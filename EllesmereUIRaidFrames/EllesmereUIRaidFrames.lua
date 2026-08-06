@@ -16467,6 +16467,19 @@ function ERF:OnEnable()
         -- shared tickers never render a stale overlay across a flip.
         -- Near-zero cost when the overlay gate is inactive.
         if ns._RebuildPvOverlay then ns._RebuildPvOverlay() end
+        -- Solo-visibility recompute. Override/profile transitions can flip
+        -- showWhenSolo (healer solo-frames spec override, field report):
+        -- the DB restore alone never re-derives container visibility or the
+        -- secure showSolo header attributes, so the frames kept the state of
+        -- whichever override page was viewed last. Both recomputes no-op via
+        -- change guards when nothing moved. OOC-gated: the override
+        -- refreshers are REGEN-stashed, but direct callers may not be, and
+        -- the secure attribute writes are combat-blocked; a combat-time skip
+        -- self-heals on the existing combat-exit visibility pass.
+        if not InCombatLockdown() then
+            if ns.UpdateVisibility then ns.UpdateVisibility() end
+            if ns._UpdatePartyVisibility then ns._UpdatePartyVisibility() end
+        end
     end
 
     -- Buff Manager LAYER swap refresh (spec-override BM forks): re-derives
