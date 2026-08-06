@@ -8151,10 +8151,21 @@ function ns.FullCDMRebuild(reason)
                         chfc.isChargeSpell = nil
                         chfc.maxCharges = nil
                         chfc.sortOrder = nil
+                        -- NOT chfc.barKey: CollectAndReanchor reads it as
+                        -- "we have claimed this frame before" and refuses to
+                        -- park it while identification is transiently failing.
+                        -- Clearing it here would hand the next pass a frame it
+                        -- cannot identify AND cannot vouch for.
                     end
                 end
             end
         end
+        -- A memo wipe is the START of a fresh transient-failure window, so
+        -- hand the reanchor below a full retry budget instead of whatever an
+        -- earlier transition left behind. Matters for cooldowns that are new
+        -- to the spec being swapped TO: those have no barKey to vouch for
+        -- them, so the budget is all they have.
+        ns._cdmUnresolvedRetries = 0
         -- Cancel the reanchor BuildAllCDMBars queued -- we run our own
         -- direct one immediately below. Without this, the queued reanchor
         -- would fire ~200ms later and run the entire reanchor pipeline
@@ -9446,6 +9457,7 @@ local function ScheduleTalentRebuild()
                 end
             end
         end
+        ns._cdmUnresolvedRetries = 0  -- fresh window; see FullCDMRebuild
         -- Rebuild keybind cache (talent swap may change action slot contents)
         UpdateCDMKeybinds()
         -- Invalidate TBB frame cache + spell caches, then reanchor so
