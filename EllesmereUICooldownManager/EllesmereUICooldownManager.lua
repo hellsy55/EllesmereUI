@@ -9711,3 +9711,82 @@ SlashCmdList.ECME = function(msg)
 end
 
 
+
+-------------------------------------------------------------------------------
+--  /cdmwhy -- one-shot claim diagnostic
+--
+--  Exists because "the CDM is empty" has three completely different causes and
+--  a screenshot cannot tell them apart:
+--    * Blizzard's pools are empty      -> nothing for us to claim; our problem
+--                                         is that the viewer never repopulated
+--    * frames exist but are PARKED     -> we claimed nothing and swept them to
+--                                         -10000 (the unclaimed-frame cleanup)
+--    * frames exist and are CLAIMED    -> the bars are fine and something else
+--                                         (visibility, alpha) is hiding them
+--  Read-only and zero cost until typed.
+-------------------------------------------------------------------------------
+SLASH_CDMWHY1 = "/cdmwhy"
+SlashCmdList.CDMWHY = function()
+    local function say(fmt, ...)
+        print("|cff0cd29fCDM|r " .. string.format(fmt, ...))
+    end
+    local _, instType = IsInInstance()
+    say("zone=%s  wasPvP=%s  retries=%s  pending=%s",
+        tostring(instType), tostring(ns._cdmWasInPvP),
+        tostring(ns._cdmUnresolvedRetries), tostring(ns._cdmUnresolvedPending))
+
+    local totActive, totClaimed, totParked, totUnres = 0, 0, 0, 0
+    for _, vname in ipairs(_cdmViewerNames) do
+        local vf = _G[vname]
+        local active, claimed, parked, unres = 0, 0, 0, 0
+        if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+            for ch in vf.itemFramePool:EnumerateActive() do
+                active = active + 1
+                local fc = _ecmeFC[ch]
+                if fc and fc.barKey then claimed = claimed + 1 end
+                -- Parked = swept offscreen by the unclaimed-frame cleanup.
+                local l = ch.GetLeft and ch:GetLeft()
+                if l and l < -9000 then parked = parked + 1 end
+                -- Live resolve probe: this is the exact call whose nil return
+                -- is what makes a frame unidentifiable mid-rebuild.
+                local cdID = ch.cooldownID or (ch.cooldownInfo and ch.cooldownInfo.cooldownID)
+                if cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                    if not C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID) then
+                        unres = unres + 1
+                    end
+                elseif not cdID then
+                    unres = unres + 1
+                end
+            end
+        end
+        say("%s active=%d claimed=%d parked=%d unresolvable=%d",
+            vname, active, claimed, parked, unres)
+        totActive, totClaimed = totActive + active, totClaimed + claimed
+        totParked, totUnres = totParked + parked, totUnres + unres
+    end
+    say("TOTAL active=%d claimed=%d parked=%d unresolvable=%d",
+        totActive, totClaimed, totParked, totUnres)
+
+    local p = ECME.db and ECME.db.profile
+    if p and p.cdmBars and p.cdmBars.bars then
+        for _, bd in ipairs(p.cdmBars.bars) do
+            if bd.enabled then
+                local icons = cdmBarIcons[bd.key]
+                local f = cdmBarFrames[bd.key]
+                say("bar %-14s icons=%d alpha=%s hidden=%s",
+                    bd.key, icons and #icons or 0,
+                    f and string.format("%.2f", f:GetAlpha()) or "nil",
+                    tostring(f and f._visHidden))
+            end
+        end
+    end
+    if totActive == 0 then
+        say("VERDICT: Blizzard's pools are EMPTY -- the viewer never repopulated.")
+    elseif totParked >= totActive - 1 then
+        say("VERDICT: frames exist but are PARKED -- the claim pass failed.")
+    elseif totClaimed > 0 and totUnres == 0 then
+        say("VERDICT: frames are CLAIMED -- look at bar alpha/visibility above.")
+    else
+        say("VERDICT: mixed; send the whole dump.")
+    end
+end
