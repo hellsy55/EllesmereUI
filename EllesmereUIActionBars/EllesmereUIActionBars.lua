@@ -14197,10 +14197,10 @@ local function UpdateXPBar()
 
     if restedXP > 0 then
         if showRawValues then
-            strRested = format(" (Rested: %s)", AbbreviateLargeNumbers(restedXP))
+            strRested = format(EllesmereUI.L(" (Rested: %s)"), AbbreviateLargeNumbers(restedXP))
         else
             local restedPct = (restedXP / maxXP) * 100
-            strRested = format(" (Rested: %.1f%%)", restedPct)
+            strRested = format(EllesmereUI.L(" (Rested: %.1f%%)"), restedPct)
         end
     end
 
@@ -14241,12 +14241,12 @@ local function CreateXPBar()
         local restedXP = GetXPExhaustion() or 0
         local pct = (currentXP / maxXP) * 100
         local remain = maxXP - currentXP
-        GameTooltip:AddLine("Experience", 1, 1, 1)
-        GameTooltip:AddDoubleLine("Level", tostring(UnitLevel("player")), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("XP", format("%s / %s (%.1f%%)", BreakUpLargeNumbers(currentXP), BreakUpLargeNumbers(maxXP), pct), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Remaining", BreakUpLargeNumbers(remain), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddLine(EllesmereUI.L("Experience"), 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Level"), tostring(UnitLevel("player")), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("XP"), format("%s / %s (%.1f%%)", BreakUpLargeNumbers(currentXP), BreakUpLargeNumbers(maxXP), pct), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Remaining"), BreakUpLargeNumbers(remain), 1, 1, 1, 1, 1, 1)
         if restedXP > 0 then
-            GameTooltip:AddDoubleLine("Rested", format("+%s (%.1f%%)", BreakUpLargeNumbers(restedXP), (restedXP / maxXP) * 100), 1, 1, 1, 1, 1, 1)
+            GameTooltip:AddDoubleLine(EllesmereUI.L("Rested"), format("+%s (%.1f%%)", BreakUpLargeNumbers(restedXP), (restedXP / maxXP) * 100), 1, 1, 1, 1, 1, 1)
         end
         GameTooltip:Show()
     end)
@@ -14308,7 +14308,7 @@ local function UpdateRepBar()
         local paragonVal, paragonThreshold = C_Reputation.GetFactionParagonInfo(factionID)
         if paragonVal and paragonThreshold then
             isParagon = true
-            standing = "Paragon"
+            standing = EllesmereUI.L("Paragon")
             currentStanding = paragonVal % paragonThreshold
             currentReactionThreshold = 0
             nextReactionThreshold = paragonThreshold
@@ -14326,7 +14326,7 @@ local function UpdateRepBar()
                 return
             end
             reaction = 10
-            standing = "Renown"
+            standing = EllesmereUI.L("Renown")
             currentReactionThreshold = 0
             nextReactionThreshold = majorData.renownLevelThreshold
             currentStanding = majorData.renownReputationEarned or 0
@@ -14354,6 +14354,11 @@ local function UpdateRepBar()
     bar:SetValue(current)
 
     local pct = (current / maximum) * 100
+    -- The tooltip must show the same numbers the bar shows. Recomputing them
+    -- from the raw watched-faction payload there breaks on paragon/renown
+    -- factions (negative reputation, wrong standing), so stash the resolved
+    -- values for the OnEnter handler below.
+    frame._tipStanding, frame._tipCurrent, frame._tipMaximum = standing, current, maximum
     text:SetText(format("%s: %.0f%% [%s]", name, pct, standing))
 
     -- Auto-size text if bar is too narrow
@@ -14377,14 +14382,20 @@ local function CreateRepBar()
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
         GameTooltip:AddLine(data.name, 1, 1, 1)
-        local reaction = data.reaction or 4
-        local standing = _G["FACTION_STANDING_LABEL" .. reaction] or ""
-        GameTooltip:AddDoubleLine("Standing", standing, 1, 1, 1, 1, 1, 1)
-        local current = (data.currentStanding or 0) - (data.currentReactionThreshold or 0)
-        local maximum = (data.nextReactionThreshold or 1) - (data.currentReactionThreshold or 0)
+        -- Use the values the bar already resolved (paragon/renown/friendship
+        -- aware); fall back to the raw payload only if the bar has not run yet.
+        local standing = self._tipStanding
+        if not standing or standing == "" then
+            standing = _G["FACTION_STANDING_LABEL" .. (data.reaction or 4)] or ""
+        end
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Standing"), standing, 1, 1, 1, 1, 1, 1)
+        local current = self._tipCurrent
+            or ((data.currentStanding or 0) - (data.currentReactionThreshold or 0))
+        local maximum = self._tipMaximum
+            or ((data.nextReactionThreshold or 1) - (data.currentReactionThreshold or 0))
         if maximum <= 0 then maximum = 1 end
         local pct = (current / maximum) * 100
-        GameTooltip:AddDoubleLine("Reputation", format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(maximum), pct), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Reputation"), format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(maximum), pct), 1, 1, 1, 1, 1, 1)
         GameTooltip:Show()
     end)
     holder:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -14463,7 +14474,7 @@ local function UpdateFavorBar()
     bar:SetStatusBarColor(ns.ResolveDataBarColor(s, DATA_BAR_COLORS.favor.r, DATA_BAR_COLORS.favor.g, DATA_BAR_COLORS.favor.b))
 
     local pct = (current / st.needed) * 100
-    text:SetText(format("House Level %d: %d / %d", st.displayLevel or 1, current, st.needed))
+    text:SetText(format(EllesmereUI.L("House Level %d: %d / %d"), st.displayLevel or 1, current, st.needed))
 
     -- Auto-size text if bar is too narrow
     local barW = frame:GetWidth()
@@ -14539,12 +14550,12 @@ local function CreateFavorBar()
         if not st or not st.needed or st.needed <= 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
-        GameTooltip:AddLine("House Favor", 1, 1, 1)
-        GameTooltip:AddDoubleLine("House Level", tostring(st.displayLevel or 1), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddLine(EllesmereUI.L("House Favor"), 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("House Level"), tostring(st.displayLevel or 1), 1, 1, 1, 1, 1, 1)
         local current = math.min(st.favor or 0, st.needed)
         local pct = (current / st.needed) * 100
-        GameTooltip:AddDoubleLine("Favor", format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(st.needed), pct), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Remaining", BreakUpLargeNumbers(st.needed - current), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Favor"), format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(st.needed), pct), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Remaining"), BreakUpLargeNumbers(st.needed - current), 1, 1, 1, 1, 1, 1)
         GameTooltip:Show()
     end)
     holder:SetScript("OnLeave", function() GameTooltip:Hide() end)
