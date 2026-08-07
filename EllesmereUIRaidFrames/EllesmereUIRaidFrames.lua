@@ -4575,7 +4575,7 @@ local function UpdateButton(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
+        elseif s.showIncomingRez and UnitHasIncomingResurrection(unit) then
             -- Being resurrected: hide the status text so the incoming-rez icon (shown in the same
             -- spot by UpdateReadyCheck) isn't covered by the status text.
             d.statusText:Hide()
@@ -6075,11 +6075,16 @@ local function UpdateReadyCheck(button, unit)
     local tex = d.readyCheck
     if not tex then return end
 
-    local sz = PixelSnap(db.profile.readyCheckSize or 20)
+    -- Party/extra-aware settings source, same as every other indicator updater.
+    -- AnchorReadyCheck already resolves LIVE this way, so a raw db.profile read
+    -- here re-sized the shared texture back to the RAID value on every paint.
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
+
+    local sz = PixelSnap(s.readyCheckSize or 20)
     tex:SetSize(sz, sz)
 
     -- Ready check (priority)
-    if db.profile.showReadyCheck and readyCheckActive then
+    if s.showReadyCheck and readyCheckActive then
         local status = GetReadyCheckStatus(unit)
         if status == "ready" then
             tex:SetTexCoord(0, 1, 0, 1)
@@ -6100,7 +6105,7 @@ local function UpdateReadyCheck(button, unit)
     end
 
     -- Incoming summon
-    if db.profile.showSummonPending and unit and C_IncomingSummon.HasIncomingSummon(unit) then
+    if s.showSummonPending and unit and C_IncomingSummon.HasIncomingSummon(unit) then
         local sStatus = C_IncomingSummon.IncomingSummonStatus(unit)
         if sStatus == SUMMON_STATUS_PENDING then
             tex:SetAtlas("RaidFrame-Icon-SummonPending")
@@ -6120,7 +6125,7 @@ local function UpdateReadyCheck(button, unit)
     -- Incoming resurrection ("someone is casting a rez / rez waiting to be
     -- accepted"). Lowest priority; only meaningful on a dead unit. Lets healers
     -- see a body is already being picked up so they don't all rez the same one.
-    if db.profile.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
+    if s.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
         tex:SetTexCoord(0, 1, 0, 1)
         tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
         tex:Show()
@@ -6487,7 +6492,7 @@ ns._UpdateButtonHealth = function(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        elseif db.profile.showIncomingRez and UnitHasIncomingResurrection(unit) then
+        elseif s.showIncomingRez and UnitHasIncomingResurrection(unit) then
             -- Being resurrected: hide the status text so the incoming-rez icon isn't covered.
             d.statusText:Hide()
         elseif not UnitIsConnected(unit) then
