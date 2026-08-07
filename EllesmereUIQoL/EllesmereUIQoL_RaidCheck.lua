@@ -69,8 +69,15 @@ local GetReadyCheckStatus = GetReadyCheckStatus
 -- at a glance mid-raid rather than to save pixels -- the window fits the group
 -- and the column set, so there is room, and the scale slider is there for
 -- anyone who disagrees.
+--
+-- SINGLE_COL_THRESHOLD overrides that split for a big raid: at 25+ members,
+-- splitting into two columns means scanning left-then-right-then-left again
+-- to find one name, which is worse than a taller single column reading
+-- top-to-bottom in one pass. Below the threshold the two-column layout above
+-- still applies unchanged.
 local MEMBER_COLS = 2
 local COL_ROWS    = 20
+local SINGLE_COL_THRESHOLD = 25
 local NAME_W      = 112
 local CELL_W      = 30
 local ROW_H       = 22
@@ -717,9 +724,14 @@ end
 -- Guarded by a signature because it is real work -- forty rows times twelve
 -- cells -- and the column set changes when the group does, not every two
 -- seconds.
+--
+-- rowsPerCol is normally COL_ROWS; Refresh passes something larger when the
+-- big-raid single-column mode (see SINGLE_COL_THRESHOLD) is folding the
+-- whole roster into column one instead of wrapping into column two.
 local lastLayoutSig
-local function Relayout(visible, slotOf, memberCols, bodyW)
-    local sig = memberCols .. "|" .. table.concat(visible, ",")
+local function Relayout(visible, slotOf, memberCols, bodyW, rowsPerCol)
+    rowsPerCol = rowsPerCol or COL_ROWS
+    local sig = memberCols .. "|" .. rowsPerCol .. "|" .. table.concat(visible, ",")
     if sig == lastLayoutSig then return end
     lastLayoutSig = sig
 
@@ -741,8 +753,8 @@ local function Relayout(visible, slotOf, memberCols, bodyW)
 
     for i = 1, #rows do
         local r = rows[i]
-        local mc   = math.floor((i - 1) / COL_ROWS)
-        local line = (i - 1) % COL_ROWS
+        local mc   = math.floor((i - 1) / rowsPerCol)
+        local line = (i - 1) % rowsPerCol
         r:SetSize(bodyW, ROW_H)
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", win, "TOPLEFT",
@@ -854,13 +866,23 @@ local function Refresh()
     end
 
     -- The window fits the group rather than the largest group possible.
+    -- Below the threshold this is the original two-column wrap; at 25+
+    -- members it switches to one tall column instead of wrapping into a
+    -- second, so a big raid reads top-to-bottom instead of in two passes.
     local n = #roster
-    local memberCols = math.max(1, math.ceil(n / COL_ROWS))
-    local rowsShown  = math.min(math.max(n, 1), COL_ROWS)
+    local memberCols, rowsPerCol
+    if n >= SINGLE_COL_THRESHOLD then
+        memberCols = 1
+        rowsPerCol = math.max(n, 1)
+    else
+        memberCols = math.max(1, math.ceil(n / COL_ROWS))
+        rowsPerCol = COL_ROWS
+    end
+    local rowsShown  = math.min(math.max(n, 1), rowsPerCol)
     local bodyW      = NAME_W + #visible * CELL_W
     win:SetSize(PAD * 2 + memberCols * bodyW + (memberCols - 1) * COL_GAP,
                 PAD * 2 + TITLE_H + HEADER_H + rowsShown * ROW_H)
-    Relayout(visible, slotOf, memberCols, bodyW)
+    Relayout(visible, slotOf, memberCols, bodyW, rowsPerCol)
 
     for i = 1, #rows do
         local r, e = rows[i], roster[i]
