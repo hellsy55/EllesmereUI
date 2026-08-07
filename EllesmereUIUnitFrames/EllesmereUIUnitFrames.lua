@@ -12189,6 +12189,16 @@ function InitializeFrames()
         end)
     end
 
+    -- Seed the built-style marker from the init build, so the first reload of a
+    -- session does not see a nil marker, assume a change, and pay a pointless
+    -- teardown for users with no override at all. It belongs HERE and not in
+    -- PositionClassPowerBar: that is a repositioning function, and
+    -- ReassertClassPower calls it from Blizzard's SetParent/Hide hooks with no
+    -- rebuild behind it. Stamping the current profile style there would claim a
+    -- style is built when it is not, which suppresses the very rebuild the
+    -- reload pass exists to trigger. Guarded on frames.player to match
+    -- _toggleClassPower, which returns before stamping when there is no frame.
+    if frames.player then frames._classPowerBuiltStyle = classPowerStyle end
     if classPowerStyle ~= "none" and frames.player then
         if classPowerStyle == "blizzard" then
             if savedClassPowerBar then
@@ -12219,6 +12229,10 @@ function InitializeFrames()
         -- default frame (or hidden), there is no EUI frame to attach it to.
         if not frames.player then return end
         style = style or db.profile.player.classPowerStyle or "none"
+        -- What is actually BUILT right now. Read by the reload pass below to
+        -- notice a style that changed through a path which never calls this
+        -- function (see the reload hook).
+        frames._classPowerBuiltStyle = style
         -- Keep showClassPowerBar in sync with style
         db.profile.player.showClassPowerBar = (style ~= "none")
         db.profile.player.classPowerStyle = style
@@ -13537,6 +13551,31 @@ function SetupOptionsPanel()
     local reloadPending = false
     local reloadThrottle = CreateFrame("Frame")
     reloadThrottle:Hide()
+    -- Realise a classPowerStyle that changed through a path which never calls
+    -- _toggleClassPower (a Spec Override applying at login, a profile switch, an
+    -- import). Gated on an actual change because the toggle is a full teardown
+    -- and rebuild; running it every reload would thrash the bar.
+    local cpRegen = CreateFrame("Frame")
+    local function RealiseClassPowerStyle()
+        if not frames._toggleClassPower then return end
+        local wantCP = db.profile.player.classPowerStyle or "none"
+        if wantCP == frames._classPowerBuiltStyle then return end
+        -- Not in combat: the toggle reparents and hides Blizzard's class power
+        -- frame and re-anchors the health bar. ReloadFrames() early-returns in
+        -- lockdown for the same reason, but this runs from the throttle body
+        -- AFTER that return, so it needs its own guard (the same shape as the
+        -- UpdateFrameVisibility note above) plus a re-run, since nothing else
+        -- re-arms the pass once combat ends.
+        if InCombatLockdown() then
+            cpRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
+        frames._toggleClassPower(wantCP)
+    end
+    cpRegen:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        RealiseClassPowerStyle()
+    end)
     reloadThrottle:SetScript("OnUpdate", function(self)
         self:Hide()
         reloadPending = false
@@ -13566,6 +13605,13 @@ function SetupOptionsPanel()
         -- Player private auras re-register with fresh geometry (one boolean
         -- check + return when disabled).
         if ns.PlayerPA_Apply then ns.PlayerPA_Apply() end
+        -- Class power: _toggleClassPower is the ONLY thing that honours a
+        -- classPowerStyle change, and it had exactly two callers -- the options
+        -- dropdown and the PLAYER_SPECIALIZATION_CHANGED watcher. Any other
+        -- path that changes the style left the live bar stale. That is why the
+        -- reported workaround was to switch spec away and back, which is the
+        -- one event that does call it.
+        RealiseClassPowerStyle()
     end)
     ns.ReloadFrames = function()
         if not reloadPending then
