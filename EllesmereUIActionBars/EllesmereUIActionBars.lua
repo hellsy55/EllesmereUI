@@ -1270,9 +1270,22 @@ local function RegisterButtonWithController(btn)
     -- ActionButton1 showgrid monitor (which depends on Blizzard's retained
     -- MainActionBar event chain staying secure end to end). The pre-wrap
     -- returns nothing, so the native drag proceeds untouched; the matching
-    -- grid-off arrives via the monitor or, failing that, the regen apply.
+    -- grid-off arrives via the monitor or, failing that, the regen apply --
+    -- but only when a pickup actually happens, which is what the guard below
+    -- is for.
+    -- OnDragStart fires on the GESTURE, not on a successful pickup. Blizzard's
+    -- own handler no-ops when the bars are locked and the PICKUPACTION modifier
+    -- is not held, so an unconditional reveal here lit every empty slot on a
+    -- plain left-drag over a locked bar -- and since no pickup happened, no
+    -- ACTIONBAR_HIDEGRID ever arrived to turn it back off. It then sat there
+    -- until some unrelated repaint cleared it (reported: "goes away in 5-15
+    -- seconds, or when I use the spell"). Mirror Blizzard's own condition so
+    -- the reveal only fires when the drag will actually pick the action up.
+    -- IsModifiedClick is whitelisted in the restricted environment.
     ActionButtonController:WrapScript(btn, "OnDragStart", [[
-        control:RunAttribute("SetShowGrid", true, 2)
+        if control:GetAttribute("eab-barslocked") ~= 1 or IsModifiedClick("PICKUPACTION") then
+            control:RunAttribute("SetShowGrid", true, 2)
+        end
     ]])
 
     -- Per-button showgrid: toggle the flag bit and update visibility.
@@ -12897,12 +12910,40 @@ function EAB:FinishSetup()
         end
         wipe(_gridSurfacedBars)
     end
+    -- Mirror Blizzard's lockActionBars setting onto the controller so the
+    -- secure OnDragStart wrapper can tell a real pickup from a dead gesture
+    -- (see the wrapper in RegisterButtonWithController). Attribute, not a
+    -- chunk local: this file is at Lua 5.1's 200-local cap, and the snippet
+    -- can only read attributes anyway.
+    ns.EABSyncBarsLocked = function()
+        -- No _eabApplyDeferred here, unlike the widget-writing guards: nothing
+        -- else needs re-applying, and PLAYER_REGEN_ENABLED re-syncs this.
+        if InCombatLockdown() then return end
+        local locked
+        if Settings and Settings.GetValue then
+            local ok, v = pcall(Settings.GetValue, "lockActionBars")
+            -- v ~= nil, not just ok: this seeds during FinishSetup, which can
+            -- run before the setting is registered. Accepting nil as "false"
+            -- would skip the CVar fallback and seed a LOCKED bar as unlocked.
+            if ok and v ~= nil then locked = v and true or false end
+        end
+        if locked == nil and C_CVar and C_CVar.GetCVarBool then
+            locked = C_CVar.GetCVarBool("lockActionBars") and true or false
+        end
+        local v = locked and 1 or 0
+        -- Guarded: SetAttribute re-runs the controller's _onattributechanged
+        -- snippet, and CVAR_UPDATE is a firehose at login.
+        if ActionButtonController:GetAttribute("eab-barslocked") ~= v then
+            ActionButtonController:SetAttribute("eab-barslocked", v)
+        end
+    end
+
     -- 12.1: registering events on a frame stamps it with the EventRegistrations
     -- forbidden aspect, and the restricted environment refuses frames carrying
     -- any aspect. The controller wraps buttons and executes snippets, so its
     -- events must live on a plain sidecar listener, never on the controller.
     EAB._abcEvents = ns.TakeShell()
-    EAB._abcEvents:SetScript("OnEvent", function(_, event)
+    EAB._abcEvents:SetScript("OnEvent", function(_, event, arg1)
         if event == "ACTIONBAR_SHOWGRID" then
             -- Cancel any pending restore (swap case: drop + immediate pickup)
             _gridRestorePending = false
@@ -12949,7 +12990,15 @@ function EAB:FinishSetup()
                     C_Timer_After(0, RestoreGridSurfacedBars)
                 end
             end
+        elseif event == "CVAR_UPDATE" then
+            -- Name-filtered: CVAR_UPDATE fires for every cvar, dozens of times
+            -- at login. Only the lock matters to the drag wrapper.
+            if arg1 == "lockActionBars" then ns.EABSyncBarsLocked() end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            -- A lock toggled during combat deferred; pick it up on regen.
+            ns.EABSyncBarsLocked()
         elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" then
+            if event == "PLAYER_ENTERING_WORLD" then ns.EABSyncBarsLocked() end
             -- Spec/talent swaps refill slots: retire the filled-slot fast
             -- lists (see the dispatcher's repaint walks) AND the curated-set
             -- memo (talents change what the viewer curates).
@@ -12975,6 +13024,10 @@ function EAB:FinishSetup()
     EAB._abcEvents:RegisterEvent("PET_BAR_HIDEGRID")
     EAB._abcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
     EAB._abcEvents:RegisterEvent("SPELLS_CHANGED")
+    EAB._abcEvents:RegisterEvent("CVAR_UPDATE")
+    EAB._abcEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+    -- Seed before the first drag: PLAYER_ENTERING_WORLD may already be past.
+    ns.EABSyncBarsLocked()
 
     -- Reset showgrid state at login (covers waiting for the game to apply
     -- the always-show-buttons state to the main bar).
