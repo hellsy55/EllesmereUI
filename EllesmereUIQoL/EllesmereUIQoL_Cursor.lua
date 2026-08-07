@@ -1277,8 +1277,33 @@ function ECL:OnEnable()
 
     Apply()
 
+    -- Repaint when the accent lands. Apply() above runs inside the module
+    -- lifecycle's PLAYER_LOGIN, which fires BEFORE the core resolves the
+    -- active profile's accent, so an accent-mode ring paints the parse-time
+    -- fallback and Apply() is never called again -- the colour stays wrong
+    -- for the whole session (field report: white accent, green cursor). The
+    -- GCD and cast rings escaped it only because their apply is deferred
+    -- half a second, past the core's resolution. Registering here also
+    -- covers a mid-session accent change, which nothing pushed to us before.
+    if EllesmereUI.RegAccent then
+        EllesmereUI.RegAccent({ type = "callback", fn = function()
+            local p = ECL.db and ECL.db.profile
+            if not p then return end
+            if p.useAccentColor then Apply() end
+            if p.gcd and p.gcd.useAccentColor then ApplyGCDCircle() end
+            if p.castCircle and p.castCircle.useAccentColor then ApplyCastCircle() end
+        end })
+    end
+
     -- Apply GCD / Cast circles (creates on demand only when enabled)
     C_Timer.After(0.5, function()
+        -- Re-apply the circle too. The RegAccent callback above is the real
+        -- fix, but it only lands if this module registered before the core
+        -- notified, which is frame event-dispatch ORDER -- an assumption, not
+        -- a guarantee. This runs well past the core's login resolution (it is
+        -- why the two rings below were always correct), so the colour is right
+        -- either way. Cheap: Apply() is a handful of setters.
+        Apply()
         ApplyGCDCircle()
         ApplyCastCircle()
         ApplyTrail()
