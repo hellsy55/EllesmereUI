@@ -1355,6 +1355,15 @@ end
 -- tint. Fully inert at 100: nothing is touched unless previously applied
 -- (_fillOpApplied). Value-blind (relational anchors + plain alphas only),
 -- so secret cast states render identically.
+-- castbar._castTintOn mirrors "the last alpha we wrote to castTintLayer was
+-- above zero". It exists because castTintLayer:GetAlpha() cannot be trusted to
+-- return a plain number: this castbar also drives _shieldedTint's alpha from
+-- the SECRET notInterruptible flag (SetAlphaFromBoolean), and once secrecy is
+-- in a castbar's render state an alpha read comes back secret. Comparing that
+-- inside our own (tainted) execution throws "attempt to compare a secret number
+-- value", which aborts the whole styling pass mid-way and leaves the cast bar
+-- unanchored at screen centre. We write every one of these alphas ourselves, so
+-- owning the state costs one boolean and removes the comparison entirely.
 ns.ApplyCastFillOpacity = function(castbar, settings)
     local op = (settings and settings.castFillOpacity) or 100
     local bgHost = castbar:GetParent()
@@ -1367,9 +1376,9 @@ ns.ApplyCastFillOpacity = function(castbar, settings)
                 bgTex:ClearAllPoints()
                 bgTex:SetAllPoints(bgHost)
             end
-            -- Mid-cast restore: the tint's alpha is its active/idle state, so
-            -- only lift it back to full when it is currently active.
-            if castbar.castTintLayer and castbar.castTintLayer:GetAlpha() > 0 then
+            -- Mid-cast restore: the tint's active/idle state comes from our own
+            -- flag, never from reading the widget back (see _castTintOn).
+            if castbar.castTintLayer and castbar._castTintOn then
                 castbar.castTintLayer:SetAlpha(1)
             end
         end
@@ -1389,7 +1398,7 @@ ns.ApplyCastFillOpacity = function(castbar, settings)
         end
     end
     -- Mid-cast application: retune the tint if it is currently active.
-    if castbar.castTintLayer and castbar.castTintLayer:GetAlpha() > 0 then
+    if castbar.castTintLayer and castbar._castTintOn then
         castbar.castTintLayer:SetAlpha(op / 100)
     end
 end
@@ -5792,6 +5801,7 @@ local function CreateCastBar(frame, unit, settings)
     castTintLayer:SetVertexColor(c.r, c.g, c.b)
     castTintLayer:SetAlpha(0)
     castbar.castTintLayer = castTintLayer
+    castbar._castTintOn = nil
 
     local shieldedTint = castbar:CreateTexture(nil, "ARTWORK", nil, 2)
     shieldedTint:SetPoint("TOPLEFT", castbar:GetStatusBarTexture(), "TOPLEFT")
@@ -5810,6 +5820,7 @@ local function CreateCastBar(frame, unit, settings)
             -- _fillOp is nil unless Fill Opacity is below 100 (see
             -- ns.ApplyCastFillOpacity), so the default path is unchanged.
             self.castTintLayer:SetAlpha(self._fillOp or 1)
+            self._castTintOn = true
             ApplyUnitFrameCastColor(self)
         end
     end
@@ -13867,7 +13878,10 @@ function SetupOptionsPanel()
         local castbar = frame.Castbar
         local castbarBg = castbar and castbar:GetParent()
         if castbar then
-            if castbar.castTintLayer then castbar.castTintLayer:SetAlpha(0) end
+            if castbar.castTintLayer then
+                castbar.castTintLayer:SetAlpha(0)
+                castbar._castTintOn = nil
+            end
             castbar:Hide()
         end
         if castbarBg then castbarBg:Hide() end
@@ -13905,6 +13919,7 @@ function SetupOptionsPanel()
         -- Active-cast tint -- same path a real cast uses.
         if castbar.castTintLayer then
             castbar.castTintLayer:SetAlpha(castbar._fillOp or 1)
+            castbar._castTintOn = true
             ApplyUnitFrameCastColor(castbar)
         end
         castbarBg:Show()
