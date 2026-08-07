@@ -1721,33 +1721,35 @@ local function HideBlizzardBars()
 
     -- Replace ActionBar_PageUp / ActionBar_PageDown with versions that
     -- read the current page from our state driver. The stock versions
-    -- call ChangeActionBarPage (a C function) which uses
-    -- GetActionBarPage() internally. Something in the stock pipeline
+    -- increment from GetActionBarPage(), and something in the stock pipeline
     -- resets the page back to 1 after each change because we disabled
-    -- MainMenuBar. Our replacements read state-page from the MainBar
-    -- frame and call SetActionBarPage directly.
-    ActionBar_PageUp = function()
-        local mainFrame = barFrames and barFrames["MainBar"]
-        local curPage
-        if mainFrame then
-            curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
-        else
-            curPage = EAB_VTABLE.GetActionBarPage()
-        end
+    -- MainMenuBar. Our replacements compute the target page themselves and
+    -- pass it to ChangeActionBarPage explicitly.
+    --
+    -- state-page is the RESOLVED page, so in a form, vehicle, override or
+    -- skyriding state it is 7-14 rather than a manual page. Cycling off that
+    -- value walked straight out of the 1-6 range: while skyriding (11), Next
+    -- Page always requested page 1 -- a no-op from manual page 1, so the key
+    -- looked dead -- and Previous Page called ChangeActionBarPage(10). Only
+    -- trust it inside the manual range; otherwise ask Blizzard for the page
+    -- the cycle actually moves, which is what ChangeActionBarPage writes.
+    local function CurrentManualPage()
         local maxPages = NUM_ACTIONBAR_PAGES or 6
+        local mainFrame = barFrames and barFrames["MainBar"]
+        local curPage = mainFrame and tonumber(mainFrame:GetAttribute("state-page"))
+        if not curPage or curPage < 1 or curPage > maxPages then
+            curPage = EAB_VTABLE.GetActionBarPage() or 1
+        end
+        return curPage, maxPages
+    end
+    ActionBar_PageUp = function()
+        local curPage, maxPages = CurrentManualPage()
         local newPage = curPage + 1
         if newPage > maxPages then newPage = 1 end
         ChangeActionBarPage(newPage)
     end
     ActionBar_PageDown = function()
-        local mainFrame = barFrames and barFrames["MainBar"]
-        local curPage
-        if mainFrame then
-            curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
-        else
-            curPage = EAB_VTABLE.GetActionBarPage()
-        end
-        local maxPages = NUM_ACTIONBAR_PAGES or 6
+        local curPage, maxPages = CurrentManualPage()
         local newPage = curPage - 1
         if newPage < 1 then newPage = maxPages end
         ChangeActionBarPage(newPage)
@@ -2236,12 +2238,19 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
             end
         end
     end
+    -- Manual pages come before the skyriding clause: the engine only consults
+    -- the bonus bar while Blizzard's page is 1 (ActionBarController_UpdateAll),
+    -- so [bonusbar:5] listed first pinned the bar to the skyriding page and
+    -- swallowed every manual page change until the player dismounted.
+    -- The form clauses above deliberately keep their old precedence -- a page
+    -- picked for a specific form in the dropdowns is an explicit request, and
+    -- this path is click-routed, so the icon and the key agree either way.
     if barKey == "MainBar" then
-        if not noSky then
-            parts[#parts + 1] = "[bonusbar:5] 11"
-        end
         for i = 2, NUM_AB_PAGES do
             parts[#parts + 1] = "[bar:" .. i .. "] " .. i
+        end
+        if not noSky then
+            parts[#parts + 1] = "[bonusbar:5] 11"
         end
     end
     -- Target conditions come after bonusbar/bar so dragonriding and manual
@@ -2260,8 +2269,10 @@ end
 
 -------------------------------------------------------------------------------
 --  Paging State Conditions (class-specific, hardcoded fallback)
---  Used when no custom paging is configured. Produces the exact same
---  conditional string as the original implementation for zero impact.
+--  Used when no custom paging is configured. Clause order mirrors the engine's
+--  own resolution (see ActionBarController_UpdateAll): vehicle/override/possess
+--  ignore the page, then the manual page, then the bonusbar states, which the
+--  engine only consults while the page is 1.
 --  Format: "[condition] pageNumber; ..."
 -------------------------------------------------------------------------------
 local function GetClassPagingConditions()
@@ -2276,11 +2287,6 @@ local function GetClassPagingConditions()
     end
     if EAB_VTABLE.GetVehicleBarIndex then
         conditions = conditions .. "[vehicleui][possessbar] " .. EAB_VTABLE.GetVehicleBarIndex() .. "; "
-    end
-
-    -- Dragonriding (all classes)
-    if not noSky then
-        conditions = conditions .. "[bonusbar:5] 11; "
     end
 
     -- Manual page switching (pages 2-6)
@@ -2305,6 +2311,14 @@ local function GetClassPagingConditions()
         elseif class == "ROGUE" then
             conditions = conditions .. "[bonusbar:1] 7; "
         end
+    end
+
+    -- Dragonriding (all classes). Also page 1 only: skyriding is bonusbar 5, and
+    -- the engine only reads the bonus bar while the page is 1, so listing this
+    -- ahead of [bar:N] would freeze the bar on the skyriding page and make every
+    -- manual page unreachable until you dismount.
+    if not noSky then
+        conditions = conditions .. "[bonusbar:5] 11; "
     end
 
     -- Default: page 1

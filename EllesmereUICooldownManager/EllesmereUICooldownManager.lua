@@ -7606,10 +7606,13 @@ local function RebuildKeybindCache()
                     local pg = mbf and tonumber(mbf:GetAttribute("actionpage"))
                     if not pg then
                         local bonus = GetBonusBarOffset and GetBonusBarOffset() or 0
-                        if bonus > 0 then
+                        local page = (GetActionBarPage and GetActionBarPage()) or 1
+                        -- The bonus bar only wins on page 1; a manual page beats
+                        -- the form/skyriding swap, same as the engine.
+                        if bonus > 0 and page == 1 then
                             pg = 6 + bonus
                         else
-                            pg = (GetActionBarPage and GetActionBarPage()) or 1
+                            pg = page
                         end
                     end
                     slot = i + (pg - 1) * 12
