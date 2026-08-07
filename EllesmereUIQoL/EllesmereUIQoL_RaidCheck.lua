@@ -74,10 +74,14 @@ local GetReadyCheckStatus = GetReadyCheckStatus
 -- splitting into two columns means scanning left-then-right-then-left again
 -- to find one name, which is worse than a taller single column reading
 -- top-to-bottom in one pass. Below the threshold the two-column layout above
--- still applies unchanged.
+-- still applies unchanged. MAX_ROSTER is the row pool's real ceiling: kept
+-- separate from MEMBER_COLS * COL_ROWS so single-column mode growing past
+-- what the two-column layout ever needed doesn't silently run out of row
+-- frames -- the window grows tall enough to hold every one of the 40 up front.
 local MEMBER_COLS = 2
 local COL_ROWS    = 20
 local SINGLE_COL_THRESHOLD = 25
+local MAX_ROSTER  = 40
 local NAME_W      = 112
 local CELL_W      = 30
 local ROW_H       = 22
@@ -715,7 +719,10 @@ local function Build()
         if button == "RightButton" then self:Hide() end
     end)
 
-    for i = 1, MEMBER_COLS * COL_ROWS do MakeRow(win, i) end
+    -- One row per possible roster slot (MAX_ROSTER, not MEMBER_COLS *
+    -- COL_ROWS): single-column mode can stack all 40 in column one, past
+    -- what the two-column layout alone would ever need.
+    for i = 1, MAX_ROSTER do MakeRow(win, i) end
 end
 
 -- Puts every header and cell where the current column set says it belongs, and
@@ -873,7 +880,7 @@ local function Refresh()
     local memberCols, rowsPerCol
     if n >= SINGLE_COL_THRESHOLD then
         memberCols = 1
-        rowsPerCol = math.max(n, 1)
+        rowsPerCol = math.min(math.max(n, 1), MAX_ROSTER)
     else
         memberCols = math.max(1, math.ceil(n / COL_ROWS))
         rowsPerCol = COL_ROWS
