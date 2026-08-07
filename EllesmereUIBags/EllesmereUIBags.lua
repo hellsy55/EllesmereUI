@@ -93,31 +93,43 @@ local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
 -- a user wanting one currency on their main and another on the alt that farms
 -- it, which the shared table made impossible.
 --
--- Storage stays inside the Bags profile, keyed by character, so it still rides
--- the existing profile plumbing (defaults merge, logout strip, export). A
--- profile exported to someone else simply carries keys their characters do not
--- match, and they seed fresh.
+-- Stored at the EllesmereUIDB ROOT, not in the bag profile, which is where the
+-- module already keeps its other per-character data (characterGold,
+-- bagPinnedItems, bagItemAssignments). Profile data is the wrong home for it in
+-- two ways: ApplyProfileData wipes db.profile wholesale before copying an
+-- imported snapshot, so importing any shared profile would erase every
+-- character's currencies, and profile exports would ship a roster of the
+-- author's character names, realms and per-alt currency lists to whoever
+-- imported it -- the leak PRIVATE_ADDON_KEYS exists to plug.
+local _bagsCharKey  -- session-constant; UpdateCurrencyDisplays is a render path
 local function BagsCharKey()
-    return (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?")
+    if not _bagsCharKey then
+        local n, r = UnitName("player"), GetRealmName()
+        if not n or not r then return nil end  -- too early; do not cache a stub
+        _bagsCharKey = n .. " - " .. r
+    end
+    return _bagsCharKey
 end
 
 -- The per-character order table, seeded on this character's first use.
--- Returns nil only when the DB is not up yet (callers already handle that).
+-- Returns nil only when the DB or the player identity is not up yet (callers
+-- already handle that).
 local function CurrencyOrder()
-    local p = BP()
-    if p == _emptyP then return nil end
-    local byChar = p.currencyOrderByChar
-    if type(byChar) ~= "table" then byChar = {}; p.currencyOrderByChar = byChar end
+    if not EllesmereUIDB then return nil end
     local key = BagsCharKey()
+    if not key then return nil end
+    local byChar = EllesmereUIDB.bagCurrencyByChar
+    if type(byChar) ~= "table" then byChar = {}; EllesmereUIDB.bagCurrencyByChar = byChar end
     local t = byChar[key]
     if type(t) ~= "table" then
         t = {}
         -- Seed from the legacy shared table so an upgrading user keeps exactly
         -- what they had. The legacy table is deliberately NOT deleted: every
-        -- character seeds from it once, so a character that has not logged in
-        -- since the upgrade still inherits the old setup rather than an empty
-        -- bag footer. Nothing writes to it any more, so the seed is stable.
-        local legacy = p.currencyOrder
+        -- character seeds from it once, at ITS first login after the upgrade,
+        -- so a character that has not logged in yet still inherits the old
+        -- setup instead of an empty footer. Nothing writes to it any more, so
+        -- the seed stays stable. A per-character migration is never a one-shot.
+        local legacy = BP().currencyOrder
         if type(legacy) == "table" then
             for cID, order in pairs(legacy) do
                 if type(order) == "number" then t[cID] = order end

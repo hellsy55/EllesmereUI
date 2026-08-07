@@ -835,6 +835,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.bagItemAssignments = nil
                 EllesmereUIDB.characterGold = nil
                 EllesmereUIDB.warbandGold = nil
+                EllesmereUIDB.bagCurrencyByChar = nil
             end
             EllesmereUI:InvalidatePageCache()
         end,
