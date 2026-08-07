@@ -83,6 +83,52 @@ local EUI = EllesmereUI
 local _emptyP = {}
 local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
 
+-- Tracked currencies are PER CHARACTER, unlike every other bag setting.
+--
+-- They used to live in one profile-level `currencyOrder` table, which meant
+-- ticking a currency on one character put it in every character's bag. Worse,
+-- the input feeding that table is Blizzard's own currency tab, which IS
+-- per-character (see the TokenFrame.OnTokenWatchChanged sync below): a
+-- per-character source writing a shared store can only ever bleed. Reported by
+-- a user wanting one currency on their main and another on the alt that farms
+-- it, which the shared table made impossible.
+--
+-- Storage stays inside the Bags profile, keyed by character, so it still rides
+-- the existing profile plumbing (defaults merge, logout strip, export). A
+-- profile exported to someone else simply carries keys their characters do not
+-- match, and they seed fresh.
+local function BagsCharKey()
+    return (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?")
+end
+
+-- The per-character order table, seeded on this character's first use.
+-- Returns nil only when the DB is not up yet (callers already handle that).
+local function CurrencyOrder()
+    local p = BP()
+    if p == _emptyP then return nil end
+    local byChar = p.currencyOrderByChar
+    if type(byChar) ~= "table" then byChar = {}; p.currencyOrderByChar = byChar end
+    local key = BagsCharKey()
+    local t = byChar[key]
+    if type(t) ~= "table" then
+        t = {}
+        -- Seed from the legacy shared table so an upgrading user keeps exactly
+        -- what they had. The legacy table is deliberately NOT deleted: every
+        -- character seeds from it once, so a character that has not logged in
+        -- since the upgrade still inherits the old setup rather than an empty
+        -- bag footer. Nothing writes to it any more, so the seed is stable.
+        local legacy = p.currencyOrder
+        if type(legacy) == "table" then
+            for cID, order in pairs(legacy) do
+                if type(order) == "number" then t[cID] = order end
+            end
+        end
+        byChar[key] = t
+    end
+    return t
+end
+EUI._BagsCurrencyOrder = CurrencyOrder
+
 -- Resolve the default bag-type view ("all" | "onebag" | "multibag"). Reads the
 -- new bagDefaultBagType key, falling back to the legacy bagDefaultOneBag boolean
 -- so existing users keep their OneBag default. (Cross-version profile imports are
@@ -1667,7 +1713,7 @@ local function UpdateCurrencyDisplays(footerWidth)
 
     -- Build tracked list from internal order table (decoupled from Blizzard)
     local tracked = {}
-    local orderDB = BP().currencyOrder
+    local orderDB = CurrencyOrder()
     if orderDB and C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo then
         for cID, order in pairs(orderDB) do
             if type(order) == "number" then
@@ -6656,14 +6702,16 @@ local function StartAddon()
         end
     end
 
-    -- Seed currencyOrder from Blizzard's tracked currencies on first load
+    -- Seed this character's tracked currencies from Blizzard's on first load
     if EllesmereUIDB and C_CurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo then
-        if not BP().currencyOrder then BP().currencyOrder = {} end
-        local co = BP().currencyOrder
-        -- Only seed if our table is empty (first install or fresh profile)
+        -- Only seed when this character's table is empty: first install, a
+        -- fresh profile, or a character whose legacy seed was empty too.
+        local co = CurrencyOrder()
         local hasAny = false
-        for _ in pairs(co) do hasAny = true; break end
-        if not hasAny then
+        if co then
+            for _ in pairs(co) do hasAny = true; break end
+        end
+        if co and not hasAny then
             local order = 0
             for i = 1, 20 do
                 local info = C_CurrencyInfo.GetBackpackCurrencyInfo(i)
@@ -6695,8 +6743,8 @@ local function StartAddon()
     if EventRegistry and EventRegistry.RegisterCallback then
         EventRegistry:RegisterCallback("TokenFrame.OnTokenWatchChanged", function()
             if not EllesmereUIDB then return end
-            if not BP().currencyOrder then BP().currencyOrder = {} end
-            local co = BP().currencyOrder
+            local co = CurrencyOrder()
+            if not co then return end
             local blizzSet = ReadBlizzSet()
             -- Add newly checked currencies
             for cID in pairs(blizzSet) do
