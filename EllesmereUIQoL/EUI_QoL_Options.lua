@@ -1104,7 +1104,7 @@ initFrame:SetScript("OnEvent", function(self)
             kbLbl:SetPoint("CENTER")
 
             local function FormatKey(key)
-                if not key then return "Not Bound" end
+                if not key then return EllesmereUI.L("Not Bound") end
                 local parts = {}
                 for mod in key:gmatch("(%u+)%-") do
                     parts[#parts + 1] = mod:sub(1, 1) .. mod:sub(2):lower()
@@ -2324,6 +2324,19 @@ initFrame:SetScript("OnEvent", function(self)
                           if not EllesmereUIDB then EllesmereUIDB = {} end
                           EllesmereUIDB.autoOpenContainersExcludeWarbound = v
                       end },
+                    { type="toggle", label="Hold Capped Artisan Payouts",
+                      tooltip="Keeps Artisan's Consortium Payouts closed while Shard of Dundun is at its maximum, then resumes automatic opening after you spend shards.",
+                      get=function()
+                          return EllesmereUIDB
+                              and EllesmereUIDB.autoOpenContainersHoldCappedArtisanPayouts == true
+                      end,
+                      set=function(v)
+                          if not EllesmereUIDB then EllesmereUIDB = {} end
+                          EllesmereUIDB.autoOpenContainersHoldCappedArtisanPayouts = v
+                          if EllesmereUI._applyAutoOpenContainers then
+                              EllesmereUI._applyAutoOpenContainers()
+                          end
+                      end },
                 },
             })
 
@@ -2435,6 +2448,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.autoUnwrapCollections = false
                 EllesmereUIDB.autoOpenContainers = false
                 EllesmereUIDB.autoOpenContainersExcludeWarbound = true
+                EllesmereUIDB.autoOpenContainersHoldCappedArtisanPayouts = false
                 EllesmereUIDB.autoRepairGuild = false
                 EllesmereUIDB.shifterEnabled = false
                 EllesmereUIDB.shifterPositions = nil

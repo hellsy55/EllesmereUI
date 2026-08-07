@@ -374,6 +374,14 @@ end
 --   legacy format: { x = left, y = top } -- TOPLEFT offset from UIParent's
 --                  BOTTOMLEFT, written by header drags outside unlock mode
 ns.ApplyWinPosition = function(frame, wdb, idx)
+    -- The resize grip owns the frame's anchor while a drag is in flight. Even
+    -- with the format converted above, re-anchoring mid-resize would fight the
+    -- grip's live SetPoint for a frame; leave it alone until the drag ends.
+    -- ns._windows, not the _windows local: that local is declared BELOW this
+    -- function, so referencing it here would read a nil global and the guard
+    -- would silently never fire.
+    local W = ns._windows and ns._windows[idx]
+    if W and W.resizing then return end
     local pos = wdb.position
     frame:ClearAllPoints()
     if pos and pos.point then
@@ -3064,7 +3072,7 @@ local function CreateDMWindow(winIdx)
     ---------------------------------------------------------------------------
     W.resizeGrip = CreateFrame("Button", nil, frame)
     W.resizeGrip:SetSize(18, 18); W.resizeGrip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
-    W.resizeGrip:SetFrameStrata("HIGH"); W.resizeGrip:SetFrameLevel(frame:GetFrameLevel() + 15)
+    W.resizeGrip:SetFrameLevel(frame:GetFrameLevel() + 15)
     local gripTex = W.resizeGrip:CreateTexture(nil, "ARTWORK"); gripTex:SetAllPoints()
     gripTex:SetTexture(RESIZE_ICON); gripTex:SetDesaturated(true); gripTex:SetVertexColor(1, 1, 1)
     W.resizeGrip:EnableMouse(true); W.resizeGrip:SetAlpha(0)
@@ -3074,7 +3082,7 @@ local function CreateDMWindow(winIdx)
     -- Lock icon (shows/hides with resize grip, click toggles lock state)
     W.lockBtn = CreateFrame("Button", nil, frame)
     W.lockBtn:SetSize(13, 17)
-    W.lockBtn:SetFrameStrata("HIGH"); W.lockBtn:SetFrameLevel(frame:GetFrameLevel() + 16)
+    W.lockBtn:SetFrameLevel(frame:GetFrameLevel() + 16)
     W.lockBtn:EnableMouse(true); W.lockBtn:SetAlpha(0)
     local lockTex = W.lockBtn:CreateTexture(nil, "ARTWORK"); lockTex:SetAllPoints()
     lockTex:SetDesaturated(true); lockTex:SetVertexColor(1, 1, 1)
@@ -3173,7 +3181,22 @@ local function CreateDMWindow(winIdx)
         if button ~= "LeftButton" or W.windowLocked then return end
         if EUI.InProtectedInstance and EUI.InProtectedInstance() then return end
         local left, top = frame:GetLeft(), frame:GetTop()
-        if left and top then frame:ClearAllPoints(); frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top) end
+        if left and top then
+            frame:ClearAllPoints(); frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+            -- Convert the STORED position to match the pin immediately, not
+            -- just on mouse-up. wdb.position is point-format whenever unlock
+            -- mode saved it (an imported profile is all point-format), and
+            -- ApplyWinPosition re-applies that as SetPoint(pos.point, ...) --
+            -- a different anchor from the TOPLEFT pin above. Any re-apply that
+            -- lands mid-drag therefore yanks the frame back to its old anchor,
+            -- which is the resize "glitch": random, because it depends on
+            -- whether a refresh happens while the mouse is down. A window whose
+            -- position is already legacy format never showed it, since that
+            -- re-applies to the same corner the pin uses.
+            if wdb.position and wdb.position.point then
+                wdb.position = { x = left, y = top }
+            end
+        end
         resizeAnchorLeft = left; resizeAnchorTop = top
         local cx, cy = GetCursorPosition(); local es = frame:GetEffectiveScale()
         resizeStartX = cx/es; resizeStartY = cy/es; resizeStartW = frame:GetWidth(); resizeStartH = frame:GetHeight()

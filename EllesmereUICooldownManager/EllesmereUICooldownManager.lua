@@ -7538,6 +7538,14 @@ local _barBindingDefs = {
     { prefix = "MULTIACTIONBAR5BUTTON", startSlot = 145 },  -- bar 6
     { prefix = "MULTIACTIONBAR6BUTTON", startSlot = 157 },  -- bar 7
     { prefix = "MULTIACTIONBAR7BUTTON", startSlot = 169 },  -- bar 8
+    -- EUI bars 9/10 have no native binding command: their keys are routed
+    -- through the button with SetOverrideBindingClick against the custom
+    -- commands declared in the Action Bars module's Bindings.xml. Because that
+    -- route always reads the button's live "action" attr, resolve the slot from
+    -- the button when it exists and only fall back to the base page slot when
+    -- the Action Bars module is not loaded.
+    { prefix = "EUI_BAR9_BUTTON",       startSlot = 13,  eabButton = true },  -- bar 9  (action page 2)
+    { prefix = "EUI_BAR10_BUTTON",      startSlot = 109, eabButton = true },  -- bar 10 (action page 10)
     { prefix = "ACTIONBUTTON",          startSlot = 1   },  -- bar 1 (last = lowest priority)
 }
 
@@ -7598,13 +7606,20 @@ local function RebuildKeybindCache()
                     local pg = mbf and tonumber(mbf:GetAttribute("actionpage"))
                     if not pg then
                         local bonus = GetBonusBarOffset and GetBonusBarOffset() or 0
-                        if bonus > 0 then
+                        local page = (GetActionBarPage and GetActionBarPage()) or 1
+                        -- The bonus bar only wins on page 1; a manual page beats
+                        -- the form/skyriding swap, same as the engine.
+                        if bonus > 0 and page == 1 then
                             pg = 6 + bonus
                         else
-                            pg = (GetActionBarPage and GetActionBarPage()) or 1
+                            pg = page
                         end
                     end
                     slot = i + (pg - 1) * 12
+                elseif def.eabButton then
+                    local btn = _G["EABButton" .. slot]
+                    local live = btn and tonumber(btn:GetAttribute("action"))
+                    if live then slot = live end
                 end
                 local slotType, id, subType = GetActionInfo(slot)
                 local spellID
@@ -8151,10 +8166,21 @@ function ns.FullCDMRebuild(reason)
                         chfc.isChargeSpell = nil
                         chfc.maxCharges = nil
                         chfc.sortOrder = nil
+                        -- NOT chfc.barKey: CollectAndReanchor reads it as
+                        -- "we have claimed this frame before" and refuses to
+                        -- park it while identification is transiently failing.
+                        -- Clearing it here would hand the next pass a frame it
+                        -- cannot identify AND cannot vouch for.
                     end
                 end
             end
         end
+        -- A memo wipe is the START of a fresh transient-failure window, so
+        -- hand the reanchor below a full retry budget instead of whatever an
+        -- earlier transition left behind. Matters for cooldowns that are new
+        -- to the spec being swapped TO: those have no barKey to vouch for
+        -- them, so the budget is all they have.
+        ns._cdmUnresolvedRetries = 0
         -- Cancel the reanchor BuildAllCDMBars queued -- we run our own
         -- direct one immediately below. Without this, the queued reanchor
         -- would fire ~200ms later and run the entire reanchor pipeline
@@ -9446,6 +9472,7 @@ local function ScheduleTalentRebuild()
                 end
             end
         end
+        ns._cdmUnresolvedRetries = 0  -- fresh window; see FullCDMRebuild
         -- Rebuild keybind cache (talent swap may change action slot contents)
         UpdateCDMKeybinds()
         -- Invalidate TBB frame cache + spell caches, then reanchor so
@@ -9699,3 +9726,82 @@ SlashCmdList.ECME = function(msg)
 end
 
 
+
+-------------------------------------------------------------------------------
+--  /cdmwhy -- one-shot claim diagnostic
+--
+--  Exists because "the CDM is empty" has three completely different causes and
+--  a screenshot cannot tell them apart:
+--    * Blizzard's pools are empty      -> nothing for us to claim; our problem
+--                                         is that the viewer never repopulated
+--    * frames exist but are PARKED     -> we claimed nothing and swept them to
+--                                         -10000 (the unclaimed-frame cleanup)
+--    * frames exist and are CLAIMED    -> the bars are fine and something else
+--                                         (visibility, alpha) is hiding them
+--  Read-only and zero cost until typed.
+-------------------------------------------------------------------------------
+SLASH_CDMWHY1 = "/cdmwhy"
+SlashCmdList.CDMWHY = function()
+    local function say(fmt, ...)
+        print("|cff0cd29fCDM|r " .. string.format(fmt, ...))
+    end
+    local _, instType = IsInInstance()
+    say("zone=%s  wasPvP=%s  retries=%s  pending=%s",
+        tostring(instType), tostring(ns._cdmWasInPvP),
+        tostring(ns._cdmUnresolvedRetries), tostring(ns._cdmUnresolvedPending))
+
+    local totActive, totClaimed, totParked, totUnres = 0, 0, 0, 0
+    for _, vname in ipairs(_cdmViewerNames) do
+        local vf = _G[vname]
+        local active, claimed, parked, unres = 0, 0, 0, 0
+        if vf and vf.itemFramePool and vf.itemFramePool.EnumerateActive then
+            for ch in vf.itemFramePool:EnumerateActive() do
+                active = active + 1
+                local fc = _ecmeFC[ch]
+                if fc and fc.barKey then claimed = claimed + 1 end
+                -- Parked = swept offscreen by the unclaimed-frame cleanup.
+                local l = ch.GetLeft and ch:GetLeft()
+                if l and l < -9000 then parked = parked + 1 end
+                -- Live resolve probe: this is the exact call whose nil return
+                -- is what makes a frame unidentifiable mid-rebuild.
+                local cdID = ch.cooldownID or (ch.cooldownInfo and ch.cooldownInfo.cooldownID)
+                if cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                    if not C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID) then
+                        unres = unres + 1
+                    end
+                elseif not cdID then
+                    unres = unres + 1
+                end
+            end
+        end
+        say("%s active=%d claimed=%d parked=%d unresolvable=%d",
+            vname, active, claimed, parked, unres)
+        totActive, totClaimed = totActive + active, totClaimed + claimed
+        totParked, totUnres = totParked + parked, totUnres + unres
+    end
+    say("TOTAL active=%d claimed=%d parked=%d unresolvable=%d",
+        totActive, totClaimed, totParked, totUnres)
+
+    local p = ECME.db and ECME.db.profile
+    if p and p.cdmBars and p.cdmBars.bars then
+        for _, bd in ipairs(p.cdmBars.bars) do
+            if bd.enabled then
+                local icons = cdmBarIcons[bd.key]
+                local f = cdmBarFrames[bd.key]
+                say("bar %-14s icons=%d alpha=%s hidden=%s",
+                    bd.key, icons and #icons or 0,
+                    f and string.format("%.2f", f:GetAlpha()) or "nil",
+                    tostring(f and f._visHidden))
+            end
+        end
+    end
+    if totActive == 0 then
+        say("VERDICT: Blizzard's pools are EMPTY -- the viewer never repopulated.")
+    elseif totParked >= totActive - 1 then
+        say("VERDICT: frames exist but are PARKED -- the claim pass failed.")
+    elseif totClaimed > 0 and totUnres == 0 then
+        say("VERDICT: frames are CLAIMED -- look at bar alpha/visibility above.")
+    else
+        say("VERDICT: mixed; send the whole dump.")
+    end
+end

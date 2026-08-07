@@ -77,6 +77,19 @@ local function SetFont(fs, size)
     fs:SetFont(GetFont(), size, GetOutline())
 end
 
+local function SetTBBTextColor(fs, cfg, prefix)
+    if not fs or not cfg then return end
+    local r = cfg[prefix .. "TextR"]
+    local g = cfg[prefix .. "TextG"]
+    local b = cfg[prefix .. "TextB"]
+    local a = cfg[prefix .. "TextA"]
+    if r == nil then r = 1 end
+    if g == nil then g = 1 end
+    if b == nil then b = 1 end
+    if a == nil then a = 0.9 end
+    fs:SetTextColor(r, g, b, a)
+end
+
 -------------------------------------------------------------------------------
 --  Pandemic state via Blizzard hooks
 -------------------------------------------------------------------------------
@@ -241,10 +254,12 @@ local TBB_DEFAULT_BAR = {
     timerPosition = "right",
     timerSize = 11,
     timerX = 0, timerY = 0,
+    timerTextR = 1, timerTextG = 1, timerTextB = 1, timerTextA = 0.9,
     showName  = true,
     namePosition = "left",
     nameSize  = 11,
     nameX = 0, nameY = 0,
+    nameTextR = 1, nameTextG = 1, nameTextB = 1, nameTextA = 0.9,
     showSpark = true,
     iconDisplay = "none",
     iconSize    = 24,
@@ -253,6 +268,7 @@ local TBB_DEFAULT_BAR = {
     stacksPosition = "center",
     stacksSize     = 11,
     stacksX = 0, stacksY = 0,
+    stacksTextR = 1, stacksTextG = 1, stacksTextB = 1, stacksTextA = 0.9,
     stackThresholdEnabled = false,
     stackThreshold = 5,
     stackThresholdR = 0.8, stackThresholdG = 0.1, stackThresholdB = 0.1, stackThresholdA = 1,
@@ -1518,11 +1534,14 @@ local TBB_STYLE_KEYS = {
     "gradientEnabled", "gradientR", "gradientG", "gradientB", "gradientA", "gradientDir",
     "opacity", "hideWhenInactive", "onlyInCombat",
     "showTimer", "timerPosition", "timerSize", "timerX", "timerY",
+    "timerTextR", "timerTextG", "timerTextB", "timerTextA",
     "timerDecimals", "timerDecimalThreshold",
     "showName", "namePosition", "nameSize", "nameX", "nameY",
+    "nameTextR", "nameTextG", "nameTextB", "nameTextA",
     "showSpark",
     "iconDisplay", "iconSize", "iconX", "iconY", "iconBorderSize",
     "stacksPosition", "stacksSize", "stacksX", "stacksY",
+    "stacksTextR", "stacksTextG", "stacksTextB", "stacksTextA",
     "borderSize", "borderTexture", "borderR", "borderG", "borderB",
     "borderTextureOffset", "borderTextureOffsetY",
     "borderTextureShiftX", "borderTextureShiftY", "borderBehind",
@@ -2524,6 +2543,10 @@ local function ApplyTrackedBuffBarSettings(bar, cfg)
     -- Opacity
     bar._opacityTarget = cfg.opacity or 1.0
     if not bar._tbbReady then bar:SetAlpha(bar._opacityTarget) end
+
+    SetTBBTextColor(bar._timerText, cfg, "timer")
+    SetTBBTextColor(bar._nameText, cfg, "name")
+    SetTBBTextColor(bar._stacksText, cfg, "stacks")
 
     -- Timer text. Vertical bars honor the same position choices as horizontal
     -- ones: left/right sit OUTSIDE the (thin) bar, top/bottom sit above/below

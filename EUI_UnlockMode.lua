@@ -9955,6 +9955,10 @@ local function SnapshotPositions()
                 refX = info.refX, refY = info.refY,
                 edgeOffX = info.edgeOffX, edgeOffY = info.edgeOffY,
                 refFor = info.refFor,
+                -- COPY, not a reference: _NudgeSelectedFallbackGhost mutates
+                -- fb.offsetX/offsetY in place, so a shared table would drag the
+                -- snapshot along with the edit and make the revert a no-op.
+                fallback = info.fallback and CopyTable(info.fallback) or nil,
             }
         end
     end
@@ -10271,18 +10275,14 @@ local function RevertPositions()
     -- 2) Restore anchor data before repositioning
     local anchorDB = GetAnchorDB()
     if anchorDB then
-        -- Fallback links live OUTSIDE the position transaction: setting or
-        -- adjusting one is an explicit action that survives a discard. The
-        -- snapshot never carried the field, so without this carry-over a
-        -- revert would silently destroy every fallback -- including ones
-        -- from previous sessions.
-        local liveFallbacks
-        for childKey, info in pairs(anchorDB) do
-            if info.fallback then
-                liveFallbacks = liveFallbacks or {}
-                liveFallbacks[childKey] = info.fallback
-            end
-        end
+        -- Fallbacks used to be carried over from the LIVE table here, because
+        -- the snapshot did not capture the field and a revert would otherwise
+        -- have destroyed every fallback including ones from earlier sessions.
+        -- The snapshot carries it now, which preserves those AND discards
+        -- edits made this session -- so the carry-over is gone. It was the
+        -- reason a fallback ghost dragged during a session kept its new
+        -- position after Exit Without Saving: the revert put the anchor back
+        -- and then re-attached the edited fallback on top of it.
         wipe(anchorDB)
         for childKey, info in pairs(snapshotAnchors) do
             anchorDB[childKey] = {
@@ -10291,15 +10291,11 @@ local function RevertPositions()
                 refX = info.refX, refY = info.refY,
                 edgeOffX = info.edgeOffX, edgeOffY = info.edgeOffY,
                 refFor = info.refFor,
+                -- Restored from the snapshot, so a fallback MOVED this session
+                -- reverts like every other position. Fresh copy so the next
+                -- session's nudges cannot reach back into the snapshot.
+                fallback = info.fallback and CopyTable(info.fallback) or nil,
             }
-        end
-        if liveFallbacks then
-            for childKey, fb in pairs(liveFallbacks) do
-                local entry = anchorDB[childKey]
-                -- Re-attach only where an anchor link still exists: a link
-                -- that reverted away takes its fallback with it.
-                if entry then entry.fallback = fb end
-            end
         end
     end
 
