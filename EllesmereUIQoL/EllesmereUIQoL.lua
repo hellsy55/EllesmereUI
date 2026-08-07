@@ -265,6 +265,9 @@ qolFrame:SetScript("OnEvent", function(self)
         local function MailOpen()
             return (MailFrame and MailFrame:IsShown()) and true or false
         end
+        local function BankOpen()
+            return (BankFrame and BankFrame:IsShown()) and true or false
+        end
         -- "Exclude Warbound Containers": true only when the option is on AND
         -- the slot is confirmed warband-bank-eligible. Guarded like the bags
         -- module (C_Bank / ItemLocation / DoesItemExist can all be absent or
@@ -367,6 +370,7 @@ qolFrame:SetScript("OnEvent", function(self)
                 -- interaction-manager events, so the HIDE event is the one
                 -- that actually drives the resume on retail.
                 containerFrame:RegisterEvent("MAIL_CLOSED")
+                containerFrame:RegisterEvent("BANKFRAME_CLOSED")
                 if C_PlayerInteractionManager then
                     containerFrame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
                 end
@@ -397,6 +401,7 @@ qolFrame:SetScript("OnEvent", function(self)
                 containerFrame:UnregisterEvent("BAG_UPDATE")
                 containerFrame:UnregisterEvent("MERCHANT_CLOSED")
                 containerFrame:UnregisterEvent("MAIL_CLOSED")
+                containerFrame:UnregisterEvent("BANKFRAME_CLOSED")
                 if C_PlayerInteractionManager then
                     containerFrame:UnregisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
                 end
@@ -452,12 +457,13 @@ qolFrame:SetScript("OnEvent", function(self)
         -- with their own 0.5s settle delay (see the dispatcher below), by which
         -- point MailOpen() is reliably false -- this flag is passed there purely
         -- as belt-and-suspenders, not load-bearing the way skipMerchantGate is.
-        ScanAndOpen = function(skipMerchantGate, skipMailGate)
+        ScanAndOpen = function(skipMerchantGate, skipMailGate, skipBankGate)
             if not _cacheBuilt then return end
             if not IsEnabled() then return end
             if InCombatLockdown() then return end
             if not skipMerchantGate and MerchantOpen() then return end
             if not skipMailGate and MailOpen() then return end
+            if not skipBankGate and BankOpen() then return end
             if PlayerIsCasting() then _missedScan = true; return end
             -- A loot window is up (payout container lingering): LOOT_CLOSED
             -- restarts a clean cycle once it has left the bag.
@@ -498,9 +504,9 @@ qolFrame:SetScript("OnEvent", function(self)
                 _openBusy = false
                 if (madeProgress or _missedScan) and IsEnabled()
                     and not InCombatLockdown()
-                    and not MerchantOpen() and not MailOpen() and not _lootOpen then
+                    and not MerchantOpen() and not MailOpen() and not BankOpen() and not _lootOpen then
                     _missedScan = false
-                    C_Timer.After(0.3, function() ScanAndOpen(false, false) end)
+                    C_Timer.After(0.3, function() ScanAndOpen(false, false, false) end)
                 end
             end
 
@@ -508,7 +514,7 @@ qolFrame:SetScript("OnEvent", function(self)
             local function step(idx)
                 if myGen ~= _cycleGen then return end
                 if idx > #toOpen then return finish() end
-                if not IsEnabled() or InCombatLockdown() or MerchantOpen() or MailOpen() then return finish() end
+                if not IsEnabled() or InCombatLockdown() or MerchantOpen() or MailOpen() or BankOpen() then return finish() end
                 -- Re-checked per step, not just at cycle entry: a cycle paces
                 -- itself across several seconds of timers, so a cast can start
                 -- long after the entry gate passed.
@@ -676,7 +682,11 @@ qolFrame:SetScript("OnEvent", function(self)
             if event == "MAIL_CLOSED" then
                 -- Legacy path: no longer fires on retail (see the registration
                 -- comment), kept for older clients where it still does.
-                C_Timer.After(0.5, function() ScanAndOpen(false, true) end)
+                C_Timer.After(0.5, function() ScanAndOpen(false, true, false) end)
+                return
+            end
+            if event == "BANKFRAMECLOSED" then
+                C_Timer.After(0.5, function() ScanAndOpen(false, false, true) end)
                 return
             end
             if event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
@@ -685,7 +695,9 @@ qolFrame:SetScript("OnEvent", function(self)
                     -- delivery can still be landing and unlocking slots for a
                     -- moment after the frame closes -- the exact race that
                     -- strands a slot -- so settle first, same as LOOT_CLOSED.
-                    C_Timer.After(0.5, function() ScanAndOpen(false, true) end)
+                    C_Timer.After(0.5, function() ScanAndOpen(false, true, false) end)
+                elseif interactionType == Enum.PlayerInteractionType.Banker then
+                    C_Timer.After(0.5, function() ScanAndOpen(false, false, true) end)
                 end
                 return
             end
