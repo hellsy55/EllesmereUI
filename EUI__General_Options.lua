@@ -4113,6 +4113,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDamageMeters      = "Lightweight damage meters with simple but powerful customization.",
                 EllesmereUIChat              = "Modern chat enhancements with useful utilities.",
                 EllesmereUIBags              = "A beautiful visual refresh of Blizzard Bags with intuitive organization.",
+                EllesmereUIActionPalette     = "Hold a key to open a palette of actions; point or scroll to choose, release to fire.",
             }
 
             local iy = -30
@@ -6546,6 +6547,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDamageMeters      = "Lightweight damage meters with simple but powerful customization.",
                 EllesmereUIChat              = "Modern chat enhancements with useful utilities.",
                 EllesmereUIBags              = "A beautiful visual refresh of Blizzard Bags with intuitive organization.",
+                EllesmereUIActionPalette     = "Hold a key to open a palette of actions; point or scroll to choose, release to fire.",
             }
 
             -- Pre-compute scroll height for background panel sizing
