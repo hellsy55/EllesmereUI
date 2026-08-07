@@ -3232,6 +3232,10 @@ local function SyncIndicatorVisibility()
                 hasMail = raw or false
             end
         end
+        local mp = EBS.db and EBS.db.profile.minimap
+        if mp and mp.hideMail then
+            hasMail = false
+        end
         _customIndicators.mail:SetShown(hasMail)
     end
     if _customIndicators.crafting then
