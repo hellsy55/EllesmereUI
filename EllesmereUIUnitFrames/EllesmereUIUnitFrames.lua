@@ -11762,7 +11762,18 @@ function InitializeFrames()
     RegisterStylesOnce()
 
     local function SetupUnitMenu(frame, unit)
-        frame:RegisterForClicks("AnyUp")
+        -- Left and right only, matching Blizzard's own unit frames
+        -- (Blizzard_UnitFrame/UnitFrame.lua: RegisterForClicks("LeftButtonUp",
+        -- "RightButtonUp")). "AnyUp" made the frame CONSUME middle mouse and
+        -- the two thumb buttons, and a consumed click never reaches the
+        -- binding system -- so a @mouseover macro on a mouse bind did nothing
+        -- while the cursor was over a unit frame, though the same macro on a
+        -- keyboard bind worked. That consumption is exactly how click-casting
+        -- works, and these frames bind nothing to those buttons on their own:
+        -- the click-cast engine sets its own RegisterForClicks when it takes a
+        -- frame over, so it never needed this. Left and right still cover
+        -- target and the context menu.
+        frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         -- 12.0.7 gates SecureUnitButton's togglemenu; route right-click securely
         -- through a SecureActionButton proxy so the menu (and its protected items
         -- like Set Focus) work without taint.
