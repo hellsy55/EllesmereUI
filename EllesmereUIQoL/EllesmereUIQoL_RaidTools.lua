@@ -21,11 +21,13 @@
 --    "always" -- always shown (no driver; the visible attribute just stays
 --                true).
 --
---  On top of the mode sits ONE unconditional gate: in a raid without leader or
---  assist the whole feature is off the screen, because the server refuses
---  every button on it there. It is raid-only (a party has no assistants) and
---  Lua-side, since no macro conditional can express it -- see AssistSuppressed
---  and RefreshAssistGate.
+--  The panel shows in every group the mode's driver puts it in, whether or
+--  not you have leader or assist -- there is no whole-feature gate on that
+--  anymore. RefreshPermissions still dims/disables the individual controls
+--  the server would refuse (ready check, role check, convert, disband, the
+--  markers), so the panel is always visible but only as capable as your
+--  rank. AssistSuppressed and RefreshAssistGate remain as the plumbing for
+--  that per-button gate, now permanently reporting "not suppressed".
 --
 --  The Toggle Raid Tools keybind works in every active mode, and what it
 --  toggles follows Default to Collapsed When Shown: with it ON the key rocks
@@ -759,20 +761,15 @@ end
 
 -- In a RAID, every control on the panel needs leader or assist: ready check,
 -- role check, the countdown, convert, disband and the marker buttons are all
--- refused by the server without it. So the feature steps off the screen there
--- instead of sitting around fully dimmed.
---
--- Raid only, deliberately. A party has no assistants -- UnitIsGroupAssistant
--- is false for everyone in one -- so the same test would hide the panel from
--- every non-leader in a 5-man, where marking is open to all of them.
---
--- There is no macro conditional for leader/assist, so NO state driver can
--- express this: the gate is Lua's, it lands on the enabled attribute, and a
--- promotion mid-combat is picked up on PLAYER_REGEN_ENABLED like every other
--- Lua-side change (see the combat model in the header).
+-- refused by the server without it. That USED to take the whole feature off
+-- the screen in a raid without assist; by request it no longer does -- the
+-- panel now stays visible in every group (subject only to Show Mode), and
+-- RefreshPermissions is left to dim/disable the individual controls the
+-- server would refuse. This function is kept (rather than deleted) so every
+-- call site below reads the same way and a future "hide when powerless"
+-- toggle has a single place to live again.
 local function AssistSuppressed()
-    if previewOn then return false end   -- configuring the thing beats hiding it
-    return IsInRaid() and not HasAssist()
+    return false
 end
 
 -- An optional button's switch, defaulting to shown for an unset profile.
@@ -1800,8 +1797,9 @@ local function ApplyVisibility()
     -- window everywhere except Markers-only; the Markers shell exists only in
     -- Two Windows and Markers-only.
     --
-    -- The assist gate rides on top of that and takes ALL of them, icon
-    -- included -- a raid without assist is a raid where nothing here works.
+    -- `suppressed` is always false now (see AssistSuppressed) -- kept as a
+    -- multiplier here rather than removed so a future gate can drop back in
+    -- without touching this shape again.
     local showAs = ShowAs()
     local suppressed = AssistSuppressed()
     local shellOn = {
