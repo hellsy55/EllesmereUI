@@ -4338,3 +4338,21 @@ EllesmereUI.RegisterMigration({
         if seeded ~= (cur or 1.0) then db.panelScale = seeded end
     end,
 })
+
+--------------------------------------------------------------------------------
+--  Player castbar spell target -> None. The player castbar never rendered the
+--  spell target before the display fix (an "and ownerUnit ~= 'player'" guard
+--  swallowed it), so any inherited or explicitly-set side would make the text
+--  pop in on update. Pin existing profiles to None; the player default is now
+--  false too, so only users who opt back in see it.
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "uf_player_cast_target_none_v1",
+    scope       = "profile",
+    description = "Pin the player castbar's spell target to None (it never displayed before the fix).",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        local p = uf and uf.player
+        if type(p) == "table" then p.showCastTarget = false end
+    end,
+})

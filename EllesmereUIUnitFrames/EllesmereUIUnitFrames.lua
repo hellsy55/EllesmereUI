@@ -412,7 +412,11 @@ local defaults = {
             castDurationX = 0,
             castDurationY = 0,
             showCastDuration = true,
-            showCastTarget = true,
+            -- Player-only: the spell target never rendered here before the
+            -- display fix, so it defaults OFF to keep the frame unchanged;
+            -- users opt in via the Spell Target side dropdown. Existing
+            -- profiles are pinned to None by uf_player_cast_target_none_v1.
+            showCastTarget = false,
             castbarFillColor = { r = 0.863, g = 0.820, b = 0.639 },
             castbarClassColored = false,
             showClassPowerBar = false,
@@ -6013,7 +6017,7 @@ local function SetupShowOnCastBar(frame, unit)
         if self.Target then
             local spellTarget, spellTargetClass
             local ownerUnit = self.__owner and self.__owner.unit
-            if ownerUnit and ownerUnit ~= "player"
+            if ownerUnit
                and UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(ownerUnit) then
                 local rawTarget = UnitSpellTargetName and UnitSpellTargetName(ownerUnit)
                 if rawTarget then
@@ -9721,14 +9725,11 @@ local function ReloadFrames()
                                 local tsC = settings.castSpellTargetColor or { r=1, g=1, b=1 }
                                 frame.Castbar.Target:SetTextColor(tsC.r, tsC.g, tsC.b)
                                 frame.Castbar._showTarget = settings.showCastTarget ~= false
-                                frame.Castbar._nameSide = settings.castSpellNameSide or "left"
-                                frame.Castbar._tgtSide  = settings.castSpellTargetSide or "right"
-                                frame.Castbar._durSide  = settings.castDurationSide or "right"
                                 if not frame.Castbar._showTarget then
                                     frame.Castbar.Target:Hide()
                                 end
-                                if frame.Castbar._layoutTextZones then
-                                    frame.Castbar:_layoutTextZones()
+                                if frame.Castbar._syncOffsetsAndLayout then
+                                    frame.Castbar:_syncOffsetsAndLayout(settings)
                                 end
                             end
                         else
@@ -11762,17 +11763,11 @@ function InitializeFrames()
     RegisterStylesOnce()
 
     local function SetupUnitMenu(frame, unit)
-        -- Left and right only, matching Blizzard's own unit frames
-        -- (Blizzard_UnitFrame/UnitFrame.lua: RegisterForClicks("LeftButtonUp",
-        -- "RightButtonUp")). "AnyUp" made the frame CONSUME middle mouse and
-        -- the two thumb buttons, and a consumed click never reaches the
-        -- binding system -- so a @mouseover macro on a mouse bind did nothing
-        -- while the cursor was over a unit frame, though the same macro on a
-        -- keyboard bind worked. That consumption is exactly how click-casting
-        -- works, and these frames bind nothing to those buttons on their own:
-        -- the click-cast engine sets its own RegisterForClicks when it takes a
-        -- frame over, so it never needed this. Left and right still cover
-        -- target and the context menu.
+        -- Left and right only, matching Blizzard's own unit frames: a
+        -- registered click is CONSUMED and never reaches the binding system,
+        -- and these frames bind nothing to middle/thumb buttons themselves.
+        -- The click-cast engine sets its own RegisterForClicks when it takes
+        -- a frame over. Left and right still cover target and the menu.
         frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         -- 12.0.7 gates SecureUnitButton's togglemenu; route right-click securely
         -- through a SecureActionButton proxy so the menu (and its protected items
@@ -12200,15 +12195,12 @@ function InitializeFrames()
         end)
     end
 
-    -- Seed the built-style marker from the init build, so the first reload of a
-    -- session does not see a nil marker, assume a change, and pay a pointless
-    -- teardown for users with no override at all. It belongs HERE and not in
-    -- PositionClassPowerBar: that is a repositioning function, and
-    -- ReassertClassPower calls it from Blizzard's SetParent/Hide hooks with no
-    -- rebuild behind it. Stamping the current profile style there would claim a
-    -- style is built when it is not, which suppresses the very rebuild the
-    -- reload pass exists to trigger. Guarded on frames.player to match
-    -- _toggleClassPower, which returns before stamping when there is no frame.
+    -- Seed the built-style marker so the first reload does not mistake a nil
+    -- marker for a change. Written ONLY at build sites (here and the toggle):
+    -- PositionClassPowerBar is repositioning, called by ReassertClassPower from
+    -- Blizzard's SetParent/Hide hooks with no rebuild behind it, and stamping
+    -- there would suppress the rebuild this exists to trigger. frames.player
+    -- guard matches _toggleClassPower.
     if frames.player then frames._classPowerBuiltStyle = classPowerStyle end
     if classPowerStyle ~= "none" and frames.player then
         if classPowerStyle == "blizzard" then
@@ -13571,12 +13563,10 @@ function SetupOptionsPanel()
         if not frames._toggleClassPower then return end
         local wantCP = db.profile.player.classPowerStyle or "none"
         if wantCP == frames._classPowerBuiltStyle then return end
-        -- Not in combat: the toggle reparents and hides Blizzard's class power
-        -- frame and re-anchors the health bar. ReloadFrames() early-returns in
-        -- lockdown for the same reason, but this runs from the throttle body
-        -- AFTER that return, so it needs its own guard (the same shape as the
-        -- UpdateFrameVisibility note above) plus a re-run, since nothing else
-        -- re-arms the pass once combat ends.
+        -- The toggle reparents Blizzard's class power frame and re-anchors the
+        -- health bar. The throttle body keeps running after ReloadFrames()'s
+        -- lockdown return (same shape as the UpdateFrameVisibility note above),
+        -- so this needs its own guard plus a regen re-run to re-arm the pass.
         if InCombatLockdown() then
             cpRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
             return
@@ -13616,12 +13606,10 @@ function SetupOptionsPanel()
         -- Player private auras re-register with fresh geometry (one boolean
         -- check + return when disabled).
         if ns.PlayerPA_Apply then ns.PlayerPA_Apply() end
-        -- Class power: _toggleClassPower is the ONLY thing that honours a
-        -- classPowerStyle change, and it had exactly two callers -- the options
-        -- dropdown and the PLAYER_SPECIALIZATION_CHANGED watcher. Any other
-        -- path that changes the style left the live bar stale. That is why the
-        -- reported workaround was to switch spec away and back, which is the
-        -- one event that does call it.
+        -- Class power: _toggleClassPower is the only thing that honours a
+        -- classPowerStyle change, and options + the spec watcher are its only
+        -- other callers -- styles changed by overrides, profile switch, or
+        -- import land here.
         RealiseClassPowerStyle()
     end)
     ns.ReloadFrames = function()

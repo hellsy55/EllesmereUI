@@ -9075,37 +9075,19 @@ do
         RefreshCdmPressMirrorFlag()
     end
 
-    ---------------------------------------------------------------------------
-    --  Click-routed keybinds.
-    --  ActionButtonDown/MultiActionButtonDown below only fire for bars that
-    --  own a NATIVE binding command. EllesmereUI's action bars route a key
-    --  through the button with SetOverrideBindingClick whenever the native
-    --  command cannot resolve what the button actually shows: Bars 9 and 10
-    --  (no native command exists at all), every empower spell, and any bar
-    --  with user-configured or opted-out paging. Those presses never reach the
-    --  native handlers, so the mirror never saw them.
-    --
-    --  The action bars module already hooks PostClick on every button for its
-    --  own press-time GCD paint and publishes the press to us there, which is
-    --  the safe place to sit: PostClick runs after Blizzard's click handler has
-    --  finished, so this stays downstream of the protected calls that
-    --  OnActionButtonClick makes (UseContainerItem/SpellTargetItem on the
-    --  spell-targets-item path). Same taint posture as the native hooks below,
-    --  which likewise run after TryUseActionButton has fully returned.
-    ---------------------------------------------------------------------------
+    -- Click-routed keybinds (Bars 9/10, empower spells, custom paging) go
+    -- through the button via SetOverrideBindingClick and never fire the native
+    -- commands hooked below; the EAB PostClick hook publishes them here.
+    -- PostClick runs after Blizzard's click handler returns, downstream of its
+    -- protected item-use calls -- same taint posture as the native hooks.
     _G._EUI_OnActionButtonPress = function(btn, down, bindCmd)
-        -- Paint at the physical press, not the release: buttons register for
-        -- both edges, and in key-up mode the key is already gone by the up
-        -- click, which the held-key test below would then misread.
+        -- Down edge only: buttons register both edges, and in key-up mode the
+        -- key is already released by the up click.
         if not down or not btn or not bindCmd or not _anyPressMirror then return end
-        -- Keyboard only, matching the native path. By PostClick a click-routed
-        -- keybind and a real mouse click are indistinguishable (Blizzard says
-        -- as much in SecureActionButton_OnClick), so this needs two tests, not
-        -- one. A held binding key proves keyboard, but cannot: mouse WHEEL
-        -- binds are never IsKeyDown, and gating on that alone would silently
-        -- drop every wheel-bound button, which the native path still mirrors.
-        -- The cursor-rect test covers those. Together they only miss a wheel
-        -- bind pressed while the cursor happens to rest on its own button.
+        -- Keyboard evidence (a real mouse click must not mirror): a held
+        -- binding key proves keyboard, but wheel binds are never IsKeyDown, so
+        -- the cursor-rect test covers those. Only miss: a wheel bind pressed
+        -- while the cursor rests on its own button.
         local k1, k2 = GetBindingKey(bindCmd)
         local b1, b2 = BaseKey(k1), BaseKey(k2)
         local keyHeld = (b1 and IsKeyDown(b1)) or (b2 and IsKeyDown(b2))

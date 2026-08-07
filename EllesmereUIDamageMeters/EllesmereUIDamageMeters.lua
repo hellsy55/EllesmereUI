@@ -3532,15 +3532,11 @@ local function CreateDMWindow(winIdx)
 
                     -- Per-tick content: only for visible bars
                     if i >= visFirst and i <= visLast then
-                        -- Icon: only when the icon's own inputs change. The memo
-                        -- must include the SPEC, not just the class: bars are
-                        -- recycled by rank, so a rank swap between two players
-                        -- of the same class but different specs left classFile
-                        -- unchanged, the rebuild was skipped, and the row kept
-                        -- the previous player's spec icon. Field report: an
-                        -- Affliction and a Demonology Warlock trading 2nd and
-                        -- 3rd place showed two Afflictions, and it got rarer as
-                        -- the DPS gap grew, because the swaps did.
+                        -- Icon: only when the icon's own inputs change. The
+                        -- memo must include the SPEC, not just the class: bars
+                        -- are recycled by rank, so a swap between same-class
+                        -- players of different specs left classFile unchanged
+                        -- and the row kept the previous player's spec icon.
                         local classFile = src.classFilename
                         local specIcon = src.specIconID
                         if classFile ~= bar._cachedClass or specIcon ~= bar._cachedSpecIcon then
@@ -3639,7 +3635,7 @@ local function CreateDMWindow(winIdx)
                 else
                     if bar.row:IsShown() then bar.row:Hide() end
                     bar._src = nil; bar._srcGUID = nil; bar._class = nil
-                    bar._cachedSlot = nil; bar._cachedClass = nil; bar._cachedColorClass = nil
+                    bar._cachedSlot = nil; bar._cachedClass = nil; bar._cachedSpecIcon = nil; bar._cachedColorClass = nil
                     bar._cachedSrcName = nil; bar._cachedDisplayName = nil; bar._cachedAmtText = nil
                 end
             end

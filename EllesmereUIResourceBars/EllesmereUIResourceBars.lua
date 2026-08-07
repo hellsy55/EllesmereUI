@@ -6256,6 +6256,44 @@ do
     end
 end
 
+-- Raw-fill writer for Smooth Bar Animation OFF. A plain SetValue lands only
+-- at the 20 Hz tick and the engine has no linear interpolation to carry the
+-- fill between redraws (Enum.StatusBarInterpolation: Immediate or ease-out
+-- only), so raw mode visibly stepped. This frame does the minimal per-frame
+-- write -- one time read, one SetValue -- and exists ONLY while a Lua-drawn
+-- cast is active with smoothing off: shown by the per-cast constants memo,
+-- hidden by ns.ShowIdleCastBar and by its own gate the moment cast state or
+-- fill ownership changes. Hidden frame = zero idle cost. Text, stages,
+-- spark and safety stay on the 20 Hz tick.
+do
+    local min, max = math.min, math.max
+    local driver = CreateFrame("Frame")
+    driver:Hide()
+    ns._rawFillDriver = driver
+    driver:SetScript("OnUpdate", function(self)
+        local f = castBarFrame
+        if not f or f._nativeFill or not f._rawFill
+           or not (f._casting or f._channeling or f._empowering) then
+            self:Hide()
+            return
+        end
+        local dur = f._endTime - f._startTime
+        local v
+        if f._channeling then
+            v = (dur > 0) and ((f._endTime - GetTime()) / dur) or 0
+        else
+            v = (dur > 0) and ((GetTime() - f._startTime) / dur) or 0
+        end
+        v = min(max(v, 0), 1)
+        local bar = f._bar
+        local sb = bar._sb or bar
+        sb:SetValue(v)
+        if f._gradientFullBar and f._gradClip then
+            f._gradClip:SetWidth(max(0.01, bar:GetWidth() * v))
+        end
+    end)
+end
+
 -- GCD bar ticker: 20 Hz; the eased SetValue inside UpdateGCDBar carries the
 -- fill between fires. Runs only while a GCD is live, and the final fire
 -- renders the idle state before the loop stops itself.
@@ -6374,10 +6412,18 @@ BuildCastBar = function()
         spark:SetBlendMode("ADD")
         castBarFrame._spark = spark
 
-        -- Latency overlay (on clipFrame, above bar fill, below spark)
+        -- Latency overlay (on clipFrame: below the bar's fill, so a cast's
+        -- completing fill sweeps over the end-side zone)
         local latOverlay = clipFrame:CreateTexture(nil, "ARTWORK", nil, 7)
         latOverlay:Hide()
         castBarFrame._latencyOverlay = latOverlay
+
+        -- Channel twin on the bar frame: a channel starts FULL, so the
+        -- drain-side zone spends the whole channel under the fill unless it
+        -- draws above it (OVERLAY 0: over the fill, under ticks and spark).
+        local latOverlayFront = bar:CreateTexture(nil, "OVERLAY", nil, 0)
+        latOverlayFront:Hide()
+        castBarFrame._latencyOverlayFront = latOverlayFront
 
         -- Spell icon
         local iconFrame = CreateFrame("Frame", nil, castBarFrame)
@@ -6589,22 +6635,29 @@ end
     -- GetNetStats (live network latency), so there is no event timing involved
     -- and spell-queueing cannot break it.
     if cb.latencyEnabled then
-        local lo = castBarFrame._latencyOverlay
         local lR, lG, lB, lA = cb.latencyR or 0.835, cb.latencyG or 0.290, cb.latencyB or 0.290, cb.latencyA or 1
         local texKey = cb.texture
+        local texPath
         if texKey and texKey ~= "none" and texKey ~= "blizzard" then
-            local texPath = EllesmereUI.ResolveTexturePath(CAST_BAR_TEXTURES, texKey, nil)
-            if texPath then
-                lo:SetTexture(texPath)
-                lo:SetVertexColor(lR, lG, lB, lA)
-            else
-                lo:SetColorTexture(lR, lG, lB, lA)
+            texPath = EllesmereUI.ResolveTexturePath(CAST_BAR_TEXTURES, texKey, nil)
+        end
+        -- Style both overlays; ShowLatencyOverlay picks one per cast kind
+        -- (channels use the front twin so the zone survives the full fill).
+        for i = 1, 2 do
+            local lo = (i == 1) and castBarFrame._latencyOverlay
+                or castBarFrame._latencyOverlayFront
+            if lo then
+                if texPath then
+                    lo:SetTexture(texPath)
+                    lo:SetVertexColor(lR, lG, lB, lA)
+                else
+                    lo:SetColorTexture(lR, lG, lB, lA)
+                end
             end
-        else
-            lo:SetColorTexture(lR, lG, lB, lA)
         end
     else
         if castBarFrame._latencyOverlay then castBarFrame._latencyOverlay:Hide() end
+        if castBarFrame._latencyOverlayFront then castBarFrame._latencyOverlayFront:Hide() end
         castBarFrame._latencySuffix = nil
     end
     -- Text width cap: use the bar's rendered width so width-matching
@@ -6905,8 +6958,19 @@ UpdateCastBar = function(dt)
         -- Native easing between redraws (live API; the GCD bar ships with the
         -- same mechanism). The engine renders intermediate positions every
         -- frame, so the redraw rate can drop without visible stepping.
-        castBarFrame._cstInterp     = Enum and Enum.StatusBarInterpolation
-            and Enum.StatusBarInterpolation.ExponentialEaseOut
+        -- Smooth Bar Animation off: plain SetValue at true progress, and no
+        -- fill lead -- there is no ease to trail the timeline.
+        local smooth = cb.smoothFill ~= false
+        castBarFrame._cstInterp     = smooth and Enum and Enum.StatusBarInterpolation
+            and Enum.StatusBarInterpolation.ExponentialEaseOut or nil
+        castBarFrame._cstLead       = smooth and 0.08 or 0
+        -- Raw mode hands the fill to the per-frame writer (below the cast
+        -- tick): plain 20Hz SetValues visibly step, and the engine has no
+        -- linear interpolation mode to carry them between redraws.
+        castBarFrame._rawFill = not smooth
+        if castBarFrame._rawFill and not castBarFrame._nativeFill and ns._rawFillDriver then
+            ns._rawFillDriver:Show()
+        end
     end
     local showTimer = castBarFrame._cstShowTimer
 
@@ -6925,18 +6989,28 @@ UpdateCastBar = function(dt)
         local castDur = castBarFrame._endTime - castBarFrame._startTime
         local progress = (castDur > 0) and ((now - castBarFrame._startTime) / castDur) or 0
         progress = min(max(progress, 0), 1)
+        -- The eased SetValue chases a target computed at the LAST 20Hz tick,
+        -- so the drawn fill trails true time by roughly one tick plus the
+        -- ease-out's convergence residue and dies ~4% short when the stop
+        -- lands (measured: rendered 0.96 at dtEnd 0). Lead the fill target by
+        -- tick + residue (user-calibrated; 0 when smoothing is off) so the
+        -- ease converges ON the true timeline; stages and text below keep
+        -- using true progress.
+        local fillProgress = (castDur > 0) and ((now + castBarFrame._cstLead - castBarFrame._startTime) / castDur) or 0
+        fillProgress = min(max(fillProgress, 0), 1)
         -- Fill: only the fallback path draws from Lua. When the engine timer
         -- owns the fill (ns.ApplyCastTimer), progress is still computed above
         -- because the empower stage coloring below derives its stage from it.
-        if not castBarFrame._nativeFill then
+        -- Raw mode: the per-frame writer owns the fill instead.
+        if not (castBarFrame._nativeFill or castBarFrame._rawFill) then
             if castBarFrame._cstSB then
-                castBarFrame._cstSB:SetValue(progress, castBarFrame._cstInterp)
+                castBarFrame._cstSB:SetValue(fillProgress, castBarFrame._cstInterp)
             else
-                bar:SetValue(progress, castBarFrame._cstInterp)
+                bar:SetValue(fillProgress, castBarFrame._cstInterp)
             end
             -- Size the gradient clip frame to match the fill width
             if castBarFrame._gradientFullBar and castBarFrame._gradClip then
-                castBarFrame._gradClip:SetWidth(max(0.01, bar:GetWidth() * progress))
+                castBarFrame._gradClip:SetWidth(max(0.01, bar:GetWidth() * fillProgress))
             end
         end
 
@@ -6961,9 +7035,11 @@ UpdateCastBar = function(dt)
             ns.SetCastTimerText(castBarFrame, now, totalDurMode, totalSuffix, latSuffix)
         end
     elseif castBarFrame._channeling then
-        if not castBarFrame._nativeFill then
+        if not (castBarFrame._nativeFill or castBarFrame._rawFill) then
             local chanDur = castBarFrame._endTime - castBarFrame._startTime
-            local progress = (chanDur > 0) and ((castBarFrame._endTime - now) / chanDur) or 0
+            -- Same lead as the cast branch, mirrored for the drain
+            -- (measured: channels ended rendered at 0.018 instead of 0).
+            local progress = (chanDur > 0) and ((castBarFrame._endTime - now - castBarFrame._cstLead) / chanDur) or 0
             progress = min(max(progress, 0), 1)
             if castBarFrame._cstSB then
                 castBarFrame._cstSB:SetValue(progress, castBarFrame._cstInterp)
@@ -7007,7 +7083,14 @@ end
 -------------------------------------------------------------------------------
 local function ShowLatencyOverlay(castType)
     if not castBarFrame then return end
-    local overlay = castBarFrame._latencyOverlay
+    -- Channels use the front twin: the bar starts full, so the drain-side
+    -- zone must draw above the fill to be visible at all. Casts keep the
+    -- behind texture -- the fill sweeps over the zone as it completes.
+    local behind = castBarFrame._latencyOverlay
+    local front  = castBarFrame._latencyOverlayFront
+    local overlay = (castType == "channel") and (front or behind) or behind
+    local other   = (overlay == front) and behind or front
+    if other then other:Hide() end
     if not overlay then return end
 
     local cb = ERB.db.profile.castBar
@@ -7059,6 +7142,7 @@ end
 local function HideLatencyOverlay()
     if not castBarFrame then return end
     if castBarFrame._latencyOverlay then castBarFrame._latencyOverlay:Hide() end
+    if castBarFrame._latencyOverlayFront then castBarFrame._latencyOverlayFront:Hide() end
     castBarFrame._latencySuffix = nil
 end
 
@@ -7109,6 +7193,7 @@ function ns.ShowIdleCastBar()
     castBarFrame._bar:SetValue(0)
     castBarFrame._nativeFill = nil
     castBarFrame._cstKey = nil
+    if ns._rawFillDriver then ns._rawFillDriver:Hide() end
 
     -- Cast decoration has nothing to show without a cast. The spark in
     -- particular is anchored to the RIGHT edge of the fill, so at value 0 it
@@ -7474,6 +7559,42 @@ end
 --  GCD Bar
 --  Uses the same detection logic as the cursor GCD Circle
 -------------------------------------------------------------------------------
+-- Idle fill render for the GCD bar. Debug-measured on the live client
+-- (2026-08-08): a COMPLETED bar timer keeps painting its finished state --
+-- SetValue(0) read back 0 while the fill still drew full -- so the idle
+-- look is set by RE-ARMING the finished duration object in whichever
+-- direction PAINTS the desired state (RemainingTime of a finished cooldown
+-- paints empty, ElapsedTime paints full). SetValue keeps the value channel
+-- and the no-timer Lua fill path coherent.
+ns.GCDIdleFill = function(g)
+    local bar = gcdBarFrame and gcdBarFrame._bar
+    if not bar then return end
+    local wantFull = g.idleShowFill == true
+    if bar.SetTimerDuration and Enum and Enum.StatusBarTimerDirection then
+        -- Fetch a FRESH object here: after a CANCELLED cast the GCD is
+        -- refunded and the stored handle goes stale -- a RemainingTime
+        -- re-arm on it plays out the original countdown (a slow un-fill
+        -- over the leftover window). A fresh handle reflects the reset and
+        -- paints the terminal state instantly. wantFull prefers the stored
+        -- FINISHED object (ElapsedTime of finished paints full, proven);
+        -- each side falls back to the other.
+        local fresh = C_Spell and C_Spell.GetSpellCooldownDuration
+            and C_Spell.GetSpellCooldownDuration(61304)
+        local obj
+        if wantFull then
+            obj = gcdBarFrame._gcdDurObj or fresh
+        else
+            obj = fresh or gcdBarFrame._gcdDurObj
+        end
+        if obj then
+            bar:SetTimerDuration(obj, nil,
+                wantFull and Enum.StatusBarTimerDirection.ElapsedTime
+                    or Enum.StatusBarTimerDirection.RemainingTime)
+        end
+    end
+    bar:SetValue(wantFull and 1 or 0)
+end
+
 BuildGCDBar = function()
     local g = ERB.db.profile.gcdBar
 
@@ -7485,6 +7606,8 @@ BuildGCDBar = function()
             gcdBarFrame._gcdDur = nil
             gcdBarFrame._gcdActualStart = nil
             gcdBarFrame._barActive = nil
+            gcdBarFrame._nativeGCD = nil
+            gcdBarFrame._gcdDurObj = nil
         end
         return
     end
@@ -7531,12 +7654,122 @@ BuildGCDBar = function()
         gcdBarFrame._spark = spark
 
         -- Event-driven GCD capture (like the cursor GCD ring)
+        local getCD = C_Spell and C_Spell.GetSpellCooldown
+
+        -- Push a fresh GCD duration object into the bar timer. Hoisted so a
+        -- capture allocates no closure beyond the pcall body. The object is
+        -- kept on the frame: the idle render re-arms it to repaint (see
+        -- ns.GCDIdleFill).
+        local function armNativeGCD(bar, deplete)
+            local durObj = C_Spell.GetSpellCooldownDuration(61304)
+            if not durObj then return end
+            gcdBarFrame._gcdDurObj = durObj
+            bar:SetTimerDuration(durObj, nil,
+                deplete and Enum.StatusBarTimerDirection.RemainingTime
+                    or Enum.StatusBarTimerDirection.ElapsedTime)
+            return true
+        end
+
+        -- (Re)capture the GCD and arm the fill. windowOnly marks the
+        -- cooldown-chatter edge: when the values are secret it may only
+        -- refresh an already-open lifecycle window, never open one --
+        -- otherwise random cooldown chatter would flash an empty bar.
+        local function captureGCD(self, gc, windowOnly)
+            local cd = getCD and getCD(61304)
+            if not cd or not cd.startTime then return end
+            -- Engine-true fill, same duration-object push-through as the
+            -- action bar swipes: hand the GCD's duration object to the bar
+            -- timer and the engine renders TRUE progress every frame --
+            -- zero Lua per frame, queue-proof (re-arms land on the same
+            -- timeline, so they are idempotent), and secret-proof (the
+            -- object is never read).
+            local bar = self._bar
+            local canNative = bar and bar.SetTimerDuration and Enum
+                and Enum.StatusBarTimerDirection
+                and C_Spell and C_Spell.GetSpellCooldownDuration
+            local ok, elapsed, dur = pcall(function()
+                local d, s = cd.duration, cd.startTime
+                if d and d > 0 and d <= 1.6 and s and s > 0 then return GetTime() - s, d end
+                return nil
+            end)
+            if ok and elapsed and not (issecretvalue and (issecretvalue(elapsed) or issecretvalue(dur))) then
+                local actualStart = GetTime() - elapsed
+                -- (Re)start whenever this is a genuinely NEWER GCD than the one we
+                -- last captured. Do NOT gate on how far the GCD has elapsed:
+                -- while spamming, the next ability is queued and its SUCCEEDED
+                -- lands partway into the fresh GCD, so an "elapsed near 0" gate
+                -- rejected every queued cast and the bar stayed dropped for the
+                -- rest of combat. The newer-start check still stops an off-GCD
+                -- spell from restarting the running GCD: it reads the SAME
+                -- start, so actualStart is not newer. The remaining check just
+                -- skips an already-finished GCD.
+                if (dur - elapsed) > 0.05 and ((not self._gcdActualStart) or actualStart > (self._gcdActualStart + 0.05)) then
+                    self._gcdActualStart = actualStart
+                    -- Lifecycle window for the tick (end detection + fade):
+                    -- the engine timer owns the drawn fill when available;
+                    -- the Lua fill only draws when it is not.
+                    self._gcdStart = GetTime()
+                    self._gcdDur = math.max(dur - elapsed, 0.05)
+                    self._nativeGCD = canNative and armNativeGCD(bar, gc.depleteFill) or nil
+                    -- Show the bar THIS frame: waiting for the next tick (or
+                    -- the central dispatcher) stacked visible latency on top
+                    -- of the event edge.
+                    ns.GCDTick.Start()
+                    UpdateGCDBar()
+                end
+            elseif not ok and canNative then
+                -- Secret cooldown values (instanced combat): the readable
+                -- gate cannot run, and gating this channel on guesses is
+                -- the exact trap the action bar swipe work documented --
+                -- push the object through. The engine renders the true
+                -- fill; the lifecycle window is a conservative GCD
+                -- ceiling, cut short by the next arm.
+                if windowOnly then
+                    -- Cooldown chatter may only refresh the fill of an open
+                    -- window (armNative keeps the engine honest); it never
+                    -- opens visibility on its own.
+                    if self._gcdStart then armNativeGCD(bar, gc.depleteFill) end
+                    return
+                end
+                if armNativeGCD(bar, gc.depleteFill) then
+                    self._nativeGCD = true
+                    self._gcdStart = GetTime()
+                    self._gcdDur = 1.6
+                    self._gcdActualStart = nil
+                    ns.GCDTick.Start()
+                    UpdateGCDBar()
+                end
+            end
+        end
+
         gcdBarFrame:SetScript("OnEvent", function(self, event, unit, _, spellID)
-            if unit ~= "player" then return end
             local gc = ERB.db.profile.gcdBar
             if not gc or not gc.enabled then return end
 
-            local getCD = C_Spell and C_Spell.GetSpellCooldown
+            -- Press-parity edge (the action bar swipe lesson): the client
+            -- PREDICTS the GCD and fires SPELL_UPDATE_COOLDOWN the moment
+            -- the button is pressed -- and, for a queued spell, the moment
+            -- the queued cast actually fires. SUCCEEDED only lands after
+            -- the server ack, so arming from it alone opened every fill a
+            -- tenth of the way in. Same-frame collapse absorbs the storm.
+            if event == "SPELL_UPDATE_COOLDOWN" then
+                local now = GetTime()
+                if self._gcdCapStamp == now then return end
+                self._gcdCapStamp = now
+                if gc.instantOnly then
+                    -- Hard casts also start a GCD, and cast info may not be
+                    -- readable yet on this exact frame -- check one later.
+                    C_Timer.After(0, function()
+                        if UnitCastingInfo("player") or UnitChannelInfo("player") then return end
+                        local gc2 = ERB.db.profile.gcdBar
+                        if gc2 and gc2.enabled then captureGCD(self, gc2, true) end
+                    end)
+                    return
+                end
+                captureGCD(self, gc, true)
+                return
+            end
+            if unit ~= "player" then return end
 
             -- Stop events: clear the bar the moment the GCD is no longer active.
             if event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED"
@@ -7559,6 +7792,10 @@ BuildGCDBar = function()
                     self._gcdStart = nil
                     self._gcdDur = nil
                     self._gcdActualStart = nil
+                    -- Paint the idle state NOW: a cancelled cast refunds the
+                    -- GCD, and waiting for the next tick leaves the dead fill
+                    -- on screen for up to one tick.
+                    ns.GCDIdleFill(gc)
                 end
                 self._realCastSpellID = nil  -- the cast ended; clear the hard-cast flag
                 return
@@ -7590,51 +7827,25 @@ BuildGCDBar = function()
                 return
             end
 
-            local function captureGCD()
-                local cd = getCD and getCD(61304)
-                if not cd or not cd.startTime then return end
-                local ok, elapsed, dur = pcall(function()
-                    local d, s = cd.duration, cd.startTime
-                    if d and d > 0 and d <= 1.6 and s and s > 0 then return GetTime() - s, d end
-                    return nil
-                end)
-                if ok and elapsed and not (issecretvalue and (issecretvalue(elapsed) or issecretvalue(dur))) then
-                    local actualStart = GetTime() - elapsed
-                    -- (Re)start whenever this is a genuinely NEWER GCD than the one we
-                    -- last captured. Do NOT gate on how far the GCD has elapsed:
-                    -- while spamming, the next ability is queued and its SUCCEEDED
-                    -- lands partway into the fresh GCD (elapsed ~0.4-0.7s observed),
-                    -- so an "elapsed near 0" gate rejected every queued cast and the
-                    -- bar stayed dropped for the rest of combat. The newer-start check
-                    -- still stops an off-GCD spell from restarting the running GCD: it
-                    -- reads the SAME start, so actualStart is not newer. The remaining
-                    -- check just skips an already-finished GCD.
-                    if (dur - elapsed) > 0.05 and ((not self._gcdActualStart) or actualStart > (self._gcdActualStart + 0.05)) then
-                        self._gcdActualStart = actualStart
-                        -- Fill starts visually at 0 fills over the time remaining
-                        -- (Using the true start would open the bar at the
-                        -- already-elapsed %, e.g. ~30% on a hasted GCD.)
-                        self._gcdStart = GetTime()
-                        self._gcdDur = math.max(dur - elapsed, 0.05)
-                    end
-                end
-            end
-
             if gc.instantOnly and event == "UNIT_SPELLCAST_SUCCEEDED" then
                 -- A channel's succeeded can fire before its channel_start.
                 -- Defer the capture one frame and skip it if channeling.
-				-- Avoids a 1-frame flash on channel start
+                -- Avoids a 1-frame flash on channel start
                 C_Timer.After(0, function()
                     if UnitChannelInfo and UnitChannelInfo("player") then return end
-                    captureGCD()
+                    local gc2 = ERB.db.profile.gcdBar
+                    if gc2 and gc2.enabled then captureGCD(self, gc2) end
                 end)
             else
-                captureGCD()
+                captureGCD(self, gc)
             end
         end)
     end
 
-    -- register the cast events that start a GCD.
+    -- register the cast events that start a GCD. SPELL_UPDATE_COOLDOWN is
+    -- the press-parity edge (client GCD prediction); the UNIT_SPELLCAST
+    -- events carry the instant-only bookkeeping and the stop/clear edges.
+    gcdBarFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_START", "player")
     gcdBarFrame:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", "player")
@@ -7743,11 +7954,16 @@ BuildGCDBar = function()
 
     -- Visibility
     gcdBarFrame:Show()
-    if g.alwaysShow and not (g.instanceOnly and not IsInInstance()) then
-        bar:SetValue(0)
+    if gcdBarFrame._gcdStart then
+        -- A GCD is mid-flight: leave the fill alone -- a plain SetValue here
+        -- would cancel the engine bar timer with nothing to restore it until
+        -- the next arm.
+        EllesmereUI.SetElementVisibility(gcdBarFrame, true)
+    elseif g.alwaysShow and not (g.instanceOnly and not IsInInstance()) then
+        ns.GCDIdleFill(g)
         EllesmereUI.SetElementVisibility(gcdBarFrame, true)
     else
-        bar:SetValue(0)
+        ns.GCDIdleFill(g)
         EllesmereUI.SetElementVisibility(gcdBarFrame, false)
     end
 end
@@ -7762,8 +7978,9 @@ UpdateGCDBar = function(_dt)
     local bar = gcdBarFrame._bar
 
     if g.instanceOnly and not IsInInstance() then
-        bar:SetValue(0)
+        ns.GCDIdleFill(g)
         gcdBarFrame._barActive = nil
+        gcdBarFrame._nativeGCD = nil
         EllesmereUI.SetElementVisibility(gcdBarFrame, false)
         return
     end
@@ -7784,10 +8001,12 @@ UpdateGCDBar = function(_dt)
     end
 
     if not active then
-        -- No GCD running: empty, and invisible unless Always Show is on.
-        -- (In deplete mode "empty" = depleted, which is the right idle state.)
-        bar:SetValue(0)
+        -- No GCD running: invisible unless Always Show is on. Idle fill is
+        -- empty (background) by default, full when Show Fill Color When
+        -- Idle is on.
+        ns.GCDIdleFill(g)
         gcdBarFrame._barActive = nil
+        gcdBarFrame._nativeGCD = nil
         local visible = false
         if g.alwaysShow then visible = true end
         EllesmereUI.SetElementVisibility(gcdBarFrame, visible)
@@ -7795,6 +8014,12 @@ UpdateGCDBar = function(_dt)
     end
 
     EllesmereUI.SetElementVisibility(gcdBarFrame, true)
+    if gcdBarFrame._nativeGCD then
+        -- The engine bar timer owns the fill (true progress, per frame,
+        -- zero Lua); the tick keeps only lifecycle and visibility.
+        gcdBarFrame._barActive = true
+        return
+    end
     -- Deplete mode starts full (1) and drains to empty (0); normal mode fills 0->1.
     local progress = elapsed / dur
     local value = g.depleteFill and (1 - progress) or progress
@@ -8914,4 +9139,3 @@ SlashCmdList.ERB = function(msg)
         EllesmereUI:ShowModule("EllesmereUIResourceBars")
     end
 end
-

@@ -11522,7 +11522,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.7.6"
+EllesmereUI.VERSION = "8.7.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12482,15 +12482,9 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- exactly, so existing users see zero change.
         --
         -- Routed through the live-apply path rather than assigning the three
-        -- fields directly: this handler is NOT the first PLAYER_LOGIN to run.
-        -- EllesmereUI_Lite.lua is TOC-ordered ahead of this file, so its
-        -- lifecycle frame registers first and every module's OnEnable has
-        -- already painted -- against the parse-time fallback, since a
-        -- per-profile accent cannot be resolved that early. A silent
-        -- assignment leaves anything that read the accent before now holding
-        -- the wrong colour for the entire session (field report: the QoL
-        -- cursor circle ignoring a white accent and drawing the default
-        -- green). Notifying repaints them.
+        -- fields directly: Lite is TOC-ordered ahead of this file, so its
+        -- PLAYER_LOGIN fires first and every module's OnEnable has already
+        -- painted against the parse-time fallback. Notifying repaints them.
         local accentR, accentG, accentB = EllesmereUI.ResolveActiveAccent()
         if EllesmereUI.ApplyAccentColorLive then
             EllesmereUI.ApplyAccentColorLive(accentR, accentG, accentB)
