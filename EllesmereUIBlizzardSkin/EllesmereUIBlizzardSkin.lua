@@ -2167,6 +2167,25 @@ local function TooltipOwnerUsable(parent)
     return true
 end
 
+-- Addons that cannot risk touching the global GameTooltip -- taint-sensitive
+-- callers driving secure frames, such as OPie's ring view -- build their own
+-- GameTooltipTemplate frame and flag it LIKE_GLOBAL_GAMETOOLTIP, which is their
+-- documented request to be treated exactly as _G.GameTooltip. Those stand-ins
+-- still route through GameTooltip_SetDefaultAnchor like everyone else, so a
+-- strict identity check was the only thing keeping our anchors off them: their
+-- tooltips ignored the fixed/cursor position and landed on Blizzard's default
+-- container instead. Honour the flag for the anchor decision.
+--
+-- Strict identity is still correct everywhere else in this file. The armed-state
+-- bookkeeping below hooks GameTooltip's OWN SetOwner/SetPoint methods, so it can
+-- only ever track one tooltip; a stand-in gets the one-shot anchor at default
+-- time and nothing re-anchors it afterwards, which is all it needs (Blizzard's
+-- container logic, the reason that enforcement exists, does not manage it).
+local function TooltipIsGlobalLike(tooltip)
+    if tooltip == GameTooltip then return true end
+    return type(tooltip) == "table" and tooltip.LIKE_GLOBAL_GAMETOOLTIP == true
+end
+
 do
     -- Selected position = where the tooltip sits relative to the cursor, so the
     -- tooltip corner that touches the cursor is the opposite one.
@@ -2220,7 +2239,7 @@ do
     end
 
     local function ApplyCursorAnchor(tooltip, parent)
-        if tooltip ~= GameTooltip then return end
+        if not TooltipIsGlobalLike(tooltip) then return end
         -- Gated by the "Reskin Tooltip" master (matches the grayed-out option), so
         -- disabling the reskin restores the default tooltip position.
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return end
@@ -2453,7 +2472,7 @@ do
     end
 
     local function ApplyFixedAnchor(tooltip, parent)
-        if tooltip ~= GameTooltip then return end
+        if not TooltipIsGlobalLike(tooltip) then return end
         if not WantFixed() then return end
         if tooltip:IsForbidden() then return end
         -- A forbidden owner (a nameplate aura button) cannot be anchored to, so
@@ -2479,8 +2498,10 @@ do
     end
 
     hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
-        if tooltip ~= GameTooltip then return end
-        _fixedArmed = true
+        if not TooltipIsGlobalLike(tooltip) then return end
+        -- Only the global tooltip can be armed: the SetPoint enforcement below
+        -- is hooked onto GameTooltip's own setters. See TooltipIsGlobalLike.
+        if tooltip == GameTooltip then _fixedArmed = true end
         ApplyFixedAnchor(tooltip, parent)
     end)
     -- Every explicit tooltip build starts with SetOwner (it runs BEFORE the
@@ -2638,8 +2659,10 @@ do
     end
 
     hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip)
-        if tooltip ~= GameTooltip then return end
-        _growthDefaultAnchored = true
+        if not TooltipIsGlobalLike(tooltip) then return end
+        -- Only the global tooltip can be armed: the SetPoint enforcement below
+        -- is hooked onto GameTooltip's own setters. See TooltipIsGlobalLike.
+        if tooltip == GameTooltip then _growthDefaultAnchored = true end
         Enforce(tooltip)
     end)
     -- Every tooltip build starts with SetOwner (it runs BEFORE the
