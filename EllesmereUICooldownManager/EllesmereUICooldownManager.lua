@@ -7538,6 +7538,14 @@ local _barBindingDefs = {
     { prefix = "MULTIACTIONBAR5BUTTON", startSlot = 145 },  -- bar 6
     { prefix = "MULTIACTIONBAR6BUTTON", startSlot = 157 },  -- bar 7
     { prefix = "MULTIACTIONBAR7BUTTON", startSlot = 169 },  -- bar 8
+    -- EUI bars 9/10 have no native binding command: their keys are routed
+    -- through the button with SetOverrideBindingClick against the custom
+    -- commands declared in the Action Bars module's Bindings.xml. Because that
+    -- route always reads the button's live "action" attr, resolve the slot from
+    -- the button when it exists and only fall back to the base page slot when
+    -- the Action Bars module is not loaded.
+    { prefix = "EUI_BAR9_BUTTON",       startSlot = 13,  eabButton = true },  -- bar 9  (action page 2)
+    { prefix = "EUI_BAR10_BUTTON",      startSlot = 109, eabButton = true },  -- bar 10 (action page 10)
     { prefix = "ACTIONBUTTON",          startSlot = 1   },  -- bar 1 (last = lowest priority)
 }
 
@@ -7605,6 +7613,10 @@ local function RebuildKeybindCache()
                         end
                     end
                     slot = i + (pg - 1) * 12
+                elseif def.eabButton then
+                    local btn = _G["EABButton" .. slot]
+                    local live = btn and tonumber(btn:GetAttribute("action"))
+                    if live then slot = live end
                 end
                 local slotType, id, subType = GetActionInfo(slot)
                 local spellID
