@@ -1726,13 +1726,11 @@ local function HideBlizzardBars()
     -- MainMenuBar. Our replacements compute the target page themselves and
     -- pass it to ChangeActionBarPage explicitly.
     --
-    -- state-page is the RESOLVED page, so in a form, vehicle, override or
-    -- skyriding state it is 7-14 rather than a manual page. Cycling off that
-    -- value walked straight out of the 1-6 range: while skyriding (11), Next
-    -- Page always requested page 1 -- a no-op from manual page 1, so the key
-    -- looked dead -- and Previous Page called ChangeActionBarPage(10). Only
-    -- trust it inside the manual range; otherwise ask Blizzard for the page
-    -- the cycle actually moves, which is what ChangeActionBarPage writes.
+    -- state-page is the RESOLVED page (7-14 in a form, vehicle, override or
+    -- skyriding state), not the manual page, so cycling off it can walk out
+    -- of the 1-6 range. Only trust it inside the manual range; otherwise ask
+    -- Blizzard for the page the cycle actually moves, which is what
+    -- ChangeActionBarPage writes.
     local function CurrentManualPage()
         local maxPages = NUM_ACTIONBAR_PAGES or 6
         local mainFrame = barFrames and barFrames["MainBar"]
@@ -2054,23 +2052,16 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- and HookScript stacks.
         if not EFD(btn).cdClickHooked then
             EFD(btn).cdClickHooked = true
-            -- The binding command this button answers to, captured once. It is
-            -- a property of the BUTTON, not of the slot it currently shows, so
-            -- it stays correct across every page swap. A subscriber deriving it
-            -- from the live action slot instead would be ambiguous exactly
-            -- where it matters: Bar 9 is action page 2, so its slots collide
-            -- with MainBar's whenever MainBar is paged there.
+            -- Captured once: the command is a property of the BUTTON, not the
+            -- slot it shows, so it survives page swaps (Bar 9 shares action
+            -- page 2 with a paged MainBar, making slot-derived ambiguous).
             local pressBindCmd = BINDING_MAP[info.key]
             pressBindCmd = pressBindCmd and (pressBindCmd .. index) or nil
             btn:HookScript("PostClick", function(self, _, down)
                 if ns._EABPressPush then ns._EABPressPush(self) end
-                -- Publish the press for other EUI modules (the CDM press
-                -- mirror). Same reason this hook exists at all: a click-routed
-                -- keybind never reaches ActionButtonDown/MultiActionButtonDown,
-                -- so a subscriber watching those native commands cannot see
-                -- Bars 9/10, empower spells, or any custom-paged bar. Global
-                -- rather than ns because the subscriber is a separate addon,
-                -- matching _EAB_UpdateKeybinds. Nil when that module is off.
+                -- Publish for the CDM press mirror: click-routed keybinds never
+                -- fire the native binding commands. Global rather than ns (the
+                -- subscriber is a separate addon, like _EAB_UpdateKeybinds).
                 local onPress = _G._EUI_OnActionButtonPress
                 if onPress then onPress(self, down, pressBindCmd) end
             end)
@@ -3406,8 +3397,8 @@ end
 ns._eabBarDormant = {}
 -- HARD dormancy: bars whose visibility mode is "Never" (or which are
 -- disabled) cannot become visible through ANY runtime condition -- no
--- driver state, no combat edge. The only reveal path is a settings write,
--- and every settings path that changes effective visibility funnels
+-- driver state, no combat edge. The only reveal paths are a settings write
+-- or the Toggle Action Bar runtime override; both paths funnel
 -- through RefreshRuntimeVisibility (the driver re-derivation lives there),
 -- which recomputes this map. While a bar is in this map EVERY per-event
 -- walk skips it, content classes included: the dormancy reveal reconcile
@@ -3425,14 +3416,13 @@ ns.RecomputeNeverBars = function()
     for _, info in ipairs(BAR_CONFIG) do
         if not info.isStance and not info.isPetBar and not info.visibilityOnly then
             local s = bars[info.key]
-            local never = (s and (s.alwaysHidden or s.enabled == false)) and true or nil
-            -- The Toggle Action Bar keybind override can runtime-reveal a
-            -- saved-Never bar without any settings write; an overridden bar
-            -- is NOT hard-dormant (both toggle paths re-run
-            -- RefreshRuntimeVisibility, so this recomputes on every flip).
-            if never and EAB._visOverride and EAB._visOverride[info.key] == "always" then
-                never = nil
-            end
+            local override = EAB._visOverride and EAB._visOverride[info.key]
+            local never = s and (s.alwaysHidden or s.enabled == false) or false
+            -- Toggle override wins both ways: hiding an Always bar hard-disables
+            -- its UI work; showing a Never bar wakes it. Action bindings stay live.
+            if override == "never" then never = true
+            elseif override == "always" then never = false end
+            never = never and true or nil
             if map[info.key] ~= never then
                 if map[info.key] and not never then
                     -- Leaving Never: remember it so the reveal reconcile
@@ -9566,8 +9556,9 @@ end
 
 -------------------------------------------------------------------------------
 --  "Toggle Action Bar" visibility keybind
---  A per-bar keybind that flips a bar between always-shown and hidden at RUNTIME
---  only -- the saved barVisibility is never written, so the toggle does not
+--  A per-bar keybind that flips bar UI between active/shown and dormant/hidden
+--  at RUNTIME. Action bindings stay live; saved barVisibility is never written,
+--  so the toggle does not
 --  persist across sessions (a /reload restores the saved state). Only meaningful
 --  when the bar's saved visibility is "always" or "never", and only out of combat
 --  (changing a secure frame's state-visibility driver is combat-blocked).

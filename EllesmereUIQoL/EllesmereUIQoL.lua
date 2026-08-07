@@ -685,7 +685,9 @@ qolFrame:SetScript("OnEvent", function(self)
                 C_Timer.After(0.5, function() ScanAndOpen(false, true, false) end)
                 return
             end
-            if event == "BANKFRAMECLOSED" then
+            if event == "BANKFRAME_CLOSED" then
+                -- Legacy path like MAIL_CLOSED above; the interaction-manager
+                -- HIDE below is the live driver on retail.
                 C_Timer.After(0.5, function() ScanAndOpen(false, false, true) end)
                 return
             end
@@ -696,7 +698,10 @@ qolFrame:SetScript("OnEvent", function(self)
                     -- moment after the frame closes -- the exact race that
                     -- strands a slot -- so settle first, same as LOOT_CLOSED.
                     C_Timer.After(0.5, function() ScanAndOpen(false, true, false) end)
-                elseif interactionType == Enum.PlayerInteractionType.Banker then
+                elseif interactionType == Enum.PlayerInteractionType.Banker
+                    or interactionType == Enum.PlayerInteractionType.AccountBanker then
+                    -- AccountBanker: the warband bank signals its own type, and
+                    -- BankOpen() gates both (same BankFrame).
                     C_Timer.After(0.5, function() ScanAndOpen(false, false, true) end)
                 end
                 return

@@ -10275,14 +10275,8 @@ local function RevertPositions()
     -- 2) Restore anchor data before repositioning
     local anchorDB = GetAnchorDB()
     if anchorDB then
-        -- Fallbacks used to be carried over from the LIVE table here, because
-        -- the snapshot did not capture the field and a revert would otherwise
-        -- have destroyed every fallback including ones from earlier sessions.
-        -- The snapshot carries it now, which preserves those AND discards
-        -- edits made this session -- so the carry-over is gone. It was the
-        -- reason a fallback ghost dragged during a session kept its new
-        -- position after Exit Without Saving: the revert put the anchor back
-        -- and then re-attached the edited fallback on top of it.
+        -- fallback rides the snapshot (copied both ways), so pre-session
+        -- fallbacks survive the revert and session edits discard with it.
         wipe(anchorDB)
         for childKey, info in pairs(snapshotAnchors) do
             anchorDB[childKey] = {
