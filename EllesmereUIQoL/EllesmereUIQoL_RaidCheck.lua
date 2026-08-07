@@ -70,17 +70,19 @@ local GetReadyCheckStatus = GetReadyCheckStatus
 -- and the column set, so there is room, and the scale slider is there for
 -- anyone who disagrees.
 --
--- SINGLE_COL_THRESHOLD overrides that split for a big raid: at 25+ members,
--- splitting into two columns means scanning left-then-right-then-left again
--- to find one name, which is worse than a taller single column reading
--- top-to-bottom in one pass. Below the threshold the two-column layout above
--- still applies unchanged. MAX_ROSTER is the row pool's real ceiling: kept
--- separate from MEMBER_COLS * COL_ROWS so single-column mode growing past
--- what the two-column layout ever needed doesn't silently run out of row
--- frames -- the window grows tall enough to hold every one of the 40 up front.
+-- SINGLE_COL_THRESHOLD overrides that split as soon as the group would spill
+-- into a second column at all (21+ members): a lone straggler in a second
+-- column is exactly the "scan left, scan right, scan left again" problem a
+-- single tall column avoids, so there is no reason to wait for a bigger
+-- group first. Below the threshold -- 20 or fewer -- the two-column layout
+-- above never actually needs the second column, so nothing changes there.
+-- MAX_ROSTER is the row pool's real ceiling: kept separate from MEMBER_COLS
+-- * COL_ROWS so single-column mode growing past what the two-column layout
+-- ever needed doesn't silently run out of row frames -- the window grows
+-- tall enough to hold every one of the 40 up front.
 local MEMBER_COLS = 2
 local COL_ROWS    = 20
-local SINGLE_COL_THRESHOLD = 25
+local SINGLE_COL_THRESHOLD = COL_ROWS + 1
 local MAX_ROSTER  = 40
 local NAME_W      = 112
 local CELL_W      = 30
@@ -873,9 +875,9 @@ local function Refresh()
     end
 
     -- The window fits the group rather than the largest group possible.
-    -- Below the threshold this is the original two-column wrap; at 25+
-    -- members it switches to one tall column instead of wrapping into a
-    -- second, so a big raid reads top-to-bottom instead of in two passes.
+    -- Below the threshold this is the original two-column wrap; past 20
+    -- members it switches to one tall column instead of spilling into a
+    -- second, so the roster reads top-to-bottom in one pass instead of two.
     local n = #roster
     local memberCols, rowsPerCol
     if n >= SINGLE_COL_THRESHOLD then
