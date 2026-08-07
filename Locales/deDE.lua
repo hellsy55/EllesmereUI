@@ -345,7 +345,6 @@ L["Already on %s"] = "Bereits auf %s"
 L["Already used by Button Row Position"] = "Bereits von der Tasten Reihenposition verwendet"
 L["Already used by Element Row Position"] = "Bereits von der Element Reihenposition verwendet"
 L["Also show the badge in dungeons and raids, where most enemies are elite."] = "Zeigt das Wappen auch in Dungeons und Schlachtzügen an, wo die meisten Gegner Elite sind."
-L["Also show the strip on gold toasts, in the header's gold color. Gold has no rarity to signal, so this is off by default."] = "Zeigt den Streifen auch bei Gold-Benachrichtigungen in der Goldfarbe der Kopfzeile an. Da Gold keine Seltenheit signalisieren muss, ist dies standardmäßig deaktiviert."
 L["Also show the strip on gold toasts, in the header's gold color. Gold has no rarity to signal, so this is off by default."] = "Zeigt den Streifen auch bei Gold Benachrichtigungen in der Goldfarbe der Kopfzeile an. Da Gold keine Seltenheit signalisieren muss, ist dies standardmäßig deaktiviert."
 L["Alt Modifier"] = "Alt-Modifikator"
 L["Alt"] = true
