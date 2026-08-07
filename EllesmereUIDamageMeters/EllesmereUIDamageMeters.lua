@@ -3373,13 +3373,17 @@ local function CreateDMWindow(winIdx)
             bar.fill:SetAlpha(c.barFillAlpha or 1)
             SetDMFont(bar.pos, leftFS); SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
             bar.label:SetWidth(math.max(20, (frame:GetWidth() or 200) * 0.60))
-            W._stickyClassCache = nil  -- force icon/color rebuild
+            W._stickyClassCache = nil; W._stickySpecCache = nil  -- force icon/color rebuild
         end
         bar.row:Show()
-        -- Icon + color: only when class changes
+        -- Icon + color: only when the icon's own inputs change (see the row
+        -- loop below -- the sticky bar is re-pointed at whatever source holds
+        -- the player's rank, so it needs the same spec-aware memo).
         local classFile = src.classFilename
-        if classFile ~= W._stickyClassCache then
+        local specIcon = src.specIconID
+        if classFile ~= W._stickyClassCache or specIcon ~= W._stickySpecCache then
             W._stickyClassCache = classFile
+            W._stickySpecCache = specIcon
             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
             if not showIcon then bar.classIcon:Hide() end
             if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
@@ -3523,15 +3527,25 @@ local function CreateDMWindow(winIdx)
                             bar.pos:SetText(RANK_STRINGS[i] or (i .. "."))
                         end
                         -- Invalidate icon + color caches so they rebuild
-                        bar._cachedClass = nil; bar._cachedColorClass = nil
+                        bar._cachedClass = nil; bar._cachedSpecIcon = nil; bar._cachedColorClass = nil
                     end
 
                     -- Per-tick content: only for visible bars
                     if i >= visFirst and i <= visLast then
-                        -- Icon: only when class changes
+                        -- Icon: only when the icon's own inputs change. The memo
+                        -- must include the SPEC, not just the class: bars are
+                        -- recycled by rank, so a rank swap between two players
+                        -- of the same class but different specs left classFile
+                        -- unchanged, the rebuild was skipped, and the row kept
+                        -- the previous player's spec icon. Field report: an
+                        -- Affliction and a Demonology Warlock trading 2nd and
+                        -- 3rd place showed two Afflictions, and it got rarer as
+                        -- the DPS gap grew, because the swaps did.
                         local classFile = src.classFilename
-                        if classFile ~= bar._cachedClass then
+                        local specIcon = src.specIconID
+                        if classFile ~= bar._cachedClass or specIcon ~= bar._cachedSpecIcon then
                             bar._cachedClass = classFile
+                            bar._cachedSpecIcon = specIcon
                             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
                             if not showIcon then bar.classIcon:Hide() end
                             if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
@@ -4397,7 +4411,7 @@ end
 -- keyed only on classFile, which does not change when the palette is edited).
 ns.RefreshColors = function()
     for _, w in ipairs(_windows) do
-        w._stickyClassCache = nil
+        w._stickyClassCache = nil; w._stickySpecCache = nil
         w._barCacheKey = nil
         if w.rowPool then
             for _, bar in ipairs(w.rowPool) do bar._cachedColorClass = nil end
