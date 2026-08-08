@@ -374,6 +374,14 @@ end
 --   legacy format: { x = left, y = top } -- TOPLEFT offset from UIParent's
 --                  BOTTOMLEFT, written by header drags outside unlock mode
 ns.ApplyWinPosition = function(frame, wdb, idx)
+    -- The resize grip owns the frame's anchor while a drag is in flight. Even
+    -- with the format converted above, re-anchoring mid-resize would fight the
+    -- grip's live SetPoint for a frame; leave it alone until the drag ends.
+    -- ns._windows, not the _windows local: that local is declared BELOW this
+    -- function, so referencing it here would read a nil global and the guard
+    -- would silently never fire.
+    local W = ns._windows and ns._windows[idx]
+    if W and W.resizing then return end
     local pos = wdb.position
     frame:ClearAllPoints()
     if pos and pos.point then
@@ -3064,7 +3072,7 @@ local function CreateDMWindow(winIdx)
     ---------------------------------------------------------------------------
     W.resizeGrip = CreateFrame("Button", nil, frame)
     W.resizeGrip:SetSize(18, 18); W.resizeGrip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
-    W.resizeGrip:SetFrameStrata("HIGH"); W.resizeGrip:SetFrameLevel(frame:GetFrameLevel() + 15)
+    W.resizeGrip:SetFrameLevel(frame:GetFrameLevel() + 15)
     local gripTex = W.resizeGrip:CreateTexture(nil, "ARTWORK"); gripTex:SetAllPoints()
     gripTex:SetTexture(RESIZE_ICON); gripTex:SetDesaturated(true); gripTex:SetVertexColor(1, 1, 1)
     W.resizeGrip:EnableMouse(true); W.resizeGrip:SetAlpha(0)
@@ -3074,7 +3082,7 @@ local function CreateDMWindow(winIdx)
     -- Lock icon (shows/hides with resize grip, click toggles lock state)
     W.lockBtn = CreateFrame("Button", nil, frame)
     W.lockBtn:SetSize(13, 17)
-    W.lockBtn:SetFrameStrata("HIGH"); W.lockBtn:SetFrameLevel(frame:GetFrameLevel() + 16)
+    W.lockBtn:SetFrameLevel(frame:GetFrameLevel() + 16)
     W.lockBtn:EnableMouse(true); W.lockBtn:SetAlpha(0)
     local lockTex = W.lockBtn:CreateTexture(nil, "ARTWORK"); lockTex:SetAllPoints()
     lockTex:SetDesaturated(true); lockTex:SetVertexColor(1, 1, 1)
@@ -3173,7 +3181,22 @@ local function CreateDMWindow(winIdx)
         if button ~= "LeftButton" or W.windowLocked then return end
         if EUI.InProtectedInstance and EUI.InProtectedInstance() then return end
         local left, top = frame:GetLeft(), frame:GetTop()
-        if left and top then frame:ClearAllPoints(); frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top) end
+        if left and top then
+            frame:ClearAllPoints(); frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+            -- Convert the STORED position to match the pin immediately, not
+            -- just on mouse-up. wdb.position is point-format whenever unlock
+            -- mode saved it (an imported profile is all point-format), and
+            -- ApplyWinPosition re-applies that as SetPoint(pos.point, ...) --
+            -- a different anchor from the TOPLEFT pin above. Any re-apply that
+            -- lands mid-drag therefore yanks the frame back to its old anchor,
+            -- which is the resize "glitch": random, because it depends on
+            -- whether a refresh happens while the mouse is down. A window whose
+            -- position is already legacy format never showed it, since that
+            -- re-applies to the same corner the pin uses.
+            if wdb.position and wdb.position.point then
+                wdb.position = { x = left, y = top }
+            end
+        end
         resizeAnchorLeft = left; resizeAnchorTop = top
         local cx, cy = GetCursorPosition(); local es = frame:GetEffectiveScale()
         resizeStartX = cx/es; resizeStartY = cy/es; resizeStartW = frame:GetWidth(); resizeStartH = frame:GetHeight()
@@ -3350,13 +3373,17 @@ local function CreateDMWindow(winIdx)
             bar.fill:SetAlpha(c.barFillAlpha or 1)
             SetDMFont(bar.pos, leftFS); SetDMFont(bar.label, leftFS); SetDMFont(bar.amount, rightFS)
             bar.label:SetWidth(math.max(20, (frame:GetWidth() or 200) * 0.60))
-            W._stickyClassCache = nil  -- force icon/color rebuild
+            W._stickyClassCache = nil; W._stickySpecCache = nil  -- force icon/color rebuild
         end
         bar.row:Show()
-        -- Icon + color: only when class changes
+        -- Icon + color: only when the icon's own inputs change (see the row
+        -- loop below -- the sticky bar is re-pointed at whatever source holds
+        -- the player's rank, so it needs the same spec-aware memo).
         local classFile = src.classFilename
-        if classFile ~= W._stickyClassCache then
+        local specIcon = src.specIconID
+        if classFile ~= W._stickyClassCache or specIcon ~= W._stickySpecCache then
             W._stickyClassCache = classFile
+            W._stickySpecCache = specIcon
             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
             if not showIcon then bar.classIcon:Hide() end
             if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
@@ -3500,15 +3527,21 @@ local function CreateDMWindow(winIdx)
                             bar.pos:SetText(RANK_STRINGS[i] or (i .. "."))
                         end
                         -- Invalidate icon + color caches so they rebuild
-                        bar._cachedClass = nil; bar._cachedColorClass = nil
+                        bar._cachedClass = nil; bar._cachedSpecIcon = nil; bar._cachedColorClass = nil
                     end
 
                     -- Per-tick content: only for visible bars
                     if i >= visFirst and i <= visLast then
-                        -- Icon: only when class changes
+                        -- Icon: only when the icon's own inputs change. The
+                        -- memo must include the SPEC, not just the class: bars
+                        -- are recycled by rank, so a swap between same-class
+                        -- players of different specs left classFile unchanged
+                        -- and the row kept the previous player's spec icon.
                         local classFile = src.classFilename
-                        if classFile ~= bar._cachedClass then
+                        local specIcon = src.specIconID
+                        if classFile ~= bar._cachedClass or specIcon ~= bar._cachedSpecIcon then
                             bar._cachedClass = classFile
+                            bar._cachedSpecIcon = specIcon
                             local iconOffset = showIcon and ResolveIcon(src, bar.classIcon, barH) or 0
                             if not showIcon then bar.classIcon:Hide() end
                             if bar._iconBorderFrame then bar._iconBorderFrame:SetShown(bar.classIcon:IsShown()) end
@@ -3602,7 +3635,7 @@ local function CreateDMWindow(winIdx)
                 else
                     if bar.row:IsShown() then bar.row:Hide() end
                     bar._src = nil; bar._srcGUID = nil; bar._class = nil
-                    bar._cachedSlot = nil; bar._cachedClass = nil; bar._cachedColorClass = nil
+                    bar._cachedSlot = nil; bar._cachedClass = nil; bar._cachedSpecIcon = nil; bar._cachedColorClass = nil
                     bar._cachedSrcName = nil; bar._cachedDisplayName = nil; bar._cachedAmtText = nil
                 end
             end
@@ -4374,7 +4407,7 @@ end
 -- keyed only on classFile, which does not change when the palette is edited).
 ns.RefreshColors = function()
     for _, w in ipairs(_windows) do
-        w._stickyClassCache = nil
+        w._stickyClassCache = nil; w._stickySpecCache = nil
         w._barCacheKey = nil
         if w.rowPool then
             for _, bar in ipairs(w.rowPool) do bar._cachedColorClass = nil end

@@ -7538,6 +7538,14 @@ local _barBindingDefs = {
     { prefix = "MULTIACTIONBAR5BUTTON", startSlot = 145 },  -- bar 6
     { prefix = "MULTIACTIONBAR6BUTTON", startSlot = 157 },  -- bar 7
     { prefix = "MULTIACTIONBAR7BUTTON", startSlot = 169 },  -- bar 8
+    -- EUI bars 9/10 have no native binding command: their keys are routed
+    -- through the button with SetOverrideBindingClick against the custom
+    -- commands declared in the Action Bars module's Bindings.xml. Because that
+    -- route always reads the button's live "action" attr, resolve the slot from
+    -- the button when it exists and only fall back to the base page slot when
+    -- the Action Bars module is not loaded.
+    { prefix = "EUI_BAR9_BUTTON",       startSlot = 13,  eabButton = true },  -- bar 9  (action page 2)
+    { prefix = "EUI_BAR10_BUTTON",      startSlot = 109, eabButton = true },  -- bar 10 (action page 10)
     { prefix = "ACTIONBUTTON",          startSlot = 1   },  -- bar 1 (last = lowest priority)
 }
 
@@ -7598,13 +7606,20 @@ local function RebuildKeybindCache()
                     local pg = mbf and tonumber(mbf:GetAttribute("actionpage"))
                     if not pg then
                         local bonus = GetBonusBarOffset and GetBonusBarOffset() or 0
-                        if bonus > 0 then
+                        local page = (GetActionBarPage and GetActionBarPage()) or 1
+                        -- The bonus bar only wins on page 1; a manual page beats
+                        -- the form/skyriding swap, same as the engine.
+                        if bonus > 0 and page == 1 then
                             pg = 6 + bonus
                         else
-                            pg = (GetActionBarPage and GetActionBarPage()) or 1
+                            pg = page
                         end
                     end
                     slot = i + (pg - 1) * 12
+                elseif def.eabButton then
+                    local btn = _G["EABButton" .. slot]
+                    local live = btn and tonumber(btn:GetAttribute("action"))
+                    if live then slot = live end
                 end
                 local slotType, id, subType = GetActionInfo(slot)
                 local spellID
@@ -8151,10 +8166,21 @@ function ns.FullCDMRebuild(reason)
                         chfc.isChargeSpell = nil
                         chfc.maxCharges = nil
                         chfc.sortOrder = nil
+                        -- NOT chfc.barKey: CollectAndReanchor reads it as
+                        -- "we have claimed this frame before" and refuses to
+                        -- park it while identification is transiently failing.
+                        -- Clearing it here would hand the next pass a frame it
+                        -- cannot identify AND cannot vouch for.
                     end
                 end
             end
         end
+        -- A memo wipe is the START of a fresh transient-failure window, so
+        -- hand the reanchor below a full retry budget instead of whatever an
+        -- earlier transition left behind. Matters for cooldowns that are new
+        -- to the spec being swapped TO: those have no barKey to vouch for
+        -- them, so the budget is all they have.
+        ns._cdmUnresolvedRetries = 0
         -- Cancel the reanchor BuildAllCDMBars queued -- we run our own
         -- direct one immediately below. Without this, the queued reanchor
         -- would fire ~200ms later and run the entire reanchor pipeline
@@ -9446,6 +9472,7 @@ local function ScheduleTalentRebuild()
                 end
             end
         end
+        ns._cdmUnresolvedRetries = 0  -- fresh window; see FullCDMRebuild
         -- Rebuild keybind cache (talent swap may change action slot contents)
         UpdateCDMKeybinds()
         -- Invalidate TBB frame cache + spell caches, then reanchor so
@@ -9697,5 +9724,6 @@ SlashCmdList.ECME = function(msg)
         EllesmereUI:ShowModule("EllesmereUICooldownManager")
     end
 end
+
 
 
