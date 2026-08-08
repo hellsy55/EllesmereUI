@@ -1860,8 +1860,18 @@ initFrame:SetScript("OnEvent", function(self)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 if v == "default" then
                     EllesmereUIDB.fctFont = nil
+                    EllesmereUIDB.fctFontPath = nil
                 else
                     EllesmereUIDB.fctFont = v
+                    -- Cache the resolved path (Name Font pattern). At next
+                    -- login the startup apply runs at OUR ADDON_LOADED, before
+                    -- an external SharedMedia pack has registered its fonts,
+                    -- so an smf: key cannot be resolved that early -- but the
+                    -- engine caches DAMAGE_TEXT_FONT in that window. Here the
+                    -- pack is loaded (its font is in this dropdown), so the
+                    -- path is known-good.
+                    local e = fctFontValues[v]
+                    EllesmereUIDB.fctFontPath = e and e.font or nil
                 end
                 EllesmereUI:ShowConfirmPopup({
                     title   = "Logout Required",

@@ -304,19 +304,42 @@ end
 -- CombatTextFont may not exist yet here, so we also hook ADDON_LOADED
 -- to catch it as soon as it becomes available.
 do
-    local function ApplyCombatTextFont()
-        local saved = EllesmereUIDB and EllesmereUIDB.fctFont
+    local function ApplyCombatTextFont(loginComplete)
+        local db = EllesmereUIDB
+        local saved = db and db.fctFont
         if not saved or type(saved) ~= "string" or saved == "" then return end
         -- Resolve "smf:" prefixed SharedMedia font keys to actual paths
         local fontPath = saved
         local smName = saved:match("^smf:(.+)")
         if smName then
             local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
-            local fetched = LSM and LSM:Fetch("font", smName)
-            -- If the SM addon is missing or hasn't loaded yet, skip entirely
-            -- so Blizzard's default combat text font stays intact.
-            if not fetched then return end
-            fontPath = fetched
+            -- noDefault: an unregistered key must yield nil here. Without it
+            -- Fetch silently substitutes the DEFAULT font (Friz Quadrata),
+            -- which then lands in DAMAGE_TEXT_FONT right as the engine caches
+            -- it -- external SM packs load after us, so at our ADDON_LOADED
+            -- their fonts are never registered yet.
+            local fetched = LSM and LSM:Fetch("font", smName, true)
+            local cached = db.fctFontPath
+            if fetched then
+                db.fctFontPath = fetched   -- keep the login cache current
+                fontPath = fetched
+            elseif loginComplete then
+                -- Every login addon has loaded and the font is still not
+                -- registered: the providing pack is gone. Drop the stale
+                -- cache so no later login points the engine at a missing
+                -- file, and leave Blizzard's default intact this session.
+                db.fctFontPath = nil
+                return
+            elseif type(cached) == "string" and cached ~= "" then
+                -- Early window (pack not loaded yet): use the path cached at
+                -- selection time. This is what makes an smf: font survive the
+                -- engine's login cache at all.
+                fontPath = cached
+            else
+                -- Pre-cache profile: nothing usable this early. The login-
+                -- complete pass above will populate the cache for next time.
+                return
+            end
         end
         _G.DAMAGE_TEXT_FONT = fontPath
         if _G.CombatTextFont then
@@ -341,14 +364,19 @@ do
             end
         end
 
-        ApplyCombatTextFont()
+        ApplyCombatTextFont(event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD")
         ApplyUnitNameFont()
 
         if event == "PLAYER_LOGIN" then
             self:UnregisterEvent("PLAYER_LOGIN")
         elseif event == "PLAYER_ENTERING_WORLD" then
             self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-        elseif event == "ADDON_LOADED" then
+        elseif addonName == "Blizzard_CombatText" then
+            -- Only Blizzard_CombatText's load retires the ADDON_LOADED watch.
+            -- Our own addon always loads first, so unregistering on the first
+            -- match (the old behavior) meant the CombatTextFont object -- the
+            -- load-on-demand scrolling-text font -- was never restyled at its
+            -- actual load moment.
             self:UnregisterEvent("ADDON_LOADED")
         end
     end)
