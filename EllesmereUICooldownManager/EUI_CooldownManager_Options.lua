@@ -5507,7 +5507,21 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   RefreshTBB()
               end },
-            { type = "label", text = "" });  y = y - h
+            { type = "toggle", text = "Fill Up",
+              tooltip = "Fills the bar as the cooldown recovers instead of draining it as the cooldown runs down.",
+              disabled = function()
+                  local bd = SelectedTBB()
+                  return not bd or bd.trackType ~= "cooldown"
+              end,
+              disabledTooltip = "This option requires a cooldown-tracking bar",
+              getValue = function()
+                  local bd = SelectedTBB(); return bd and bd.fillUp == true
+              end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.fillUp = v and true or nil
+                  RefreshTBB()
+              end });  y = y - h
 
         -------------------------------------------------------------------
         --  DISPLAY

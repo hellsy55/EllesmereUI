@@ -239,6 +239,7 @@ local TBB_DEFAULT_BAR = {
     width     = 270,
     verticalOrientation = false,
     reverseFill = false,
+    fillUp = false,          -- cooldown bars only: fill as the cooldown recovers
     chargeHashLines = false,
     chargeHashLineWidth = 2,
     chargeHashLineR = 0, chargeHashLineG = 0,
@@ -1525,7 +1526,7 @@ end
 --  and stackThresholds too: a copied style must not carry threshold numbers.
 -------------------------------------------------------------------------------
 local TBB_STYLE_KEYS = {
-    "height", "width", "verticalOrientation", "reverseFill",
+    "height", "width", "verticalOrientation", "reverseFill", "fillUp",
     "chargeHashLines", "chargeHashLineWidth",
     "chargeHashLineR", "chargeHashLineG", "chargeHashLineB", "chargeHashLineA",
     "texture", "strata",
@@ -4523,11 +4524,19 @@ local function _UpdateCooldownBar(bar, cfg)
             -- the visible clipped texture and spark were updated above.
         elseif durObj and sb.SetTimerDuration and timerDir then
             _restoreTBBNormalFill(bar, cfg)
-            -- Engine-driven drain: the duration handle tracks CDR and
+            -- Engine-driven fill: the duration handle tracks CDR and
             -- resets live, no numbers ever read. The bar timer is re-set
-            -- only when a fresh handle was fetched (event/revalidate) or
-            -- the bar just appeared -- the engine animates in between.
-            if bar._cdNeedSet or not wasShown then
+            -- only when a fresh handle was fetched (event/revalidate), the
+            -- bar just appeared, or the requested direction changed -- the
+            -- engine animates in between. Fill Up asks the engine for
+            -- ElapsedTime instead of RemainingTime, the same constant the
+            -- charge-hash recovery bar uses. The direction term matters
+            -- because toggling the option restyles a LIVE bar in place: with
+            -- only the fetch/show terms the engine would keep animating the
+            -- old direction until the next handle fetch.
+            local wantDir = cfg.fillUp and timerDir.ElapsedTime
+                or timerDir.RemainingTime
+            if bar._cdNeedSet or not wasShown or bar._cdFillDir ~= wantDir then
                 sb:SetMinMaxValues(0, 1)
                 local interpE = Enum.StatusBarInterpolation
                 local interp
@@ -4538,33 +4547,43 @@ local function _UpdateCooldownBar(bar, cfg)
                         interp = interpE.None
                     end
                 end
-                sb:SetTimerDuration(durObj, interp, timerDir.RemainingTime)
+                sb:SetTimerDuration(durObj, interp, wantDir)
                 if not wasShown and sb.SetToTargetValue then
                     -- Snap on first show: avoids the empty-to-full sweep-in.
                     sb:SetToTargetValue()
                 end
                 bar._cdNeedSet = nil
+                bar._cdFillDir = wantDir
             end
             if cfg.showSpark and bar._spark then bar._spark:Show() end
         elseif remaining then
             _restoreTBBNormalFill(bar, cfg)
             sb:SetMinMaxValues(0, duration)
+            -- Both operands are clean numbers on this branch, and a
+            -- non-positive remaining was normalised away above, so Fill Up
+            -- can simply mirror the fraction in Lua.
+            local fillVal = cfg.fillUp and (duration - remaining) or remaining
             -- Smooth fill is baseline (see UpdateLustBar note).
             local smooth = _smoothCooldowns and wasShown and Enum
                 and Enum.StatusBarInterpolation
                 and Enum.StatusBarInterpolation.ExponentialEaseOut
             if smooth then
-                sb:SetValue(remaining, smooth)
+                sb:SetValue(fillVal, smooth)
             else
-                sb:SetValue(remaining)
+                sb:SetValue(fillVal)
             end
+            -- Plain SetValue cancels the running bar timer, so the cached
+            -- engine direction is stale the moment this branch runs.
+            bar._cdFillDir = nil
             if cfg.showSpark and bar._spark then bar._spark:Show() end
         else
             _restoreTBBNormalFill(bar, cfg)
-            -- Ready (kept on screen) or unreadable fail-open: full bar.
-            -- Plain SetValue also cancels any running bar timer.
+            -- Ready (kept on screen) or unreadable fail-open: full bar in
+            -- either direction. Plain SetValue also cancels any running bar
+            -- timer.
             sb:SetMinMaxValues(0, 1)
             sb:SetValue(1)
+            bar._cdFillDir = nil
             if bar._spark then bar._spark:Hide() end
         end
     end
