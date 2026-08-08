@@ -3306,7 +3306,20 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
     if not action then return end
     local icon = btn.icon or btn.Icon
     if icon then
-        icon:SetTexture(GetActionTexture(action))
+        -- Stamp the icon texture-delta memo with what we actually paint.
+        -- ns._cdIconHeal skips its repaint when the memo equals the live
+        -- texture, so the memo is only safe while it matches what is ON the
+        -- icon. This path paints whatever GetActionTexture reports RIGHT NOW,
+        -- and a spell override can resolve late (zone in/out on a hero talent:
+        -- Black Arrow briefly reports as Kill Shot). Painting the base texture
+        -- here while the memo still held the override's left the two
+        -- disagreeing, and the SPELL_UPDATE_ICON heal that follows -- the one
+        -- whose whole job is repainting an override change -- then compared
+        -- equal and skipped, stranding the base icon until something else
+        -- repainted the slot.
+        local tex = GetActionTexture(action)
+        icon:SetTexture(tex)
+        EFD(btn).lastIconTex = tex
         -- The mixin's Update() HIDES the icon region for empty slots and only
         -- re-Shows it in its filled branch. A slot that was empty before this
         -- content change still has a hidden icon region, so painting the new
@@ -4065,11 +4078,17 @@ do
         -- Shared per-button icon heal (texture-delta memo). The texture
         -- fileID is the override's visible fingerprint (never secret, per
         -- the API docs), so only buttons whose texture actually changed pay
-        -- the mixin path. The memo is write-behind everywhere else on
-        -- purpose: paths that paint the icon without stamping it
-        -- (ForceButtonRefresh, the infrequent walk's UpdateAction) always
-        -- paint the CURRENT texture, so a stale memo can only cause one
-        -- redundant repaint here -- never a wrong skip. Used by the full
+        -- the mixin path. INVARIANT: the memo must equal what is ON the icon,
+        -- so every path that paints the ACTION's texture stamps it too
+        -- (ForceButtonRefresh). This was previously write-behind, reasoning
+        -- that unstamped painters "always paint the CURRENT texture, so a
+        -- stale memo can only cause one redundant repaint -- never a wrong
+        -- skip"; that holds only while CURRENT means the texture the memo
+        -- already holds, and an override resolving late (zone in/out on a
+        -- hero talent) breaks it in exactly the direction that does cause a
+        -- wrong skip. The assist painters are the deliberate exception --
+        -- they paint the SUGGESTED spell's texture, not the action's, and
+        -- stamping that would make this heal clobber them. Used by the full
         -- walk below and by the payload-targeted SPELL_UPDATE_ICON fast
         -- path in the dispatcher prologue; ns-hosted (200-local cap).
         ns._cdIconHeal = function(btn)
