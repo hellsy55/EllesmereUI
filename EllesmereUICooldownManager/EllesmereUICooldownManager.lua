@@ -7529,11 +7529,13 @@ ns.GetBarData = GetBarData
 
 -------------------------------------------------------------------------------
 --  Keybind cache for CDM icons
---  Resolves binding keys per action slot. By default the main bar is scanned
---  across every page the player's layout can reach, so the cache does not
---  follow bar swaps (stealth, forms, skyriding) and a key only changes when
---  the player moves the ability or rebinds it. Read-only + text writes on
---  our own frames, so it is safe to run in combat (debounced upstream).
+--  Resolves binding keys per action slot. In Stable mode, the main bar is
+--  scanned across home page + bonus pages (forms/stealth/skyriding), so the
+--  cache does not follow bar swaps and a key only changes when the player
+--  moves the ability or rebinds it. Manually-paged pages 2-6 are excluded --
+--  their contents aren't reliably something the player set up on purpose.
+--  Read-only + text writes on our own frames, so it is safe to run in combat
+--  (debounced upstream).
 -------------------------------------------------------------------------------
 
 -- Forward-declared: everything else in this section lives inside the do-block
@@ -7559,11 +7561,23 @@ local _barBindingDefs = {
 }
 
 -- Main-bar tiers. Page 1 is the "home" state and outranks the form/stealth/
--- skyriding bonus pages, which in turn outrank the manually paged ones
--- (whose slots 25-72 are already covered by the multibars above anyway).
+-- skyriding bonus pages.
+--
+-- Pages 2-6 (manual paging, e.g. Shift+MouseWheel -- a stock WoW binding, not
+-- an EAB-specific feature) are deliberately NOT scanned. Unlike page 1 and the
+-- bonus pages, nothing guarantees their contents are something the player
+-- actually curated: WoW keeps whatever was last placed there (leftovers from
+-- a previous bar addon, a default-populated slot, an accidental scroll) and
+-- GetActionInfo returns it regardless. Root-caused 2026-08-07: a tracked,
+-- genuinely unbound Utility spell showed a phantom "CR" key because slot 11
+-- of page 6 -- never intentionally used -- happened to hold something under
+-- the ACTIONBUTTON11 binding. Since the tracked spell had no other entry,
+-- that stray page-6 read became its only (wrong) answer. Multibars and bonus
+-- pages don't have this problem: multibars are explicit EAB bar assignments,
+-- and bonus pages are gated by real, meaningful game state (stealth/form/
+-- skyriding), not "whatever a stray scroll last revealed."
 local _TIER_MAINBAR_HOME  = 8    -- page 1        -> slots 1-12
 local _TIER_MAINBAR_BONUS = 9    -- pages 7-11    -> slots 73-132  (+ pg - 7)
-local _TIER_MAINBAR_PAGED = 14   -- pages 2-6     -> slots 13-72   (+ pg - 2)
 -- A macro-sourced bind is always outranked by a direct one, whatever the bar.
 local _RANK_MACRO_PENALTY = 100
 
@@ -7758,27 +7772,23 @@ local function _ResolveSlotBinding(slot, key, tier)
     end
 end
 
--- Stable scan: resolve ACTIONBUTTONn against every page the player's own
--- layout can reach, not just the page that happens to be active. That makes
--- the cache independent of bar swaps (stealth, druid forms, skyriding), so a
+-- Stable scan: resolve ACTIONBUTTONn against the pages that reliably reflect
+-- something the player actually set up -- home page plus the bonus pages
+-- (forms, stealth, stances, skyriding), not the page that happens to be
+-- active right now. That makes the cache independent of bar swaps, so a
 -- keybind only ever changes when the player actually moves the ability or
 -- rebinds the key.
 --
--- Deliberately excluded: the vehicle, override and temp-shapeshift pages.
--- Their contents are server-pushed and transient rather than a layout the
--- player configured, and their page indices can overlap the slot ranges of
--- action bars 6-8 (145-180), which are already scanned via _barBindingDefs.
+-- Deliberately excluded: manually-paged pages 2-6 (see the tier comment
+-- above) and the vehicle/override/temp-shapeshift pages. The latter's
+-- contents are server-pushed and transient rather than a layout the player
+-- configured, and their page indices can overlap the slot ranges of action
+-- bars 6-8 (145-180), which are already scanned via _barBindingDefs.
 local function _ScanMainBarStable(i, key)
     _ResolveSlotBinding(i, key, _TIER_MAINBAR_HOME)
     -- Bonus bars 1-5 (forms, stealth, stances, skyriding) = pages 7-11.
     for pg = 7, 11 do
         _ResolveSlotBinding(i + (pg - 1) * 12, key, _TIER_MAINBAR_BONUS + pg - 7)
-    end
-    -- Manually paged main bar. Capped at 6 so it can never run into the bonus
-    -- page range above if NUM_ACTIONBAR_PAGES ever grows.
-    local maxPages = math.min(NUM_ACTIONBAR_PAGES or 6, 6)
-    for pg = 2, maxPages do
-        _ResolveSlotBinding(i + (pg - 1) * 12, key, _TIER_MAINBAR_PAGED + pg - 2)
     end
 end
 
