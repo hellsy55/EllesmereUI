@@ -7558,6 +7558,14 @@ local _barBindingDefs = {
     { prefix = "MULTIACTIONBAR5BUTTON", startSlot = 145, tier = 5 },  -- bar 6
     { prefix = "MULTIACTIONBAR6BUTTON", startSlot = 157, tier = 6 },  -- bar 7
     { prefix = "MULTIACTIONBAR7BUTTON", startSlot = 169, tier = 7 },  -- bar 8
+    -- EUI bars 9/10 have no native binding command: their keys are routed
+    -- through the button with SetOverrideBindingClick against the custom
+    -- commands declared in the Action Bars module's Bindings.xml. Because that
+    -- route always reads the button's live "action" attr, resolve the slot from
+    -- the button when it exists and only fall back to the base page slot when
+    -- the Action Bars module is not loaded (handled where this def is consumed).
+    { prefix = "EUI_BAR9_BUTTON",       startSlot = 13,  tier = 8, eabButton = true },  -- bar 9  (action page 2)
+    { prefix = "EUI_BAR10_BUTTON",      startSlot = 109, tier = 9, eabButton = true },  -- bar 10 (action page 10)
 }
 
 -- Main-bar tiers. Page 1 is the "home" state and outranks the form/stealth/
@@ -7576,8 +7584,10 @@ local _barBindingDefs = {
 -- pages don't have this problem: multibars are explicit EAB bar assignments,
 -- and bonus pages are gated by real, meaningful game state (stealth/form/
 -- skyriding), not "whatever a stray scroll last revealed."
-local _TIER_MAINBAR_HOME  = 8    -- page 1        -> slots 1-12
-local _TIER_MAINBAR_BONUS = 9    -- pages 7-11    -> slots 73-132  (+ pg - 7)
+-- Tiers 8-9 are taken by EUI_BAR9_BUTTON/EUI_BAR10_BUTTON above (also
+-- non-main-bar, so they outrank the main bar the same way).
+local _TIER_MAINBAR_HOME  = 10   -- page 1        -> slots 1-12
+local _TIER_MAINBAR_BONUS = 11   -- pages 7-11    -> slots 73-132  (+ pg - 7)
 -- A macro-sourced bind is always outranked by a direct one, whatever the bar.
 local _RANK_MACRO_PENALTY = 100
 
@@ -7796,16 +7806,18 @@ end
 -- Prefer the EAB main bar's actionpage attribute (set by its secure page
 -- handler, covers override/vehicle pages too). Without it (Action Bars module
 -- disabled), derive the page from the client: bonus bars (forms) map to pages
--- 7+, else the manually selected page.
+-- 7+, but only when page 1 is otherwise active -- a manual page beats the
+-- form/skyriding swap, same priority order the engine itself uses.
 local function _ScanMainBarLive(i, key)
     local mbf = _G["EABBar_MainBar"]
     local pg = mbf and tonumber(mbf:GetAttribute("actionpage"))
     if not pg then
         local bonus = GetBonusBarOffset and GetBonusBarOffset() or 0
-        if bonus > 0 then
+        local page = (GetActionBarPage and GetActionBarPage()) or 1
+        if bonus > 0 and page == 1 then
             pg = 6 + bonus
         else
-            pg = (GetActionBarPage and GetActionBarPage()) or 1
+            pg = page
         end
     end
     _ResolveSlotBinding(i + (pg - 1) * 12, key, _TIER_MAINBAR_HOME)
@@ -7829,7 +7841,21 @@ local function RebuildKeybindCache()
         for i = 1, 12 do
             local key = GetBindingKey(def.prefix .. i)
             if key then
-                _ResolveSlotBinding(def.startSlot + i - 1, key, def.tier)
+                local slot = def.startSlot + i - 1
+                if def.eabButton then
+                    -- EUI bars 9/10 have no native binding command: their keys
+                    -- are routed through the button with SetOverrideBindingClick
+                    -- against the custom commands declared in the Action Bars
+                    -- module's Bindings.xml. That route always reads the
+                    -- button's live "action" attr, so resolve the slot from the
+                    -- button when it exists (custom paging) and only fall back
+                    -- to the base page slot when the Action Bars module isn't
+                    -- loaded.
+                    local btn = _G["EABButton" .. slot]
+                    local live = btn and tonumber(btn:GetAttribute("action"))
+                    if live then slot = live end
+                end
+                _ResolveSlotBinding(slot, key, def.tier)
             end
         end
     end
@@ -8317,10 +8343,21 @@ function ns.FullCDMRebuild(reason)
                         chfc.isChargeSpell = nil
                         chfc.maxCharges = nil
                         chfc.sortOrder = nil
+                        -- NOT chfc.barKey: CollectAndReanchor reads it as
+                        -- "we have claimed this frame before" and refuses to
+                        -- park it while identification is transiently failing.
+                        -- Clearing it here would hand the next pass a frame it
+                        -- cannot identify AND cannot vouch for.
                     end
                 end
             end
         end
+        -- A memo wipe is the START of a fresh transient-failure window, so
+        -- hand the reanchor below a full retry budget instead of whatever an
+        -- earlier transition left behind. Matters for cooldowns that are new
+        -- to the spec being swapped TO: those have no barKey to vouch for
+        -- them, so the budget is all they have.
+        ns._cdmUnresolvedRetries = 0
         -- Cancel the reanchor BuildAllCDMBars queued -- we run our own
         -- direct one immediately below. Without this, the queued reanchor
         -- would fire ~200ms later and run the entire reanchor pipeline
@@ -9612,6 +9649,7 @@ local function ScheduleTalentRebuild()
                 end
             end
         end
+        ns._cdmUnresolvedRetries = 0  -- fresh window; see FullCDMRebuild
         -- Rebuild keybind cache (talent swap may change action slot contents)
         UpdateCDMKeybinds()
         -- Invalidate TBB frame cache + spell caches, then reanchor so
@@ -9884,5 +9922,6 @@ SlashCmdList.ECME = function(msg)
         EllesmereUI:ShowModule("EllesmereUICooldownManager")
     end
 end
+
 
 

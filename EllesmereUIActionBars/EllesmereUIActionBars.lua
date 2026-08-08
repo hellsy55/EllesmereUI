@@ -1270,9 +1270,22 @@ local function RegisterButtonWithController(btn)
     -- ActionButton1 showgrid monitor (which depends on Blizzard's retained
     -- MainActionBar event chain staying secure end to end). The pre-wrap
     -- returns nothing, so the native drag proceeds untouched; the matching
-    -- grid-off arrives via the monitor or, failing that, the regen apply.
+    -- grid-off arrives via the monitor or, failing that, the regen apply --
+    -- but only when a pickup actually happens, which is what the guard below
+    -- is for.
+    -- OnDragStart fires on the GESTURE, not on a successful pickup. Blizzard's
+    -- own handler no-ops when the bars are locked and the PICKUPACTION modifier
+    -- is not held, so an unconditional reveal here lit every empty slot on a
+    -- plain left-drag over a locked bar -- and since no pickup happened, no
+    -- ACTIONBAR_HIDEGRID ever arrived to turn it back off. It then sat there
+    -- until some unrelated repaint cleared it (reported: "goes away in 5-15
+    -- seconds, or when I use the spell"). Mirror Blizzard's own condition so
+    -- the reveal only fires when the drag will actually pick the action up.
+    -- IsModifiedClick is whitelisted in the restricted environment.
     ActionButtonController:WrapScript(btn, "OnDragStart", [[
-        control:RunAttribute("SetShowGrid", true, 2)
+        if control:GetAttribute("eab-barslocked") ~= 1 or IsModifiedClick("PICKUPACTION") then
+            control:RunAttribute("SetShowGrid", true, 2)
+        end
     ]])
 
     -- Per-button showgrid: toggle the flag bit and update visibility.
@@ -1708,33 +1721,33 @@ local function HideBlizzardBars()
 
     -- Replace ActionBar_PageUp / ActionBar_PageDown with versions that
     -- read the current page from our state driver. The stock versions
-    -- call ChangeActionBarPage (a C function) which uses
-    -- GetActionBarPage() internally. Something in the stock pipeline
+    -- increment from GetActionBarPage(), and something in the stock pipeline
     -- resets the page back to 1 after each change because we disabled
-    -- MainMenuBar. Our replacements read state-page from the MainBar
-    -- frame and call SetActionBarPage directly.
-    ActionBar_PageUp = function()
-        local mainFrame = barFrames and barFrames["MainBar"]
-        local curPage
-        if mainFrame then
-            curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
-        else
-            curPage = EAB_VTABLE.GetActionBarPage()
-        end
+    -- MainMenuBar. Our replacements compute the target page themselves and
+    -- pass it to ChangeActionBarPage explicitly.
+    --
+    -- state-page is the RESOLVED page (7-14 in a form, vehicle, override or
+    -- skyriding state), not the manual page, so cycling off it can walk out
+    -- of the 1-6 range. Only trust it inside the manual range; otherwise ask
+    -- Blizzard for the page the cycle actually moves, which is what
+    -- ChangeActionBarPage writes.
+    local function CurrentManualPage()
         local maxPages = NUM_ACTIONBAR_PAGES or 6
+        local mainFrame = barFrames and barFrames["MainBar"]
+        local curPage = mainFrame and tonumber(mainFrame:GetAttribute("state-page"))
+        if not curPage or curPage < 1 or curPage > maxPages then
+            curPage = EAB_VTABLE.GetActionBarPage() or 1
+        end
+        return curPage, maxPages
+    end
+    ActionBar_PageUp = function()
+        local curPage, maxPages = CurrentManualPage()
         local newPage = curPage + 1
         if newPage > maxPages then newPage = 1 end
         ChangeActionBarPage(newPage)
     end
     ActionBar_PageDown = function()
-        local mainFrame = barFrames and barFrames["MainBar"]
-        local curPage
-        if mainFrame then
-            curPage = tonumber(mainFrame:GetAttribute("state-page")) or 1
-        else
-            curPage = EAB_VTABLE.GetActionBarPage()
-        end
-        local maxPages = NUM_ACTIONBAR_PAGES or 6
+        local curPage, maxPages = CurrentManualPage()
         local newPage = curPage - 1
         if newPage < 1 then newPage = maxPages end
         ChangeActionBarPage(newPage)
@@ -2039,8 +2052,18 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- and HookScript stacks.
         if not EFD(btn).cdClickHooked then
             EFD(btn).cdClickHooked = true
-            btn:HookScript("PostClick", function(self)
+            -- Captured once: the command is a property of the BUTTON, not the
+            -- slot it shows, so it survives page swaps (Bar 9 shares action
+            -- page 2 with a paged MainBar, making slot-derived ambiguous).
+            local pressBindCmd = BINDING_MAP[info.key]
+            pressBindCmd = pressBindCmd and (pressBindCmd .. index) or nil
+            btn:HookScript("PostClick", function(self, _, down)
                 if ns._EABPressPush then ns._EABPressPush(self) end
+                -- Publish for the CDM press mirror: click-routed keybinds never
+                -- fire the native binding commands. Global rather than ns (the
+                -- subscriber is a separate addon, like _EAB_UpdateKeybinds).
+                local onPress = _G._EUI_OnActionButtonPress
+                if onPress then onPress(self, down, pressBindCmd) end
             end)
         end
         -- When the pickup modifier is held (shift-click to move abilities),
@@ -2206,12 +2229,19 @@ function EAB_VTABLE.BuildPagingConditions(barKey, pagingConfig, defaultPage)
             end
         end
     end
+    -- Manual pages come before the skyriding clause: the engine only consults
+    -- the bonus bar while Blizzard's page is 1 (ActionBarController_UpdateAll),
+    -- so [bonusbar:5] listed first pinned the bar to the skyriding page and
+    -- swallowed every manual page change until the player dismounted.
+    -- The form clauses above deliberately keep their old precedence -- a page
+    -- picked for a specific form in the dropdowns is an explicit request, and
+    -- this path is click-routed, so the icon and the key agree either way.
     if barKey == "MainBar" then
-        if not noSky then
-            parts[#parts + 1] = "[bonusbar:5] 11"
-        end
         for i = 2, NUM_AB_PAGES do
             parts[#parts + 1] = "[bar:" .. i .. "] " .. i
+        end
+        if not noSky then
+            parts[#parts + 1] = "[bonusbar:5] 11"
         end
     end
     -- Target conditions come after bonusbar/bar so dragonriding and manual
@@ -2230,8 +2260,10 @@ end
 
 -------------------------------------------------------------------------------
 --  Paging State Conditions (class-specific, hardcoded fallback)
---  Used when no custom paging is configured. Produces the exact same
---  conditional string as the original implementation for zero impact.
+--  Used when no custom paging is configured. Clause order mirrors the engine's
+--  own resolution (see ActionBarController_UpdateAll): vehicle/override/possess
+--  ignore the page, then the manual page, then the bonusbar states, which the
+--  engine only consults while the page is 1.
 --  Format: "[condition] pageNumber; ..."
 -------------------------------------------------------------------------------
 local function GetClassPagingConditions()
@@ -2246,11 +2278,6 @@ local function GetClassPagingConditions()
     end
     if EAB_VTABLE.GetVehicleBarIndex then
         conditions = conditions .. "[vehicleui][possessbar] " .. EAB_VTABLE.GetVehicleBarIndex() .. "; "
-    end
-
-    -- Dragonriding (all classes)
-    if not noSky then
-        conditions = conditions .. "[bonusbar:5] 11; "
     end
 
     -- Manual page switching (pages 2-6)
@@ -2275,6 +2302,14 @@ local function GetClassPagingConditions()
         elseif class == "ROGUE" then
             conditions = conditions .. "[bonusbar:1] 7; "
         end
+    end
+
+    -- Dragonriding (all classes). Also page 1 only: skyriding is bonusbar 5, and
+    -- the engine only reads the bonus bar while the page is 1, so listing this
+    -- ahead of [bar:N] would freeze the bar on the skyriding page and make every
+    -- manual page unreachable until you dismount.
+    if not noSky then
+        conditions = conditions .. "[bonusbar:5] 11; "
     end
 
     -- Default: page 1
@@ -3362,8 +3397,8 @@ end
 ns._eabBarDormant = {}
 -- HARD dormancy: bars whose visibility mode is "Never" (or which are
 -- disabled) cannot become visible through ANY runtime condition -- no
--- driver state, no combat edge. The only reveal path is a settings write,
--- and every settings path that changes effective visibility funnels
+-- driver state, no combat edge. The only reveal paths are a settings write
+-- or the Toggle Action Bar runtime override; both paths funnel
 -- through RefreshRuntimeVisibility (the driver re-derivation lives there),
 -- which recomputes this map. While a bar is in this map EVERY per-event
 -- walk skips it, content classes included: the dormancy reveal reconcile
@@ -3381,14 +3416,13 @@ ns.RecomputeNeverBars = function()
     for _, info in ipairs(BAR_CONFIG) do
         if not info.isStance and not info.isPetBar and not info.visibilityOnly then
             local s = bars[info.key]
-            local never = (s and (s.alwaysHidden or s.enabled == false)) and true or nil
-            -- The Toggle Action Bar keybind override can runtime-reveal a
-            -- saved-Never bar without any settings write; an overridden bar
-            -- is NOT hard-dormant (both toggle paths re-run
-            -- RefreshRuntimeVisibility, so this recomputes on every flip).
-            if never and EAB._visOverride and EAB._visOverride[info.key] == "always" then
-                never = nil
-            end
+            local override = EAB._visOverride and EAB._visOverride[info.key]
+            local never = s and (s.alwaysHidden or s.enabled == false) or false
+            -- Toggle override wins both ways: hiding an Always bar hard-disables
+            -- its UI work; showing a Never bar wakes it. Action bindings stay live.
+            if override == "never" then never = true
+            elseif override == "always" then never = false end
+            never = never and true or nil
             if map[info.key] ~= never then
                 if map[info.key] and not never then
                     -- Leaving Never: remember it so the reveal reconcile
@@ -9522,8 +9556,9 @@ end
 
 -------------------------------------------------------------------------------
 --  "Toggle Action Bar" visibility keybind
---  A per-bar keybind that flips a bar between always-shown and hidden at RUNTIME
---  only -- the saved barVisibility is never written, so the toggle does not
+--  A per-bar keybind that flips bar UI between active/shown and dormant/hidden
+--  at RUNTIME. Action bindings stay live; saved barVisibility is never written,
+--  so the toggle does not
 --  persist across sessions (a /reload restores the saved state). Only meaningful
 --  when the bar's saved visibility is "always" or "never", and only out of combat
 --  (changing a secure frame's state-visibility driver is combat-blocked).
@@ -12897,12 +12932,40 @@ function EAB:FinishSetup()
         end
         wipe(_gridSurfacedBars)
     end
+    -- Mirror Blizzard's lockActionBars setting onto the controller so the
+    -- secure OnDragStart wrapper can tell a real pickup from a dead gesture
+    -- (see the wrapper in RegisterButtonWithController). Attribute, not a
+    -- chunk local: this file is at Lua 5.1's 200-local cap, and the snippet
+    -- can only read attributes anyway.
+    ns.EABSyncBarsLocked = function()
+        -- No _eabApplyDeferred here, unlike the widget-writing guards: nothing
+        -- else needs re-applying, and PLAYER_REGEN_ENABLED re-syncs this.
+        if InCombatLockdown() then return end
+        local locked
+        if Settings and Settings.GetValue then
+            local ok, v = pcall(Settings.GetValue, "lockActionBars")
+            -- v ~= nil, not just ok: this seeds during FinishSetup, which can
+            -- run before the setting is registered. Accepting nil as "false"
+            -- would skip the CVar fallback and seed a LOCKED bar as unlocked.
+            if ok and v ~= nil then locked = v and true or false end
+        end
+        if locked == nil and C_CVar and C_CVar.GetCVarBool then
+            locked = C_CVar.GetCVarBool("lockActionBars") and true or false
+        end
+        local v = locked and 1 or 0
+        -- Guarded: SetAttribute re-runs the controller's _onattributechanged
+        -- snippet, and CVAR_UPDATE is a firehose at login.
+        if ActionButtonController:GetAttribute("eab-barslocked") ~= v then
+            ActionButtonController:SetAttribute("eab-barslocked", v)
+        end
+    end
+
     -- 12.1: registering events on a frame stamps it with the EventRegistrations
     -- forbidden aspect, and the restricted environment refuses frames carrying
     -- any aspect. The controller wraps buttons and executes snippets, so its
     -- events must live on a plain sidecar listener, never on the controller.
     EAB._abcEvents = ns.TakeShell()
-    EAB._abcEvents:SetScript("OnEvent", function(_, event)
+    EAB._abcEvents:SetScript("OnEvent", function(_, event, arg1)
         if event == "ACTIONBAR_SHOWGRID" then
             -- Cancel any pending restore (swap case: drop + immediate pickup)
             _gridRestorePending = false
@@ -12949,7 +13012,15 @@ function EAB:FinishSetup()
                     C_Timer_After(0, RestoreGridSurfacedBars)
                 end
             end
+        elseif event == "CVAR_UPDATE" then
+            -- Name-filtered: CVAR_UPDATE fires for every cvar, dozens of times
+            -- at login. Only the lock matters to the drag wrapper.
+            if arg1 == "lockActionBars" then ns.EABSyncBarsLocked() end
+        elseif event == "PLAYER_REGEN_ENABLED" then
+            -- A lock toggled during combat deferred; pick it up on regen.
+            ns.EABSyncBarsLocked()
         elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" then
+            if event == "PLAYER_ENTERING_WORLD" then ns.EABSyncBarsLocked() end
             -- Spec/talent swaps refill slots: retire the filled-slot fast
             -- lists (see the dispatcher's repaint walks) AND the curated-set
             -- memo (talents change what the viewer curates).
@@ -12975,6 +13046,10 @@ function EAB:FinishSetup()
     EAB._abcEvents:RegisterEvent("PET_BAR_HIDEGRID")
     EAB._abcEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
     EAB._abcEvents:RegisterEvent("SPELLS_CHANGED")
+    EAB._abcEvents:RegisterEvent("CVAR_UPDATE")
+    EAB._abcEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+    -- Seed before the first drag: PLAYER_ENTERING_WORLD may already be past.
+    ns.EABSyncBarsLocked()
 
     -- Reset showgrid state at login (covers waiting for the game to apply
     -- the always-show-buttons state to the main bar).
@@ -14197,10 +14272,10 @@ local function UpdateXPBar()
 
     if restedXP > 0 then
         if showRawValues then
-            strRested = format(" (Rested: %s)", AbbreviateLargeNumbers(restedXP))
+            strRested = format(EllesmereUI.L(" (Rested: %s)"), AbbreviateLargeNumbers(restedXP))
         else
             local restedPct = (restedXP / maxXP) * 100
-            strRested = format(" (Rested: %.1f%%)", restedPct)
+            strRested = format(EllesmereUI.L(" (Rested: %.1f%%)"), restedPct)
         end
     end
 
@@ -14241,12 +14316,12 @@ local function CreateXPBar()
         local restedXP = GetXPExhaustion() or 0
         local pct = (currentXP / maxXP) * 100
         local remain = maxXP - currentXP
-        GameTooltip:AddLine("Experience", 1, 1, 1)
-        GameTooltip:AddDoubleLine("Level", tostring(UnitLevel("player")), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("XP", format("%s / %s (%.1f%%)", BreakUpLargeNumbers(currentXP), BreakUpLargeNumbers(maxXP), pct), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Remaining", BreakUpLargeNumbers(remain), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddLine(EllesmereUI.L("Experience"), 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Level"), tostring(UnitLevel("player")), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("XP"), format("%s / %s (%.1f%%)", BreakUpLargeNumbers(currentXP), BreakUpLargeNumbers(maxXP), pct), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Remaining"), BreakUpLargeNumbers(remain), 1, 1, 1, 1, 1, 1)
         if restedXP > 0 then
-            GameTooltip:AddDoubleLine("Rested", format("+%s (%.1f%%)", BreakUpLargeNumbers(restedXP), (restedXP / maxXP) * 100), 1, 1, 1, 1, 1, 1)
+            GameTooltip:AddDoubleLine(EllesmereUI.L("Rested"), format("+%s (%.1f%%)", BreakUpLargeNumbers(restedXP), (restedXP / maxXP) * 100), 1, 1, 1, 1, 1, 1)
         end
         GameTooltip:Show()
     end)
@@ -14308,7 +14383,7 @@ local function UpdateRepBar()
         local paragonVal, paragonThreshold = C_Reputation.GetFactionParagonInfo(factionID)
         if paragonVal and paragonThreshold then
             isParagon = true
-            standing = "Paragon"
+            standing = EllesmereUI.L("Paragon")
             currentStanding = paragonVal % paragonThreshold
             currentReactionThreshold = 0
             nextReactionThreshold = paragonThreshold
@@ -14326,7 +14401,7 @@ local function UpdateRepBar()
                 return
             end
             reaction = 10
-            standing = "Renown"
+            standing = EllesmereUI.L("Renown")
             currentReactionThreshold = 0
             nextReactionThreshold = majorData.renownLevelThreshold
             currentStanding = majorData.renownReputationEarned or 0
@@ -14354,6 +14429,11 @@ local function UpdateRepBar()
     bar:SetValue(current)
 
     local pct = (current / maximum) * 100
+    -- The tooltip must show the same numbers the bar shows. Recomputing them
+    -- from the raw watched-faction payload there breaks on paragon/renown
+    -- factions (negative reputation, wrong standing), so stash the resolved
+    -- values for the OnEnter handler below.
+    frame._tipStanding, frame._tipCurrent, frame._tipMaximum = standing, current, maximum
     text:SetText(format("%s: %.0f%% [%s]", name, pct, standing))
 
     -- Auto-size text if bar is too narrow
@@ -14377,14 +14457,20 @@ local function CreateRepBar()
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
         GameTooltip:AddLine(data.name, 1, 1, 1)
-        local reaction = data.reaction or 4
-        local standing = _G["FACTION_STANDING_LABEL" .. reaction] or ""
-        GameTooltip:AddDoubleLine("Standing", standing, 1, 1, 1, 1, 1, 1)
-        local current = (data.currentStanding or 0) - (data.currentReactionThreshold or 0)
-        local maximum = (data.nextReactionThreshold or 1) - (data.currentReactionThreshold or 0)
+        -- Use the values the bar already resolved (paragon/renown/friendship
+        -- aware); fall back to the raw payload only if the bar has not run yet.
+        local standing = self._tipStanding
+        if not standing or standing == "" then
+            standing = _G["FACTION_STANDING_LABEL" .. (data.reaction or 4)] or ""
+        end
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Standing"), standing, 1, 1, 1, 1, 1, 1)
+        local current = self._tipCurrent
+            or ((data.currentStanding or 0) - (data.currentReactionThreshold or 0))
+        local maximum = self._tipMaximum
+            or ((data.nextReactionThreshold or 1) - (data.currentReactionThreshold or 0))
         if maximum <= 0 then maximum = 1 end
         local pct = (current / maximum) * 100
-        GameTooltip:AddDoubleLine("Reputation", format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(maximum), pct), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Reputation"), format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(maximum), pct), 1, 1, 1, 1, 1, 1)
         GameTooltip:Show()
     end)
     holder:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -14463,7 +14549,7 @@ local function UpdateFavorBar()
     bar:SetStatusBarColor(ns.ResolveDataBarColor(s, DATA_BAR_COLORS.favor.r, DATA_BAR_COLORS.favor.g, DATA_BAR_COLORS.favor.b))
 
     local pct = (current / st.needed) * 100
-    text:SetText(format("House Level %d: %d / %d", st.displayLevel or 1, current, st.needed))
+    text:SetText(format(EllesmereUI.L("House Level %d: %d / %d"), st.displayLevel or 1, current, st.needed))
 
     -- Auto-size text if bar is too narrow
     local barW = frame:GetWidth()
@@ -14539,12 +14625,12 @@ local function CreateFavorBar()
         if not st or not st.needed or st.needed <= 0 then return end
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
-        GameTooltip:AddLine("House Favor", 1, 1, 1)
-        GameTooltip:AddDoubleLine("House Level", tostring(st.displayLevel or 1), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddLine(EllesmereUI.L("House Favor"), 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("House Level"), tostring(st.displayLevel or 1), 1, 1, 1, 1, 1, 1)
         local current = math.min(st.favor or 0, st.needed)
         local pct = (current / st.needed) * 100
-        GameTooltip:AddDoubleLine("Favor", format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(st.needed), pct), 1, 1, 1, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Remaining", BreakUpLargeNumbers(st.needed - current), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Favor"), format("%s / %s (%.1f%%)", BreakUpLargeNumbers(current), BreakUpLargeNumbers(st.needed), pct), 1, 1, 1, 1, 1, 1)
+        GameTooltip:AddDoubleLine(EllesmereUI.L("Remaining"), BreakUpLargeNumbers(st.needed - current), 1, 1, 1, 1, 1, 1)
         GameTooltip:Show()
     end)
     holder:SetScript("OnLeave", function() GameTooltip:Hide() end)
