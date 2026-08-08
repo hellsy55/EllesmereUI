@@ -5362,8 +5362,10 @@ initFrame:SetScript("OnEvent", function(self)
         -- they expect, and they do different things. Reverse Fill mirrors the
         -- geometry, Fill Up flips the direction the value travels. Splitting
         -- them across the page is what makes people try the wrong one.
-        local fillRow
-        fillRow, h = W:DualRow(parent, y,
+        -- Named distinctly: `fillRow` is already taken further down by the
+        -- Fill Color row, which preview click-nav targets by reference.
+        local fillDirRow
+        fillDirRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Reverse Fill",
               tooltip = "Mirrors which end of the bar the fill is anchored to. It does not change the direction the bar travels: use Fill Up for that.",
               getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
@@ -5375,9 +5377,20 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip = "Fills the bar as the cooldown recovers instead of draining it as the cooldown runs down.",
               disabled = function()
                   local bd = SelectedTBB()
+                  -- Charge Hash Lines drives its own recovery bar, which
+                  -- already fills upward, so fillUp cannot do anything there.
+                  -- Leaving the toggle live would promise behaviour it has no
+                  -- way to deliver.
                   return not bd or bd.trackType ~= "cooldown"
+                      or bd.chargeHashLines == true
               end,
-              disabledTooltip = "This option requires a cooldown-tracking bar",
+              disabledTooltip = function()
+                  local bd = SelectedTBB()
+                  if not bd or bd.trackType ~= "cooldown" then
+                      return "This option requires a cooldown-tracking bar"
+                  end
+                  return "Charge Hash Lines already fills as charges recover"
+              end,
               getValue = function()
                   local bd = SelectedTBB(); return bd and bd.fillUp == true
               end,
