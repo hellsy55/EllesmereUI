@@ -4299,13 +4299,18 @@ end
 
 -------------------------------------------------------------------------------
 --  Cooldown-tracking bar (cfg.trackType == "cooldown"): the stock fill drains
---  with the spell's remaining cooldown. Charge Hash Lines instead fill through
---  one section per recovered charge while the timer remains the NEXT charge's
---  remaining cooldown. Stacks text = current charges. Ready (off cooldown /
---  GCD-only / at max charges / spell unknown) counts as INACTIVE for
---  hideWhenInactive; a shown-but-ready bar renders full with no timer.
+--  with the spell's remaining cooldown. cfg.fillUp inverts that, filling as
+--  the cooldown recovers -- it changes only WHICH WAY the value travels, and
+--  every fill source below honours it. Reverse Fill is a different thing
+--  entirely and composes with it: that mirrors the bar's geometry and never
+--  touches the value. Charge Hash Lines instead fill through one section per
+--  recovered charge while the timer remains the NEXT charge's remaining
+--  cooldown, and already fill upward by construction, so fillUp is a no-op
+--  there. Stacks text = current charges. Ready (off cooldown / GCD-only / at
+--  max charges / spell unknown) counts as INACTIVE for hideWhenInactive; a
+--  shown-but-ready bar renders full with no timer, in either direction.
 --
---  FILL SOURCE ORDER:
+--  FILL SOURCE ORDER (each honours cfg.fillUp):
 --  1. Engine duration handle (C_Spell.GetSpellCooldownDuration /
 --     GetSpellChargeDuration + StatusBar:SetTimerDuration): the ENGINE
 --     animates the drain and tracks CDR / resets live, secret-proof by
@@ -4548,8 +4553,16 @@ local function _UpdateCooldownBar(bar, cfg)
                     end
                 end
                 sb:SetTimerDuration(durObj, interp, wantDir)
-                if not wasShown and sb.SetToTargetValue then
-                    -- Snap on first show: avoids the empty-to-full sweep-in.
+                -- Snap whenever the bar was not already animating THIS
+                -- direction. First show is the original case (the
+                -- empty-to-full sweep-in). The direction term adds two more:
+                -- arriving from the ready state, which parks the bar full and
+                -- clears _cdFillDir, and a mid-cooldown toggle. Both leave the
+                -- bar sitting at the opposite end, and with smooth cooldowns
+                -- on, easing from there plays a visible backwards sweep at the
+                -- exact moment the spell was cast.
+                if (not wasShown or bar._cdFillDir ~= wantDir)
+                    and sb.SetToTargetValue then
                     sb:SetToTargetValue()
                 end
                 bar._cdNeedSet = nil

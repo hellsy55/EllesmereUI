@@ -5288,12 +5288,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EvictTBBTextConflicts(bd, "stacksPosition", v)
                   bd.stacksPosition = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
-            { type = "toggle", text = "Reverse Fill",
-              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.reverseFill = v; RefreshTBB()
-              end }
+            { type = "label", text = "" }
         );  y = y - h
         AddTBBTextSwatch(stacksRow, stacksRow._leftRegion, "stacks")
         do
@@ -5361,6 +5356,37 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
             })
         end
+
+        -- Reverse Fill | Fill Up. Deliberately paired on one row: they are the
+        -- two options a user reaches for when the bar is not moving the way
+        -- they expect, and they do different things. Reverse Fill mirrors the
+        -- geometry, Fill Up flips the direction the value travels. Splitting
+        -- them across the page is what makes people try the wrong one.
+        local fillRow
+        fillRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Reverse Fill",
+              tooltip = "Mirrors which end of the bar the fill is anchored to. It does not change the direction the bar travels: use Fill Up for that.",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.reverseFill = v; RefreshTBB()
+              end },
+            { type = "toggle", text = "Fill Up",
+              tooltip = "Fills the bar as the cooldown recovers instead of draining it as the cooldown runs down.",
+              disabled = function()
+                  local bd = SelectedTBB()
+                  return not bd or bd.trackType ~= "cooldown"
+              end,
+              disabledTooltip = "This option requires a cooldown-tracking bar",
+              getValue = function()
+                  local bd = SelectedTBB(); return bd and bd.fillUp == true
+              end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.fillUp = v and true or nil
+                  RefreshTBB()
+              end }
+        );  y = y - h
 
         -- Charge Hash Lines | Smooth Bars. The number and orientation of hash
         -- separators are resolved automatically from the tracked spell's max
@@ -5507,21 +5533,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   RefreshTBB()
               end },
-            { type = "toggle", text = "Fill Up",
-              tooltip = "Fills the bar as the cooldown recovers instead of draining it as the cooldown runs down.",
-              disabled = function()
-                  local bd = SelectedTBB()
-                  return not bd or bd.trackType ~= "cooldown"
-              end,
-              disabledTooltip = "This option requires a cooldown-tracking bar",
-              getValue = function()
-                  local bd = SelectedTBB(); return bd and bd.fillUp == true
-              end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.fillUp = v and true or nil
-                  RefreshTBB()
-              end });  y = y - h
+            { type = "label", text = "" });  y = y - h
 
         -------------------------------------------------------------------
         --  DISPLAY
