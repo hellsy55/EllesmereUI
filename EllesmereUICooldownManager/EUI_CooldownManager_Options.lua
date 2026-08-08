@@ -4660,6 +4660,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue = function(v)
                       ns.TBBSetGroupGrow(gid, v)
                       ns.BuildTrackedBuffBars()
+                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                      RefreshTBBPopout()
                       EllesmereUI:RefreshPage()
                   end },
                 { type = "slider", pixel = true, text = "Bar Spacing", min = -2, max = 20, step = 1,
@@ -4667,6 +4669,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue = function(v)
                       ns.TBBSetGroupSpacing(gid, v)
                       ns.BuildTrackedBuffBars()
+                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                      RefreshTBBPopout()
                       EllesmereUI:RefreshPage()
                   end }
             );  y = y - h
@@ -4830,6 +4834,12 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                   end
                   ns.BuildTrackedBuffBars()
+                  -- BuildTrackedBuffBars() only rebuilds the LIVE bar pool; the
+                  -- preview wraps in the popout are separate frames. RefreshPage()
+                  -- takes the fast widget-refresh path here, so the page builder
+                  -- tail that repaints the popout never re-runs. Repaint it
+                  -- directly or the preview keeps the old geometry.
+                  RefreshTBBPopout()
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
@@ -4848,6 +4858,8 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                   end
                   ns.BuildTrackedBuffBars()
+                  -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                  RefreshTBBPopout()
                   EllesmereUI:RefreshPage()
               end }
         );  y = y - h
