@@ -11343,12 +11343,16 @@ ns.ReloadPartyFrames = function()
 
     -- Temp-swap: write party overrides onto db.profile so anchor closures
     -- (which captured db.profile) read party values. Only for keys whose
-    -- section is custom (unsynced).
-    local saved = {}
+    -- section is custom (unsynced). `swapped` records WHICH keys were swapped:
+    -- a key whose raid value is nil (no default, never set on raid) stores
+    -- nothing in `saved`, so restoring from `saved` alone would skip it and
+    -- leave the party value on the shared raid key permanently.
+    local saved, swapped = {}, {}
     for key, section in pairs(ns._PARTY_KEY_SECTION) do
         if ns._IsPartySectionCustom(section) then
             local pv = rawget(raw, "party_" .. key)
             if pv ~= nil then
+                swapped[#swapped + 1] = key
                 saved[key] = raw[key]
                 raw[key] = pv
             end
@@ -11504,9 +11508,10 @@ ns.ReloadPartyFrames = function()
         end
     end
 
-    -- Restore db.profile to raid values
-    for key, val in pairs(saved) do
-        raw[key] = val
+    -- Restore db.profile to raid values (via `swapped`, so a nil raid value
+    -- is written back as nil rather than skipped)
+    for _, key in ipairs(swapped) do
+        raw[key] = saved[key]
     end
 
     -- Re-layout header
