@@ -468,10 +468,10 @@ local function ReadMembers()
         Add("player")
     end
 
-    table.sort(out, function(a, b)
-        if a.group ~= b.group then return a.group < b.group end
-        return a.name < b.name
-    end)
+    -- Plain A-Z by name, subgroup ignored entirely: a raid leader hunting one
+    -- name reads the grid top-to-bottom once instead of finding the right
+    -- subgroup block first.
+    table.sort(out, function(a, b) return a.name < b.name end)
     return out
 end
 
