@@ -10580,11 +10580,20 @@ do
             "hoverBorderEnabled", "hoverBorderSize", "hoverBorderColor", "hoverBorderAlpha",
             "targetBorderEnabled", "targetBorderSize", "targetBorderColor", "targetBorderAlpha", "threatBorderSize",
         },
+        -- Must list every key the DISPELS section of the options page draws:
+        -- the party tab's blocking overlay is sized from that section's y-range,
+        -- so a control there is editable whenever "dispels" is unsynced. A key
+        -- filed under another section (or missing) is still editable but writes
+        -- the shared raid value.
         dispels = {
             "dispelBorderSize", "dispelOverlay", "dispelOverlayOpacity", "dispelShowAll",
             "showDispelIcons", "dispelIconPosition", "dispelIconOffsetX", "dispelIconOffsetY", "dispelIconSize",
             "dispelColorMagic", "dispelColorCurse", "dispelColorDisease",
             "dispelColorPoison", "dispelColorBleed",
+            "dispelIconBorderSize", "dispelOverlayPosition",
+            "dispelClockBorder", "dispelClockExtraBorder",
+            "dispellableDebuffLocation", "dispellableDebuffGrowDirection",
+            "dispellableDebuffOffsetX", "dispellableDebuffOffsetY", "dispellableDebuffSize",
         },
         topNameBar = {
             "topNameBarEnabled", "topNameBarHeight",
@@ -10610,8 +10619,8 @@ do
             "debuffPosition", "debuffOffsetX", "debuffOffsetY",
             "debuffGrowDirection", "debuffPerRow", "debuffWrapDirection",
             "debuffCap", "debuffHideTooltips",
-            "dispellableDebuffLocation", "dispellableDebuffGrowDirection",
-            "dispellableDebuffOffsetX", "dispellableDebuffOffsetY", "dispellableDebuffSize",
+            -- The dispellableDebuff* keys live in "dispels": that is the section
+            -- whose header their controls are drawn under.
         },
         debuffStyle = {
             "debuffSize", "debuffIconZoom", "debuffBorderSize", "debuffBorderColor", "debuffSpacing",
