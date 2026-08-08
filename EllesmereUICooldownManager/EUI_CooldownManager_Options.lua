@@ -5380,10 +5380,18 @@ initFrame:SetScript("OnEvent", function(self)
                   -- Charge Hash Lines drives its own recovery bar, which
                   -- already fills upward, so fillUp cannot do anything there.
                   -- Leaving the toggle live would promise behaviour it has no
-                  -- way to deliver.
+                  -- way to deliver. Test the same way the Charge Hash Lines
+                  -- toggle does: the stored flag alone is not enough, because
+                  -- chargeHashLines rides in TBB_STYLE_KEYS and a style copy
+                  -- or preset can set it on a single-charge spell, where the
+                  -- hash fill never actually runs.
                   return not bd or bd.trackType ~= "cooldown"
-                      or bd.chargeHashLines == true
+                      or (bd.chargeHashLines == true
+                          and SelectedTBBSupportsChargeHash())
               end,
+              -- rawTooltip: these are whole sentences. Without it they get
+              -- wrapped into "This option requires <text> to be enabled".
+              rawTooltip = true,
               disabledTooltip = function()
                   local bd = SelectedTBB()
                   if not bd or bd.trackType ~= "cooldown" then
