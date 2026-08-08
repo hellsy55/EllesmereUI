@@ -575,6 +575,12 @@ local defaults = {
         dispelIconOffsetX  = 0,
         dispelIconOffsetY  = 0,
         dispelIconSize     = 16,
+        -- 12.1 dispel ring thickness in physical pixels (-1 follows the icon's own
+        -- Border, 0 hides it). Stored explicitly rather than left to the `or 2`
+        -- read fallback: ReloadPartyFrames temp-swaps party values onto db.profile
+        -- and restores from a table keyed by the raid value, so a key with no
+        -- default is absent from that table and its party value would stick.
+        dispelIconBorderSize = 2,
         dispelClockBorder  = false,  -- animated clock-style dispel border (erases clockwise) on dispellable debuff icons
         dispelClockExtraBorder = 0,  -- extra physical pixels added to the clock border thickness (on top of debuffBorderSize)
         dispellableDebuffLocation = "same",      -- "same" = use the main debuff layout; else a separate anchor for dispellable debuffs
