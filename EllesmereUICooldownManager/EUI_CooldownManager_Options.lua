@@ -5288,12 +5288,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EvictTBBTextConflicts(bd, "stacksPosition", v)
                   bd.stacksPosition = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
-            { type = "toggle", text = "Reverse Fill",
-              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.reverseFill = v; RefreshTBB()
-              end }
+            { type = "label", text = "" }
         );  y = y - h
         AddTBBTextSwatch(stacksRow, stacksRow._leftRegion, "stacks")
         do
@@ -5361,6 +5356,58 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
             })
         end
+
+        -- Reverse Fill | Fill Up. Deliberately paired on one row: they are the
+        -- two options a user reaches for when the bar is not moving the way
+        -- they expect, and they do different things. Reverse Fill mirrors the
+        -- geometry, Fill Up flips the direction the value travels. Splitting
+        -- them across the page is what makes people try the wrong one.
+        -- Named distinctly: `fillRow` is already taken further down by the
+        -- Fill Color row, which preview click-nav targets by reference.
+        local fillDirRow
+        fillDirRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Reverse Fill",
+              tooltip = "Mirrors which end of the bar the fill is anchored to. It does not change the direction the bar travels: use Fill Up for that.",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.reverseFill = v; RefreshTBB()
+              end },
+            { type = "toggle", text = "Fill Up",
+              tooltip = "Fills the bar as the cooldown recovers instead of draining it as the cooldown runs down.",
+              disabled = function()
+                  local bd = SelectedTBB()
+                  -- Charge Hash Lines drives its own recovery bar, which
+                  -- already fills upward, so fillUp cannot do anything there.
+                  -- Leaving the toggle live would promise behaviour it has no
+                  -- way to deliver. Test the same way the Charge Hash Lines
+                  -- toggle does: the stored flag alone is not enough, because
+                  -- chargeHashLines rides in TBB_STYLE_KEYS and a style copy
+                  -- or preset can set it on a single-charge spell, where the
+                  -- hash fill never actually runs.
+                  return not bd or bd.trackType ~= "cooldown"
+                      or (bd.chargeHashLines == true
+                          and SelectedTBBSupportsChargeHash())
+              end,
+              -- rawTooltip: these are whole sentences. Without it they get
+              -- wrapped into "This option requires <text> to be enabled".
+              rawTooltip = true,
+              disabledTooltip = function()
+                  local bd = SelectedTBB()
+                  if not bd or bd.trackType ~= "cooldown" then
+                      return "This option requires a cooldown-tracking bar"
+                  end
+                  return "Charge Hash Lines already fills as charges recover"
+              end,
+              getValue = function()
+                  local bd = SelectedTBB(); return bd and bd.fillUp == true
+              end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.fillUp = v and true or nil
+                  RefreshTBB()
+              end }
+        );  y = y - h
 
         -- Charge Hash Lines | Smooth Bars. The number and orientation of hash
         -- separators are resolved automatically from the tracked spell's max
