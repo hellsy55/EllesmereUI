@@ -1860,8 +1860,15 @@ initFrame:SetScript("OnEvent", function(self)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 if v == "default" then
                     EllesmereUIDB.fctFont = nil
+                    EllesmereUIDB.fctFontPath = nil
+                    EllesmereUIDB.fctFontPathFor = nil
                 else
                     EllesmereUIDB.fctFont = v
+                    -- smf: keys cache their resolved path for the next login's
+                    -- early window; see ApplyCombatTextFont in Startup.
+                    local e = v:match("^smf:") and fctFontValues[v]
+                    EllesmereUIDB.fctFontPath = e and e.font
+                    EllesmereUIDB.fctFontPathFor = e and v
                 end
                 EllesmereUI:ShowConfirmPopup({
                     title   = "Logout Required",
