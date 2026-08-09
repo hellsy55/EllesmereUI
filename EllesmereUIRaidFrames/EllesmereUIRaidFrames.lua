@@ -575,6 +575,12 @@ local defaults = {
         dispelIconOffsetX  = 0,
         dispelIconOffsetY  = 0,
         dispelIconSize     = 16,
+        -- 12.1 dispel ring thickness in physical pixels (-1 follows the icon's own
+        -- Border, 0 hides it). Stored explicitly rather than left to the `or 2`
+        -- read fallback: ReloadPartyFrames temp-swaps party values onto db.profile
+        -- and restores from a table keyed by the raid value, so a key with no
+        -- default is absent from that table and its party value would stick.
+        dispelIconBorderSize = 2,
         dispelClockBorder  = false,  -- animated clock-style dispel border (erases clockwise) on dispellable debuff icons
         dispelClockExtraBorder = 0,  -- extra physical pixels added to the clock border thickness (on top of debuffBorderSize)
         dispellableDebuffLocation = "same",      -- "same" = use the main debuff layout; else a separate anchor for dispellable debuffs
@@ -10585,11 +10591,20 @@ do
             "hoverBorderEnabled", "hoverBorderSize", "hoverBorderColor", "hoverBorderAlpha",
             "targetBorderEnabled", "targetBorderSize", "targetBorderColor", "targetBorderAlpha", "threatBorderSize",
         },
+        -- Must list every key the DISPELS section of the options page draws:
+        -- the party tab's blocking overlay is sized from that section's y-range,
+        -- so a control there is editable whenever "dispels" is unsynced. A key
+        -- filed under another section (or missing) is still editable but writes
+        -- the shared raid value.
         dispels = {
             "dispelBorderSize", "dispelOverlay", "dispelOverlayOpacity", "dispelShowAll",
             "showDispelIcons", "dispelIconPosition", "dispelIconOffsetX", "dispelIconOffsetY", "dispelIconSize",
             "dispelColorMagic", "dispelColorCurse", "dispelColorDisease",
             "dispelColorPoison", "dispelColorBleed",
+            "dispelIconBorderSize", "dispelOverlayPosition",
+            "dispelClockBorder", "dispelClockExtraBorder",
+            "dispellableDebuffLocation", "dispellableDebuffGrowDirection",
+            "dispellableDebuffOffsetX", "dispellableDebuffOffsetY", "dispellableDebuffSize",
         },
         topNameBar = {
             "topNameBarEnabled", "topNameBarHeight",
@@ -10615,8 +10630,8 @@ do
             "debuffPosition", "debuffOffsetX", "debuffOffsetY",
             "debuffGrowDirection", "debuffPerRow", "debuffWrapDirection",
             "debuffCap", "debuffHideTooltips",
-            "dispellableDebuffLocation", "dispellableDebuffGrowDirection",
-            "dispellableDebuffOffsetX", "dispellableDebuffOffsetY", "dispellableDebuffSize",
+            -- The dispellableDebuff* keys live in "dispels": that is the section
+            -- whose header their controls are drawn under.
         },
         debuffStyle = {
             "debuffSize", "debuffIconZoom", "debuffBorderSize", "debuffBorderColor", "debuffSpacing",

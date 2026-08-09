@@ -4356,3 +4356,42 @@ EllesmereUI.RegisterMigration({
         if type(p) == "table" then p.showCastTarget = false end
     end,
 })
+
+--------------------------------------------------------------------------------
+--  Raid Frames: dispellableDebuff* keys moved party-sync sections
+--
+--  Their controls are drawn under the DISPELS header but the keys were filed
+--  under "debuffDisplay", so on the Party tab they were editable whenever
+--  Dispels was unsynced while the write routed through Debuff Display. They now
+--  file under "dispels".
+--
+--  Writing one required BOTH sections custom, but re-syncing DISPELS afterwards
+--  only deleted keys mapped to "dispels", so these could survive as a live
+--  override under a custom Debuff Display with Dispels synced. Under the new
+--  mapping that value would go dormant; the mirror case (dormant under a synced
+--  Debuff Display, live once Dispels is custom) would switch on.
+--
+--  Clear the override whenever its live/dormant state would flip. In the
+--  flip-to-live case that preserves exactly what the party renders today; in
+--  the flip-to-dormant case the party inherits raid either way, and clearing
+--  stops the value reviving later. An override live in BOTH mappings (both
+--  sections custom, the normal case) is left untouched.
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "rf_dispellable_debuff_party_section_v1",
+    scope       = "profile",
+    description = "Clear dispellableDebuff* party overrides whose live/dormant state would flip when the keys moved to the Dispels sync section.",
+    body = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        if type(rf) ~= "table" then return end
+        local ss = type(rf.partySyncSections) == "table" and rf.partySyncSections or nil
+        local wasLive    = (ss and ss.debuffDisplay == false) and true or false
+        local willBeLive = (ss and ss.dispels       == false) and true or false
+        if wasLive == willBeLive then return end
+        rf.party_dispellableDebuffLocation      = nil
+        rf.party_dispellableDebuffGrowDirection = nil
+        rf.party_dispellableDebuffOffsetX       = nil
+        rf.party_dispellableDebuffOffsetY       = nil
+        rf.party_dispellableDebuffSize          = nil
+    end,
+})
