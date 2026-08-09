@@ -10022,6 +10022,14 @@ do
         -- "CTRL-Q" → "Q"). IsKeyDown only accepts raw key names.
         local function BaseKey(binding)
             if not binding then return nil end
+            -- The hyphen/minus key is itself bound as the literal string "-"
+            -- (default ACTIONBUTTON11 keybind). A modifier combo ending in
+            -- the hyphen key (e.g. "SHIFT--") also ends in "-". In both
+            -- cases the trailing character IS the base key, so check for
+            -- that before stripping the "everything after the last '-'"
+            -- modifier prefix -- otherwise the pattern below finds no
+            -- non-hyphen run and returns nil.
+            if binding:sub(-1) == "-" then return "-" end
             return binding:match("[^%-]+$")
         end
         local function ShowPushedForSlot(slot)
