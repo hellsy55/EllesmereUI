@@ -12727,9 +12727,6 @@ function EAB:FinishSetup()
                 SetupBar(info, false)
                 LayoutBar(info.key)
             end
-            -- Both broadcasters are killed at file-load time (top of file).
-            -- Central dispatcher handles all events.
-            EAB:SetupEventDispatcher()
             -- Register secure handler refs now that buttons exist
             SecureSetupHandler_PrepareRefs()
             -- Apply the current page to MainBar buttons. The state driver
@@ -12817,6 +12814,16 @@ function EAB:FinishSetup()
             -- Dispatch all protected operations through the secure handler
             SecureSetupHandler_Execute(layoutData, barFrameData)
         end
+
+        -- Both broadcasters are killed at file-load time (top of file), and
+        -- the per-button ACTIONBAR_UPDATE_COOLDOWN registration is stripped at
+        -- button creation, so this dispatcher is the ONLY owner of the cooldown
+        -- pipeline -- swipes, desaturation and on-CD alpha all ride it. It used
+        -- to be set up inside the out-of-combat branch above, which left a
+        -- /reload taken in combat with no cooldown events at all for the rest
+        -- of the session. It registers events and builds closures, nothing
+        -- protected, so both paths get it here, after their buttons exist.
+        EAB:SetupEventDispatcher()
 
         -- Visual styling: defer visuals to out-of-combat if needed.
         local function DoVisuals()
