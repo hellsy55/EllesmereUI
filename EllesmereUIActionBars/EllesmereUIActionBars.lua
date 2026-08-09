@@ -2067,32 +2067,51 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
             end)
         end
         -- When the pickup modifier is held (shift-click to move abilities),
-        -- temporarily disable useOnKeyDown so the action doesn't fire on
-        -- mouse down; the drag then consumes the action instead of a cast.
+        -- clear useOnKeyDown for the duration of that mouse click so the
+        -- action doesn't fire on mouse down: a drag then consumes the action
+        -- instead of casting, and a click without a drag casts on RELEASE.
+        -- This matches Blizzard's default buttons, which force useOnKeyDown
+        -- off for hardware mouse clicks (SecureTemplates.lua) and so act on
+        -- the up edge.
         -- MOUSE-ONLY via IsUnderMouse (rect test): keybinds ALSO arrive as
         -- OnClick (SetOverrideBindingClick dispatch for all bars), and a
-        -- modified KEYBIND press must cast normally. The old wrap flipped
-        -- useOnKeyDown=false for those too -- and the flip STUCK, because a
-        -- wrap's post-body only executes when the pre-body returns a message
-        -- (SecureHandlers.lua) and this pre returned none. Every button
-        -- pressed with the pickup modifier down was left casting on key
-        -- RELEASE until an out-of-combat rebuild rewrote the attribute:
-        -- issue #1165's delayed presses and late GCD swipes that begin mid
-        -- combat and persist for the rest of it. The pre now returns a
-        -- message exactly when it flips, and the post restores right after
-        -- the down-click handler, so nothing can stay flipped across clicks
-        -- -- the up-click of a mouse pickup then simply does not cast
-        -- (useOnKeyDown is back to true, and up-clicks never fire in
-        -- key-down mode), which is the intended pickup behavior.
+        -- modified KEYBIND press must cast on its configured edge.
+        -- The flip must SURVIVE to the up edge. The first version of this
+        -- wrap flipped for keybinds too and never restored, because a wrap's
+        -- post-body only executes when the pre-body returns a message
+        -- (SecureHandlers.lua) and that pre returned none -- issue #1165's
+        -- delayed presses and late GCD swipes. The next version restored
+        -- immediately after the DOWN click's handler, which broke the other
+        -- direction: the down edge was suppressed and the up edge never
+        -- fired (up-clicks are dead in key-down mode), so a shift-click cast
+        -- on neither edge. The pre now returns the message on the UP click,
+        -- so the restore lands after the release has cast.
+        -- The flip is tracked by its own attribute rather than inferred from
+        -- useOnKeyDown, because useOnKeyDown=false is also a legitimate user
+        -- setting (press-and-hold casting, ActionButtonUseKeyDown): the flag
+        -- keeps us from ever forcing those users' attribute back to true.
+        -- If the click ended in a drag, no up-click arrives and the flip is
+        -- left stale; the next down click clears it before the native
+        -- handler runs, so that press still acts on its configured edge.
         if not btn:GetAttribute("eabPickupWrap") and not InCombatLockdown() then
             btn:SetAttribute("eabPickupWrap", true)
             SecureHandlerWrapScript(btn, "OnClick", btn, [[
-                if down and IsModifiedClick("PICKUPACTION") and self:IsUnderMouse()
-                   and self:GetAttribute("useOnKeyDown") ~= false then
-                    self:SetAttribute("useOnKeyDown", false)
+                local flipped = self:GetAttribute("eabPickupFlipped")
+                if down then
+                    if IsModifiedClick("PICKUPACTION") and self:IsUnderMouse() then
+                        if self:GetAttribute("useOnKeyDown") ~= false then
+                            self:SetAttribute("eabPickupFlipped", true)
+                            self:SetAttribute("useOnKeyDown", false)
+                        end
+                    elseif flipped then
+                        self:SetAttribute("eabPickupFlipped", false)
+                        self:SetAttribute("useOnKeyDown", true)
+                    end
+                elseif flipped then
                     return nil, "restore"
                 end
             ]], [[
+                self:SetAttribute("eabPickupFlipped", false)
                 self:SetAttribute("useOnKeyDown", true)
             ]])
         end
