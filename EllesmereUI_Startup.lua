@@ -234,12 +234,15 @@ local function ApplyUnitNameFont()
     local name = fonts and fonts.unitNameFont
     if not name or name == "" then return end
     local path = fonts.unitNameFontPath
-    local ok = ProbeFont(path)
-    if not ok and EllesmereUI and EllesmereUI.ResolveFontName then
-        path = EllesmereUI.ResolveFontName(name)
-        ok = ProbeFont(path)
+    if not ProbeFont(path) and EllesmereUI and EllesmereUI.ResolveFontName then
+        -- Advisory probe (see ApplyCombatTextFont): a live resolve of the saved
+        -- name is better evidence than a probe that false-negatives on macOS
+        -- and Linux, so prefer it over dropping the setting back to Blizzard's
+        -- default.
+        local resolved = EllesmereUI.ResolveFontName(name)
+        if resolved and resolved ~= "" then path = resolved end
     end
-    if ok then
+    if path and path ~= "" then
         _G.UNIT_NAME_FONT = path
     end
 end
@@ -337,15 +340,38 @@ do
             -- The cache only counts if it was written for the currently
             -- saved key (fctFontPathFor pairs them).
             local cached = (db.fctFontPathFor == saved) and db.fctFontPath or nil
+            -- The probe is ADVISORY, never a veto. Reported on macOS and Linux
+            -- (8.7.8): it rejects paths that load correctly when applied, and
+            -- because a rejection both skipped the apply AND nil'd the cache
+            -- below, one false negative reverted the font permanently -- the
+            -- retry chain had nothing left to retry with.
+            --
+            -- LSM resolving the name RIGHT NOW proves the providing pack is
+            -- installed, which is better evidence than the probe, so a fetched
+            -- path is used even if the probe dislikes it. The cache is only
+            -- consulted when nothing resolves, which is the uninstalled-pack
+            -- case the probe was added for, and there the probe still guards
+            -- against pointing the engine at a missing file.
             fontPath = (ProbeFont(fetched) and fetched)
-                or (ProbeFont(cached) and cached) or nil
-            db.fctFontPath = fontPath
-            db.fctFontPathFor = fontPath and saved or nil
+                or (ProbeFont(cached) and cached)
+                or fetched
+            -- Only ever WRITE a path we actually have. Never nil the cache: an
+            -- early pass runs before external font packs load, and the later
+            -- ADDON_LOADED / PLAYER_LOGIN / PLAYER_ENTERING_WORLD passes need
+            -- the cached path to still be there to succeed with.
+            if fontPath then
+                db.fctFontPath = fontPath
+                db.fctFontPathFor = saved
+            end
             if not fontPath then return end
         end
         _G.DAMAGE_TEXT_FONT = fontPath
         if _G.CombatTextFont then
-            _G.CombatTextFont:SetFont(fontPath, 120, "")
+            -- SetFont is RequiresValidFontAsset, so it RAISES on a bad path.
+            -- This function is called at file scope, where an unhandled error
+            -- would abort the rest of this file, and the path above is no
+            -- longer probe-guaranteed.
+            pcall(_G.CombatTextFont.SetFont, _G.CombatTextFont, fontPath, 120, "")
         end
     end
 
