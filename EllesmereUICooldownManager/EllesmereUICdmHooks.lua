@@ -1880,11 +1880,21 @@ local function EvalZeroChargeTextFrame(frame, fd)
     -- write, no comparison, correct for every charge wiring (see the block
     -- header). Secret count (instanced combat): same write, memo dirtied.
     local cc = ci.currentCharges
-    if cc == nil then
-        ZctSetAlpha(fd, fs, 1)
-    elseif issecretvalue and issecretvalue(cc) then
+    -- issecretvalue FIRST, and type() rather than == nil for the missing case.
+    -- currentCharges is secret whenever cooldowns are restricted (combat,
+    -- encounter, challenge mode, PvP match), and comparing a secret to nil is
+    -- the exact operation this addon's own secret rules forbid. Ordering the
+    -- nil "belt" ahead of the guard made the belt the hazard: a throw here
+    -- aborts the eval with the alpha still 0, so the counter stays HIDDEN until
+    -- the next SPELL_UPDATE_CHARGES -- which for a charge spell that just
+    -- refilled is a whole recharge away. That is the reported "0 -> 1 hides the
+    -- stack count temporarily". The throw also kills the pairs() loop in the
+    -- event handler, so every other watched icon stops updating with it.
+    if issecretvalue and issecretvalue(cc) then
         fd._zctAlpha = nil
         fs:SetAlpha(cc)
+    elseif type(cc) ~= "number" then
+        ZctSetAlpha(fd, fs, 1)
     else
         ZctSetAlpha(fd, fs, cc > 1 and 1 or cc)
     end

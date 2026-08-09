@@ -86,23 +86,26 @@ ns._EABZeroCountAlpha = function(fd, fs, v, action)
         local mc = ci and ci.maxCharges
         if mc ~= nil and not (issecretvalue and issecretvalue(mc)) and mc > 1 then
             local cc = ci.currentCharges
-            if cc == nil then
-                -- Struct field is non-nilable by contract; belt anyway so a
-                -- missing read can never strand a hidden count.
+            -- issecretvalue FIRST, and type() rather than == nil for the missing
+            -- case. The count is secret whenever cooldowns are restricted, and
+            -- comparing a secret to nil is the operation our own secret rules
+            -- forbid -- so ordering the nil "belt" ahead of the guard made the
+            -- belt the hazard, and a throw strands the count HIDDEN rather than
+            -- protecting it. Same defect and same fix as the CDM counterpart in
+            -- EllesmereUICdmHooks (EvalZeroChargeTextFrame).
+            if issecretvalue and issecretvalue(cc) then
+                fd._zeroCountAlpha = nil
+                fs:SetAlpha(cc)
+            elseif type(cc) ~= "number" then
                 if fd._zeroCountAlpha ~= 1 then
                     fd._zeroCountAlpha = 1
                     fs:SetAlpha(1)
                 end
             else
-                if issecretvalue and issecretvalue(cc) then
-                    fd._zeroCountAlpha = nil
-                    fs:SetAlpha(cc)
-                else
-                    a = cc > 1 and 1 or cc
-                    if fd._zeroCountAlpha ~= a then
-                        fd._zeroCountAlpha = a
-                        fs:SetAlpha(a)
-                    end
+                a = cc > 1 and 1 or cc
+                if fd._zeroCountAlpha ~= a then
+                    fd._zeroCountAlpha = a
+                    fs:SetAlpha(a)
                 end
             end
             return
