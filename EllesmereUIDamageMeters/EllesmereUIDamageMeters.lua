@@ -418,6 +418,14 @@ local _inEncounter = false       -- true between ENCOUNTER_START and ENCOUNTER_E
 local _playerGUID
 local _windows = {}  -- array of active window tables
 ns._windows = _windows
+
+-- Bumped whenever a build of the windows starts or _EDM_Apply() supersedes one. The
+-- login build is staggered across frames, so a rebuild arriving while it is still in
+-- flight would otherwise let the pending steps assign _windows[i] over entries the
+-- rebuild had just created -- abandoning those frames while they stay parented and
+-- visible. A staggered step checks this before doing any work and drops out if a newer
+-- build has taken over.
+local _buildGen = 0
 ns._DM_TYPE_NAMES = DM_TYPE_NAMES
 
 -------------------------------------------------------------------------------
@@ -5242,7 +5250,12 @@ initFrame:SetScript("OnEvent", function(self)
     cfg.windowCount = winCount
     for i = winCount + 1, MAX_WINDOWS do cfg.windows[i] = nil end
     local winIdx = 0
+    _buildGen = _buildGen + 1
+    local myBuildGen = _buildGen
     local function CreateNextWindow()
+        -- A rebuild has superseded this staggered build; carrying on would overwrite the
+        -- windows it created and leave those frames orphaned but visible.
+        if myBuildGen ~= _buildGen then return end
         winIdx = winIdx + 1
         if winIdx > winCount then
             -- All windows exist: register them with the core unlock mode system
@@ -5263,6 +5276,9 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Profile swap rebuild: tear down all windows and recreate from new profile
     _G._EDM_Apply = function()
+        -- Supersede any staggered build still in flight, so its remaining steps do not
+        -- assign over the windows created below and orphan them
+        _buildGen = _buildGen + 1
         -- Destroy existing windows (frame cleanup only, don't touch DB)
         for i = #_windows, 1, -1 do
             local w = _windows[i]
@@ -5299,10 +5315,15 @@ initFrame:SetScript("OnEvent", function(self)
         ns.RegisterDMUnlock()
         -- Recreate standalone timer if enabled
         if c.standaloneTimer then CreateSATimer() end
+        -- Pre-create tooltip frame so first hover doesn't pay creation cost. This and the
+        -- ticker below are the staggered build's closing steps, repeated here because
+        -- this rebuild may have superseded that build before it reached them.
+        EnsureTooltipFrame()
         -- Update tooltip scale
         if _ttFrame then
             local sc = (c.hoverTooltipScale or 100) / 100
             _ttFrame:SetScale(sc)
         end
+        if _inCombat and not _sharedTicker then StartSharedTicker() end
     end
 end)
