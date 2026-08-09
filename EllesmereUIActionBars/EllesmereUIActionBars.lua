@@ -86,23 +86,26 @@ ns._EABZeroCountAlpha = function(fd, fs, v, action)
         local mc = ci and ci.maxCharges
         if mc ~= nil and not (issecretvalue and issecretvalue(mc)) and mc > 1 then
             local cc = ci.currentCharges
-            if cc == nil then
-                -- Struct field is non-nilable by contract; belt anyway so a
-                -- missing read can never strand a hidden count.
+            -- issecretvalue FIRST, and type() rather than == nil for the missing
+            -- case. The count is secret whenever cooldowns are restricted, and
+            -- comparing a secret to nil is the operation our own secret rules
+            -- forbid -- so ordering the nil "belt" ahead of the guard made the
+            -- belt the hazard, and a throw strands the count HIDDEN rather than
+            -- protecting it. Same defect and same fix as the CDM counterpart in
+            -- EllesmereUICdmHooks (EvalZeroChargeTextFrame).
+            if issecretvalue and issecretvalue(cc) then
+                fd._zeroCountAlpha = nil
+                fs:SetAlpha(cc)
+            elseif type(cc) ~= "number" then
                 if fd._zeroCountAlpha ~= 1 then
                     fd._zeroCountAlpha = 1
                     fs:SetAlpha(1)
                 end
             else
-                if issecretvalue and issecretvalue(cc) then
-                    fd._zeroCountAlpha = nil
-                    fs:SetAlpha(cc)
-                else
-                    a = cc > 1 and 1 or cc
-                    if fd._zeroCountAlpha ~= a then
-                        fd._zeroCountAlpha = a
-                        fs:SetAlpha(a)
-                    end
+                a = cc > 1 and 1 or cc
+                if fd._zeroCountAlpha ~= a then
+                    fd._zeroCountAlpha = a
+                    fs:SetAlpha(a)
                 end
             end
             return
@@ -2067,32 +2070,46 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
             end)
         end
         -- When the pickup modifier is held (shift-click to move abilities),
-        -- temporarily disable useOnKeyDown so the action doesn't fire on
-        -- mouse down; the drag then consumes the action instead of a cast.
+        -- clear useOnKeyDown for the duration of that mouse click: the down
+        -- edge never casts (a drag consumes the action instead), and a click
+        -- without a drag casts on RELEASE -- matching Blizzard's buttons,
+        -- which force useOnKeyDown off for hardware mouse clicks
+        -- (SecureTemplates.lua) and so act on the up edge.
         -- MOUSE-ONLY via IsUnderMouse (rect test): keybinds ALSO arrive as
         -- OnClick (SetOverrideBindingClick dispatch for all bars), and a
-        -- modified KEYBIND press must cast normally. The old wrap flipped
-        -- useOnKeyDown=false for those too -- and the flip STUCK, because a
-        -- wrap's post-body only executes when the pre-body returns a message
-        -- (SecureHandlers.lua) and this pre returned none. Every button
-        -- pressed with the pickup modifier down was left casting on key
-        -- RELEASE until an out-of-combat rebuild rewrote the attribute:
-        -- issue #1165's delayed presses and late GCD swipes that begin mid
-        -- combat and persist for the rest of it. The pre now returns a
-        -- message exactly when it flips, and the post restores right after
-        -- the down-click handler, so nothing can stay flipped across clicks
-        -- -- the up-click of a mouse pickup then simply does not cast
-        -- (useOnKeyDown is back to true, and up-clicks never fire in
-        -- key-down mode), which is the intended pickup behavior.
+        -- modified KEYBIND press must cast on its configured edge.
+        -- The pre-body must return its message on the UP click and ONLY
+        -- there: a wrap's post-body only executes when the pre returns a
+        -- message (SecureHandlers.lua), so no message = the flip sticks
+        -- (#1165's delayed presses / late GCD swipes), and a DOWN-edge
+        -- message = the restore lands before the release and a shift-click
+        -- casts on neither edge. Both shapes shipped and failed; keep the
+        -- message on the up edge.
+        -- eabPickupFlipped marks OUR flip: useOnKeyDown=false is also a
+        -- legitimate user setting (press-and-hold casting), and the flag
+        -- keeps the restore from ever forcing those users back to true.
+        -- A drag consumes the up edge and strands the flip; the next down
+        -- click (mouse or keybind) clears it BEFORE the native handler
+        -- runs, so that press still acts on its configured edge.
         if not btn:GetAttribute("eabPickupWrap") and not InCombatLockdown() then
             btn:SetAttribute("eabPickupWrap", true)
             SecureHandlerWrapScript(btn, "OnClick", btn, [[
-                if down and IsModifiedClick("PICKUPACTION") and self:IsUnderMouse()
-                   and self:GetAttribute("useOnKeyDown") ~= false then
-                    self:SetAttribute("useOnKeyDown", false)
+                local flipped = self:GetAttribute("eabPickupFlipped")
+                if down then
+                    if IsModifiedClick("PICKUPACTION") and self:IsUnderMouse() then
+                        if self:GetAttribute("useOnKeyDown") ~= false then
+                            self:SetAttribute("eabPickupFlipped", true)
+                            self:SetAttribute("useOnKeyDown", false)
+                        end
+                    elseif flipped then
+                        self:SetAttribute("eabPickupFlipped", false)
+                        self:SetAttribute("useOnKeyDown", true)
+                    end
+                elseif flipped then
                     return nil, "restore"
                 end
             ]], [[
+                self:SetAttribute("eabPickupFlipped", false)
                 self:SetAttribute("useOnKeyDown", true)
             ]])
         end
@@ -2110,9 +2127,13 @@ end
 
 local NUM_AB_PAGES = NUM_ACTIONBAR_PAGES or 6
 
--- Hybrid keybind routing: empower spells use SetOverrideBindingClick so our
--- buttons' pressAndHoldAction/typerelease handle hold-and-release. Non-empower
--- spells use SetOverrideBinding to native commands for press-and-hold repeat.
+-- Keybind routing: every standard-bar slot -- INCLUDING empowered spells --
+-- binds to native commands, where the engine pairs press and release against
+-- the physical key (hold-and-release, hold-to-cast repeat and queued empowers
+-- are all engine-owned there). Only custom-paged bars and the custom bars
+-- (no native command exists) route keys through the button via
+-- SetOverrideBindingClick. pressAndHoldAction/typerelease stay maintained on
+-- the buttons for MOUSE clicks on empowered slots.
 
 -- Safe API wrappers: 12.0.5 may move these globals to C_ActionBar.
 -- Stored on EAB_VTABLE to avoid 200-local Lua 5.1 limit.
@@ -2555,8 +2576,10 @@ ns.LayoutPagingFrame = LayoutPagingFrame
 -- scrubbing wrapper, RestrictedEnvironment.lua).
 -- Stored on ns (not a file local) to stay clear of Lua's 200-local chunk cap.
 --
--- Writes pressAndHoldAction ONLY, exactly like Blizzard's own
--- UpdatePressAndHoldAction. It must NOT touch typerelease: Blizzard sets that
+-- Writes pressAndHoldAction ONLY (like Blizzard's own
+-- UpdatePressAndHoldAction), and only on a POSITIVE identity read: a slot
+-- whose identity is unreadable at snippet time KEEPS its current value --
+-- see the decision trailer inside. It must NOT touch typerelease: Blizzard sets that
 -- to "actionrelease" once in the button mixin's OnLoad and never clears it,
 -- and SecureTemplates reads it on EVERY key release when the
 -- ActionButtonUseKeyHeldSpell CVar is on, not just for empowered spells
@@ -2567,6 +2590,9 @@ ns.LayoutPagingFrame = LayoutPagingFrame
 -- re-check trigger was wired to an _onattributechanged handler that
 -- SecureHandlerStateTemplate does not implement. Fixing the trigger made this
 -- snippet live addon-wide, so the clear had to go with it.
+-- (2026-08-09: a [channeling]-gated typerelease disarm was field-tested here
+-- against the rank-1 queued-release latch and REVERTED -- it did not stop the
+-- early release. Do not re-attempt that shape without new field data.)
 ns._eabEmpowerSnippet = [[
     local slot = self:GetAttribute('action')
     if slot and IsPressHoldReleaseSpell then
@@ -2577,13 +2603,32 @@ ns._eabEmpowerSnippet = [[
         elseif actionType == 'macro' and subType == 'spell' then
             spellID = id
         end
-        if spellID and IsPressHoldReleaseSpell(spellID) then
-            self:SetAttribute('pressAndHoldAction', true)
-        else
+        if spellID then
+            if IsPressHoldReleaseSpell(spellID) then
+                self:SetAttribute('pressAndHoldAction', true)
+            else
+                self:SetAttribute('pressAndHoldAction', false)
+            end
+        elseif actionType and actionType ~= 'spell' and actionType ~= 'macro' then
             self:SetAttribute('pressAndHoldAction', false)
         end
     end
 ]]
+-- Decision trailer for the snippet above: a readable spell identity decides
+-- true/false exactly as before, and a positively non-spell action (item,
+-- companion, ...) is never hold-release. EVERYTHING ELSE -- an empty slot, a
+-- scrubbed in-combat read, or a macro not currently resolving to a spell
+-- (mouseover macros flip constantly) -- KEEPS the current attribute. This
+-- snippet runs SECURELY during combat page swaps (bonusbar/override flips in
+-- encounters), where the restricted GetActionInfo read cannot be trusted to
+-- see the spell: writing false there stripped hold-release from empowered
+-- slots mid-fight, which presents as the Empowered Spell Input setting
+-- flipping to Press-and-Tap. A stale TRUE on the other hand is inert: the
+-- key-up actionrelease it allows is the same no-op every
+-- Press-and-Hold-Casting key-up already fires on non-empower actions, and
+-- native-routed keys never reach the button at all. The out-of-combat
+-- re-checks (pass 3 of UpdateKeybinds, the combat-drop re-assert) correct
+-- any kept value as soon as identity is readable again.
 
 -- Build the _childupdate-eab-page snippet for a button at the given 1-based bar
 -- index. On a page change: action = baseIndex + (page-1)*12, then re-check
@@ -3306,13 +3351,22 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
     if not action then return end
     local icon = btn.icon or btn.Icon
     if icon then
-        icon:SetTexture(GetActionTexture(action))
+        -- Stamp the icon texture-delta memo with what we actually paint:
+        -- ns._cdIconHeal skips its repaint when the memo equals the live
+        -- texture, so the memo must always match what is ON the icon. A
+        -- spell override can resolve late (zone in/out on a hero talent),
+        -- making this paint the BASE texture; left unstamped, the memo
+        -- diverges and the SPELL_UPDATE_ICON heal wrong-skips the repaint.
+        local tex = GetActionTexture(action)
+        icon:SetTexture(tex)
+        EFD(btn).lastIconTex = tex
         -- The mixin's Update() HIDES the icon region for empty slots and only
         -- re-Shows it in its filled branch. A slot that was empty before this
         -- content change still has a hidden icon region, so painting the new
         -- texture alone renders nothing (spec swap: spells invisible until a
-        -- hover ran Blizzard's secure Update). Gate on HasAction -- a clean
-        -- boolean -- never on the texture value, which can be secret.
+        -- hover ran Blizzard's secure Update). Gate on HasAction -- the
+        -- slot-filled boolean is the question being asked (the texture
+        -- fileID is never secret, per the API docs on every client).
         icon:SetShown(HasAction(action))
         -- Saturated baseline on every content change: desaturation is
         -- otherwise event/hover-managed and survives the slot being emptied,
@@ -3549,11 +3603,11 @@ do
     -- `return` and drop the update on the floor with NOTHING to re-arm it --
     -- ACTIONBAR_SLOT_CHANGED had already fired and would not fire again, and
     -- the only other UpdateKeybinds callers are load-time, house-editor-close
-    -- and the vehicle/housing handler. So a slot change during a fight could
-    -- leave an empowered spell routed to its native binding, with no
-    -- pressAndHoldAction/typerelease, which presents as the Empowered Spell
-    -- Input setting having flipped from Hold and Release to Press and Tap, and
-    -- it persisted until something unrelated happened to rebuild.
+    -- and the vehicle/housing handler. A dropped rebuild left routing and
+    -- attr state stale until something unrelated happened to rebuild.
+    -- (Historical note: this comment once blamed native routing for
+    -- press-and-tap empower behaviour; superseded 2026-08-09 -- empower keys
+    -- are native by design now.)
     -- Both sibling paths (the UPDATE_BINDINGS handler and ApplyKeyDownCVar)
     -- already defer to PLAYER_REGEN_ENABLED; this now matches them.
     local _empowerDeferFrame
@@ -3562,36 +3616,105 @@ do
         _dispatcherSetup = true
         local dispatcher = ns.TakeShell()
         ns._cdDispatcher = dispatcher
-        -- Desaturation curves: secret-safe duration -> 0/1 via EvaluateRemainingDuration,
-        -- so we never compare secret cooldown/charge numbers ourselves.
-        --   desatCurveAny  : 1 for any active cooldown (normal spells; GCD filtered via isOnGCD)
-        --   desatCurveReal : 1 only when the cooldown is longer than the GCD. Used for charge
-        --                    spells -- a banked charge shows only a GCD-length cooldown on the
-        --                    main cooldown so it stays colored; at 0 charges the longer recharge
-        --                    drives the main cooldown and it desaturates.
-        local desatCurveAny, desatCurveReal
+        -- Cooldown-vs-GCD classification for the desaturate and on-CD-alpha
+        -- channels. Both ask the same question -- is this button on a REAL
+        -- cooldown, or only on the global cooldown? -- and both must answer it
+        -- without reading a secret number.
+        --
+        -- Why not cdInfo.isOnGCD alone: the API docs say that field is only
+        -- trustworthy while responding to SPELL_UPDATE_COOLDOWN, and these
+        -- visuals repaint from a dozen other places (the cast kick, the press
+        -- hot lane, the charge branch, the hover and OnCooldownDone hooks, the
+        -- options apply). One stale isOnGCD=false there dimmed every plain
+        -- spell on the bar for the length of a GCD -- reported 8.7.7 as random
+        -- alpha on cast, and the desaturate channel had the same defect. So the
+        -- verdict comes from the cooldown's TOTAL duration instead, compared
+        -- engine-side against the live GCD length by a Step curve: at or below
+        -- the GCD the icon keeps its ready look, above it the on-cooldown look
+        -- applies. The total never decays, so the verdict holds for the whole
+        -- life of the cooldown (see RefreshCooldownVisuals for why the
+        -- REMAINING duration cannot carry it).
+        --
+        -- GCD length comes from UnitSpellHaste, which is itself secret in
+        -- instanced combat, so a secret read falls back to the unhasted 1.5s
+        -- (same treatment as ns.GCDTailAlpha in the Cooldown Manager). That
+        -- fallback and the 0.15s margin both push the threshold HIGH on
+        -- purpose: too high only means a sub-GCD cooldown keeps its ready look,
+        -- which is how Blizzard's own cooldown viewer treats those; too low
+        -- brings the bug back.
+        local _gcdStep, _gcdStepAt, _gcdStepHold
+        local function GcdStep()
+            local nowG = GetTime()
+            if _gcdStepAt ~= nowG then
+                -- GetTime is frame-constant, so the haste read below costs one
+                -- call per frame no matter how many buttons repaint in it.
+                _gcdStepAt = nowG
+                local haste = UnitSpellHaste and UnitSpellHaste("player") or 0
+                if (issecretvalue and issecretvalue(haste)) or type(haste) ~= "number" then
+                    haste = 0
+                end
+                local len = 1.5 / (1 + haste / 100)
+                if len < 0.75 then len = 0.75 end            -- engine floor
+                -- Rounded to a 0.05 grid so continuous haste drift does not
+                -- rebuild the curves every frame.
+                local step = floor((len + 0.15) * 20 + 0.5) / 20
+                -- The threshold tracks haste NOW, but a running cooldown's
+                -- TOTAL was fixed by the haste in force when it started. A
+                -- haste GAIN mid-GCD (Bloodlust, a large proc) shortens the
+                -- GCD, and an unlatched threshold would drop below the total
+                -- already recorded for the GCD in flight -- dimming the whole
+                -- bar until it expired, which is the defect this whole
+                -- classification exists to remove. So the step rises at once
+                -- (always the safe direction) and only falls after a hold
+                -- longer than any GCD it could still be measuring. The cost of
+                -- the hold is that a real cooldown inside the old and new
+                -- thresholds keeps its ready look for up to 2s.
+                if not _gcdStep or step >= _gcdStep or nowG >= (_gcdStepHold or 0) then
+                    _gcdStep = step
+                    _gcdStepHold = nowG + 2
+                end
+            end
+            return _gcdStep
+        end
+        -- Fallback curve for clients with no EvaluateTotalDuration: 1 for any
+        -- active cooldown. The GCD threshold cannot ride the REMAINING duration
+        -- -- remaining decays into the threshold and restores the icon a GCD
+        -- early -- so that path keeps this any-cooldown step and leans on
+        -- isOnGCD the way it did before the total-duration classification.
+        local desatCurveAny
         if C_CurveUtil and C_CurveUtil.CreateCurve then
             desatCurveAny = C_CurveUtil.CreateCurve()
             desatCurveAny:SetType(Enum.LuaCurveType.Step)
             desatCurveAny:AddPoint(0, 0)
             desatCurveAny:AddPoint(0.001, 1)
-            desatCurveReal = C_CurveUtil.CreateCurve()
-            desatCurveReal:SetType(Enum.LuaCurveType.Step)
-            desatCurveReal:AddPoint(0, 0)
-            desatCurveReal:AddPoint(1.6, 1)
         end
-        -- On-CD alpha curve for charge spells / items: keyed on TOTAL
-        -- duration like desatCurveReal (GCD-length cooldown = full alpha,
-        -- real cooldown = the user's dim value). Rebuilt only when the
-        -- user's alpha setting changes.
-        local cdAlphaCurve, cdAlphaCurveFor
+        -- Desaturation curve: 0 up to the GCD length, 1 above it. Rebuilt only
+        -- when the player's GCD length changes.
+        local desatCurve, desatCurveStep
+        local function GetDesatCurve()
+            local step = GcdStep()
+            if desatCurveStep ~= step and C_CurveUtil and C_CurveUtil.CreateCurve then
+                desatCurve = C_CurveUtil.CreateCurve()
+                desatCurve:SetType(Enum.LuaCurveType.Step)
+                desatCurve:AddPoint(0, 0)
+                desatCurve:AddPoint(step, 1)
+                desatCurveStep = step
+            end
+            return desatCurve
+        end
+        -- On-CD alpha curve: full alpha up to the GCD length, the user's dim
+        -- value above it. Rebuilt when the alpha setting or the GCD changes.
+        local cdAlphaCurve, cdAlphaCurveFor, cdAlphaCurveStep
         local function GetCdAlphaCurve(cdAlpha)
-            if cdAlphaCurveFor ~= cdAlpha and C_CurveUtil and C_CurveUtil.CreateCurve then
+            local step = GcdStep()
+            if (cdAlphaCurveFor ~= cdAlpha or cdAlphaCurveStep ~= step)
+               and C_CurveUtil and C_CurveUtil.CreateCurve then
                 cdAlphaCurve = C_CurveUtil.CreateCurve()
                 cdAlphaCurve:SetType(Enum.LuaCurveType.Step)
                 cdAlphaCurve:AddPoint(0, 1)
-                cdAlphaCurve:AddPoint(1.6, cdAlpha / 100)
+                cdAlphaCurve:AddPoint(step, cdAlpha / 100)
                 cdAlphaCurveFor = cdAlpha
+                cdAlphaCurveStep = step
             end
             return cdAlphaCurve
         end
@@ -3600,14 +3723,14 @@ do
         -- absent) and from each button's OnCooldownDone edge + the infrequent
         -- full-update path (nil = fetched fresh here). Early-outs before any
         -- API call when both features are off.
-        -- Why TOTAL duration for charge spells and items: the desat/alpha
-        -- writes are static, and the old code evaluated the 1.6s "real
-        -- cooldown" step against the REMAINING duration -- correct at
-        -- cooldown start, but any cooldown event landing in the final 1.6s
-        -- (in combat every cast fires one) read 0 and re-saturated the icon
-        -- early. The TOTAL duration never decays, so the classification
-        -- holds for the cooldown's entire life; the OnCooldownDone edge then
-        -- restores the icon the moment the cooldown actually completes.
+        -- Why TOTAL duration and never REMAINING: the desat/alpha writes are
+        -- static between repaints, and an earlier version evaluated the step
+        -- against the REMAINING duration -- correct at cooldown start, but any
+        -- cooldown event landing inside the step window (in combat every cast
+        -- fires one) read below the threshold and restored the icon early. The
+        -- TOTAL duration never decays, so the classification holds for the
+        -- cooldown's entire life; the OnCooldownDone edge then restores the
+        -- icon the moment the cooldown actually completes.
         local function RefreshCooldownVisuals(btn, action, cdInfo, durObj, chargeInfo)
             local desatOn = EAB.db.profile.desaturateOnCooldown
             local cdAlpha = EAB.db.profile.alphaWhenOnCD or 100
@@ -3633,35 +3756,37 @@ do
                 useRealCurve = true
             end
             local active = cdInfo and cdInfo.isActive and durObj
+            -- A GCD must never classify a button as being on cooldown, for
+            -- either channel. The GCD-length Step curve above answers that from
+            -- the TOTAL duration, which is the same value for the cooldown's
+            -- whole life -- so a plain spell that only carries a GCD stays
+            -- ready-looking no matter which repaint path arrives, and a real
+            -- cooldown keeps its on-cooldown look down to its last tick.
+            --
+            -- The charge/item branch keeps the extra isOnGCD guard. For those,
+            -- the engine hands back a duration object whose total is the
+            -- RECHARGE PERIOD (20s on Arcane Orb) even while charges are
+            -- banked, so the threshold on its own would grey a spell sitting at
+            -- FULL charges on every cast. A stale isOnGCD there can only fail
+            -- toward the threshold, which then rejects the GCD anyway.
             if desatOn then
                 local val = 0
                 if active then
-                    -- A GCD must never classify a charge spell or item as being
-                    -- on cooldown. The 1.6s step was meant to filter the GCD out
-                    -- on its own, but it tests the TOTAL duration of whatever
-                    -- object the engine hands back, and for a charge spell that
-                    -- is the RECHARGE PERIOD (20s on Arcane Orb) even while
-                    -- charges are banked -- so every GCD greyed a spell sitting
-                    -- at FULL charges, flashing back to colour only in the gaps
-                    -- between casts. The non-charge branch below always had this
-                    -- guard; the charge/item branch never did.
-                    -- isOnGCD separates the cases cleanly, measured in game:
-                    -- 0 charges -> isActive=true isOnGCD=false dur=27 (desaturate),
-                    -- banked charge mid-GCD -> isActive=true isOnGCD=true dur=1.05.
-                    -- One guard for BOTH classes, hoisted: a GCD is never a
-                    -- cooldown for these purposes.
-                    if not cdInfo.isOnGCD then
-                        if useRealCurve then
-                            if durObj.EvaluateTotalDuration and desatCurveReal then
-                                val = durObj:EvaluateTotalDuration(desatCurveReal, 0)
-                            elseif durObj.EvaluateRemainingDuration and desatCurveReal then
-                                -- Client without the total evaluator: remaining is
-                                -- start-accurate and the Done edge fixes the tail.
-                                val = durObj:EvaluateRemainingDuration(desatCurveReal, 0)
-                            end
-                        elseif durObj.EvaluateRemainingDuration and desatCurveAny then
-                            val = durObj:EvaluateRemainingDuration(desatCurveAny, 0)
+                    local curve = GetDesatCurve()
+                    if curve and durObj.EvaluateTotalDuration then
+                        if not useRealCurve or not cdInfo.isOnGCD then
+                            val = durObj:EvaluateTotalDuration(curve, 0)
                         end
+                    elseif durObj.EvaluateRemainingDuration and not cdInfo.isOnGCD then
+                        -- Client without the total evaluator. Charge spells and
+                        -- items keep the GCD-length step (remaining is
+                        -- start-accurate and the Done edge fixes the tail);
+                        -- plain spells take the any-cooldown step, which has no
+                        -- tail to lose. Both leaned on isOnGCD before this
+                        -- change and still do -- there is no threshold that
+                        -- works against a decaying duration.
+                        local rc = useRealCurve and curve or desatCurveAny
+                        if rc then val = durObj:EvaluateRemainingDuration(rc, 0) end
                     end
                 end
                 -- val may be SECRET: never compare it; SetDesaturation
@@ -3669,31 +3794,25 @@ do
                 icon:SetDesaturation(val or 0)
             end
             if alphaOn then
+                local alphaSet = false
                 if active then
-                    if useRealCurve and not cdInfo.isOnGCD and durObj.EvaluateTotalDuration then
-                        -- Same total-duration classification as desat, and the
-                        -- same isOnGCD guard for the same reason: the total is
-                        -- the RECHARGE PERIOD for a charge spell, so the 1.6s
-                        -- step alone does not filter out the GCD and a spell at
-                        -- full charges dimmed on every cast. (The old comment
-                        -- here claimed the threshold handled that; it does not.)
-                        local curve = GetCdAlphaCurve(cdAlpha)
-                        if curve then
+                    local curve = GetCdAlphaCurve(cdAlpha)
+                    if curve and durObj.EvaluateTotalDuration then
+                        if not useRealCurve or not cdInfo.isOnGCD then
                             icon:SetAlpha(durObj:EvaluateTotalDuration(curve, 1) or 1)
-                        else
-                            icon:SetAlpha(1)
+                            alphaSet = true
                         end
                     elseif icon.SetAlphaFromBoolean and durObj.IsZero
                        and not cdInfo.isOnGCD then
-                        -- IsZero() is a secret boolean; SetAlphaFromBoolean
-                        -- consumes it without any Lua comparison.
+                        -- Client without the total evaluator. IsZero() is a
+                        -- secret boolean; SetAlphaFromBoolean consumes it
+                        -- without any Lua comparison. This path has no GCD
+                        -- threshold, so it leans on isOnGCD as before.
                         icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
-                    else
-                        icon:SetAlpha(1)
+                        alphaSet = true
                     end
-                else
-                    icon:SetAlpha(1)
                 end
+                if not alphaSet then icon:SetAlpha(1) end
             end
         end
         -- Exposed for the per-button OnCooldownDone edge hooks (installed at
@@ -4065,11 +4184,14 @@ do
         -- Shared per-button icon heal (texture-delta memo). The texture
         -- fileID is the override's visible fingerprint (never secret, per
         -- the API docs), so only buttons whose texture actually changed pay
-        -- the mixin path. The memo is write-behind everywhere else on
-        -- purpose: paths that paint the icon without stamping it
-        -- (ForceButtonRefresh, the infrequent walk's UpdateAction) always
-        -- paint the CURRENT texture, so a stale memo can only cause one
-        -- redundant repaint here -- never a wrong skip. Used by the full
+        -- the mixin path. INVARIANT: the memo must equal what is ON the icon,
+        -- so every path that paints the ACTION's texture stamps it too
+        -- (ForceButtonRefresh) -- a late-resolving override means an
+        -- unstamped paint CAN differ from the memo, and a diverged memo
+        -- turns this heal's skip into a wrong skip. The assist painters are
+        -- the deliberate exception -- they paint the SUGGESTED spell's
+        -- texture, not the action's, and stamping that would make this heal
+        -- clobber them. Used by the full
         -- walk below and by the payload-targeted SPELL_UPDATE_ICON fast
         -- path in the dispatcher prologue; ns-hosted (200-local cap).
         ns._cdIconHeal = function(btn)
@@ -7574,6 +7696,13 @@ function EAB:ApplyCDAlphaAll()
     local pdb = self.db and self.db.profile
     local cdAlpha = (pdb and pdb.alphaWhenOnCD) or 100
     local on = cdAlpha ~= 100
+    -- This used to carry its own copy of the on-cooldown test, and the copy
+    -- drifted: it treated ANY charge spell as being on a real cooldown, so
+    -- touching the slider (or any full apply) during a GCD dimmed every charge
+    -- spell sitting at full charges. Delegate to the live classifier instead,
+    -- which owns the GCD threshold and the charge rules in one place. Restore
+    -- to full alpha first so setting the slider back to 100 -- and every button
+    -- the classifier declines to dim -- lands on a clean icon.
     for _, info in ipairs(BAR_CONFIG) do
         if not info.isStance and not info.isPetBar then
             local btns = barButtons[info.key]
@@ -7581,30 +7710,10 @@ function EAB:ApplyCDAlphaAll()
                 for _, btn in ipairs(btns) do
                     local icon = btn and btn.icon
                     if icon then
-                        local applied = false
-                        if on then
-                            local action = btn:GetAttribute("action")
-                            if action and HasAction(action) and icon.SetAlphaFromBoolean then
-                                local cdInfo = C_ActionBar.GetActionCooldown(action)
-                                if cdInfo and cdInfo.isActive then
-                                    local durObj = C_ActionBar.GetActionCooldownDuration(action)
-                                    if durObj and durObj.IsZero then
-                                        -- Secret-safe: never compare the remaining duration; feed
-                                        -- IsZero() into SetAlphaFromBoolean. Same real-CD gating as
-                                        -- the live handler (GCD excluded for plain spells).
-                                        local chargeInfo = C_ActionBar.GetActionCharges(action)
-                                        local realCd = (chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1)
-                                            or (GetActionInfo(action) == "item")
-                                            or (not cdInfo.isOnGCD)
-                                        if realCd then
-                                            icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
-                                            applied = true
-                                        end
-                                    end
-                                end
-                            end
+                        icon:SetAlpha(1)
+                        if on and EAB._RefreshCooldownVisuals then
+                            EAB._RefreshCooldownVisuals(btn)
                         end
-                        if not applied then icon:SetAlpha(1) end
                     end
                 end
             end
@@ -11152,10 +11261,16 @@ end
 
 -------------------------------------------------------------------------------
 --  Keybind System
---  Hybrid routing: empower/flyout slots use SetOverrideBindingClick so our
---  buttons' pressAndHoldAction/typerelease handle hold-and-release. All other
---  slots use SetOverrideBinding to native commands (ACTIONBUTTON1, etc.) so
---  the engine handles press-and-hold repeat casting natively.
+--  Keybind routing: ALL standard-bar slots (empowered spells included) bind
+--  to native commands (ACTIONBUTTON1, etc.) -- the engine pairs press/release
+--  against the physical key, which is the only queue-safe empower path. A
+--  click-routed key delivers stateless up/down clicks, and an up landing
+--  while an empower is still QUEUED files a release the engine honors the
+--  instant the cast starts (the rank-1 latch; typerelease-disarm gating was
+--  field-tested against it and failed -- the up is consumed as a second
+--  UseAction, not as a release attribute read). Click routing remains ONLY
+--  where native commands cannot express the slot: custom-paged bars and
+--  Bar9/Bar10.
 -------------------------------------------------------------------------------
 local _bindState = { housingCleared = false }
 
@@ -11185,11 +11300,12 @@ local function UpdateKeybinds()
     -- build on the floor. The load-time apply is the caller that matters: it has
     -- no deferral of its own and assumes combat state is not yet restored, so
     -- logging in or reloading during combat left EVERY override binding
-    -- unapplied. Empower slots then sat on their native binding, where
-    -- pressAndHoldAction never engages, and the spell behaved exactly like
-    -- Press-and-Tap with the CVar untouched -- for the rest of the session,
-    -- because nothing re-ran this. A reload was the only cure, which is the
-    -- reported symptom.
+    -- unapplied. Custom-bound keys then sat dead and custom-paged routing sat
+    -- wrong for the rest of the session, because nothing re-ran this. A
+    -- reload was the only cure, which is the reported symptom. (A previous
+    -- version of this comment blamed native bindings for press-and-tap
+    -- empower behaviour; superseded 2026-08-09 -- empowers route native BY
+    -- DESIGN now, with hold-and-release engine-owned.)
     -- Re-arming here rather than at the call site covers every caller at once;
     -- the sibling paths that already defer simply arm this a second time, which
     -- is idempotent (RegisterEvent twice is one registration).
@@ -11242,6 +11358,7 @@ local function UpdateKeybinds()
     if not sig then sig = {}; _bindState.sig = sig end
     local n = 0
     local changed = not _bindState.sigValid
+    local anyPH = false
     for _, info in ipairs(BAR_CONFIG) do
         local prefix = BINDING_MAP[info.key]
         local btns = barButtons[info.key]
@@ -11284,12 +11401,13 @@ local function UpdateKeybinds()
                 if btn then
                     local cmd = prefix .. i
                     local k1, k2 = GetBindingKey(cmd)
-                    -- Empower spells need SetOverrideBindingClick so our
-                    -- button's pressAndHoldAction/typerelease handle the
-                    -- hold-and-release. Non-empower spells use native
-                    -- SetOverrideBinding for press-and-hold repeat casting --
-                    -- EXCEPT on custom-paged bars (see above), which must also
-                    -- route through the button so the keybind tracks the page.
+                    -- Routing is native for everything on standard bars,
+                    -- empowers included: the engine's keystate-paired
+                    -- hold-and-release is the only queue-safe empower path
+                    -- (stateless click routes latch queued releases at
+                    -- rank 1). Click routing exists ONLY where a native
+                    -- command cannot express the slot: custom-paged bars
+                    -- (see above) and the custom bars.
                     local slot = btn:GetAttribute("action")
                     -- Custom bars (Bar9/Bar10) have no native binding command, so
                     -- their keys MUST route through the button (SetOverrideBindingClick);
@@ -11299,21 +11417,17 @@ local function UpdateKeybinds()
                     -- empower snippet still needs a re-trigger when a slot's
                     -- press-and-hold state flips.
                     local isPH = SlotIsPH(slot)
-                    -- Page-proof routing: also consult the button's BASE slot.
-                    -- A click binding tracks the BUTTON, whose action attr
-                    -- re-pages SECURELY in combat, so a click-routed key
-                    -- survives any page swap with no rebind. Deriving isPH only
-                    -- from the CURRENT page meant mounting (skyriding page)
-                    -- rebuilt the empower keys to native; dismounting INTO
-                    -- combat then blocked the rebuild back, leaving empowered
-                    -- spells on native routes -- Press-and-Tap behaviour -- for
-                    -- the rest of the fight, or (before the combat re-arm) the
-                    -- session. Keeping the key click-routed when EITHER slot is
-                    -- empower-capable removes the rebind entirely; the cost is
-                    -- press-and-hold repeat on that key only while paged away
-                    -- from the empower slot. Guarded on the offsets table so
-                    -- Pet/Stance buttons (action attr nil) never alias into
-                    -- MainBar slots.
+                    -- Base-slot check: isPH no longer decides ROUTING (keys
+                    -- are native either way); it stays in the signature so
+                    -- pass 3 re-fires the attr re-check when a slot's
+                    -- press-and-hold state genuinely changes (mouse-click
+                    -- correctness), and it feeds the combat-drop re-assert
+                    -- gate. Consulting the BASE slot keeps the signature
+                    -- stable across page swaps -- deriving it from the
+                    -- CURRENT page only would rebuild ~200 bindings on every
+                    -- mount and dismount (skyriding page flips). Guarded on
+                    -- the offsets table so Pet/Stance buttons (action attr
+                    -- nil) never alias into MainBar slots.
                     if not isPH then
                         local off = BAR_SLOT_OFFSETS[info.key]
                         if off then
@@ -11323,7 +11437,10 @@ local function UpdateKeybinds()
                             end
                         end
                     end
-                    local useClick = isPH or barHasCustomPaging or (info.customPage ~= nil)
+                    if isPH then anyPH = true end
+                    -- isPH deliberately NOT part of the routing decision:
+                    -- empower keys must ride the native command.
+                    local useClick = barHasCustomPaging or (info.customPage ~= nil)
                     k1 = k1 or false
                     k2 = k2 or false
                     if sig[n + 1] ~= k1 or sig[n + 2] ~= k2
@@ -11337,6 +11454,10 @@ local function UpdateKeybinds()
         end
     end
     if _bindState.sigN ~= n then changed = true; _bindState.sigN = n end
+    -- Tracked on every full pass (even signature-unchanged ones) so the
+    -- combat-drop attr re-assert knows whether any press-and-hold slot
+    -- exists at all -- non-empower classes never pay for it.
+    _bindState.hasPH = anyPH
     if not changed then return false end
     _bindState.sigValid = true
     -- Pass 2: apply. Reads the routing decisions computed above.
@@ -11403,6 +11524,28 @@ local function UpdateKeybinds()
     return true
 end
 _G._EAB_UpdateKeybinds = UpdateKeybinds
+
+-- Re-assert pressAndHoldAction across all bars once combat drops. Combat is
+-- the ONE window where the attribute can be rewritten without pass 3 above
+-- running: the page-swap snippet fires SECURELY mid-fight (bonusbar/override
+-- flips during encounters), and even with its unreadable-read guard the
+-- out-of-combat truth must win afterwards -- while the signature cache
+-- correctly reports "nothing changed", because the ROUTING didn't change,
+-- only the attribute did. One ChildUpdate per bar per combat drop, and only
+-- when a press-and-hold slot exists at all, so non-empower classes and idle
+-- play pay nothing. Touches pressAndHoldAction only -- never typerelease,
+-- never bindings -- so the native hold-to-cast path is untouched by
+-- construction.
+ns._EABReassertEmpowerAttrs = function()
+    if InCombatLockdown() then return end
+    if not _bindState.hasPH then return end
+    for _, info in ipairs(BAR_CONFIG) do
+        local frame = barFrames[info.key]
+        if frame then
+            frame:SetAttribute("state-eabempower", GetTime())
+        end
+    end
+end
 
 
 
@@ -12727,9 +12870,6 @@ function EAB:FinishSetup()
                 SetupBar(info, false)
                 LayoutBar(info.key)
             end
-            -- Both broadcasters are killed at file-load time (top of file).
-            -- Central dispatcher handles all events.
-            EAB:SetupEventDispatcher()
             -- Register secure handler refs now that buttons exist
             SecureSetupHandler_PrepareRefs()
             -- Apply the current page to MainBar buttons. The state driver
@@ -12817,6 +12957,16 @@ function EAB:FinishSetup()
             -- Dispatch all protected operations through the secure handler
             SecureSetupHandler_Execute(layoutData, barFrameData)
         end
+
+        -- Both broadcasters are killed at file-load time (top of file), and
+        -- the per-button ACTIONBAR_UPDATE_COOLDOWN registration is stripped at
+        -- button creation, so this dispatcher is the ONLY owner of the cooldown
+        -- pipeline -- swipes, desaturation and on-CD alpha all ride it. It used
+        -- to be set up inside the out-of-combat branch above, which left a
+        -- /reload taken in combat with no cooldown events at all for the rest
+        -- of the session. It registers events and builds closures, nothing
+        -- protected, so both paths get it here, after their buttons exist.
+        EAB:SetupEventDispatcher()
 
         -- Visual styling: defer visuals to out-of-combat if needed.
         local function DoVisuals()
@@ -13322,6 +13472,9 @@ function EAB:FinishSetup()
         ResetDragState()
         -- Quick Keybind buttons may need reassertion after combat transitions
         _quickKeybindState.ReassertButtonsAfterCombatChange()
+        -- Combat page flips can leave empower hold-release attrs stale while
+        -- the routing signature is unchanged; repair once per combat drop.
+        if ns._EABReassertEmpowerAttrs then ns._EABReassertEmpowerAttrs() end
     end)
 
     self:RegisterEvent("PLAYER_REGEN_DISABLED", function()

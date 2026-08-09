@@ -4660,6 +4660,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue = function(v)
                       ns.TBBSetGroupGrow(gid, v)
                       ns.BuildTrackedBuffBars()
+                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                      RefreshTBBPopout()
                       EllesmereUI:RefreshPage()
                   end },
                 { type = "slider", pixel = true, text = "Bar Spacing", min = -2, max = 20, step = 1,
@@ -4667,6 +4669,8 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue = function(v)
                       ns.TBBSetGroupSpacing(gid, v)
                       ns.BuildTrackedBuffBars()
+                      -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                      RefreshTBBPopout()
                       EllesmereUI:RefreshPage()
                   end }
             );  y = y - h
@@ -4830,6 +4834,12 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                   end
                   ns.BuildTrackedBuffBars()
+                  -- BuildTrackedBuffBars() only rebuilds the LIVE bar pool; the
+                  -- preview wraps in the popout are separate frames. RefreshPage()
+                  -- takes the fast widget-refresh path here, so the page builder
+                  -- tail that repaints the popout never re-runs. Repaint it
+                  -- directly or the preview keeps the old geometry.
+                  RefreshTBBPopout()
                   EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Width",
@@ -4848,6 +4858,8 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                   end
                   ns.BuildTrackedBuffBars()
+                  -- Preview popout: RefreshPage() takes the fast path, repaint it here.
+                  RefreshTBBPopout()
                   EllesmereUI:RefreshPage()
               end }
         );  y = y - h
@@ -5277,7 +5289,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Stacks Text (dropdown + resize cog: size, x, y) | empty
+        -- Stacks Text (dropdown + resize cog: size, x, y) | Bar Strata
         local stacksRow
         stacksRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Stacks Text",
@@ -5288,11 +5300,23 @@ initFrame:SetScript("OnEvent", function(self)
                   EvictTBBTextConflicts(bd, "stacksPosition", v)
                   bd.stacksPosition = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
-            { type = "toggle", text = "Reverse Fill",
-              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
+            { type = "dropdown", text = "Bar Strata",
+              tooltip = "Screen layer the bar renders on; changing a grouped bar changes its whole group.",
+              values = EllesmereUI.FRAME_STRATA_LABELS,
+              order = EllesmereUI.FRAME_STRATA_ORDER_FULL,
+              getValue = function() local bd = SelectedTBB(); return bd and bd.strata or "MEDIUM" end,
               setValue = function(v)
                   local bd = SelectedTBB(); if not bd then return end
-                  bd.reverseFill = v; RefreshTBB()
+                  bd.strata = v
+                  -- Grouped bars share one strata: write the rest of the group too.
+                  local gid = ns.TBBBarGroupID(bd)
+                  if gid ~= 0 then
+                      local t = ns.GetTrackedBuffBars()
+                      for _, b in ipairs(t.bars or {}) do
+                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.strata = v end
+                      end
+                  end
+                  RefreshTBB()
               end }
         );  y = y - h
         AddTBBTextSwatch(stacksRow, stacksRow._leftRegion, "stacks")
@@ -5361,6 +5385,58 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
             })
         end
+
+        -- Reverse Fill | Fill Up. Deliberately paired on one row: they are the
+        -- two options a user reaches for when the bar is not moving the way
+        -- they expect, and they do different things. Reverse Fill mirrors the
+        -- geometry, Fill Up flips the direction the value travels. Splitting
+        -- them across the page is what makes people try the wrong one.
+        -- Named distinctly: `fillRow` is already taken further down by the
+        -- Fill Color row, which preview click-nav targets by reference.
+        local fillDirRow
+        fillDirRow, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Reverse Fill",
+              tooltip = "Mirrors which end of the bar the fill is anchored to. It does not change the direction the bar travels: use Fill Up for that.",
+              getValue = function() local bd = SelectedTBB(); return bd and bd.reverseFill end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.reverseFill = v; RefreshTBB()
+              end },
+            { type = "toggle", text = "Fill Up",
+              tooltip = "Fills the bar as the cooldown recovers instead of draining it as the cooldown runs down.",
+              disabled = function()
+                  local bd = SelectedTBB()
+                  -- Charge Hash Lines drives its own recovery bar, which
+                  -- already fills upward, so fillUp cannot do anything there.
+                  -- Leaving the toggle live would promise behaviour it has no
+                  -- way to deliver. Test the same way the Charge Hash Lines
+                  -- toggle does: the stored flag alone is not enough, because
+                  -- chargeHashLines rides in TBB_STYLE_KEYS and a style copy
+                  -- or preset can set it on a single-charge spell, where the
+                  -- hash fill never actually runs.
+                  return not bd or bd.trackType ~= "cooldown"
+                      or (bd.chargeHashLines == true
+                          and SelectedTBBSupportsChargeHash())
+              end,
+              -- rawTooltip: these are whole sentences. Without it they get
+              -- wrapped into "This option requires <text> to be enabled".
+              rawTooltip = true,
+              disabledTooltip = function()
+                  local bd = SelectedTBB()
+                  if not bd or bd.trackType ~= "cooldown" then
+                      return "This option requires a cooldown-tracking bar"
+                  end
+                  return "Charge Hash Lines already fills as charges recover"
+              end,
+              getValue = function()
+                  local bd = SelectedTBB(); return bd and bd.fillUp == true
+              end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.fillUp = v and true or nil
+                  RefreshTBB()
+              end }
+        );  y = y - h
 
         -- Charge Hash Lines | Smooth Bars. The number and orientation of hash
         -- separators are resolved automatically from the tracked spell's max
@@ -5485,29 +5561,6 @@ initFrame:SetScript("OnEvent", function(self)
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
-
-        -- Bar Strata
-        local barStrataRow
-        barStrataRow, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Bar Strata",
-              tooltip = "Screen layer the bar renders on; changing a grouped bar changes its whole group.",
-              values = EllesmereUI.FRAME_STRATA_LABELS,
-              order = EllesmereUI.FRAME_STRATA_ORDER_FULL,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.strata or "MEDIUM" end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.strata = v
-                  -- Grouped bars share one strata: write the rest of the group too.
-                  local gid = ns.TBBBarGroupID(bd)
-                  if gid ~= 0 then
-                      local t = ns.GetTrackedBuffBars()
-                      for _, b in ipairs(t.bars or {}) do
-                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.strata = v end
-                      end
-                  end
-                  RefreshTBB()
-              end },
-            { type = "label", text = "" });  y = y - h
 
         -------------------------------------------------------------------
         --  DISPLAY
@@ -19357,6 +19410,23 @@ initFrame:SetScript("OnEvent", function(self)
                     { type = "slider", label = "Y Offset", min = -30, max = 30, step = 1,
                       get = function() return BD().keybindOffsetY or -2 end,
                       set = function(v) BD().keybindOffsetY = v; ns.RefreshCDMIconAppearance(BD().key); ns.ApplyCachedKeybinds(); UpdateCDMPreview(); EllesmereUI:RefreshPage() end },
+                    -- Global, not per-bar: there is one shared keybind cache
+                    -- for every CDM bar, so this toggle is labelled as such.
+                    { type = "toggle", label = "Keep Keys on Bar Swap (global)",
+                      tooltip = "Keep keybind text identical when your action bar swaps -- rogue stealth, druid forms, skyriding. Also covers conditional macros like \"/cast [bonusbar:1] Backstab; Shadow Dance\", where the key would otherwise jump to whichever branch is live.\n\nThe key then only changes when you actually move the ability or rebind it.\n\nOn by default. Applies to every CDM bar at once.",
+                      get = function()
+                          local p = DB()
+                          return (p and p.cdmBars and p.cdmBars.stableKeybinds) == true
+                      end,
+                      set = function(v)
+                          local p = DB()
+                          if not p or not p.cdmBars then return end
+                          p.cdmBars.stableKeybinds = v and true or false
+                          -- Changes how the cache is built, not just how it is
+                          -- drawn -- needs a full rebuild, not an apply pass.
+                          if ns.UpdateCDMKeybinds then ns.UpdateCDMKeybinds() end
+                          UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                      end },
                 },
             })
             MakeCogBtn(rgn, kbCogShow, kbSwatch, EllesmereUI.RESIZE_ICON)
