@@ -3562,36 +3562,105 @@ do
         _dispatcherSetup = true
         local dispatcher = ns.TakeShell()
         ns._cdDispatcher = dispatcher
-        -- Desaturation curves: secret-safe duration -> 0/1 via EvaluateRemainingDuration,
-        -- so we never compare secret cooldown/charge numbers ourselves.
-        --   desatCurveAny  : 1 for any active cooldown (normal spells; GCD filtered via isOnGCD)
-        --   desatCurveReal : 1 only when the cooldown is longer than the GCD. Used for charge
-        --                    spells -- a banked charge shows only a GCD-length cooldown on the
-        --                    main cooldown so it stays colored; at 0 charges the longer recharge
-        --                    drives the main cooldown and it desaturates.
-        local desatCurveAny, desatCurveReal
+        -- Cooldown-vs-GCD classification for the desaturate and on-CD-alpha
+        -- channels. Both ask the same question -- is this button on a REAL
+        -- cooldown, or only on the global cooldown? -- and both must answer it
+        -- without reading a secret number.
+        --
+        -- Why not cdInfo.isOnGCD alone: the API docs say that field is only
+        -- trustworthy while responding to SPELL_UPDATE_COOLDOWN, and these
+        -- visuals repaint from a dozen other places (the cast kick, the press
+        -- hot lane, the charge branch, the hover and OnCooldownDone hooks, the
+        -- options apply). One stale isOnGCD=false there dimmed every plain
+        -- spell on the bar for the length of a GCD -- reported 8.7.7 as random
+        -- alpha on cast, and the desaturate channel had the same defect. So the
+        -- verdict comes from the cooldown's TOTAL duration instead, compared
+        -- engine-side against the live GCD length by a Step curve: at or below
+        -- the GCD the icon keeps its ready look, above it the on-cooldown look
+        -- applies. The total never decays, so the verdict holds for the whole
+        -- life of the cooldown (see RefreshCooldownVisuals for why the
+        -- REMAINING duration cannot carry it).
+        --
+        -- GCD length comes from UnitSpellHaste, which is itself secret in
+        -- instanced combat, so a secret read falls back to the unhasted 1.5s
+        -- (same treatment as ns.GCDTailAlpha in the Cooldown Manager). That
+        -- fallback and the 0.15s margin both push the threshold HIGH on
+        -- purpose: too high only means a sub-GCD cooldown keeps its ready look,
+        -- which is how Blizzard's own cooldown viewer treats those; too low
+        -- brings the bug back.
+        local _gcdStep, _gcdStepAt, _gcdStepHold
+        local function GcdStep()
+            local nowG = GetTime()
+            if _gcdStepAt ~= nowG then
+                -- GetTime is frame-constant, so the haste read below costs one
+                -- call per frame no matter how many buttons repaint in it.
+                _gcdStepAt = nowG
+                local haste = UnitSpellHaste and UnitSpellHaste("player") or 0
+                if (issecretvalue and issecretvalue(haste)) or type(haste) ~= "number" then
+                    haste = 0
+                end
+                local len = 1.5 / (1 + haste / 100)
+                if len < 0.75 then len = 0.75 end            -- engine floor
+                -- Rounded to a 0.05 grid so continuous haste drift does not
+                -- rebuild the curves every frame.
+                local step = floor((len + 0.15) * 20 + 0.5) / 20
+                -- The threshold tracks haste NOW, but a running cooldown's
+                -- TOTAL was fixed by the haste in force when it started. A
+                -- haste GAIN mid-GCD (Bloodlust, a large proc) shortens the
+                -- GCD, and an unlatched threshold would drop below the total
+                -- already recorded for the GCD in flight -- dimming the whole
+                -- bar until it expired, which is the defect this whole
+                -- classification exists to remove. So the step rises at once
+                -- (always the safe direction) and only falls after a hold
+                -- longer than any GCD it could still be measuring. The cost of
+                -- the hold is that a real cooldown inside the old and new
+                -- thresholds keeps its ready look for up to 2s.
+                if not _gcdStep or step >= _gcdStep or nowG >= (_gcdStepHold or 0) then
+                    _gcdStep = step
+                    _gcdStepHold = nowG + 2
+                end
+            end
+            return _gcdStep
+        end
+        -- Fallback curve for clients with no EvaluateTotalDuration: 1 for any
+        -- active cooldown. The GCD threshold cannot ride the REMAINING duration
+        -- -- remaining decays into the threshold and restores the icon a GCD
+        -- early -- so that path keeps this any-cooldown step and leans on
+        -- isOnGCD the way it did before the total-duration classification.
+        local desatCurveAny
         if C_CurveUtil and C_CurveUtil.CreateCurve then
             desatCurveAny = C_CurveUtil.CreateCurve()
             desatCurveAny:SetType(Enum.LuaCurveType.Step)
             desatCurveAny:AddPoint(0, 0)
             desatCurveAny:AddPoint(0.001, 1)
-            desatCurveReal = C_CurveUtil.CreateCurve()
-            desatCurveReal:SetType(Enum.LuaCurveType.Step)
-            desatCurveReal:AddPoint(0, 0)
-            desatCurveReal:AddPoint(1.6, 1)
         end
-        -- On-CD alpha curve for charge spells / items: keyed on TOTAL
-        -- duration like desatCurveReal (GCD-length cooldown = full alpha,
-        -- real cooldown = the user's dim value). Rebuilt only when the
-        -- user's alpha setting changes.
-        local cdAlphaCurve, cdAlphaCurveFor
+        -- Desaturation curve: 0 up to the GCD length, 1 above it. Rebuilt only
+        -- when the player's GCD length changes.
+        local desatCurve, desatCurveStep
+        local function GetDesatCurve()
+            local step = GcdStep()
+            if desatCurveStep ~= step and C_CurveUtil and C_CurveUtil.CreateCurve then
+                desatCurve = C_CurveUtil.CreateCurve()
+                desatCurve:SetType(Enum.LuaCurveType.Step)
+                desatCurve:AddPoint(0, 0)
+                desatCurve:AddPoint(step, 1)
+                desatCurveStep = step
+            end
+            return desatCurve
+        end
+        -- On-CD alpha curve: full alpha up to the GCD length, the user's dim
+        -- value above it. Rebuilt when the alpha setting or the GCD changes.
+        local cdAlphaCurve, cdAlphaCurveFor, cdAlphaCurveStep
         local function GetCdAlphaCurve(cdAlpha)
-            if cdAlphaCurveFor ~= cdAlpha and C_CurveUtil and C_CurveUtil.CreateCurve then
+            local step = GcdStep()
+            if (cdAlphaCurveFor ~= cdAlpha or cdAlphaCurveStep ~= step)
+               and C_CurveUtil and C_CurveUtil.CreateCurve then
                 cdAlphaCurve = C_CurveUtil.CreateCurve()
                 cdAlphaCurve:SetType(Enum.LuaCurveType.Step)
                 cdAlphaCurve:AddPoint(0, 1)
-                cdAlphaCurve:AddPoint(1.6, cdAlpha / 100)
+                cdAlphaCurve:AddPoint(step, cdAlpha / 100)
                 cdAlphaCurveFor = cdAlpha
+                cdAlphaCurveStep = step
             end
             return cdAlphaCurve
         end
@@ -3600,14 +3669,14 @@ do
         -- absent) and from each button's OnCooldownDone edge + the infrequent
         -- full-update path (nil = fetched fresh here). Early-outs before any
         -- API call when both features are off.
-        -- Why TOTAL duration for charge spells and items: the desat/alpha
-        -- writes are static, and the old code evaluated the 1.6s "real
-        -- cooldown" step against the REMAINING duration -- correct at
-        -- cooldown start, but any cooldown event landing in the final 1.6s
-        -- (in combat every cast fires one) read 0 and re-saturated the icon
-        -- early. The TOTAL duration never decays, so the classification
-        -- holds for the cooldown's entire life; the OnCooldownDone edge then
-        -- restores the icon the moment the cooldown actually completes.
+        -- Why TOTAL duration and never REMAINING: the desat/alpha writes are
+        -- static between repaints, and an earlier version evaluated the step
+        -- against the REMAINING duration -- correct at cooldown start, but any
+        -- cooldown event landing inside the step window (in combat every cast
+        -- fires one) read below the threshold and restored the icon early. The
+        -- TOTAL duration never decays, so the classification holds for the
+        -- cooldown's entire life; the OnCooldownDone edge then restores the
+        -- icon the moment the cooldown actually completes.
         local function RefreshCooldownVisuals(btn, action, cdInfo, durObj, chargeInfo)
             local desatOn = EAB.db.profile.desaturateOnCooldown
             local cdAlpha = EAB.db.profile.alphaWhenOnCD or 100
@@ -3633,35 +3702,37 @@ do
                 useRealCurve = true
             end
             local active = cdInfo and cdInfo.isActive and durObj
+            -- A GCD must never classify a button as being on cooldown, for
+            -- either channel. The GCD-length Step curve above answers that from
+            -- the TOTAL duration, which is the same value for the cooldown's
+            -- whole life -- so a plain spell that only carries a GCD stays
+            -- ready-looking no matter which repaint path arrives, and a real
+            -- cooldown keeps its on-cooldown look down to its last tick.
+            --
+            -- The charge/item branch keeps the extra isOnGCD guard. For those,
+            -- the engine hands back a duration object whose total is the
+            -- RECHARGE PERIOD (20s on Arcane Orb) even while charges are
+            -- banked, so the threshold on its own would grey a spell sitting at
+            -- FULL charges on every cast. A stale isOnGCD there can only fail
+            -- toward the threshold, which then rejects the GCD anyway.
             if desatOn then
                 local val = 0
                 if active then
-                    -- A GCD must never classify a charge spell or item as being
-                    -- on cooldown. The 1.6s step was meant to filter the GCD out
-                    -- on its own, but it tests the TOTAL duration of whatever
-                    -- object the engine hands back, and for a charge spell that
-                    -- is the RECHARGE PERIOD (20s on Arcane Orb) even while
-                    -- charges are banked -- so every GCD greyed a spell sitting
-                    -- at FULL charges, flashing back to colour only in the gaps
-                    -- between casts. The non-charge branch below always had this
-                    -- guard; the charge/item branch never did.
-                    -- isOnGCD separates the cases cleanly, measured in game:
-                    -- 0 charges -> isActive=true isOnGCD=false dur=27 (desaturate),
-                    -- banked charge mid-GCD -> isActive=true isOnGCD=true dur=1.05.
-                    -- One guard for BOTH classes, hoisted: a GCD is never a
-                    -- cooldown for these purposes.
-                    if not cdInfo.isOnGCD then
-                        if useRealCurve then
-                            if durObj.EvaluateTotalDuration and desatCurveReal then
-                                val = durObj:EvaluateTotalDuration(desatCurveReal, 0)
-                            elseif durObj.EvaluateRemainingDuration and desatCurveReal then
-                                -- Client without the total evaluator: remaining is
-                                -- start-accurate and the Done edge fixes the tail.
-                                val = durObj:EvaluateRemainingDuration(desatCurveReal, 0)
-                            end
-                        elseif durObj.EvaluateRemainingDuration and desatCurveAny then
-                            val = durObj:EvaluateRemainingDuration(desatCurveAny, 0)
+                    local curve = GetDesatCurve()
+                    if curve and durObj.EvaluateTotalDuration then
+                        if not useRealCurve or not cdInfo.isOnGCD then
+                            val = durObj:EvaluateTotalDuration(curve, 0)
                         end
+                    elseif durObj.EvaluateRemainingDuration and not cdInfo.isOnGCD then
+                        -- Client without the total evaluator. Charge spells and
+                        -- items keep the GCD-length step (remaining is
+                        -- start-accurate and the Done edge fixes the tail);
+                        -- plain spells take the any-cooldown step, which has no
+                        -- tail to lose. Both leaned on isOnGCD before this
+                        -- change and still do -- there is no threshold that
+                        -- works against a decaying duration.
+                        local rc = useRealCurve and curve or desatCurveAny
+                        if rc then val = durObj:EvaluateRemainingDuration(rc, 0) end
                     end
                 end
                 -- val may be SECRET: never compare it; SetDesaturation
@@ -3669,31 +3740,25 @@ do
                 icon:SetDesaturation(val or 0)
             end
             if alphaOn then
+                local alphaSet = false
                 if active then
-                    if useRealCurve and not cdInfo.isOnGCD and durObj.EvaluateTotalDuration then
-                        -- Same total-duration classification as desat, and the
-                        -- same isOnGCD guard for the same reason: the total is
-                        -- the RECHARGE PERIOD for a charge spell, so the 1.6s
-                        -- step alone does not filter out the GCD and a spell at
-                        -- full charges dimmed on every cast. (The old comment
-                        -- here claimed the threshold handled that; it does not.)
-                        local curve = GetCdAlphaCurve(cdAlpha)
-                        if curve then
+                    local curve = GetCdAlphaCurve(cdAlpha)
+                    if curve and durObj.EvaluateTotalDuration then
+                        if not useRealCurve or not cdInfo.isOnGCD then
                             icon:SetAlpha(durObj:EvaluateTotalDuration(curve, 1) or 1)
-                        else
-                            icon:SetAlpha(1)
+                            alphaSet = true
                         end
                     elseif icon.SetAlphaFromBoolean and durObj.IsZero
                        and not cdInfo.isOnGCD then
-                        -- IsZero() is a secret boolean; SetAlphaFromBoolean
-                        -- consumes it without any Lua comparison.
+                        -- Client without the total evaluator. IsZero() is a
+                        -- secret boolean; SetAlphaFromBoolean consumes it
+                        -- without any Lua comparison. This path has no GCD
+                        -- threshold, so it leans on isOnGCD as before.
                         icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
-                    else
-                        icon:SetAlpha(1)
+                        alphaSet = true
                     end
-                else
-                    icon:SetAlpha(1)
                 end
+                if not alphaSet then icon:SetAlpha(1) end
             end
         end
         -- Exposed for the per-button OnCooldownDone edge hooks (installed at
@@ -7574,6 +7639,13 @@ function EAB:ApplyCDAlphaAll()
     local pdb = self.db and self.db.profile
     local cdAlpha = (pdb and pdb.alphaWhenOnCD) or 100
     local on = cdAlpha ~= 100
+    -- This used to carry its own copy of the on-cooldown test, and the copy
+    -- drifted: it treated ANY charge spell as being on a real cooldown, so
+    -- touching the slider (or any full apply) during a GCD dimmed every charge
+    -- spell sitting at full charges. Delegate to the live classifier instead,
+    -- which owns the GCD threshold and the charge rules in one place. Restore
+    -- to full alpha first so setting the slider back to 100 -- and every button
+    -- the classifier declines to dim -- lands on a clean icon.
     for _, info in ipairs(BAR_CONFIG) do
         if not info.isStance and not info.isPetBar then
             local btns = barButtons[info.key]
@@ -7581,30 +7653,10 @@ function EAB:ApplyCDAlphaAll()
                 for _, btn in ipairs(btns) do
                     local icon = btn and btn.icon
                     if icon then
-                        local applied = false
-                        if on then
-                            local action = btn:GetAttribute("action")
-                            if action and HasAction(action) and icon.SetAlphaFromBoolean then
-                                local cdInfo = C_ActionBar.GetActionCooldown(action)
-                                if cdInfo and cdInfo.isActive then
-                                    local durObj = C_ActionBar.GetActionCooldownDuration(action)
-                                    if durObj and durObj.IsZero then
-                                        -- Secret-safe: never compare the remaining duration; feed
-                                        -- IsZero() into SetAlphaFromBoolean. Same real-CD gating as
-                                        -- the live handler (GCD excluded for plain spells).
-                                        local chargeInfo = C_ActionBar.GetActionCharges(action)
-                                        local realCd = (chargeInfo and chargeInfo.maxCharges and chargeInfo.maxCharges > 1)
-                                            or (GetActionInfo(action) == "item")
-                                            or (not cdInfo.isOnGCD)
-                                        if realCd then
-                                            icon:SetAlphaFromBoolean(durObj:IsZero(), 1, cdAlpha / 100)
-                                            applied = true
-                                        end
-                                    end
-                                end
-                            end
+                        icon:SetAlpha(1)
+                        if on and EAB._RefreshCooldownVisuals then
+                            EAB._RefreshCooldownVisuals(btn)
                         end
-                        if not applied then icon:SetAlpha(1) end
                     end
                 end
             end
