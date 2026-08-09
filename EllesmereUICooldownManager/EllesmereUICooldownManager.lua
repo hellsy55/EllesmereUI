@@ -1430,6 +1430,30 @@ function ns.RescanChargeCdTextFlag()
     end)
 end
 
+-- Charge style gate: set ns._cdmAnyChargeStyle once if any saved spell (any spec)
+-- has Hide Swipe (Charges) or Hide Recharge Edge enabled. Same monotonic,
+-- scanned-once contract as RescanChargeCdTextFlag.
+--
+-- This flag is the one charge gate that had no priming pass: it was set only from
+-- inside the SetSwipeColor hook, i.e. not until the first cooldown re-push after
+-- login, which is already after the rebuild has run RefreshCDMIconAppearance. So
+-- the rebuild's ReapplyChargeStyle was skipped, and ApplyCdmChargeStyle itself
+-- gates its whole Hide Swipe / Hide Recharge Edge block on the flag -- meaning a
+-- charge spell already recharging at login kept its swipe until something pushed
+-- its cooldown again. Priming here closes that window; the reactive hooks then
+-- carry it as before.
+function ns.RescanChargeStyleFlag()
+    if ns._cdmAnyChargeStyle or ns._chargeStyleFlagScanned then return end
+    if not EllesmereUIDB then return end
+    ns._chargeStyleFlagScanned = true
+    ns.ForEachSavedSettingsBlock(function(ss)
+        if ss.chargeHideSwipe or ss.hideRechargeEdge then
+            ns._cdmAnyChargeStyle = true
+            return true
+        end
+    end)
+end
+
 -- Custom Item gate: set ns._cdmAnyCustomItem once if any saved bar (any spec)
 -- tracks a custom item (an assignedSpells entry <= -100). The buff-bar injection
 -- pass is then skipped entirely for anyone who never adds one -- 0 cost when off.
@@ -7784,6 +7808,7 @@ BuildAllCDMBars = function()
     EnsureFocusKickBar()
     ns.RescanMaxStacksGlowFlag()  -- set the Max Stacks Glow gate (once) before refresh
     ns.RescanChargeCdTextFlag()   -- set the Hide CD Text (Charges) gate (once) before refresh
+    ns.RescanChargeStyleFlag()    -- set the Hide Swipe (Charges) gate (once) before refresh
     ns.RescanBuffSoundFlag()      -- set the Audio on Buff Gain/Loss gate (once) before refresh
     ns.RescanCdReadySoundFlag()   -- set the Audio Effect on CD Ready gate (once) before refresh
     ns.RescanCustomItemFlag()     -- set the custom-item buff-injection gate (once)
