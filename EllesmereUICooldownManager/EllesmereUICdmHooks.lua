@@ -1207,6 +1207,44 @@ local function CdmFrameIsActive(frame)
     return false
 end
 
+-- Charge info for a CDM frame, resolved the way BLIZZARD resolves it.
+--
+-- We were resolving the charge spell with C_SpellBook.FindSpellOverrideByID and
+-- Blizzard resolves it from the CooldownViewer's OWN override record --
+-- CooldownViewerItemDataMixin:GetSpellChargeInfo reads
+-- `info.overrideSpellID or info.spellID`, deliberately, "to ensure that charges
+-- work correctly for cooldown items that are actively cast, apply auras, and
+-- have charges". Those are two different sources and they disagree in the field:
+-- captured on a Mage, base Blink 1953 with FindSpellOverrideByID resolving to
+-- Shimmer 212653, our read returned isActive=false (no recharge) while Blizzard's
+-- own HasVisualDataSource_Charges was true (a recharge running with charges in
+-- hand) on the very same frame in the very same call.
+--
+-- That disagreement is not cosmetic: chargeRecharging false is what lets the
+-- Suppress GCD block alpha-0 a swipe, so with Suppress GCD on, an override
+-- spell's recharge swipe gets blanked for the whole GCD every time another
+-- ability is pressed -- the exact failure the charge carve-out exists to
+-- prevent. Asking Blizzard removes the whole class rather than special-casing
+-- Shimmer.
+--
+-- Falls back to the old resolution for frames without the accessor (preset,
+-- custom-spell and item frames are ours, not CooldownViewer items), so those
+-- keep exactly today's behaviour.
+local function CdmChargeInfoFor(frame, sid)
+    if frame and type(frame.GetSpellChargeInfo) == "function" then
+        local ci = frame:GetSpellChargeInfo()
+        if ci then return ci end
+    end
+    if not (sid and C_Spell and C_Spell.GetSpellCharges) then return nil end
+    local effID = sid
+    if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+        local ovr = C_SpellBook.FindSpellOverrideByID(sid)
+        if ovr and ovr > 0 and ovr ~= sid then effID = ovr end
+    end
+    return C_Spell.GetSpellCharges(effID) or C_Spell.GetSpellCharges(sid)
+end
+ns.CdmChargeInfoFor = CdmChargeInfoFor
+
 -- Apply charge cooldown style. Returns true for charge spells (caller then skips
 -- its own swipe forcing). BASELINE edge is drawn for every charge spell; the
 -- swipe is hidden only when the per-spell Hide Swipe toggle is set (resolved
@@ -2658,9 +2696,13 @@ local function DecorateFrame(frame, barData)
                         local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
                         if ovr and ovr > 0 and ovr ~= sid2 then effID2 = ovr end
                     end
+                    -- Resolved through Blizzard's own accessor: see CdmChargeInfoFor.
+                    -- This value decides whether the swipe may be alpha-0'd, and a
+                    -- wrong "not recharging" here blanks a live recharge for a whole
+                    -- GCD on every override spell.
                     local chargeRecharging = false
-                    if C_Spell.GetSpellCharges then
-                        local ci = C_Spell.GetSpellCharges(effID2) or C_Spell.GetSpellCharges(sid2)
+                    do
+                        local ci = CdmChargeInfoFor(frame, sid2)
                         chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
                     end
                     -- The GCD read must use the override too: a transform's real
@@ -2749,8 +2791,8 @@ local function DecorateFrame(frame, barData)
                         local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
                         if ovrID and ovrID > 0 and ovrID ~= sid2 then
                             local chargeRecharging = false
-                            if C_Spell.GetSpellCharges then
-                                local ci = C_Spell.GetSpellCharges(ovrID) or C_Spell.GetSpellCharges(sid2)
+                            do
+                                local ci = CdmChargeInfoFor(frame, sid2)
                                 chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
                             end
                             local oc = C_Spell.GetSpellCooldown(ovrID)
@@ -3065,8 +3107,8 @@ local function DecorateFrame(frame, barData)
                 -- ONLY inside our Hide-Active override so non-override charge spells
                 -- keep Blizzard's native display untouched. Secret-safe: GetSpellCharges
                 -- .isActive is a clean bool; currentCharges is never read.
-                local chargeActive = fd._hideActiveOverriding and C_Spell.GetSpellCharges
-                    and (C_Spell.GetSpellCharges(effID) or C_Spell.GetSpellCharges(sid2) or {}).isActive == true
+                local chargeActive = fd._hideActiveOverriding
+                    and (CdmChargeInfoFor(frame, sid2) or {}).isActive == true
                 if not (cdActive or chargeActive) then return end
                 -- Re-derive the charge recharge duration. The duration object is
                 -- opaque and fed straight to the widget, never inspected, so it is
@@ -3168,7 +3210,7 @@ local function DecorateFrame(frame, barData)
                 -- Suppress GCD had just alpha-0'd would repaint it at full alpha in
                 -- the same refresh. Both fields are clean; the secret
                 -- currentCharges is never read.
-                local ci = C_Spell.GetSpellCharges(effID) or C_Spell.GetSpellCharges(sid2)
+                local ci = CdmChargeInfoFor(frame, sid2)
                 if not (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) then
                     return
                 end
@@ -4857,8 +4899,11 @@ local function ApplyPresetGCDSwipe(f, sid, cdInfo, barKey)
             -- showing its RECHARGE, never a GCD, and alpha-0'ing that would
             -- blank the recharge for a whole GCD every time another ability is
             -- pressed. Read it from the stable charge data (maxCharges +
-            -- isActive), never the secret currentCharges.
-            local ci = C_Spell.GetSpellCharges and C_Spell.GetSpellCharges(sid)
+            -- isActive), never the secret currentCharges. Resolved through
+            -- CdmChargeInfoFor so this copy cannot drift from the hook's answer;
+            -- preset frames are ours rather than CooldownViewer items, so it
+            -- falls back to the spellbook resolution for them.
+            local ci = CdmChargeInfoFor(f, sid)
             hide = not (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true)
         end
     end
