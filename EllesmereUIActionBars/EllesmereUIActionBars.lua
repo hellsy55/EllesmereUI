@@ -2630,13 +2630,73 @@ ns._eabEmpowerSnippet = [[
 -- re-checks (pass 3 of UpdateKeybinds, the combat-drop re-assert) correct
 -- any kept value as soon as identity is readable again.
 
+-- Un-park a slot that "Always Show Buttons" off left hidden. Parking writes
+-- four things (alpha 0, mouse off, statehidden, Hide) and un-parking must undo
+-- all four -- but EnableMouse on a protected button is combat-blocked, so
+-- SafeEnableMouse silently returns and the insecure pass can only restore the
+-- three unprotected ones. A form or page flip that fills the slot mid-combat
+-- therefore left the button VISIBLE (alpha is unprotected) yet deaf to hover
+-- and clicks, while keybinds -- which route through override bindings and need
+-- no mouse -- kept working (reported: druid stance change in combat).
+--
+-- The restore cannot come from the OnShow -> UpdateShown wrapper: that snippet
+-- gates on not IsShown(), and OnShow fires after the frame is already shown.
+-- It has to happen here, before the Show. Gated on the hidden->shown edge so a
+-- live on-cooldown alpha on an already-visible button is never stomped, and on
+-- eab-click so a reveal never makes a click-through bar clickable.
+ns._eabPageUnparkSnippet = [[
+if not self:IsShown() then
+    self:SetAlpha(1)
+    if (self:GetAttribute('eab-click') or 1) ~= 0 then
+        self:EnableMouse(true)
+    end
+end
+]]
+
 -- Build the _childupdate-eab-page snippet for a button at the given 1-based bar
--- index. On a page change: action = baseIndex + (page-1)*12, then re-check
--- hold-release. ALL install sites (SetupBar, RebuildBarPaging) call this so the
--- handler is byte-identical everywhere -- the page change rewrites the secure
--- "action" attribute (our buttons are ID=0, so actionpage is never consulted).
+-- index. On a page change: action = baseIndex + (page-1)*12, re-evaluate parked
+-- visibility, then re-check hold-release. ALL install sites (SetupBar,
+-- RebuildBarPaging) call this so the handler is byte-identical everywhere --
+-- the page change rewrites the secure "action" attribute (our buttons are
+-- ID=0, so actionpage is never consulted).
+--
+-- The visibility half is gated on eab-showempty EXISTING: it is stamped by
+-- ApplyAlwaysShowButtons out of combat, and a button that has never seen a
+-- stamp keeps the pre-existing behaviour (action only, visibility left to the
+-- controller's deferred UpdateShown) rather than guessing at a default.
+ns._eabPageVisSnippet = [[
+local showEmpty = self:GetAttribute('eab-showempty')
+if showEmpty then
+    local withinCutoff = self:GetAttribute('eab-withincutoff') ~= 0
+    local visible = withinCutoff
+    if visible and showEmpty == 0 then
+        visible = HasAction(slot)
+    end
+    -- A transient grid reveal outranks the empty-slot park, exactly as
+    -- UpdateShown does: a page flip during a combat spell drag must not
+    -- delete the drop targets under the cursor. Bits 2+ only -- bit 1 is
+    -- Blizzard's CVAR reason and is not a transient reveal. statehidden is
+    -- cleared only for a genuinely filled slot, so drag end still re-parks.
+    local grid = self:GetAttribute('showgrid') or 0
+    local transient = withinCutoff and (grid % 32) >= 2
+    if visible or transient then
+        if visible and self:GetAttribute('statehidden') then
+            self:SetAttribute('statehidden', nil)
+        end
+]] .. ns._eabPageUnparkSnippet .. [[
+        self:Show(true)
+    else
+        if not self:GetAttribute('statehidden') then
+            self:SetAttribute('statehidden', true)
+        end
+        self:Hide(true)
+    end
+end
+]]
+
 function ns._eabBuildPageChildSnippet(baseIndex)
-    return ("local page = tonumber(message) or 1; self:SetAttribute('action', %d + (page - 1) * 12)"):format(baseIndex) .. ns._eabEmpowerSnippet
+    return ("local page = tonumber(message) or 1; local slot = %d + (page - 1) * 12; self:SetAttribute('action', slot)\n"):format(baseIndex)
+        .. ns._eabPageVisSnippet .. ns._eabEmpowerSnippet
 end
 
 -------------------------------------------------------------------------------
@@ -8001,9 +8061,15 @@ function EAB:ApplyAlwaysShowButtons(barKey)
 
             -- Stamp the secure-side facts the restricted reveal needs
             -- (see the SetShowGrid snippet): this button is within the icon
-            -- cutoff, and whether a reveal may enable mouse clicks.
+            -- cutoff, whether empty slots are shown at all, and whether a
+            -- reveal may enable mouse clicks. eab-showempty is what lets the
+            -- paging snippet (ns._eabPageVisSnippet) re-evaluate a parked slot
+            -- during combat on every bar, not just MainBar -- without it a
+            -- custom-paged bar 2-10 leaves the slot statehidden for the whole
+            -- fight.
             if not InCombatLockdown() then
                 btn:SetAttributeNoHandler("eab-withincutoff", 1)
+                btn:SetAttributeNoHandler("eab-showempty", showEmpty and 1 or 0)
                 btn:SetAttributeNoHandler("eab-click", clickable and 1 or 0)
             end
             if not visible then
@@ -8052,6 +8118,7 @@ function EAB:ApplyAlwaysShowButtons(barKey)
                 -- Cutoff buttons are excluded from the secure drag reveal:
                 -- revealing them would paint slots the user configured away.
                 btn:SetAttributeNoHandler("eab-withincutoff", 0)
+                btn:SetAttributeNoHandler("eab-showempty", showEmpty and 1 or 0)
                 btn:SetAttributeNoHandler("statehidden", true)
                 btn:Hide()
             end
@@ -8118,24 +8185,37 @@ function EAB_VTABLE.MainBarPageSync.InstallButton(btn)
     local info = buttonToBar[btn]
     local baseIdx = info and info.index or 1
 
+    -- Only the slot arithmetic is interpolated. The body is concatenated raw:
+    -- it contains a modulo, and string.format eats a bare "%" as a broken
+    -- conversion spec.
     btn:SetAttributeNoHandler("_childupdate-eab-page", ([[
         local page = tonumber(message) or 1
         local slot = %d + (page - 1) * %d
         self:SetAttribute("action", slot)
-        local visible = self:GetAttribute("eab-withincutoff") ~= 0
+    ]]):format(baseIdx, NUM_ACTIONBAR_BUTTONS) .. [[
+        local withinCutoff = self:GetAttribute("eab-withincutoff") ~= 0
+        local visible = withinCutoff
 
         if visible and self:GetAttribute("eab-showempty") == 0 then
             visible = HasAction(slot)
         end
 
+        -- Transient grid reveal outranks the empty-slot park (see
+        -- ns._eabPageVisSnippet, which carries the same rule for bars 2-10):
+        -- a page flip during a combat spell drag must not delete the drop
+        -- targets. Bits 2+ only -- bit 1 is Blizzard's CVAR reason.
+        local grid = self:GetAttribute("showgrid") or 0
+        local transient = withinCutoff and (grid % 32) >= 2
+
         local hidden = self:GetAttribute("statehidden")
         local changed = false
 
-        if visible then
-            if hidden then
+        if visible or transient then
+            if visible and hidden then
                 self:SetAttribute("statehidden", nil)
                 changed = true
             end
+    ]] .. ns._eabPageUnparkSnippet .. [[
             self:Show(true)
         else
             if not hidden then
@@ -8149,7 +8229,7 @@ function EAB_VTABLE.MainBarPageSync.InstallButton(btn)
             local token = self:GetAttribute("eab-pagesync-token") or 0
             self:SetAttribute("eab-pagesync-token", token == 0 and 1 or 0)
         end
-    ]]):format(baseIdx, NUM_ACTIONBAR_BUTTONS))
+    ]])
 
     btn:SetAttributeNoHandler("_eabPageSyncInstalled", true)
 end
