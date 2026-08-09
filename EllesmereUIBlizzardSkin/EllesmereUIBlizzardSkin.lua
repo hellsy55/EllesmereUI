@@ -2167,20 +2167,17 @@ local function TooltipOwnerUsable(parent)
     return true
 end
 
--- Addons that cannot risk touching the global GameTooltip -- taint-sensitive
--- callers driving secure frames, such as OPie's ring view -- build their own
--- GameTooltipTemplate frame and flag it LIKE_GLOBAL_GAMETOOLTIP, which is their
--- documented request to be treated exactly as _G.GameTooltip. Those stand-ins
--- still route through GameTooltip_SetDefaultAnchor like everyone else, so a
--- strict identity check was the only thing keeping our anchors off them: their
--- tooltips ignored the fixed/cursor position and landed on Blizzard's default
--- container instead. Honour the flag for the anchor decision.
---
--- Strict identity is still correct everywhere else in this file. The armed-state
--- bookkeeping below hooks GameTooltip's OWN SetOwner/SetPoint methods, so it can
--- only ever track one tooltip; a stand-in gets the one-shot anchor at default
--- time and nothing re-anchors it afterwards, which is all it needs (Blizzard's
--- container logic, the reason that enforcement exists, does not manage it).
+-- Stand-in tooltips: taint-sensitive callers that cannot touch the global
+-- GameTooltip build their own GameTooltipTemplate frame and flag it
+-- LIKE_GLOBAL_GAMETOOLTIP -- the ecosystem convention asking to be treated
+-- as _G.GameTooltip. They still route through GameTooltip_SetDefaultAnchor,
+-- so honour the flag for the ANCHOR decision only. The armed-state
+-- bookkeeping stays strict-identity: it gates SetPoint enforcement hooked
+-- onto GameTooltip's OWN setters, so arming it for a stand-in would enforce
+-- against another frame's state. A stand-in needs no ongoing enforcement:
+-- GameTooltip_SetDefaultAnchor is a pure one-shot (SetOwner + corner
+-- SetPoint, no registration), so nothing Blizzard-side ever re-anchors a
+-- stand-in -- every re-build re-enters these hooks.
 local function TooltipIsGlobalLike(tooltip)
     if tooltip == GameTooltip then return true end
     return type(tooltip) == "table" and tooltip.LIKE_GLOBAL_GAMETOOLTIP == true

@@ -83,24 +83,14 @@ local EUI = EllesmereUI
 local _emptyP = {}
 local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
 
--- Tracked currencies are PER CHARACTER, unlike every other bag setting.
---
--- They used to live in one profile-level `currencyOrder` table, which meant
--- ticking a currency on one character put it in every character's bag. Worse,
--- the input feeding that table is Blizzard's own currency tab, which IS
--- per-character (see the TokenFrame.OnTokenWatchChanged sync below): a
--- per-character source writing a shared store can only ever bleed. Reported by
--- a user wanting one currency on their main and another on the alt that farms
--- it, which the shared table made impossible.
---
--- Stored at the EllesmereUIDB ROOT, not in the bag profile, which is where the
--- module already keeps its other per-character data (characterGold,
--- bagPinnedItems, bagItemAssignments). Profile data is the wrong home for it in
--- two ways: ApplyProfileData wipes db.profile wholesale before copying an
--- imported snapshot, so importing any shared profile would erase every
--- character's currencies, and profile exports would ship a roster of the
--- author's character names, realms and per-alt currency lists to whoever
--- imported it -- the leak PRIVATE_ADDON_KEYS exists to plug.
+-- Tracked currencies are PER CHARACTER: their input feed (Blizzard's currency
+-- tab via the TokenFrame.OnTokenWatchChanged sync below) is per-character, so
+-- a shared store can only bleed across characters. Stored at the EllesmereUIDB
+-- ROOT beside the module's other per-character data (characterGold,
+-- bagPinnedItems, bagItemAssignments), NEVER in the bag profile:
+-- ApplyProfileData wipes db.profile wholesale on import (would erase every
+-- character's currencies), and profile exports must not ship a character
+-- roster (the PRIVATE_ADDON_KEYS leak class).
 local _bagsCharKey  -- session-constant; UpdateCurrencyDisplays is a render path
 local function BagsCharKey()
     if not _bagsCharKey then
@@ -123,12 +113,10 @@ local function CurrencyOrder()
     local t = byChar[key]
     if type(t) ~= "table" then
         t = {}
-        -- Seed from the legacy shared table so an upgrading user keeps exactly
-        -- what they had. The legacy table is deliberately NOT deleted: every
-        -- character seeds from it once, at ITS first login after the upgrade,
-        -- so a character that has not logged in yet still inherits the old
-        -- setup instead of an empty footer. Nothing writes to it any more, so
-        -- the seed stays stable. A per-character migration is never a one-shot.
+        -- Seed once per character from the legacy shared profile table. The
+        -- legacy table is deliberately never deleted: a per-character
+        -- migration is never a one-shot (a character that has not logged in
+        -- yet still seeds from it later), and nothing writes it any more.
         local legacy = BP().currencyOrder
         if type(legacy) == "table" then
             for cID, order in pairs(legacy) do

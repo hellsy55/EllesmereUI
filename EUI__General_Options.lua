@@ -520,6 +520,50 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.7.8",
+        heroes = {
+            {
+                -- Input-behavior fix: nothing to open, renders static.
+                module = "Action Bars",
+                title  = "Empowered Casting Fixed",
+                desc   = "Evoker empowered spells no longer release at Rank 1 when queued or when the key is pressed an extra time, and Hold and Release input no longer flips to Press and Tap mid-fight. Empowered keybinds now behave exactly like the default UI.",
+            },
+        },
+        features = {
+            {
+                module = "Cooldown Manager",
+                title  = "Fill Up",
+                desc   = "Cooldown Tracking Bars can fill as they recover instead of draining",
+                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "BAR LAYOUT", highlight = "Fill Up" },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Hero-talent spells like Black Arrow no longer revert to their base spell's icon after entering or leaving an instance." },
+            { module = "Action Bars", text = "Shift-clicking an action button works again: [mod:shift] macro branches cast on the click's release, matching the default UI." },
+            { module = "Action Bars", text = "Alpha when on CD and Desaturate on Cooldown no longer randomly dim buttons that are ready while you cast." },
+            { module = "Action Bars", text = "Cooldown swipes, desaturation, and on-CD alpha now survive a /reload taken during combat." },
+            { module = "Bags", text = "Tracked currencies are now saved per character: picking currencies on one character no longer changes every other character's bag." },
+            { module = "Blizz UI Enhanced", text = "Tooltip anchor settings (fixed position, cursor anchor, growth) now also apply to addon tooltips that ask to be treated like the game tooltip." },
+            { module = "Cooldown Manager", text = "Keybind text on icons no longer disappears or jumps when your action bar pages for stealth, druid forms, or skyriding, or when a conditional macro switches branches; the key only changes when you move the ability or rebind it (toggle in Show Keybind's gear icon)." },
+            { module = "Cooldown Manager", text = "A buff claimed by a custom buff group no longer shows up as a phantom copy in the default buff group's editor." },
+            { module = "Cooldown Manager", text = "A charge spell's recharge swipe no longer goes blank for its last second when another ability is pressed with Suppress GCD on." },
+            { module = "Cooldown Manager", text = "The charge count no longer hides itself in combat when a charge comes back with Hide at 0 Stacks enabled." },
+            { module = "Cooldown Manager", text = "Spells with talent override forms like Shimmer no longer lose their recharge swipe under Suppress GCD." },
+            { module = "Cooldown Manager", text = "The Tracking Bars preview now updates immediately when changing Height, Width, Grow Direction, or Bar Spacing." },
+            { module = "Cooldown Manager", text = "Bar Strata now sits next to Stacks Text on the Tracking Bars page." },
+            { module = "Damage Meters", text = "Fixed duplicate frozen ghost meter windows after login; closing a ghost could also delete the real window." },
+            { module = "General", text = "Combat Text Font now applies for SharedMedia fonts after the relog, survives the font pack being disabled, and reverts safely if it is uninstalled." },
+            { module = "General", text = "Updated Simplified Chinese translations and fixed the character sheet Mount tooltip label on zhCN clients." },
+            { module = "Nameplates", text = "Fixed double nameplates when a friendly or neutral NPC turns hostile." },
+            { module = "QoL", text = "The Frame Shifter can now move and zoom Blizzard's Combined Bags window." },
+            { module = "Quest Tracker", text = "The Quest Item Hotkey now actually uses the quest item: it works with cast on key down, multi-modifier keys bind correctly, and the key frees up when no quest item exists." },
+            { module = "Raid Frames", text = "Party frame settings no longer leak into the shared raid settings: Dispels, Threat Borders, and ready check sizing save their own party values, and editing an unsynced party setting can no longer permanently overwrite a raid value." },
+            { module = "Resource Bars", text = "Custom Class Resource fill colors on a Spec Override now always re-apply after opening and closing the settings window." },
+            { module = "Resource Bars", text = "Disintegrate's castbar hash lines now match the real damage cadence and follow chained recasts." },
+            { module = "Resource Bars", text = "Castbar hash lines and empowered stage markers now render pixel perfect at every UI scale." },
+        },
+    },
+    {
         version = "8.7.7",
         -- No hero tier this patch (same shape as 8.7.6): features present,
         -- so the tiers render normally and this is not a mini patch.

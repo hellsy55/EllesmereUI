@@ -5289,7 +5289,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Stacks Text (dropdown + resize cog: size, x, y) | empty
+        -- Stacks Text (dropdown + resize cog: size, x, y) | Bar Strata
         local stacksRow
         stacksRow, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Stacks Text",
@@ -5300,7 +5300,24 @@ initFrame:SetScript("OnEvent", function(self)
                   EvictTBBTextConflicts(bd, "stacksPosition", v)
                   bd.stacksPosition = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            { type = "dropdown", text = "Bar Strata",
+              tooltip = "Screen layer the bar renders on; changing a grouped bar changes its whole group.",
+              values = EllesmereUI.FRAME_STRATA_LABELS,
+              order = EllesmereUI.FRAME_STRATA_ORDER_FULL,
+              getValue = function() local bd = SelectedTBB(); return bd and bd.strata or "MEDIUM" end,
+              setValue = function(v)
+                  local bd = SelectedTBB(); if not bd then return end
+                  bd.strata = v
+                  -- Grouped bars share one strata: write the rest of the group too.
+                  local gid = ns.TBBBarGroupID(bd)
+                  if gid ~= 0 then
+                      local t = ns.GetTrackedBuffBars()
+                      for _, b in ipairs(t.bars or {}) do
+                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.strata = v end
+                      end
+                  end
+                  RefreshTBB()
+              end }
         );  y = y - h
         AddTBBTextSwatch(stacksRow, stacksRow._leftRegion, "stacks")
         do
@@ -5544,29 +5561,6 @@ initFrame:SetScript("OnEvent", function(self)
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
-
-        -- Bar Strata
-        local barStrataRow
-        barStrataRow, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Bar Strata",
-              tooltip = "Screen layer the bar renders on; changing a grouped bar changes its whole group.",
-              values = EllesmereUI.FRAME_STRATA_LABELS,
-              order = EllesmereUI.FRAME_STRATA_ORDER_FULL,
-              getValue = function() local bd = SelectedTBB(); return bd and bd.strata or "MEDIUM" end,
-              setValue = function(v)
-                  local bd = SelectedTBB(); if not bd then return end
-                  bd.strata = v
-                  -- Grouped bars share one strata: write the rest of the group too.
-                  local gid = ns.TBBBarGroupID(bd)
-                  if gid ~= 0 then
-                      local t = ns.GetTrackedBuffBars()
-                      for _, b in ipairs(t.bars or {}) do
-                          if b ~= bd and ns.TBBBarGroupID(b) == gid then b.strata = v end
-                      end
-                  end
-                  RefreshTBB()
-              end },
-            { type = "label", text = "" });  y = y - h
 
         -------------------------------------------------------------------
         --  DISPLAY
@@ -19419,7 +19413,7 @@ initFrame:SetScript("OnEvent", function(self)
                     -- Global, not per-bar: there is one shared keybind cache
                     -- for every CDM bar, so this toggle is labelled as such.
                     { type = "toggle", label = "Keep Keys on Bar Swap (global)",
-                      tooltip = "Keep keybind text identical when your action bar swaps -- rogue stealth, druid forms, skyriding. Also covers conditional macros like \"/cast [bonusbar:1] Backstab; Shadow Dance\", where the key would otherwise jump to whichever branch is live.\n\nThe key then only changes when you actually move the ability or rebind it.\n\nOff by default. Applies to every CDM bar at once.",
+                      tooltip = "Keep keybind text identical when your action bar swaps -- rogue stealth, druid forms, skyriding. Also covers conditional macros like \"/cast [bonusbar:1] Backstab; Shadow Dance\", where the key would otherwise jump to whichever branch is live.\n\nThe key then only changes when you actually move the ability or rebind it.\n\nOn by default. Applies to every CDM bar at once.",
                       get = function()
                           local p = DB()
                           return (p and p.cdmBars and p.cdmBars.stableKeybinds) == true

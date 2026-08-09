@@ -540,11 +540,11 @@ local DEFAULTS = {
             hideBuffsWhenInactive = true,
             showInactiveBuffIcons = false,
             desaturateInactiveBuffs = true,
-            -- Opt-in: keep keybind text identical across action bar swaps
-            -- (stealth, druid forms, skyriding). Off by default so the shipped
-            -- behaviour is unchanged -- StableKeybindsEnabled() reads a missing
-            -- value as off too, so existing profiles stay as they are.
-            stableKeybinds = false,
+            -- Keep keybind text identical across action bar swaps (stealth,
+            -- druid forms, skyriding). ON by default: the defaults merge
+            -- seeds it into existing profiles at login, and an explicit
+            -- false (user turned it off) survives the logout default-strip.
+            stableKeybinds = true,
             -- The 3 default bars (match Blizzard CDM)
             bars = {
                 {
@@ -7847,8 +7847,9 @@ local function _ScanMainBarLive(i, key)
     _ResolveSlotBinding(i + (pg - 1) * 12, key, _TIER_MAINBAR_HOME)
 end
 
--- Global opt-in for the stable scan. Off unless the profile explicitly enables
--- it, so nothing changes for anyone who does not go looking for the option.
+-- Global toggle for the stable scan. Default ON via DEFAULTS; the strict
+-- == true read means a pre-merge call (key not seeded yet) falls back to
+-- the legacy live-page scan for that pass.
 local function StableKeybindsEnabled()
     local p = ECME.db and ECME.db.profile
     return (p and p.cdmBars and p.cdmBars.stableKeybinds) == true

@@ -175,7 +175,13 @@ local PT = {
 -------------------------------------------------------------------------------
 local CHANNEL_TICK_DATA = {
     -- Evoker
-    [356995]  = { ticks = 4, modSpell = 1219723, modTicks = 5 },   -- Disintegrate / Azure Celerity
+    -- Disintegrate deals damage ON channel start and then once per interval
+    -- (3 intervals base; Azure Celerity shortens the interval ONLY -> 4), so
+    -- its interior marks sit at i/N of the ACTUAL duration and a chained
+    -- recast keeps the outgoing cast's damage cadence -- see the
+    -- intervalCount model in ShowChannelTicks.
+    -- Cadence and talent behavior credited to Xephyris -- thanks!
+    [356995]  = { intervalCount = 3, modSpell = 1219723, modIntervalCount = 4 },
     -- Priest
     [15407]   = { ticks = 6 },                                     -- Mind Flay
     [48045]   = { ticks = 6 },                                     -- Mind Sear
@@ -6759,29 +6765,97 @@ ShowChannelTicks = function(spellID)
     local barHeight = bar:GetHeight()
     if barWidth <= 0 or barHeight <= 0 then return end
 
-    -- Pixel-snap helpers (same approach as empower pips)
+    -- Physical-pixel helpers (same approach as empower pips): PP.perfect /
+    -- effectiveScale is one PHYSICAL pixel in the bar's local units, so mark
+    -- widths are exact physical pixel counts at every UI scale. The old
+    -- effectiveScale rounding treated the target as UI units and drifted
+    -- between 1 and 3 physical pixels depending on scale.
     local effectiveScale = bar:GetEffectiveScale()
-    local pixelSize = 1 / effectiveScale
-    local tickWidth = max(pixelSize, floor(2 * effectiveScale + 0.5) / effectiveScale)
-    local highlightWidth = max(pixelSize, floor(3 * effectiveScale + 0.5) / effectiveScale)
-    local snappedHeight = floor(barHeight * effectiveScale + 0.5) / effectiveScale
+    local PPc = EllesmereUI and EllesmereUI.PP
+    local onePx = ((PPc and PPc.perfect) or 1) / effectiveScale
+    local tickWidth = 2 * onePx
+    local highlightWidth = 3 * onePx
+    local snappedHeight = (PPc and PPc.SnapForES)
+        and PPc.SnapForES(barHeight, effectiveScale) or barHeight
 
     -- Tick marks
     if wantTicks then
-        local numTicks
-        if tickData.tickInterval then
-            local channelDuration = castBarFrame._endTime - castBarFrame._startTime
-            if channelDuration > 0 then
-                numTicks = floor(channelDuration / tickData.tickInterval)
-            else
-                numTicks = 0
+        -- Interior mark positions as fractions of elapsed channel time
+        -- (ascending; the LAST entry is the gold last-safe-clip mark).
+        -- Three cadence models:
+        --   ticks = N         : N evenly spaced damage events ending at the
+        --                       channel end -> marks at i/N
+        --   tickInterval = s  : fixed short cadence -> floor(duration/s) segments
+        --   intervalCount = N : damage lands AT channel start, then once every
+        --                       duration/N. Marks sit on each later event, and
+        --                       a recast begun BEFORE the old channel ended
+        --                       (proc-driven chaining) inherits the outgoing
+        --                       cast's rhythm: its first mark lands where the
+        --                       old cadence's next tick was due. Haste and
+        --                       whole-cast talents are absorbed by working in
+        --                       fractions of the ACTUAL duration; only
+        --                       interval-only modifiers change N.
+        local positions
+        if tickData.intervalCount then
+            local dur = castBarFrame._endTime - castBarFrame._startTime
+            if dur > 0 then
+                local N = tickData.intervalCount
+                if tickData.modSpell and IsPlayerSpell(tickData.modSpell) then
+                    N = tickData.modIntervalCount or N
+                end
+                local interval = dur / N
+                local startT = castBarFrame._startTime
+                -- Chain carry is computed ONCE per cast and cached: duration
+                -- updates re-enter here for the same cast, and re-starts
+                -- within 0.5s are duplicate events for the SAME channel
+                -- (hover-style refires), never a chain.
+                local tracked = castBarFrame._cadStart
+                if not tracked or (startT - tracked) >= 0.5 then
+                    local carry = 0
+                    local pEnd = castBarFrame._cadPrevEnd
+                    local pInt = castBarFrame._cadPrevInterval
+                    if pEnd and pInt and pInt > 0 and startT < pEnd - 0.01 then
+                        carry = math.fmod(pEnd - startT, pInt)
+                        if carry < 0.01 then carry = 0 end
+                    end
+                    castBarFrame._cadCarry = carry
+                    castBarFrame._cadStart = startT
+                end
+                -- Bank this cast's cadence for a possible chain into the next.
+                castBarFrame._cadPrevEnd = castBarFrame._endTime
+                castBarFrame._cadPrevInterval = interval
+                positions = {}
+                local t = castBarFrame._cadCarry or 0
+                if t < 0.01 then t = interval end
+                while t < dur - interval * 0.05 and #positions < 12 do
+                    positions[#positions + 1] = t / dur
+                    t = t + interval
+                end
             end
         else
-            numTicks = tickData.ticks
-            if tickData.modSpell and IsPlayerSpell(tickData.modSpell) then
-                numTicks = tickData.modTicks
+            local numTicks
+            if tickData.tickInterval then
+                local channelDuration = castBarFrame._endTime - castBarFrame._startTime
+                if channelDuration > 0 then
+                    numTicks = floor(channelDuration / tickData.tickInterval)
+                else
+                    numTicks = 0
+                end
+            else
+                numTicks = tickData.ticks
+                if tickData.modSpell and IsPlayerSpell(tickData.modSpell) then
+                    numTicks = tickData.modTicks
+                end
+            end
+            if numTicks and numTicks > 1 then
+                positions = {}
+                for i = 1, numTicks - 1 do
+                    positions[i] = i / numTicks
+                end
             end
         end
+
+        local count = positions and #positions or 0
 
         -- Pre-read colors once outside the loop
         local showTickMarks = cb.showTickMarks
@@ -6789,8 +6863,8 @@ ShowChannelTicks = function(spellID)
         local tmR, tmG, tmB, tmA = cb.tickMarksR or 1.0, cb.tickMarksG or 1.0, cb.tickMarksB or 1.0, cb.tickMarksA or 0.7
         local ltR, ltG, ltB, ltA = cb.lastTickR or 1.0, cb.lastTickG or 0.82, cb.lastTickB or 0.0, cb.lastTickA or 0.95
 
-        for i = 1, numTicks - 1 do
-            local isLastTick = (i == numTicks - 1)
+        for i = 1, count do
+            local isLastTick = (i == count)
 
             if not showTickMarks and not isLastTick then
                 if castBarFrame._ticks[i] then castBarFrame._ticks[i]:Hide() end
@@ -6798,18 +6872,33 @@ ShowChannelTicks = function(spellID)
                 local tick = castBarFrame._ticks[i]
                 if not tick then
                     tick = bar:CreateTexture(nil, "OVERLAY", nil, 3)
+                    -- Exact-width 1px-class art: keep the engine's texel
+                    -- snapping out of it or it re-rounds our aligned edges.
+                    if tick.SetSnapToPixelGrid then
+                        tick:SetSnapToPixelGrid(false)
+                        tick:SetTexelSnappingBias(0)
+                    end
                     castBarFrame._ticks[i] = tick
                 end
 
-                local snappedOffset = floor(barWidth * (numTicks - i) / numTicks * effectiveScale + 0.5) / effectiveScale
+                local isGold = isLastTick and showLastTick
+                local w = isGold and highlightWidth or tickWidth
+                -- The bar drains, so a mark at time-fraction f draws at
+                -- (1 - f) of the width from the left. The center is snapped
+                -- WIDTH-AWARE so both edges land on the physical grid -- an
+                -- odd-pixel mark centered on a plain grid point straddles it
+                -- and blurs.
+                local rawOffset = barWidth * (1 - positions[i])
+                local snappedOffset = (PPc and PPc.SnapCenterForDim)
+                    and PPc.SnapCenterForDim(rawOffset, w, effectiveScale)
+                    or (floor(rawOffset * effectiveScale + 0.5) / effectiveScale)
 
-                if isLastTick and showLastTick then
+                if isGold then
                     tick:SetColorTexture(ltR, ltG, ltB, ltA)
-                    tick:SetSize(highlightWidth, snappedHeight)
                 else
                     tick:SetColorTexture(tmR, tmG, tmB, tmA)
-                    tick:SetSize(tickWidth, snappedHeight)
                 end
+                tick:SetSize(w, snappedHeight)
 
                 tick:ClearAllPoints()
                 tick:SetPoint("CENTER", bar, "LEFT", snappedOffset, 0)
@@ -6817,12 +6906,12 @@ ShowChannelTicks = function(spellID)
             end
         end
 
-        -- Hide extras from a previous channel that had more ticks
-        for i = max(1, numTicks), #castBarFrame._ticks do
+        -- Hide extras from a previous channel that had more marks
+        for i = count + 1, #castBarFrame._ticks do
             castBarFrame._ticks[i]:Hide()
         end
 
-        castBarFrame._numTicks = numTicks
+        castBarFrame._numTicks = count + 1
     else
         for i = 1, #castBarFrame._ticks do
             castBarFrame._ticks[i]:Hide()
@@ -7506,10 +7595,16 @@ OnEmpowerStart = function()
         local numStages = #stages
         castBarFrame._numStages = numStages
 
-        -- Compute the effective scale so we can snap to physical pixels
+        -- Physical-pixel sizing: PP.perfect / effectiveScale = one PHYSICAL
+        -- pixel in the bar's local units, so the pip is exactly 2 physical
+        -- pixels wide at every UI scale (the old effectiveScale rounding
+        -- treated 2 as UI units and drifted between 1 and 3 physical pixels).
         local effectiveScale = bar:GetEffectiveScale()
-        local pixelSize = 1 / effectiveScale          -- 1 physical pixel in UI units
-        local pipWidth = max(pixelSize, floor(2 * effectiveScale + 0.5) / effectiveScale) -- at least 1px, target ~2px
+        local PPc = EllesmereUI and EllesmereUI.PP
+        local onePx = ((PPc and PPc.perfect) or 1) / effectiveScale
+        local pipWidth = 2 * onePx
+        local snappedHeight = (PPc and PPc.SnapForES)
+            and PPc.SnapForES(barHeight, effectiveScale) or barHeight
 
         -- Position a pip at each stage boundary (skip the last -- it's the bar end)
         local lastOffset = 0
@@ -7518,13 +7613,19 @@ OnEmpowerStart = function()
             if not pip then
                 pip = bar:CreateTexture(nil, "OVERLAY", nil, 2)
                 pip:SetColorTexture(1, 1, 1, 0.85)
+                if pip.SetSnapToPixelGrid then
+                    pip:SetSnapToPixelGrid(false)
+                    pip:SetTexelSnappingBias(0)
+                end
                 castBarFrame._pips[i] = pip
             end
             local rawOffset = lastOffset + (barWidth * stages[i])
             lastOffset = rawOffset
-            -- Snap offset to nearest physical pixel
-            local snappedOffset = floor(rawOffset * effectiveScale + 0.5) / effectiveScale
-            local snappedHeight = floor(barHeight * effectiveScale + 0.5) / effectiveScale
+            -- Width-aware center snap: both pip edges land on the physical
+            -- grid (a centered even-width mark on a grid point is exact).
+            local snappedOffset = (PPc and PPc.SnapCenterForDim)
+                and PPc.SnapCenterForDim(rawOffset, pipWidth, effectiveScale)
+                or (floor(rawOffset * effectiveScale + 0.5) / effectiveScale)
             pip:SetSize(pipWidth, snappedHeight)
             pip:ClearAllPoints()
             pip:SetPoint("CENTER", bar, "LEFT", snappedOffset, 0)
