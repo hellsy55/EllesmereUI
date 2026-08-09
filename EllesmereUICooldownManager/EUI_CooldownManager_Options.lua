@@ -19357,6 +19357,23 @@ initFrame:SetScript("OnEvent", function(self)
                     { type = "slider", label = "Y Offset", min = -30, max = 30, step = 1,
                       get = function() return BD().keybindOffsetY or -2 end,
                       set = function(v) BD().keybindOffsetY = v; ns.RefreshCDMIconAppearance(BD().key); ns.ApplyCachedKeybinds(); UpdateCDMPreview(); EllesmereUI:RefreshPage() end },
+                    -- Global, not per-bar: there is one shared keybind cache
+                    -- for every CDM bar, so this toggle is labelled as such.
+                    { type = "toggle", label = "Keep Keys on Bar Swap (global)",
+                      tooltip = "Keep keybind text identical when your action bar swaps -- rogue stealth, druid forms, skyriding. Also covers conditional macros like \"/cast [bonusbar:1] Backstab; Shadow Dance\", where the key would otherwise jump to whichever branch is live.\n\nThe key then only changes when you actually move the ability or rebind it.\n\nOff by default. Applies to every CDM bar at once.",
+                      get = function()
+                          local p = DB()
+                          return (p and p.cdmBars and p.cdmBars.stableKeybinds) == true
+                      end,
+                      set = function(v)
+                          local p = DB()
+                          if not p or not p.cdmBars then return end
+                          p.cdmBars.stableKeybinds = v and true or false
+                          -- Changes how the cache is built, not just how it is
+                          -- drawn -- needs a full rebuild, not an apply pass.
+                          if ns.UpdateCDMKeybinds then ns.UpdateCDMKeybinds() end
+                          UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                      end },
                 },
             })
             MakeCogBtn(rgn, kbCogShow, kbSwatch, EllesmereUI.RESIZE_ICON)
