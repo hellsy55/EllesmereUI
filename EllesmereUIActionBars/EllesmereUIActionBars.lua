@@ -641,6 +641,9 @@ end
 
 -- Blizzard data bar override (let Blizzard control XP + Rep via Edit Mode)
 defaults.profile.useBlizzardDataBars = false
+-- Stock vehicle / override bar suppression. Opt-in, and inert until switched
+-- on: no frame, no events and no hook exist while it is false.
+defaults.profile.hideBlizzardVehicleBar = false
 
 ns.defaults = defaults
 
@@ -11643,6 +11646,144 @@ do
 end
 
 -------------------------------------------------------------------------------
+--  Hide Blizzard's Vehicle / Override Bar  (opt-in)
+--
+--  Nothing is lost when it is on: bar 1 already pages to
+--  [vehicleui][possessbar], so the vehicle's own slots appear there, and
+--  MainMenuBarVehicleLeaveButton is reparented to UIParent just above.
+--
+--  Suppression is alpha + mouse on the BAR ITSELF, never SetParent and never
+--  Hide. OverrideActionBar is a protected, EditMode-managed frame: reparenting
+--  it taints Blizzard's transition code and blocks the next vehicle, while
+--  SetAlpha is unprotected, works in combat and needs no /reload to undo.
+--
+--  Deliberately NOT recursive. Walking Blizzard's frame tree to force mouse
+--  state on descendants is how you end up owning frames you never meant to,
+--  and re-enabling them blind on the way back out is worse -- it hands the
+--  player a mouse state Blizzard never set. Only the top-level frame is
+--  touched, and only what we disabled is restored.
+--
+--  The micro menu is the one descendant that matters, because Blizzard docks
+--  it INTO this bar and it would inherit alpha 0. That is solved by moving it
+--  out (see ReclaimMicroMenu), not by disabling it in place.
+-------------------------------------------------------------------------------
+
+-- Snapshot where MicroMenu lives while it is still home, so the reclaim has a
+-- real anchor to restore instead of guessing one.
+function EAB:CacheMicroMenuHome()
+    if self._eabMicroHome then return end
+    if not (MicroMenu and MicroMenu.GetPoint) then return end
+    -- Never snapshot while Blizzard has it docked elsewhere. Reloading inside a
+    -- vehicle would otherwise record the DOCKED anchor as "home", and every
+    -- later reclaim would faithfully restore it to the wrong place -- silently,
+    -- since the cache is write-once.
+    if self:MicroMenuDockedIn(OverrideActionBar) then return end
+    local p, rel, relP, x, y = MicroMenu:GetPoint(1)
+    if p then
+        self._eabMicroHome = { p, rel, relP, x or 0, y or 0 }
+    end
+end
+
+-- Blizzard docks MicroMenu several levels deep, so a one-level parent test
+-- misses it. Walk the chain.
+function EAB:MicroMenuDockedIn(root)
+    if not (MicroMenu and root) then return false end
+    local p = MicroMenu.GetParent and MicroMenu:GetParent()
+    local guard = 0
+    while p and guard < 8 do
+        if p == root then return true end
+        p = p.GetParent and p:GetParent()
+        guard = guard + 1
+    end
+    return false
+end
+
+-- Hand MicroMenu back to its own container. Without this it stays parented
+-- inside the bar, inherits alpha 0, and sits invisible on top of the vehicle
+-- exit button still taking clicks.
+--
+-- ResetMicroMenuPosition() looks like the right call and is not: it re-derives
+-- the dock from CURRENT game state, and with a vehicle up that resolves right
+-- back to the bar being hidden, so the reclaim silently no-ops. Force the
+-- parent and restore the cached anchor instead.
+function EAB:ReclaimMicroMenu()
+    if InCombatLockdown() then return end
+    if not (MicroMenu and MicroMenuContainer) then return end
+    self:CacheMicroMenuHome()
+    if not self:MicroMenuDockedIn(OverrideActionBar) then return end
+    MicroMenu:SetParent(MicroMenuContainer)
+    local h = self._eabMicroHome
+    if h then
+        MicroMenu:ClearAllPoints()
+        MicroMenu:SetPoint(h[1], h[2] or MicroMenuContainer, h[3], h[4], h[5])
+    end
+    MicroMenu:SetAlpha(1)
+end
+
+function EAB:ApplyVehicleBarVisibility()
+    local bar = OverrideActionBar
+    if not bar then return end
+    local hide = self.db and self.db.profile and self.db.profile.hideBlizzardVehicleBar
+    if hide then
+        self:ReclaimMicroMenu()
+        bar:SetAlpha(0)
+        -- Guarded so the restore below can only ever undo OUR change: if the
+        -- bar already had mouse off for Blizzard's own reasons, we never
+        -- touched it and must not switch it back on.
+        if not self._eabVehMouseOff then
+            self._eabVehMouseOff = true
+            SafeEnableMouse(bar, false)
+        end
+    else
+        bar:SetAlpha(1)
+        if self._eabVehMouseOff then
+            self._eabVehMouseOff = nil
+            SafeEnableMouse(bar, true)
+        end
+    end
+end
+
+-- Arm or disarm the watch. Everything is created on first enable, so a user
+-- who never turns this on pays nothing: no event frame, no registrations and
+-- no OnShow hook are ever created.
+--
+-- HookScript cannot be undone, so the hook is installed at most once and is
+-- gated on the setting from the inside; disabling unregisters the events,
+-- which is what actually stops the work.
+function EAB:UpdateVehicleBarWatch()
+    local on = self.db and self.db.profile and self.db.profile.hideBlizzardVehicleBar
+    local f = self._eabVehWatch
+    if not on then
+        if f then f:UnregisterAllEvents() end
+        self:ApplyVehicleBarVisibility()
+        return
+    end
+    if not f then
+        f = ns.TakeShell()
+        f:SetScript("OnEvent", function()
+            EAB:CacheMicroMenuHome()
+            EAB:ApplyVehicleBarVisibility()
+        end)
+        self._eabVehWatch = f
+    end
+    f:RegisterEvent("PLAYER_ENTERING_WORLD")
+    -- The bar's own OnShow is the deterministic edge: Blizzard raises it as
+    -- part of the transition, so there is nothing to race and no need to poll
+    -- a ladder of timers. One deferred re-assert follows it because the micro
+    -- menu dock can land in the same frame, just after the show.
+    if not self._eabVehShowHooked and OverrideActionBar then
+        self._eabVehShowHooked = true
+        OverrideActionBar:HookScript("OnShow", function()
+            if not (EAB.db and EAB.db.profile
+                    and EAB.db.profile.hideBlizzardVehicleBar) then return end
+            EAB:ApplyVehicleBarVisibility()
+            C_Timer_After(0, function() EAB:ApplyVehicleBarVisibility() end)
+        end)
+    end
+    self:ApplyVehicleBarVisibility()
+end
+
+-------------------------------------------------------------------------------
 --  Vehicle Highlight Fix
 --  During vehicle/override paging, empty MainBar buttons can retain a stale
 --  "checked" state from the normal bar. The CheckedTexture uses the same
@@ -14128,6 +14269,7 @@ function EAB:FinishSetup()
     -- ApplyAll pass is a no-op for these. Extra bars (built on a later
     -- timer) are nil-skipped here, exactly as on a normal login.
     self:ApplyCombatVisibility()
+    self:UpdateVehicleBarWatch()
 
     -- Dormancy initial sync: bars that START hidden never fire an OnHide
     -- edge, and the creation-time OnHide fired before buttons existed. Runs
