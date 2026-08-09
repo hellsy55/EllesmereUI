@@ -326,8 +326,32 @@ do
     -- our ADDON_LOADED -- the window where the engine caches the global --
     -- the name is never registered yet). noDefault on Fetch: without it an
     -- unregistered name silently resolves to the DEFAULT font, not nil.
-    -- Every candidate is probed, so only a loadable path is ever applied or
-    -- kept in the cache.
+    -- Candidates are ranked by the advisory probe, then confirmed against the
+    -- real font object when it exists; only a path that was applied, or that
+    -- there was no way to test, is kept in the cache.
+
+    -- Blizzard's own value, captured before we ever write it, so a path the
+    -- real font object later rejects can be backed out instead of leaving
+    -- floating text dead for the whole session.
+    local defaultDamageFont = _G.DAMAGE_TEXT_FONT
+
+    -- CombatTextFont is the object we are actually configuring, so its own
+    -- SetFont result is DIRECT evidence, unlike the synthetic ProbeFont
+    -- FontString (which false-negatives on macOS and Linux). Prefer it
+    -- whenever it exists.
+    --   true  = the font took
+    --   false = the real object rejected it
+    --   nil   = nothing to test with yet (Blizzard_CombatText not loaded)
+    -- SetFont is RequiresValidFontAsset, so it RAISES on a bad path, and this
+    -- runs at file scope where an unhandled error would abort the rest of the
+    -- file. Hence the pcall.
+    local function TryRealFont(path)
+        local f = _G.CombatTextFont
+        if not f then return nil end
+        local ok, success = pcall(f.SetFont, f, path, 120, "")
+        return ok and success == true
+    end
+
     local function ApplyCombatTextFont()
         local db = EllesmereUIDB
         local saved = db and db.fctFont
@@ -355,23 +379,26 @@ do
             fontPath = (ProbeFont(fetched) and fetched)
                 or (ProbeFont(cached) and cached)
                 or fetched
-            -- Only ever WRITE a path we actually have. Never nil the cache: an
-            -- early pass runs before external font packs load, and the later
-            -- ADDON_LOADED / PLAYER_LOGIN / PLAYER_ENTERING_WORLD passes need
-            -- the cached path to still be there to succeed with.
-            if fontPath then
-                db.fctFontPath = fontPath
-                db.fctFontPathFor = saved
-            end
             if not fontPath then return end
         end
+
+        -- Validate against the real object when it exists. A rejection here is
+        -- trustworthy, so back the global out to Blizzard's value: an engine
+        -- global left pointing at an unloadable path kills floating text for
+        -- the session, which is worse than falling back to the default.
+        if TryRealFont(fontPath) == false then
+            _G.DAMAGE_TEXT_FONT = defaultDamageFont
+            return
+        end
         _G.DAMAGE_TEXT_FONT = fontPath
-        if _G.CombatTextFont then
-            -- SetFont is RequiresValidFontAsset, so it RAISES on a bad path.
-            -- This function is called at file scope, where an unhandled error
-            -- would abort the rest of this file, and the path above is no
-            -- longer probe-guaranteed.
-            pcall(_G.CombatTextFont.SetFont, _G.CombatTextFont, fontPath, 120, "")
+
+        -- Cache only a path that was applied (or that we had no way to test).
+        -- Never nil the cache: an early pass runs before external font packs
+        -- load, and the later ADDON_LOADED / PLAYER_LOGIN /
+        -- PLAYER_ENTERING_WORLD passes need it to still be there to succeed.
+        if smName then
+            db.fctFontPath = fontPath
+            db.fctFontPathFor = saved
         end
     end
 
