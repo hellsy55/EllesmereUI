@@ -217,16 +217,24 @@ end
 -- that helper lazy-creates the table, and this can run at the ADDON_LOADED of
 -- Blizzard_CombatText, before our SavedVariables have been restored.
 
--- Probe a font path before it reaches an engine global: SetFont returns a
--- success boolean, so a cached path whose providing addon was uninstalled is
--- detected instead of leaving the engine pointed at a missing file for the
--- whole session (which kills floating text entirely).
+-- Probe a font path before it reaches an engine global, so a cached path whose
+-- providing addon was uninstalled is detected instead of leaving the engine
+-- pointed at a missing file for the whole session (which kills floating text
+-- entirely).
+--
+-- Only the RAISE counts. SetFont is RequiresValidFontAsset, so a path the
+-- client cannot find raises ("Invalid font asset (<path>): file not found").
+-- The success boolean it returns when it does NOT raise is a different signal
+-- and is not evidence of loadability: field capture (8.7.8) has it returning
+-- false for a font file the very same call proved present, in a session where
+-- a stock Blizzard path raised. Reading that false as "missing" vetoed a font
+-- that was there. So: raised = the client could not find the file, anything
+-- else = it could, and we say nothing about the rest.
 local probeFS
 local function ProbeFont(path)
     if type(path) ~= "string" or path == "" then return false end
     probeFS = probeFS or UIParent:CreateFontString()
-    local ok, success = pcall(probeFS.SetFont, probeFS, path, 12, "")
-    return ok and success == true
+    return (pcall(probeFS.SetFont, probeFS, path, 12, ""))
 end
 
 local function ApplyUnitNameFont()
@@ -335,21 +343,21 @@ do
     -- floating text dead for the whole session.
     local defaultDamageFont = _G.DAMAGE_TEXT_FONT
 
-    -- CombatTextFont is the object we are actually configuring, so its own
-    -- SetFont result is DIRECT evidence, unlike the synthetic ProbeFont
-    -- FontString (which false-negatives on macOS and Linux). Prefer it
-    -- whenever it exists.
-    --   true  = the font took
-    --   false = the real object rejected it
+    -- CombatTextFont is the object we are actually configuring, so applying to
+    -- it here also does the real work when it exists.
+    --   true  = the client found the file
+    --   false = it did not (SetFont raised: RequiresValidFontAsset)
     --   nil   = nothing to test with yet (Blizzard_CombatText not loaded)
-    -- SetFont is RequiresValidFontAsset, so it RAISES on a bad path, and this
-    -- runs at file scope where an unhandled error would abort the rest of the
-    -- file. Hence the pcall.
+    -- Only the raise is read, for the same reason as ProbeFont above: moving
+    -- the veto off the synthetic probe and onto the real object did not help,
+    -- because the unreliable part was never the object, it was the success
+    -- boolean. Both witnesses run the same call and return the same false for
+    -- a font that is present. This runs at file scope, where an unhandled
+    -- error would abort the rest of the file, hence the pcall.
     local function TryRealFont(path)
         local f = _G.CombatTextFont
         if not f then return nil end
-        local ok, success = pcall(f.SetFont, f, path, 120, "")
-        return ok and success == true
+        return (pcall(f.SetFont, f, path, 120, ""))
     end
 
     local function ApplyCombatTextFont()
@@ -383,9 +391,10 @@ do
         end
 
         -- Validate against the real object when it exists. A rejection here is
-        -- trustworthy, so back the global out to Blizzard's value: an engine
-        -- global left pointing at an unloadable path kills floating text for
-        -- the session, which is worse than falling back to the default.
+        -- a raise, i.e. the client could not find the file at all, so back the
+        -- global out to Blizzard's value: an engine global left pointing at a
+        -- missing path kills floating text for the session, which is worse
+        -- than falling back to the default.
         if TryRealFont(fontPath) == false then
             _G.DAMAGE_TEXT_FONT = defaultDamageFont
             return
