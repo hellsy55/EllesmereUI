@@ -519,6 +519,18 @@ end
 --  whatever the user's CVar says. The comments elsewhere in this file claim
 --  otherwise; if they are right, this renders nothing and the prototype dies.
 -------------------------------------------------------------------------------
+-- Both sinks accept secrets, and icon mode already feeds them the same way.
+local function BindEngineCountdown(cd, duration, cdStart, cdDuration, cdModRate)
+    if duration and cd.SetCooldownFromDurationObject then
+        cd:SetCooldownFromDurationObject(duration)
+        return true
+    elseif cdStart and cdDuration then
+        cd:SetCooldown(cdStart, cdDuration, cdModRate)
+        return true
+    end
+    return false
+end
+
 local function HideEngineCountdown(slot)
     if slot.cdNum then slot.cdNum:Hide() end
     -- ShowEngineCountdown slides the name off centre to make room for the
@@ -583,15 +595,42 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
             cd:SetPoint("LEFT", slot.text, "RIGHT", gap, 0)
         end
     end
-    -- Both sinks accept secrets, and icon mode already feeds them the same way.
-    if duration and cd.SetCooldownFromDurationObject then
-        cd:SetCooldownFromDurationObject(duration)
-    elseif cdStart and cdDuration then
-        cd:SetCooldown(cdStart, cdDuration, cdModRate)
-    else
+    if not BindEngineCountdown(cd, duration, cdStart, cdDuration, cdModRate) then
         -- Nothing to drive the number with: undo the room made for it, or the
         -- name is left sitting off centre with an empty gap beside it.
         HideEngineCountdown(slot)
+        return false
+    end
+    cd:Show()
+    return true
+end
+
+-- Bar mode's number lives centred in the bar with no name beside it, so it
+-- needs the binding but none of the two-object layout above.
+local function ShowEngineCountdownCentred(slot, anchor, duration, cdStart, cdDuration, cdModRate)
+    local cd = slot.cdNum
+    if not cd then return false end
+    local ma = MA()
+    local fontSize = math.max(8, math.min(72, ma.textSize or 24))
+    local precision = ((tonumber(ma.precision) or 1) > 0) and 1 or 0
+    if cd.SetCountdownMillisecondsThreshold then
+        cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
+    end
+    cd:ClearAllPoints()
+    local fs = slot.cdNumText
+    if fs then
+        cd:SetSize(1, 1)
+        cd:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+        fs:ClearAllPoints()
+        fs:SetWidth(0)
+        fs:SetJustifyH("CENTER")
+        fs:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+    else
+        cd:SetSize(fontSize * 3, fontSize * 1.4)
+        cd:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+    end
+    if not BindEngineCountdown(cd, duration, cdStart, cdDuration, cdModRate) then
+        cd:Hide()
         return false
     end
     cd:Show()
@@ -1213,7 +1252,13 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             -- would look like the cooldown had just finished.
             slot.bar:SetMinMaxValues(0, 1)
             slot.bar:SetValue(1)
+            -- The fill cannot be scaled without a readable remaining, but the
+            -- NUMBER can still be drawn by the engine, so the bar no longer has
+            -- to go silent just because Lua cannot do the arithmetic.
             slot.bar.text:SetShown(false)
+            if ma.barShowDuration ~= false then
+                ShowEngineCountdownCentred(slot, slot.bar, duration, cdStart, cdDuration, cdModRate)
+            end
         else
             slot.bar:SetMinMaxValues(0, cdDuration)
             slot.bar:SetValue(cdRemaining)
