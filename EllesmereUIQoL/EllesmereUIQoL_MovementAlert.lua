@@ -519,13 +519,14 @@ end
 --  whatever the user's CVar says. The comments elsewhere in this file claim
 --  otherwise; if they are right, this renders nothing and the prototype dies.
 -------------------------------------------------------------------------------
--- Both sinks accept secrets, and icon mode already feeds them the same way.
-local function BindEngineCountdown(cd, duration, cdStart, cdDuration, cdModRate)
+-- The duration OBJECT is the only safe way to drive this. Cooldown:SetCooldown
+-- is SecretArguments = "AllowedWhenUntainted", so handing it the secret start
+-- and duration from the cdInfo path would error out of our own tainted ticker;
+-- the object itself is not a secret value, so passing it is fine. When there is
+-- no object there is simply no number, which is the same degradation as before.
+local function BindEngineCountdown(cd, duration)
     if duration and cd.SetCooldownFromDurationObject then
         cd:SetCooldownFromDurationObject(duration)
-        return true
-    elseif cdStart and cdDuration then
-        cd:SetCooldown(cdStart, cdDuration, cdModRate)
         return true
     end
     return false
@@ -542,7 +543,7 @@ local function HideEngineCountdown(slot)
     end
 end
 
-local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
+local function ShowEngineCountdown(slot, displayMode, duration)
     local cd = slot.cdNum
     if not cd then return false end
     local ma = MA()
@@ -553,6 +554,11 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
     local precision = ((tonumber(ma.precision) or 1) > 0) and 1 or 0
     if cd.SetCountdownMillisecondsThreshold then
         cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
+    end
+    -- Blizzard abbreviates past two minutes by default, so a 90s cooldown would
+    -- print "1:30" where every other path in this feature prints "90".
+    if cd.SetCountdownAbbrevThreshold then
+        cd:SetCountdownAbbrevThreshold(0)
     end
     -- Layout. The number is a separate object from the name, so the pair has to
     -- be centred as a unit: reserve a fixed width for the number and slide the
@@ -577,9 +583,9 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
         cd:SetSize(1, 1)
         cd:SetPoint("CENTER", slot.text, "CENTER", 0, 0)
         fs:ClearAllPoints()
-        fs:SetWidth(reserved)
-        -- Justify toward the name so the digits stay put against it and grow
-        -- outward into the reserved space.
+        -- No SetWidth: the anchor below already grows the digits outward, and a
+        -- hard width clips five-glyph values like "120.0" (Stampeding Roar).
+        -- reserved is only an estimate for the centring shift above.
         if numberFirst then
             fs:SetJustifyH("RIGHT")
             fs:SetPoint("RIGHT", slot.text, "LEFT", -gap, 0)
@@ -595,7 +601,7 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
             cd:SetPoint("LEFT", slot.text, "RIGHT", gap, 0)
         end
     end
-    if not BindEngineCountdown(cd, duration, cdStart, cdDuration, cdModRate) then
+    if not BindEngineCountdown(cd, duration) then
         -- Nothing to drive the number with: undo the room made for it, or the
         -- name is left sitting off centre with an empty gap beside it.
         HideEngineCountdown(slot)
@@ -607,7 +613,7 @@ end
 
 -- Bar mode's number lives centred in the bar with no name beside it, so it
 -- needs the binding but none of the two-object layout above.
-local function ShowEngineCountdownCentred(slot, anchor, duration, cdStart, cdDuration, cdModRate)
+local function ShowEngineCountdownCentred(slot, anchor, duration)
     local cd = slot.cdNum
     if not cd then return false end
     local ma = MA()
@@ -616,7 +622,17 @@ local function ShowEngineCountdownCentred(slot, anchor, duration, cdStart, cdDur
     if cd.SetCountdownMillisecondsThreshold then
         cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
     end
+    -- Blizzard abbreviates past two minutes by default, so a 90s cooldown would
+    -- print "1:30" where every other path in this feature prints "90".
+    if cd.SetCountdownAbbrevThreshold then
+        cd:SetCountdownAbbrevThreshold(0)
+    end
     cd:ClearAllPoints()
+    -- The host frame is created before slot.bar, so without this the number is
+    -- painted under the bar's background and fill and never appears.
+    if anchor.GetFrameLevel then
+        cd:SetFrameLevel(anchor:GetFrameLevel() + 5)
+    end
     local fs = slot.cdNumText
     if fs then
         cd:SetSize(1, 1)
@@ -629,7 +645,7 @@ local function ShowEngineCountdownCentred(slot, anchor, duration, cdStart, cdDur
         cd:SetSize(fontSize * 3, fontSize * 1.4)
         cd:SetPoint("CENTER", anchor, "CENTER", 0, 0)
     end
-    if not BindEngineCountdown(cd, duration, cdStart, cdDuration, cdModRate) then
+    if not BindEngineCountdown(cd, duration) then
         cd:Hide()
         return false
     end
@@ -1166,13 +1182,21 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
 
     local cdRemaining, cdStart, cdDuration, cdModRate
     local hasSecretDuration = false
+    -- True only when the duration OBJECT supplied the values below. The engine
+    -- countdown is driven from that object, so anything resolved from cdInfo
+    -- instead must not try to use it: the object was either absent or already
+    -- rejected here, and SetCooldownFromDurationObject clears to nothing on an
+    -- expired one while still reporting success.
+    local fromDuration = false
     if duration then
         local rem, total = duration:GetRemainingDuration(), duration:GetTotalDuration()
         if IsSecret(rem) or IsSecret(total) then
             hasSecretDuration = true
+            fromDuration = true
             cdRemaining, cdDuration = rem, total
             cdStart, cdModRate = duration:GetStartTime(), duration:GetModRate()
         elseif total and total > 1.5 and rem and rem > 0 then
+            fromDuration = true
             cdRemaining, cdDuration = rem, total
             cdStart, cdModRate = duration:GetStartTime(), duration:GetModRate()
         end
@@ -1237,7 +1261,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             -- guard as the text branch below.
             if not showRemaining then
                 slot.text:SetText("No " .. spellName)
-                ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
+                if fromDuration then ShowEngineCountdown(slot, displayMode, duration) end
             else
                 slot.text:SetFormattedText(fmtStr, cdRemaining)
             end
@@ -1246,26 +1270,30 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     elseif displayMode == "bar" then
         local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
         slot.bar:SetStatusBarColor(r, g, b)
-        if hasSecretDuration then
-            -- Unreadable remaining (see the text branch): show a full bar so the
-            -- alert still reads as "unavailable" instead of an empty one, which
-            -- would look like the cooldown had just finished.
+        if type(cdRemaining) == "boolean" then
+            -- Only the sentinel leaves nothing to scale the fill with: show a
+            -- full bar so the alert still reads as "unavailable" instead of an
+            -- empty one, which would look like a cooldown that just finished.
             slot.bar:SetMinMaxValues(0, 1)
             slot.bar:SetValue(1)
-            -- The fill cannot be scaled without a readable remaining, but the
-            -- NUMBER can still be drawn by the engine, so the bar no longer has
-            -- to go silent just because Lua cannot do the arithmetic.
-            slot.bar.text:SetShown(false)
-            if ma.barShowDuration ~= false then
-                ShowEngineCountdownCentred(slot, slot.bar, duration, cdStart, cdDuration, cdModRate)
-            end
         else
+            -- A SECRET remaining still animates: SimpleStatusBar's SetValue and
+            -- SetMinMaxValues are both AllowedWhenTainted, so the engine scales
+            -- the fill from values Lua may not read. Gating this on
+            -- hasSecretDuration would freeze the bar at 100% for no reason.
             slot.bar:SetMinMaxValues(0, cdDuration)
             slot.bar:SetValue(cdRemaining)
-            slot.bar.text:SetShown(ma.barShowDuration ~= false)
-            if ma.barShowDuration ~= false then
-                slot.bar.text:SetFormattedText("%." .. precision .. "f", cdRemaining)
-            end
+        end
+        -- The NUMBER is the part Lua cannot produce, so it comes from our own
+        -- formatter when readable and from the engine when not.
+        if ma.barShowDuration == false then
+            slot.bar.text:SetShown(false)
+        elseif showRemaining then
+            slot.bar.text:SetShown(true)
+            slot.bar.text:SetFormattedText("%." .. precision .. "f", cdRemaining)
+        else
+            slot.bar.text:SetShown(false)
+            if fromDuration then ShowEngineCountdownCentred(slot, slot.bar, duration) end
         end
         if ma.barShowIcon ~= false and spellIcon then slot.bar.icon:SetTexture(spellIcon); slot.bar.icon:Show() else slot.bar.icon:Hide() end
         slot.bar:Show()
@@ -1290,7 +1318,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             -- both producers and drops the fragile type() test with it.
             slot.text:SetText("No " .. spellName)
             -- PROTOTYPE: the number Lua cannot format, drawn by the engine.
-            ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
+            if fromDuration then ShowEngineCountdown(slot, displayMode, duration) end
         else
             slot.text:SetFormattedText(fmtStr, cdRemaining)
         end
