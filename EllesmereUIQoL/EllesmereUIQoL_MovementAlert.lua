@@ -1023,6 +1023,23 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     if not cdRemaining then return false end
     if not hasSecretDuration and cdRemaining <= 0 then return false end
 
+    -- The text branches format cdRemaining themselves, so what decides them is
+    -- whether THAT value can be rendered, not whether some other field of the
+    -- same cooldown happened to be secret: hasSecretDuration is set when EITHER
+    -- the remaining or the total is secret, and a secret total leaves a
+    -- perfectly renderable remaining behind. Bar mode keeps using
+    -- hasSecretDuration because it also feeds cdDuration to SetMinMaxValues.
+    -- Both tests are secret-safe (no comparison against a secret): the sentinel
+    -- is a plain boolean, and IsSecret is issecretvalue.
+    local unreadableRemaining = type(cdRemaining) == "boolean" or IsSecret(cdRemaining)
+    -- Show a number only when there is a real, positive one to show. The <= 0
+    -- test is reachable ONLY once unreadableRemaining is false, so it never
+    -- compares against a secret. It matters because the guard above lets a
+    -- non-positive remaining through whenever hasSecretDuration was set by the
+    -- OTHER field, which is the last route by which a literal 0.0 could still
+    -- reach the display.
+    local showRemaining = not unreadableRemaining and cdRemaining > 0
+
     if displayMode == "icon" then
         if spellIcon then
             slot.icon.tex:SetTexture(spellIcon)
@@ -1048,8 +1065,8 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             slot.icon:Show()
         else
             -- Icon mode with no icon falls back to text, so it needs the same
-            -- sentinel guard as the text branch below.
-            if type(cdRemaining) == "boolean" then
+            -- guard as the text branch below.
+            if not showRemaining then
                 slot.text:SetText("No " .. spellName)
             else
                 slot.text:SetFormattedText(fmtStr, cdRemaining)
@@ -1059,7 +1076,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     elseif displayMode == "bar" then
         local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
         slot.bar:SetStatusBarColor(r, g, b)
-        if type(cdRemaining) == "boolean" then
+        if hasSecretDuration then
             -- Unreadable remaining (see the text branch): show a full bar so the
             -- alert still reads as "unavailable" instead of an empty one, which
             -- would look like the cooldown had just finished.
@@ -1077,22 +1094,24 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
         if ma.barShowIcon ~= false and spellIcon then slot.bar.icon:SetTexture(spellIcon); slot.bar.icon:Show() else slot.bar.icon:Hide() end
         slot.bar:Show()
     else -- any text mode (text_nd / text_dn / legacy "text")
-        if type(cdRemaining) == "boolean" then
-            -- The cdInfo fallback stores a BOOLEAN sentinel when the cooldown is
-            -- secret, because Lua cannot compute a remaining from secret
-            -- start/duration. Feeding that to a "%.1f" renders 0.0, which reads
-            -- as "ready" -- the exact opposite of what the alert means, and what
-            -- made the countdown appear to reset the instant combat started in
-            -- instanced content. Drop the number instead: the alert still says
-            -- the ability is unavailable, which is the part that matters.
+        if not showRemaining then
+            -- Whenever the remaining is unreadable, drop the number: the alert
+            -- still says the ability is unavailable, which is the part that
+            -- matters. Formatting it ourselves renders 0.0, which reads as
+            -- "ready" -- the exact opposite of what the alert means.
             --
-            -- Only the sentinel is special-cased. A genuine secret NUMBER is
-            -- passed straight through, because SetFormattedText is
-            -- AllowedWhenTainted and the engine renders the real value from it.
-            -- Sentinel test is type-based, NOT `== true`: the Duration-object
-            -- path above stores a raw SECRET number in cdRemaining, and
-            -- equality against a secret is not a comparison we ever risk;
-            -- type() is secret-safe and the sentinel is a plain boolean.
+            -- BOTH producers land here, which is what the first pass at this
+            -- got wrong. The cdInfo fallback stores a BOOLEAN sentinel (Lua
+            -- cannot compute a remaining from a secret start plus duration),
+            -- and the Duration-object path above stores a raw SECRET NUMBER.
+            -- Only the sentinel used to be guarded, on the assumption that
+            -- SetFormattedText being AllowedWhenTainted meant the engine would
+            -- render a secret's real value. It does not: field-confirmed on
+            -- 8.7.8, a secret remaining renders as 0.0 here. Icon mode never
+            -- relied on that assumption -- it blanks its own text and lets the
+            -- Cooldown widget draw the secret -- so the two branches disagreed
+            -- and the text one was wrong. Gating on hasSecretDuration covers
+            -- both producers and drops the fragile type() test with it.
             slot.text:SetText("No " .. spellName)
         else
             slot.text:SetFormattedText(fmtStr, cdRemaining)
