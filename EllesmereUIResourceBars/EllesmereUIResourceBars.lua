@@ -4159,6 +4159,18 @@ local function UpdatePrimaryBar()
     local cur = UnitPower("player", cachedPrimary)
     local mx = UnitPowerMax("player", cachedPrimary)
     if not mx or mx <= 0 then return end
+	-- Some custom power types (e.g. Devourer Fury) can transiently report a
+    -- negative value from the server between spend and the next power sync.
+    -- The StatusBar widget itself clamps the *fill* to [0, mx] automatically,
+    -- but nothing was clamping the raw number handed to the text formatters
+    -- below, so "smart"/"curpp"/"both" text could show a negative number
+    -- while the bar visually read empty. Floor it once here, and use the
+    -- clamped value everywhere after this point (fill + text) so both stay
+    -- consistent. issecretvalue()'d numbers can't be compared, so skip the
+    -- floor for those (SetValue's own clamp still protects the fill).
+    if not (issecretvalue and issecretvalue(cur)) and cur < 0 then
+        cur = 0
+    end
 
     primaryBar:SetMinMaxValues(0, mx)
 
