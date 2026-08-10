@@ -521,6 +521,13 @@ end
 -------------------------------------------------------------------------------
 local function HideEngineCountdown(slot)
     if slot.cdNum then slot.cdNum:Hide() end
+    -- ShowEngineCountdown slides the name off centre to make room for the
+    -- number, so every render has to start from the plain centred layout or
+    -- the offset accumulates across modes.
+    if slot.text then
+        slot.text:ClearAllPoints()
+        slot.text:SetPoint("CENTER")
+    end
 end
 
 local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
@@ -535,6 +542,20 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
     if cd.SetCountdownMillisecondsThreshold then
         cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
     end
+    -- Layout. The number is a separate object from the name, so the pair has to
+    -- be centred as a unit: reserve a fixed width for the number and slide the
+    -- name half of that the other way. The width is RESERVED rather than
+    -- measured because the number's own width changes as it counts down
+    -- (100.0 -> 9.9), and centring on a measured width would shuffle the name
+    -- sideways on every tick.
+    local gap = math.max(2, fontSize * 0.15)
+    local reserved = fontSize * (precision == 1 and 2.4 or 1.6)
+    local shift = (reserved + gap) / 2
+    local numberFirst = (displayMode ~= "text_nd")
+
+    slot.text:ClearAllPoints()
+    slot.text:SetPoint("CENTER", slot, "CENTER", numberFirst and shift or -shift, 0)
+
     -- Position the FontString itself when the engine hands it over, so the
     -- number matches our own text exactly; fall back to moving the host frame
     -- (whose centred number only approximates the same place) when it does not.
@@ -544,17 +565,22 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
         cd:SetSize(1, 1)
         cd:SetPoint("CENTER", slot.text, "CENTER", 0, 0)
         fs:ClearAllPoints()
-        if displayMode == "text_nd" then
-            fs:SetPoint("LEFT", slot.text, "RIGHT", 4, 0)
+        fs:SetWidth(reserved)
+        -- Justify toward the name so the digits stay put against it and grow
+        -- outward into the reserved space.
+        if numberFirst then
+            fs:SetJustifyH("RIGHT")
+            fs:SetPoint("RIGHT", slot.text, "LEFT", -gap, 0)
         else
-            fs:SetPoint("RIGHT", slot.text, "LEFT", -4, 0)
+            fs:SetJustifyH("LEFT")
+            fs:SetPoint("LEFT", slot.text, "RIGHT", gap, 0)
         end
     else
-        cd:SetSize(fontSize * 3, fontSize * 1.4)
-        if displayMode == "text_nd" then
-            cd:SetPoint("LEFT", slot.text, "RIGHT", 4, 0)
+        cd:SetSize(reserved, fontSize * 1.4)
+        if numberFirst then
+            cd:SetPoint("RIGHT", slot.text, "LEFT", -gap, 0)
         else
-            cd:SetPoint("RIGHT", slot.text, "LEFT", -4, 0)
+            cd:SetPoint("LEFT", slot.text, "RIGHT", gap, 0)
         end
     end
     -- Both sinks accept secrets, and icon mode already feeds them the same way.
@@ -563,7 +589,9 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
     elseif cdStart and cdDuration then
         cd:SetCooldown(cdStart, cdDuration, cdModRate)
     else
-        cd:Hide()
+        -- Nothing to drive the number with: undo the room made for it, or the
+        -- name is left sitting off centre with an empty gap beside it.
+        HideEngineCountdown(slot)
         return false
     end
     cd:Show()
