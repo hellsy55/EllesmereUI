@@ -11763,12 +11763,16 @@ function InitializeFrames()
     RegisterStylesOnce()
 
     local function SetupUnitMenu(frame, unit)
-        -- Left and right only, matching Blizzard's own unit frames: a
-        -- registered click is CONSUMED and never reaches the binding system,
-        -- and these frames bind nothing to middle/thumb buttons themselves.
-        -- The click-cast engine sets its own RegisterForClicks when it takes
-        -- a frame over. Left and right still cover target and the menu.
-        frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        -- Register ALL mouse buttons (matches raid/party's "AnyUp"), not just
+        -- left/right. These frames bind nothing to middle/thumb themselves, so
+        -- an unbound middle/thumb click still does nothing here -- but Blizzard's
+        -- built-in click-casting (and Clique) sets its own type3/type4/type5
+        -- attributes on frames registered in ClickCastFrames, and needs the
+        -- click event to actually be delivered to fire. Left-button-only
+        -- registration silently ate those clicks whenever EUI's own click-cast
+        -- engine wasn't the one driving RegisterForClicks (i.e. EUI's engine
+        -- disabled, native/Clique click-casting relied on instead).
+        frame:RegisterForClicks("AnyUp")
         -- 12.0.7 gates SecureUnitButton's togglemenu; route right-click securely
         -- through a SecureActionButton proxy so the menu (and its protected items
         -- like Set Focus) work without taint.
