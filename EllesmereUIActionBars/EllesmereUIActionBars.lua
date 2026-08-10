@@ -11332,7 +11332,7 @@ local function UpdateKeybinds()
     -- editor close (housingCleared reset -> UpdateKeybinds; sigValid stays
     -- false while cleared, so that rebuild is never skipped).
     if _bindState.housingCleared then return false end
-    -- Empower/flyout detection for one action slot, shared by the current-page
+    -- Empower detection for one action slot, shared by the current-page
     -- and base-slot checks in pass 1.
     local function SlotIsPH(slot)
         if not (slot and HasAction(slot)) then return false end
@@ -11351,6 +11351,17 @@ local function UpdateKeybinds()
             end
         end
         return false
+    end
+    -- Flyout detection, split out from SlotIsPH. A flyout MUST click-route to
+    -- our visible EABButton: SpellFlyout:Toggle anchors to self, and native
+    -- command routing (ACTIONBUTTONn) fires on Blizzard's original button,
+    -- which we hide/reparent off-screen (see stock-bar hiding above) --
+    -- opening the popup there produces no visible menu even though the key
+    -- was received. Empowers have no popup to anchor, so they're unaffected
+    -- and must stay on the native command (see routing comment below).
+    local function SlotIsFlyout(slot)
+        if not (slot and HasAction(slot)) then return false end
+        return GetActionInfo(slot) == "flyout"
     end
     -- Pass 1: compute per-button routing signature (k1, k2, useClick, isPH)
     -- and compare against the last applied build.
@@ -11402,7 +11413,8 @@ local function UpdateKeybinds()
                     local cmd = prefix .. i
                     local k1, k2 = GetBindingKey(cmd)
                     -- Routing is native for everything on standard bars,
-                    -- empowers included: the engine's keystate-paired
+                    -- empowers included (flyouts are the exception -- see
+                    -- isFlyout below): the engine's keystate-paired
                     -- hold-and-release is the only queue-safe empower path
                     -- (stateless click routes latch queued releases at
                     -- rank 1). Click routing exists ONLY where a native
@@ -11412,13 +11424,14 @@ local function UpdateKeybinds()
                     -- Custom bars (Bar9/Bar10) have no native binding command, so
                     -- their keys MUST route through the button (SetOverrideBindingClick);
                     -- SetOverrideBinding to a non-existent command would do nothing.
-                    -- isPH tracks empower/flyout separately from useClick: on a
+                    -- isPH tracks empower state separately from useClick: on a
                     -- custom-paged bar useClick is always true, but the secure
                     -- empower snippet still needs a re-trigger when a slot's
                     -- press-and-hold state flips.
                     local isPH = SlotIsPH(slot)
-                    -- Base-slot check: isPH no longer decides ROUTING (keys
-                    -- are native either way); it stays in the signature so
+                    -- Base-slot check: isPH no longer decides ROUTING on its
+                    -- own (empowers stay native either way); it stays in the
+                    -- signature so
                     -- pass 3 re-fires the attr re-check when a slot's
                     -- press-and-hold state genuinely changes (mouse-click
                     -- correctness), and it feeds the combat-drop re-assert
@@ -11428,6 +11441,7 @@ local function UpdateKeybinds()
                     -- mount and dismount (skyriding page flips). Guarded on
                     -- the offsets table so Pet/Stance buttons (action attr
                     -- nil) never alias into MainBar slots.
+                    local isFlyout = SlotIsFlyout(slot)
                     if not isPH then
                         local off = BAR_SLOT_OFFSETS[info.key]
                         if off then
@@ -11438,9 +11452,12 @@ local function UpdateKeybinds()
                         end
                     end
                     if isPH then anyPH = true end
-                    -- isPH deliberately NOT part of the routing decision:
-                    -- empower keys must ride the native command.
-                    local useClick = barHasCustomPaging or (info.customPage ~= nil)
+                    -- isPH (empower) deliberately NOT part of the routing
+                    -- decision: empower keys must ride the native command.
+                    -- isFlyout IS part of it: flyouts need self to be the
+                    -- visible button so SpellFlyout anchors somewhere the
+                    -- player can actually see.
+                    local useClick = barHasCustomPaging or (info.customPage ~= nil) or isFlyout
                     k1 = k1 or false
                     k2 = k2 or false
                     if sig[n + 1] ~= k1 or sig[n + 2] ~= k2
