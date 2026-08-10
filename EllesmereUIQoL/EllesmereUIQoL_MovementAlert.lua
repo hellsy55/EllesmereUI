@@ -396,6 +396,18 @@ local function CreateDisplaySlot()
     if slot.cdNum.SetCountdownFont then
         slot.cdNum:SetCountdownFont("EUI_MovementAlertCdFont")
     end
+    -- Blizzard suppresses countdown text on short cooldowns by default, which
+    -- would silently drop the number on exactly the short mobility cooldowns
+    -- this feature exists for.
+    if slot.cdNum.SetMinimumCountdownDuration then
+        slot.cdNum:SetMinimumCountdownDuration(0)
+    end
+    -- The engine exposes the FontString it draws into, so the number can be
+    -- placed and sized against our own text instead of being inferred from the
+    -- host frame's geometry (which is what made it render at a different size).
+    if slot.cdNum.GetCountdownFontString then
+        slot.cdNumText = slot.cdNum:GetCountdownFontString()
+    end
     slot.cdNum:Hide()
 
     slot.bar = CreateFrame("StatusBar", nil, slot)
@@ -451,6 +463,13 @@ local function StyleSlot(slot)
     end
     slot.text:SetTextColor(tR, tG, tB)
     slot.icon.timeText:SetTextColor(tR, tG, tB)
+    -- Pin the engine's countdown FontString to the same font object and colour
+    -- every pass: left alone it sizes itself against its host frame rather than
+    -- the user's Text Size.
+    if slot.cdNumText then
+        slot.cdNumText:SetFontObject(movementCdFont)
+        slot.cdNumText:SetTextColor(tR, tG, tB)
+    end
 
     local barH = math.max(12, math.floor(frameH * 0.5))
     local barW = frameW - (ma.barShowIcon ~= false and (barH + 8) or 0) - 10
@@ -509,14 +528,34 @@ local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDurat
     if not cd then return false end
     local ma = MA()
     local fontSize = math.max(8, math.min(72, ma.textSize or 24))
-    -- The widget centres its own number, so the frame is what gets positioned:
-    -- park it just outside the name text on whichever side the format puts it.
-    cd:SetSize(fontSize * 3, fontSize * 1.4)
+    -- Decimals: this is the engine's version of the Show Decimal toggle. Above
+    -- the threshold it prints whole seconds, below it one decimal place, so
+    -- "always" is a threshold past any cooldown and "never" is zero.
+    local precision = ((tonumber(ma.precision) or 1) > 0) and 1 or 0
+    if cd.SetCountdownMillisecondsThreshold then
+        cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
+    end
+    -- Position the FontString itself when the engine hands it over, so the
+    -- number matches our own text exactly; fall back to moving the host frame
+    -- (whose centred number only approximates the same place) when it does not.
     cd:ClearAllPoints()
-    if displayMode == "text_nd" then
-        cd:SetPoint("LEFT", slot.text, "RIGHT", 4, 0)
+    local fs = slot.cdNumText
+    if fs then
+        cd:SetSize(1, 1)
+        cd:SetPoint("CENTER", slot.text, "CENTER", 0, 0)
+        fs:ClearAllPoints()
+        if displayMode == "text_nd" then
+            fs:SetPoint("LEFT", slot.text, "RIGHT", 4, 0)
+        else
+            fs:SetPoint("RIGHT", slot.text, "LEFT", -4, 0)
+        end
     else
-        cd:SetPoint("RIGHT", slot.text, "LEFT", -4, 0)
+        cd:SetSize(fontSize * 3, fontSize * 1.4)
+        if displayMode == "text_nd" then
+            cd:SetPoint("LEFT", slot.text, "RIGHT", 4, 0)
+        else
+            cd:SetPoint("RIGHT", slot.text, "LEFT", -4, 0)
+        end
     end
     -- Both sinks accept secrets, and icon mode already feeds them the same way.
     if duration and cd.SetCooldownFromDurationObject then
