@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local _, ns = ...
 
 -- ===========================================================================
@@ -45,21 +46,18 @@ local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellI
 
 -- 12.1 ONLY: engine-slot driver for aura-triggered built-in rules. Ebon Might
 -- (395296) was removed from the never-secret list in build 68824, so
--- GetPlayerAuraBySpellID returns nothing for it in restricted content and the
--- numeric expirationTime window can never open mid-combat. The replacement
--- rides a hidden one-slot aura container (includeSpellIDs on the player --
--- helpful-on-assistable passes the identity gate regardless of secrecy)
--- whose slot subtree IS the active display, engine-driven end to end: the
--- button shows only while the aura is up, SetIcon binds the aura's own
--- texture, SetDurationCooldown renders the swipe from the real duration
--- object (extensions included), and SetDurationText drives the countdown
--- text -- all styled inside the creation window (the subtree is denied to
--- addon code afterward, reads and writes both). The legacy overlay frame
--- stays permanently dark on 12.1; it survives only for border raising and
--- the shared settings plumbing in ApplyToFrame.
--- FA121 stays nil on 12.0: every consumer site guards on it, so retail
--- behavior is byte-identical. Declared here (above ApplyToFrame) so the
--- gated sites capture it as an upvalue; defined after ApplyRule below.
+-- GetPlayerAuraBySpellID returns nothing for it in restricted content and the numeric
+-- expirationTime window can never open mid-combat. The replacement rides a hidden
+-- one-slot aura container (includeSpellIDs on the player -- helpful-on-assistable
+-- passes the identity gate regardless of secrecy) whose slot subtree IS the active
+-- display, engine-driven end to end: the button shows only while the aura is up,
+-- SetIcon binds the aura's own texture, SetDurationCooldown renders the swipe from the
+-- real duration object (extensions included), and SetDurationText drives the countdown
+-- text -- all styled inside the creation window (the subtree is denied to addon code
+-- afterward, reads and writes both). The legacy overlay frame stays permanently dark on
+-- 12.1; it survives only for border raising and the shared settings plumbing in
+-- ApplyToFrame. Declared here (above ApplyToFrame) so the consumer sites capture it as
+-- an upvalue; defined after ApplyRule below.
 local FA121
 
 -- ---------------------------------------------------------------------------
@@ -122,15 +120,14 @@ local PresetOnCD, ApplyCdState, RestoreAllCdState, EnsureCdStateTicker, EvalCdSt
 -- ---------------------------------------------------------------------------
 -- The same icon can be named by two different tokens. An equipped trinket is
 -- -itemID in the settings store (ResolveCustomActiveKey maps a slot frame to
--- the equipped item so each item tracks separately) and -13/-14 on the slot
--- frame itself. Which token a RULE ends up with depends on whether equipment
--- data was readable at re-arm -- and at login it is not: GetInventoryItemID
--- returns nil, the equipped-trinket skip in Rearm does not fire, and the rule
--- is keyed -itemID while the frame that renders moments later carries -13.
--- Nothing reconciled them, so the rule sat armed against an icon that did not
--- exist for the rest of the session; any settings touch re-armed with
--- equipment present and it started working, which is the "dead until I open
--- the setting again" report.
+-- the equipped item so each item tracks separately) and -13/-14 on the slot frame
+-- itself. Which token a RULE ends up with depends on whether equipment data was
+-- readable at re-arm -- and at login it is not: GetInventoryItemID returns nil, the
+-- equipped-trinket skip in Rearm does not fire, and the rule is keyed -itemID while the
+-- frame that renders moments later carries -13. Nothing reconciled them, so the rule
+-- sat armed against an icon that did not exist for the rest of the session; any
+-- settings touch re-armed with equipment present and it started working, which is the
+-- "dead until I open the setting again" report.
 --
 -- Comparing through this map fixes every ordering variant at once, because it
 -- resolves at MATCH time (frames render long after equipment is available)
@@ -157,13 +154,12 @@ end
 -- Refreshed lazily while empty (covers the login window, where re-arm ran
 -- before equipment was readable) and on every equipment change.
 --
--- The throttle matters because an EMPTY map re-reads on EVERY call, and the
--- callers are hot: EvalCdStateNow runs on a 0.12s ticker and asks once per
--- icon per rule. Unthrottled that is a wipe plus a slot sweep hundreds of
--- times a second for as long as the map stays empty. It only ever engages
--- while empty, so a character wearing anything at all never reaches it --
--- which is also why widening the sweep above shrinks this window to the brief
--- login gap it was written for.
+-- The throttle matters because an EMPTY map re-reads on EVERY call, and the callers are
+-- hot: EvalCdStateNow runs on a 0.12s ticker and asks once per icon per rule.
+-- Unthrottled that is a wipe plus a slot sweep hundreds of times a second for as long
+-- as the map stays empty. It only ever engages while empty, so a character wearing
+-- anything at all never reaches it -- which is also why widening the sweep above
+-- shrinks this window to the brief login gap it was written for.
 local _slotKeyNextTry = 0
 local function KeyMatches(ruleKey, frameKey)
     if ruleKey == frameKey then return true end
@@ -322,15 +318,10 @@ ApplyToFrame = function(iconFrame, rule, win)
         o.icon:SetDesaturated(false)
         local cr, cg, cb, ca = ResolveSwipeColor(ss)
         o.cd:SetSwipeColor(cr, cg, cb, ca)
-        -- Per-spell Reverse Swipe: flip our active swipe's fill direction, the
-        -- same setting the underlying icon honors (ss covers both sources: the
-        -- resolved per-spell block for built-in rules, the customActiveStates
-        -- entry for user rules). Gated by the session flag so it stays zero
-        -- cost for anyone who never enables it; the flag is monotonic, so a
-        -- toggle-off still passes through here and resets the pooled overlay.
-        if ns._cdmAnyReverseSwipe then
-            o.cd:SetReverse((ss and ss.reverseSwipe) and true or false)
-        end
+        -- Reverse Active Swipe: flips this overlay's own swipe direction only,
+        -- independent of the real cooldown's Reverse Swipe / Cooldown Swipe
+        -- setting. Default off (normal depleting swipe).
+        if o.cd.SetReverse then o.cd:SetReverse((ss and ss.activeSwipeReverse) or false) end
         o.cd:SetCooldown(win.start, win.dur)
         o._ss = ss
         -- Match the icon's Duration Text settings on our own countdown number;
@@ -377,6 +368,18 @@ ApplyToFrame = function(iconFrame, rule, win)
         o.cd:Clear()
         o.frame:SetAlpha(0)
         if FA121 then FA121.Detach(o) end
+        -- Reverse Active Swipe falloff: the real underlying cooldown (not this
+        -- overlay) is what's visible once the active window closes. Native
+        -- ability cooldowns get their swipe direction re-asserted on every
+        -- Blizzard SetSwipeColor call, but preset/custom icons (trinket slots,
+        -- custom item spellIDs, racials) don't repaint that way -- without an
+        -- explicit reset here their swipe can stay frozen on whatever
+        -- direction it last evaluated to (reversed, while active) instead of
+        -- reverting to the normal depleting swipe.
+        local realCd = iconFrame.Cooldown
+        if realCd and realCd.SetReverse and (ns._cdmAnyReverseSwipe or ns._cdmAnyActiveSwipeReverse) then
+            realCd:SetReverse((ss and ss.reverseSwipe) and true or false)
+        end
     end
 end
 
@@ -410,7 +413,6 @@ end
 --  regen) and parked by hiding the proxy -- a hidden container fully
 --  unregisters its events, so the parked state costs nothing.
 -- ---------------------------------------------------------------------------
-if EllesmereUI and EllesmereUI.IS_121 then
     FA121 = { byRule = {} }
     local FA121_WIN = { fa121 = true, start = 0, dur = 0, expiry = 0 }
 
@@ -420,13 +422,12 @@ if EllesmereUI and EllesmereUI.IS_121 then
         return st
     end
 
-    -- NO Lua presence signal exists: the button AND every child created in
-    -- its creation window are denied to addon code afterward (field-mapped
-    -- 2026-07-22 -- reads and writes both). The design therefore keeps the
-    -- entire active display INSIDE the slot subtree, engine-driven end to
-    -- end: visibility (button shown only while the aura is up), icon
-    -- (SetIcon) and swipe (SetDurationCooldown) all render without any
-    -- addon code running. The legacy overlay (o.frame) stays alpha 0 on
+    -- NO Lua presence signal exists: the button AND every child created in its creation
+    -- window are denied to addon code afterward (field-mapped 2026-07-22 -- reads and
+    -- writes both). The design therefore keeps the entire active display INSIDE the
+    -- slot subtree, engine-driven end to end: visibility (button shown only while the
+    -- aura is up), icon (SetIcon) and swipe (SetDurationCooldown) all render without
+    -- any addon code running. The legacy overlay (o.frame) stays alpha 0 on
     -- 12.1 -- it exists only so RaiseOverlayBorders and settings plumbing
     -- keep working through the shared ApplyToFrame path.
 
@@ -440,12 +441,11 @@ if EllesmereUI and EllesmereUI.IS_121 then
             return
         end
         -- Repositioning is ALWAYS a proxy move: the slot button anchored
-        -- SetAllPoints(proxy) once in its creation window, and the proxy is
-        -- our frame -- legal any time, icon churn included.
-        -- Parent to the ICON FRAME, never to o.frame: the legacy overlay is
-        -- held at alpha 0 on 12.1 and children inherit EFFECTIVE alpha -- a
-        -- proxy under o.frame renders the whole engine subtree invisible
-        -- (field-hit 2026-07-22: everything worked, at alpha 0).
+        -- SetAllPoints(proxy) once in its creation window, and the proxy is our frame
+        -- -- legal any time, icon churn included. Parent to the ICON FRAME, never to
+        -- o.frame: the legacy overlay is held at alpha 0 on 12.1 and children inherit
+        -- EFFECTIVE alpha -- a proxy under o.frame renders the whole engine subtree
+        -- invisible (field-hit 2026-07-22: everything worked, at alpha 0).
         st.proxy:SetParent(iconFrame)
         st.proxy:ClearAllPoints()
         st.proxy:SetAllPoints(iconFrame)
@@ -547,12 +547,11 @@ if EllesmereUI and EllesmereUI.IS_121 then
             end
         end
         -- No icon found = CDM bars not built yet (login race) OR the spell
-        -- is not on any bar. Do NOT build: every baked decision (the text
-        -- gate, fonts, swipe color, crop) resolved nil and would be wrong
-        -- for the whole session (built latches). The rescan retries
-        -- re-queue the build; once the icon exists, everything bakes from
-        -- real settings. Field-hit as "swipe works, no text" in sessions
-        -- where the build outran bar construction.
+        -- is not on any bar. Do NOT build: every baked decision (the text gate, fonts,
+        -- swipe color, crop) resolved nil and would be wrong for the whole session
+        -- (built latches). The rescan retries re-queue the build; once the icon exists,
+        -- everything bakes from real settings. Field-hit as "swipe works, no text" in
+        -- sessions where the build outran bar construction.
         if not st.srcFrame then return end
         local container = AK.CreateContainerShell(st.proxy, { point = { "CENTER" } })
         AK.AddSlotToContainer(container, {
@@ -563,16 +562,15 @@ if EllesmereUI and EllesmereUI.IS_121 then
             candidateFilters = { includeSpellIDs = { [rule.auraSpellID] = true } },
             style = "cdm:fa121",
             extraInit = function(button)
-                -- Creation window: the only legal moment for button-level
-                -- wiring AND (per the field lessons above) the only reliable
-                -- window for touching ANYTHING in this subtree -- post-window
-                -- reads AND writes on the button and its children are denied.
-                -- Therefore the subtree is entirely self-sufficient: the
-                -- ENGINE drives visibility (button shown only while the aura
-                -- is up), the icon (SetIcon binds the aura's own texture)
-                -- and the swipe (SetDurationCooldown from the real duration
-                -- object, extensions included). No Lua signal, no slave.
-                -- Two-point anchoring sizes the button by anchors forever.
+                -- Creation window: the only legal moment for button-level wiring AND
+                -- (per the field lessons above) the only reliable window for touching
+                -- ANYTHING in this subtree -- post-window reads AND writes on the
+                -- button and its children are denied. Therefore the subtree is entirely
+                -- self-sufficient: the ENGINE drives visibility (button shown only
+                -- while the aura is up), the icon (SetIcon binds the aura's own
+                -- texture) and the swipe (SetDurationCooldown from the real duration
+                -- object, extensions included). No Lua signal, no slave. Two-point
+                -- anchoring sizes the button by anchors forever.
                 button:SetAllPoints(st.proxy)
                 if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(false) end
                 -- Saturated icon: engine-bound, engine-shown. Zoom baked
@@ -604,24 +602,21 @@ if EllesmereUI and EllesmereUI.IS_121 then
                 if ns.ApplyShapeToOverlay and st.srcFrame then
                     pcall(ns.ApplyShapeToOverlay, st.srcFrame, tex, cd, bd)
                 end
-                -- Duration text: engine-bound cooldowns render NO widget
-                -- countdown (time display belongs to the SetDurationText
-                -- binding -- the AuraKit rule), so register a dedicated
-                -- FontString styled like the icon's cooldown text. Only
-                -- when the resolved cooldown-text setting is on: the engine
-                -- SetText()s every REGISTERED string, and a no-text config
-                -- should carry no binding at all. Fonted BEFORE
-                -- registration (an unfonted registered FS hard-errors
-                -- inside the engine).
+                -- Duration text: engine-bound cooldowns render NO widget countdown
+                -- (time display belongs to the SetDurationText binding -- the AuraKit
+                -- rule), so register a dedicated FontString styled like the icon's
+                -- cooldown text. Only when the resolved cooldown-text setting is on:
+                -- the engine SetText()s every REGISTERED string, and a no-text config
+                -- should carry no binding at all. Fonted BEFORE registration (an
+                -- unfonted registered FS hard-errors inside the engine).
                 local showCD = bd and bd.showCooldownText
                 if ss and ss.showCooldownText ~= nil then showCD = ss.showCooldownText end
                 if showCD then
-                    -- ARMORED: an uncaught error inside initializeFrame
-                    -- aborts the engine's whole CreateFrameBatch and kills
-                    -- the slot declaration (and every declaration after
-                    -- it). Text is optional polish -- it must never take
-                    -- the swipe down with it. Failures land in st.fsErr
-                    -- for the debug dump.
+                    -- ARMORED: an uncaught error inside initializeFrame aborts the
+                    -- engine's whole CreateFrameBatch and kills the slot declaration
+                    -- (and every declaration after it). Text is optional polish -- it
+                    -- must never take the swipe down with it. Failures land in
+                    -- st.fsErr for the debug dump.
                     local okFS, errFS = pcall(function()
                         -- Text CARRIER above the cooldown: regions created
                         -- on a Cooldown render UNDER its swipe (the classic
@@ -753,7 +748,6 @@ if EllesmereUI and EllesmereUI.IS_121 then
             C_Timer.After(8, FA121.Rescan)
         end
     end)
-end
 
 -- ---------------------------------------------------------------------------
 --  Expiry ticker (self-hides when idle).
@@ -870,12 +864,11 @@ OnEvent = function(self, event, unit, _, spellID)
         -- refresh unconditionally. It is a wipe plus one lookup per slot on an
         -- event that fires only when gear actually changes.
         RefreshSlotItemKeys()
-        -- Re-arm stays TRINKET-ONLY on purpose. A trinket swap re-points a
-        -- slot's settings to a different item, so the slot must pick up the
-        -- newly-equipped trinket's rule (or none). Re-arming on every gear
-        -- change would tear down and rebuild the whole rule set mid-gearing
-        -- for no benefit -- the refreshed map above already keeps matching
-        -- correct for the other slots.
+        -- Re-arm stays TRINKET-ONLY on purpose. A trinket swap re-points a slot's
+        -- settings to a different item, so the slot must pick up the newly-equipped
+        -- trinket's rule (or none). Re-arming on every gear change would tear down and
+        -- rebuild the whole rule set mid-gearing for no benefit -- the refreshed map
+        -- above already keeps matching correct for the other slots.
         if unit == 13 or unit == 14 then
             ns.FakeActive_Rearm()
         end
@@ -985,9 +978,8 @@ end
 PresetOnCD = function(key)
     local now = GetTime()
     if key > 0 then
-        -- A transform's real CD ticks on the override ID (e.g. Rushing Wind
-        -- Kick over Rising Sun Kick); the base-ID query reads not-on-CD
-        -- through that whole CD.
+        -- A transform's real CD ticks on the override ID (e.g. Rushing Wind Kick over
+        -- Rising Sun Kick); the base-ID query reads not-on-CD through that whole CD.
         local effKey = key
         if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
             local ov = C_SpellBook.FindSpellOverrideByID(key)
@@ -1004,10 +996,9 @@ PresetOnCD = function(key)
         if GetInventoryItemCooldown then start, dur, enable = GetInventoryItemCooldown("player", invSlot) end
     else
         local itemID = -key
-        -- Pot presets walk the swap-aware variant chain (partner family
-        -- included while the toggle is on) -- only the owned/used id reports
-        -- the shared potion cooldown. Everything else keeps the legacy
-        -- primary-then-alts walk.
+        -- Pot presets walk the swap-aware variant chain (partner family included while
+        -- the toggle is on) -- only the owned/used id reports the shared potion
+        -- cooldown. Everything else keeps the legacy primary-then-alts walk.
         local chain = ns.GetPresetPotChain and ns.GetPresetPotChain(itemID)
         if chain then
             for i = 1, #chain do
@@ -1037,12 +1028,11 @@ PresetOnCD = function(key)
     return (dur > 1.5 and now < start + dur) or false
 end
 
--- "Ready" for the Hidden (CD Ready) effects, which must not dismiss a charge
--- spell that is still recharging: a custom SPELL preset can have charges, so it
--- defers to the shared charge-aware read (ns.CdmCdStateReady). Items (key < 0)
--- have no charges, so onCD alone answers it. The override walk mirrors
--- PresetOnCD above -- the charges live on the override id (e.g. the transform),
--- not the base one.
+-- "Ready" for the Hidden (CD Ready) effects, which must not dismiss a charge spell that
+-- is still recharging: a custom SPELL preset can have charges, so it defers to the
+-- shared charge-aware read (ns.CdmCdStateReady). Items (key < 0) have no charges, so
+-- onCD alone answers it. The override walk mirrors PresetOnCD above -- the charges live
+-- on the override id (e.g. the transform), not the base one.
 local function PresetCdReady(key, onCD)
     if key <= 0 then return not onCD end
     local effKey = key
@@ -1053,11 +1043,10 @@ local function PresetCdReady(key, onCD)
     return ns.CdmCdStateReady(effKey, onCD)
 end
 
--- Normal (shown) alpha for a frame, from its bar's opacity (out-of-combat
--- fade folded in via EffectiveBarAlpha so restores don't clobber the fade).
--- Overflow-diverted frames render inside the target bar, so their restore
--- alpha follows that bar's opacity (same source the visibility/layout
--- passes use), not the identity bar's.
+-- Normal (shown) alpha for a frame, from its bar's opacity (out-of-combat fade folded
+-- in via EffectiveBarAlpha so restores don't clobber the fade). Overflow-diverted
+-- frames render inside the target bar, so their restore alpha follows that bar's
+-- opacity (same source the visibility/layout passes use), not the identity bar's.
 local function FrameBaseAlpha(fc)
     -- IconShownAlpha = EffectiveBarAlpha of the painted bar, forced to 0
     -- while that bar is visibility-hidden -- a restore here must never
@@ -1272,12 +1261,10 @@ function ns.FakeActive_OnIconRestyled(iconFrame)
     if ns.StyleOverlayCooldownText then
         ns.StyleOverlayCooldownText(o.cd, bd, o._ss, iconFrame:GetScale())
     end
-    -- Re-assert Reverse Swipe as well: o._ss is the live chained settings
-    -- block, so a toggle made while the window is open takes effect on this
-    -- restyle pass instead of waiting for the next window.
-    if ns._cdmAnyReverseSwipe then
-        o.cd:SetReverse((o._ss and o._ss.reverseSwipe) and true or false)
-    end
+    -- Re-apply Reverse Active Swipe so toggling it while this overlay is
+    -- already open takes effect immediately instead of waiting for the next
+    -- window open.
+    if o.cd.SetReverse then o.cd:SetReverse((o._ss and o._ss.activeSwipeReverse) or false) end
     -- The restyle reset the border to its normal level; clear the stale flag so
     -- RaiseOverlayBorders re-captures that level and lifts it above us again.
     o._brdRaised = false
@@ -1462,13 +1449,12 @@ end
 -- GetInventoryItemID -- so a re-arm that runs before the client can answer that
 -- builds no slot rule, and the icon it was meant to drive matches nothing.
 --
--- The login re-arm rides FullCDMRebuild, which is early enough for that to
--- happen, and nothing re-arms afterwards: PLAYER_EQUIPMENT_CHANGED is only
--- registered once user rules exist and in any case needs a real gear swap. So
--- the state stayed dormant for the whole session, and the only thing that
--- revived it was opening the options, which re-arms as a side effect. That is
--- exactly the reported shape: "works until you log out, then you have to choose
--- it again".
+-- The login re-arm rides FullCDMRebuild, which is early enough for that to happen, and
+-- nothing re-arms afterwards: PLAYER_EQUIPMENT_CHANGED is only registered once user
+-- rules exist and in any case needs a real gear swap. So the state stayed dormant for
+-- the whole session, and the only thing that revived it was opening the options, which
+-- re-arms as a side effect. That is exactly the reported shape: "works until you log
+-- out, then you have to choose it again".
 --
 -- Once per session, deferred, and only for the FIRST world entry: re-arming is
 -- a teardown and rebuild of every rule, so doing it on later zone-ins could cut

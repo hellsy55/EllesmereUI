@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIQoL_MovementAlert.lua
 --  Three independent on-screen trackers for class mobility abilities:
@@ -289,12 +290,11 @@ local function PlayAlertSound(key)
     if value then PlayLSMSound(value) end
 end
 
--- Text-to-speech: local-only playback via C_VoiceChat. The live-client
--- argument order is (voiceID, text, destination, volume, interrupt), NOT
--- (voiceID, text, destination, rate, volume) as older API docs suggest.
--- Enum.VoiceTtsDestination doesn't exist on live clients either, so
--- destination is the literal 1 (local playback). Silently no-ops if TTS
--- isn't available instead of erroring.
+-- Text-to-speech: local-only playback via C_VoiceChat. The live-client argument order
+-- is (voiceID, text, destination, volume, interrupt), NOT (voiceID, text, destination,
+-- rate, volume) as older API docs suggest. Enum.VoiceTtsDestination doesn't exist on
+-- live clients either, so destination is the literal 1 (local playback). Silently
+-- no-ops if TTS isn't available instead of erroring.
 local function SpeakAlertText(voiceId, text, volume)
     if not (C_VoiceChat and C_VoiceChat.SpeakText) then return end
     if not text or text == "" then return end
@@ -342,9 +342,8 @@ EllesmereUI._MovementBarTextures = {
 -- SetCountdownFont takes the NAME of a named font object, and StyleSlot
 -- re-points this one at the user's font/size.
 local movementCdFont = CreateFont("EUI_MovementAlertCdFont")
--- A fresh font object has no font file; give it one immediately so text
--- attached to it can render before the first StyleSlot pass re-points it
--- at the user's font and size.
+-- A fresh font object has no font file; give it one immediately so text attached to it
+-- can render before the first StyleSlot pass re-points it at the user's font and size.
 movementCdFont:SetFont(FALLBACK_FONT, 24, "OUTLINE")
 
 local displayPool = {}
@@ -952,13 +951,12 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
 
     slot.text:Hide(); slot.icon:Hide(); slot.bar:Hide()
 
-    -- Start-recovery branch. GetSpellCooldown's timeUntilEndOfStartRecovery
-    -- is ALWAYS present as a number on this client (0 outside an actual
-    -- start-recovery window), so it must be gated on a POSITIVE value --
-    -- plain truthiness hijacked EVERY render into this branch, which is why
-    -- icon mode never drew its cooldown swipe or number. Secret check comes
-    -- first (relational compares on secret numbers throw); a secret recovery
-    -- falls through to the main path, whose engine sinks accept secrets.
+    -- Start-recovery branch. GetSpellCooldown's timeUntilEndOfStartRecovery is ALWAYS
+    -- present as a number on this client (0 outside an actual start-recovery window),
+    -- so it must be gated on a POSITIVE value -- plain truthiness hijacked EVERY render
+    -- into this branch, which is why icon mode never drew its cooldown swipe or number.
+    -- Secret check comes first (relational compares on secret numbers throw); a secret
+    -- recovery falls through to the main path, whose engine sinks accept secrets.
     local recov = cdInfo and cdInfo.timeUntilEndOfStartRecovery
     if issecretvalue and issecretvalue(recov) then recov = nil end
     if type(recov) == "number" and recov > 0 then
@@ -1026,9 +1024,8 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     if displayMode == "icon" then
         if spellIcon then
             slot.icon.tex:SetTexture(spellIcon)
-            -- Single-argument form: every proven duration-object consumer in
-            -- the suite calls it this way; the extra boolean is not part of
-            -- the working pattern.
+            -- Single-argument form: every proven duration-object consumer in the suite
+            -- calls it this way; the extra boolean is not part of the working pattern.
             if duration and slot.icon.cooldown.SetCooldownFromDurationObject then
                 slot.icon.cooldown:SetCooldownFromDurationObject(duration)
             else
@@ -1531,10 +1528,9 @@ local function CheckGatewayUsable()
     itemCount = ok and itemCount or 0
     if itemCount == 0 then gatewayFrame:Hide(); lastGatewayUsable = false; return end
 
-    -- Combat Only + out of combat: the result can't change until the next
-    -- combat transition (PLAYER_REGEN_DISABLED resumes polling), so pause
-    -- the ticker instead of continuing to poll the item API 10x/second for
-    -- nothing.
+    -- Combat Only + out of combat: the result can't change until the next combat
+    -- transition (PLAYER_REGEN_DISABLED resumes polling), so pause the ticker instead
+    -- of continuing to poll the item API 10x/second for nothing.
     if ma.gwCombatOnly and not inCombat then
         gatewayFrame:Hide(); lastGatewayUsable = false
         StopGatewayPolling()
@@ -1655,10 +1651,9 @@ local function UpdateEventRegistration()
         loader:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         loader:RegisterUnitEvent("UNIT_AURA", "player")
         movementEventsRegistered = true
-        -- Toggling the master switch off then back on mid-combat would
-        -- otherwise leave buffActiveState (e.g. Burning Rush) stale until
-        -- the next aura change, since it's normally only synced on
-        -- PLAYER_REGEN_DISABLED/PLAYER_ENTERING_WORLD.
+        -- Toggling the master switch off then back on mid-combat would otherwise leave
+        -- buffActiveState (e.g. Burning Rush) stale until the next aura change, since
+        -- it's normally only synced on PLAYER_REGEN_DISABLED/PLAYER_ENTERING_WORLD.
         if inCombat then SyncBuffActiveOnCombatStart() end
     elseif not moveOn and movementEventsRegistered then
         loader:UnregisterEvent("SPELL_UPDATE_USABLE")
@@ -1693,11 +1688,10 @@ loader:SetScript("OnEvent", function(self, event, ...)
     if not ma then return end
 
     if event == "PLAYER_LOGIN" then
-        -- Zero cost while every tracker is off: UpdateEventRegistration does
-        -- the lookup/cache build when the first tracker registers baseline
-        -- events (now, or later from the options toggle) -- nothing below
-        -- runs for a user with the whole page disabled except the cheap
-        -- unlock-mover registration.
+        -- Zero cost while every tracker is off: UpdateEventRegistration does the
+        -- lookup/cache build when the first tracker registers baseline events (now, or
+        -- later from the options toggle) -- nothing below runs for a user with the
+        -- whole page disabled except the cheap unlock-mover registration.
         UpdateEventRegistration()
         if MovementEnabled() or ma.tsEnabled or ma.gwEnabled then
             ApplyMovementFrame(); ApplyTimeSpiralFrame(); ApplyGatewayFrame()

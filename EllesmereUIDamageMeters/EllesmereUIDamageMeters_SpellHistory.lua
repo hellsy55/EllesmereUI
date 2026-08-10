@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIDamageMeters_SpellHistory.lua
 --  Standalone spell history tracker.  Two independent display modes:
@@ -64,6 +65,8 @@ local SH_DEFAULTS = {
     barHideInDelve       = false,
     barHideInPvP         = false,
     barHideOutOfInstance = false,
+    iconStrata      = "MEDIUM",
+    barStrata       = "MEDIUM",
 }
 
 -------------------------------------------------------------------------------
@@ -497,10 +500,9 @@ local function StopFadeClock()
     if _fadeDriver then _fadeDriver:Hide() end
 end
 
--- Arms exactly one of: the fast driver (an icon is mid-fade) or a one-shot
--- timer for the next fade start. Out-of-combat only; entries are newest
--- first, so effective ages grow with the index and the scan can stop at
--- the first fully-faded entry.
+-- Arms exactly one of: the fast driver (an icon is mid-fade) or a one-shot timer for
+-- the next fade start. Out-of-combat only; entries are newest first, so effective ages
+-- grow with the index and the scan can stop at the first fully-faded entry.
 local function ScheduleFade(fadeTime, maxIcons)
     StopFadeClock()
     local n = min(#_history, maxIcons)
@@ -741,6 +743,14 @@ BuildIconStrip = function()
         end)
         -- Per-icon backgrounds (created in MakeIcon) travel with each icon
         -- during animation. No strip-level background needed.
+    end
+
+    -- Strata: applied every refresh (not just on creation) so the options
+    -- panel updates it live without a reload.
+    local iconStrata = sh.iconStrata or "MEDIUM"
+    if _iconStrip._cachedStrata ~= iconStrata then
+        _iconStrip._cachedStrata = iconStrata
+        _iconStrip:SetFrameStrata(iconStrata)
     end
 
     local iconSz = PhysicalPixels(sh.iconSize or 24)
@@ -1130,6 +1140,14 @@ local function BuildBarWindow()
             RefreshBarWindow()
         end)
 
+    end
+
+    -- Strata: applied every refresh (not just on creation) so the options
+    -- panel updates it live without a reload.
+    local barStrata = sh.barStrata or "MEDIUM"
+    if _barWin._cachedStrata ~= barStrata then
+        _barWin._cachedStrata = barStrata
+        _barWin:SetFrameStrata(barStrata)
     end
 
     -- Apply styling (bg from spell history settings, header from DM settings)

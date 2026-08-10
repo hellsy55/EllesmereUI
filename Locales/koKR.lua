@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -- Korean localization for EllesmereUI. Community-maintained.
 -- Encoding: UTF-8 without BOM. See CONTRIBUTING_TRANSLATIONS.md.
 -- Seed locale: high-frequency common vocabulary. Run /euiloc dump koKR in-game
@@ -6,6 +7,14 @@
 
 local L = EllesmereUI.RegisterLocale("koKR")
 if not L then return end
+
+-- Cast Bar: cancelled/interrupted cast display
+L["CANCELLED / INTERRUPTED CAST"] = "취소 / 차단된 시전"
+L["Show Cancelled Cast"] = "취소된 시전 표시"
+L["Show Interrupted Cast"] = "차단된 시전 표시"
+L["Spell Cancelled"] = "주문 취소됨"
+L["Show a brief message when you cancel your own cast."] = "자신의 시전을 취소하면 잠시 메시지를 표시합니다."
+L["Show a brief message when another player or NPC interrupts your cast."] = "다른 플레이어나 NPC가 시전을 차단하면 잠시 메시지를 표시합니다."
 
 L["BLIZZARD POPUPS & GAME MENU"] = "블리자드 팝업 및 게임 메뉴"
 

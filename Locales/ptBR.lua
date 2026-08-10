@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -- Portuguese (Brazil) localization for EllesmereUI. Community-maintained.
 -- Encoding: UTF-8 without BOM. See CONTRIBUTING_TRANSLATIONS.md.
 -- Seed locale: high-frequency common vocabulary. Run /euiloc dump ptBR in-game
@@ -5,6 +6,14 @@
 
 local L = EllesmereUI.RegisterLocale("ptBR")
 if not L then return end
+
+-- Cast Bar: cancelled/interrupted cast display
+L["CANCELLED / INTERRUPTED CAST"] = "CONJURAÇÃO CANCELADA / INTERROMPIDA"
+L["Show Cancelled Cast"] = "Exibir conjuração cancelada"
+L["Show Interrupted Cast"] = "Exibir conjuração interrompida"
+L["Spell Cancelled"] = "Feitiço cancelado"
+L["Show a brief message when you cancel your own cast."] = "Exibe brevemente uma mensagem quando você cancela sua própria conjuração."
+L["Show a brief message when another player or NPC interrupts your cast."] = "Exibe brevemente uma mensagem quando outro jogador ou PNJ interrompe sua conjuração."
 
 L["BLIZZARD POPUPS & GAME MENU"] = "POP-UPS DA BLIZZARD E MENU DO JOGO"
 L["Reskin Popups and Menus"] = "Reestilizar pop-ups e menus"

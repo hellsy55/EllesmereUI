@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -- Spanish (Latin America) localization for EllesmereUI. Community-maintained.
 -- Encoding: UTF-8 without BOM. See CONTRIBUTING_TRANSLATIONS.md.
 -- Seed locale: high-frequency common vocabulary (mirrors esES for these terms).
@@ -5,6 +6,14 @@
 
 local L = EllesmereUI.RegisterLocale("esMX")
 if not L then return end
+
+-- Cast Bar: cancelled/interrupted cast display
+L["CANCELLED / INTERRUPTED CAST"] = "LANZAMIENTO CANCELADO / INTERRUMPIDO"
+L["Show Cancelled Cast"] = "Mostrar lanzamiento cancelado"
+L["Show Interrupted Cast"] = "Mostrar lanzamiento interrumpido"
+L["Spell Cancelled"] = "Lanzamiento cancelado"
+L["Show a brief message when you cancel your own cast."] = "Muestra brevemente un mensaje cuando cancelas tu propio lanzamiento."
+L["Show a brief message when another player or NPC interrupts your cast."] = "Muestra brevemente un mensaje cuando otro jugador o PNJ interrumpe tu lanzamiento."
 
 L["BLIZZARD POPUPS & GAME MENU"] = "VENTANAS EMERGENTES Y MENÚ DE JUEGO DE BLIZZARD"
 L["Reskin Popups and Menus"] = "Rediseñar ventanas emergentes y menús"

@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUI_VideoGuides.lua
 --
@@ -433,10 +434,9 @@ local function AttachTip(region, tipId, opts)
     tip:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     tip:SetScript("OnClick", function(self, mouseButton)
         if mouseButton == "RightButton" then
-            -- Shift + right click: hide ALL video guide icons. Identical to
-            -- turning off Enable Tutorial Tips in Global Settings (same key,
-            -- same true-vs-nil convention), so that toggle reads OFF and can
-            -- turn them back on.
+            -- Shift + right click: hide ALL video guide icons. Identical to turning off
+            -- Enable Tutorial Tips in Global Settings (same key, same true-vs-nil
+            -- convention), so that toggle reads OFF and can turn them back on.
             if not IsShiftKeyDown() then return end
             if not EllesmereUIDB then EllesmereUIDB = {} end
             EllesmereUIDB.tutorialTipsDisabled = true
@@ -690,9 +690,8 @@ do
             local bar1 = MakeBar(chips[2], -7, 57)
             MakeBar(bar1, -5, 30)
 
-            -- Play badge beside the cluster, centered on the cluster's
-            -- vertical middle (chips sit at +14; chips + two bars span
-            -- symmetrically around 0).
+            -- Play badge beside the cluster, centered on the cluster's vertical middle
+            -- (chips sit at +14; chips + two bars span symmetrically around 0).
             local badge = ctx.MakePlayBadge(band, BADGE)
             PPx.Point(badge, "LEFT", chips[3], "RIGHT", BADGE_GAP, -14)
         end,

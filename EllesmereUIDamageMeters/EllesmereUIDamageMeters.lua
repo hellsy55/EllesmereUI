@@ -1,14 +1,14 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIDamageMeters.lua
 --  Custom damage meter frame using C_DamageMeter API.
 --  Multi-window support (up to 5). Zero Blizzard frame hooks. All settings live.
 -------------------------------------------------------------------------------
 local _, ns = ...
+EllesmereUI._ModuleNS["EllesmereUIDamageMeters"] = ns  -- LOD options files read this module ns via the registry
 local EUI = EllesmereUI
 
--------------------------------------------------------------------------------
---  Constants
--------------------------------------------------------------------------------
+-- Constants
 local BAR_POOL_SIZE     = 40
 local RANK_STRINGS      = {}
 for i = 1, 40 do RANK_STRINGS[i] = i .. "." end
@@ -70,9 +70,7 @@ local HOME_DEFAULTS = {
     Enum.DamageMeterType.Deaths,
 }
 
--------------------------------------------------------------------------------
---  DB defaults + helpers
--------------------------------------------------------------------------------
+-- DB defaults + helpers
 local DM_DEFAULTS = {
     global = {},
     profile = {
@@ -141,6 +139,8 @@ local DM_DEFAULTS = {
             hdrTextOffX     = 0,
             hdrTextOffY     = 0,
             hdrIconSize     = 22,
+            hdrIconOffsetX  = 0,
+            hdrIconOffsetY  = 0,
             hdrMouseoverIcons = false,
             hdrTextUseAccent = true,
             hdrTextColor    = { r = 1, g = 1, b = 1 },
@@ -283,11 +283,13 @@ end
 local function LayoutHeaderButtons(W, cfg, iconSz)
     if not W or not W.header or not W.hdrBtns then return end
     local btnPad = -2
+    local offX = (cfg and cfg.hdrIconOffsetX) or 0
+    local offY = (cfg and cfg.hdrIconOffsetY) or 0
     local layoutBtns = GetHeaderLayoutButtons(W, cfg)
     for bi, btn in ipairs(layoutBtns) do
         if iconSz then btn:SetSize(iconSz, iconSz) end
         btn:ClearAllPoints()
-        btn:SetPoint("RIGHT", W.header, "RIGHT", -(iconSz * (bi - 1) + btnPad * bi + 2), 0)
+        btn:SetPoint("RIGHT", W.header, "RIGHT", -(iconSz * (bi - 1) + btnPad * bi + 2) + offX, offY)
     end
 end
 
@@ -305,8 +307,7 @@ local function SetHeaderButtonsShown(W, shown)
             btn:EnableMouse(shown)
         end
     end
-    -- The title reserves room for the icons, so it has to re-fit whenever they
-    -- come and go (hide-until-hover) or the gap they left stays empty.
+    -- Title reserves room for the icons and must re-fit whenever hide-until-hover shows/hides them
     W._hdrIconsShown = shown and true or false
     if W.FitTitle then W.FitTitle() end
 end
@@ -368,11 +369,8 @@ local function WinDB(idx)
     return cfg.windows[idx]
 end
 
--- Applies a window's saved position to its frame. Two stored formats:
---   unlock format: { point, relPoint, x, y } -- relative to UIParent, written
---                  by unlock mode's Save & Exit (CENTER/CENTER canonical form)
---   legacy format: { x = left, y = top } -- TOPLEFT offset from UIParent's
---                  BOTTOMLEFT, written by header drags outside unlock mode
+-- Applies a window's saved position. Two formats: unlock format { point, relPoint, x, y } (relative
+-- to UIParent, from unlock mode's Save & Exit); legacy format { x = left, y = top } (TOPLEFT offset from UIParent's BOTTOMLEFT, from header drags outside unlock mode)
 ns.ApplyWinPosition = function(frame, wdb, idx)
     -- The resize grip owns the frame's anchor while a drag is in flight. Even
     -- with the format converted above, re-anchoring mid-resize would fight the
@@ -410,33 +408,18 @@ local function GetBookmarks()
 end
 
 
--------------------------------------------------------------------------------
---  Shared state
--------------------------------------------------------------------------------
+-- Shared state
 local _inCombat = false
 local _inEncounter = false       -- true between ENCOUNTER_START and ENCOUNTER_END
 local _playerGUID
 local _windows = {}  -- array of active window tables
 ns._windows = _windows
-
--- Bumped whenever a build of the windows starts or _EDM_Apply() supersedes one. The
--- login build is staggered across frames, so a rebuild arriving while it is still in
--- flight would otherwise let the pending steps assign _windows[i] over entries the
--- rebuild had just created -- abandoning those frames while they stay parented and
--- visible. A staggered step checks this before doing any work and drops out if a newer
--- build has taken over.
-local _buildGen = 0
 ns._DM_TYPE_NAMES = DM_TYPE_NAMES
 
--------------------------------------------------------------------------------
---  Unlock mode registration
---  Each window is a first-class unlock element (EDM_Win1..N): the core mover
---  system provides dragging, exact X/Y entry, anchor-to-element, and
---  width/height matching. Keys are index-based and kept in sync with the
---  compacted window array; window deletion re-keys stored anchor/match links
---  via ShiftIndexedAnchorKeys (see W.Destroy). Called on login, window
---  add/remove, and profile swap; slots beyond the live count are unregistered.
--------------------------------------------------------------------------------
+-- Unlock mode registration: each window is a first-class unlock element (EDM_Win1..N) via the
+-- core mover system (drag, exact X/Y, anchor-to-element, width/height matching). Index-based
+-- keys; deletion re-keys anchor/match links via ShiftIndexedAnchorKeys (see W.Destroy). Called
+-- on login, window add/remove, and profile swap; slots beyond the live count unregister.
 ns.RegisterDMUnlock = function()
     if not EUI or not EUI.RegisterUnlockElements or not EUI.MakeUnlockElement then return end
     local MK = EUI.MakeUnlockElement
@@ -511,14 +494,12 @@ ns.RegisterDMUnlock = function()
             end,
         })
     end
-    -- Standalone combat timer rides the master toggle (the factory is
-    -- defined in the timer section, resolved via ns at call time)
+    -- Standalone combat timer rides the master toggle (factory defined in the timer section, resolved via ns)
     if DB().standaloneTimer and ns.MakeSATimerUnlockElement then
         elements[#elements + 1] = ns.MakeSATimerUnlockElement(MK)
     end
     EUI:RegisterUnlockElements(elements, "EllesmereUIDamageMeters")
-    -- Drop registrations for window slots beyond the live count, and for the
-    -- timer while it is disabled (kept symmetric across profile swaps)
+    -- Drop registrations for window slots beyond the live count and the timer while disabled (symmetric across profile swaps)
     if EUI.UnregisterUnlockElement then
         for i = #_windows + 1, MAX_WINDOWS do
             EUI:UnregisterUnlockElement("EDM_Win" .. i)
@@ -531,17 +512,13 @@ end
 local _combatEndTime = 0       -- GetTime() at combat end; control-flow sentinel (ticker teardown / freeze-once)
 local _needsFinalRefresh = false
 local _curViewFrozenDur = 0    -- final Current-session duration, pinned when combat ends
--- This handles cases where C_DamageMeter gives a feign a valid deathRecapID,
--- which the deathRecapID > 0 filter would otherwise treat as a real death.
---
--- Entries are cleared at combat / encounter start to avoid stale tags, and when
--- the unit reaches 0 HP, which confirms a real death. UnitIsFeignDeath can remain
--- true through a feign-then-die transition, so it cannot be used to clear safely.
+-- Tracks feigned GUIDs since C_DamageMeter can give a feign a valid deathRecapID, which the
+-- deathRecapID > 0 filter would treat as a real death. Cleared at combat/encounter start and on
+-- 0 HP (confirmed real death); UnitIsFeignDeath can remain true through a feign-then-die transition so it can't be used to clear safely.
 local _feignDeathGUIDs = {}
 
--- Switch a window to a segment (sessionID) or session type (Current/Overall).
--- Windows with syncSegments enabled switch together as a group.
--- On ns instead of local: CreateDMWindow is at Lua 5.1's 60-upvalue limit.
+-- Switch a window to a segment (sessionID) or session type (Current/Overall); windows with
+-- syncSegments switch together. On ns not local: CreateDMWindow is at Lua 5.1's 60-upvalue limit.
 function ns.ApplySegmentSelection(W, sessionType, sessionID)
     local targets = { W }
     if WinDB(W.idx).syncSegments then
@@ -563,8 +540,7 @@ function ns.ApplySegmentSelection(W, sessionType, sessionID)
     end
 end
 
--- Combat start: switch windows viewing a past segment back to Current
--- (per-window autoCurrentOnCombat option). Overall windows are not touched.
+-- Combat start: switch windows viewing a past segment back to Current (per-window autoCurrentOnCombat option); Overall windows untouched.
 function ns.AutoCurrentOnCombat()
     for _, w in ipairs(_windows) do
         if w.curSessionID and WinDB(w.idx).autoCurrentOnCombat then
@@ -577,14 +553,9 @@ function ns.AutoCurrentOnCombat()
     end
 end
 
--- Single source of truth for the "Current" session timer (window AND standalone
--- both read this). While combat is live it returns the live session duration
--- straight from the API -- the SAME session the bars render -- so when the server
--- rolls "Current" to a new session (chain-pull boss, etc.) the timer resets in
--- lockstep with the bars; there is no separate clock that can drift. Once combat
--- ends every live caller is gated off and it returns the value pinned at the
--- freeze instant, so the timer stops. Reset-on-new-session and stop-on-session-end
--- are two faces of one state transition, not two things to remember to do together.
+-- Single source of truth for the "Current" session timer (window and standalone both read this).
+-- Live, it reads the SAME session the bars render so a server-side roll (chain-pull boss) resets
+-- it in lockstep with no separate clock to drift; once combat ends every caller is gated off and returns the value pinned at the freeze instant.
 local function GetCurrentViewDuration()
     if _inCombat or _needsFinalRefresh then
         if C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
@@ -596,8 +567,7 @@ local function GetCurrentViewDuration()
         end
         return _curViewFrozenDur or 0
     end
-    -- Not live: show the pinned final duration. If there is no pin yet (fresh
-    -- load / after /reload with retained session data), fall back to the API.
+    -- Not live: show the pinned final duration, falling back to the API if unpinned (fresh load/reload with retained session data)
     if _curViewFrozenDur and _curViewFrozenDur > 0 then return _curViewFrozenDur end
     if C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
         local d = C_DamageMeter.GetSessionDurationSeconds(Enum.DamageMeterSessionType.Current)
@@ -606,11 +576,8 @@ local function GetCurrentViewDuration()
     return 0
 end
 
--- Stop the live timer AND pin its final value in one atomic step. Bound to every
--- combat-end freeze site so a stop can never happen without pinning, and a pin
--- never without a stop. The d >= pin guard keeps the last live value if the
--- server already rolled Current to a fresh (smaller) session at the end; the pin
--- is reset to 0 at every combat START so it cannot carry across combats.
+-- Stop the live timer AND pin its final value atomically at every combat-end freeze site. The d
+-- >= pin guard keeps the last live value if Current already rolled to a fresh (smaller) session; the pin resets to 0 at every combat START so it can't carry across combats.
 local function FreezeCombat(ts)
     _combatEndTime = ts or GetTime()
     if C_DamageMeter and C_DamageMeter.GetSessionDurationSeconds then
@@ -641,12 +608,10 @@ local function IsGroupInCombat()
     return false
 end
 
--- Clear cached feign GUIDs before filtering so real deaths after Feign Death
--- are not hidden by stale cache entries
+-- Clear cached feign GUIDs before filtering so real deaths after Feign Death are not hidden by stale entries
 local function CleanupFeignCache()
     if not next(_feignDeathGUIDs) then return end
-    -- Build GUID -> unit map for the current group so the cache iteration
-    -- below runs in O(N + M) instead of O(N * M).
+    -- Build GUID -> unit map for the group so iteration below runs O(N+M) instead of O(N*M)
     local present = {}
     local function note(unit)
         local g = UnitGUID(unit)
@@ -658,9 +623,7 @@ local function CleanupFeignCache()
     elseif IsInGroup() then
         for i = 1, GetNumGroupMembers() - 1 do note(_partyUnits[i]) end
     end
--- HP == 0 confirms a real death. Feign Death keeps the hunter's actual HP,
--- and UnitIsFeignDeath can linger in Midnight after a feign-then-die transition.
-
+    -- HP == 0 confirms a real death; Feign Death keeps actual HP, and UnitIsFeignDeath can linger after a feign-then-die transition
     for guid in pairs(_feignDeathGUIDs) do
         local unit = present[guid]
         if not unit then
@@ -721,54 +684,33 @@ instanceFrame:SetScript("OnEvent", function(_, event)
             end
         end
     elseif event == "DAMAGE_METER_COMBAT_SESSION_UPDATED" then
-        -- Blizzard created or updated a combat session (boss kill, combat end, etc.)
-        -- "Current" may now point to a different session. Invalidate cache so the
-        -- next ticker-driven refresh picks up fresh data. Only force an immediate
-        -- refresh when NOT in combat (the shared ticker handles combat refreshes
-        -- at the user's configured refreshRate).
+        -- Blizzard created/updated a combat session (boss kill, combat end); "Current" may now point
+        -- elsewhere. Invalidate cache for the next ticker refresh; force an immediate refresh only out of combat (the shared ticker covers combat at refreshRate).
         if not instanceFrame._sessionPending then
             instanceFrame._sessionPending = true
             C_Timer.After(0.1, function()
                 instanceFrame._sessionPending = nil
                 for _, w in ipairs(_windows) do
-                    -- Data-only invalidation. Session updates change DATA,
-                    -- never STYLE: _barCacheKey gates the per-bar font and
-                    -- texture restyle, and nilling it here made every wipe
-                    -- (deaths fire session updates) restyle all bars at
-                    -- ticker rate -- the dominant meter cost in the
-                    -- dead-spectate capture. Style invalidation belongs to
-                    -- the settings/palette appliers only.
+                    -- Data-only: session updates change DATA never STYLE. _barCacheKey gates the
+                    -- per-bar restyle; nilling it here made every death restyle all bars at ticker rate (the dominant profiled cost). Style invalidation belongs to the settings/palette appliers only.
                     w._cachedTargets = nil
                 end
                 if not _inCombat then
                     for _, w in ipairs(_windows) do w.Refresh() end
                 elseif not _sharedTicker then
-                    -- Combat is live but the ticker died (teardown race): a new
-                    -- server session is our cue to revive the live refresh.
+                    -- Ticker died from a teardown race; a new server session is our cue to revive it
                     StartSharedTicker()
                 end
             end)
         end
     elseif event == "DAMAGE_METER_CURRENT_SESSION_UPDATED" then
-        -- Authoritative "the Current session just rolled to a new one" signal --
-        -- this is the boss-pull reset trigger. The ticker-only model could miss it
-        -- when the roll lands between polls at a combat boundary (occasional
-        -- no-reset-on-pull). Force an immediate repaint reading the fresh session,
-        -- and revive the live ticker if we are mid-fight. Cheap and rare (fires at
-        -- combat-segment boundaries, not per damage event).
-        if EllesmereUI and EllesmereUI.IS_121 then
-            -- 12.1: the event is no longer reliably rare -- it can fire
-            -- continuously during combat, and even a debounced full repaint
-            -- per burst multiplied by windows dwarfed the ticker's designed
-            -- refresh rate (each repaint pays the session-fetch C call).
-            -- In a live fight the caches just invalidate so the next tick
-            -- reads fresh data: the segment boundaries already force their
-            -- own immediate repaints (ENCOUNTER_START / REGEN_DISABLED),
-            -- and the ticker covers everything in between. Out of combat,
-            -- one debounced repaint keeps session rolls visually prompt.
+        -- Authoritative "Current just rolled" signal (boss-pull reset trigger, catches rolls the
+        -- ticker-only model could miss between polls). Can fire continuously during combat, so a
+        -- debounced repaint per burst (each paying a session-fetch C call, multiplied across windows) would dwarf the ticker's rate; in combat we only invalidate
+        -- caches (ENCOUNTER_START/REGEN_DISABLED already force immediate repaints at segment
+        -- boundaries, ticker covers the rest). Out of combat, one debounced repaint keeps rolls prompt.
             for _, w in ipairs(_windows) do
-                -- Data caches only -- see the SESSION_UPDATED note: style
-                -- never changes on a session roll.
+                -- Data caches only -- style never changes on a session roll (see SESSION_UPDATED note above)
                 w._barSources = nil
                 w._cachedTargets = nil
             end
@@ -781,16 +723,6 @@ instanceFrame:SetScript("OnEvent", function(_, event)
                     for _, w in ipairs(_windows) do w.Refresh() end
                 end)
             end
-        else
-            for _, w in ipairs(_windows) do
-                -- Data caches only -- see the SESSION_UPDATED note: style
-                -- never changes on a session roll.
-                w._barSources = nil
-                w._cachedTargets = nil
-                w.Refresh()
-            end
-            if _inCombat and not _sharedTicker then StartSharedTicker() end
-        end
     elseif event == "DAMAGE_METER_RESET" then
         -- Blizzard cleared all session data (auto-reset CVar, manual reset, etc.)
         _combatEndTime = 0; _curViewFrozenDur = 0
@@ -802,32 +734,23 @@ instanceFrame:SetScript("OnEvent", function(_, event)
             w.Refresh()
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
-        -- Zone transition (load screen). If we are STILL in combat after the load
-        -- (e.g. /reload on a target dummy, or zoning into an active fight), restore
-        -- the live timer -- WoW does not re-fire PLAYER_REGEN_DISABLED here, so
-        -- without this the session-derived timer would blank. Otherwise force-end.
+        -- Zone transition (load screen); WoW does not re-fire PLAYER_REGEN_DISABLED here, so
+        -- combat state must be re-derived per branch below or the session-derived timer would blank.
         if UnitAffectingCombat("player") then
-            -- Still personally in combat after the load (e.g. /reload on a target
-            -- dummy): restore the live timer -- WoW does not re-fire
-            -- PLAYER_REGEN_DISABLED here.
+            -- Still personally in combat after the load (e.g. reload on a target dummy, or zoning into an active fight): restore the live timer.
             _inCombat = true
             _combatEndTime = 0
             _needsFinalRefresh = false
             if not _sharedTicker then StartSharedTicker() end
         elseif IsGroupInCombat() then
-            -- Not personally in combat but the group is (reload while dead /
-            -- spectating). Poll like the teammate pre-warm rather than asserting
-            -- _inCombat: SharedRefreshTick freezes the instant the group leaves
-            -- combat, so even a briefly-stale cross-instance group-combat flag on
-            -- a zone change cannot leave the timer running -- it self-terminates
-            -- within a tick instead of ticking forever.
+            -- Not personally in combat but the group is (reload while dead/spectating): poll like the
+            -- teammate pre-warm rather than asserting _inCombat -- SharedRefreshTick self-terminates the instant the group leaves combat, so a stale flag can't tick forever.
             _inCombat = false
             _combatEndTime = 0
             _needsFinalRefresh = true
             if not _sharedTicker then StartSharedTicker() end
         else
-            -- Out of combat: force-end. Covers hearth/teleport, leaving a BG or
-            -- arena, abandoning an M+ key, and any other zone-out.
+            -- Out of combat: force-end. Covers hearth/teleport, leaving a BG/arena, abandoning an M+ key, any other zone-out.
             local wasLive = _inCombat or _needsFinalRefresh or _inEncounter
             _inEncounter = false
             _inCombat = false
@@ -851,9 +774,7 @@ instanceFrame:SetScript("OnEvent", function(_, event)
     end
 end)
 
--------------------------------------------------------------------------------
---  CVar helper
--------------------------------------------------------------------------------
+-- CVar helper
 local function SetCVarSafe(name, value)
     if C_CVar and C_CVar.SetCVar then
         C_CVar.SetCVar(name, value)
@@ -862,9 +783,7 @@ local function SetCVarSafe(name, value)
     end
 end
 
--------------------------------------------------------------------------------
---  Font helpers
--------------------------------------------------------------------------------
+-- Font helpers
 local function GetDMFont()
     if EUI and EUI.GetFontPath then
         return EUI.GetFontPath("damageMeters")
@@ -884,9 +803,7 @@ local function SetDMFont(fs, size)
     fs:SetFont(font, size, flags)
 end
 
--------------------------------------------------------------------------------
---  Accent color helper
--------------------------------------------------------------------------------
+-- Accent color helper
 local function GetAccentRGB()
     local EG = EUI.ELLESMERE_GREEN
     if EG then return EG.r, EG.g, EG.b end
@@ -895,9 +812,7 @@ local function GetAccentRGB()
            EUI.DEFAULT_ACCENT_B or 157/255
 end
 
--------------------------------------------------------------------------------
---  Bar texture tables
--------------------------------------------------------------------------------
+-- Bar texture tables
 local DM_BAR_TEXTURES, DM_BAR_TEXTURE_NAMES, DM_BAR_TEXTURE_ORDER =
     EllesmereUI.BuildBarTextureTables(true)
 _G._EDM_BarTextures     = DM_BAR_TEXTURES
@@ -929,10 +844,7 @@ local function GetBreakdownBarTexturePath()
     return EUI.ResolveTexturePath(DM_BAR_TEXTURES, key, BAR_TEX), key
 end
 
--- Thin-line overlay: 3 physical pixels at top or bottom of a StatusBar.
--- Instead of modifying every SetStatusBarColor/SetValue call site, we
--- hook the bar.fill so color/value operations transparently forward to
--- the overlay when thin-line mode is active.
+-- Thin-line overlay: a hairline bar at the top/bottom edge of a StatusBar. Hooks bar.fill's color/value setters to forward to the overlay when active, instead of touching every call site.
 local THIN_LINE_KEYS = { ["thin-line-top"] = "TOP", ["thin-line-bottom"] = "BOTTOM" }
 local THIN_LINE_PX = 1
 
@@ -987,8 +899,7 @@ local function ClearThinLine(fill)
     if not fill._thinLineActive then return end
     fill._thinLineActive = false
     if fill._thinLine then fill._thinLine:Hide() end
-    -- Thin-line mode set the fill to (0,0,0,0) transparent; reset to opaque
-    -- so the bar is visible immediately. The real color is applied by RefreshUI.
+    -- Thin-line mode left the fill transparent; reset to opaque so the bar is visible immediately (RefreshUI applies the real color)
     fill:SetStatusBarColor(1, 1, 1, 1)
 end
 
@@ -1003,31 +914,23 @@ local function ApplyBarTexture(fill, texPath, texKey)
     end
 end
 
--------------------------------------------------------------------------------
---  Physical pixel spacing
--------------------------------------------------------------------------------
--- Convert user values to physical pixels (user setting = physical pixel count)
+-- Physical pixel spacing: convert user values to physical pixels (user setting = physical pixel count)
 local function PhysicalPixels(userValue)
     local PP = EUI and EUI.PP
     local mult = (PP and PP.mult) or 1
     return (userValue or 0) * mult
 end
 
--------------------------------------------------------------------------------
---  Number formatting
--------------------------------------------------------------------------------
+-- Number formatting
 local _abbreviateCfg
--- East Asian clients group large numbers by ten-thousands (wan) and
--- hundred-millions (yi) rather than K/M/B. Simplified and Traditional Chinese
--- share the math and the thousands glyph; only the wan/yi glyphs differ.
+-- East Asian clients group large numbers by ten-thousands (wan) and hundred-millions (yi) rather than K/M/B; Simplified/Traditional Chinese share the math, only the wan/yi glyphs differ
 local CJK = ({
     zhCN = { thousand = "千", wan = "万", yi = "亿" },
     zhTW = { thousand = "千", wan = "萬", yi = "億" },
     koKR = { thousand = "천", wan = "만", yi = "억" },
 })[GetLocale()]
--- Choose the abbreviation breakpoint table. CJK clients normally group by
--- 萬/억; when the user opts into forceEnglish we fall through to K/M/B even on
--- a CJK locale. Non-CJK clients always get K/M/B (forceEnglish is a no-op).
+-- Choose the abbreviation breakpoint table: CJK clients normally group by 萬/억, but fall
+-- through to K/M/B if forceEnglish is on. Non-CJK clients always get K/M/B (forceEnglish is a no-op).
 local function BuildAbbrevOpts(forceEnglish)
     if CJK and not forceEnglish then
         return {
@@ -1046,10 +949,8 @@ local function BuildAbbrevOpts(forceEnglish)
     end
 end
 
--- Rebuild _abbreviateCfg from the current saved setting. Runs once at load
--- (DB not yet ready -> reads false -> identical to the previous behavior), once
--- after the DB is created, and again whenever the options toggle flips. Cheap:
--- just rebuilds one config object, never touches per-bar/per-refresh work.
+-- Rebuild _abbreviateCfg from the saved setting: once at load (DB not ready yet -> reads
+-- false), once after DB creation, and on every options toggle flip. Cheap: one config object, never touches per-bar/per-refresh work.
 local function RebuildAbbrevCfg()
     local forceEnglish = false
     if ns.EDM and ns.EDM.DB then
@@ -1083,10 +984,7 @@ local function AbbrevNumber(n)
 end
 
 local function FormatBarValue(amt, perSec, numFmt)
-    -- Per-second can drop below 1 on long overall windows (total / huge time),
-    -- which makes AbbreviateNumbers dump the raw float ("0.6100439606729"). Clamp
-    -- to a minimum of 1, but only when perSec is a plain number -- never compare a
-    -- secret value. (While secret, the session is short and perSec is never sub-1.)
+    -- Per-second can drop below 1 on long Overall windows (dumps the raw float); clamp to a min of 1, but only for a plain number -- never compare a secret value (secret sessions are short, so perSec is never sub-1 anyway)
     if perSec ~= nil and (not issecretvalue or not issecretvalue(perSec)) then
         if perSec < 1 then perSec = 1 end
     end
@@ -1144,9 +1042,7 @@ local function AmountPerSecond(total, duration)
     return total / duration
 end
 
--------------------------------------------------------------------------------
---  Class icon sprite system
--------------------------------------------------------------------------------
+-- Class icon sprite system
 local CLASS_ICON_SPRITE_BASE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\class-full\\"
 local CLASS_ICON_SPRITE_TEX = {}
 for _, style in ipairs({"modern", "dark", "light", "clean"}) do
@@ -1218,8 +1114,7 @@ local function ResolveIcon(src, iconTex, barH)
         local coords = CLASS_SPRITE_COORDS[classFile]
         if coords then
             iconTex:SetTexture(CLASS_ICON_SPRITE_TEX[style] or (CLASS_ICON_SPRITE_BASE .. style .. ".tga"))
-            -- Sprite presets are pre-framed art; Icon Zoom does NOT apply to them
-            -- (the options cog is disabled for these styles). Use raw coords.
+            -- Sprite presets are pre-framed art; Icon Zoom does NOT apply (the options cog is disabled for these styles)
             iconTex:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
         else
             iconTex:Hide(); return 0
@@ -1232,10 +1127,8 @@ local function ResolveIcon(src, iconTex, barH)
     return barH
 end
 
--------------------------------------------------------------------------------
---  Enemy Damage Taken: aggregate combatSpellDetails into per-player totals
---  Returns sorted array of { name, class, specIcon, total, amountPerSecond } or nil on failure.
--------------------------------------------------------------------------------
+-- Enemy Damage Taken: aggregate combatSpellDetails into per-player totals. Returns sorted array
+-- of { name, class, specIcon, total, amountPerSecond } or nil on failure.
 local function AggregateEnemyPlayers(srcData, duration)
     if not srcData or not srcData.combatSpells or #srcData.combatSpells == 0 then return nil end
     local byName = {}
@@ -1265,12 +1158,8 @@ local function AggregateEnemyPlayers(srcData, duration)
     return list
 end
 
--------------------------------------------------------------------------------
---  Damage Done targets: cross-reference EnemyDamageTaken to build a complete
---  map of ALL players' damage per enemy in one pass. First hover triggers the
---  build; all subsequent hovers for any player are instant cache lookups.
---  Invalidated on DAMAGE_METER_RESET and COMBAT_SESSION_UPDATED.
--------------------------------------------------------------------------------
+-- Damage Done targets: cross-reference EnemyDamageTaken to build a complete map of ALL players'
+-- damage per enemy in one pass. First hover builds it; later hovers are instant cache lookups. Invalidated on DAMAGE_METER_RESET/COMBAT_SESSION_UPDATED.
 local _targetsCache = {}  -- { key = sessionKey, map = { [playerName] = sorted targets } }
 
 local function BuildAllPlayerTargets(session, sessionID)
@@ -1294,8 +1183,7 @@ local function BuildAllPlayerTargets(session, sessionID)
         return nil
     end
 
-    -- Build per-player target totals keyed by unitName (readable from EnemyDamageTaken).
-    -- Uses creatureID as enemy key (numeric, never secret) to avoid secret table keys.
+    -- Build per-player target totals keyed by unitName; enemy key is creatureID (numeric, never secret) to avoid secret table keys
     local enemyNames = {}  -- creatureID -> display name
     local byPlayer = {}    -- unitName -> { [creatureID] = totalDamage }
     for ei = 1, #enemySession.combatSources do
@@ -1367,9 +1255,7 @@ local function BuildPlayerTargets(playerName, session, sessionID, maxTargets)
     return list
 end
 
--------------------------------------------------------------------------------
---  Hover tooltip (shared across all windows)
--------------------------------------------------------------------------------
+-- Hover tooltip (shared across all windows)
 local TT_DEFAULT_MAX = 8
 local TT_BAR_H = 18
 local TT_BAR_SP = 1
@@ -1782,9 +1668,8 @@ end
 
 local _ttLastScale
 
--- Single anchor chokepoint for the breakdown frame. Modes: "row" (above the
--- hovered row, default), "center" (screen center), "left"/"right" (beside the
--- meter window). Side modes fall back to "row" if the window frame is missing.
+-- Single anchor chokepoint for the breakdown frame. Modes: "row" (above hovered row, default),
+-- "center" (screen center), "left"/"right" (beside the meter window, falls back to "row" if the window frame is missing).
 local function AnchorBreakdownFrame(rowFrame, winFrame)
     local mode = DB().breakdownAnchorPoint
     _ttFrame:ClearAllPoints()
@@ -1811,8 +1696,7 @@ local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
     if cfg.showHoverTooltip == false then return end
     EnsureTooltipFrame()
 
-    -- Always rebuild from fresh data (no GUID cache).
-    -- PopulatePreview costs ~0.5ms which is fine for a hover action.
+    -- Always rebuild from fresh data (no GUID cache); PopulatePreview costs ~0.5ms, fine for a hover action
     if PopulatePreview(bar, curSession, curSessionID, curDMType) then
         local scale = (cfg.hoverTooltipScale or 100) / 100
         if scale ~= _ttLastScale then
@@ -1836,9 +1720,7 @@ _hoverPollFrame:SetScript("OnUpdate", function()
     end
 end)
 
--------------------------------------------------------------------------------
---  EDM Context Menu (shared)
--------------------------------------------------------------------------------
+-- EDM Context Menu (shared)
 local _edmMenu, _edmSub
 local CTX_ITEM_H   = 22
 local CTX_HDR_H    = 20
@@ -2056,12 +1938,8 @@ local function ShowEDMMenu(items, anchorBtn)
     _edmMenu:Show()
 end
 
--------------------------------------------------------------------------------
---  Window Factory
---  Creates a fully independent damage meter window with its own frame tree,
---  bar pool, scroll state, source window, home screen, and refresh cycle.
---  Returns a window table W with all state and a Destroy method.
--------------------------------------------------------------------------------
+-- Window Factory: creates a fully independent damage meter window with its own frame tree, bar
+-- pool, scroll state, source window, home screen, and refresh cycle. Returns a window table W with all state and a Destroy method.
 local UpdateSATimerText  -- forward declaration (defined in standalone timer section)
 
 local function CreateDMWindow(winIdx)
@@ -2093,9 +1971,7 @@ local function CreateDMWindow(winIdx)
     local RefreshUI
     local homeFrame
 
-    ---------------------------------------------------------------------------
-    --  Row factory
-    ---------------------------------------------------------------------------
+    -- Row factory
     local function MakeRow(parent)
         local bar = {}
         bar.row = CreateFrame("Button", nil, parent)
@@ -2115,13 +1991,9 @@ local function CreateDMWindow(winIdx)
                 if bar._fillBorder then bar._fillBorder:Hide() end
                 return
             end
-            -- Follow-fill mode: the filled extent is SECRET geometry (fill
-            -- values are secret damage numbers), so nothing here may measure
-            -- it -- Blizzard's Backdrop/NineSlice styles crash on GetWidth of
-            -- a frame anchored to it. Render four plain color strips stretched
-            -- purely by engine anchors instead: left edge on plain geometry,
-            -- right edge riding the fill texture. Always solid, whatever the
-            -- Border Style dropdown says; the styled path stays full-row only.
+            -- Follow-fill mode: fill extent is SECRET geometry, so nothing may measure it
+            -- (Backdrop/NineSlice crash on GetWidth of a frame anchored to it) -- render four
+            -- plain color strips via engine anchors instead (left fixed, right rides the fill); always solid regardless of Border Style, styled path stays full-row only.
             if c.borderFollowFill then
                 if bar._borderFrame then bar._borderFrame:Hide() end
                 local fb = bar._fillBorder
@@ -2189,9 +2061,8 @@ local function CreateDMWindow(winIdx)
                 bar._iconBorderFrame:SetFrameLevel(bar.row:GetFrameLevel() + 6)
                 bar._iconBorderFrame:SetAllPoints(bar.classIcon) -- tracks icon size/position
             end
-            -- Follow the icon's actual shown state: ResolveIcon hides the icon
-            -- for sources without a usable class (secret/NPC rows), and a frame
-            -- anchored to a hidden texture would still render a floating border.
+            -- Follow the icon's shown state: ResolveIcon hides it for sources without a usable
+            -- class (secret/NPC rows), and a frame anchored to a hidden texture would still render a floating border
             bar._iconBorderFrame:SetShown(bar.classIcon:IsShown())
             local tex = c.iconBorderTexture or "solid"
             EllesmereUI.ApplyBorderStyle(bar._iconBorderFrame, sz,
@@ -2206,11 +2077,9 @@ local function CreateDMWindow(winIdx)
         function bar.ApplyBg()
             local c = DB()
             local a = c.barBgAlpha or 0
-            -- Class-colored track when enabled: tint the per-bar background with
-            -- this bar's player class color (x the bg alpha), else the custom bg
-            -- color. classFile can be a secret value, so guard before indexing
-            -- (RAID_CLASS_COLORS[secret] throws); EUI.GetClassColor honors global
-            -- custom class color overrides. Mirrors the fill/text class coloring.
+            -- Class-colored track when enabled: tint the bg with this bar's class color (x bg
+            -- alpha), else the custom bg color. classFile can be secret, so guard before indexing
+            -- (RAID_CLASS_COLORS[secret] throws); GetClassColor honors global overrides. Mirrors fill/text class coloring.
             if c.barBgUseClassColor then
                 local cf = bar._class
                 if cf and (not issecretvalue or not issecretvalue(cf)) and RAID_CLASS_COLORS[cf] then
@@ -2222,17 +2091,15 @@ local function CreateDMWindow(winIdx)
         end
         bar.ApplyBg()
         local tf = CreateFrame("Frame", nil, bar.fill)
-        -- Keep text ABOVE the per-bar border (bar.row +3, lazy-created in
-        -- ApplyBorder). Keyed off bar.row like the border so the two can't tie
-        -- and let the border (created later, when enabled) cover the text.
+        -- Keep text ABOVE the per-bar border (bar.row +3, lazy-created in ApplyBorder); keyed off
+        -- bar.row like the border so the two can't tie and let a later-enabled border cover the text
         tf:SetAllPoints(bar.fill); tf:SetFrameLevel(bar.row:GetFrameLevel() + 4)
         bar.pos = tf:CreateFontString(nil, "OVERLAY"); bar.pos:SetPoint("LEFT", tf, "LEFT", 3, 0); SetDMFont(bar.pos, 11)
         bar.label = tf:CreateFontString(nil, "OVERLAY"); bar.label:SetPoint("LEFT", bar.pos, "RIGHT", 2, 0); bar.label:SetPoint("RIGHT", tf, "RIGHT", -70, 0); bar.label:SetJustifyH("LEFT"); SetDMFont(bar.label, 11)
         bar.label:SetWordWrap(false)
         bar.amount = tf:CreateFontString(nil, "OVERLAY"); bar.amount:SetPoint("RIGHT", tf, "RIGHT", -3, 0); bar.amount:SetJustifyH("RIGHT"); SetDMFont(bar.amount, 11)
-        -- Bar Text X/Y offsets (Bar Text size cogs). Re-applies the creation
-        -- anchors above with the profile offsets added. The label's Y rides its
-        -- RIGHT point; its LEFT already follows bar.pos on both axes.
+        -- Bar Text X/Y offsets (Bar Text size cogs): re-applies the creation anchors above with
+        -- profile offsets added. The label's Y rides its RIGHT point; LEFT already follows bar.pos on both axes.
         bar.ApplyTextOffsets = function()
             local c2 = DB()
             local lx, ly = c2.leftTextOffsetX or 0, c2.leftTextOffsetY or 0
@@ -2326,19 +2193,10 @@ local function CreateDMWindow(winIdx)
         return bar
     end
 
-    -- Spell tooltip on breakdown-row hover. Shows the REAL game spell tooltip
-    -- (full native info: cooldown, range, cast time, description, etc.) -- the
-    -- only way to get that is the shared GameTooltip. This is a deliberate
-    -- exception to the usual EllesmereUI-tooltip rule: that rule exists to avoid
-    -- taint in SECURE / chat-frame contexts, and these breakdown rows are our
-    -- own non-secure, addon-created frames, so the standard SetOwner +
-    -- SetSpellByID + Show sequence is safe here.
-    --
-    -- Anchored to the LEFT of the bar via ANCHOR_NONE + manual SetPoint.
-    -- Guards: bar._spellID is a clean numeric spellID on spell rows (nil on
-    -- player/target rows); secret-value + valid-spell checks keep it safe in
-    -- any context (and ShowWidgetTooltip's combat suppression no longer applies,
-    -- so the guards do the work).
+    -- Spell tooltip on breakdown-row hover: uses the real GameTooltip for full native info
+    -- (cooldown/range/cast time/description) -- deliberate exception to the no-GameTooltip rule,
+    -- which exists to avoid taint in secure/chat-frame contexts; these rows are our own non-secure
+    -- frames so SetOwner+SetSpellByID+Show is safe. Anchored LEFT via ANCHOR_NONE + manual SetPoint; bar._spellID is nil on non-spell rows, and secret-value + valid-spell checks guard the rest -- ShowWidgetTooltip's combat suppression does not apply here, so these guards are the only protection.
     local function ShowSpellRowTooltip(anchor, spellID)
         if not spellID or type(spellID) ~= "number" then return end
         local cfg = DB()
@@ -2370,17 +2228,14 @@ local function CreateDMWindow(winIdx)
         return bar
     end
 
-    ---------------------------------------------------------------------------
-    --  Main container
-    ---------------------------------------------------------------------------
+    -- Main container
     local frame = CreateFrame("Frame", "EllesmereUIDMFrame" .. winIdx, UIParent)
     frame:SetSize(wdb.width or 300, wdb.height or 200)
     frame:SetClampedToScreen(true); frame:SetMovable(true)
     W.frame = frame
 
     ns.ApplyWinPosition(frame, wdb, winIdx)
-    -- Re-apply saved position (both storage formats). Used by unlock mode's
-    -- applyPosition callback; W.idx (not winIdx) so it survives re-indexing.
+    -- Used by unlock mode's applyPosition callback; W.idx (not winIdx) so it survives re-indexing
     W.ApplyPosition = function() ns.ApplyWinPosition(frame, wdb, W.idx) end
 
     frame._bg = frame:CreateTexture(nil, "BACKGROUND")
@@ -2388,16 +2243,13 @@ local function CreateDMWindow(winIdx)
     frame._bg:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
     frame._bg:SetColorTexture(cfg.bgR or 0, cfg.bgG or 0, cfg.bgB or 0, cfg.bgAlpha or 0.75)
 
-    ---------------------------------------------------------------------------
-    --  Header
-    ---------------------------------------------------------------------------
+    -- Header
     local header = CreateFrame("Frame", nil, frame)
     header:SetHeight(GetHeaderH()); header:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0); header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
     header:SetFrameLevel(frame:GetFrameLevel() + 5)
     W.header = header
 
-    -- Independent overlay target so the frame border can start either at the
-    -- window top or exactly below the header without affecting window layout.
+    -- Independent overlay target so the frame border can start at the window top or below the header without affecting window layout
     local windowBorderTarget = CreateFrame("Frame", nil, frame)
     windowBorderTarget:EnableMouse(false)
     windowBorderTarget:SetFrameLevel(header:GetFrameLevel() + 4)
@@ -2434,24 +2286,20 @@ local function CreateDMWindow(winIdx)
     if wdb.hideTimer then W.timerText:Hide() end
 
     if EUI.RegAccent then
+        -- Propagates a live accent color change to header text, header icons, bars (via
+        -- Refresh), and home screen cards (via RefreshHome), each gated on its own accent-use toggle
         EUI.RegAccent({ type = "callback", fn = function(r, g, b)
             local c = DB()
-            -- Header text
             if c.hdrTextUseAccent ~= false then W.titleText:SetTextColor(r, g, b, 1) end
-            -- Header button icons
             if c.iconColorUseAccent then
                 for _, ic in ipairs(W.hdrIcons) do ic:SetVertexColor(r, g, b, ICON_ALPHA) end
             end
-            -- Bars (accent fill color or accent bar color)
             W.Refresh()
-            -- Home screen cards (accent icons + active indicator)
             if homeFrame and homeFrame:IsShown() then RefreshHome() end
         end })
     end
 
-    ---------------------------------------------------------------------------
-    --  Header buttons
-    ---------------------------------------------------------------------------
+    -- Header buttons
     local btnSize = cfg.hdrIconSize or 22
     local btnPad = -2
 
@@ -2488,8 +2336,7 @@ local function CreateDMWindow(winIdx)
     end
 
     W.settingsBtn = MakeHeaderBtn("dm_settings.png", -(btnPad + 2), "Settings", function()
-        -- "Default on M+ Start" submenu: the meter type this window switches to
-        -- when a Mythic+ key starts. "Off" (default) leaves the current type alone.
+        -- "Default on M+ Start" submenu: meter type this window switches to when a key starts; "Off" (default) leaves it alone
         local function mStartEntry(label, dmType)
             return { text = label, isActive = (wdb.mythicStartDMType == dmType),
                      onClick = function() wdb.mythicStartDMType = dmType end }
@@ -2666,11 +2513,10 @@ local function CreateDMWindow(winIdx)
                 end
             end
 
-            -- Try above first: new window bottom = highest top + gap
+            -- Try above first (new bottom = highest top + gap); if that clears the screen top, place below the lowest window instead
             local screenTop2 = UIParent:GetTop() or 0
             local newTop2 = highestTop + srcH2 + GAP
             if newTop2 > screenTop2 then
-                -- No room above: place below the lowest window
                 newTop2 = lowestBot - GAP
             end
 
@@ -2743,10 +2589,7 @@ local function CreateDMWindow(winIdx)
     W.hdrBtns = { W.settingsBtn, W.segmentBtn, W.modeBtn, W.resetBtn, W.winActionBtn }
     LayoutHeaderButtons(W, cfg, btnSize)
 
-    -- Truncate the header title so it never runs under the right-side header
-    -- icons. Mirrors the icon layout math (N buttons of hdrIconSize spaced by
-    -- btnPad, anchored from the right) so it stays correct on resize and icon-
-    -- size changes without relying on GetLeft (which can lag a SetPoint).
+    -- Truncate the header title so it never runs under the right-side icons; mirrors the icon layout math (N buttons of hdrIconSize spaced by btnPad from the right) rather than relying on GetLeft (can lag a SetPoint)
     function W.FitTitle()
         local fs = W.titleText
         local full = W._fullTitle
@@ -2755,18 +2598,21 @@ local function CreateDMWindow(winIdx)
         local c = DB()
         local iconSz = c.hdrIconSize or 22
         local n = #GetHeaderLayoutButtons(W, c)
-        -- Icons hidden until hover occupy no space, so the title gets the whole
-        -- header instead of being truncated against a gap that isn't there.
+        -- Icons hidden until hover occupy no space, so the title gets the whole header instead of truncating against a gap that isn't there
         if W._hdrIconsShown == false then n = 0 end
         local headerW = frame:GetWidth() or (wdb.width or 300)
-        local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2
+        -- + offX mirrors the same term LayoutHeaderButtons adds to each
+        -- button's SetPoint, so a negative hdrIconOffsetX (icons dragged
+        -- toward the title) correctly shrinks the room left for the title
+        -- instead of letting truncation math run as if the icons were still
+        -- in their default spot.
+        local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2 + (c.hdrIconOffsetX or 0)
         local avail = btnLeft - (6 + (c.hdrTextOffX or 0)) - 6
         if avail < 1 then avail = 1 end
         if fs:GetStringWidth() <= avail then return end
         local s = full
         while #s > 1 do
-            -- Drop one character, not one byte: localised titles are UTF-8 and
-            -- a mid-codepoint cut renders as garbage.
+            -- Drop one character, not one byte: localised titles are UTF-8 and a mid-codepoint cut renders as garbage
             local i = #s
             while i > 1 do
                 local b = string.byte(s, i)
@@ -2782,9 +2628,7 @@ local function CreateDMWindow(winIdx)
     -- Option: hide header icons until the title bar is hovered
     ApplyHeaderButtonsHoverVisibility(W, cfg)
 
-    ---------------------------------------------------------------------------
-    --  Snap helpers (X-axis alignment + width matching against other DM windows)
-    ---------------------------------------------------------------------------
+    -- Snap helpers (X-axis alignment + width matching against other DM windows)
     local SNAP_THRESH = 6
 
     local function SnapDragPosition()
@@ -2822,8 +2666,7 @@ local function CreateDMWindow(winIdx)
         end
     end
 
-    -- Find the closest other DM window by 2D edge-to-edge distance
-    -- Optional overrides for left/top allow drag to pass unsnapped target position
+    -- Find the closest other DM window by 2D edge-to-edge distance; optional left/top overrides let drag pass an unsnapped target position
     local function FindClosestWindow(overrideL, overrideT)
         local myL = overrideL or frame:GetLeft() or 0
         local myW2 = frame:GetWidth() or 0
@@ -2867,9 +2710,7 @@ local function CreateDMWindow(winIdx)
         return newH
     end
 
-    ---------------------------------------------------------------------------
-    --  Header drag (manual, with real-time X-axis snapping)
-    ---------------------------------------------------------------------------
+    -- Header drag (manual, with real-time X-axis snapping)
     header:EnableMouse(true)
     local dragging = false
     local dragStartCX, dragStartCY, dragStartLeft, dragStartTop
@@ -2949,8 +2790,7 @@ local function CreateDMWindow(winIdx)
         dragging = true; dragFrame:Show()
     end)
     header:SetScript("OnMouseUp", function(_, button)
-        -- Right-click on the header toggles the meter-type home screen,
-        -- matching the right-click behavior of the window body.
+        -- Right-click on the header toggles the meter-type home screen, matching the window body's right-click behavior
         if button == "RightButton" then
             if not dragging and W.ToggleHome then W.ToggleHome() end
             return
@@ -2972,11 +2812,8 @@ local function CreateDMWindow(winIdx)
         end
     end)
 
-    ---------------------------------------------------------------------------
-    --  Right-click catcher (covers content area below header)
-    --  Catches right-clicks on empty space to open home screen.
-    --  Sits behind the viewport so bar clicks pass through normally.
-    ---------------------------------------------------------------------------
+    -- Right-click catcher: opens the home screen on right-click over empty content area below
+    -- the header; sits behind the viewport so bar clicks pass through normally.
     local rightClickCatcher = CreateFrame("Button", nil, frame)
     rightClickCatcher:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     rightClickCatcher:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
@@ -2986,9 +2823,7 @@ local function CreateDMWindow(winIdx)
     if rightClickCatcher.SetMouseClickEnabled then rightClickCatcher:SetMouseClickEnabled(true) end
     rightClickCatcher:SetScript("OnClick", function() W.ShowHome() end)
 
-    ---------------------------------------------------------------------------
-    --  Viewport + scroll
-    ---------------------------------------------------------------------------
+    -- Viewport + scroll
     local viewport = CreateFrame("ScrollFrame", nil, frame)
     viewport:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     viewport:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
@@ -3024,15 +2859,11 @@ local function CreateDMWindow(winIdx)
         end
     end)
 
-    ---------------------------------------------------------------------------
-    --  Bar pool
-    ---------------------------------------------------------------------------
+    -- Bar pool
     W.rowPool = {}
     for i = 1, BAR_POOL_SIZE do W.rowPool[i] = MakeRow(content) end
 
-    ---------------------------------------------------------------------------
-    --  Sticky player bar
-    ---------------------------------------------------------------------------
+    -- Sticky player bar
     W.stickyPlayer = MakeRow(frame)
     W.stickyPlayer.row:SetFrameLevel(frame:GetFrameLevel() + 8)
     W.stickyPlayer.row:Hide()
@@ -3043,9 +2874,7 @@ local function CreateDMWindow(winIdx)
     local sepTex = W.stickySep:CreateTexture(nil, "OVERLAY", nil, 6); sepTex:SetAllPoints(); sepTex:SetColorTexture(0, 0, 0, 1)
     W.stickySep:Hide()
 
-    ---------------------------------------------------------------------------
-    --  Source window
-    ---------------------------------------------------------------------------
+    -- Source window
     W.sourceFrame = CreateFrame("Frame", nil, frame)
     W.sourceFrame:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     W.sourceFrame:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
@@ -3075,9 +2904,7 @@ local function CreateDMWindow(winIdx)
         for i = 1, BAR_POOL_SIZE do W.spellPool[i] = MakeSpellRow(W.srcContent) end
     end
 
-    ---------------------------------------------------------------------------
-    --  Resize grip
-    ---------------------------------------------------------------------------
+    -- Resize grip
     W.resizeGrip = CreateFrame("Button", nil, frame)
     W.resizeGrip:SetSize(18, 18); W.resizeGrip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
     W.resizeGrip:SetFrameLevel(frame:GetFrameLevel() + 15)
@@ -3214,9 +3041,8 @@ local function CreateDMWindow(winIdx)
         if button ~= "LeftButton" or not W.resizing then return end
         W.resizing = false; resizeFrame:Hide()
         wdb.width = math.floor(frame:GetWidth() + 0.5); wdb.height = math.floor(frame:GetHeight() + 0.5)
-        -- Resize pins the TOPLEFT corner, so a point-based position saved by
-        -- unlock mode (e.g. CENTER-anchored) no longer describes this spot.
-        -- Re-save in TOPLEFT drag format to match the pinned corner exactly.
+        -- Resize pins the TOPLEFT corner, so a point-based position from unlock mode (e.g.
+        -- CENTER-anchored) no longer describes this spot; re-save in TOPLEFT drag format to match
         if wdb.position and wdb.position.point then
             local left, top = frame:GetLeft(), frame:GetTop()
             if left and top then wdb.position = { x = left, y = top } end
@@ -3228,9 +3054,7 @@ local function CreateDMWindow(winIdx)
         end
     end)
 
-    ---------------------------------------------------------------------------
-    --  Hover fade (scrollbar + resize grip)
-    ---------------------------------------------------------------------------
+    -- Hover fade (scrollbar + resize grip)
     do
         local fadeSpeed = 1 / 0.12; local fadeAlpha = 0; local fadeTarget = 0
         local fadeFrame2 = CreateFrame("Frame"); fadeFrame2:Hide()
@@ -3277,9 +3101,7 @@ local function CreateDMWindow(winIdx)
         if W.stickyPlayer then W.stickyPlayer.row:HookScript("OnEnter", StartHoverPoll) end
     end
 
-    ---------------------------------------------------------------------------
-    --  Per-window functions
-    ---------------------------------------------------------------------------
+    -- Per-window functions
     local function ResetScrollAnchors()
         if not viewport or not header or not frame then return end
         W.stickyGuard = true
@@ -3384,9 +3206,9 @@ local function CreateDMWindow(winIdx)
             W._stickyClassCache = nil; W._stickySpecCache = nil  -- force icon/color rebuild
         end
         bar.row:Show()
-        -- Icon + color: only when the icon's own inputs change (see the row
-        -- loop below -- the sticky bar is re-pointed at whatever source holds
-        -- the player's rank, so it needs the same spec-aware memo).
+        -- Icon + color: only when class changes
+        -- Same spec-aware memo as the row loop below: the sticky bar is
+        -- re-pointed at whatever source holds the player's rank.
         local classFile = src.classFilename
         local specIcon = src.specIconID
         if classFile ~= W._stickyClassCache or specIcon ~= W._stickySpecCache then
@@ -3406,8 +3228,7 @@ local function CreateDMWindow(winIdx)
                 if c.barColorUseAccent ~= false then local ar2, ag2, ab2 = GetAccentRGB(); bar.fill:SetStatusBarColor(ar2, ag2, ab2)
                 else local bc = c.barColor; bar.fill:SetStatusBarColor(bc and bc.r or 0.35, bc and bc.g or 0.55, bc and bc.b or 0.8) end
             end
-            -- Repaint the class-colored background for the new class (no-op cost
-            -- when off). bar._class is set here so ApplyBg reads the current class.
+            -- Repaint class-colored background for the new class (no-op when off); bar._class set here so ApplyBg reads the current class
             bar._class = classFile
             if c.barBgUseClassColor then bar.ApplyBg() end
         end
@@ -3447,8 +3268,6 @@ local function CreateDMWindow(winIdx)
 
     end
 
-    -- (PEAK_BUDGET is at file scope)
-
     RefreshUI = function(session)
 
         if not frame then return end
@@ -3468,11 +3287,8 @@ local function CreateDMWindow(winIdx)
             local labelMaxW = math.max(20, rowWidth * 0.60)
             local isDeaths = (W.curDMType == Enum.DamageMeterType.Deaths)
             local isCount = (W.curDMType == Enum.DamageMeterType.Interrupts or W.curDMType == Enum.DamageMeterType.Dispels)
-            -- Deaths: reverse to chronological (API returns most recent first)
-            -- Filter feign deaths. CleanupFeignCache runs first so real deaths after
-            -- Feign Death are no longer hidden by the cached spell 5384 GUID.
-
-
+            -- Deaths: reverse to chronological (API returns most recent first) and filter feign
+            -- deaths; CleanupFeignCache runs first so real deaths after Feign Death aren't hidden by the cached spell 5384 GUID
             if isDeaths then
                 CleanupFeignCache()
                 local rev = {}
@@ -3480,10 +3296,8 @@ local function CreateDMWindow(winIdx)
                     local s = sources[ri]
                     local rid = s.deathRecapID
                     local sg = s.sourceGUID
-                    -- _feignDeathGUIDs[secret] throws ("cannot be indexed with
-                    -- secret keys"), so only consult the cache when the GUID is
-                    -- a plain string. Secret-GUID rows fall back to the
-                    -- deathRecapID-only filter.
+                    -- _feignDeathGUIDs[secret] throws ("cannot be indexed with secret keys"), so only
+                    -- consult the cache for a plain-string GUID; secret-GUID rows fall back to the deathRecapID-only filter
                     local sgOk = sg and (not issecretvalue or not issecretvalue(sg))
                     if not (issecretvalue and issecretvalue(rid)) and rid and rid > 0
                        and not (sgOk and _feignDeathGUIDs[sg]) then
@@ -3540,6 +3354,7 @@ local function CreateDMWindow(winIdx)
 
                     -- Per-tick content: only for visible bars
                     if i >= visFirst and i <= visLast then
+                        -- Icon: only when class changes
                         -- Icon: only when the icon's own inputs change. The
                         -- memo must include the SPEC, not just the class: bars
                         -- are recycled by rank, so a swap between same-class
@@ -3556,9 +3371,7 @@ local function CreateDMWindow(winIdx)
                             bar.fill:SetPoint("TOPLEFT", bar.row, "TOPLEFT", iconOffset, 0)
                             bar.fill:SetPoint("TOPRIGHT", bar.row, "TOPRIGHT", 0, 0)
                             bar._cachedColorClass = nil
-                            -- Repaint the class-colored background for the new class
-                            -- (no-op cost when the feature is off). bar._class is set
-                            -- here so ApplyBg reads the current class.
+                            -- Repaint class-colored background for the new class (no-op when off); bar._class set here so ApplyBg reads the current class
                             bar._class = classFile
                             if c.barBgUseClassColor then bar.ApplyBg() end
                         end
@@ -3672,13 +3485,10 @@ local function CreateDMWindow(winIdx)
 
     end
 
-    -- Header combat timer, decoupled from the meter refresh rate: the shared
-    -- timer ticker calls this between refreshes so the clock ticks smoothly
-    -- even at slow refresh rates. Memoized on the displayed second (inputs:
-    -- resolved duration second + the blank state from Overall/no-data gates).
+    -- Header combat timer, decoupled from the meter refresh rate: the shared timer ticker calls this
+    -- between refreshes so the clock ticks smoothly at slow rates. Memoized on the displayed second (inputs: resolved duration second + the blank state from Overall/no-data gates).
     function W.UpdateTimerText()
-        -- Hidden timer (hideTimer) skips the duration reads entirely; the
-        -- second-memo repaints on the first tick after it is shown again.
+        -- Hidden timer (hideTimer) skips duration reads entirely; the second-memo repaints on the first tick after it is shown again
         if not W.timerText or not W.timerText:IsShown() then return end
         local dur
         if W.curSessionID then
@@ -3688,9 +3498,8 @@ local function CreateDMWindow(winIdx)
                 if sess then for _, s in ipairs(sess) do if s.sessionID == W.curSessionID then dur = s.durationSeconds; break end end end
             end
         elseif W.curSession == Enum.DamageMeterSessionType.Current then
-            -- Live "Current" view: derived from the SAME session the bars render,
-            -- so it resets when the server rolls Current and freezes when combat
-            -- ends -- both in lockstep with the bars (see GetCurrentViewDuration).
+            -- Live "Current" view: derived from the SAME session the bars render, so it resets
+            -- on a Current roll and freezes at combat end in lockstep with the bars (see GetCurrentViewDuration)
             dur = GetCurrentViewDuration()
         else
             -- Overall (timer is hidden for Overall by the isOverall gate below)
@@ -4048,10 +3857,7 @@ local function CreateDMWindow(winIdx)
         W.UpdateSticky(nil, W.visibleCount)
     end
 
-    ---------------------------------------------------------------------------
-    --  Home screen (quick links grid)
-    --  2-column card layout with accent indicators, + add button, hint text.
-    ---------------------------------------------------------------------------
+    -- Home screen (quick links grid): 2-column card layout with accent indicators, + add button, hint text
     local homeScroll, homeChild  -- homeFrame is forward-declared above
     local homeCards = {}
     local homeAddBtn, homeTitle
@@ -4065,26 +3871,21 @@ local function CreateDMWindow(winIdx)
     local CARD_HL_A    = 0.18
     local HOME_MAX     = 8
 
-    -- HOME_ICONS is at file scope
-
     local function MakeCard(parent)
         local card = CreateFrame("Button", nil, parent)
         card:SetHeight(CARD_H)
         card:RegisterForClicks("AnyUp")
 
-        -- Card background
         card._bg = card:CreateTexture(nil, "BACKGROUND")
         card._bg:SetAllPoints()
         card._bg:SetColorTexture(CARD_BG_R, CARD_BG_G, CARD_BG_B, CARD_BG_A)
 
-        -- Accent left edge indicator (2px wide)
         card._accent = card:CreateTexture(nil, "ARTWORK")
         card._accent:SetWidth(2)
         card._accent:SetPoint("TOPLEFT", card, "TOPLEFT", 0, 0)
         card._accent:SetPoint("BOTTOMLEFT", card, "BOTTOMLEFT", 0, 0)
         card._accent:Hide()
 
-        -- Type icon
         local fontPath = (EUI.GetFontPath and EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
         local outline = (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
         local iconSz = CARD_H - 2
@@ -4093,7 +3894,6 @@ local function CreateDMWindow(winIdx)
         card._icon:SetPoint("LEFT", card, "LEFT", 6, 0)
         card._icon:SetDesaturated(true)
 
-        -- Label
         card._lbl = card:CreateFontString(nil, "OVERLAY")
         card._lbl:SetFont(fontPath, CTX_FONT_SZ, outline)
         card._lbl:SetPoint("LEFT", card._icon, "RIGHT", 5, 0)
@@ -4101,7 +3901,6 @@ local function CreateDMWindow(winIdx)
         card._lbl:SetJustifyH("LEFT")
         card._lbl:SetWordWrap(false)
 
-        -- Arrow ">"
         card._arrow = card:CreateTexture(nil, "ARTWORK")
         card._arrow:SetTexture(CTX_ARROW_ICON)
         card._arrow:SetSize(18, 18)
@@ -4141,14 +3940,12 @@ local function CreateDMWindow(winIdx)
             local label = L(DM_TYPE_NAMES[dmType] or "Unknown")
             local isActive = (dmType == W.curDMType)
 
-            -- Position in grid
             local xOff = CARD_PAD_X + col * (colW + CARD_COL_GAP)
             local yOff = startY - row * (CARD_H + CARD_GAP)
             card:ClearAllPoints()
             card:SetPoint("TOPLEFT", homeChild, "TOPLEFT", xOff, yOff)
             card:SetWidth(colW)
 
-            -- Visuals
             card._bg:SetColorTexture(CARD_BG_R, CARD_BG_G, CARD_BG_B, CARD_BG_A)
             card._lbl:SetFont(fontPath, CTX_FONT_SZ, outline)
             card._lbl:SetText(label)
@@ -4261,7 +4058,6 @@ local function CreateDMWindow(winIdx)
         local contentH = math.abs(startY) + addRow * (CARD_H + CARD_GAP) + 5
         homeChild:SetHeight(math.max(10, contentH))
 
-        -- Update scroll max
         if homeScroll then
             local viewH = homeScroll:GetHeight()
             _homeScrollMax = math.max(0, contentH - viewH)
@@ -4282,7 +4078,6 @@ local function CreateDMWindow(winIdx)
             hBg:SetAllPoints()
             hBg:SetColorTexture(0.03, 0.03, 0.03, 0.95)
 
-            -- Scrollable content area
             homeScroll = CreateFrame("ScrollFrame", nil, homeFrame)
             homeScroll:SetPoint("TOPLEFT", homeFrame, "TOPLEFT", 0, 0)
             homeScroll:SetPoint("BOTTOMRIGHT", homeFrame, "BOTTOMRIGHT", 0, 0)
@@ -4328,9 +4123,7 @@ local function CreateDMWindow(winIdx)
 
     -- (Refresh ticker is shared across all windows -- see file scope below CreateDMWindow)
 
-    ---------------------------------------------------------------------------
-    --  Visibility
-    ---------------------------------------------------------------------------
+    -- Visibility
     function W.UpdateVisibility()
         if not frame then return end
         local c = DB()
@@ -4350,8 +4143,7 @@ local function CreateDMWindow(winIdx)
 
     if EUI.RegisterVisibilityUpdater then EUI.RegisterVisibilityUpdater(W.UpdateVisibility) end
     if EUI.RegisterMouseoverTarget then
-        -- Hover-gated sets only reveal while their conditions pass; a
-        -- legacy single "mouseover" behaves exactly as before.
+        -- Hover-gated sets only reveal while their conditions pass; a legacy single "mouseover" behaves exactly as before
         EUI.RegisterMouseoverTarget(frame, function()
             local c = DB()
             return c ~= nil and EUI.VisWantsMouseover(c, "visibility")
@@ -4359,9 +4151,7 @@ local function CreateDMWindow(winIdx)
     end
 
 
-    ---------------------------------------------------------------------------
-    --  Destroy
-    ---------------------------------------------------------------------------
+    -- Destroy
     function W.Destroy()
         if W._hoverTicker then W._hoverTicker:Cancel() end
         resizeFrame:SetScript("OnUpdate", nil)
@@ -4373,9 +4163,8 @@ local function CreateDMWindow(winIdx)
         local runtimeIdx
         for i, w in ipairs(_windows) do if w == W then runtimeIdx = i; break end end
         if runtimeIdx then table.remove(_windows, runtimeIdx) end
-        -- Compact DB: remove entry and shift remaining down (no holes).
-        -- W.idx (not the winIdx upvalue) -- prior deletions may have shifted
-        -- this window's slot since creation.
+        -- Compact DB: remove entry and shift remaining down (no holes). Uses W.idx (not the
+        -- winIdx upvalue) since prior deletions may have shifted this window's slot since creation.
         local removedIdx = runtimeIdx or W.idx
         local c = DB()
         if c.windows then
@@ -4384,8 +4173,7 @@ local function CreateDMWindow(winIdx)
         end
         -- Update remaining windows' idx to match their new DB position
         for i, w in ipairs(_windows) do w.idx = i end
-        -- Re-key unlock anchor/size-match links for the shifted window set and
-        -- refresh registrations (drops the now-stale highest EDM_Win slot)
+        -- Re-key unlock anchor/size-match links for the shifted window set and refresh registrations (drops the stale highest EDM_Win slot)
         if EUI.ShiftIndexedAnchorKeys then EUI.ShiftIndexedAnchorKeys("EDM_Win", removedIdx, oldCount) end
         ns.RegisterDMUnlock()
     end
@@ -4403,16 +4191,13 @@ local function CreateDMWindow(winIdx)
     return W
 end
 
--------------------------------------------------------------------------------
---  ns exports (loop over all windows)
--------------------------------------------------------------------------------
+-- ns exports (loop over all windows)
 ns.RefreshMeter = function()
     for _, w in ipairs(_windows) do w.Refresh() end
 end
 
--- Bust the per-class color caches and repaint. Called when global custom class
--- colors change so bars/text recolor live without a /reload (bars cache color
--- keyed only on classFile, which does not change when the palette is edited).
+-- Bust per-class color caches and repaint when global custom class colors change, so bars/text
+-- recolor live without a /reload (color is cached keyed only on classFile, which the palette edit doesn't change).
 ns.RefreshColors = function()
     for _, w in ipairs(_windows) do
         w._stickyClassCache = nil; w._stickySpecCache = nil
@@ -4424,8 +4209,7 @@ ns.RefreshColors = function()
         w.Refresh()
     end
 end
--- Exposed on the shared table so the parent addon's ApplyColorsToOUF can repaint
--- damage meters when global custom class colors change.
+-- Exposed on the shared table so the parent addon's ApplyColorsToOUF can repaint damage meters when global custom class colors change
 EllesmereUI._DM_RefreshColors = ns.RefreshColors
 
 ns.ApplyBorder = function()
@@ -4498,8 +4282,7 @@ ns.ApplyWindowBorder = function()
                 target:SetPoint("TOPLEFT", w.header, "BOTTOMLEFT", -offsetX, offsetY)
             end
             target:SetPoint("BOTTOMRIGHT", w.frame, "BOTTOMRIGHT", offsetX, -offsetY)
-            -- Offsets are represented by the target geometry itself, which also
-            -- makes them work for the solid four-strip border implementation.
+            -- Offsets are represented by the target geometry itself, which also makes them work for the solid four-strip border implementation
             EUI.ApplyBorderStyle(target, size, r, g, b, a, texture)
         end
     end
@@ -4542,7 +4325,6 @@ ns.ApplyHeader = function()
         if w.timerText then
             SetDMFont(w.timerText, hdrFS)
         end
-        -- Resize and reposition header buttons
         LayoutHeaderButtons(w, cfg, iconSz)
         -- Close icon is 2px larger than other icons
         if w._closeIconTex then
@@ -4596,9 +4378,7 @@ ns.ApplyDMSize = function()
     end
 end
 
--------------------------------------------------------------------------------
---  Standalone Combat Timer
--------------------------------------------------------------------------------
+-- Standalone Combat Timer
 local _saTimer  -- frame reference
 local _saTimerFS -- fontstring
 local _saTimerPreview = false
@@ -4645,20 +4425,16 @@ local function ApplySATimerStyle()
     end
 end
 
--- Decimal display: the API duration is whole seconds, so tenths are derived
--- from a GetTime() anchor reset whenever the API value changes. Display-only
--- smoothing clamped inside the current second -- the API stays the source of
--- truth and every API tick re-anchors, so it cannot drift.
+-- Decimal display: API duration is whole seconds, so tenths are derived from a GetTime() anchor
+-- reset on every API value change -- display-only smoothing clamped inside the current second; the API stays authoritative and re-anchors each tick, so it cannot drift.
 local _saDecBase, _saDecAnchor = nil, 0
 
 UpdateSATimerText = function()
     if not _saTimer or not _saTimerFS then return end
     local cfg = DB()
     if not cfg.standaloneTimer then return end
-    -- Same source as the window's Current timer so the two can never disagree.
-    -- Visible while combat is live (or while polling a group fight we are not in);
-    -- out of combat it hides unless Show Out of Combat keeps it up (showing the
-    -- last fight's frozen duration).
+    -- Same source as the window's Current timer so the two can never disagree. Visible while
+    -- combat is live (or polling a group fight we're not in); out of combat it hides unless Show Out of Combat keeps it up (last fight's frozen duration).
     local live = _inCombat or _needsFinalRefresh
     if live or cfg.standaloneTimerShowOOC then
         if not _saTimer:IsShown() and not _saTimerPreview then _saTimer:Show() end
@@ -4831,8 +4607,7 @@ end
 ns.ShowSATimerPreview = function()
     if not _saTimer then CreateSATimer() end
     if not _saTimer then return end
-    -- Show Out of Combat already keeps real data on screen (last segment
-    -- duration, or 0:00) -- never clobber it with the preview value.
+    -- Show Out of Combat already keeps real data on screen (last segment duration, or 0:00) -- never clobber it with the preview value
     if DB().standaloneTimerShowOOC then
         UpdateSATimerText()
         return
@@ -4847,9 +4622,7 @@ ns.HideSATimerPreview = function()
     if not _saTimer then return end
     local cfg = DB()
     if cfg.standaloneTimer and cfg.standaloneTimerShowOOC then
-        -- Show Out of Combat was enabled during this preview session: swap
-        -- the preview value for the real one (last segment, or 0:00 when no
-        -- segment exists yet).
+        -- Show Out of Combat was enabled during this preview session: swap the preview value for the real one (last segment, or 0:00)
         if wasPreview then UpdateSATimerText() end
         return
     end
@@ -4867,11 +4640,7 @@ if EUI.RegAccent then
     end })
 end
 
--- Unlock-mode element for the standalone timer, built on demand by
--- ns.RegisterDMUnlock (lives here because the closures need the _saTimer
--- upvalues declared above). The frame sizes itself to its text and would
--- shift any children, so it may anchor TO elements but never serve as an
--- anchor target.
+-- Unlock-mode element for the standalone timer, built on demand by ns.RegisterDMUnlock (lives here since the closures need the _saTimer upvalues above). Sizes to its text and would shift children, so it may anchor TO elements but never serve as an anchor target.
 ns.MakeSATimerUnlockElement = function(MK)
     return MK({
         key   = "EDM_CombatTimer",
@@ -4889,8 +4658,7 @@ ns.MakeSATimerUnlockElement = function(MK)
         savePos = function(_, point, relPoint, x, y)
             local cfg = DB()
             cfg.standaloneTimerPos = { point = point, relPoint = relPoint or point, x = x, y = y }
-            -- A manual unlock-mode move implies free placement: un-snap the
-            -- window-anchor mode or RepositionSATimer would fight the drag.
+            -- A manual unlock-mode move implies free placement: un-snap the window-anchor mode or RepositionSATimer would fight the drag
             if (cfg.standaloneTimerAnchor or "free") ~= "free" then
                 cfg.standaloneTimerAnchor = "free"
             end
@@ -4912,20 +4680,13 @@ ns.MakeSATimerUnlockElement = function(MK)
     })
 end
 
--------------------------------------------------------------------------------
---  Shared refresh ticker (one ticker for ALL windows)
--------------------------------------------------------------------------------
--- _sharedTicker is forward-declared near the top (so the session-update handler
--- can revive it after a teardown race); it is assigned by Start/StopSharedTicker.
+-- Shared refresh ticker (one ticker for ALL windows). _sharedTicker is forward-declared near the
+-- top (so the session-update handler can revive it after a teardown race); assigned by Start/StopSharedTicker
 
 local _regenTimestamp = 0  -- GetTime() when player left combat
 
--- Dedicated combat-timer ticker: keeps the header clocks (and standalone
--- timer) ticking once per displayed second regardless of the meter refresh
--- rate. Runs only while the shared refresh ticker runs (combat), costs one
--- duration read per live window per tick, and the per-window second memo in
--- UpdateTimerText makes redundant ticks free. Historical-session windows are
--- skipped: their duration is static and already painted by RefreshUI.
+-- Dedicated combat-timer ticker: keeps header clocks (and the standalone timer) ticking once per displayed second regardless of refresh rate, only while the shared ticker runs (combat); the second
+-- memo in UpdateTimerText makes redundant ticks free. Historical-session windows are skipped -- their duration is static and already painted by RefreshUI.
 local _timerTicker
 local _saDecimalTicker
 
@@ -4979,8 +4740,7 @@ StartSharedTicker = function()
     _sharedTicker = C_Timer.NewTicker(rate, SharedRefreshTick)
     StopTimerTicker()
     _timerTicker = C_Timer.NewTicker(0.5, TimerTick)
-    -- Tenths display needs a faster brush than the 0.5s timer tick; combat
-    -- only, opt-in only, standalone timer only.
+    -- Tenths display needs a faster brush than the 0.5s timer tick; combat-only, opt-in only, standalone timer only
     local cfg = DB()
     if cfg.standaloneTimer and cfg.standaloneTimerDecimal then
         _saDecimalTicker = C_Timer.NewTicker(0.1, UpdateSATimerText)
@@ -4992,10 +4752,8 @@ StopSharedTicker = function()
     StopTimerTicker()
 end
 
--- Stop the ticker after `delay`, but no-op if a newer combat segment started in
--- the meantime (generation mismatch) or combat is still live. Replaces the raw
--- deferred StopSharedTicker calls, which could cancel the NEXT segment's ticker
--- when a boss was pulled within the stop delay of the previous pack ending.
+-- Stop the ticker after `delay`, no-op if a newer combat segment started (generation mismatch)
+-- or combat is still live. Guards against cancelling the NEXT segment's ticker when a boss is pulled within the stop delay of the previous pack ending.
 ScheduleStopTicker = function(delay)
     local gen = _combatGen
     C_Timer.After(delay, function()
@@ -5005,27 +4763,23 @@ ScheduleStopTicker = function(delay)
     end)
 end
 
--------------------------------------------------------------------------------
---  Combat state tracking (shared, group-aware)
--------------------------------------------------------------------------------
+-- Combat state tracking (shared, group-aware)
 local combatFrame = CreateFrame("Frame")
 combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 combatFrame:RegisterEvent("UNIT_FLAGS")
 combatFrame:RegisterEvent("ENCOUNTER_START")
 combatFrame:RegisterEvent("ENCOUNTER_END")
--- Detect Feign Death via UNIT_SPELLCAST_SUCCEEDED (Blizzard does not fire UNIT_AURA for FD,
---and the combat log is not reliable for this purpose). This is a high-frequency event, so we gate it with a tight integer compare.
+-- Detect Feign Death via UNIT_SPELLCAST_SUCCEEDED (Blizzard doesn't fire UNIT_AURA for FD, and
+-- the combat log is unreliable for this). High-frequency event, so gate it with a tight integer compare.
 combatFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 combatFrame:SetScript("OnEvent", function(_, event, ...)
-    -- UNIT_SPELLCAST_SUCCEEDED is the highest-frequency event in this handler;
-    -- check first with a tight integer compare so non-FD casts cost ~nothing.
+    -- UNIT_SPELLCAST_SUCCEEDED is the highest-frequency event here; check first with a tight integer compare so non-FD casts cost ~nothing
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, _, spellID = ...
         if not unit then return end
-        -- spellID can be a secret number when our execution is tainted by
-        -- C_DamageMeter; comparing one throws "attempt to compare a secret
-        -- value." Without a usable spellID we can't classify the cast, so bail.
+        -- spellID can be a secret number when tainted by C_DamageMeter (comparing one throws "attempt to compare a secret value");
+        -- without a usable spellID we can't classify the cast, so bail
         if issecretvalue and issecretvalue(spellID) then return end
         if spellID == 5384 then -- Feign Death
             local guid = UnitGUID(unit)
@@ -5033,9 +4787,8 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
                 _feignDeathGUIDs[guid] = true
             end
         end
--- Do not clear on non-FD casts. A live hunter can still have a feign entry with
--- a valid deathRecapID; CleanupFeignCache clears it once they are truly dead.
-
+        -- Do not clear on non-FD casts: a live hunter can still have a feign entry with a valid
+        -- deathRecapID; CleanupFeignCache clears it once they are truly dead.
         return
     end
     if event == "UNIT_FLAGS" then
@@ -5048,10 +4801,8 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
         if IsGroupInCombat() then
             _combatEndTime = 0
             _curViewFrozenDur = 0
-            -- Pre-warm: a teammate pulled before us. Mark a final-refresh poll
-            -- (NOT _inCombat -- the player may never personally enter combat, and
-            -- nothing would clear _inCombat then). SharedRefreshTick then refreshes
-            -- while the group fights and self-terminates when it leaves combat.
+            -- Pre-warm: a teammate pulled before us. Mark a final-refresh poll (NOT _inCombat --
+            -- the player may never personally enter combat, so nothing would ever clear _inCombat if we set it). SharedRefreshTick refreshes while the group fights and self-terminates when it leaves combat.
             _needsFinalRefresh = true
             _combatGen = _combatGen + 1
             StartSharedTicker()
@@ -5060,14 +4811,9 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
     end
     if event == "ENCOUNTER_START" then
         _inEncounter = true
-        -- A boss pull is a hard combat-segment boundary even in continuous
-        -- (chain-pull) combat, where PLAYER_REGEN_DISABLED never fires at the
-        -- boss. Bump the segment token (so any pending deferred stop no-ops),
-        -- assert combat, reset the timer pin, and ensure the live ticker runs.
-        -- No clock is anchored here: the timer is derived from the live "Current"
-        -- session, so it resets to ~0:00 the instant Blizzard's session roll lands
-        -- (the old synchronous GetSessionDurationSeconds read raced the roll and is
-        -- removed -- it returned the stale pre-pull duration).
+        -- A boss pull is a hard segment boundary even in chain-pull combat, where PLAYER_REGEN_DISABLED
+        -- never fires: bump the segment token (pending deferred stops no-op), assert combat, reset
+        -- the timer pin. No clock anchored here -- the timer derives from the live "Current" session so it self-resets on the roll; a synchronous read here would race it and show the stale pre-pull duration.
         _combatGen = _combatGen + 1
         if next(_feignDeathGUIDs) then wipe(_feignDeathGUIDs) end -- new segment: stale feign tags would mis-filter real deaths
         _inCombat = true
@@ -5088,12 +4834,9 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "ENCOUNTER_END" then
         _inEncounter = false
         local success = select(5, ...)   -- 1 = kill, 0 = wipe
-        -- On a clean kill, end combat promptly (PLAYER_REGEN_ENABLED can lag
-        -- several seconds behind ENCOUNTER_END). But if it was NOT a clean kill
-        -- and the group is still fighting (wipe with survivors, adds left, or we
-        -- AoE'd straight into the next pack), do NOT hard-freeze mid-combat --
-        -- keep the ticker live and let it freeze when the group truly leaves
-        -- combat. Hard-freezing here was a cause of the stuck-meter bug.
+        -- On a clean kill, end combat promptly (PLAYER_REGEN_ENABLED can lag ENCOUNTER_END by
+        -- several seconds). If it was NOT a clean kill and the group is still fighting (wipe with
+        -- survivors, adds left, AoE into the next pack), do NOT hard-freeze mid-combat -- keep the ticker live and freeze only once the group truly leaves combat.
         if _inCombat or _needsFinalRefresh then
             local gen = _combatGen
             -- Short delay: let Blizzard finalize the session data first
@@ -5139,8 +4882,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
             _needsFinalRefresh = true  -- let tick poll until group leaves combat
             -- Don't freeze timer -- group is still in combat
         else
-            -- Freeze timer: entire group out of combat. Guard against overwriting
-            -- an earlier freeze (e.g. ENCOUNTER_END already froze at the boss end).
+            -- Freeze timer: entire group out of combat. Guard against overwriting an earlier freeze (e.g. ENCOUNTER_END already froze at the boss end)
             if _combatEndTime == 0 then FreezeCombat() end
             _inCombat = false
             _needsFinalRefresh = false
@@ -5148,8 +4890,7 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
             -- One final tick then stop (guarded so it can't cancel a new segment).
             ScheduleStopTicker(DB().refreshRate or TICK_COMBAT)
         end
-        -- Delayed refresh after player exits combat: API needs a moment to
-        -- declassify secret source GUIDs so breakdowns work post-combat
+        -- Delayed refresh after exiting combat: API needs a moment to declassify secret source GUIDs so breakdowns work post-combat
         C_Timer.After(0.5, function()
             for _, w in ipairs(_windows) do w.Refresh() end
         end)
@@ -5157,12 +4898,8 @@ combatFrame:SetScript("OnEvent", function(_, event, ...)
 end)
 
 
--------------------------------------------------------------------------------
---  PvP match end detection
---  Arenas and solo shuffle don't reliably fire PLAYER_REGEN_ENABLED when the
---  match ends (IsGroupInCombat() stays true between rounds). Track the match
---  active state via C_PvP and force-end the segment when the match finishes.
--------------------------------------------------------------------------------
+-- PvP match end detection: arenas/solo shuffle don't reliably fire PLAYER_REGEN_ENABLED when the
+-- match ends (IsGroupInCombat() stays true between rounds), so track match state via C_PvP and force-end the segment when the match finishes.
 do
     local _pvpMatchActive = false
     local _pvpBlockUntil = 0
@@ -5198,9 +4935,7 @@ do
     end
 end
 
--------------------------------------------------------------------------------
---  Reset Data keybind button (hidden, receives override binding click)
--------------------------------------------------------------------------------
+-- Reset Data keybind button (hidden, receives override binding click)
 if not _G["EllesmereUIDMResetBindBtn"] then
     local btn = CreateFrame("Button", "EllesmereUIDMResetBindBtn", UIParent)
     btn:Hide()
@@ -5213,9 +4948,7 @@ if not _G["EllesmereUIDMResetBindBtn"] then
     end)
 end
 
--------------------------------------------------------------------------------
---  Init
--------------------------------------------------------------------------------
+-- Init
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
@@ -5227,8 +4960,7 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     EnsureDB()
-    -- DB is now available; rebuild number format so a saved forceEnglishUnits
-    -- preference is applied at login (load-time build ran before the DB existed).
+    -- DB is now available; rebuild number format so a saved forceEnglishUnits preference applies at login (load-time build ran before the DB existed)
     if ns.RebuildNumberFormat then ns.RebuildNumberFormat() end
     -- Disable Blizzard's built-in damage meter UI; C_DamageMeter API still works
     SetCVarSafe("damageMeterEnabled", 0)
@@ -5250,12 +4982,7 @@ initFrame:SetScript("OnEvent", function(self)
     cfg.windowCount = winCount
     for i = winCount + 1, MAX_WINDOWS do cfg.windows[i] = nil end
     local winIdx = 0
-    _buildGen = _buildGen + 1
-    local myBuildGen = _buildGen
     local function CreateNextWindow()
-        -- A rebuild has superseded this staggered build; carrying on would overwrite the
-        -- windows it created and leave those frames orphaned but visible.
-        if myBuildGen ~= _buildGen then return end
         winIdx = winIdx + 1
         if winIdx > winCount then
             -- All windows exist: register them with the core unlock mode system
@@ -5276,9 +5003,6 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Profile swap rebuild: tear down all windows and recreate from new profile
     _G._EDM_Apply = function()
-        -- Supersede any staggered build still in flight, so its remaining steps do not
-        -- assign over the windows created below and orphan them
-        _buildGen = _buildGen + 1
         -- Destroy existing windows (frame cleanup only, don't touch DB)
         for i = #_windows, 1, -1 do
             local w = _windows[i]
@@ -5315,15 +5039,10 @@ initFrame:SetScript("OnEvent", function(self)
         ns.RegisterDMUnlock()
         -- Recreate standalone timer if enabled
         if c.standaloneTimer then CreateSATimer() end
-        -- Pre-create tooltip frame so first hover doesn't pay creation cost. This and the
-        -- ticker below are the staggered build's closing steps, repeated here because
-        -- this rebuild may have superseded that build before it reached them.
-        EnsureTooltipFrame()
         -- Update tooltip scale
         if _ttFrame then
             local sc = (c.hoverTooltipScale or 100) / 100
             _ttFrame:SetScale(sc)
         end
-        if _inCombat and not _sharedTicker then StartSharedTicker() end
     end
 end)

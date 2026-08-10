@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -- Russian localization for EllesmereUI. Community-maintained.
 -- Encoding: UTF-8 without BOM. See CONTRIBUTING_TRANSLATIONS.md.
 -- Seed locale: high-frequency common vocabulary. Run /euiloc dump zhCN in-game
@@ -6,6 +7,14 @@
 ---@diagnostic disable:undefined-global
 local L = EllesmereUI.RegisterLocale("ruRU")
 if not L then return end
+
+-- Cast Bar: cancelled/interrupted cast display
+L["CANCELLED / INTERRUPTED CAST"] = "ОТМЕНЁННОЕ / ПРЕРВАННОЕ ЗАКЛИНАНИЕ"
+L["Show Cancelled Cast"] = "Показывать отменённое заклинание"
+L["Show Interrupted Cast"] = "Показывать прерванное заклинание"
+L["Spell Cancelled"] = "Заклинание отменено"
+L["Show a brief message when you cancel your own cast."] = "Кратко показывает сообщение, когда вы отменяете своё заклинание."
+L["Show a brief message when another player or NPC interrupts your cast."] = "Кратко показывает сообщение, когда другой игрок или НИП прерывает ваше заклинание."
 
 L["BLIZZARD POPUPS & GAME MENU"] = "ОКНА BLIZZARD И ИГРОВОЕ МЕНЮ"
 L["Reskin Popups and Menus"] = "Изменить оформление окон и меню"
