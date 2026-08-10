@@ -2045,6 +2045,14 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
                 if EAB._RefreshCooldownVisuals then
                     EAB._RefreshCooldownVisuals(self)
                 end
+                -- Same Blizzard hover repaint also resets HotKey's text color
+                -- to white (see ReapplyHotkeyColors above); OnEnter never fed
+                -- the event-driven reassert, so a custom color reverted on
+                -- every hover until the next unrelated ACTIONBAR_* event.
+                -- Queue instead of reapplying inline: coalesces with any
+                -- burst already pending and costs nothing when the bar is on
+                -- the default white (see ReapplyHotkeyColors' early-out).
+                EAB:QueueHotkeyColorReassert()
             end)
         end
         -- Physical-press GCD paint: keybinds arrive as clicks too
