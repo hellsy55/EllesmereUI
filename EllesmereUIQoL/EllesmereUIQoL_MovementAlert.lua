@@ -387,6 +387,17 @@ local function CreateDisplaySlot()
     slot.icon.timeText:SetText("")
     slot.icon:Hide()
 
+    -- PROTOTYPE: engine-drawn countdown for text modes. See ShowEngineCountdown.
+    slot.cdNum = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
+    slot.cdNum:SetDrawSwipe(false)
+    slot.cdNum:SetDrawEdge(false)
+    if slot.cdNum.SetDrawBling then slot.cdNum:SetDrawBling(false) end
+    slot.cdNum:SetHideCountdownNumbers(false)
+    if slot.cdNum.SetCountdownFont then
+        slot.cdNum:SetCountdownFont("EUI_MovementAlertCdFont")
+    end
+    slot.cdNum:Hide()
+
     slot.bar = CreateFrame("StatusBar", nil, slot)
     slot.bar:SetSize(150, 20)
     slot.bar:SetPoint("CENTER")
@@ -455,6 +466,10 @@ local function StyleSlot(slot)
     else
         movementCdFont:SetFont(fontPath, fontSize, outline)
     end
+    -- The engine draws its countdown numbers straight from this font object,
+    -- so the colour has to live here too or the prototype's number ignores the
+    -- user's Text Colour.
+    movementCdFont:SetTextColor(tR, tG, tB)
 
     -- Bar texture (change-guarded: StyleSlot runs on every poll tick)
     local texPath = (EllesmereUI.ResolveTexturePath
@@ -467,6 +482,53 @@ local function StyleSlot(slot)
 
     local iconSz = math.max(16, math.min(128, ma.iconSize or 40))
     slot.icon:SetSize(iconSz, iconSz)
+end
+
+-------------------------------------------------------------------------------
+--  PROTOTYPE: engine-drawn countdown for the text modes
+--
+--  A secret remaining cannot be formatted in Lua (that is the 0.0 bug), but
+--  the ENGINE can draw it: a Cooldown widget handed the same duration object
+--  renders the number itself, which is exactly why icon mode still counts down
+--  in combat. Everything except the number is switched off here, so all this
+--  widget contributes is text sitting beside the name.
+--
+--  The assumption this exists to test: Blizzard READS countdownForCooldowns
+--  and passes it into SetHideCountdownNumbers for its own buttons
+--  (Blizzard_ActionBar/Shared/ActionButton.lua), so the CVar gates Blizzard's
+--  buttons rather than the widget. Forcing false should therefore draw numbers
+--  whatever the user's CVar says. The comments elsewhere in this file claim
+--  otherwise; if they are right, this renders nothing and the prototype dies.
+-------------------------------------------------------------------------------
+local function HideEngineCountdown(slot)
+    if slot.cdNum then slot.cdNum:Hide() end
+end
+
+local function ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
+    local cd = slot.cdNum
+    if not cd then return false end
+    local ma = MA()
+    local fontSize = math.max(8, math.min(72, ma.textSize or 24))
+    -- The widget centres its own number, so the frame is what gets positioned:
+    -- park it just outside the name text on whichever side the format puts it.
+    cd:SetSize(fontSize * 3, fontSize * 1.4)
+    cd:ClearAllPoints()
+    if displayMode == "text_nd" then
+        cd:SetPoint("LEFT", slot.text, "RIGHT", 4, 0)
+    else
+        cd:SetPoint("RIGHT", slot.text, "LEFT", -4, 0)
+    end
+    -- Both sinks accept secrets, and icon mode already feeds them the same way.
+    if duration and cd.SetCooldownFromDurationObject then
+        cd:SetCooldownFromDurationObject(duration)
+    elseif cdStart and cdDuration then
+        cd:SetCooldown(cdStart, cdDuration, cdModRate)
+    else
+        cd:Hide()
+        return false
+    end
+    cd:Show()
+    return true
 end
 
 -------------------------------------------------------------------------------
@@ -917,7 +979,7 @@ local function HideMovementDisplay()
     wipe(readyAlertShown)
     movementFrame:Hide()
     for _, slot in ipairs(displayPool) do
-        slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); slot:Hide()
+        slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); HideEngineCountdown(slot); slot:Hide()
     end
     activeSlotCount = 0
     CancelMovementCountdown()
@@ -951,6 +1013,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     end
 
     slot.text:Hide(); slot.icon:Hide(); slot.bar:Hide()
+    HideEngineCountdown(slot)
 
     -- Start-recovery branch. GetSpellCooldown's timeUntilEndOfStartRecovery
     -- is ALWAYS present as a number on this client (0 outside an actual
@@ -1068,6 +1131,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             -- guard as the text branch below.
             if not showRemaining then
                 slot.text:SetText("No " .. spellName)
+                ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
             else
                 slot.text:SetFormattedText(fmtStr, cdRemaining)
             end
@@ -1113,6 +1177,8 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
             -- and the text one was wrong. Gating on hasSecretDuration covers
             -- both producers and drops the fragile type() test with it.
             slot.text:SetText("No " .. spellName)
+            -- PROTOTYPE: the number Lua cannot format, drawn by the engine.
+            ShowEngineCountdown(slot, displayMode, duration, cdStart, cdDuration, cdModRate)
         else
             slot.text:SetFormattedText(fmtStr, cdRemaining)
         end
@@ -1132,6 +1198,7 @@ local function ShowBuffActiveSlot(index, spellEntry)
     local spellIcon = spellEntry.spellIcon
 
     slot.text:Hide(); slot.icon:Hide(); slot.bar:Hide()
+    HideEngineCountdown(slot)
 
     if displayMode == "icon" and spellIcon then
         slot.icon.tex:SetTexture(spellIcon)
@@ -1261,7 +1328,7 @@ CheckMovementCooldown = function()
 
     for i = count + 1, activeSlotCount do
         local slot = displayPool[i]
-        if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); slot:Hide() end
+        if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); HideEngineCountdown(slot); slot:Hide() end
     end
 
     if count > 0 then
@@ -1358,7 +1425,7 @@ local function PreviewTick()
     if ShowMovementSlot(1, previewCdInfo, previewEntry) then
         for i = 2, activeSlotCount do
             local slot = displayPool[i]
-            if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); slot:Hide() end
+            if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); HideEngineCountdown(slot); slot:Hide() end
         end
         activeSlotCount = 1
         LayoutDisplaySlots(1)
