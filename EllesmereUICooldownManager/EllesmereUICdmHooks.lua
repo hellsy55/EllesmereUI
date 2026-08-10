@@ -717,7 +717,61 @@ local _divertedVarBaseCD   = {}
 -- half the time -- and these transforms rebuild constantly. Learning it the
 -- moment it IS observable and keeping it is what makes the result stable, and
 -- keeping it is safe precisely because the relationship never changes.
+--
+-- Learning it in-session still leaves one hole, which is what the store below
+-- closes: a slot only ever names its base and the form live RIGHT NOW, so a
+-- fresh login can never witness the pair for an assigned variant that is not
+-- the live one. The claim is therefore missing from the very first build and
+-- the base falls through to whatever a repopulate assigned, until a cast
+-- transforms the slot and a later rebuild finally observes it. Persisting is
+-- what lets a login start where the last session left off. The pairing is
+-- static game data -- identical on every character and in every profile, and
+-- it never changes -- so it belongs on the SV root beside _capturedOnce_CDM,
+-- not in a profile. StripDefaults only walks keys present in DEFAULTS, so a
+-- root key it does not know about survives logout untouched.
 local _variantBaseLearned = {}
+local _variantBaseLoaded = false
+
+local function _variantBaseSV()
+    local db = ECME and ECME.db
+    return db and db.sv or nil
+end
+
+-- Seeds the live table from the store. Idempotent, and reads WITHOUT creating:
+-- a player who never assigns a transforming spell should not gain an empty
+-- table in their SavedVariables. Leaves the flag clear when the db is not up
+-- yet so a later rebuild retries.
+local function _loadVariantBases()
+    if _variantBaseLoaded then return end
+    local sv = _variantBaseSV()
+    if not sv then return end
+    _variantBaseLoaded = true
+    local store = sv._variantBase
+    if type(store) ~= "table" then return end
+    for variant, base in pairs(store) do
+        if type(variant) == "number" and type(base) == "number"
+           and base > 0 and base ~= variant then
+            _variantBaseLearned[variant] = base
+        end
+    end
+end
+
+-- Record a pair in the live table and the store. Callers gate ids for secrecy
+-- before calling: a secret must never index a table, let alone reach
+-- SavedVariables. The unchanged-pair early-out keeps the resolve path, which
+-- relearns the live pairing on every call, from touching the store per frame.
+local function _learnVariantBase(variant, base)
+    if _variantBaseLearned[variant] == base then return end
+    _variantBaseLearned[variant] = base
+    local sv = _variantBaseSV()
+    if not sv then return end
+    local store = sv._variantBase
+    if type(store) ~= "table" then
+        store = {}
+        sv._variantBase = store
+    end
+    store[variant] = base
+end
 ns._divertedSpellsBuff = _divertedSpellsBuff
 ns._divertedSpellsCD   = _divertedSpellsCD
 
@@ -770,6 +824,11 @@ function ns.RebuildSpellRouteMap()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
 
+    -- Before any StoreDirect: the recall below is the only thing that can supply
+    -- a base for an assigned variant that is not the live form, and this is the
+    -- first build of the session.
+    _loadVariantBases()
+
     local SVV = ns.StoreVariantValue
     if not SVV then return end
 
@@ -794,7 +853,7 @@ function ns.RebuildSpellRouteMap()
             local ok, b = pcall(GetBase, sid)
             if ok and type(b) == "number" and b > 0 and b ~= sid then
                 base = b
-                _variantBaseLearned[sid] = b
+                _learnVariantBase(sid, b)
             end
         end
         base = base or _variantBaseLearned[sid]
@@ -978,7 +1037,7 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     -- known from then on.
     if CdidIDReadable(info.spellID) and CdidIDReadable(info.overrideSpellID)
        and info.overrideSpellID ~= info.spellID then
-        _variantBaseLearned[info.overrideSpellID] = info.spellID
+        _learnVariantBase(info.overrideSpellID, info.spellID)
     end
 
     local routedBar = nil
