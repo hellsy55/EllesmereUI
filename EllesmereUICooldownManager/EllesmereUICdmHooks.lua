@@ -309,10 +309,22 @@ local function ResolveSpellSettingsUncached(frame, sid2, sd2, barKey)
     -- must keep the normal CD-family resolution. A buff frame only reaches a
     -- non-buff bar through an explicit host, so the frame identity is exact.
     -- Cheap: sd2.hostedBuffSpellIDs is nil on bars with no host.
+    -- All four signals are frame-scoped, and FC.isHostedBuff / viewerFrame are
+    -- readable BEFORE the frame is decorated (the claim pass stamps the first;
+    -- the second is the Blizzard field DecorateFrame later reads). Testing only
+    -- the decoration stamps made a pre-decoration resolve report "not hosted",
+    -- and the miss is SILENT: the family store below falls back to
+    -- spellSettingsCD and applies a CD-era entry under the same id to the buff.
+    -- Only bites ids where the aura and spell id coincide (Agony 980, Unstable
+    -- Affliction 1259790), which is why one hosted DoT of three looked correct.
     local hostedFrame = false
     if frame and bk and sd2 and sd2.hostedBuffSpellIDs then
         local fdH = ns._hookFrameData and ns._hookFrameData[frame]
-        if (fdH and fdH._isBuffViewerFrame) or frame._isPlaceholderFrame then
+        if (fc0 and fc0.isHostedBuff)
+           or (fdH and fdH._isBuffViewerFrame)
+           or frame._isPlaceholderFrame
+           or frame.viewerFrame == _G.BuffIconCooldownViewer
+           or frame.viewerFrame == _G.BuffBarCooldownViewer then
             local bdH = ns.barDataByKey and ns.barDataByKey[bk]
             if bdH and bdH.barType ~= "buffs" and bdH.barType ~= "custom_buff" then
                 hostedFrame = true
