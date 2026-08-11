@@ -19631,6 +19631,20 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end });  y = y - h
 
+        -- Show Item Quality: the crafted-rank pip the action bars draw for
+        -- ranked items, for tracked items here. Off by default. Ranks of a
+        -- potion share their icon art, so two entries for different ranks are
+        -- otherwise indistinguishable on the bar.
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Item Quality",
+              tooltip = "Show the crafted quality rank on tracked items, matching the rank icon on the action bars. Items with no crafted quality are unaffected.",
+              getValue = function() return BD().showItemQuality == true end,
+              setValue = function(v)
+                  BD().showItemQuality = v
+                  if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_toggle") end
+              end },
+            { type = "label", text = "" });  y = y - h
+
         end -- custom_buff extras guard
 
         return math.abs(y)

@@ -4727,6 +4727,55 @@ local function GetOrCreateItemPresetFrame(barKey, itemID)
 end
 ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 
+-- Crafted-quality pip for item frames -- the action bars' Show Rank Icon, for
+-- CDM. Those read C_ActionBar.GetProfessionQualityInfo, which needs an action
+-- slot; an item frame has only an item id, so this asks the item-side call that
+-- returns the same CraftingQualityInfo struct, and takes iconInventory off it
+-- exactly as the action bars do. Blizzard's own callers pass a LINK rather than
+-- a bare id (and the action bar work recorded bare-id reads coming back nil), so
+-- prefer the link and keep the id as the fallback.
+-- Per bar and off by default: nothing here is created or called until a bar
+-- turns it on. Memoised per resolved item, so the steady state is one compare --
+-- it re-reads only when the icon changes which item it is showing, which for a
+-- pot preset is the point (the pip has to follow the rank actually resolved).
+local function ApplyItemQualityPip(f, itemID, on)
+    if not on then
+        if f._qualityTex then f._qualityTex:Hide() end
+        f._qualityItemID = nil
+        return
+    end
+    if f._qualityItemID == itemID then return end
+    f._qualityItemID = itemID
+    local atlas
+    local ts = C_TradeSkillUI
+    if itemID and ts and ts.GetItemCraftedQualityInfo then
+        local link = C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(itemID))
+        local ok, info = pcall(ts.GetItemCraftedQualityInfo, link or itemID)
+        atlas = ok and info and info.iconInventory or nil
+    end
+    if not atlas then
+        if f._qualityTex then f._qualityTex:Hide() end
+        return
+    end
+    local tex = f._qualityTex
+    if not tex then
+        tex = f:CreateTexture(nil, "OVERLAY", nil, 7)
+        f._qualityTex = tex
+    end
+    -- Unknown atlas reads as no pip, never as an error.
+    if not pcall(tex.SetAtlas, tex, atlas, true) then
+        tex:Hide()
+        return
+    end
+    -- Same proportion the action bars use (Blizzard centers the overlay 14,-14
+    -- from the TOPLEFT of a 45px button), scaled to whatever size the bar runs.
+    local sc = (f:GetWidth() or 36) / 36
+    tex:ClearAllPoints()
+    tex:SetPoint("CENTER", f, "TOPLEFT", 11 * sc, -11 * sc)
+    tex:SetScale(sc)
+    tex:Show()
+end
+
 -- ---------------------------------------------------------------------------
 -- Dynamic potion display for every pot preset carrying a displayOrder (Light's
 -- Potential, Potion of Recklessness, health). The preset icon resolves to the best variant
@@ -5228,6 +5277,16 @@ local function ProcessPresetCooldowns()
                         f._itemCountText:Hide()
                         f._lastItemCount = nil
                     end
+                end
+                do
+                    -- Quality pip follows the variant actually being SHOWN: a pot
+                    -- preset resolves its icon across ranks, so keying this on the
+                    -- primary would label the icon with a rank it is not drawing.
+                    local fc2 = _ecmeFC[f]
+                    local bk2 = fc2 and fc2.barKey
+                    local bd2 = bk2 and barDataByKey[bk2]
+                    ApplyItemQualityPip(f, f._displayItemID or f._presetItemID,
+                        bd2 and bd2.showItemQuality == true)
                 end
                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                 if shouldDesat ~= f._lastDesat then
