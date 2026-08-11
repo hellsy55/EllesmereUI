@@ -4984,6 +4984,23 @@ end
 -- Options toggle: force every pot frame to re-resolve on the next pass.
 ns._BumpPotResolveGen = PotSwap.Bump
 
+-- True when this frame IS the preset rather than one specific variant of it.
+-- The picker only ever stores -(preset.itemID), so a frame sitting on an ALT id
+-- can only have come from the user typing that exact item id into Custom Item
+-- ID -- they asked for that rank, not for the family.
+-- Frames still carry _presetData either way: the preset icon and the keybind
+-- fallback (which deliberately answers across ranks) want it. Only the
+-- family-wide reads below are primary-only -- summing the family's bag counts
+-- made a hand-added rank-2 pot report its rank-1 siblings as its own count,
+-- point _itemCdSource at a sibling's cooldown and, with Hide Items if Missing
+-- on, stay on the bar while the user owned none of it. Two such entries then
+-- showed the same count off the same art (ranks share an icon), which reads as
+-- one pot tracked twice. Mirrors PotSwap.Ensure's own primary check.
+local function IsPresetFamilyFrame(f)
+    local pd = f and f._presetData
+    return (pd and pd.altItemIDs and f._presetItemID == pd.itemID) and true or false
+end
+
 -- Guard: after ENCOUNTER_END clears item-preset caches, subsequent events
 -- fire before Blizzard has finished resetting potion CDs. Without this guard
 -- the update loop re-caches stale cooldown data from C_Item.GetItemCooldown.
@@ -5341,7 +5358,7 @@ local function ProcessPresetCooldowns()
                     f._countArm = false
                     total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
                     local owned = total > 0 and f._presetItemID or nil
-                    if total == 0 and f._presetData and f._presetData.altItemIDs then
+                    if total == 0 and IsPresetFamilyFrame(f) then
                         for _, altID in ipairs(f._presetData.altItemIDs) do
                             local c = C_Item.GetItemCount(altID, false, true) or 0
                             total = total + c
@@ -5422,7 +5439,7 @@ local function CheckItemPresenceForHide()
                     total = f._displayCount or 0
                 else
                     total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
-                    if total == 0 and f._presetData and f._presetData.altItemIDs then
+                    if total == 0 and IsPresetFamilyFrame(f) then
                         for _, altID in ipairs(f._presetData.altItemIDs) do
                             total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                         end
@@ -6303,7 +6320,7 @@ local function CollectAndReanchor()
                                         total = f._displayCount or 0
                                     else
                                         total = C_Item.GetItemCount(itemID, false, true) or 0
-                                        if total == 0 and f._presetData and f._presetData.altItemIDs then
+                                        if total == 0 and IsPresetFamilyFrame(f) then
                                             for _, altID in ipairs(f._presetData.altItemIDs) do
                                                 total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                                             end
@@ -6856,7 +6873,7 @@ local function CollectAndReanchor()
                                         total = f._displayCount or 0
                                     else
                                         total = C_Item.GetItemCount(itemID, false, true) or 0
-                                        if total == 0 and f._presetData and f._presetData.altItemIDs then
+                                        if total == 0 and IsPresetFamilyFrame(f) then
                                             for _, altID in ipairs(f._presetData.altItemIDs) do
                                                 total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                                             end
