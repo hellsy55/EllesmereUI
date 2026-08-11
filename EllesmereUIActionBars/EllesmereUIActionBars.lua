@@ -113,7 +113,13 @@ ns._EABZeroCountAlpha = function(fd, fs, v, action)
         -- Non-charge actions: the mixin shows GetActionCount for
         -- consumables/stackables (including 0); the display string is only
         -- the cheap first check.
-        if v ~= nil and not (issecretvalue and issecretvalue(v))
+        -- issecretvalue FIRST: v is GetActionDisplayCount's return, which the
+        -- API documents as secret whenever cooldowns are restricted, and
+        -- comparing a secret to nil is the operation our own rules forbid --
+        -- the same ordering defect this function's charge branch above already
+        -- carries a comment about. The nil case needs no test of its own:
+        -- nil == 0 is simply false.
+        if not (issecretvalue and issecretvalue(v))
            and (v == 0 or v == "0") then
             a = 0
         elseif (IsConsumableAction and IsConsumableAction(action))
@@ -3555,8 +3561,14 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         pcall(ns._TintUsableIcon, icon, action)
     end
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
+        -- No `or ""` on the raw return: it is secret while cooldowns are
+        -- restricted, and coercing one before the guard is what strands the
+        -- count. SetText accepts a secret, so only the plain nil needs healing.
         local display = C_ActionBar.GetActionDisplayCount(action)
-        btn.Count:SetText(display or "")
+        if not (issecretvalue and issecretvalue(display)) and display == nil then
+            display = ""
+        end
+        btn.Count:SetText(display)
         ns._EABZeroCountAlpha(EFD(btn), btn.Count, display, action)
     end
     -- Macro / action text. The mixin's Update() maintains this normally, but
@@ -4334,13 +4346,25 @@ do
                     -- WITHOUT that talent. This event fires ~0.1/sec, so
                     -- writing unconditionally here costs nothing.
                     if btn.Count and C_ActionBar.GetActionDisplayCount then
-                        local display = C_ActionBar.GetActionDisplayCount(action) or ""
+                        -- Raw read, guard, THEN coerce. The `or ""` used to sit
+                        -- on this line, ahead of the issecretvalue check below,
+                        -- so a restricted-cooldown return (raids, keys) was
+                        -- coerced before anything established it was safe to
+                        -- touch. A throw here aborts the walk, and this handler
+                        -- is the SOLE owner of the count text, so the number
+                        -- freezes at its last value: it reads as a charge that
+                        -- is not there, a real charge gain that changes nothing,
+                        -- and a spend that finally moves it.
+                        local display = C_ActionBar.GetActionDisplayCount(action)
                         if issecretvalue and issecretvalue(display) then
                             btn.Count:SetText(display)
                             fd.lastCountText = nil
-                        elseif fd.lastCountText ~= display then
-                            fd.lastCountText = display
-                            btn.Count:SetText(display)
+                        else
+                            if display == nil then display = "" end
+                            if fd.lastCountText ~= display then
+                                fd.lastCountText = display
+                                btn.Count:SetText(display)
+                            end
                         end
                         ns._EABZeroCountAlpha(fd, btn.Count, display, action)
                     end
@@ -5163,16 +5187,23 @@ do
                                     for _, b2 in ipairs(list2) do
                                         local a2 = b2:GetAttribute("action")
                                         if a2 and HasAction(a2) and b2.Count then
-                                            local d2 = C_ActionBar.GetActionDisplayCount(a2) or ""
+                                            -- Guard before coercing: same
+                                            -- ordering fix as the charge-tick
+                                            -- handler; the `or ""` was ahead of
+                                            -- the issecretvalue check.
+                                            local d2 = C_ActionBar.GetActionDisplayCount(a2)
                                             local f2 = EFD(b2)
                                             if issecretvalue and issecretvalue(d2) then
                                                 -- Secret string (combat): write through
                                                 -- and dirty the memo (never store one).
                                                 b2.Count:SetText(d2)
                                                 f2.lastCountText = nil
-                                            elseif f2.lastCountText ~= d2 then
-                                                f2.lastCountText = d2
-                                                b2.Count:SetText(d2)
+                                            else
+                                                if d2 == nil then d2 = "" end
+                                                if f2.lastCountText ~= d2 then
+                                                    f2.lastCountText = d2
+                                                    b2.Count:SetText(d2)
+                                                end
                                             end
                                             ns._EABZeroCountAlpha(f2, b2.Count, d2, a2)
                                         end
