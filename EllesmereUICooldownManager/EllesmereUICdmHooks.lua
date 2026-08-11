@@ -3489,33 +3489,67 @@ local function DecorateFrame(frame, barData)
                 local onRealCD = cdInfo2 and cdInfo2.isActive and not cdInfo2.isOnGCD
                 -- Charge spells report cooldown isActive while a recharge is in
                 -- progress even when a castable charge remains, which would wrongly
-                -- desaturate a still-usable icon. currentCharges is a SECRET value
-                -- in this tainted hook (can't be compared), so use Blizzard's clean
-                -- isOnActualCooldown flag instead -- false means at least one charge
-                -- is usable, so stay saturated until the spell is genuinely out.
+                -- desaturate a still-usable icon. currentCharges is SECRET in this
+                -- tainted hook, so the usable-charge verdict has to come from
+                -- somewhere else -- see the guard below.
                 --
-                -- The charge-SPELL test is static charge data, NOT
-                -- frame:HasVisualDataSource_Charges(): that getter is documented
-                -- three times in this file as flipping FALSE while a GCD swipe is
-                -- layered on top, and a field dump shows it absent entirely (nil, not
-                -- false) on every CDM frame on a 12.0 client, so gating on it made
-                -- this whole branch dead code. maxCharges is stable, present, and
-                -- clean; the secret currentCharges is still never read. Same signal
-                -- the swipe guard, Max Stacks Glow and Hide CD Text already use.
-                local baseCI = sid2 and C_Spell and C_Spell.GetSpellCharges
-                    and C_Spell.GetSpellCharges(sid2)
-                local baseMax = baseCI and baseCI.maxCharges
-                local isChargeSpell = baseMax ~= nil
-                    and not (issecretvalue and issecretvalue(baseMax))
-                    and baseMax > 1
+                -- The charge-SPELL test is static charge data, NOT the
+                -- HasVisualDataSource_Charges flag: that one is documented three
+                -- times in this file as answering "is this icon drawing its recharge
+                -- right now", which is false at full charges and during a GCD, so
+                -- gating the whole branch on it made it dead code. maxCharges is
+                -- stable and clean; the secret currentCharges is never read.
+                -- Resolve it through Blizzard's own accessor rather than a base-ID
+                -- read: CdmChargeInfoFor documents the two disagreeing on override
+                -- spells (captured on Blink 1953 -> Shimmer 212653), where a base
+                -- read reports the charge-less base, so this test came back false
+                -- and the guard never ran on a 2-charge ability. The swipe guard
+                -- already resolves charges this way and the two verdicts must agree.
+                local chargeCI = CdmChargeInfoFor(frame, sid2)
+                local maxCh = chargeCI and chargeCI.maxCharges
+                local isChargeSpell = type(maxCh) == "number"
+                    and not (issecretvalue and issecretvalue(maxCh))
+                    and maxCh > 1
                 local outOfCharges
                 if onRealCD and isChargeSpell then
-                    local actualCD = frame.isOnActualCooldown
-                    if not issecretvalue or not issecretvalue(actualCD) then
-                        if actualCD == false then
-                            outOfCharges = false
-                        elseif actualCD == true then
-                            outOfCharges = true
+                    -- Preferred signal: Blizzard's own charge visual-data-source
+                    -- flag. isOnActualCooldown below is derived from the cooldown
+                    -- startTime + duration, both SECRET inside instanced content,
+                    -- so it comes back unreadable from this tainted hook the
+                    -- moment a key starts -- the guard then set nothing and a
+                    -- banked charge desaturated. Fresh login looked fine because
+                    -- nothing was secret yet. wasSetFromCharges is a plain literal
+                    -- assigned inside an untainted branch, so it survives that,
+                    -- and RefreshData clears it and CacheCooldownValues re-sets it
+                    -- immediately before the SetDesaturated call this hooks, so it
+                    -- is never stale here.
+                    -- Only TRUE is informative: Blizzard sets it for
+                    -- "cooldownStartTime > 0 and currentCharges > 0", so false is
+                    -- equally what a full-charge icon and an aura-driven one
+                    -- report -- those keep falling through to the read below, which
+                    -- is why this cannot re-break greying at zero charges.
+                    -- Read the field, falling back to the getter: a past field
+                    -- dump on a 12.0 client reported the getter as nil on these
+                    -- frames while isOnActualCooldown beside it read fine, so
+                    -- take whichever of the two this client actually carries.
+                    local fromCharges = frame.wasSetFromCharges
+                    if type(fromCharges) ~= "boolean"
+                        and type(frame.HasVisualDataSource_Charges) == "function" then
+                        fromCharges = frame:HasVisualDataSource_Charges()
+                    end
+                    if type(fromCharges) == "boolean"
+                        and not (issecretvalue and issecretvalue(fromCharges))
+                        and fromCharges then
+                        outOfCharges = false
+                    end
+                    if type(outOfCharges) ~= "boolean" then
+                        local actualCD = frame.isOnActualCooldown
+                        if not issecretvalue or not issecretvalue(actualCD) then
+                            if actualCD == false then
+                                outOfCharges = false
+                            elseif actualCD == true then
+                                outOfCharges = true
+                            end
                         end
                     end
                 end
