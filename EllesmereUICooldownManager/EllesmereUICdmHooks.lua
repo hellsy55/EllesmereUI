@@ -2602,7 +2602,35 @@ local function DecorateFrame(frame, barData)
                 if ss2 and ss2.suppressGCD then ns._cdmAnySuppressGcd = true end
                 if ss2 and ss2.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                 if ss2 and ss2.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                if ss2 and ss2.activeSwipeReverse then ns._cdmAnyActiveSwipeReverse = true end
                 if ss2 and (tonumber(ss2.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
+
+                -- Reverse Active Swipe: while active, flip away from this icon's
+                -- normal (non-active) swipe direction; restore that direction the
+                -- moment the active window ends. Independent of Cooldown Swipe's
+                -- Reverse Swipe (which reverses the real cooldown itself) -- we
+                -- recompute that same base direction here so the two compose
+                -- correctly instead of fighting each other. Zero cost unless at
+                -- least one spell has either per-spell reverse toggle armed.
+                if ns._cdmAnyReverseSwipe or ns._cdmAnyActiveSwipeReverse then
+                    -- Trinket slots, custom item spellIDs, and racials store their
+                    -- settings in the profile customActiveStates block (cas), not
+                    -- the per-bar spellSettings store ss2 reads -- resolve it once
+                    -- and use it for BOTH the base direction and the active-flip
+                    -- trigger below, or those icons' swipe would never un-reverse
+                    -- when the active window ends (ss2.activeSwipeReverse is always
+                    -- nil for them, so the flip -- and its restore -- never fired).
+                    local casRev = ns.GetEffectiveCustomActiveState and sid2
+                        and ns.GetEffectiveCustomActiveState(sid2)
+                    local baseRev = (ss2 and ss2.reverseSwipe) or (casRev and casRev.reverseSwipe)
+                    baseRev = baseRev and true or false
+                    local wantRev = baseRev
+                    local activeRev = (ss2 and ss2.activeSwipeReverse) or (casRev and casRev.activeSwipeReverse)
+                    if isActive and activeRev then
+                        wantRev = not baseRev
+                    end
+                    cd:SetReverse(wantRev)
+                end
 
                 if ss2 and ss2.activeSwipeMode == "none" then
                     -- Hide Active State: force black swipe, track active flag (CD
@@ -3693,6 +3721,18 @@ local function GetOrCreateTrinketFrame(slotID)
     return f
 end
 
+local function ReassertBaseReverseSwipe(cd, key)
+    if not (cd and cd.SetReverse) then return end
+    if not (ns._cdmAnyReverseSwipe or ns._cdmAnyActiveSwipeReverse) then return end
+    local baseRev
+    if ns.GetEffectiveCustomActiveState then
+        local cas = ns.GetEffectiveCustomActiveState(key)
+        baseRev = cas and cas.reverseSwipe
+    end
+    cd:SetReverse(baseRev and true or false)
+end
+ns.ReassertBaseReverseSwipe = ReassertBaseReverseSwipe
+
 local function UpdateTrinketFrame(slotID)
     local f = _trinketFrames[slotID]
     if not f then return end
@@ -3701,6 +3741,7 @@ local function UpdateTrinketFrame(slotID)
     -- the desaturation against fresh settings.
     f._cdMemoStart, f._cdMemoDur = nil, nil
     local itemID = GetInventoryItemID("player", slotID)
+    local prevItemID = _trinketItemCache[slotID]
     _trinketItemCache[slotID] = itemID
     if not itemID then
         f:Hide()
@@ -3710,6 +3751,16 @@ local function UpdateTrinketFrame(slotID)
     if icon and f._tex then f._tex:SetTexture(icon) end
     local _, spellID = C_Item.GetItemSpell(itemID)
     f._trinketSpellID = spellID
+    -- Item swap: reset a possible stale Reverse Active Swipe stamp left by the
+    -- PREVIOUS trinket in this slot. A freshly-equipped item starts on
+    -- cooldown (game mechanic), so without this its swipe could inherit
+    -- whatever direction the old trinket last left the shared cooldown region
+    -- in (reversed, if the old trinket had an active window running at the
+    -- moment of the swap). Only fires on an actual item change, so it never
+    -- disturbs a currently-active reversed swipe for the same trinket.
+    if itemID ~= prevItemID then
+        ReassertBaseReverseSwipe(f.Cooldown, -slotID)
+    end
     if slotID ~= 13 and slotID ~= 14 then
         -- User-added equipment slot: the use effect usually comes from an
         -- ENCHANT (engineering tinkers like Nitro Boosts), which exists only
@@ -3817,6 +3868,11 @@ local function UpdateTrinketCooldown(slotID)
             f._cdMemoStart, f._cdMemoDur = start, dur
             f._cooldown:SetCooldown(start, dur)
             if f._tex then f._tex:SetDesaturated(not PresetKeepsColor(f)) end
+            -- Re-assert the base (non-active) swipe direction on every fresh
+            -- cooldown push -- including a freshly-equipped trinket's initial
+            -- post-swap cooldown -- so it can never inherit a stale reversed
+            -- stamp left by a previous item or a previous active window.
+            ReassertBaseReverseSwipe(f._cooldown, -slotID)
         end
         return true
     else
@@ -4996,6 +5052,7 @@ local function ProcessPresetCooldowns()
                         local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(sid)
                         if durObj and f._cooldown and f._cooldown.SetCooldownFromDurationObject then
                             f._cooldown:SetCooldownFromDurationObject(durObj, true)
+                            ReassertBaseReverseSwipe(f._cooldown, sid)
                         end
                     end
                     if onRealCD then anyUnsettled = true end
@@ -5157,6 +5214,7 @@ local function ProcessPresetCooldowns()
                     if start and dur and dur > 1.5 then
                         f._cooldown:SetCooldown(start, dur)
                         f._cdStart = start; f._cdDur = dur
+                        ReassertBaseReverseSwipe(f._cooldown, -f._presetItemID)
                     elseif not (f._cdStart and f._cdDur and (now < f._cdStart + f._cdDur)) then
                         f._cooldown:Clear()
                         f._cdStart = nil; f._cdDur = nil
@@ -6863,6 +6921,7 @@ local function CollectAndReanchor()
                                         local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(sid)
                                         if durObj and f._cooldown.SetCooldownFromDurationObject then
                                             f._cooldown:SetCooldownFromDurationObject(durObj, true)
+                                            ReassertBaseReverseSwipe(f._cooldown, sid)
                                         end
                                         ApplySpellDesaturation(f, durObj)
                                         -- This push can land mid-GCD (a bar rebuild

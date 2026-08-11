@@ -121,9 +121,12 @@ strip:SetScript("OnEnter", function()
     -- The strip sits above the idle-fade peek overlay and captures motion
     -- over the tab band; hovering the tabs counts as chat interaction.
     if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
+    -- Tab Visibility = Mouseover: reveal the strip. No-op in "always" mode.
+    if ECHAT.TabVisibilityEnter then ECHAT.TabVisibilityEnter() end
 end)
 strip:SetScript("OnLeave", function()
     if ECHAT.FollowRelease then ECHAT.FollowRelease() end
+    if ECHAT.TabVisibilityLeave then ECHAT.TabVisibilityLeave() end
 end)
 strip:Hide()
 ns._chatTabStrip = strip
@@ -834,4 +837,7 @@ function ECHAT.TabsInit()
     end
     ECHAT.TabsSweepBlizzard()
     RefreshNow()
+    -- Strip now exists: apply the saved Tab Visibility mode (snaps to
+    -- faded-out in "mouseover" until the first hover).
+    if ECHAT.ApplyTabVisibility then ECHAT.ApplyTabVisibility() end
 end

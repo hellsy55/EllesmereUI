@@ -505,7 +505,31 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
-            -- Inline cog: icon visibility
+            -- Inline direction arrows (right of the gear): header icon X/Y position
+            local _, dirShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Position",
+                rows = {
+                    { type = "slider", label = "X Offset", min = -20, max = 20, step = 1,
+                      get = function() return Cfg("hdrIconOffsetX") or 0 end,
+                      set = function(v) Set("hdrIconOffsetX", v); ApplyHdr() end },
+                    { type = "slider", label = "Y Offset", min = -20, max = 20, step = 1,
+                      get = function() return Cfg("hdrIconOffsetY") or 0 end,
+                      set = function(v) Set("hdrIconOffsetY", v); ApplyHdr() end },
+                },
+            })
+            local dirBtn = CreateFrame("Button", nil, rgn)
+            dirBtn:SetSize(26, 26)
+            dirBtn:SetPoint("RIGHT", accentSwatch, "LEFT", -8, 0)
+            dirBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            dirBtn:SetAlpha(0.4)
+            local dirTex = dirBtn:CreateTexture(nil, "OVERLAY")
+            dirTex:SetAllPoints()
+            dirTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            dirBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            dirBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            dirBtn:SetScript("OnClick", function(self) dirShow(self) end)
+
+            -- Inline cog: icon visibility (left of the direction arrows)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Icon Visibility",
                 rows = {
@@ -516,7 +540,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
             cogBtn:SetSize(26, 26)
-            cogBtn:SetPoint("RIGHT", accentSwatch, "LEFT", -8, 0)
+            cogBtn:SetPoint("RIGHT", dirBtn, "LEFT", -8, 0)   -- era: "RIGHT", accentSwatch, "LEFT", -8, 0
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             cogBtn:SetAlpha(0.4)
@@ -1589,6 +1613,18 @@ initFrame:SetScript("OnEvent", function(self)
     }
     local shGrowOrder = { "LEFT", "RIGHT", "UP", "DOWN" }
 
+    -- Frame strata (layering), shared dropdown for icon strip and bar window.
+    -- Ordered lowest -> highest so the dropdown doubles as an "up/down" control.
+    local shStrataValues = {
+        BACKGROUND = "Background (Lowest)",
+        LOW        = "Low",
+        MEDIUM     = "Medium (Default)",
+        HIGH       = "High",
+        DIALOG     = "Dialog",
+        TOOLTIP    = "Tooltip (Highest)",
+    }
+    local shStrataOrder = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "TOOLTIP" }
+
     local function RefreshSH()
         if ns.ApplySpellHistory then ns.ApplySpellHistory() end
     end
@@ -1732,6 +1768,17 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconFadeTime or 0 end,
               setValue = function(v) SHDB().iconFadeTime = v; RefreshSH() end }
+        );  y = y - h
+
+        -- Row 6: Frame Strata | (spacer)
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Frame Strata",
+              tooltip = "Layering of the icon strip relative to other UI elements. Raise it if other frames are covering it, or lower it to sit behind them.",
+              disabled = iconOff, disabledTooltip = "Icon History",
+              values = shStrataValues, order = shStrataOrder,
+              getValue = function() return SHDB().iconStrata or "MEDIUM" end,
+              setValue = function(v) SHDB().iconStrata = v; RefreshSH() end },
+            { type = "spacer" }
         );  y = y - h
 
         -- =====================================================================
@@ -1914,6 +1961,17 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = barOff, disabledTooltip = "Bar History",
               getValue = function() return SHDB().barOpacity or 1 end,
               setValue = function(v) SHDB().barOpacity = v; RefreshSH() end }
+        );  y = y - h
+
+        -- Row 6: Frame Strata | (spacer)
+        _, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Frame Strata",
+              tooltip = "Layering of the bar window relative to other UI elements. Raise it if other frames are covering it, or lower it to sit behind them.",
+              disabled = barOff, disabledTooltip = "Bar History",
+              values = shStrataValues, order = shStrataOrder,
+              getValue = function() return SHDB().barStrata or "MEDIUM" end,
+              setValue = function(v) SHDB().barStrata = v; RefreshSH() end },
+            { type = "spacer" }
         );  y = y - h
 
         if not EllesmereUI._prebuilding then

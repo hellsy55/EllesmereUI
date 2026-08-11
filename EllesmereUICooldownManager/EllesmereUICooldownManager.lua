@@ -1151,7 +1151,8 @@ end
 -- Custom Active State store, keyed by spellID at the PROFILE level (shared across every
 -- bar and spec) so state travels with the spell wherever placed. Key matches assignedSpells:
 -- positive = racial/custom spell, negative = item/trinket-slot preset. Entry shape: { duration,
--- activeSwipeMode, activeSwipeClassColor, activeSwipeR/G/B/A, activeGlow, glowColor, glowColorR/G/B }.
+-- activeSwipeMode, activeSwipeClassColor, activeSwipeR/G/B/A, activeSwipeReverse, activeGlow,
+-- glowColor, glowColorR/G/B }.
 function ns.GetCustomActiveStates()
     local p = ECME and ECME.db and ECME.db.profile
     if not p then return nil end
@@ -1426,16 +1427,18 @@ end
 
 -- Reverse Swipe gate: set ns._cdmAnyReverseSwipe once if any saved spell (any spec) has
 -- per-spell reverseSwipe on; the reverse-apply in RefreshCDMIconAppearance is skipped for
--- non-users. Also gates hideCDSwipe -- both monotonic per-spell swipe flags scanned in one pass, costing nothing until used.
+-- non-users. Also gates hideCDSwipe (Hide CD Swipe) and activeSwipeReverse (Reverse Active
+-- Swipe) -- all monotonic per-spell swipe flags scanned in one pass, costing nothing until used.
 function ns.RescanReverseSwipeFlag()
     if ns._reverseSwipeFlagScanned then return end
-    if ns._cdmAnyReverseSwipe and ns._cdmAnyHideCDSwipe then return end
+    if ns._cdmAnyReverseSwipe and ns._cdmAnyHideCDSwipe and ns._cdmAnyActiveSwipeReverse then return end
     if not EllesmereUIDB then return end
     ns._reverseSwipeFlagScanned = true
     -- Regular per-spell settings (family stores + bar tiers, every spec).
     ns.ForEachSavedSettingsBlock(function(ss)
         if ss.reverseSwipe then ns._cdmAnyReverseSwipe = true end
         if ss.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+        if ss.activeSwipeReverse then ns._cdmAnyActiveSwipeReverse = true end
     end)
     -- Preset / custom cd-utility spells (profile-level customActiveStates).
     local cas = ns.GetCustomActiveStates and ns.GetCustomActiveStates()
@@ -1444,6 +1447,7 @@ function ns.RescanReverseSwipeFlag()
             if e then
                 if e.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                 if e.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                if e.activeSwipeReverse then ns._cdmAnyActiveSwipeReverse = true end
             end
         end
     end

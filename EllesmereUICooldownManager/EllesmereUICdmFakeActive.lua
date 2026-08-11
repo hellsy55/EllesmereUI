@@ -318,15 +318,10 @@ ApplyToFrame = function(iconFrame, rule, win)
         o.icon:SetDesaturated(false)
         local cr, cg, cb, ca = ResolveSwipeColor(ss)
         o.cd:SetSwipeColor(cr, cg, cb, ca)
-        -- Per-spell Reverse Swipe: flip our active swipe's fill direction, the
-        -- same setting the underlying icon honors (ss covers both sources: the
-        -- resolved per-spell block for built-in rules, the customActiveStates
-        -- entry for user rules). Gated by the session flag so it stays zero
-        -- cost for anyone who never enables it; the flag is monotonic, so a
-        -- toggle-off still passes through here and resets the pooled overlay.
-        if ns._cdmAnyReverseSwipe then
-            o.cd:SetReverse((ss and ss.reverseSwipe) and true or false)
-        end
+        -- Reverse Active Swipe: flips this overlay's own swipe direction only,
+        -- independent of the real cooldown's Reverse Swipe / Cooldown Swipe
+        -- setting. Default off (normal depleting swipe).
+        if o.cd.SetReverse then o.cd:SetReverse((ss and ss.activeSwipeReverse) or false) end
         o.cd:SetCooldown(win.start, win.dur)
         o._ss = ss
         -- Match the icon's Duration Text settings on our own countdown number;
@@ -373,6 +368,18 @@ ApplyToFrame = function(iconFrame, rule, win)
         o.cd:Clear()
         o.frame:SetAlpha(0)
         if FA121 then FA121.Detach(o) end
+        -- Reverse Active Swipe falloff: the real underlying cooldown (not this
+        -- overlay) is what's visible once the active window closes. Native
+        -- ability cooldowns get their swipe direction re-asserted on every
+        -- Blizzard SetSwipeColor call, but preset/custom icons (trinket slots,
+        -- custom item spellIDs, racials) don't repaint that way -- without an
+        -- explicit reset here their swipe can stay frozen on whatever
+        -- direction it last evaluated to (reversed, while active) instead of
+        -- reverting to the normal depleting swipe.
+        local realCd = iconFrame.Cooldown
+        if realCd and realCd.SetReverse and (ns._cdmAnyReverseSwipe or ns._cdmAnyActiveSwipeReverse) then
+            realCd:SetReverse((ss and ss.reverseSwipe) and true or false)
+        end
     end
 end
 
@@ -1254,12 +1261,10 @@ function ns.FakeActive_OnIconRestyled(iconFrame)
     if ns.StyleOverlayCooldownText then
         ns.StyleOverlayCooldownText(o.cd, bd, o._ss, iconFrame:GetScale())
     end
-    -- Re-assert Reverse Swipe as well: o._ss is the live chained settings
-    -- block, so a toggle made while the window is open takes effect on this
-    -- restyle pass instead of waiting for the next window.
-    if ns._cdmAnyReverseSwipe then
-        o.cd:SetReverse((o._ss and o._ss.reverseSwipe) and true or false)
-    end
+    -- Re-apply Reverse Active Swipe so toggling it while this overlay is
+    -- already open takes effect immediately instead of waiting for the next
+    -- window open.
+    if o.cd.SetReverse then o.cd:SetReverse((o._ss and o._ss.activeSwipeReverse) or false) end
     -- The restyle reset the border to its normal level; clear the stale flag so
     -- RaiseOverlayBorders re-captures that level and lifts it above us again.
     o._brdRaised = false

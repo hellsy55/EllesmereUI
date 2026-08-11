@@ -14,13 +14,7 @@ initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
 
-    -- NOT gated on EllesmereUI.Widgets: on this LoadOnDemand addon the
-    -- IsLoggedIn() re-fire below runs this handler at FILE SCOPE, before
-    -- EnsureLoaded drains _deferredInits -- and the whole Widgets factory
-    -- lives in a deferred body, so Widgets is always nil here. BuildPage
-    -- reads it at panel-open time, after the drain, which is the only
-    -- moment it is needed.
-    if not EllesmereUI then return end
+    if not EllesmereUI or not EllesmereUI.RegisterModule then return end
 
     -- Settings live in one slice of the shared QoL profile, so every read here
     -- goes through the same handle the runtime publishes.
@@ -80,10 +74,11 @@ initFrame:SetScript("OnEvent", function(self)
 
         EllesmereUI:ClearContentHeader()
 
-        -- Settings preview: with this page in front the windows force shown and fully
-        -- expanded, so every change lands visibly instead of the collapse/visibility
-        -- rules eating it (the TBB placeholder-mode arrangement). NEVER during Global
-        -- Search's hidden pre-build, which builds every page once at startup.
+        -- Settings preview: with this page in front the windows force shown
+        -- and fully expanded, so every change lands visibly instead of the
+        -- collapse/visibility rules eating it (the TBB placeholder-mode
+        -- arrangement). NEVER during Global Search's hidden pre-build, which
+        -- builds every page once at startup.
         if not EllesmereUI._prebuilding and _G._EUI_RaidTools_Preview then
             _G._EUI_RaidTools_Preview(true)
         end
@@ -227,8 +222,9 @@ initFrame:SetScript("OnEvent", function(self)
             RefreshState()
             EllesmereUI.RegisterWidgetRefresh(RefreshState)
 
-            -- Spec Overrides capture: bespoke widget, so its SLOT opts in with a
-            -- synthetic accessor (the label cfg carries no get/set of its own).
+            -- Spec Overrides capture: bespoke widget, so its SLOT opts in
+            -- with a synthetic accessor (the label cfg carries no get/set of
+            -- its own).
             EllesmereUI.AddCaptureAccessor(rgn, {
                 type = "keybind", text = "Toggle Raid Tools",
                 getValue = function() return Cfg("toggleKey") end,
@@ -266,19 +262,44 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 3: one scale for the whole feature -- both shells and the
-        -- collapsed icon wear it, whichever windows the Show as choice puts
-        -- on screen | which way the windows extend from the collapsed icon.
+        -- Row 3: how the shown windows (and the collapsed icon) sit on
+        -- screen when nothing else is changing their visibility -- Always
+        -- keeps them solid, Mouseover fades them out until the cursor is
+        -- over them -- and which stacking layer they draw on. Both are
+        -- display-only; neither touches whether the mode/showAs verdict
+        -- shows anything.
         _, h = W:DualRow(parent, y,
-            { type = "slider", text = "Window Scale", min = 0.5, max = 2.0, step = 0.05,
+            { type = "dropdown", text = "Visibility",
+              tooltip = "Always keeps the shown windows and the button that opens them fully visible. Mouseover fades them out until you move your cursor over them.",
               disabled = Disabled,
-              getValue = function() return Cfg("scale") or 1 end,
+              values = { always = "Always", mouseover = "Mouseover" },
+              order = { "always", "mouseover" },
+              getValue = function() return Cfg("visibility") or "always" end,
               setValue = function(v)
-                  Set("scale", v)
+                  Set("visibility", v)
                   Refresh()
               end },
+            { type = "dropdown", text = "Strata",
+              tooltip = "Which layer the windows and the collapsed icon draw on, relative to other frames on screen.",
+              disabled = Disabled,
+              values = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium",
+                         HIGH = "High", DIALOG = "Dialog" },
+              order = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+              getValue = function() return Cfg("strata") or "MEDIUM" end,
+              setValue = function(v)
+                  Set("strata", v)
+                  Refresh()
+              end }
+        );  y = y - h
+
+        -- Row 4: which corner the collapsed icon and its expanded windows
+        -- share -- that shared corner stays put across collapse/expand, so
+        -- it also reads as the direction the panel opens from the button,
+        -- and where the close button lands -- paired with Window Scale,
+        -- the other setting that touches every shown form of the feature.
+        _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Menu Grow Direction",
-              tooltip = "Which way the windows extend from the collapsed icon when they open.",
+              tooltip = "Which way the windows extend from the collapsed icon when they open. The close button always lands at that same corner.",
               disabled = Disabled,
               values = { downright = "Down Right", upright = "Up Right",
                          downleft = "Down Left", upleft = "Up Left" },
@@ -287,15 +308,97 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   Set("growDir", v)
                   Refresh()
+              end },
+            -- One scale for the whole feature -- both shells and the
+            -- collapsed icon wear it, whichever windows the Show as choice
+            -- puts on screen. Fine step so the value can be nudged in small
+            -- increments (1.185, 1.195, ...) rather than jumping by whole
+            -- ticks.
+            { type = "slider", text = "Window Scale", min = 0.5, max = 2.0, step = 0.001,
+              disabled = Disabled,
+              getValue = function() return Cfg("scale") or 1 end,
+              setValue = function(v)
+                  Set("scale", v)
+                  Refresh()
               end }
+        );  y = y - h
+
+        -- Row 5: Auto-Minimize -- collapses the windows back to the icon on
+        -- their own once they've sat open (and unhovered) for the delay
+        -- below, no click needed. The delay only matters while the toggle
+        -- is on, so it greys out alongside it exactly like the rest of this
+        -- page greys out alongside Show Raid Tools.
+        local function AutoMinDisabled()
+            return Disabled() or not (Cfg("autoMinimize") and true)
+        end
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Auto-Minimize",
+              tooltip = "Collapses the windows back to the icon on their own after they've been open (and the cursor hasn't been over them) for the delay below -- the same result as clicking the close button, just on a timer. Moving the cursor over the windows pauses the timer and it starts over once you look away.",
+              disabled = Disabled,
+              getValue = function() return Cfg("autoMinimize") and true or false end,
+              setValue = function(v)
+                  Set("autoMinimize", v)
+                  Refresh()
+                  EllesmereUI:RefreshPage()  -- the delay slider's disabled state follows
+              end },
+            { type = "slider", text = "Auto-Minimize Delay (Seconds)", min = 5, max = 120, step = 1,
+              tooltip = "How long the windows stay open, cursor off them, before Auto-Minimize collapses them.",
+              disabled = AutoMinDisabled,
+              getValue = function() return Cfg("autoMinimizeDelay") or 30 end,
+              setValue = function(v)
+                  Set("autoMinimizeDelay", v)
+                  Refresh()
+              end }
+        );  y = y - h
+
+        -- Row 6: the Raid Groups window keeps its own slice and its own
+        -- scale -- it is a popup opened on purpose, not one of the panels,
+        -- so it is sized for reading rather than for sitting on screen.
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Raid Groups Window Scale", min = 0.5, max = 2.0, step = 0.05,
+              disabled = Disabled,
+              getValue = ns.RaidGroupsScale,
+              setValue = ns.RaidGroupsScale },
+            { type = "label", text = "" }
+        );  y = y - h
+
+        -- GROUP BUTTONS
+        --
+        -- One switch per optional action. Ready Check has none: it is the
+        -- reason the panel exists. Turning a button off closes the gap it
+        -- leaves -- the survivors re-flow across the rows.
+        _, h = W:SectionHeader(parent, "GROUP BUTTONS", y);  y = y - h
+
+        local function ButtonToggle(key, text, tooltip)
+            return { type = "toggle", text = text, tooltip = tooltip,
+                     disabled = Disabled,
+                     getValue = function() return Cfg(key) ~= false end,
+                     setValue = function(v)
+                         Set(key, v)
+                         Refresh()
+                     end }
+        end
+
+        _, h = W:DualRow(parent, y,
+            ButtonToggle("showRoleCheck", "Show Role Check",
+                "Shows the Role Check button. Turn it off and the remaining buttons close the gap."),
+            ButtonToggle("showConvert", "Show Convert to Raid",
+                "Shows the Convert to Raid button, which reads Convert to Party while you are in a raid.")
+        );  y = y - h
+        _, h = W:DualRow(parent, y,
+            ButtonToggle("showDisband", "Show Disband",
+                "Shows the Disband button. It always asks before disbanding, but hiding it puts it out of misclick range for good."),
+            { type = "spacer" }
         );  y = y - h
 
         -- PULL TIMER
         _, h = W:SectionHeader(parent, "PULL TIMER", y);  y = y - h
 
         local PULL_LABELS = { "First Timer", "Second Timer", "Third Timer" }
+        local PULL_TIP = "Countdown length of this pull button, in seconds. Set it to 0 to hide the button; with all three at 0 the whole pull row disappears, Stop included."
         local function PullSlider(i)
-            return { type="slider", text=PULL_LABELS[i], min=1, max=60, step=1,
+            return { type="slider", text=PULL_LABELS[i], min=0, max=60, step=1,
+                     tooltip=PULL_TIP,
                      disabled=Disabled,
                      getValue=function() return PullGet(i) end,
                      setValue=function(v) PullSet(i, v) end }
@@ -303,6 +406,53 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:DualRow(parent, y, PullSlider(1), PullSlider(2));      y = y - h
         _, h = W:DualRow(parent, y, PullSlider(3), { type="spacer" });  y = y - h
+
+        -- RAID CHECK
+        --
+        -- Its own feature in its own file and its own profile slice, but its
+        -- controls live here: it is triggered by a ready check, and the ready
+        -- check button is on this page. Page grouping is a UI decision, not a
+        -- DB one. Every read and write goes through the ns accessors the
+        -- feature publishes, so this page knows nothing about its slice.
+        _, h = W:SectionHeader(parent, "RAID CHECK", y);  y = y - h
+
+        local function RCDisabled() return not ns.RaidCheckEnabled() end
+
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show on Ready Check",
+              tooltip = "Lists every group member against the consumables a raid expects -- flask, food, augment rune, vantus -- whenever a ready check starts, whoever started it.",
+              getValue = ns.RaidCheckEnabled,
+              setValue = function(v)
+                  ns.RaidCheckEnabled(v)
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "toggle", text = "Show Without Lead or Assist",
+              tooltip = "Shows the window even when you can do nothing about what it reports. Every column is read from your own client, so this view is complete rather than degraded.",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckShowWithoutRank,
+              setValue = ns.RaidCheckShowWithoutRank }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Raid Check Window Scale", min = 0.5, max = 2.0, step = 0.05,
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckScale,
+              setValue = ns.RaidCheckScale },
+            { type = "toggle", text = "Hide Inapplicable Columns",
+              tooltip = "Drops columns nothing in this group can satisfy instead of greying them: no mage means no Intellect column, and a Mythic+ key means no Vantus. Turn off to keep every column in place whatever the group.",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckHideInapplicable,
+              setValue = ns.RaidCheckHideInapplicable }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Only Players Missing Something",
+              tooltip = "Lists only the people something is actually wrong with, so a thirty-man roster becomes the three names you need to whisper. Someone whose client has not reported yet is not counted as missing.",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckHideReady,
+              setValue = ns.RaidCheckHideReady },
+            { type = "label", text = "" }
+        );  y = y - h
 
         return math.abs(y)
     end

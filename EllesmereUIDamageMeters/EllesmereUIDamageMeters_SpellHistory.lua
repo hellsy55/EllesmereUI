@@ -65,6 +65,8 @@ local SH_DEFAULTS = {
     barHideInDelve       = false,
     barHideInPvP         = false,
     barHideOutOfInstance = false,
+    iconStrata      = "MEDIUM",
+    barStrata       = "MEDIUM",
 }
 
 -------------------------------------------------------------------------------
@@ -743,6 +745,14 @@ BuildIconStrip = function()
         -- during animation. No strip-level background needed.
     end
 
+    -- Strata: applied every refresh (not just on creation) so the options
+    -- panel updates it live without a reload.
+    local iconStrata = sh.iconStrata or "MEDIUM"
+    if _iconStrip._cachedStrata ~= iconStrata then
+        _iconStrip._cachedStrata = iconStrata
+        _iconStrip:SetFrameStrata(iconStrata)
+    end
+
     local iconSz = PhysicalPixels(sh.iconSize or 24)
     local gap = PhysicalPixels(sh.iconSpacing or 1)
     local dir = sh.growDirection or "LEFT"
@@ -1130,6 +1140,14 @@ local function BuildBarWindow()
             RefreshBarWindow()
         end)
 
+    end
+
+    -- Strata: applied every refresh (not just on creation) so the options
+    -- panel updates it live without a reload.
+    local barStrata = sh.barStrata or "MEDIUM"
+    if _barWin._cachedStrata ~= barStrata then
+        _barWin._cachedStrata = barStrata
+        _barWin:SetFrameStrata(barStrata)
     end
 
     -- Apply styling (bg from spell history settings, header from DM settings)

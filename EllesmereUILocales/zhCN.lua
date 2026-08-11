@@ -7,6 +7,14 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local L = EllesmereUI.RegisterLocale("zhCN")
 if not L then return end
 
+-- Cast Bar: cancelled/interrupted cast display
+L["CANCELLED / INTERRUPTED CAST"] = "已取消 / 已打断的施法"
+L["Show Cancelled Cast"] = "显示已取消的施法"
+L["Show Interrupted Cast"] = "显示已打断的施法"
+L["Spell Cancelled"] = "法术已取消"
+L["Show a brief message when you cancel your own cast."] = "当你取消自己的施法时，短暂显示一条消息。"
+L["Show a brief message when another player or NPC interrupts your cast."] = "当其他玩家或NPC打断你的施法时，短暂显示一条消息。"
+
 -- == 常用标签 (Common labels) ===============================================
 L["Anchor"] = "锚点"
 L["Anchor Point"] = "锚点位置"

@@ -84,6 +84,7 @@ local CHAT_DEFAULTS = {
             tabFontColor = { r=1, g=1, b=1, a=0.65 },
             tabFontColorActive = { r=1, g=1, b=1, a=1 },
             sidebarVisibility = "always",
+            tabVisibility = "always",
             hideBorders = false,
             innerBorderColor = { r=1, g=1, b=1, a=0.06 },
             innerBorderColorMode = "custom",
@@ -677,6 +678,70 @@ end
 local _sidebarFadeTarget = 1
 local _sidebarFadeAlpha = 1
 local _sidebarFadeFrame
+
+-- Tab strip visibility: always, mouseover. Independent of the idle-fade
+-- system -- this only decides whether the strip starts faded OUT and waits
+-- for a hover to reveal it. Mirrors the sidebar's mouseover fade (same 0.25s
+-- lerp), but the tab band never participates in layout, so there is no
+-- layout-visible flag to track.
+local _tabFadeTarget = 1
+local _tabFadeAlpha = 1
+local _tabFadeFrame
+
+local function EnsureTabFadeFrame()
+    if _tabFadeFrame then return end
+    _tabFadeFrame = CreateFrame("Frame")
+    _tabFadeFrame:Hide()
+    _tabFadeFrame:SetScript("OnUpdate", function(self, dt)
+        local step = dt * 4  -- 0.25s fade, matches the sidebar
+        if _tabFadeTarget > _tabFadeAlpha then
+            _tabFadeAlpha = min(_tabFadeTarget, _tabFadeAlpha + step)
+        else
+            _tabFadeAlpha = max(_tabFadeTarget, _tabFadeAlpha - step)
+        end
+        if ns._chatTabStrip then
+            ns._chatTabStrip:SetAlpha(min(_chatAlphaCurrent, _tabFadeAlpha))
+        end
+        if _tabFadeAlpha == _tabFadeTarget then
+            self:Hide()
+        end
+    end)
+end
+
+-- Re-derives the target/current alpha from config (mode switch, login,
+-- profile swap). "always" snaps to fully shown; "mouseover" snaps to
+-- faded-out until the strip is hovered.
+function ECHAT.ApplyTabVisibility()
+    local cfg = ECHAT.DB()
+    local mode = cfg.tabVisibility or "always"
+    if mode == "mouseover" then
+        _tabFadeTarget = 0
+        _tabFadeAlpha = 0
+    else
+        _tabFadeTarget = 1
+        _tabFadeAlpha = 1
+    end
+    if _tabFadeFrame then _tabFadeFrame:Hide() end
+    if ns._chatTabStrip then
+        ns._chatTabStrip:SetAlpha(min(_chatAlphaCurrent, _tabFadeAlpha))
+    end
+end
+
+-- Hover in/out on the tab strip. No-ops outside mouseover mode -- "always"
+-- never leaves the strip's alpha under our control.
+function ECHAT.TabVisibilityEnter()
+    if (ECHAT.DB().tabVisibility or "always") ~= "mouseover" then return end
+    _tabFadeTarget = 1
+    EnsureTabFadeFrame()
+    _tabFadeFrame:Show()
+end
+
+function ECHAT.TabVisibilityLeave()
+    if (ECHAT.DB().tabVisibility or "always") ~= "mouseover" then return end
+    _tabFadeTarget = 0
+    EnsureTabFadeFrame()
+    _tabFadeFrame:Show()
+end
 
 function ECHAT.ApplySidebarVisibility()
     local cfg = ECHAT.DB()
@@ -2354,6 +2419,7 @@ local function _BuildAlphaCache()
     _alphaFrames._sidebar = cf1 and CFD(cf1).sidebar
     local cfg = ECHAT.DB()
     _alphaFrames._sidebarMode = cfg and cfg.sidebarVisibility or "always"
+    _alphaFrames._tabMode = cfg and cfg.tabVisibility or "always"
     -- A chat-anchored scroll button does not inherit the sidebar alpha.
     if cfg and cfg.scrollButtonOnChat and cf1 then
         _alphaFrames._chatScrollBtn = CFD(cf1).scrollBtn
@@ -2627,7 +2693,15 @@ local function _ApplyAlpha(alpha)
     SetChatMousePassthrough(alpha <= 0)
     if not _alphaFrames then _BuildAlphaCache() end
     -- Our tab strip (UIParent-parented) fades directly; its buttons inherit.
-    if ns._chatTabStrip then ns._chatTabStrip:SetAlpha(alpha) end
+    -- Mode cached at build time, same pattern as the sidebar below.
+    if ns._chatTabStrip then
+        local tabMode = _alphaFrames._tabMode
+        if tabMode == "mouseover" then
+            ns._chatTabStrip:SetAlpha(min(alpha, _tabFadeAlpha))
+        else
+            ns._chatTabStrip:SetAlpha(alpha)
+        end
+    end
     for i = 1, #_alphaFrames do
         local af = _alphaFrames[i]
         local cf = af.cf
@@ -4609,6 +4683,7 @@ initFrame:SetScript("OnEvent", function(self)
     --  8. Apply all visual settings from DB
     ---------------------------------------------------------------------------
     ECHAT.ApplySidebarVisibility()
+    ECHAT.ApplyTabVisibility()
     -- ApplyBorders is DEFERRED out of the PLAYER_LOGIN execution: running it
     -- synchronously here chains into ApplyExtendedBackground, which plants the panel
     -- border's anchors in ChatFrame1's rect web WHILE Blizzard's login dock pass is
@@ -4657,6 +4732,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- position/scale/free-move are covered by the Apply* calls below.
     _G._ECHAT_RefreshAll = function()
         ECHAT.ApplySidebarVisibility()
+        ECHAT.ApplyTabVisibility()
         ECHAT.ApplyBorders()
         do
             local _cfg = ECHAT.DB()

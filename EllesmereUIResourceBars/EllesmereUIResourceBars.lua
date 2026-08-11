@@ -1242,6 +1242,7 @@ local DEFAULTS = {
             alwaysShow    = false,  -- keep the bar on screen (sitting empty) while nothing is being cast
             showIcon      = true,
             iconOnRight   = false,  -- attach the spell icon to the right of the bar instead of the left
+            iconDivider   = false,  -- one-pixel separator at the icon/bar seam
             width         = 220,
             height        = 20,
             anchorX       = 0,
@@ -1281,6 +1282,12 @@ local DEFAULTS = {
             latencyEnabled    = false,
             latencyShowText   = false,
             latencyR = 0.835, latencyG = 0.290, latencyB = 0.290, latencyA = 1.0,
+            cancelledCastEnabled = false,
+            cancelledCastDuration = 1.5,
+            cancelledCastR = 0.95, cancelledCastG = 0.55, cancelledCastB = 0.10, cancelledCastA = 1,
+            interruptedCastEnabled = false,
+            interruptedCastDuration = 1.5,
+            interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
         },
         gcdBar = {
             enabled       = false,
@@ -6035,7 +6042,7 @@ do
     tick:SetDuration(1 / 20)
     ag:SetScript("OnLoop", function()
         if castBarFrame and (castBarFrame._casting or castBarFrame._channeling
-           or castBarFrame._empowering) then
+           or castBarFrame._empowering or castBarFrame._cancelDisplayUntil) then
             UpdateCastBar()
         else
             ag:Stop()
@@ -6215,6 +6222,15 @@ BuildCastBar = function()
         castBarFrame._iconFrame = iconFrame
         castBarFrame._icon = icon
 
+        -- Optional one-physical-pixel separator at the icon/bar seam.
+        local iconDivider = CreateFrame("Frame", nil, castBarFrame)
+        iconDivider:SetFrameLevel(castBarFrame:GetFrameLevel() + 10)
+        local iconDividerTex = iconDivider:CreateTexture(nil, "OVERLAY")
+        iconDividerTex:SetAllPoints()
+        iconDividerTex:SetColorTexture(0, 0, 0, 1)
+        iconDivider:Hide()
+        castBarFrame._iconDivider = iconDivider
+
         -- Text overlay frame (above all bar borders)
         local textFrame = CreateFrame("Frame", nil, castBarFrame)
         textFrame:SetAllPoints(bar)
@@ -6316,6 +6332,16 @@ BuildCastBar = function()
         iconFrame:Show()
     else
         iconFrame:Hide()
+    end
+
+    local iconDivider = castBarFrame._iconDivider
+    if iconDivider then
+        iconDivider:ClearAllPoints()
+        local edge = iconOnRight and "LEFT" or "RIGHT"
+        iconDivider:SetPoint("TOP", iconFrame, "TOP" .. edge, 0, 0)
+        iconDivider:SetPoint("BOTTOM", iconFrame, "BOTTOM" .. edge, 0, 0)
+        iconDivider:SetWidth((PP and PP.mult) or 1)
+        iconDivider:SetShown(hasIcon and cb.iconDivider == true)
     end
 
     -- Clip frame + bar: beside the icon (or full width), full height
@@ -6766,6 +6792,17 @@ end
 
 UpdateCastBar = function(dt)
     if not castBarFrame then return end
+
+    -- A cancelled/interrupted cast has no active cast state anymore, but its
+    -- message remains visible until this deadline. Check it before the fast
+    -- inactive-state return below so the bar can actually expire.
+    if castBarFrame._cancelDisplayUntil then
+        if GetTime() >= castBarFrame._cancelDisplayUntil then
+            castBarFrame._cancelDisplayUntil = nil
+            EllesmereUI.SetElementVisibility(castBarFrame, false)
+        end
+        return
+    end
     -- NEVER gate this on IsShown(): SetElementVisibility fades an idle cast bar to
     -- alpha 0 instead of calling Hide(), so IsShown() is constant-true for the
     -- whole session and the entire body would run every frame with no cast in
@@ -7070,6 +7107,15 @@ OnCastStart = function()
     local name, _, _, startTimeMS, endTimeMS, _, _, notInterruptible, spellID, barID = UnitCastingInfo("player")
     if not name then return end
 
+    -- A new cast immediately replaces a pending cancelled-cast message. Only
+    -- rebuild (restoring the user's normal fill/gradient/text) when a cancel
+    -- display actually overrode them -- BuildCastBar is not part of the
+    -- normal per-cast path here, so this stays a rare-path cost.
+    if castBarFrame._cancelDisplayUntil then
+        castBarFrame._cancelDisplayUntil = nil
+        BuildCastBar()
+    end
+
     castBarFrame._casting = true
     castBarFrame._channeling = false
     castBarFrame._empowering = false
@@ -7125,6 +7171,15 @@ OnChannelStart = function()
             end)
         end
         return
+    end
+
+    -- A new cast immediately replaces a pending cancelled-cast message. Only
+    -- rebuild (restoring the user's normal fill/gradient/text) when a cancel
+    -- display actually overrode them -- BuildCastBar is not part of the
+    -- normal per-cast path here, so this stays a rare-path cost.
+    if castBarFrame._cancelDisplayUntil then
+        castBarFrame._cancelDisplayUntil = nil
+        BuildCastBar()
     end
 
     castBarFrame._casting = false
@@ -7197,13 +7252,44 @@ end
 -- Called for UNIT_SPELLCAST_FAILED / INTERRUPTED. These fire for the spell that FAILED,
 -- which may be a completely different spell than the one currently being cast (e.g.
 -- pressing an instant while casting). Only hide if the castID matches our active cast.
-local function OnCastFailed(eventCastID)
+local function OnCastFailed(eventCastID, externallyInterrupted)
     if not castBarFrame then return end
     if not castBarFrame._casting then return end
     if not eventCastID or not castBarFrame._castID or eventCastID ~= castBarFrame._castID then return end
     castBarFrame._casting = false
     castBarFrame._castID = nil
-    ns.ShowIdleCastBar()
+    local cb = ERB.db.profile.castBar
+    local displayEnabled
+    if externallyInterrupted then displayEnabled = cb.interruptedCastEnabled
+    else displayEnabled = cb.cancelledCastEnabled end
+    if displayEnabled then
+        HideLatencyOverlay()
+        HideChannelTicks()
+        castBarFrame._spark:Hide()
+        castBarFrame._timerText:SetText("")
+        castBarFrame._timerText:Hide()
+        castBarFrame._nameText:SetText(EllesmereUI.L(externallyInterrupted and "Interrupted" or "Spell Cancelled"))
+        castBarFrame._nameText:Show()
+        castBarFrame._bar:SetValue(1)
+        local r, g, b, colorA
+        if externallyInterrupted then
+            r, g, b = cb.interruptedCastR or 0.85, cb.interruptedCastG or 0.15, cb.interruptedCastB or 0.15
+            colorA = cb.interruptedCastA == nil and 1 or cb.interruptedCastA
+        else
+            r, g, b = cb.cancelledCastR or 0.95, cb.cancelledCastG or 0.55, cb.cancelledCastB or 0.10
+            colorA = cb.cancelledCastA == nil and 1 or cb.cancelledCastA
+        end
+        local a = colorA * ((cb.fillOpacity or 100) / 100)
+        local fill = castBarFrame._bar:GetStatusBarTexture()
+        fill:SetVertexColor(1, 1, 1, 1)
+        fill:SetGradient(cb.gradientDir or "HORIZONTAL", CreateColor(r, g, b, a), CreateColor(r, g, b, a))
+        local duration = externallyInterrupted and cb.interruptedCastDuration or cb.cancelledCastDuration
+        castBarFrame._cancelDisplayUntil = GetTime() + (duration or 1.5)
+        castBarFrame:Show()
+        EllesmereUI.SetElementVisibility(castBarFrame, true)
+    else
+        ns.ShowIdleCastBar()
+    end
 end
 
 -- Called for UNIT_SPELLCAST_CHANNEL_STOP.
@@ -7306,6 +7392,15 @@ OnEmpowerStart = function()
 
     local name, _, _, startTimeMS, endTimeMS, _, notInterruptible, spellID, empowering, _, empowerCastID = UnitChannelInfo("player")
     if not name or not empowering then return end
+
+    -- A new cast immediately replaces a pending cancelled-cast message. Only
+    -- rebuild (restoring the user's normal fill/gradient/text) when a cancel
+    -- display actually overrode them -- BuildCastBar is not part of the
+    -- normal per-cast path here, so this stays a rare-path cost.
+    if castBarFrame._cancelDisplayUntil then
+        castBarFrame._cancelDisplayUntil = nil
+        BuildCastBar()
+    end
 
     -- Add hold-at-max time to the end
     local holdAtMax = GetUnitEmpowerHoldAtMaxTime("player")
@@ -8678,8 +8773,8 @@ local function OnEvent(self, event, ...)
         if unit == "player" then OnCastFailed(castID) end
     elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
         -- args: unit, castGUID, spellID, interruptedBy, castID
-        local unit, _, _, _, castID = ...
-        if unit == "player" then OnCastFailed(castID) end
+        local unit, _, _, interruptedBy, castID = ...
+        if unit == "player" then OnCastFailed(castID, interruptedBy and true or false) end
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
         local unit = ...
         if unit == "player" then OnChannelStart() end
