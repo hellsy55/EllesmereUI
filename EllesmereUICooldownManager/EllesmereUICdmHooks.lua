@@ -4878,6 +4878,122 @@ local function GetOrCreateItemPresetFrame(barKey, itemID)
 end
 ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 
+-- Crafted-quality pip for item frames -- the action bars' Show Rank Icon, for
+-- CDM. Those read C_ActionBar.GetProfessionQualityInfo, which needs an action
+-- slot; an item frame has only an item id, so this asks the item-side call that
+-- returns the same CraftingQualityInfo struct, and takes iconInventory off it
+-- exactly as the action bars do. Blizzard's own callers pass a LINK rather than
+-- a bare id (and the action bar work recorded bare-id reads coming back nil), so
+-- prefer the link and keep the id as the fallback.
+-- Per bar and off by default: nothing here is created or called until a bar
+-- turns it on. The resolved atlas is memoised per item so the steady state is
+-- one compare; it re-reads when the icon changes which item it is showing,
+-- which for a pot preset is the point (the pip follows the rank resolved).
+-- The memo is deliberately TRI-STATE. An item whose data the client has not
+-- cached yet answers nil, and that is the state on the pass right after login,
+-- so caching it as "no quality" would leave the pip permanently missing on
+-- exactly the items it is for: nil = unresolved, retry next pass (item data is
+-- requested here, so the retry has something to find); false = resolved, this
+-- item has no crafted quality, stop asking.
+local _cdmQualityAtlas = {}
+local function CdmQualityAtlasFor(q)
+    local hit = _cdmQualityAtlas[q]
+    if hit ~= nil then return hit or nil end
+    local probe = C_Texture and C_Texture.GetAtlasInfo
+    local names = {
+        "Professions-Icon-Quality-Tier" .. q .. "-Inv-Small",
+        "Professions-Icon-Quality-Tier" .. q .. "-Small",
+        "Professions-Icon-Quality-Tier" .. q,
+    }
+    for i = 1, #names do
+        if probe and probe(names[i]) then
+            _cdmQualityAtlas[q] = names[i]
+            return names[i]
+        end
+    end
+    _cdmQualityAtlas[q] = false
+    return nil
+end
+
+local function ApplyItemQualityPip(f, itemID, on)
+    if not on then
+        if f._qualityHolder then f._qualityHolder:Hide() end
+        f._qualityItemID, f._qualityAtlas = nil, nil
+        return
+    end
+    if not itemID then return end
+    -- Resolved already for this exact item (false = resolved as "no quality").
+    if f._qualityItemID == itemID and f._qualityAtlas ~= nil then return end
+
+    local atlas
+    local ts = C_TradeSkillUI
+    local link = C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(itemID))
+    if not link and C_Item and C_Item.RequestLoadItemDataByID then
+        -- Not cached yet. Ask for it and leave the memo unresolved so the next
+        -- pass retries rather than baking in the miss.
+        C_Item.RequestLoadItemDataByID(itemID)
+    end
+    -- Blizzard's own item buttons (SetItemCraftingQualityOverlay in
+    -- ItemButtonTemplate) ask REAGENT quality first and only then CRAFTED, and
+    -- that order is the whole fix: a live probe on this bar had the crafted
+    -- calls answering nil for every potion on it -- ranked consumables carry a
+    -- reagent quality, not a crafted one. Both return the same
+    -- CraftingQualityInfo, so iconInventory comes off whichever answers.
+    if ts and ts.GetItemReagentQualityInfo then
+        local ok, info = pcall(ts.GetItemReagentQualityInfo, link or itemID)
+        atlas = ok and info and info.iconInventory or nil
+    end
+    if not atlas and ts and ts.GetItemCraftedQualityInfo then
+        local ok, info = pcall(ts.GetItemCraftedQualityInfo, link or itemID)
+        atlas = ok and info and info.iconInventory or nil
+    end
+    if not atlas and ts and ts.GetItemCraftedQualityByItemInfo then
+        -- Same fallback shape the action bars keep: a bare quality number,
+        -- mapped through the probe.
+        local ok, q = pcall(ts.GetItemCraftedQualityByItemInfo, link or itemID)
+        if ok and type(q) == "number" and q >= 1 and q <= 5 then
+            atlas = CdmQualityAtlasFor(q)
+        end
+    end
+    if not atlas then
+        if f._qualityHolder then f._qualityHolder:Hide() end
+        -- Only settle on "no quality" once the item is actually known.
+        if link then f._qualityItemID, f._qualityAtlas = itemID, false end
+        return
+    end
+    f._qualityItemID, f._qualityAtlas = itemID, atlas
+
+    local holder = f._qualityHolder
+    if not holder then
+        -- Own holder frame rather than a texture on f: the item frame's
+        -- Cooldown is a CHILD frame, and a child draws above every texture of
+        -- its parent whatever the draw layer, so a pip parented to f sits under
+        -- the swipe. This is why the item count text is reparented to a text
+        -- overlay too, and what the action bars' rank icon does.
+        holder = CreateFrame("Frame", nil, f)
+        holder:SetAllPoints(f)
+        holder:SetFrameLevel((f:GetFrameLevel() or 1) + 18)
+        holder:EnableMouse(false)
+        f._qualityHolder = holder
+        f._qualityTex = holder:CreateTexture(nil, "OVERLAY", nil, 7)
+    end
+    local tex = f._qualityTex
+    -- Unknown atlas reads as no pip, never as an error.
+    if not pcall(tex.SetAtlas, tex, atlas, true) then
+        f._qualityAtlas = false
+        holder:Hide()
+        return
+    end
+    -- Same proportion the action bars use (Blizzard centers the overlay 14,-14
+    -- from the TOPLEFT of a 45px button), scaled to whatever size the bar runs.
+    local sc = (f:GetWidth() or 36) / 36
+    tex:ClearAllPoints()
+    tex:SetPoint("CENTER", holder, "TOPLEFT", 11 * sc, -11 * sc)
+    tex:SetScale(sc)
+    tex:Show()
+    holder:Show()
+end
+
 -- ---------------------------------------------------------------------------
 -- Dynamic potion display for every pot preset carrying a displayOrder (Light's
 -- Potential, Potion of Recklessness, health). The preset icon resolves to the best variant
@@ -5396,6 +5512,16 @@ local function ProcessPresetCooldowns()
                         f._itemCountText:Hide()
                         f._lastItemCount = nil
                     end
+                end
+                do
+                    -- Quality pip follows the variant actually being SHOWN: a pot
+                    -- preset resolves its icon across ranks, so keying this on the
+                    -- primary would label the icon with a rank it is not drawing.
+                    local fc2 = _ecmeFC[f]
+                    local bk2 = fc2 and fc2.barKey
+                    local bd2 = bk2 and barDataByKey[bk2]
+                    ApplyItemQualityPip(f, f._displayItemID or f._presetItemID,
+                        bd2 and bd2.showItemQuality == true)
                 end
                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                 if shouldDesat ~= f._lastDesat then
