@@ -2882,6 +2882,15 @@ local function PortraitOverride(self, event, evtUnit)
         -- stays the same; repaint once per zone so 3D portraits never come
         -- back blank.
         or event == "PLAYER_ENTERING_WORLD"
+        -- The repaint above runs mid-loading-screen, where SetPortraitTexture
+        -- has no portrait art to hand back yet and paints a blank one. The
+        -- client fires PORTRAITS_UPDATED once that art is ready, and it is the
+        -- only trigger that follows: the guid and the availability state both
+        -- come back unchanged, so without this the blank is what the gate
+        -- caches until the next reload. Blizzard's own player portrait (the
+        -- character micro button) re-runs SetPortraitTexture on the same event
+        -- for the same reason.
+        or event == "PORTRAITS_UPDATED"
     if hasStateChanged then
         if element:IsObjectType("PlayerModel") then
             if not isAvailable then
