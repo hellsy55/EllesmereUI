@@ -2873,6 +2873,7 @@ local function PortraitOverride(self, event, evtUnit)
     else
         changed = element.guid ~= guid
     end
+    local isModel = element:IsObjectType("PlayerModel")
     local hasStateChanged = changed
         or element.state ~= isAvailable
         or event == "UNIT_PORTRAIT_UPDATE"
@@ -2889,10 +2890,12 @@ local function PortraitOverride(self, event, evtUnit)
         -- come back unchanged, so without this the blank is what the gate
         -- caches until the next reload. Blizzard's own player portrait (the
         -- character micro button) re-runs SetPortraitTexture on the same event
-        -- for the same reason.
-        or event == "PORTRAITS_UPDATED"
+        -- for the same reason. 2D only: the event says portrait ART is ready,
+        -- which the model path does not read, and repainting it would mean a
+        -- ClearModel + SetUnit reload every time the client streams a batch.
+        or (event == "PORTRAITS_UPDATED" and not isModel)
     if hasStateChanged then
-        if element:IsObjectType("PlayerModel") then
+        if isModel then
             if not isAvailable then
                 element:SetCamDistanceScale(0.25)
                 element:SetPortraitZoom(0)
@@ -13400,6 +13403,35 @@ function InitializeFrames()
             if ct then
                 local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
                 ApplyClassIconTexture(backdrop._class, ct, classStyle)
+            end
+        end
+    end)
+
+    ---------------------------------------------------------------------------
+    --  Portrait art readiness for the OnUpdate-polled frames (Target of Target
+    --  / Focus Target). PORTRAITS_UPDATED is how the client says portrait art
+    --  finished loading, and PortraitOverride acts on it -- but the event is
+    --  never registered on these frames: once __eventless is set, the unit
+    --  frame library's RegisterEvent drops everything except
+    --  UNIT_PORTRAIT_UPDATE and UNIT_MODEL_CHANGED. PLAYER_ENTERING_WORLD
+    --  still reaches them (UpdateAllElements pushes it to every element), so
+    --  they take the mid-loading blank paint with nothing to heal it: the poll
+    --  just re-runs the same guid-gated Override. ForceUpdate is the trigger
+    --  that gate always honors. 2D only -- a PlayerModel does not read portrait
+    --  art, and repainting one costs a ClearModel + SetUnit reload.
+    ---------------------------------------------------------------------------
+    if not frames._portraitArtUpdater then
+        frames._portraitArtUpdater = CreateFrame("Frame")
+        frames._portraitArtUpdater:RegisterEvent("PORTRAITS_UPDATED")
+    end
+    frames._portraitArtUpdater:SetScript("OnEvent", function()
+        for _, frame in pairs(frames) do
+            if type(frame) == "table" and frame.__eventless and frame.IsElementEnabled then
+                local p = frame.Portrait
+                if p and p.ForceUpdate and not p:IsObjectType("PlayerModel")
+                    and frame:IsElementEnabled("Portrait") then
+                    p:ForceUpdate()
+                end
             end
         end
     end)
