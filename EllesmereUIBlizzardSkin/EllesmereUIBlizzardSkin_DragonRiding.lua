@@ -398,7 +398,17 @@ local function CreateSpeedBar(parent)
     f.bg = CreateSolidTexture(f, "BACKGROUND", 0)
     f.bg:SetAllPoints(f)
     f.tick = CreateSolidTexture(f, "OVERLAY", 5)
-    f.text = f:CreateFontString(nil, "OVERLAY")
+    -- The pip stacks/icon nest their bar textures one parent level deeper
+    -- than the speed bar itself (stackFrame -> pip, wsIcon -> tex/cd), and
+    -- frame level always outranks draw layer across frames. A plain OVERLAY
+    -- fontstring parented directly to f would render behind that nested
+    -- content, so give the text its own frame raised well above every level
+    -- used anywhere in this HUD (same pattern as CreateWhirlingSurgeIcon's
+    -- textFrame).
+    f.textFrame = CreateFrame("Frame", nil, f)
+    f.textFrame:SetAllPoints(f)
+    f.textFrame:SetFrameLevel(f:GetFrameLevel() + 10)
+    f.text = f.textFrame:CreateFontString(nil, "OVERLAY")
     return f
 end
 
