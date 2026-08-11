@@ -4735,45 +4735,139 @@ ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 -- a bare id (and the action bar work recorded bare-id reads coming back nil), so
 -- prefer the link and keep the id as the fallback.
 -- Per bar and off by default: nothing here is created or called until a bar
--- turns it on. Memoised per resolved item, so the steady state is one compare --
--- it re-reads only when the icon changes which item it is showing, which for a
--- pot preset is the point (the pip has to follow the rank actually resolved).
+-- turns it on. The resolved atlas is memoised per item so the steady state is
+-- one compare; it re-reads when the icon changes which item it is showing,
+-- which for a pot preset is the point (the pip follows the rank resolved).
+-- The memo is deliberately TRI-STATE. An item whose data the client has not
+-- cached yet answers nil, and that is the state on the pass right after login,
+-- so caching it as "no quality" would leave the pip permanently missing on
+-- exactly the items it is for: nil = unresolved, retry next pass (item data is
+-- requested here, so the retry has something to find); false = resolved, this
+-- item has no crafted quality, stop asking.
+local _cdmQualityAtlas = {}
+local function CdmQualityAtlasFor(q)
+    local hit = _cdmQualityAtlas[q]
+    if hit ~= nil then return hit or nil end
+    local probe = C_Texture and C_Texture.GetAtlasInfo
+    local names = {
+        "Professions-Icon-Quality-Tier" .. q .. "-Inv-Small",
+        "Professions-Icon-Quality-Tier" .. q .. "-Small",
+        "Professions-Icon-Quality-Tier" .. q,
+    }
+    for i = 1, #names do
+        if probe and probe(names[i]) then
+            _cdmQualityAtlas[q] = names[i]
+            return names[i]
+        end
+    end
+    _cdmQualityAtlas[q] = false
+    return nil
+end
+
 local function ApplyItemQualityPip(f, itemID, on)
     if not on then
-        if f._qualityTex then f._qualityTex:Hide() end
-        f._qualityItemID = nil
+        if f._qualityHolder then f._qualityHolder:Hide() end
+        f._qualityItemID, f._qualityAtlas = nil, nil
         return
     end
-    if f._qualityItemID == itemID then return end
-    f._qualityItemID = itemID
+    if not itemID then return end
+    -- Resolved already for this exact item (false = resolved as "no quality").
+    if f._qualityItemID == itemID and f._qualityAtlas ~= nil then return end
+
     local atlas
     local ts = C_TradeSkillUI
-    if itemID and ts and ts.GetItemCraftedQualityInfo then
-        local link = C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(itemID))
+    local link = C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(itemID))
+    if not link and C_Item and C_Item.RequestLoadItemDataByID then
+        -- Not cached yet. Ask for it and leave the memo unresolved so the next
+        -- pass retries rather than baking in the miss.
+        C_Item.RequestLoadItemDataByID(itemID)
+    end
+    if ts and ts.GetItemCraftedQualityInfo then
         local ok, info = pcall(ts.GetItemCraftedQualityInfo, link or itemID)
         atlas = ok and info and info.iconInventory or nil
     end
+    if not atlas and ts and ts.GetItemCraftedQualityByItemInfo then
+        -- Same fallback shape the action bars keep: a bare quality number,
+        -- mapped through the probe.
+        local ok, q = pcall(ts.GetItemCraftedQualityByItemInfo, link or itemID)
+        if ok and type(q) == "number" and q >= 1 and q <= 5 then
+            atlas = CdmQualityAtlasFor(q)
+        end
+    end
     if not atlas then
-        if f._qualityTex then f._qualityTex:Hide() end
+        if f._qualityHolder then f._qualityHolder:Hide() end
+        -- Only settle on "no quality" once the item is actually known.
+        if link then f._qualityItemID, f._qualityAtlas = itemID, false end
         return
     end
-    local tex = f._qualityTex
-    if not tex then
-        tex = f:CreateTexture(nil, "OVERLAY", nil, 7)
-        f._qualityTex = tex
+    f._qualityItemID, f._qualityAtlas = itemID, atlas
+
+    local holder = f._qualityHolder
+    if not holder then
+        -- Own holder frame rather than a texture on f: the item frame's
+        -- Cooldown is a CHILD frame, and a child draws above every texture of
+        -- its parent whatever the draw layer, so a pip parented to f sits under
+        -- the swipe. This is why the item count text is reparented to a text
+        -- overlay too, and what the action bars' rank icon does.
+        holder = CreateFrame("Frame", nil, f)
+        holder:SetAllPoints(f)
+        holder:SetFrameLevel((f:GetFrameLevel() or 1) + 18)
+        holder:EnableMouse(false)
+        f._qualityHolder = holder
+        f._qualityTex = holder:CreateTexture(nil, "OVERLAY", nil, 7)
     end
+    local tex = f._qualityTex
     -- Unknown atlas reads as no pip, never as an error.
     if not pcall(tex.SetAtlas, tex, atlas, true) then
-        tex:Hide()
+        f._qualityAtlas = false
+        holder:Hide()
         return
     end
     -- Same proportion the action bars use (Blizzard centers the overlay 14,-14
     -- from the TOPLEFT of a 45px button), scaled to whatever size the bar runs.
     local sc = (f:GetWidth() or 36) / 36
     tex:ClearAllPoints()
-    tex:SetPoint("CENTER", f, "TOPLEFT", 11 * sc, -11 * sc)
+    tex:SetPoint("CENTER", holder, "TOPLEFT", 11 * sc, -11 * sc)
     tex:SetScale(sc)
     tex:Show()
+    holder:Show()
+end
+
+-- TEMPORARY PROBE -- remove before the PR. /cdmqual dumps what the pip pass
+-- actually sees per item frame, so a "no pip" report names its own cause in one
+-- round instead of another guess: whether the bar toggle is on, whether item
+-- data resolved, what each quality API answered, and whether the texture exists
+-- and is shown.
+SLASH_CDMQUAL1 = "/cdmqual"
+SlashCmdList.CDMQUAL = function()
+    local ts = C_TradeSkillUI
+    print("|cff33ff99[cdmqual]|r GetItemCraftedQualityInfo:",
+        tostring(ts and ts.GetItemCraftedQualityInfo ~= nil),
+        "GetItemCraftedQualityByItemInfo:",
+        tostring(ts and ts.GetItemCraftedQualityByItemInfo ~= nil))
+    for key, f in pairs(_presetFrames) do
+        if f._isItemPresetFrame then
+            local id = f._displayItemID or f._presetItemID
+            local link = id and C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(id))
+            local bd = f._ownerBarKey and barDataByKey[f._ownerBarKey]
+            local info, qnum
+            if id and ts and ts.GetItemCraftedQualityInfo then
+                local ok, r = pcall(ts.GetItemCraftedQualityInfo, link or id)
+                info = ok and r or nil
+            end
+            if id and ts and ts.GetItemCraftedQualityByItemInfo then
+                local ok, r = pcall(ts.GetItemCraftedQualityByItemInfo, link or id)
+                qnum = ok and r or nil
+            end
+            print(("  %s id=%s shown=%s toggle=%s link=%s info.iconInventory=%s q=%s tex=%s texShown=%s memo=%s"):format(
+                tostring(key), tostring(id), tostring(f:IsShown()),
+                tostring(bd and bd.showItemQuality), tostring(link ~= nil),
+                tostring(info and info.iconInventory), tostring(qnum),
+                tostring(f._qualityTex ~= nil),
+                tostring(f._qualityTex and f._qualityTex:IsShown()),
+                tostring(f._qualityAtlas)))
+        end
+    end
 end
 
 -- ---------------------------------------------------------------------------
