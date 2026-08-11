@@ -458,11 +458,19 @@ local function LayoutPips(frame, pipCount, width, height, spacing)
     -- degenerate case so pips stay visible, just not perfectly pixel-snapped.
     if widthAvail < px then px = 1 end
     local totalUnits = floor(widthAvail / px + 1e-6)
-    local unitsPer = floor(totalUnits / pipCount)
-    local remUnits = totalUnits - unitsPer * pipCount
+    -- Cumulative boundary = floor(totalUnits * i / pipCount), not a fixed
+    -- remainder lumped onto the first N pips. The two pip rows (6 and 3
+    -- charges) share the same widthAvail and pipCount is an exact multiple
+    -- between them, so this formula lands every 2nd Skyward Ascent divider
+    -- on the exact same physical pixel as a Second Wind divider -- a
+    -- per-row remainder would drift the two rows' dividers by up to 1px
+    -- relative to each other even though they should align.
     local x = 0
+    local prevBoundary = 0
     for i = 1, pipCount do
-        local thisW = (unitsPer + (i <= remUnits and 1 or 0)) * px
+        local boundary = floor(totalUnits * i / pipCount + 1e-6)
+        local thisW = (boundary - prevBoundary) * px
+        prevBoundary = boundary
         local pip = frame.pips[i]
         pip:ClearAllPoints()
         pip:SetPoint("TOPLEFT", frame, "TOPLEFT", x, 0)
