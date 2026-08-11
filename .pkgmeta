@@ -39,7 +39,7 @@ externals:
   Libs/LibKeystone:
     url: https://github.com/BigWigsMods/LibKeystone.git/LibKeystone
   Libs/LibSpecialization:
-    url: https://github.com/BigWigsMods/LibSpecialization
+    url: https://github.com/BigWigsMods/LibSpecialization.git/LibSpecialization
 
 enable-nolib-creation: no
 

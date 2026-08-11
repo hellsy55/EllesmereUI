@@ -933,13 +933,37 @@ local function OnBuffActiveSpellCast(castSpellId)
 end
 local function OnPlayerBuffActiveAuraUpdate(updateInfo)
     if not updateInfo then return end
-    if updateInfo.removedAuraInstanceIDs then
+    local removed = updateInfo.removedAuraInstanceIDs
+    local added   = updateInfo.addedAuras
+    -- Restricted content can hand over the payload LISTS themselves as secret
+    -- tables (ipairs on one throws; the per-FIELD PlainValue guards below never
+    -- get a chance to run). Nothing in a secret list is enumerable, so re-derive
+    -- the whole answer from the direct own-aura probe instead -- the same call
+    -- SyncBuffActiveOnCombatStart already makes under restriction, consumed by
+    -- truthiness only. Behavior stays identical in and out of restriction.
+    if IsSecret(removed) or IsSecret(added) then
+        for _, entry in ipairs(cachedMovementSpells) do
+            if entry.checkType == "buffActive" then
+                local key = BuffActiveKey(entry)
+                local aura = C_UnitAuras.GetPlayerAuraBySpellID(key)
+                if aura then
+                    SetBuffActiveState(key, true, aura.auraInstanceID)
+                    expectingBuffAura[key] = nil
+                else
+                    local state = buffActiveState[key]
+                    if state and state.active then SetBuffActiveState(key, false, nil) end
+                end
+            end
+        end
+        return
+    end
+    if removed then
         for _, entry in ipairs(cachedMovementSpells) do
             if entry.checkType == "buffActive" then
                 local key = BuffActiveKey(entry)
                 local state = buffActiveState[key]
                 if state and state.instanceID then
-                    for _, instanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
+                    for _, instanceID in ipairs(removed) do
                         if PlainValue(instanceID) == state.instanceID then
                             SetBuffActiveState(key, false, nil)
                             expectingBuffAura[key] = nil
@@ -950,7 +974,7 @@ local function OnPlayerBuffActiveAuraUpdate(updateInfo)
             end
         end
     end
-    if updateInfo.addedAuras then
+    if added then
         for _, entry in ipairs(cachedMovementSpells) do
             if entry.checkType == "buffActive" then
                 local key = BuffActiveKey(entry)
@@ -961,7 +985,7 @@ local function OnPlayerBuffActiveAuraUpdate(updateInfo)
                     -- is no way to tell which is ours, so leave the expectation
                     -- standing rather than latch onto an unrelated aura.
                     local match, unreadable, unreadableCount = nil, nil, 0
-                    for _, aura in ipairs(updateInfo.addedAuras) do
+                    for _, aura in ipairs(added) do
                         local sid = PlainValue(aura.spellId)
                         if sid then
                             if sid == key then match = aura; break end
@@ -976,7 +1000,7 @@ local function OnPlayerBuffActiveAuraUpdate(updateInfo)
                         expectingBuffAura[key] = nil
                     end
                 end
-                for _, aura in ipairs(updateInfo.addedAuras) do
+                for _, aura in ipairs(added) do
                     local sid = PlainValue(aura.spellId)
                     if sid and sid == key and aura.auraInstanceID then
                         SetBuffActiveState(key, true, aura.auraInstanceID)
