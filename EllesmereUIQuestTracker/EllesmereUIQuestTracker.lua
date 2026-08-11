@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 -- EllesmereUIQuestTracker.lua
 --
@@ -9,6 +10,7 @@
 -- Blizzard_ObjectiveTracker has loaded.
 -------------------------------------------------------------------------------
 local addonName, ns = ...
+EllesmereUI._ModuleNS[addonName] = ns  -- LOD options files read this module ns via the registry
 
 local EQT = {}
 ns.EQT = EQT
