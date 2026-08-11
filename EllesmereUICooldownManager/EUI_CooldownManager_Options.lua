@@ -19923,6 +19923,11 @@ initFrame:SetScript("OnEvent", function(self)
                     _G._ECME_AceDB.sv._capturedOnce_CDM = nil
                 end
             end
+            -- Learned variant->base pairs are game data rather than settings,
+            -- but they sit on the SV root where StripDefaults and the profile
+            -- system never reach, so a pair learned wrong would survive every
+            -- other reset. This is the only path that clears them.
+            if ns.ResetVariantBaseStore then ns.ResetVariantBaseStore() end
             -- Wipe spell assignments for the current spec so the init
             -- snapshot re-populates from Blizzard's CDM. Spell data lives
             -- in EllesmereUIDB (per-profile store), not the AceDB profile, so

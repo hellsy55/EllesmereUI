@@ -729,7 +729,107 @@ local _divertedVarBaseCD   = {}
 -- half the time -- and these transforms rebuild constantly. Learning it the
 -- moment it IS observable and keeping it is what makes the result stable, and
 -- keeping it is safe precisely because the relationship never changes.
+--
+-- Learning it in-session still leaves one hole, which is what the store below
+-- closes: a slot only ever names its base and the form live RIGHT NOW, so a
+-- fresh login can never witness the pair for an assigned variant that is not
+-- the live one. The claim is therefore missing from the very first build and
+-- the base falls through to whatever a repopulate assigned, until a cast
+-- transforms the slot and a later rebuild finally observes it. Persisting is
+-- what lets a login start where the last session left off.
+--
+-- SCOPED PER SPEC, and that is load-bearing. GetBaseSpell takes a `spec`
+-- argument documented as "overrides may vary by Spec", and we call it without
+-- one, so every answer describes the CURRENT spec only. The links are not
+-- always the tidy same-ability pair the armaments suggest, either: #842 saw
+-- GetBaseSpell tie SV Kill Command to a different ability entirely. Seeding one
+-- spec's answer into another would hand varMap a base that belongs to a
+-- different family there, and ResolveCDIDToBar consults varBaseMap BEFORE
+-- directMap[info.spellID], so a bogus pair would outrank that spell's own
+-- explicit assignment. Keying by spec confines every pair to the state it was
+-- measured in. Sharing across characters within one spec is fine: same spec,
+-- same links.
+--
+-- Lives on the SV root beside _capturedOnce_CDM rather than in a profile
+-- because it describes the game, not the user's settings. StripDefaults only
+-- walks keys present in DEFAULTS, so a root key it does not know about survives
+-- logout untouched -- which also means nothing else can ever clear it, hence
+-- ns.ResetVariantBaseStore below.
 local _variantBaseLearned = {}
+local _variantBaseSpec = nil   -- spec key the live table was loaded for
+
+local function _variantBaseSV()
+    local db = ECME and ECME.db
+    return db and db.sv or nil
+end
+
+-- Seeds the live table for the current spec, and reloads it when the spec
+-- changes, since the previous spec's pairs do not describe the new one. Reads
+-- WITHOUT creating; only _learnVariantBase creates, so the table appears the
+-- first time a pair is actually observed. Bails without latching while the db
+-- or the spec is not up yet, so a later rebuild retries.
+local function _loadVariantBases()
+    local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+    if not specKey then return end
+    if _variantBaseSpec == specKey then return end
+    local sv = _variantBaseSV()
+    if not sv then return end
+    wipe(_variantBaseLearned)
+    _variantBaseSpec = specKey
+    local root = sv._variantBase
+    if type(root) == "table" then
+        -- Pre-release test builds stored pairs flat, keyed by spellID, before
+        -- spec scoping existed. Those answers cannot be attributed to a spec so
+        -- they cannot be trusted; drop them rather than leave them orphaned.
+        -- Clearing existing fields during pairs() is defined behaviour in Lua.
+        for k in pairs(root) do
+            if type(k) ~= "string" then root[k] = nil end
+        end
+    end
+    local store = (type(root) == "table") and root[specKey] or nil
+    if type(store) ~= "table" then return end
+    for variant, base in pairs(store) do
+        if type(variant) == "number" and type(base) == "number"
+           and base > 0 and base ~= variant then
+            _variantBaseLearned[variant] = base
+        end
+    end
+end
+
+-- Record a pair in the live table and the current spec's store. Callers gate
+-- ids for secrecy before calling: a secret must never index a table, let alone
+-- reach SavedVariables. The unchanged-pair early-out keeps the resolve path,
+-- which relearns the live pairing on every call, from touching the store per
+-- frame. Persists only once the spec is known, so a pair observed before that
+-- still routes this session without being filed under the wrong spec.
+local function _learnVariantBase(variant, base)
+    if _variantBaseLearned[variant] == base then return end
+    _variantBaseLearned[variant] = base
+    if not _variantBaseSpec then return end
+    local sv = _variantBaseSV()
+    if not sv then return end
+    local root = sv._variantBase
+    if type(root) ~= "table" then
+        root = {}
+        sv._variantBase = root
+    end
+    local store = root[_variantBaseSpec]
+    if type(store) ~= "table" then
+        store = {}
+        root[_variantBaseSpec] = store
+    end
+    store[variant] = base
+end
+
+-- Reset hook for the CDM's own reset path. Without it a pair learned wrong is
+-- permanent: StripDefaults never walks this key and no profile operation
+-- touches it, so there would be no way back short of editing SavedVariables.
+function ns.ResetVariantBaseStore()
+    wipe(_variantBaseLearned)
+    _variantBaseSpec = nil
+    local sv = _variantBaseSV()
+    if sv then sv._variantBase = nil end
+end
 ns._divertedSpellsBuff = _divertedSpellsBuff
 ns._divertedSpellsCD   = _divertedSpellsCD
 
@@ -782,6 +882,11 @@ function ns.RebuildSpellRouteMap()
     local p = ECME.db and ECME.db.profile
     if not p or not p.cdmBars then return end
 
+    -- Before any StoreDirect: the recall below is the only thing that can supply
+    -- a base for an assigned variant that is not the live form, and this is the
+    -- first build of the session.
+    _loadVariantBases()
+
     local SVV = ns.StoreVariantValue
     if not SVV then return end
 
@@ -806,7 +911,7 @@ function ns.RebuildSpellRouteMap()
             local ok, b = pcall(GetBase, sid)
             if ok and type(b) == "number" and b > 0 and b ~= sid then
                 base = b
-                _variantBaseLearned[sid] = b
+                _learnVariantBase(sid, b)
             end
         end
         base = base or _variantBaseLearned[sid]
@@ -990,7 +1095,7 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     -- known from then on.
     if CdidIDReadable(info.spellID) and CdidIDReadable(info.overrideSpellID)
        and info.overrideSpellID ~= info.spellID then
-        _variantBaseLearned[info.overrideSpellID] = info.spellID
+        _learnVariantBase(info.overrideSpellID, info.spellID)
     end
 
     local routedBar = nil
