@@ -4987,6 +4987,39 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
                 end
+            
+            -- Toggle pip border on/off
+                if not EllesmereUI._prebuilding then
+                    local rgn = classBsRow._leftRegion
+                    local lastInline = rgn._lastInline or rgn._control
+                    local _, cogShow = EllesmereUI.BuildCogPopup({
+                        title = "Pip Border",
+                        rows = {
+                            { type = "toggle", label = "Border on individual pips",
+                            tooltip = "Draws a border around each pip instead of the bar as a whole.",
+                              get = function() local c = cfg(); return c and c.borderOnPips end,
+                              set = function(v)
+                                  local c = cfg(); if not c then return end
+                                  c.borderOnPips = v; RebuildClass(); EllesmereUI:RefreshPage()
+                              end },
+                        },
+                    })
+
+                    local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.COGS_ICON)
+                    cogBtn:Show()
+
+                    local function UpdateCogVis()
+                        local c = cfg()
+                        local tex = c and c.borderTexture or "solid"
+                        if tex == "solid" then 
+                            PP.Point(cogBtn, "RIGHT", rgn._control, "LEFT", -8, 0)
+                        else
+                            PP.Point(cogBtn, "RIGHT", lastInline, "LEFT", -8, 0)
+                        end
+                    end
+                    EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
+                    UpdateCogVis()
+                end
         end
 
         -- Row: Bar Spacing (slider + opt-in gap-color toggle/swatch) | Empty Bar Overlay (opacity slider + inline color swatch)
