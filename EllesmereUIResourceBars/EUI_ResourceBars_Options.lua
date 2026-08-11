@@ -484,6 +484,23 @@ initFrame:SetScript("OnEvent", function(self)
                     UnsnapTex(pip._fill)
 
                     if pip._border then pip._border:SetShown(false) end
+
+                    if sp.borderOnPips then
+                        if not pip._borderFrame then
+                            local bf = CreateFrame("Frame", nil, pip)
+                            bf:SetAllPoints(pip)
+                            pip._borderFrame = bf
+                        end
+                        pip._borderFrame:SetFrameLevel(sp.borderBehind and math.max(0, pip:GetFrameLevel() - 1) or (pip:GetFrameLevel() + 2))
+                        EllesmereUI.ApplyBorderStyle(pip._borderFrame, sp.borderSize or 1,
+                            sp.borderR or 0, sp.borderG or 0, sp.borderB or 0, sp.borderA or 1,
+                            sp.borderTexture or "solid", sp.borderTextureOffset, sp.borderTextureOffsetY,
+                            sp.borderTextureShiftX, sp.borderTextureShiftY)
+                        pip._borderFrame:Show()
+                    else
+                        if pip._borderFrame then pip._borderFrame:Hide() end
+                    end
+
                     local active = i <= filledCount
                     if active and useThresh then
                         if _pvPartialOnly and i < _pvThreshCount then
@@ -584,10 +601,16 @@ initFrame:SetScript("OnEvent", function(self)
                 pc._barBorderFrame = bf
             end
             pc._barBorderFrame:SetFrameLevel(sp.borderBehind and math.max(0, pc:GetFrameLevel() - 1) or (pc:GetFrameLevel() + 2))
-            EllesmereUI.ApplyBorderStyle(pc._barBorderFrame, sp.borderSize or 1,
-                sp.borderR or 0, sp.borderG or 0, sp.borderB or 0, sp.borderA or 1,
-                sp.borderTexture or "solid", sp.borderTextureOffset, sp.borderTextureOffsetY,
-                sp.borderTextureShiftX, sp.borderTextureShiftY)
+            
+            if sp.borderOnPips and cf ~= "DEATHKNIGHT" and not isBar then
+                pc._barBorderFrame:Hide()
+            else
+                EllesmereUI.ApplyBorderStyle(pc._barBorderFrame, sp.borderSize or 1,
+                    sp.borderR or 0, sp.borderG or 0, sp.borderB or 0, sp.borderA or 1,
+                    sp.borderTexture or "solid", sp.borderTextureOffset, sp.borderTextureOffsetY,
+                    sp.borderTextureShiftX, sp.borderTextureShiftY)
+                pc._barBorderFrame:Show()
+            end
 
             -- Full-bar background (for pips only bar-type uses _barBg)
             if not isBar then
@@ -4986,6 +5009,39 @@ initFrame:SetScript("OnEvent", function(self)
                     flashTargets = function() return { ctx.syncRows.classBorder, ctx.syncRows.powerBorder, ctx.syncRows.healthBorder } end,
                 })
             end
+                end
+            
+            -- Toggle pip border on/off
+                if not EllesmereUI._prebuilding then
+                    local rgn = classBsRow._leftRegion
+                    local lastInline = rgn._lastInline or rgn._control
+                    local _, cogShow = EllesmereUI.BuildCogPopup({
+                        title = "Pip Border",
+                        rows = {
+                            { type = "toggle", label = "Border on individual pips",
+                            tooltip = "Draws a border around each pip instead of the bar as a whole.",
+                              get = function() local c = cfg(); return c and c.borderOnPips end,
+                              set = function(v)
+                                  local c = cfg(); if not c then return end
+                                  c.borderOnPips = v; RebuildClass(); EllesmereUI:RefreshPage()
+                              end },
+                        },
+                    })
+
+                    local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.COGS_ICON)
+                    cogBtn:Show()
+
+                    local function UpdateCogVis()
+                        local c = cfg()
+                        local tex = c and c.borderTexture or "solid"
+                        if tex == "solid" then 
+                            PP.Point(cogBtn, "RIGHT", rgn._control, "LEFT", -8, 0)
+                        else
+                            PP.Point(cogBtn, "RIGHT", lastInline, "LEFT", -8, 0)
+                        end
+                    end
+                    EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
+                    UpdateCogVis()
                 end
         end
 

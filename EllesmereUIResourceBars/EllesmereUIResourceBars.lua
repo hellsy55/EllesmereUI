@@ -1,4 +1,4 @@
--------------------------------------------------------------------------------
+﻿-------------------------------------------------------------------------------
 --  EllesmereUIResourceBars.lua
 --  Custom class resource, health, and mana bar display
 --  Features: Health bar, primary resource bar (mana/rage/energy/etc),
@@ -3725,7 +3725,15 @@ local function BuildBars()
                 pip["_barAnim_x1"] = x1 - x0
                 pip["_barAnim_ph"] = pipH
                 ApplyPipPos()
-                pips[i]:ApplyBorder(0, 0, 0, 0, 0)
+
+                if sp.borderOnPips then
+                    pips[i]:ApplyBorder(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
+                        sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
+                        sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+                else
+                    pips[i]:ApplyBorder(0, 0, 0, 0, 0)
+                end
+
                 pips[i]:ApplyTexture(g.barTexture or "none")
                 pips[i]._bg:SetColorTexture(ERB.PipBgColor(sp))
                 -- Fill Opacity: stamp the per-pip factor (consumed by SetActive
@@ -3766,9 +3774,14 @@ local function BuildBars()
             local pl = secondaryFrame:GetFrameLevel()
             secondaryFrame._barBorder._frame:SetFrameLevel(sp.borderBehind and math.max(0, pl - 1) or (pl + 5))
         end
-        secondaryFrame._barBorder:ApplyStyle(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
-            sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
-            sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+
+        if sp.borderOnPips and cachedSecondary.type ~= "runes" and not isBarType then
+            secondaryFrame._barBorder:ApplyStyle(0,0,0,0,0)
+        else
+            secondaryFrame._barBorder:ApplyStyle(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
+                sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
+                sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+        end
 
         -- Full-bar background (behind all pips) -- this is what shows through
         -- the pip spacing/gaps. In dark theme the inactive pips are opaque gray
