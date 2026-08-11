@@ -113,7 +113,13 @@ ns._EABZeroCountAlpha = function(fd, fs, v, action)
         -- Non-charge actions: the mixin shows GetActionCount for
         -- consumables/stackables (including 0); the display string is only
         -- the cheap first check.
-        if v ~= nil and not (issecretvalue and issecretvalue(v))
+        -- issecretvalue FIRST: v is GetActionDisplayCount's return, which the
+        -- API documents as secret whenever cooldowns are restricted, and
+        -- comparing a secret to nil is the operation our own rules forbid --
+        -- the same ordering defect this function's charge branch above already
+        -- carries a comment about. The nil case needs no test of its own:
+        -- nil == 0 is simply false.
+        if not (issecretvalue and issecretvalue(v))
            and (v == 0 or v == "0") then
             a = 0
         elseif (IsConsumableAction and IsConsumableAction(action))
@@ -948,12 +954,61 @@ do
     -- (ExtraActionButton1 -- its spell-typed delve abilities have no action
     -- slot, so our own dispatch can't paint their cooldown; only Blizzard's
     -- native update, driven by this broadcaster, can).
-    local _vehNeed, _extraNeed, _broadcasterActive = false, false, false
+    -- A THIRD need, and a partial one: press-and-hold.
+    --
+    -- Empower keys ride the native command, so ACTIONBUTTON<n> resolves through
+    -- GetActionButtonForID to BLIZZARD's button, not ours -- which is why the
+    -- mouse was never affected. Those twins learn their pressAndHoldAction only
+    -- from Update() -> UpdatePressAndHoldAction, reached from the mixin OnEvent,
+    -- and the only thing that ever calls that OnEvent is this broadcaster. With
+    -- it dead the attribute is never initialised at all, so SecureTemplates
+    -- computes releasePressAndHoldAction = (not down) and (pressAndHoldAction or
+    -- CVar) and, with Press and Hold Casting off, key-up has nothing to release
+    -- the empower with. Broken since the empower keys became native, for every
+    -- login, not just after a spec change.
+    --
+    -- We cannot repair those buttons ourselves: writing any field or attribute
+    -- on them from here taints them, and their own later updates then fail
+    -- (blocked SetAttribute, and secret cooldown args rejected). Let Blizzard do
+    -- it in its own untainted execution instead, and buy the smallest possible
+    -- slice of the broadcaster to make that happen.
+    --
+    -- ACTIONBAR_SLOT_CHANGED ONLY, and that is the whole cost story. The event
+    -- the perf campaign profiled out is ACTIONBAR_UPDATE_COOLDOWN, which fires
+    -- ~11x/sec at total idle; this one fires only when a slot actually changes,
+    -- and Blizzard's own handler gates on "arg1 == 0 or arg1 == self.action" so
+    -- a single button does real work per event. Idle cost is zero.
+    local _vehNeed, _extraNeed, _phNeed = false, false, false
+    local _broadcasterMode = "off"
+    -- Class gate, and it exists purely for ORDERING. The survey that sets
+    -- _phNeed reads the action slots, and on a cold login those are still empty
+    -- when it first runs -- so it reports "no press-and-hold", we stay off, and
+    -- the ACTIONBAR_SLOT_CHANGED that arrives WITH the slot data is the one
+    -- event we needed and the one we are not listening for. The class is known
+    -- before any of that and cannot change mid-session, so it turns the listener
+    -- on early enough to catch the first fill. _phNeed remains the general
+    -- path: if press-and-hold ever reaches another class, the survey still
+    -- switches this on without touching this gate.
+    local _classPH
+    local function ClassMayPressHold()
+        if _classPH == nil then
+            local _, class = UnitClass("player")
+            if not class then return false end   -- too early; ask again later
+            _classPH = (class == "EVOKER")
+        end
+        return _classPH
+    end
     local function ApplyBroadcaster()
-        local want = _vehNeed or _extraNeed
-        if want == _broadcasterActive then return end
-        _broadcasterActive = want
-        if want then
+        local want = (_vehNeed or _extraNeed) and "full"
+            or ((_phNeed or ClassMayPressHold()) and "ph" or "off")
+        if want == _broadcasterMode then return end
+        _broadcasterMode = want
+        -- Always drop to a known state first: "full" and "ph" are different
+        -- registration sets, so switching between them directly would leave the
+        -- wider set's events behind.
+        if ActionBarButtonEventsFrame then ActionBarButtonEventsFrame:UnregisterAllEvents() end
+        if ActionBarActionEventsFrame then ActionBarActionEventsFrame:UnregisterAllEvents() end
+        if want == "full" then
             if ActionBarButtonEventsFrame then
                 for _, ev in ipairs(_abefEvents) do
                     ActionBarButtonEventsFrame:RegisterEvent(ev)
@@ -964,10 +1019,46 @@ do
                     ActionBarActionEventsFrame:RegisterUnitEvent(ev, "player")
                 end
             end
-        else
-            if ActionBarButtonEventsFrame then ActionBarButtonEventsFrame:UnregisterAllEvents() end
-            if ActionBarActionEventsFrame then ActionBarActionEventsFrame:UnregisterAllEvents() end
+        elseif want == "ph" then
+            if ActionBarButtonEventsFrame then
+                ActionBarButtonEventsFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+                -- PLAYER_ENTERING_WORLD as well, because SLOT_CHANGED alone
+                -- cannot seed a login. Blizzard gates that one on
+                -- "arg1 == 0 or arg1 == tonumber(self.action)", so a button only
+                -- re-checks when ITS slot is the one that changed -- and at login
+                -- a slot that never changes never fires, leaving that button
+                -- unset while its neighbours are fine. Measured: one empowered
+                -- slot read true at login and the other still false. The PEW
+                -- branch calls self:Update() with no gate at all, so every button
+                -- re-derives once per loading screen. Costs one pass per zone-in.
+                ActionBarButtonEventsFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+            end
         end
+    end
+    -- Driven from UpdateKeybinds, where the press-and-hold survey already runs,
+    -- so a character with no empowered spells never turns this on and pays
+    -- nothing at all.
+    -- No "unchanged value" early-out on purpose: the resolved mode also depends
+    -- on the class gate and on the vehicle/extra needs, so a survey reporting
+    -- the same _phNeed as last time can still need a different mode -- and at
+    -- load it reports false into an already-false _phNeed, which is exactly when
+    -- the class gate has to get its first look. ApplyBroadcaster early-outs on an
+    -- unchanged resolved mode, so calling it unconditionally costs nothing.
+    ns.SetBroadcasterPressHoldNeed = function(v)
+        _phNeed = v and true or false
+        ApplyBroadcaster()
+    end
+    -- For callers that unregister the broadcasters DIRECTLY rather than through
+    -- ApplyBroadcaster. The setup path has a "redundant kill, in case Blizzard
+    -- re-creates them" safety net that runs after we may already have
+    -- registered: it leaves the frames bare while _broadcasterMode still claims
+    -- "ph", and the mode check above then early-outs forever, so we never
+    -- register again. That is precisely how press-and-hold mode ended up
+    -- silently inert -- registered once at login, wiped moments later, and the
+    -- state machine none the wiser. Any direct wipe must come back through here.
+    ns.ResyncBroadcaster = function()
+        _broadcasterMode = "off"   -- the caller has just put the frames in that state
+        ApplyBroadcaster()
     end
     -- Recompute both needs from ground truth -- the actual visibility of the
     -- buttons that depend on the broadcaster -- and apply. We poll visibility on
@@ -1702,8 +1793,28 @@ end
 
 local function HideBlizzardBars()
     -- Fully hide all Blizzard action buttons. We create our own buttons
-    -- instead, so these are parented to a hidden frame and silenced.
+    -- instead, so these are silenced and hidden.
     -- Stance and Pet buttons are still reused, so only hide action buttons.
+    --
+    -- NOT reparented, and that is deliberate. The template sets
+    -- "useparent-actionpage" and then seeds self.action from UpdateAction() in
+    -- its OnLoad, so the button derives its slot from whichever frame is its
+    -- PARENT. Moving it to hiddenParent breaks that inheritance and freezes
+    -- self.action at whatever it resolved to at load -- and Blizzard's own
+    -- ACTIONBAR_SLOT_CHANGED handler gates on
+    -- "arg1 == 0 or arg1 == tonumber(self.action)", so a button with a stale
+    -- cached slot can never match the slot that actually changed and simply
+    -- stops updating. That is what left pressAndHoldAction unset on the
+    -- natively-routed twins and killed Hold and Release on empower KEYBINDS,
+    -- while mouse clicks (which go through our own buttons) were fine.
+    -- Measured in game: at login the twins read pressAndHoldAction=false, and
+    -- only ever flipped true for whichever buttons happened to match, which is
+    -- also why a spec change helped -- it fires arg1 == 0 and bypasses the gate.
+    --
+    -- Leaving them under their real bar costs no visibility: every stock bar is
+    -- in STOCK_BAR_DISPOSAL, which hides it and hooks OnShow to re-hide, so a
+    -- child of one is never drawn. statehidden and Hide still apply here; only
+    -- the reparent had to go.
     for _, info in ipairs(BAR_CONFIG) do
         if info.blizzBtnPrefix and not info.isStance and not info.isPetBar then
             for i = 1, info.count do
@@ -1711,7 +1822,6 @@ local function HideBlizzardBars()
                 if btn then
                     btn:UnregisterAllEvents()
                     btn:SetAttributeNoHandler("statehidden", true)
-                    btn:SetParent(hiddenParent)
                     btn:Hide()
                 end
             end
@@ -3475,8 +3585,14 @@ function EAB_VTABLE.ForceButtonRefresh(btn, action)
         pcall(ns._TintUsableIcon, icon, action)
     end
     if btn.Count and C_ActionBar and C_ActionBar.GetActionDisplayCount then
+        -- No `or ""` on the raw return: it is secret while cooldowns are
+        -- restricted, and coercing one before the guard is what strands the
+        -- count. SetText accepts a secret, so only the plain nil needs healing.
         local display = C_ActionBar.GetActionDisplayCount(action)
-        btn.Count:SetText(display or "")
+        if not (issecretvalue and issecretvalue(display)) and display == nil then
+            display = ""
+        end
+        btn.Count:SetText(display)
         ns._EABZeroCountAlpha(EFD(btn), btn.Count, display, action)
     end
     -- Macro / action text. The mixin's Update() maintains this normally, but
@@ -4254,13 +4370,25 @@ do
                     -- WITHOUT that talent. This event fires ~0.1/sec, so
                     -- writing unconditionally here costs nothing.
                     if btn.Count and C_ActionBar.GetActionDisplayCount then
-                        local display = C_ActionBar.GetActionDisplayCount(action) or ""
+                        -- Raw read, guard, THEN coerce. The `or ""` used to sit
+                        -- on this line, ahead of the issecretvalue check below,
+                        -- so a restricted-cooldown return (raids, keys) was
+                        -- coerced before anything established it was safe to
+                        -- touch. A throw here aborts the walk, and this handler
+                        -- is the SOLE owner of the count text, so the number
+                        -- freezes at its last value: it reads as a charge that
+                        -- is not there, a real charge gain that changes nothing,
+                        -- and a spend that finally moves it.
+                        local display = C_ActionBar.GetActionDisplayCount(action)
                         if issecretvalue and issecretvalue(display) then
                             btn.Count:SetText(display)
                             fd.lastCountText = nil
-                        elseif fd.lastCountText ~= display then
-                            fd.lastCountText = display
-                            btn.Count:SetText(display)
+                        else
+                            if display == nil then display = "" end
+                            if fd.lastCountText ~= display then
+                                fd.lastCountText = display
+                                btn.Count:SetText(display)
+                            end
                         end
                         ns._EABZeroCountAlpha(fd, btn.Count, display, action)
                     end
@@ -5083,16 +5211,23 @@ do
                                     for _, b2 in ipairs(list2) do
                                         local a2 = b2:GetAttribute("action")
                                         if a2 and HasAction(a2) and b2.Count then
-                                            local d2 = C_ActionBar.GetActionDisplayCount(a2) or ""
+                                            -- Guard before coercing: same
+                                            -- ordering fix as the charge-tick
+                                            -- handler; the `or ""` was ahead of
+                                            -- the issecretvalue check.
+                                            local d2 = C_ActionBar.GetActionDisplayCount(a2)
                                             local f2 = EFD(b2)
                                             if issecretvalue and issecretvalue(d2) then
                                                 -- Secret string (combat): write through
                                                 -- and dirty the memo (never store one).
                                                 b2.Count:SetText(d2)
                                                 f2.lastCountText = nil
-                                            elseif f2.lastCountText ~= d2 then
-                                                f2.lastCountText = d2
-                                                b2.Count:SetText(d2)
+                                            else
+                                                if d2 == nil then d2 = "" end
+                                                if f2.lastCountText ~= d2 then
+                                                    f2.lastCountText = d2
+                                                    b2.Count:SetText(d2)
+                                                end
                                             end
                                             ns._EABZeroCountAlpha(f2, b2.Count, d2, a2)
                                         end
@@ -11920,6 +12055,12 @@ local function UpdateKeybinds()
     -- combat-drop attr re-assert knows whether any press-and-hold slot
     -- exists at all -- non-empower classes never pay for it.
     _bindState.hasPH = anyPH
+    -- Same survey drives the broadcaster's press-and-hold need: Blizzard's twin
+    -- buttons are what a natively-routed empower key actually drives, and only
+    -- the broadcaster can keep their pressAndHoldAction current (we cannot write
+    -- it ourselves without tainting them). Costs nothing for a character with no
+    -- press-and-hold slots, which is every class but one.
+    if ns.SetBroadcasterPressHoldNeed then ns.SetBroadcasterPressHoldNeed(anyPH) end
     if not changed then return false end
     _bindState.sigValid = true
     -- Pass 2: apply. Reads the routing decisions computed above.
@@ -14728,6 +14869,11 @@ function EAB:FinishSetup()
         -- Redundant kill here as safety net in case Blizzard re-creates them.
         if _G.ActionBarButtonEventsFrame then _G.ActionBarButtonEventsFrame:UnregisterAllEvents() end
         if _G.ActionBarActionEventsFrame then _G.ActionBarActionEventsFrame:UnregisterAllEvents() end
+        -- ...then hand control back to the mode machine. This safety net runs
+        -- after the press-and-hold mode may already have registered, so without
+        -- the resync it silently wipes that registration and the mode check
+        -- believes it is still active, leaving empower keybinds unfixable.
+        if ns.ResyncBroadcaster then ns.ResyncBroadcaster() end
     end)
 
     -- Hook Show on stock bars so they can never re-appear regardless

@@ -3517,33 +3517,67 @@ local function DecorateFrame(frame, barData)
                 local onRealCD = cdInfo2 and cdInfo2.isActive and not cdInfo2.isOnGCD
                 -- Charge spells report cooldown isActive while a recharge is in
                 -- progress even when a castable charge remains, which would wrongly
-                -- desaturate a still-usable icon. currentCharges is a SECRET value
-                -- in this tainted hook (can't be compared), so use Blizzard's clean
-                -- isOnActualCooldown flag instead -- false means at least one charge
-                -- is usable, so stay saturated until the spell is genuinely out.
+                -- desaturate a still-usable icon. currentCharges is SECRET in this
+                -- tainted hook, so the usable-charge verdict has to come from
+                -- somewhere else -- see the guard below.
                 --
-                -- The charge-SPELL test is static charge data, NOT
-                -- frame:HasVisualDataSource_Charges(): that getter is documented
-                -- three times in this file as flipping FALSE while a GCD swipe is
-                -- layered on top, and a field dump shows it absent entirely (nil, not
-                -- false) on every CDM frame on a 12.0 client, so gating on it made
-                -- this whole branch dead code. maxCharges is stable, present, and
-                -- clean; the secret currentCharges is still never read. Same signal
-                -- the swipe guard, Max Stacks Glow and Hide CD Text already use.
-                local baseCI = sid2 and C_Spell and C_Spell.GetSpellCharges
-                    and C_Spell.GetSpellCharges(sid2)
-                local baseMax = baseCI and baseCI.maxCharges
-                local isChargeSpell = baseMax ~= nil
-                    and not (issecretvalue and issecretvalue(baseMax))
-                    and baseMax > 1
+                -- The charge-SPELL test is static charge data, NOT the
+                -- HasVisualDataSource_Charges flag: that one is documented three
+                -- times in this file as answering "is this icon drawing its recharge
+                -- right now", which is false at full charges and during a GCD, so
+                -- gating the whole branch on it made it dead code. maxCharges is
+                -- stable and clean; the secret currentCharges is never read.
+                -- Resolve it through Blizzard's own accessor rather than a base-ID
+                -- read: CdmChargeInfoFor documents the two disagreeing on override
+                -- spells (captured on Blink 1953 -> Shimmer 212653), where a base
+                -- read reports the charge-less base, so this test came back false
+                -- and the guard never ran on a 2-charge ability. The swipe guard
+                -- already resolves charges this way and the two verdicts must agree.
+                local chargeCI = CdmChargeInfoFor(frame, sid2)
+                local maxCh = chargeCI and chargeCI.maxCharges
+                local isChargeSpell = type(maxCh) == "number"
+                    and not (issecretvalue and issecretvalue(maxCh))
+                    and maxCh > 1
                 local outOfCharges
                 if onRealCD and isChargeSpell then
-                    local actualCD = frame.isOnActualCooldown
-                    if not issecretvalue or not issecretvalue(actualCD) then
-                        if actualCD == false then
-                            outOfCharges = false
-                        elseif actualCD == true then
-                            outOfCharges = true
+                    -- Preferred signal: Blizzard's own charge visual-data-source
+                    -- flag. isOnActualCooldown below is derived from the cooldown
+                    -- startTime + duration, both SECRET inside instanced content,
+                    -- so it comes back unreadable from this tainted hook the
+                    -- moment a key starts -- the guard then set nothing and a
+                    -- banked charge desaturated. Fresh login looked fine because
+                    -- nothing was secret yet. wasSetFromCharges is a plain literal
+                    -- assigned inside an untainted branch, so it survives that,
+                    -- and RefreshData clears it and CacheCooldownValues re-sets it
+                    -- immediately before the SetDesaturated call this hooks, so it
+                    -- is never stale here.
+                    -- Only TRUE is informative: Blizzard sets it for
+                    -- "cooldownStartTime > 0 and currentCharges > 0", so false is
+                    -- equally what a full-charge icon and an aura-driven one
+                    -- report -- those keep falling through to the read below, which
+                    -- is why this cannot re-break greying at zero charges.
+                    -- Read the field, falling back to the getter: a past field
+                    -- dump on a 12.0 client reported the getter as nil on these
+                    -- frames while isOnActualCooldown beside it read fine, so
+                    -- take whichever of the two this client actually carries.
+                    local fromCharges = frame.wasSetFromCharges
+                    if type(fromCharges) ~= "boolean"
+                        and type(frame.HasVisualDataSource_Charges) == "function" then
+                        fromCharges = frame:HasVisualDataSource_Charges()
+                    end
+                    if type(fromCharges) == "boolean"
+                        and not (issecretvalue and issecretvalue(fromCharges))
+                        and fromCharges then
+                        outOfCharges = false
+                    end
+                    if type(outOfCharges) ~= "boolean" then
+                        local actualCD = frame.isOnActualCooldown
+                        if not issecretvalue or not issecretvalue(actualCD) then
+                            if actualCD == false then
+                                outOfCharges = false
+                            elseif actualCD == true then
+                                outOfCharges = true
+                            end
                         end
                     end
                 end
@@ -4907,6 +4941,122 @@ local function GetOrCreateItemPresetFrame(barKey, itemID)
 end
 ns.GetOrCreateItemPresetFrame = GetOrCreateItemPresetFrame
 
+-- Crafted-quality pip for item frames -- the action bars' Show Rank Icon, for
+-- CDM. Those read C_ActionBar.GetProfessionQualityInfo, which needs an action
+-- slot; an item frame has only an item id, so this asks the item-side call that
+-- returns the same CraftingQualityInfo struct, and takes iconInventory off it
+-- exactly as the action bars do. Blizzard's own callers pass a LINK rather than
+-- a bare id (and the action bar work recorded bare-id reads coming back nil), so
+-- prefer the link and keep the id as the fallback.
+-- Per bar and off by default: nothing here is created or called until a bar
+-- turns it on. The resolved atlas is memoised per item so the steady state is
+-- one compare; it re-reads when the icon changes which item it is showing,
+-- which for a pot preset is the point (the pip follows the rank resolved).
+-- The memo is deliberately TRI-STATE. An item whose data the client has not
+-- cached yet answers nil, and that is the state on the pass right after login,
+-- so caching it as "no quality" would leave the pip permanently missing on
+-- exactly the items it is for: nil = unresolved, retry next pass (item data is
+-- requested here, so the retry has something to find); false = resolved, this
+-- item has no crafted quality, stop asking.
+local _cdmQualityAtlas = {}
+local function CdmQualityAtlasFor(q)
+    local hit = _cdmQualityAtlas[q]
+    if hit ~= nil then return hit or nil end
+    local probe = C_Texture and C_Texture.GetAtlasInfo
+    local names = {
+        "Professions-Icon-Quality-Tier" .. q .. "-Inv-Small",
+        "Professions-Icon-Quality-Tier" .. q .. "-Small",
+        "Professions-Icon-Quality-Tier" .. q,
+    }
+    for i = 1, #names do
+        if probe and probe(names[i]) then
+            _cdmQualityAtlas[q] = names[i]
+            return names[i]
+        end
+    end
+    _cdmQualityAtlas[q] = false
+    return nil
+end
+
+local function ApplyItemQualityPip(f, itemID, on)
+    if not on then
+        if f._qualityHolder then f._qualityHolder:Hide() end
+        f._qualityItemID, f._qualityAtlas = nil, nil
+        return
+    end
+    if not itemID then return end
+    -- Resolved already for this exact item (false = resolved as "no quality").
+    if f._qualityItemID == itemID and f._qualityAtlas ~= nil then return end
+
+    local atlas
+    local ts = C_TradeSkillUI
+    local link = C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(itemID))
+    if not link and C_Item and C_Item.RequestLoadItemDataByID then
+        -- Not cached yet. Ask for it and leave the memo unresolved so the next
+        -- pass retries rather than baking in the miss.
+        C_Item.RequestLoadItemDataByID(itemID)
+    end
+    -- Blizzard's own item buttons (SetItemCraftingQualityOverlay in
+    -- ItemButtonTemplate) ask REAGENT quality first and only then CRAFTED, and
+    -- that order is the whole fix: a live probe on this bar had the crafted
+    -- calls answering nil for every potion on it -- ranked consumables carry a
+    -- reagent quality, not a crafted one. Both return the same
+    -- CraftingQualityInfo, so iconInventory comes off whichever answers.
+    if ts and ts.GetItemReagentQualityInfo then
+        local ok, info = pcall(ts.GetItemReagentQualityInfo, link or itemID)
+        atlas = ok and info and info.iconInventory or nil
+    end
+    if not atlas and ts and ts.GetItemCraftedQualityInfo then
+        local ok, info = pcall(ts.GetItemCraftedQualityInfo, link or itemID)
+        atlas = ok and info and info.iconInventory or nil
+    end
+    if not atlas and ts and ts.GetItemCraftedQualityByItemInfo then
+        -- Same fallback shape the action bars keep: a bare quality number,
+        -- mapped through the probe.
+        local ok, q = pcall(ts.GetItemCraftedQualityByItemInfo, link or itemID)
+        if ok and type(q) == "number" and q >= 1 and q <= 5 then
+            atlas = CdmQualityAtlasFor(q)
+        end
+    end
+    if not atlas then
+        if f._qualityHolder then f._qualityHolder:Hide() end
+        -- Only settle on "no quality" once the item is actually known.
+        if link then f._qualityItemID, f._qualityAtlas = itemID, false end
+        return
+    end
+    f._qualityItemID, f._qualityAtlas = itemID, atlas
+
+    local holder = f._qualityHolder
+    if not holder then
+        -- Own holder frame rather than a texture on f: the item frame's
+        -- Cooldown is a CHILD frame, and a child draws above every texture of
+        -- its parent whatever the draw layer, so a pip parented to f sits under
+        -- the swipe. This is why the item count text is reparented to a text
+        -- overlay too, and what the action bars' rank icon does.
+        holder = CreateFrame("Frame", nil, f)
+        holder:SetAllPoints(f)
+        holder:SetFrameLevel((f:GetFrameLevel() or 1) + 18)
+        holder:EnableMouse(false)
+        f._qualityHolder = holder
+        f._qualityTex = holder:CreateTexture(nil, "OVERLAY", nil, 7)
+    end
+    local tex = f._qualityTex
+    -- Unknown atlas reads as no pip, never as an error.
+    if not pcall(tex.SetAtlas, tex, atlas, true) then
+        f._qualityAtlas = false
+        holder:Hide()
+        return
+    end
+    -- Same proportion the action bars use (Blizzard centers the overlay 14,-14
+    -- from the TOPLEFT of a 45px button), scaled to whatever size the bar runs.
+    local sc = (f:GetWidth() or 36) / 36
+    tex:ClearAllPoints()
+    tex:SetPoint("CENTER", holder, "TOPLEFT", 11 * sc, -11 * sc)
+    tex:SetScale(sc)
+    tex:Show()
+    holder:Show()
+end
+
 -- ---------------------------------------------------------------------------
 -- Dynamic potion display for every pot preset carrying a displayOrder (Light's
 -- Potential, Potion of Recklessness, health). The preset icon resolves to the best variant
@@ -5012,6 +5162,23 @@ ns.GetPresetPotChain = function(itemID)
 end
 -- Options toggle: force every pot frame to re-resolve on the next pass.
 ns._BumpPotResolveGen = PotSwap.Bump
+
+-- True when this frame IS the preset rather than one specific variant of it.
+-- The picker only ever stores -(preset.itemID), so a frame sitting on an ALT id
+-- can only have come from the user typing that exact item id into Custom Item
+-- ID -- they asked for that rank, not for the family.
+-- Frames still carry _presetData either way: the preset icon and the keybind
+-- fallback (which deliberately answers across ranks) want it. Only the
+-- family-wide reads below are primary-only -- summing the family's bag counts
+-- made a hand-added rank-2 pot report its rank-1 siblings as its own count,
+-- point _itemCdSource at a sibling's cooldown and, with Hide Items if Missing
+-- on, stay on the bar while the user owned none of it. Two such entries then
+-- showed the same count off the same art (ranks share an icon), which reads as
+-- one pot tracked twice. Mirrors PotSwap.Ensure's own primary check.
+local function IsPresetFamilyFrame(f)
+    local pd = f and f._presetData
+    return (pd and pd.altItemIDs and f._presetItemID == pd.itemID) and true or false
+end
 
 -- Guard: after ENCOUNTER_END clears item-preset caches, subsequent events
 -- fire before Blizzard has finished resetting potion CDs. Without this guard
@@ -5372,7 +5539,7 @@ local function ProcessPresetCooldowns()
                     f._countArm = false
                     total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
                     local owned = total > 0 and f._presetItemID or nil
-                    if total == 0 and f._presetData and f._presetData.altItemIDs then
+                    if total == 0 and IsPresetFamilyFrame(f) then
                         for _, altID in ipairs(f._presetData.altItemIDs) do
                             local c = C_Item.GetItemCount(altID, false, true) or 0
                             total = total + c
@@ -5410,6 +5577,16 @@ local function ProcessPresetCooldowns()
                         f._itemCountText:Hide()
                         f._lastItemCount = nil
                     end
+                end
+                do
+                    -- Quality pip follows the variant actually being SHOWN: a pot
+                    -- preset resolves its icon across ranks, so keying this on the
+                    -- primary would label the icon with a rank it is not drawing.
+                    local fc2 = _ecmeFC[f]
+                    local bk2 = fc2 and fc2.barKey
+                    local bd2 = bk2 and barDataByKey[bk2]
+                    ApplyItemQualityPip(f, f._displayItemID or f._presetItemID,
+                        bd2 and bd2.showItemQuality == true)
                 end
                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                 if shouldDesat ~= f._lastDesat then
@@ -5453,7 +5630,7 @@ local function CheckItemPresenceForHide()
                     total = f._displayCount or 0
                 else
                     total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
-                    if total == 0 and f._presetData and f._presetData.altItemIDs then
+                    if total == 0 and IsPresetFamilyFrame(f) then
                         for _, altID in ipairs(f._presetData.altItemIDs) do
                             total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                         end
@@ -6334,7 +6511,7 @@ local function CollectAndReanchor()
                                         total = f._displayCount or 0
                                     else
                                         total = C_Item.GetItemCount(itemID, false, true) or 0
-                                        if total == 0 and f._presetData and f._presetData.altItemIDs then
+                                        if total == 0 and IsPresetFamilyFrame(f) then
                                             for _, altID in ipairs(f._presetData.altItemIDs) do
                                                 total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                                             end
@@ -6887,7 +7064,7 @@ local function CollectAndReanchor()
                                         total = f._displayCount or 0
                                     else
                                         total = C_Item.GetItemCount(itemID, false, true) or 0
-                                        if total == 0 and f._presetData and f._presetData.altItemIDs then
+                                        if total == 0 and IsPresetFamilyFrame(f) then
                                             for _, altID in ipairs(f._presetData.altItemIDs) do
                                                 total = total + (C_Item.GetItemCount(altID, false, true) or 0)
                                             end

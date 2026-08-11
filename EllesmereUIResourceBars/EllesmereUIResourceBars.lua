@@ -1,4 +1,4 @@
--------------------------------------------------------------------------------
+﻿-------------------------------------------------------------------------------
 --  EllesmereUIResourceBars.lua
 --  Custom class resource, health, and mana bar display
 --  Features: Health bar, primary resource bar (mana/rage/energy/etc),
@@ -3732,7 +3732,15 @@ local function BuildBars()
                 pip["_barAnim_x1"] = x1 - x0
                 pip["_barAnim_ph"] = pipH
                 ApplyPipPos()
-                pips[i]:ApplyBorder(0, 0, 0, 0, 0)
+
+                if sp.borderOnPips then
+                    pips[i]:ApplyBorder(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
+                        sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
+                        sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+                else
+                    pips[i]:ApplyBorder(0, 0, 0, 0, 0)
+                end
+
                 pips[i]:ApplyTexture(g.barTexture or "none")
                 pips[i]._bg:SetColorTexture(ERB.PipBgColor(sp))
                 -- Fill Opacity: stamp the per-pip factor (consumed by SetActive
@@ -3773,9 +3781,14 @@ local function BuildBars()
             local pl = secondaryFrame:GetFrameLevel()
             secondaryFrame._barBorder._frame:SetFrameLevel(sp.borderBehind and math.max(0, pl - 1) or (pl + 5))
         end
-        secondaryFrame._barBorder:ApplyStyle(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
-            sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
-            sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+
+        if sp.borderOnPips and cachedSecondary.type ~= "runes" and not isBarType then
+            secondaryFrame._barBorder:ApplyStyle(0,0,0,0,0)
+        else
+            secondaryFrame._barBorder:ApplyStyle(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
+                sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
+                sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+        end
 
         -- Full-bar background (behind all pips) -- this is what shows through
         -- the pip spacing/gaps. In dark theme the inactive pips are opaque gray
@@ -7572,6 +7585,50 @@ local function OnChannelStop(eventCastID)
     ns.ShowIdleCastBar()
 end
 
+-- Undo the per-stage empower tint and put the configured fill back. Shared by
+-- OnEmpowerStop and OnCastStop: the 1s-overrun safety path routes a missed
+-- EMPOWER_STOP through OnCastStop, which clears _empowering, and OnEmpowerStop
+-- then early-returns on that very flag -- so without this call there the stage
+-- tint stayed painted for the rest of the session, the same stuck-fill symptom
+-- by a second route. On ns to respect the 200-local cap.
+ns.ResetEmpowerFillColor = function()
+    if not (castBarFrame and castBarFrame._empowerColorApplied) then return end
+    castBarFrame._empowerColorApplied = false
+    local cb = ERB.db.profile.castBar
+    local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, 1
+    if cb.classColored then
+        local cc = CLASS_COLORS[cachedClass]
+        if cc then fR, fG, fB = cc[1], cc[2], cc[3] end
+    end
+    if castBarFrame._gradientFullBar and castBarFrame._gradTex then
+        empowerColorA:SetRGBA(fR, fG, fB, fA)
+        empowerColorB:SetRGBA(cb.gradientR or fR, cb.gradientG or fG, cb.gradientB or fB, cb.gradientA or fA)
+        castBarFrame._gradTex:SetGradient(cb.gradientDir or "HORIZONTAL", empowerColorA, empowerColorB)
+    elseif cb.gradientEnabled then
+        -- Re-ISSUE the gradient, do not just neutralise the vertex color.
+        -- SetVertexColor REPLACES a texture's gradient rather than
+        -- multiplying it, so the per-stage empower tint (which paints this
+        -- exact texture with SetVertexColor) already destroyed the configured
+        -- gradient. Whitening the vertex color therefore left a plain WHITE
+        -- fill, and nothing restored it: the gradient is issued only where the
+        -- bar is built, so every later cast in the session stayed white until a
+        -- config edit or reload rebuilt the bar. The full-bar branch above
+        -- already re-issues for the same reason. Fill Opacity is baked into
+        -- both endpoint alphas, matching the build path.
+        local fillTex = castBarFrame._bar:GetStatusBarTexture()
+        local fillOp = (cb.fillOpacity or 100) / 100
+        fillTex:SetVertexColor(1, 1, 1, 1)
+        empowerColorA:SetRGBA(fR, fG, fB, fA * fillOp)
+        empowerColorB:SetRGBA(cb.gradientR or fR, cb.gradientG or fG,
+            cb.gradientB or fB, (cb.gradientA or fA) * fillOp)
+        fillTex:SetGradient(cb.gradientDir or "HORIZONTAL",
+            empowerColorA, empowerColorB)
+    else
+        local fillTex = castBarFrame._bar:GetStatusBarTexture()
+        fillTex:SetVertexColor(fR, fG, fB, fA * ((cb.fillOpacity or 100) / 100))
+    end
+end
+
 -- Called for UNIT_SPELLCAST_EMPOWER_STOP.
 local function OnEmpowerStop(eventCastID)
     if not castBarFrame then return end
@@ -7588,28 +7645,8 @@ local function OnEmpowerStop(eventCastID)
     castBarFrame._numStages = 0
 
     -- Reset empower stage coloring if it was applied
-    if castBarFrame._empowerColorApplied then
-        castBarFrame._empowerColorApplied = false
-        local cb = ERB.db.profile.castBar
-        local fR, fG, fB, fA = cb.fillR, cb.fillG, cb.fillB, 1
-        if cb.classColored then
-            local cc = CLASS_COLORS[cachedClass]
-            if cc then fR, fG, fB = cc[1], cc[2], cc[3] end
-        end
-        if castBarFrame._gradientFullBar and castBarFrame._gradTex then
-            empowerColorA:SetRGBA(fR, fG, fB, fA)
-            empowerColorB:SetRGBA(cb.gradientR or fR, cb.gradientG or fG, cb.gradientB or fB, cb.gradientA or fA)
-            castBarFrame._gradTex:SetGradient(cb.gradientDir or "HORIZONTAL", empowerColorA, empowerColorB)
-        elseif cb.gradientEnabled then
-            -- Gradient colors live in the SetGradient endpoints (with Fill
-            -- Opacity baked in); the vertex color must return to plain white
-            -- or the empower tint would keep coloring the gradient.
-            castBarFrame._bar:GetStatusBarTexture():SetVertexColor(1, 1, 1, 1)
-        else
-            local fillTex = castBarFrame._bar:GetStatusBarTexture()
-            fillTex:SetVertexColor(fR, fG, fB, fA * ((cb.fillOpacity or 100) / 100))
-        end
-    end
+    ns.ResetEmpowerFillColor()
+
     cachedStageThresholds = nil
 
     ns.ShowIdleCastBar()
@@ -7621,6 +7658,10 @@ OnCastStop = function()
     castBarFrame._channeling = false
     castBarFrame._empowering = false
     castBarFrame._castID = nil
+    -- The overrun safety path forces a stop here on a missed EMPOWER_STOP, and
+    -- clearing _empowering above is exactly what makes OnEmpowerStop early-return
+    -- later, so this is the only chance to undo the stage tint.
+    ns.ResetEmpowerFillColor()
     -- Pip textures, channel ticks and the latency overlay are all cleared by
     -- the idle pass below.
     ns.ShowIdleCastBar()
