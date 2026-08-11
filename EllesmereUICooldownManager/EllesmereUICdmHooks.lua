@@ -8922,7 +8922,9 @@ end
 --  key-down/up CVar. The pushed texture + colour are read live from the
 --  EllesmereUI action bars settings, so the CDM press matches real buttons
 --  (falling back to a border-cropped Blizzard depress texture if that module
---  isn't present). Per-frame data lives in an external weak-keyed table.
+--  isn't present). On a custom-shape bar the press is masked to the shape, so
+--  a hexagon icon flashes a hexagon rather than the full square it sits in.
+--  Per-frame data lives in an external weak-keyed table.
 -------------------------------------------------------------------------------
 do
     local AB_MEDIA      = "Interface\\AddOns\\EllesmereUIActionBars\\Media\\"
@@ -8999,6 +9001,34 @@ do
         return edges
     end
 
+    -- Custom shape of a CDM icon (hexagon/circle/...), or nil for a square one.
+    -- A square press drawn over a shaped icon spills past the shape, so the
+    -- overlay has to follow it. We reuse the icon's own shapeMask -- masking is
+    -- screen-space and the overlay covers the same rect -- exactly like the
+    -- fake-active overlay does (ns.ApplyShapeToOverlay). none/cropped return
+    -- nil: their icon art fills the frame rect, so a square press is correct.
+    local function IconShape(icon)
+        local ifc = _ecmeFC and _ecmeFC[icon]
+        if not (ifc and ifc.shapeApplied and ifc.shapeMask) then return nil end
+        local shape = ifc.shapeName
+        if not shape or shape == "none" or shape == "cropped" then return nil end
+        return shape, ifc.shapeMask
+    end
+
+    -- Ring art for "border" pushed mode on a shaped icon: four straight edges
+    -- around a hexagon leave the corners hanging in space, so press-flash the
+    -- shape's own border texture instead. Its thickness is baked into the art,
+    -- so the bars' pushed border size doesn't apply -- colour still does.
+    local function EnsureShapeRing(ov)
+        if ov._shapeRing then return ov._shapeRing end
+        local t = ov:CreateTexture(nil, "OVERLAY", nil, 2)
+        t:SetSnapToPixelGrid(false)
+        t:SetTexelSnappingBias(0)
+        t:Hide()
+        ov._shapeRing = t
+        return t
+    end
+
     local function ShowPush(icon)
         local ov = _pushOverlay[icon]
         if not ov then
@@ -9010,14 +9040,40 @@ do
             ov._tex = tex
             _pushOverlay[icon] = ov
         end
+        -- Re-sync the shape mask on every press: the shape can change or be
+        -- cleared between presses, and a cleared shapeMask is emptied + hidden
+        -- rather than destroyed -- left attached it would blank the overlay.
+        -- A shape swap keeps the same mask object (re-textured), so it stays.
+        local shape, mask = IconShape(icon)
+        if ov._shapeMask and ov._shapeMask ~= mask then
+            pcall(ov._tex.RemoveMaskTexture, ov._tex, ov._shapeMask)
+            ov._shapeMask = nil
+        end
+        if mask and not ov._shapeMask then
+            pcall(ov._tex.AddMaskTexture, ov._tex, mask)
+            ov._shapeMask = mask
+        end
         local result, cr, cg, cb, bsz = StylePush(ov._tex)
         if not result then ov:Hide(); return nil end
-        local region = icon.Icon or icon
+        -- Shaped icons expand their icon texture past the frame (and expand the
+        -- texcoords to match), so anchor to the frame itself -- the rect the
+        -- shapeMask covers -- rather than to the oversized texture.
+        local region = (shape and icon) or icon.Icon or icon
         ov:ClearAllPoints()
         ov:SetPoint("TOPLEFT", region, "TOPLEFT", 0, 0)
         ov:SetPoint("BOTTOMRIGHT", region, "BOTTOMRIGHT", 0, 0)
-        if result == "border" then
+        local ringTex = shape and ns.CDM_SHAPE_BORDERS and ns.CDM_SHAPE_BORDERS[shape]
+        if result == "border" and ringTex then
             ov._tex:Hide()
+            if ov._borderEdges then for j = 1, 4 do ov._borderEdges[j]:Hide() end end
+            local ring = EnsureShapeRing(ov)
+            ring:SetTexture(ringTex)
+            ring:SetVertexColor(cr, cg, cb, 1)
+            ring:ClearAllPoints(); ring:SetAllPoints(ov)
+            ring:Show()
+        elseif result == "border" then
+            ov._tex:Hide()
+            if ov._shapeRing then ov._shapeRing:Hide() end
             local edges = EnsureBorderEdges(ov)
             for j = 1, 4 do edges[j]:SetVertexColor(cr, cg, cb, 1) end
             edges[1]:ClearAllPoints(); edges[1]:SetPoint("TOPLEFT", ov); edges[1]:SetPoint("TOPRIGHT", ov); edges[1]:SetHeight(bsz); edges[1]:Show()
@@ -9027,6 +9083,7 @@ do
         else
             ov._tex:Show()
             if ov._borderEdges then for j = 1, 4 do ov._borderEdges[j]:Hide() end end
+            if ov._shapeRing then ov._shapeRing:Hide() end
         end
         ov:Show()
         return ov
