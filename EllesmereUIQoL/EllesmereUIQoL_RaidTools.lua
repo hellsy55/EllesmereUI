@@ -990,8 +990,7 @@ local function RefreshPermissions(force)
     end
     lastAssist, lastLeader, lastRaid, lastGrouped = assist, leader, raid, grouped
 
-    -- HasAssist/IsLeader both read true when solo (see their own header --
-    -- that bypass is for the marker buttons below, which stay usable alone).
+    -- HasAssist/IsLeader both read true when solo (see their own header).
     -- These four are real group actions with no meaning outside a group, so
     -- they gate on `grouped` FIRST: assist/leader only count once there is
     -- an actual group to be assist or leader of.
@@ -1002,12 +1001,20 @@ local function RefreshPermissions(force)
 
     -- Secure buttons: cosmetic only, never Enable/Disable (see header).
     -- 0.8 is the grid's resting opacity (hover lifts to 1); 0.4 is the
-    -- dim (no assist, or -- world markers only -- not in a group at all),
-    -- which also suppresses the hover lift. Target markers stay assist-only:
-    -- marking your own target works solo. World markers place on the
-    -- ground for the group to see, which solo has no group to show it to.
+    -- dim (no permission, or -- world markers only -- not in a group at
+    -- all), which also suppresses the hover lift.
+    --
+    -- Markers are NOT gated on `assist` the way the four buttons above are:
+    -- Blizzard only restricts raid target/world markers to leader/assist
+    -- inside an actual RAID. In a plain party (or solo), any member can
+    -- place them from the native UI, so gating on `assist` there dimmed a
+    -- button the server would have honored -- hence `canMark`, which only
+    -- checks leader/assist once `raid` is true. Target markers stay usable
+    -- outside a raid entirely (marking your own target works solo/party).
+    -- World markers still need a group to place for, hence `grouped`.
+    local canMark = (not raid) or assist
     for _, b in ipairs(markerButtons) do
-        local on = assist and (b._kind ~= "world" or grouped)
+        local on = canMark and (b._kind ~= "world" or grouped)
         b._baseAlpha = on and 0.8 or 0.4
         b.icon:SetAlpha(b._baseAlpha)
     end
