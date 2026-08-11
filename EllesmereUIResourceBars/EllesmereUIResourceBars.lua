@@ -7508,10 +7508,25 @@ local function OnEmpowerStop(eventCastID)
             empowerColorB:SetRGBA(cb.gradientR or fR, cb.gradientG or fG, cb.gradientB or fB, cb.gradientA or fA)
             castBarFrame._gradTex:SetGradient(cb.gradientDir or "HORIZONTAL", empowerColorA, empowerColorB)
         elseif cb.gradientEnabled then
-            -- Gradient colors live in the SetGradient endpoints (with Fill
-            -- Opacity baked in); the vertex color must return to plain white
-            -- or the empower tint would keep coloring the gradient.
-            castBarFrame._bar:GetStatusBarTexture():SetVertexColor(1, 1, 1, 1)
+            -- Re-ISSUE the gradient, do not just neutralise the vertex color.
+            -- SetVertexColor REPLACES a texture's gradient rather than
+            -- multiplying it, so the per-stage empower tint above (which paints
+            -- this exact texture with SetVertexColor) already destroyed the
+            -- configured gradient. Whitening the vertex color therefore left a
+            -- plain WHITE fill, and nothing restored it: the gradient is issued
+            -- only where the bar is built, so every later cast in the session
+            -- stayed white until a config edit or reload rebuilt the bar. The
+            -- full-bar branch above already re-issues for the same reason.
+            -- Fill Opacity is baked into both endpoint alphas, matching the
+            -- build path.
+            local fillTex = castBarFrame._bar:GetStatusBarTexture()
+            local fillOp = (cb.fillOpacity or 100) / 100
+            fillTex:SetVertexColor(1, 1, 1, 1)
+            empowerColorA:SetRGBA(fR, fG, fB, fA * fillOp)
+            empowerColorB:SetRGBA(cb.gradientR or fR, cb.gradientG or fG,
+                cb.gradientB or fB, (cb.gradientA or fA) * fillOp)
+            fillTex:SetGradient(cb.gradientDir or "HORIZONTAL",
+                empowerColorA, empowerColorB)
         else
             local fillTex = castBarFrame._bar:GetStatusBarTexture()
             fillTex:SetVertexColor(fR, fG, fB, fA * ((cb.fillOpacity or 100) / 100))
