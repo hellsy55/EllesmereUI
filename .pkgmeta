@@ -25,7 +25,11 @@ move-folders:
 externals:
   EllesmereUIUnitFrames/Libs/oUF:
     url: https://github.com/oUF-wow/oUF
-    tag: latest
+    # PINNED: oUF 14.0.0 (2026-08-10) is a breaking major (colors Enum -> map,
+    # aura rewrite, renamed state attributes). The suite is built and tested
+    # against 13.4.5; only move this pin together with a deliberate, tested
+    # oUF upgrade -- never back to "latest".
+    tag: 13.4.5
   Libs/LibStub:
     url: https://repos.wowace.com/wow/libstub/trunk
     tag: 1.0
@@ -39,7 +43,7 @@ externals:
   Libs/LibKeystone:
     url: https://github.com/BigWigsMods/LibKeystone.git/LibKeystone
   Libs/LibSpecialization:
-    url: https://github.com/BigWigsMods/LibSpecialization
+    url: https://github.com/BigWigsMods/LibSpecialization.git/LibSpecialization
 
 enable-nolib-creation: no
 

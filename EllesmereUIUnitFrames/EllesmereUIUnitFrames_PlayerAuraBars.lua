@@ -3898,6 +3898,12 @@ local RETRY_CAP = 40 -- ~ a few seconds worst case at the backed-off interval; t
 local retryCount = 0
 
 local function TryCreateBars()
+    -- Module-disabled stand-down: EnableBody stamps ns._eufEnabled before this
+    -- handler can run (same PLAYER_LOGIN dispatch, parent enable-drain first,
+    -- module router second, this file's handler third). No stamp = the Unit
+    -- Frames module is off this session, ns.db will never arrive, and erroring
+    -- would spam every login for users who simply disabled the module.
+    if not ns._eufEnabled then return end
     if PAB() then
         CreateBars()
         return

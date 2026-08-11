@@ -1,5 +1,6 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local addonName, ns = ...
+if not (EllesmereUI and EllesmereUI._ModuleNS) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring
 EllesmereUI._ModuleNS[addonName] = ns  -- LOD options files read this module ns via the registry
 
 local math_floor, math_ceil, math_max, math_min, math_abs =
@@ -12312,7 +12313,12 @@ function InitializeFrames()
             if not (uf and uf._leaderIndicator and s) then return end
             local tex = uf._leaderIndicator
             if s.leaderIndicatorEnabled == false then tex:Hide(); return end
+            -- The oUF unit token can still be unassigned when the setup-time
+            -- refresh runs (login/reload timing), and the API rejects a nil
+            -- unit outright. Hide and stand down: the leader/roster/target
+            -- events below re-run this refresh once the unit exists.
             local unit = uf.unit
+            if not unit or (issecretvalue and issecretvalue(unit)) then tex:Hide(); return end
             local isLeader = UnitIsGroupLeader(unit)
             local isAssist = UnitIsGroupAssistant(unit)
             -- Secrecy check MUST run before any truthiness test: boolean-testing
@@ -14384,6 +14390,9 @@ end
 -- always set the pending flag by the time this frame's handler fires -- within the
 -- SAME event dispatch, still inside the combat-reload pre-lockdown window.
 local function EnableBody()
+    -- Consumed by PlayerAuraBars' login retry: absent = the module never enabled
+    -- this session, so ns.db will never arrive and PAB must stand down silently.
+    ns._eufEnabled = true
     InitializeFrames()
     -- Register with unlock mode synchronously: on a combat reload this runs
     -- inside the pre-lockdown window, so the login position pass can resolve
