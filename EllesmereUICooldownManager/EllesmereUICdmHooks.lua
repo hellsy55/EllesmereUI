@@ -4782,7 +4782,17 @@ local function ApplyItemQualityPip(f, itemID, on)
         -- pass retries rather than baking in the miss.
         C_Item.RequestLoadItemDataByID(itemID)
     end
-    if ts and ts.GetItemCraftedQualityInfo then
+    -- Blizzard's own item buttons (SetItemCraftingQualityOverlay in
+    -- ItemButtonTemplate) ask REAGENT quality first and only then CRAFTED, and
+    -- that order is the whole fix: a live probe on this bar had the crafted
+    -- calls answering nil for every potion on it -- ranked consumables carry a
+    -- reagent quality, not a crafted one. Both return the same
+    -- CraftingQualityInfo, so iconInventory comes off whichever answers.
+    if ts and ts.GetItemReagentQualityInfo then
+        local ok, info = pcall(ts.GetItemReagentQualityInfo, link or itemID)
+        atlas = ok and info and info.iconInventory or nil
+    end
+    if not atlas and ts and ts.GetItemCraftedQualityInfo then
         local ok, info = pcall(ts.GetItemCraftedQualityInfo, link or itemID)
         atlas = ok and info and info.iconInventory or nil
     end
@@ -4850,7 +4860,14 @@ SlashCmdList.CDMQUAL = function()
             local id = f._displayItemID or f._presetItemID
             local link = id and C_Item and C_Item.GetItemInfo and select(2, C_Item.GetItemInfo(id))
             local bd = f._ownerBarKey and barDataByKey[f._ownerBarKey]
-            local info, qnum
+            local info, qnum, rinfo, rinfoID
+            if id and ts and ts.GetItemReagentQualityInfo then
+                local ok, r = pcall(ts.GetItemReagentQualityInfo, link or id)
+                rinfo = ok and r or nil
+                -- Bare id as well as the link: the two disagree on some items.
+                local ok2, r2 = pcall(ts.GetItemReagentQualityInfo, id)
+                rinfoID = ok2 and r2 or nil
+            end
             if id and ts and ts.GetItemCraftedQualityInfo then
                 local ok, r = pcall(ts.GetItemCraftedQualityInfo, link or id)
                 info = ok and r or nil
@@ -4859,9 +4876,11 @@ SlashCmdList.CDMQUAL = function()
                 local ok, r = pcall(ts.GetItemCraftedQualityByItemInfo, link or id)
                 qnum = ok and r or nil
             end
-            print(("  %s id=%s shown=%s toggle=%s link=%s info.iconInventory=%s q=%s tex=%s texShown=%s memo=%s"):format(
+            print(("  %s id=%s shown=%s toggle=%s link=%s reagent(link)=%s reagent(id)=%s crafted=%s q=%s tex=%s texShown=%s memo=%s"):format(
                 tostring(key), tostring(id), tostring(f:IsShown()),
                 tostring(bd and bd.showItemQuality), tostring(link ~= nil),
+                tostring(rinfo and rinfo.iconInventory),
+                tostring(rinfoID and rinfoID.iconInventory),
                 tostring(info and info.iconInventory), tostring(qnum),
                 tostring(f._qualityTex ~= nil),
                 tostring(f._qualityTex and f._qualityTex:IsShown()),
