@@ -4964,7 +4964,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return "_placeholder" end,
               setValue=function() end },
             { type="dropdown", text="Frame Strata",
-              tooltip="Controls the order that overlapping elements display in. Set higher to show above other elements. Applies to the selected frame only.",
+              tooltip="Controls the order that overlapping elements display in. Set higher to show above other elements.",
               values = ufStrataValues, order = ufStrataOrder,
               getValue=function() return SGet("frameStrata") or db.profile.frameStrata or "MEDIUM" end,
               setValue=function(v) SSet("frameStrata", v) end });  y = y - h
@@ -12504,6 +12504,26 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(function() updHover(); updTarget(); UpdateHBSwatchVis() end)
                 UpdateHBSwatchVis()
             end
+        end
+
+        -- DISPLAY bottom row for boss: the mini frames carry their Strata
+        -- override in the Bar Texture row's right slot, which boss spends on
+        -- Hover Borders, so boss gets its own row here. Without it nothing in
+        -- the UI writes a boss strata at all -- the main frames' dropdown is
+        -- per-frame and the profile-wide value is only the fallback.
+        if unitKey == "boss" then
+            local bossStrataValues = EllesmereUI.FRAME_STRATA_LABELS
+            local bossStrataOrder = EllesmereUI.FRAME_STRATA_ORDER_BASE
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Strata",
+                  tooltip="Overrides the Frame Strata set in the main frames for this frame only. Controls the order that overlapping frames display in; set higher to show above other frames.",
+                  values = bossStrataValues, order = bossStrataOrder,
+                  getValue=function() return settingsTable.frameStrata or db.profile.frameStrata or "MEDIUM" end,
+                  setValue=function(v)
+                      settingsTable.frameStrata = v
+                      ReloadAndUpdate()
+                  end },
+                { type="label", text="" });  y = y - h
         end
 
         -- DISPLAY bottom row: per-frame Border Size override for ToT / Focus

@@ -9213,9 +9213,13 @@ local function ReloadFrames()
         if type(frame) == "table" and frame.SetFrameStrata then
             -- Any unit with its own settings table can override the global
             -- strata; nil (the default) means "follow the global value".
+            -- GetSettingsForUnit maps boss1..boss5 onto the shared boss table
+            -- and falls back to the player's settings, which is what the
+            -- non-unit entries in `frames` (the class power bar above all)
+            -- should ride with anyway.
             local strata = ufStrata
-            local us = profile[unitKey]
-            if type(us) == "table" and us.frameStrata then strata = us.frameStrata end
+            local us = GetSettingsForUnit(unitKey)
+            if us and us.frameStrata then strata = us.frameStrata end
             frame:SetFrameStrata(strata)
             -- Re-apply or reset custom strata for detached bars
             if frame.BottomTextBar and frame.BottomTextBar._isDetached then
@@ -12820,10 +12824,12 @@ function InitializeFrames()
     for unitKey, frame in pairs(frames) do
         if type(frame) == "table" and frame.SetFrameStrata then
             -- Any unit with its own settings table can override the global
-            -- strata; nil (the default) means "follow the global value".
+            -- strata; nil (the default) means "follow the global value". See
+            -- the matching comment in the other frameStrata-apply pass for why
+            -- this resolves through GetSettingsForUnit.
             local strata = ufStrata
-            local us = db.profile[unitKey]
-            if type(us) == "table" and us.frameStrata then strata = us.frameStrata end
+            local us = GetSettingsForUnit(unitKey)
+            if us and us.frameStrata then strata = us.frameStrata end
             frame:SetFrameStrata(strata)
             if frame.BottomTextBar and frame.BottomTextBar._isDetached then
                 if db.profile.enableCustomBarStratas then
