@@ -9211,12 +9211,11 @@ local function ReloadFrames()
     local ufStrata = profile.frameStrata or "MEDIUM"
     for unitKey, frame in pairs(frames) do
         if type(frame) == "table" and frame.SetFrameStrata then
-            -- Mini frames (ToT / Focus Target / Pet) can override the global strata.
+            -- Any unit with its own settings table can override the global
+            -- strata; nil (the default) means "follow the global value".
             local strata = ufStrata
-            if unitKey == "targettarget" or unitKey == "focustarget" or unitKey == "pet" then
-                local us = profile[unitKey]
-                if us and us.frameStrata then strata = us.frameStrata end
-            end
+            local us = profile[unitKey]
+            if type(us) == "table" and us.frameStrata then strata = us.frameStrata end
             frame:SetFrameStrata(strata)
             -- Re-apply or reset custom strata for detached bars
             if frame.BottomTextBar and frame.BottomTextBar._isDetached then
@@ -12820,12 +12819,11 @@ function InitializeFrames()
     local ufStrata = db.profile.frameStrata or "MEDIUM"
     for unitKey, frame in pairs(frames) do
         if type(frame) == "table" and frame.SetFrameStrata then
-            -- Mini frames (ToT / Focus Target / Pet) can override the global strata.
+            -- Any unit with its own settings table can override the global
+            -- strata; nil (the default) means "follow the global value".
             local strata = ufStrata
-            if unitKey == "targettarget" or unitKey == "focustarget" or unitKey == "pet" then
-                local us = db.profile[unitKey]
-                if us and us.frameStrata then strata = us.frameStrata end
-            end
+            local us = db.profile[unitKey]
+            if type(us) == "table" and us.frameStrata then strata = us.frameStrata end
             frame:SetFrameStrata(strata)
             if frame.BottomTextBar and frame.BottomTextBar._isDetached then
                 if db.profile.enableCustomBarStratas then

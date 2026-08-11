@@ -4964,13 +4964,10 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return "_placeholder" end,
               setValue=function() end },
             { type="dropdown", text="Frame Strata",
-              tooltip="Controls the order that overlapping elements display in. Set higher to show above other elements.",
+              tooltip="Controls the order that overlapping elements display in. Set higher to show above other elements. Applies to the selected frame only.",
               values = ufStrataValues, order = ufStrataOrder,
-              getValue=function() return db.profile.frameStrata or "MEDIUM" end,
-              setValue=function(v)
-                  db.profile.frameStrata = v
-                  ReloadAndUpdate()
-              end });  y = y - h
+              getValue=function() return SGet("frameStrata") or db.profile.frameStrata or "MEDIUM" end,
+              setValue=function(v) SSet("frameStrata", v) end });  y = y - h
 
         -- Show Tooltip For checkbox-dropdown (left region)
         if not EllesmereUI._prebuilding then
@@ -5046,6 +5043,44 @@ initFrame:SetScript("OnEvent", function(self)
             if strataRgn then
                 MakeCogBtn(strataRgn, cogShow)
             end
+        end
+
+        -- Sync icon: Frame Strata (right region) -- pushes this unit's strata to
+        -- the other main frames. Each frame keeps its own value; unset frames
+        -- fall back to the profile-wide default.
+        if not EllesmereUI._prebuilding then
+            local rgn = tipStrataRow._rightRegion
+            local function CurStrata(key)
+                return UNIT_DB_MAP[key]().frameStrata or db.profile.frameStrata or "MEDIUM"
+            end
+            local function ApplyStrataTo(keys)
+                local strata = CurStrata(selectedUnit)
+                for _, key in ipairs(keys) do
+                    if key ~= selectedUnit then
+                        UNIT_DB_MAP[key]().frameStrata = strata
+                    end
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region  = rgn,
+                tooltip = "Apply Frame Strata to all Frames",
+                onClick = function() ApplyStrataTo(GROUP_UNIT_ORDER) end,
+                isSynced = function()
+                    local cur = CurStrata(selectedUnit)
+                    for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        if CurStrata(key) ~= cur then return false end
+                    end
+                    return true
+                end,
+                flashTargets = function() return { rgn } end,
+                multiApply = {
+                    elementKeys   = GROUP_UNIT_ORDER,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return selectedUnit end,
+                    onApply       = function(checkedKeys) ApplyStrataTo(checkedKeys) end,
+                },
+            })
         end
 
         -- Show Decimal on Health Text (global): one decimal on health value
