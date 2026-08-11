@@ -778,6 +778,23 @@ initFrame:SetScript("OnEvent", function(self)
                   end })
             y = y - h
 
+            local tabVisValues = {
+                always    = { text = "Always" },
+                mouseover = { text = "Mouseover" },
+            }
+            local tabVisOrder = { "always", "mouseover" }
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Tab Visibility",
+                  tooltip="Always shows the chat tabs. Mouseover hides them until you move the cursor over the tab bar.",
+                  values=tabVisValues, order=tabVisOrder,
+                  getValue=function() return Cfg("tabVisibility") or "always" end,
+                  setValue=function(v)
+                      Set("tabVisibility", v)
+                      if ECHAT.ApplyTabVisibility then ECHAT.ApplyTabVisibility() end
+                  end },
+                { type="label", text="" })
+            y = y - h
+
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Tab Spacing", min=0, max=10, step=1,
                   disabled=function() return Cfg("extendBgBehindTabs") == true end,

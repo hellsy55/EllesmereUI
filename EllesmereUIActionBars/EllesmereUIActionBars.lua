@@ -126,6 +126,7 @@ local EAB_VTABLE = {
     CooldownFonts = {},
     Hover = {},
     MainBarPageSync = {},
+    Compact = {},
 }
 ns.EAB_VTABLE = EAB_VTABLE
 
@@ -253,6 +254,13 @@ ns.DATA_BAR            = DATA_BAR
 ns.BAR_LOOKUP          = BAR_LOOKUP
 ns.ALL_BARS            = ALL_BARS
 ns.EXTRA_BARS          = EXTRA_BARS
+
+function EAB:BarSupportsAutoCompact(barKey)
+    local info = BAR_LOOKUP[barKey]
+    return info ~= nil and info.count ~= nil
+        and not info.isStance and not info.isPetBar
+        and not info.visibilityOnly
+end
 
 function EAB.VisibilityCompat.ApplyMode(settings, mode)
     if not settings then return "always" end
@@ -519,6 +527,7 @@ for _, info in ipairs(BAR_CONFIG) do
         visHideHousing = false,
         visOnlyInstances = false,
         visHideMounted = false,
+        visShowSkyriding = false,
         visHideNoTarget = false,
         visHideNoEnemy = false,
         hideKeybind = false,
@@ -539,6 +548,7 @@ for _, info in ipairs(BAR_CONFIG) do
         -- nil means "derive from reverseIconOrder" so old profiles keep layout.
         reverseIconOrder = false,
         alwaysShowButtons = true,
+        autoCompactSlots = false,
         showPagingArrows = false,
         pagingArrowsRight = false,
         paging = {},
@@ -5306,6 +5316,116 @@ do
     end
 end
 
+-- Resolve the effective icon count for a bar (override, or its default count).
+function EAB_VTABLE.GetConfiguredNumIcons(key, info, s)
+    local numIcons = s.overrideNumIcons or s.numIcons or info.count
+    if numIcons < 1 then numIcons = info.count end
+    if numIcons > info.count then numIcons = info.count end
+    return numIcons
+end
+
+function EAB_VTABLE.GetEffectiveShowEmpty(key, info, s)
+    -- Auto-Compact owns empty-slot visibility while it's actively packing
+    -- the bar, without mutating the user's saved Always Show Buttons
+    -- preference. No-op for bars whose toggle is off.
+    if EAB_VTABLE.Compact.IsEnabled(key, info, s) then
+        return false
+    end
+    local showEmpty = s.alwaysShowButtons
+    if showEmpty == nil then showEmpty = true end
+    if info.isStance then showEmpty = false end
+    return showEmpty
+end
+
+function EAB_VTABLE.ResolveActionSlot(key, info, btn, index)
+    if btn and btn.GetAttribute then
+        local slot = btn:GetAttribute("action")
+        if type(slot) == "number" and slot > 0 then return slot end
+    end
+
+    -- On a combat /reload the secure setup pass has not assigned the button's
+    -- action attribute yet. The bar's secure actionpage is already available,
+    -- so use it before falling back to the static slot range.
+    local frame = barFrames[key]
+    local page = frame and frame:GetAttribute("actionpage")
+    if type(page) == "number" and page > 0 then
+        return index + (page - 1) * NUM_ACTIONBAR_BUTTONS
+    end
+    local offset = BAR_SLOT_OFFSETS[key]
+    return offset and (offset + index) or nil
+end
+
+function EAB_VTABLE.ButtonHasAction(key, info, btn, index)
+    if not btn then return false end
+    if info.isStance or info.isPetBar then
+        return ButtonHasAction(btn, info.blizzBtnPrefix)
+    end
+    local slot = EAB_VTABLE.ResolveActionSlot(key, info, btn, index)
+    return slot ~= nil and HasAction(slot) or false
+end
+
+-- Auto-Compact. Kept on the existing vtable to avoid consuming any of this
+-- chunk's already-tight Lua 5.1 local-variable budget.
+function EAB_VTABLE.Compact.IsEnabled(key, info, s)
+    return s and s.autoCompactSlots == true
+        and EAB:BarSupportsAutoCompact(key)
+end
+
+-- Item/toy/battlepet drags aren't part of the base spell/macro drag set the
+-- general grid system reacts to, but should still expand a compacted bar so
+-- there's somewhere to drop them.
+EAB_VTABLE.Compact.DragCursorTypes = {
+    action = true, ability = true, spell = true, macro = true, item = true,
+    petaction = true, mount = true, companion = true,
+    flyout = true, equipmentset = true, outfit = true,
+    toy = true, battlepet = true,
+}
+
+function EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType)
+    if cursorType == nil then cursorType = GetCursorInfo() end
+    return cursorType ~= nil
+        and EAB_VTABLE.Compact.DragCursorTypes[cursorType] == true
+end
+
+function EAB_VTABLE.Compact.IsExpanded(key, info, s)
+    if not EAB_VTABLE.Compact.IsEnabled(key, info, s) then return true end
+    -- Quick Keybind, Unlock Mode, and a real cursor drag need every drop/mover
+    -- slot.
+    return _gridState.shown
+        or _quickKeybindState.open
+        or EAB_VTABLE.Compact.unlockExpanded
+        or (EllesmereUI and EllesmereUI._unlockActive)
+end
+
+function EAB_VTABLE.Compact.GetOccupancy(key, info, s, buttons, numIcons)
+    local mask, count, bitValue = 0, 0, 1
+    for i = 1, numIcons do
+        if EAB_VTABLE.ButtonHasAction(key, info, buttons[i], i) then
+            mask = mask + bitValue
+            count = count + 1
+        end
+        bitValue = bitValue * 2
+    end
+    return mask, count
+end
+
+-- Shared by unlock-mode resize handles (setWidth/setHeight) so dragging the
+-- resize handle while actively compacting reverse-engineers button size from
+-- the packed slot count instead of the configured one. Falls back to
+-- numIcons unchanged when Auto-Compact is off, expanded, or buttons aren't
+-- available yet.
+function EAB_VTABLE.Compact.GetEffectiveNumIcons(key, info, s, buttons, numIcons)
+    if EAB_VTABLE.Compact.IsEnabled(key, info, s)
+        and not EAB_VTABLE.Compact.IsExpanded(key, info, s) then
+        local btns = buttons or barButtons[key]
+        if btns then
+            local _, occupied = EAB_VTABLE.Compact.GetOccupancy(key, info, s, btns, numIcons)
+            return max(occupied, 1)
+        end
+    end
+    return numIcons
+end
+
 -- Compute layout for a bar and return a table of per-button data.
 -- Returns: { [i] = { x, y, w, h, show } }, frameW, frameH
 local function ComputeBarLayout(key)
@@ -5315,16 +5435,25 @@ local function ComputeBarLayout(key)
     if not buttons then return {}, 1, 1 end
 
     local s = EAB.db.profile.bars[key]
-    local numIcons = s.overrideNumIcons or s.numIcons or info.count
-    if numIcons < 1 then numIcons = info.count end
-    if numIcons > info.count then numIcons = info.count end
+    local numIcons = EAB_VTABLE.GetConfiguredNumIcons(key, info, s)
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
     if numIcons < 1 then numIcons = 1 end
 
+    local compactEnabled = EAB_VTABLE.Compact.IsEnabled(key, info, s)
+    local compactExpanded = EAB_VTABLE.Compact.IsExpanded(key, info, s)
+    local compacting = compactEnabled and not compactExpanded
+    local occupiedCount = numIcons
+    if compacting then
+        local _
+        _, occupiedCount = EAB_VTABLE.Compact.GetOccupancy(key, info, s, buttons, numIcons)
+    end
+    local layoutIcons = compacting and occupiedCount or numIcons
+    local gridIcons = max(layoutIcons, 1)
+
     local numRows = s.overrideNumRows or s.numRows or 1
     if numRows < 1 then numRows = 1 end
-    local stride = ceil(numIcons / numRows)
-    numRows = ceil(numIcons / stride)
+    local stride = ceil(gridIcons / numRows)
+    numRows = ceil(gridIcons / stride)
     -- Raw coords -- do NOT pre-snap with SnapForScale: PP.Scale truncates and
     -- loses a pixel where PP.mult > 1. Pixel-lock happens below, post-shape.
     local padding = s.buttonPadding or 2
@@ -5359,35 +5488,48 @@ local function ComputeBarLayout(key)
     local extraWC = s._matchExtraPixels or 0
     local extraHC = s._matchExtraPixelsH or 0
 
-    local showEmpty = s.alwaysShowButtons
-    if showEmpty == nil then showEmpty = true end
-    if info.isStance then showEmpty = false end
+    local showEmpty = EAB_VTABLE.GetEffectiveShowEmpty(key, info, s)
 
     -- Icon order flips are constant for the whole grid.
     local rowsUpward = not isVertical and (growDir == "UP" or growDir == "CENTER")
     local colFlip, rowFlip, cornerFill = ns.GetOrderFlips(s, isVertical, rowsUpward)
 
     local result = {}
+    local packedIndex = 0
     for i = 1, info.count do
         local btn = buttons[i]
         if not btn then break end
         if i > numIcons then
             result[i] = { x = 0, y = 0, w = btnW, h = btnH, show = false }
         else
+            local hasAction = EAB_VTABLE.ButtonHasAction(key, info, btn, i)
+            local layoutIndex = i
+            if compacting then
+                if hasAction then
+                    packedIndex = packedIndex + 1
+                    layoutIndex = packedIndex
+                else
+                    layoutIndex = nil
+                end
+            end
+
+            if not layoutIndex then
+                result[i] = { x = 0, y = 0, w = btnW, h = btnH, show = false }
+            else
             local col, row
             if isVertical then
                 if cornerFill then
                     -- Corner modes fill across columns first, then wrap down a
                     -- row (numRows = the column count on vertical bars).
-                    col = (i - 1) % numRows
-                    row = floor((i - 1) / numRows)
+                    col = (layoutIndex - 1) % numRows
+                    row = floor((layoutIndex - 1) / numRows)
                 else
-                    col = floor((i - 1) / stride)
-                    row = (i - 1) % stride
+                    col = floor((layoutIndex - 1) / stride)
+                    row = (layoutIndex - 1) % stride
                 end
             else
-                col = (i - 1) % stride
-                row = floor((i - 1) / stride)
+                col = (layoutIndex - 1) % stride
+                row = floor((layoutIndex - 1) / stride)
             end
             -- Icon order flips first so the width/height-match extras
             -- below derive from the final visual position.
@@ -5404,11 +5546,12 @@ local function ComputeBarLayout(key)
             else
                 yOff = -(row * stepH + extraBeforeH)
             end
-            local show = true
-            if not showEmpty and not (_gridState.shown or ShouldQuickKeybindSurfaceBar(s)) and not ButtonHasAction(btn, info.blizzBtnPrefix) then
-                show = false
-            end
+            local show = not compacting or hasAction
+            if show and not showEmpty
+                and not (_gridState.shown or ShouldQuickKeybindSurfaceBar(s))
+                and not hasAction then show = false end
             result[i] = { x = xOff, y = yOff, w = thisBtnW, h = thisBtnH, show = show }
+            end
         end
     end
 
@@ -5421,6 +5564,9 @@ local function ComputeBarLayout(key)
     local frameHPx = totalRows * btnHPxC + (totalRows - 1) * paddingPxC + extraHC
     local frameW = frameWPx * onePxC
     local frameH = frameHPx * onePxC
+    if compacting and occupiedCount == 0 then
+        frameW, frameH = 1, 1
+    end
     return result, max(frameW, 1), max(frameH, 1)
 end
 
@@ -5638,6 +5784,20 @@ local function LayoutBar(key)
             end
             fillS = table.concat(tf)
         end
+        -- Auto-Compact's on/off, expanded/packed, and occupied-slot state are
+        -- outcome-changing inputs the stamp must cover too -- without this,
+        -- toggling the setting or crossing the skyriding edge would compute
+        -- an identical stamp to the prior pass and silently no-op.
+        local compactSig = ""
+        if EAB:BarSupportsAutoCompact(key) then
+            local cEnabled = EAB_VTABLE.Compact.IsEnabled(key, info, s)
+            local cExpanded = EAB_VTABLE.Compact.IsExpanded(key, info, s)
+            local cMask = 0
+            if cEnabled then
+                cMask = EAB_VTABLE.Compact.GetOccupancy(key, info, s, buttons, nIcoS)
+            end
+            compactSig = (cEnabled and "1" or "0") .. (cExpanded and "1" or "0") .. tostring(cMask)
+        end
         _lbStamp = table.concat({
             tostring(nIcoS), tostring(s.overrideNumRows or s.numRows or 1),
             tostring(s.buttonPadding or 2), tostring(s.orientation), growDirS or "-",
@@ -5653,7 +5813,7 @@ local function LayoutBar(key)
             tostring(_gridState.shown),
             ShouldQuickKeybindSurfaceBar(s) and "1" or "0",
             (EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(key)) and "1" or "0",
-            tostring(fbS), fillS,
+            tostring(fbS), fillS, compactSig,
         }, "|")
         local st = ns._eabLayoutStamp
         if not st then st = {}; ns._eabLayoutStamp = st end
@@ -5662,19 +5822,27 @@ local function LayoutBar(key)
         end
         st[key] = nil
     end
-    local numIcons = s.overrideNumIcons or s.numIcons or info.count
-    if numIcons < 1 then numIcons = info.count end
-    if numIcons > info.count then numIcons = info.count end
+    local numIcons = EAB_VTABLE.GetConfiguredNumIcons(key, info, s)
     if info.isStance then numIcons = GetNumShapeshiftForms() or info.count end
     if numIcons < 1 then numIcons = 1 end
+
+    local compactEnabled = EAB_VTABLE.Compact.IsEnabled(key, info, s)
+    local compactExpanded = EAB_VTABLE.Compact.IsExpanded(key, info, s)
+    local compactMask, occupiedCount = 0, numIcons
+    if compactEnabled then
+        compactMask, occupiedCount = EAB_VTABLE.Compact.GetOccupancy(key, info, s, buttons, numIcons)
+    end
+    local compacting = compactEnabled and not compactExpanded
+    local layoutIcons = compacting and occupiedCount or numIcons
+    local gridIcons = max(layoutIcons, 1)
 
     local numRows = s.overrideNumRows or s.numRows or 1
     if numRows < 1 then numRows = 1 end
 
-    local stride = ceil(numIcons / numRows)
+    local stride = ceil(gridIcons / numRows)
     if stride < 1 then stride = 1 end
     -- Recalculate actual rows needed (avoids empty trailing rows)
-    numRows = ceil(numIcons / stride)
+    numRows = ceil(gridIcons / stride)
     -- Raw coords -- do NOT pre-snap with SnapForScale: PP.Scale truncates and
     -- loses a pixel where PP.mult > 1. Pixel-lock happens below, post-shape.
     local padding = s.buttonPadding or 2
@@ -5714,10 +5882,17 @@ local function LayoutBar(key)
     local extraW = s._matchExtraPixels or 0
     local extraH = s._matchExtraPixelsH or 0
 
-    -- Show empty slots (stance bar always forces this off)
-    local showEmpty = s.alwaysShowButtons
-    if showEmpty == nil then showEmpty = true end
-    if info.isStance then showEmpty = false end
+    -- Show empty slots (stance bar always forces this off; Auto-Compact
+    -- forces this off too while it's actively packing the bar)
+    local showEmpty = EAB_VTABLE.GetEffectiveShowEmpty(key, info, s)
+
+    -- Cache scalar state for the event refresh path. Conditional macros can emit
+    -- ACTIONBAR_SLOT_CHANGED every mouseover; unchanged masks must not reflow.
+    local compactFD = EFD(frame)
+    compactFD.autoCompactEnabled = compactEnabled
+    compactFD.autoCompactExpanded = compactExpanded
+    compactFD.autoCompactMask = compactMask
+    compactFD.autoCompactNumIcons = numIcons
 
     -- Growth direction fixes which edge stays put on resize. UP/CENTER on
     -- horizontal bars stack rows upward (2nd row above 1st); icon order flips
@@ -5725,6 +5900,7 @@ local function LayoutBar(key)
     local rowsUpward = not isVertical and (growDir == "UP" or growDir == "CENTER")
     local colFlip, rowFlip, cornerFill = ns.GetOrderFlips(s, isVertical, rowsUpward)
 
+    local packedIndex = 0
     for i = 1, info.count do
         local btn = buttons[i]
         if not btn then break end
@@ -5737,20 +5913,34 @@ local function LayoutBar(key)
             -- combat page swaps never strand a button hidden.
             btn:Show()
 
+            local hasAction = EAB_VTABLE.ButtonHasAction(key, info, btn, i)
+            local layoutIndex = i
+            if compacting then
+                if hasAction then
+                    packedIndex = packedIndex + 1
+                    layoutIndex = packedIndex
+                else
+                    -- Hidden compact slots share a harmless in-frame parking
+                    -- point. The restricted layout repositions them before it
+                    -- can surface them for a combat-safe grid expansion.
+                    layoutIndex = 1
+                end
+            end
+
             local col, row
             if isVertical then
                 if cornerFill then
                     -- Corner modes fill across columns first, then wrap down a
                     -- row (numRows = the column count on vertical bars).
-                    col = (i - 1) % numRows
-                    row = floor((i - 1) / numRows)
+                    col = (layoutIndex - 1) % numRows
+                    row = floor((layoutIndex - 1) / numRows)
                 else
-                    col = floor((i - 1) / stride)
-                    row = (i - 1) % stride
+                    col = floor((layoutIndex - 1) / stride)
+                    row = (layoutIndex - 1) % stride
                 end
             else
-                col = (i - 1) % stride
-                row = floor((i - 1) / stride)
+                col = (layoutIndex - 1) % stride
+                row = floor((layoutIndex - 1) / stride)
             end
 
             -- Icon order flips first so the width/height-match extras
@@ -5860,6 +6050,9 @@ local function LayoutBar(key)
     local totalRows = isVertical and stride or numRows
     local frameW = totalCols * btnW + (totalCols - 1) * padding + extraW * onePx
     local frameH = totalRows * btnH + (totalRows - 1) * padding + extraH * onePx
+    if compacting and occupiedCount == 0 then
+        frameW, frameH = 1, 1
+    end
 
     -- Sync frame anchor with barPositions before SetSize so the frame grows
     -- from the correct edge (or center). Skip anchored bars: their position
@@ -6107,6 +6300,36 @@ local function LayoutBar(key)
     EAB:ApplyCooldownFontsForBar(key)
     -- Publish the stamp only on a completed pass (cleared on entry above).
     ns._eabLayoutStamp[key] = _lbStamp
+end
+
+function EAB:RefreshAutoCompactLayouts(force)
+    if InCombatLockdown() or not self.db then return end
+    for _, info in ipairs(BAR_CONFIG) do
+        local key = info.key
+        if self:BarSupportsAutoCompact(key) then
+            local s = self.db.profile.bars[key]
+            local frame = barFrames[key]
+            local buttons = barButtons[key]
+            if s and frame and buttons then
+                local enabled = EAB_VTABLE.Compact.IsEnabled(key, info, s)
+                local expanded = EAB_VTABLE.Compact.IsExpanded(key, info, s)
+                local numIcons = EAB_VTABLE.GetConfiguredNumIcons(key, info, s)
+                local mask = 0
+                if enabled then
+                    mask = EAB_VTABLE.Compact.GetOccupancy(key, info, s, buttons, numIcons)
+                end
+                local fd = EFD(frame)
+                if force
+                    or fd.autoCompactEnabled ~= enabled
+                    or fd.autoCompactExpanded ~= expanded
+                    or fd.autoCompactMask ~= mask
+                    or fd.autoCompactNumIcons ~= numIcons then
+                    LayoutBar(key)
+                    self:ApplyAlwaysShowButtons(key)
+                end
+            end
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -7567,10 +7790,7 @@ function EAB:ApplyAlwaysShowButtons(barKey)
     if not info then return end
     local buttons = barButtons[barKey]
     if not buttons then return end
-    local showEmpty = s.alwaysShowButtons
-    if showEmpty == nil then showEmpty = true end
-    -- Stance bar always hides empty slots (count is dynamic per class)
-    if info.isStance then showEmpty = false end
+    local showEmpty = EAB_VTABLE.GetEffectiveShowEmpty(barKey, info, s)
 
     -- Respect icon cutoff (hoisted above the grid half so the signature
     -- below sees every input)
@@ -7633,14 +7853,20 @@ function EAB:ApplyAlwaysShowButtons(barKey)
             local visible = showEmpty or hasAction or quickKeybindVisible
 
             local bfd = EFD(btn)
+            -- Auto-compact hides the parent button, so its empty-slot art can
+            -- remain logically shown at no rendering cost. If secure showgrid
+            -- expands the parent during combat, the drop target is immediately
+            -- visible without insecure child-region mutations.
+            local showSlotArt = visible
+                or EAB_VTABLE.Compact.IsEnabled(barKey, info, s)
             if bfd.slotBG then
-                bfd.slotBG:SetShown(visible)
+                bfd.slotBG:SetShown(showSlotArt)
             end
             if bfd.borders and not (bfd.shapeMask and bfd.shapeMask:IsShown()) then
-                bfd.borders:SetShown(visible)
+                bfd.borders:SetShown(showSlotArt)
             end
             if bfd.shapeBorder then
-                bfd.shapeBorder:SetShown(visible and EFD(bfd.shapeBorder).wantsShow == true)
+                bfd.shapeBorder:SetShown(showSlotArt and EFD(bfd.shapeBorder).wantsShow == true)
             end
 
             -- Stamp the secure-side facts the restricted reveal needs
@@ -8446,8 +8672,10 @@ local function AttachHoverHooks(barKey)
         -- Skip hidden empty buttons (alwaysShowButtons off)
         local s = EAB.db.profile.bars[barKey]
         if s then
-            local showEmpty = s.alwaysShowButtons
-            if showEmpty == nil then showEmpty = true end
+            local info = BAR_LOOKUP[barKey]
+            local showEmpty = info
+                and EAB_VTABLE.GetEffectiveShowEmpty(barKey, info, s)
+                or true
             if not showEmpty then
                 if self ~= frame then
                     -- Individual button: skip if it's hidden (no action)
@@ -8498,6 +8726,53 @@ local function AttachHoverHooks(barKey)
     end
 end
 
+do
+    local function IsSkyriding()
+        return (IsAdvancedFlyableArea and IsAdvancedFlyableArea() and IsFlying and IsFlying()) and true or false
+    end
+    EAB_VTABLE.IsSkyriding = IsSkyriding
+
+    local skyEvt = CreateFrame("Frame")
+    skyEvt:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
+    if EllesmereUI._hasGlidingEvent then
+        skyEvt:RegisterEvent("PLAYER_IS_GLIDING_CHANGED")
+    end
+    skyEvt:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
+    skyEvt:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    skyEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
+    local function SkyEvtRefresh()
+        if EAB.RefreshMouseover then EAB:RefreshMouseover() end
+        if EAB.UpdateSkyridingVisOverride then EAB:UpdateSkyridingVisOverride() end
+        if EAB.RefreshAutoCompactLayouts then EAB:RefreshAutoCompactLayouts() end
+    end
+    skyEvt:SetScript("OnEvent", function(_, event)
+        SkyEvtRefresh()
+        if event == "PLAYER_ENTERING_WORLD" then
+            C_Timer_After(0, SkyEvtRefresh)
+        end
+    end)
+end
+
+function EAB:UpdateSkyridingVisOverride()
+    local s = self.db and self.db.profile and self.db.profile.bars["MainBar"]
+    local active = s and s.visShowSkyriding and GetBonusBarOffset() == 5
+    if active then
+        EAB._skyridingVisForced = true
+        EAB._visOverride = EAB._visOverride or {}
+        if EAB._visOverride["MainBar"] ~= "always" then
+            EAB._visOverride["MainBar"] = "always"
+            self:RefreshRuntimeVisibility()
+        end
+    elseif EAB._skyridingVisForced then
+        EAB._skyridingVisForced = nil
+        if EAB._visOverride and EAB._visOverride["MainBar"] == "always" then
+            EAB._visOverride["MainBar"] = nil
+            self:RefreshRuntimeVisibility()
+        end
+    end
+    if self.RefreshMouseover then self:RefreshMouseover() end
+end
+
 function EAB:RefreshMouseover()
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
@@ -8517,6 +8792,16 @@ function EAB:RefreshMouseover()
                     -- force full opacity regardless of stale mouseover settings.
                     StopFade(frame)
                     frame:SetAlpha(1)
+                elseif key == "MainBar" and EAB._skyridingVisForced then
+                    -- Bonusbar-5 visibility override active ("Always Show
+                    -- While Skyriding"): show fully, bypassing whatever the
+                    -- saved mouseover/visibility setting says.
+                    StopFade(frame)
+                    local skyAlpha = s._savedBarAlpha or s.mouseoverAlpha or 1
+                    frame:SetAlpha(skyAlpha)
+                    local state = hoverStates[key]
+                    if state then state.fadeDir = "in" end
+                    SyncPagingAlpha(skyAlpha)
                 elseif s.mouseoverEnabled then
                     if info.isDataBar then
                         AttachDataBarHoverHooks(key)
@@ -8527,10 +8812,20 @@ function EAB:RefreshMouseover()
                         AttachExtraBarHoverHooks(info)
                     end
                     StopFade(frame)
-                    frame:SetAlpha(0)
-                    local state = hoverStates[key]
-                    if state then state.fadeDir = "out" end
-                    if key == "MainBar" then SyncPagingAlpha(0) end
+                    if s.visShowSkyriding and EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding() then
+                        -- Skip the fade-to-0 while airborne on a skyriding mount:
+                        -- show at the bar's hovered alpha as if moused-over.
+                        local skyAlpha = s._savedBarAlpha or 1
+                        frame:SetAlpha(skyAlpha)
+                        local state = hoverStates[key]
+                        if state then state.fadeDir = "in" end
+                        if key == "MainBar" then SyncPagingAlpha(skyAlpha) end
+                    else
+                        frame:SetAlpha(0)
+                        local state = hoverStates[key]
+                        if state then state.fadeDir = "out" end
+                        if key == "MainBar" then SyncPagingAlpha(0) end
+                    end
                 else
                     StopFade(frame)
                     frame:SetAlpha(s.mouseoverAlpha or 1)
@@ -9155,6 +9450,7 @@ do
 local MYSLOT_VIS_FIELDS = {
     "barVisibility", "alwaysHidden", "mouseoverEnabled", "mouseoverAlpha",
     "_savedBarAlpha", "combatShowEnabled", "combatHideEnabled", "alwaysShowButtons",
+    "autoCompactSlots",
     -- Multi-select set: backed up by reference (the shared setter assigns a
     -- fresh table on every write, so the captured table never mutates) and
     -- restored/cleared like any other field.
@@ -9217,6 +9513,7 @@ function EAB:SetMyslotForceShow(on)
                 s.combatShowEnabled = false
                 s.combatHideEnabled = false
                 s.alwaysShowButtons = true
+                s.autoCompactSlots = false
             end
         end
     else
@@ -9229,6 +9526,7 @@ function EAB:SetMyslotForceShow(on)
         self:RefreshRuntimeVisibility()
         self:RefreshMouseover()
         self:ApplyCombatVisibility()
+        self:RefreshAutoCompactLayouts(true)
         for _, info in ipairs(BAR_CONFIG) do
             self:ApplyAlwaysShowButtons(info.key)
         end
@@ -9408,10 +9706,10 @@ function EAB:ApplyClickThroughForBar(barKey)
     -- Bar frame only needs mouse motion (for hover detection); clicks pass through
     -- to the buttons or to frames behind the bar.
     SafeEnableMouseMotionOnly(frame, enable or motionOnly)
-    local showEmpty = s.alwaysShowButtons
-    if showEmpty == nil then showEmpty = true end
     local info = BAR_LOOKUP[barKey]
-    if info and info.isStance then showEmpty = false end
+    local showEmpty = info
+        and EAB_VTABLE.GetEffectiveShowEmpty(barKey, info, s)
+        or true
     for i = 1, #buttons do
         local btn = buttons[i]
         if btn then
@@ -11444,6 +11742,7 @@ local function OnGridChange()
     if _gridState.shown and _gridState._lastTime and (now - _gridState._lastTime) < 0.1 then return end
     _gridState._lastTime = now
     _gridState.shown = true
+    EAB:RefreshAutoCompactLayouts()
 
     -- Propagate showgrid to the controller so the secure environment
     -- knows buttons should be visible (handles combat transitions).
@@ -12223,8 +12522,14 @@ function EAB:OnInitialize()
 
     -- MicroBar position is fully Blizzard-owned (Edit Mode). No anchor
     -- flipping needed. Stubs kept so callers don't error.
-    _G._EAB_UnlockModeOpen = function() end
-    _G._EAB_UnlockModeClose = function() end
+    _G._EAB_UnlockModeOpen = function()
+        EAB_VTABLE.Compact.unlockExpanded = true
+        EAB:RefreshAutoCompactLayouts(true)
+    end
+    _G._EAB_UnlockModeClose = function()
+        EAB_VTABLE.Compact.unlockExpanded = false
+        EAB:RefreshAutoCompactLayouts(true)
+    end
 
     _G._EAB_ApplyKeyDown = function() ApplyKeyDownCVar() end
     _G._EAB_Apply = function()
@@ -13184,6 +13489,9 @@ function EAB:FinishSetup()
 
     self:RegisterEvent("CURSOR_CHANGED", function()
         local cursorType = GetCursorInfo()
+        if EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType) then
+            EAB:RefreshAutoCompactLayouts()
+        end
         if cursorType then
             if DRAG_TYPES[cursorType] then
                 SetDragVisible(true)
@@ -13228,6 +13536,13 @@ function EAB:FinishSetup()
                         EAB:RefreshRuntimeVisibility()
                     end
                 end
+            elseif EAB_VTABLE.Compact.IsSupportedDragCursor(cursorType) then
+                -- Compact-only cursor types (item/toy/battlepet/etc.) don't
+                -- surface the classic mouseover/Never-bar behavior, but still
+                -- need the grid held open so newly-expanded slots stay visible.
+                if not _gridState.shown then
+                    OnGridChange()
+                end
             end
         else
             SetDragVisible(false)
@@ -13238,6 +13553,7 @@ function EAB:FinishSetup()
                     -- Drag force-showed grids: the stamps no longer reflect
                     -- button state, so every bar must re-assert.
                     if ns._asbStamp then wipe(ns._asbStamp) end
+                    self:RefreshAutoCompactLayouts()
                     for _, info in ipairs(BAR_CONFIG) do
                         self:ApplyAlwaysShowButtons(info.key)
                     end
@@ -13311,6 +13627,7 @@ function EAB:FinishSetup()
         C_Timer_After(0, function()
             _gridState.visPending = false
             if _gridState.shown then return end
+            self:RefreshAutoCompactLayouts()
             for _, info in ipairs(BAR_CONFIG) do
                 self:ApplyAlwaysShowButtons(info.key)
             end
@@ -13505,6 +13822,7 @@ function EAB:FinishSetup()
         -- causing the button to be hidden as empty.
         C_Timer.After(0, function()
             if InCombatLockdown() then return end
+            self:RefreshAutoCompactLayouts()
             for _, info2 in ipairs(BAR_CONFIG) do
                 self:ApplyAlwaysShowButtons(info2.key)
             end
@@ -13540,6 +13858,7 @@ function EAB:FinishSetup()
             _gridState.spellsPending = false
             LayoutBar("StanceBar")
             self:RefreshRuntimeVisibility() -- form count may have changed; re-eval stance bar show/hide
+            self:RefreshAutoCompactLayouts()
             -- Content-signature gate: SPELLS_CHANGED also fires mid-combat on
             -- spell-override flips (proc morphs), where slot CONTENTS are identical and
             -- the full AlwaysShow + ForceButtonRefresh sweep below (~140 buttons;
@@ -15988,6 +16307,8 @@ end
 
 local function EAB_UpdateQuickKeybindVisibility(show)
     if InCombatLockdown() then return end
+
+    EAB:RefreshAutoCompactLayouts()
 
     for _, info in ipairs(BAR_CONFIG) do
         local key = info.key

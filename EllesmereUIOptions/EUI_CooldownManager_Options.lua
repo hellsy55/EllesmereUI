@@ -8770,6 +8770,7 @@ initFrame:SetScript("OnEvent", function(self)
                         if not t then return end
                         if t.reverseSwipe then ns._cdmAnyReverseSwipe = true end
                         if t.hideCDSwipe then ns._cdmAnyHideCDSwipe = true end
+                        if t.activeSwipeReverse then ns._cdmAnyActiveSwipeReverse = true end
                         if (tonumber(t.thresholdSeconds) or 0) > 0 then ns._cdmAnyThresholdText = true end
                         if t.maxStacksGlow and t.maxStacksGlow > 0 then ns._cdmAnyMaxStacksGlow = true end
                         if t.desatNotActive then ns._cdmAnyDesatNotActive = true end
@@ -8823,6 +8824,7 @@ initFrame:SetScript("OnEvent", function(self)
                         glowColorR = true, glowColorG = true, glowColorB = true,
                         cdStateEffect = true, cdStateLowerAlpha = true,
                         reverseSwipe = true, hideCDSwipe = true,
+                        activeSwipeReverse = true,
                         thresholdSeconds = true, thresholdDecimals = true,
                         thresholdColorEnabled = true, thresholdColorR = true,
                         thresholdColorG = true, thresholdColorB = true,
@@ -11295,6 +11297,23 @@ initFrame:SetScript("OnEvent", function(self)
                                                 end
                                             end } })
 
+                            -- Reverse Active Swipe: flips only this icon's active-state
+                            -- overlay swipe direction, independent of Cooldown Swipe (which
+                            -- reverses the real cooldown). Default off. Stored in the profile
+                            -- customActiveStates so it travels with the spell/preset/trinket.
+                            MakeSubnavRow("Reverse Active Swipe", REVERSE_SWIPE_ITEMS,
+                                function() return cas.activeSwipeReverse and true or nil end,
+                                function(v)
+                                    SetCasOwn("activeSwipeReverse", v or nil)
+                                    if v then ns._cdmAnyActiveSwipeReverse = true end
+                                    if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                                    if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                                end,
+                                function() return cas.activeSwipeReverse == nil end,
+                                nil,
+                                { apply = { keys = { "activeSwipeReverse" },
+                                            write = function(t, v) t.activeSwipeReverse = v or false end } })
+
                             -- Active State Glow
                             MakeSubnavRow("Active State Glow", ACTIVE_GLOW_ITEMS,
                                 function()
@@ -11585,6 +11604,32 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end)
                         activeRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
+
+                    -- 2a. Reverse Active Swipe: flips only this icon's active-state
+                    -- overlay swipe direction, independent of Cooldown Swipe (which
+                    -- reverses the real cooldown). Default off.
+                    local rangeSwipeRow = MakeSubnavRow("Reverse Active Swipe", REVERSE_SWIPE_ITEMS,
+                        function() return ss.activeSwipeReverse and true or nil end,
+                        function(v)
+                            EnsureSS(); SetOwn("activeSwipeReverse", v or nil)
+                            if v then ns._cdmAnyActiveSwipeReverse = true end
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.activeSwipeReverse == nil end,
+                        nil,
+                        { apply = { keys = { "activeSwipeReverse" },
+                                    write = function(t, v) t.activeSwipeReverse = v or false end } })
+                    if isCustomInjected and rangeSwipeRow then
+                        rangeSwipeRow:SetAlpha(0.35)
+                        rangeSwipeRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(rangeSwipeRow, customDisabledTip)
+                            end
+                        end)
+                        rangeSwipeRow:SetScript("OnLeave", function()
                             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                         end)
                     end

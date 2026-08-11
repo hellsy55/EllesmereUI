@@ -7,6 +7,14 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local L = EllesmereUI.RegisterLocale("itIT")
 if not L then return end
 
+-- Cast Bar: cancelled/interrupted cast display
+L["CANCELLED / INTERRUPTED CAST"] = "LANCIO ANNULLATO / INTERROTTO"
+L["Show Cancelled Cast"] = "Mostra lancio annullato"
+L["Show Interrupted Cast"] = "Mostra lancio interrotto"
+L["Spell Cancelled"] = "Incantesimo annullato"
+L["Show a brief message when you cancel your own cast."] = "Mostra brevemente un messaggio quando annulli il tuo lancio."
+L["Show a brief message when another player or NPC interrupts your cast."] = "Mostra brevemente un messaggio quando un altro giocatore o PNG interrompe il tuo lancio."
+
 L["BLIZZARD POPUPS & GAME MENU"] = "POPUP BLIZZARD E MENU DI GIOCO"
 L["Reskin Popups and Menus"] = "Rivesti popup e menu"
 L["Reskins Blizzard's right-click context menus and pop-up dialogs with the EUI dark style. Requires reload to apply."] = "Riveste i menu contestuali e le finestre popup di Blizzard con lo stile scuro EUI. Richiede il ricaricamento dell'interfaccia."

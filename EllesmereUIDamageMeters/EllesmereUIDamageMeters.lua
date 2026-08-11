@@ -141,6 +141,8 @@ local DM_DEFAULTS = {
             hdrTextOffX     = 0,
             hdrTextOffY     = 0,
             hdrIconSize     = 22,
+            hdrIconOffsetX  = 0,
+            hdrIconOffsetY  = 0,
             hdrMouseoverIcons = false,
             hdrTextUseAccent = true,
             hdrTextColor    = { r = 1, g = 1, b = 1 },
@@ -283,11 +285,13 @@ end
 local function LayoutHeaderButtons(W, cfg, iconSz)
     if not W or not W.header or not W.hdrBtns then return end
     local btnPad = -2
+    local offX = (cfg and cfg.hdrIconOffsetX) or 0
+    local offY = (cfg and cfg.hdrIconOffsetY) or 0
     local layoutBtns = GetHeaderLayoutButtons(W, cfg)
     for bi, btn in ipairs(layoutBtns) do
         if iconSz then btn:SetSize(iconSz, iconSz) end
         btn:ClearAllPoints()
-        btn:SetPoint("RIGHT", W.header, "RIGHT", -(iconSz * (bi - 1) + btnPad * bi + 2), 0)
+        btn:SetPoint("RIGHT", W.header, "RIGHT", -(iconSz * (bi - 1) + btnPad * bi + 2) + offX, offY)
     end
 end
 
@@ -2695,7 +2699,12 @@ local function CreateDMWindow(winIdx)
         -- Icons hidden until hover occupy no space, so the title gets the whole header instead of truncating against a gap that isn't there
         if W._hdrIconsShown == false then n = 0 end
         local headerW = frame:GetWidth() or (wdb.width or 300)
-        local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2
+        -- + offX mirrors the same term LayoutHeaderButtons adds to each
+        -- button's SetPoint, so a negative hdrIconOffsetX (icons dragged
+        -- toward the title) correctly shrinks the room left for the title
+        -- instead of letting truncation math run as if the icons were still
+        -- in their default spot.
+        local btnLeft = headerW - (iconSz * n) - (btnPad * n) - 2 + (c.hdrIconOffsetX or 0)
         local avail = btnLeft - (6 + (c.hdrTextOffX or 0)) - 6
         if avail < 1 then avail = 1 end
         if fs:GetStringWidth() <= avail then return end

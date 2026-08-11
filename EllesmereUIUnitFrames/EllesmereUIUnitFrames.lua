@@ -440,6 +440,22 @@ local defaults = {
             healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
+            castbarIconDivider = false,
+            castbarBorderTexture = "solid",
+            castbarBorderSize = 1,
+            castbarBorderR = 0, castbarBorderG = 0, castbarBorderB = 0, castbarBorderA = 1,
+            castbarBorderBehind = false,
+            cancelledCastEnabled = false,
+            cancelledCastDuration = 1.5,
+            cancelledCastR = 0.95, cancelledCastG = 0.55, cancelledCastB = 0.10, cancelledCastA = 1,
+            interruptedCastEnabled = false,
+            interruptedCastDuration = 1.5,
+            interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
         },
         target = {
             frameWidth = 181,
@@ -683,6 +699,25 @@ local defaults = {
             healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
+            oorAlpha = 0.4,
+            castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
+            castbarIconDivider = false,
+            castbarBorderTexture = "solid",
+            castbarBorderSize = 1,
+            castbarBorderR = 0, castbarBorderG = 0, castbarBorderB = 0, castbarBorderA = 1,
+            castbarBorderBehind = false,
+            cancelledCastEnabled = false,
+            cancelledCastDuration = 1.5,
+            cancelledCastR = 0.95, cancelledCastG = 0.55, cancelledCastB = 0.10, cancelledCastA = 1,
+            interruptedCastEnabled = false,
+            interruptedCastDuration = 1.5,
+            interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
+            interruptedCastShowSource = true,
         },
         targettarget = {
             frameWidth = 101,
@@ -715,6 +750,10 @@ local defaults = {
             healthReverseFill = false,
             healthVerticalFill = false,
             smoothBars = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            powerTextStrata = "inherit",
         },
         -- Focus Target: independent clone of Target of Target defaults. MUST stay
         -- byte-identical to the targettarget block above (old shared totPet migrates
@@ -750,6 +789,10 @@ local defaults = {
             healthReverseFill = false,
             healthVerticalFill = false,
             smoothBars = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            powerTextStrata = "inherit",
         },
         pet = {
             frameWidth = 101,
@@ -782,6 +825,10 @@ local defaults = {
             healthReverseFill = false,
             healthVerticalFill = false,
             smoothBars = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            powerTextStrata = "inherit",
         },
         focus = {
             frameWidth = 160,
@@ -950,6 +997,30 @@ local defaults = {
             healthVerticalFill = false,
             smoothBars = false,
             powerReverseFill = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
+            oorAlpha = 0.4,
+            castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
+            castbarIconDivider = false,
+            castbarBorderTexture = "solid",
+            castbarBorderSize = 1,
+            castbarBorderR = 0, castbarBorderG = 0, castbarBorderB = 0, castbarBorderA = 1,
+            castbarBorderBehind = false,
+            cancelledCastEnabled = false,
+            cancelledCastDuration = 1.5,
+            cancelledCastR = 0.95, cancelledCastG = 0.55, cancelledCastB = 0.10, cancelledCastA = 1,
+            interruptedCastEnabled = false,
+            interruptedCastDuration = 1.5,
+            interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
+            interruptedCastShowSource = true,
+            castbarRaidMarkerEnabled = false,
+            castbarRaidMarkerSide = "right",
+            castbarRaidMarkerSize = 16,
+            castbarRaidMarkerX = 0,
+            castbarRaidMarkerY = 0,
         },
         boss = {
             frameWidth = 160,
@@ -1086,6 +1157,22 @@ local defaults = {
             healthReverseFill = false,
             healthVerticalFill = false,
             smoothBars = false,
+            leftTextStrata = "inherit",
+            rightTextStrata = "inherit",
+            centerTextStrata = "inherit",
+            extraTextStrata = "inherit",
+            powerTextStrata = "inherit",
+            castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
+            castbarBorderTexture = "solid",
+            castbarBorderSize = 1,
+            castbarBorderR = 0, castbarBorderG = 0, castbarBorderB = 0, castbarBorderA = 1,
+            castbarBorderBehind = false,
+            cancelledCastEnabled = false,
+            cancelledCastDuration = 1.5,
+            cancelledCastR = 0.95, cancelledCastG = 0.55, cancelledCastB = 0.10, cancelledCastA = 1,
+            interruptedCastEnabled = false,
+            interruptedCastDuration = 1.5,
+            interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
         },
         enabledFrames = {
             player = true,
@@ -5481,12 +5568,119 @@ local function NotifyCastbarEnded(castbar)
     end
 end
 
+local function ApplyConfigCastbarBorder(castbarBg, settings)
+    if not castbarBg or not settings then return end
+    local borderFrame = castbarBg._borderFrame
+    if not borderFrame then
+        borderFrame = CreateFrame("Frame", nil, castbarBg)
+        borderFrame:SetAllPoints(castbarBg)
+        castbarBg._borderFrame = borderFrame
+    end
+    local castbar = castbarBg._statusBar
+    local bgLevel = castbarBg:GetFrameLevel()
+    if castbar then castbar:SetFrameLevel(bgLevel + 2) end
+    -- "Show Behind" means behind the complete castbar background, not merely
+    -- behind the StatusBar fill.  Keep the border below its parent level so the
+    -- background texture and fill both render over it (matches the preview).
+    borderFrame:SetFrameLevel(settings.castbarBorderBehind and math.max(0, bgLevel - 1) or (bgLevel + 5))
+    EllesmereUI.ApplyBorderStyle(borderFrame, settings.castbarBorderSize or 1,
+        settings.castbarBorderR or 0, settings.castbarBorderG or 0,
+        settings.castbarBorderB or 0, settings.castbarBorderA == nil and 1 or settings.castbarBorderA,
+        settings.castbarBorderTexture or "solid",
+        settings.castbarBorderTextureOffset, settings.castbarBorderTextureOffsetY,
+        settings.castbarBorderTextureShiftX, settings.castbarBorderTextureShiftY,
+        "unitframes", settings.castbarBorderSize or 1)
+end
+
+local function ApplyCastbarIconDivider(castbar, inWidth, onRight, enabled)
+    if not castbar then return end
+    local iconFrame = castbar._iconFrame
+    if not iconFrame then return end
+    local divider = castbar._iconDivider
+    if not divider then
+        divider = CreateFrame("Frame", nil, castbar:GetParent())
+        divider:SetFrameLevel(castbar:GetFrameLevel() + 10)
+        local tex = divider:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints()
+        tex:SetColorTexture(0, 0, 0, 1)
+        castbar._iconDivider = divider
+    end
+    divider:ClearAllPoints()
+    -- Center the one-physical-pixel strip on the exact icon/bar seam. Anchoring
+    -- to the icon edge keeps it pixel-perfect on either side and at every scale.
+    local edge = onRight and "LEFT" or "RIGHT"
+    divider:SetPoint("TOP", iconFrame, "TOP" .. edge, 0, 0)
+    divider:SetPoint("BOTTOM", iconFrame, "BOTTOM" .. edge, 0, 0)
+    divider:SetWidth((PP and PP.mult) or 1)
+    divider:SetShown(enabled == true and inWidth == true)
+end
+
+local function ApplyConfigCastbarIconBorder(castbar, settings)
+    local iconFrame = castbar and castbar._iconFrame
+    if not iconFrame or not settings then return end
+    local castbarBg = castbar:GetParent()
+    local borderFrame = castbar._iconBorderFrame
+    if not borderFrame then
+        borderFrame = CreateFrame("Frame", nil, castbarBg)
+        borderFrame:SetAllPoints(iconFrame)
+        castbar._iconBorderFrame = borderFrame
+    end
+    local isPlayer = settings.showPlayerCastIcon ~= nil
+    local inWidth = isPlayer
+        and settings.showPlayerCastIcon ~= false and settings.playerCastbarIconInWidth ~= false
+        or (not isPlayer and settings.showCastIcon ~= false and settings.castbarIconInWidth ~= false)
+    local size = inWidth and 0 or (settings.castbarBorderSize or 1)
+    local bgLevel = castbarBg:GetFrameLevel()
+    -- A detached icon is an independent foreground element. Keep its artwork
+    -- above the castbar; when Show Behind is enabled, place its border just
+    -- below that artwork instead of forcing it into the foreground.
+    local iconLevel = inWidth and (bgLevel + 2) or (bgLevel + 7)
+    iconFrame:SetFrameLevel(iconLevel)
+    if inWidth then
+        borderFrame:SetFrameLevel(settings.castbarBorderBehind and math.max(0, bgLevel - 1) or (bgLevel + 5))
+    else
+        borderFrame:SetFrameLevel(settings.castbarBorderBehind and math.max(0, iconLevel - 1) or (bgLevel + 9))
+    end
+    EllesmereUI.ApplyBorderStyle(borderFrame, size,
+        settings.castbarBorderR or 0, settings.castbarBorderG or 0,
+        settings.castbarBorderB or 0, settings.castbarBorderA == nil and 1 or settings.castbarBorderA,
+        settings.castbarBorderTexture or "solid",
+        settings.castbarBorderTextureOffset, settings.castbarBorderTextureOffsetY,
+        settings.castbarBorderTextureShiftX, settings.castbarBorderTextureShiftY,
+        "unitframes", settings.castbarBorderSize or 1)
+    local icon = castbar.Icon
+    if icon then
+        icon:ClearAllPoints()
+        local inset = (not inWidth and (settings.castbarBorderTexture or "solid") == "solid" and size > 0) and 1 or 0
+        icon:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", inset, -inset)
+        icon:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMRIGHT", -inset, inset)
+    end
+end
+
 local function CreateCastBar(frame, unit, settings)
     local settings = GetSettingsForUnit(unit)
     
     -- Standalone element parented to the oUF frame for compatibility, but sized
     -- and positioned independently.
     local castbarBg = CreateFrame("Frame", nil, frame)
+
+    -- Target/Focus/Boss only: alpha inherits multiplicatively down the parent
+    -- chain, so as long as castbarBg is a child of "frame" the whole-frame
+    -- Out of Range Alpha / Out of Combat fade (applied to "frame" itself)
+    -- always caps how opaque the Castbar can ever render, no matter what the
+    -- independent Cast Bar-only Out of Range Alpha sets on the Castbar's own
+    -- alpha. Reparent to whatever "frame" is itself parented to (unaffected
+    -- by any of the fades above) and mirror real Show/Hide so the Castbar
+    -- still disappears whenever the unit frame does (e.g. losing target/focus).
+    if unit == "target" or unit == "focus" or (unit and unit:match("^boss%d$")) then
+        local cbParent = frame:GetParent() or UIParent
+        castbarBg:SetParent(cbParent)
+        castbarBg:SetFrameStrata(frame:GetFrameStrata())
+        castbarBg:SetFrameLevel(frame:GetFrameLevel() + 1)
+        if not frame:IsShown() then castbarBg:Hide() end
+        frame:HookScript("OnShow", function() castbarBg:Show() end)
+        frame:HookScript("OnHide", function() castbarBg:Hide() end)
+    end
 
     -- Width/height always come from settings; nothing is auto-derived.
     local cbWidth, cbHeight
@@ -5517,16 +5711,25 @@ local function CreateCastBar(frame, unit, settings)
     castbarBg._bgTex = bgTex
 
     local castbar = CreateFrame("StatusBar", nil, castbarBg)
+    castbarBg._statusBar = castbar
     PP.Point(castbar, "TOPLEFT", castbarBg, "TOPLEFT", 0, 0)
     PP.Point(castbar, "BOTTOMRIGHT", castbarBg, "BOTTOMRIGHT", 0, 0)
     castbar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     castbar:GetStatusBarTexture():SetHorizTile(false)
     castbar:SetReverseFill(settings.castReverseFill and true or false)
 
-    -- Borders draw on the castbar itself (same frame level as the fill texture) so
-    -- the OVERLAY border sits above the ARTWORK fill. On castbarBg they would land
-    -- BEHIND the fill, since castbar is its child and draws above it.
-    PP.CreateBorder(castbar, 0, 0, 0, 1, 1, "OVERLAY", 0)
+    local hasConfigBorder = unit == "player" or unit == "target" or unit == "focus" or (unit and unit:match("^boss"))
+    if hasConfigBorder then
+        -- A dedicated frame lets textured borders sit either above the fill or
+        -- behind the complete cast bar (Border Style / Show Behind options).
+        ApplyConfigCastbarBorder(castbarBg, settings)
+    else
+        -- Other unit cast bars retain their existing fixed one-pixel border.
+        -- Borders draw on the castbar itself (same frame level as the fill texture) so
+        -- the OVERLAY border sits above the ARTWORK fill. On castbarBg they would land
+        -- BEHIND the fill, since castbar is its child and draws above it.
+        PP.CreateBorder(castbar, 0, 0, 0, 1, 1, "OVERLAY", 0)
+    end
 
 
     -- Three-zone cast bar text layout matching nameplates: [spell name LEFT 42%]
@@ -5670,7 +5873,7 @@ local function CreateCastBar(frame, unit, settings)
     castbar._shieldedTint = shieldedTint
 
     -- Cast bar reuses the unit's health bar texture (overridden donor-aware in ReloadFrames).
-    ns.ApplyCastBarTexture(castbar, (settings and settings.healthBarTexture) or db.profile.healthBarTexture or "none")
+    ns.ApplyCastBarTexture(castbar, (settings and (settings.castbarTexture or settings.healthBarTexture)) or db.profile.healthBarTexture or "none")
     ns.ApplyCastFillOpacity(castbar, settings)
 
     local function OnCastbarCastActive(self)
@@ -5790,8 +5993,9 @@ local function CreateCastBar(frame, unit, settings)
     local iconBg = iconFrame:CreateTexture(nil, "BACKGROUND")
     iconBg:SetAllPoints()
     iconBg:SetColorTexture(0, 0, 0, 1)
-    -- 1px black border via unified PP system
-    PP.CreateBorder(iconFrame, 0, 0, 0, 1)
+    -- 1px black border via unified PP system (config-driven border takes over
+    -- below for units that support the Border Style options).
+    if not hasConfigBorder then PP.CreateBorder(iconFrame, 0, 0, 0, 1) end
     local iconTex = iconFrame:CreateTexture(nil, "ARTWORK")
     iconTex:SetPoint("TOPLEFT", iconFrame, "TOPLEFT", 1, -1)
     iconTex:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMRIGHT", -1, 1)
@@ -5802,6 +6006,8 @@ local function CreateCastBar(frame, unit, settings)
     -- Initial icon/fill layout (re-applied on every reload by the per-unit
     -- update paths and whenever the cast-bar height changes).
     LayoutCastbarIcon(castbar, CastIconInWidth(unit, settings), cbHeight, CastIconOnRight(unit, settings), CastIconOffsets(unit, settings))
+    ApplyCastbarIconDivider(castbar, CastIconInWidth(unit, settings), CastIconOnRight(unit, settings), settings.castbarIconDivider)
+    if hasConfigBorder then ApplyConfigCastbarIconBorder(castbar, settings) end
 
     return castbar
 end
@@ -5835,6 +6041,13 @@ local function SetupShowOnCastBar(frame, unit)
     local savedInterruptHook = castbar.PostCastInterruptible
 
     castbar.PostCastStart = function(self, ...)
+        -- A real cast always replaces a pending outcome message immediately.
+        self._eufOutcomeToken = (self._eufOutcomeToken or 0) + 1
+        self._eufOutcomeVisible = nil
+        self._eufCastActive = true
+        if self._outcomeFrame then self._outcomeFrame:Hide() end
+        if self._outcomeIconFrame then self._outcomeIconFrame:Hide() end
+        if self.Icon then self._eufLastCastIcon = self.Icon:GetTexture() end
         local bg = self:GetParent()
         if bg then
             -- Boss: re-assert the configured width (castbarWidth>0=custom, 0=match
@@ -5947,9 +6160,200 @@ local function SetupShowOnCastBar(frame, unit)
             if bg then bg:Hide() end
         end
     end
-    castbar.PostCastStop = dismissCastBar
-    castbar.PostChannelStop = dismissCastBar
+    castbar.PostCastStop = function(self)
+        self._eufCastActive = nil
+        dismissCastBar(self)
+    end
+    castbar.PostChannelStop = castbar.PostCastStop
     castbar.PostCastFail = dismissCastBar
+
+    -- oUF hides failed foreign casts immediately. A separate unit-event
+    -- listener restores Target/Focus for the configured outcome duration.
+    -- _eufOutcomeVisible deliberately overrides Hide When Idle until its timer
+    -- expires; afterwards the normal inactive visibility rule takes over.
+    if unit == "player" or unit == "target" or unit == "focus" or (unit and unit:match("^boss%d+$")) then
+        local outcomeEvents = CreateFrame("Frame", nil, castbarBg)
+        outcomeEvents:SetScript("OnEvent", function(_, event, eventUnit, ...)
+            local s = GetSettingsForUnit(unit)
+            if not (s.cancelledCastEnabled or s.interruptedCastEnabled) then return end
+            if event == "UNIT_HEALTH" or event == "UNIT_FLAGS"
+               or event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_FOCUS_CHANGED" then
+                if eventUnit and eventUnit ~= unit then return end
+                local dead = UnitIsDeadOrGhost(unit)
+                local deadIsSecret = issecretvalue and issecretvalue(dead)
+                local unitGone = not UnitExists(unit)
+                if unitGone or (not deadIsSecret and dead == true)
+                   or event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_FOCUS_CHANGED" then
+                    -- Death often emits an INTERRUPTED event immediately after
+                    -- the health update. Invalidate the active cast first so
+                    -- that event cannot create a misleading outcome message.
+                    castbar._eufCastActive = nil
+                    castbar._eufOutcomeVisible = nil
+                    castbar._eufOutcomeToken = (castbar._eufOutcomeToken or 0) + 1
+                    if castbar._outcomeFrame then castbar._outcomeFrame:Hide() end
+                    if castbar._outcomeIconFrame then castbar._outcomeIconFrame:Hide() end
+                    castbar:Hide()
+                    if castbar._iconFrame then castbar._iconFrame:Hide() end
+                    castbarBg:Hide()
+                end
+                return
+            end
+            if eventUnit ~= unit or not castbar._eufCastActive then return end
+            -- WoW also emits UNIT_SPELLCAST_INTERRUPTED when a unit cancels
+            -- its own cast. Only the interruptedBy payload distinguishes a
+            -- real external interrupt from that cancellation (same rule used
+            -- by the main Player castbar).
+            local interrupted = false
+            -- Kept (possibly secret) for the Target/Focus "Interrupted (Name)"
+            -- text below. We never inspect or stringify it ourselves -- it's
+            -- handed only to UnitNameFromGUID/UnitClassFromGUID, which are on
+            -- Blizzard's allow-list for consuming secret arguments and return
+            -- an ordinary, readable name/class in exchange.
+            local interruptGUID
+            if event == "UNIT_SPELLCAST_INTERRUPTED" then
+                local interruptedBy = select(3, ...)
+                interruptGUID = interruptedBy
+                if issecretvalue and issecretvalue(interruptedBy) then
+                    -- A protected non-nil source still represents an external
+                    -- interrupt; do not inspect or stringify its value.
+                    interrupted = true
+                else
+                    interrupted = interruptedBy and true or false
+                end
+            end
+            local enabled
+            if interrupted then enabled = s.interruptedCastEnabled
+            else enabled = s.cancelledCastEnabled end
+            castbar._eufCastActive = nil
+            if not enabled then return end
+            castbar._eufOutcomeToken = (castbar._eufOutcomeToken or 0) + 1
+            local token = castbar._eufOutcomeToken
+            castbar._eufOutcomeVisible = true
+            C_Timer.After(0, function()
+                if castbar._eufOutcomeToken ~= token then return end
+                if not castbar._outcomeFrame then
+                    -- Parent the outcome to castbarBg, not to the StatusBar:
+                    -- oUF is allowed to hide/reset the latter after a fail.
+                    local outcome = CreateFrame("Frame", nil, castbarBg)
+                    outcome:SetAllPoints(castbar)
+                    outcome:SetFrameLevel(castbarBg:GetFrameLevel() + 3)
+                    local fill = outcome:CreateTexture(nil, "ARTWORK")
+                    fill:SetAllPoints(outcome)
+                    castbar._outcomeFrame = outcome
+                    castbar._outcomeFill = fill
+                    local text = outcome:CreateFontString(nil, "OVERLAY")
+                    text:SetPoint("LEFT", outcome, "LEFT", 5, 0)
+                    text:SetPoint("RIGHT", outcome, "RIGHT", -5, 0)
+                    text:SetJustifyH("LEFT"); text:SetWordWrap(false); text:SetMaxLines(1)
+                    castbar._outcomeText = text
+                    if castbar._iconFrame then
+                        local outcomeIcon = CreateFrame("Frame", nil, castbarBg)
+                        outcomeIcon:SetAllPoints(castbar._iconFrame)
+                        outcomeIcon:SetFrameLevel(castbarBg:GetFrameLevel() + 3)
+                        local icon = outcomeIcon:CreateTexture(nil, "ARTWORK")
+                        icon:SetAllPoints(outcomeIcon)
+                        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                        castbar._outcomeIconFrame = outcomeIcon
+                        castbar._outcomeIcon = icon
+                    end
+                end
+                castbar:SetMinMaxValues(0, 1)
+                castbar:SetValue(1)
+                if castbar.Text then castbar.Text:Hide() end
+                if castbar.Target then castbar.Target:SetText(""); castbar.Target:Hide() end
+                if castbar.Time then castbar.Time:SetText(""); castbar.Time:Hide() end
+                if castbar._shieldedTint then castbar._shieldedTint:SetAlpha(0) end
+                local r, g, b, a
+                if interrupted then
+                    r, g, b = s.interruptedCastR or 0.85, s.interruptedCastG or 0.15, s.interruptedCastB or 0.15
+                    a = s.interruptedCastA == nil and 1 or s.interruptedCastA
+                else
+                    r, g, b = s.cancelledCastR or 0.95, s.cancelledCastG or 0.55, s.cancelledCastB or 0.10
+                    a = s.cancelledCastA == nil and 1 or s.cancelledCastA
+                end
+                local texKey = s.castbarTexture or s.healthBarTexture or db.profile.healthBarTexture or "none"
+                local texPath = EllesmereUI.ResolveTexturePath(healthBarTextures, texKey, "Interface\\Buttons\\WHITE8X8")
+                castbar._outcomeFill:SetTexture(texPath)
+                castbar._outcomeFill:SetVertexColor(r, g, b, a * (castbar._fillOp or 1))
+                castbar._outcomeFrame:Show()
+                SetFSFont(castbar._outcomeText, s.castSpellNameSize or 11)
+                local tc = s.castSpellNameColor or { r=1, g=1, b=1 }
+                castbar._outcomeText:SetTextColor(tc.r, tc.g, tc.b)
+                local outcomeText = EllesmereUI.L(interrupted and "Interrupted" or "Spell Cancelled")
+                -- Append "(Name)" for who/what landed the interrupt, only on
+                -- Target/Focus and only when the cog option is enabled.
+                -- Players are class-colored; anything without a class (pets,
+                -- NPCs) shows up in white.
+                --
+                -- UnitNameFromGUID/UnitClassFromGUID can hand back a SECRET
+                -- string even though they're allowed to consume a secret
+                -- GUID: the identity is still protected, it's just protected
+                -- one level further downstream now. That string can never be
+                -- compared (~= ""), concatenated (..), or run through Lua's
+                -- string.format -- all of that "reads" it and throws, same
+                -- as the crash this replaced. It can only be handed onward
+                -- to other Blizzard widget/API methods that are themselves
+                -- allowed to accept secret arguments (WrapTextInColorCode,
+                -- FontString:SetFormattedText), which is what Blizzard's own
+                -- AdvancedFocusCastBarMixin does for this exact feature.
+                local sourceText
+                if interrupted and interruptGUID and (unit == "target" or unit == "focus")
+                   and s.interruptedCastShowSource ~= false then
+                    local interruptName = UnitNameFromGUID(interruptGUID)
+                    if interruptName ~= nil then
+                        local _, classToken = UnitClassFromGUID(interruptGUID)
+                        local color
+                        if classToken ~= nil and C_ClassColor and C_ClassColor.GetClassColor then
+                            color = C_ClassColor.GetClassColor(classToken)
+                        end
+                        if not color then color = CreateColor(1, 1, 1) end
+                        sourceText = color:WrapTextInColorCode(interruptName)
+                    end
+                end
+                if sourceText then
+                    castbar._outcomeText:SetFormattedText("%s (%s)", outcomeText, sourceText)
+                else
+                    castbar._outcomeText:SetText(outcomeText)
+                end
+                castbar:SetStatusBarColor(r, g, b, a * (castbar._fillOp or 1))
+                castbarBg:Show()
+                if castbar._outcomeIcon then castbar._outcomeIcon:SetTexture(castbar._eufLastCastIcon) end
+                if castbar._outcomeIconFrame then
+                    local showOutcomeIcon
+                    if unit == "player" then showOutcomeIcon = s.showPlayerCastIcon ~= false
+                    else showOutcomeIcon = s.showCastIcon ~= false end
+                    local outcomeInWidth = unit == "player"
+                        and s.playerCastbarIconInWidth ~= false
+                        or (unit ~= "player" and s.castbarIconInWidth ~= false)
+                    castbar._outcomeIconFrame:SetFrameLevel(castbarBg:GetFrameLevel() + (outcomeInWidth and 3 or 7))
+                    castbar._outcomeIconFrame:SetShown(showOutcomeIcon and castbar._eufLastCastIcon ~= nil)
+                end
+            end)
+            local duration = interrupted and s.interruptedCastDuration or s.cancelledCastDuration
+            C_Timer.After(duration or 1.5, function()
+                if castbar._eufOutcomeToken ~= token then return end
+                castbar._eufOutcomeVisible = nil
+                if castbar._outcomeFrame then castbar._outcomeFrame:Hide() end
+                if castbar._outcomeIconFrame then castbar._outcomeIconFrame:Hide() end
+                castbar:Hide()
+                if castbar._iconFrame then castbar._iconFrame:Hide() end
+                if shouldHideWhenInactive() then castbarBg:Hide() else castbarBg:Show() end
+            end)
+        end)
+        castbar._outcomeEventFrame = outcomeEvents
+        castbar._updateOutcomeEvents = function()
+            outcomeEvents:UnregisterAllEvents()
+            local s = GetSettingsForUnit(unit)
+            if not s or not (s.cancelledCastEnabled or s.interruptedCastEnabled) then return end
+            outcomeEvents:RegisterUnitEvent("UNIT_SPELLCAST_FAILED", unit)
+            outcomeEvents:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", unit)
+            outcomeEvents:RegisterUnitEvent("UNIT_HEALTH", unit)
+            outcomeEvents:RegisterUnitEvent("UNIT_FLAGS", unit)
+            if unit == "target" then outcomeEvents:RegisterEvent("PLAYER_TARGET_CHANGED")
+            elseif unit == "focus" then outcomeEvents:RegisterEvent("PLAYER_FOCUS_CHANGED") end
+        end
+        castbar:_updateOutcomeEvents()
+    end
 
     -- Guard against nil stages from UnitEmpoweredStagePercentages during
     -- empower casts where stage data isn't available yet.
@@ -5990,6 +6394,7 @@ local function SetupShowOnCastBar(frame, unit)
         HideUnitFrameKickTick(self)
         NotifyCastbarEnded(self)
         if self._iconFrame then self._iconFrame:Hide() end
+        if self._eufOutcomeVisible then return end
         if shouldHideWhenInactive() then
             local bg = self:GetParent()
             if bg then bg:Hide() end
@@ -6909,19 +7314,33 @@ local function StyleFullFrame(frame, unit)
     local cts = settings.centerTextSize or settings.textSize or 12
     local ets = settings.extraTextSize or settings.textSize or 12
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, lts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, rts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, cts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -6929,7 +7348,10 @@ local function StyleFullFrame(frame, unit)
 
     -- Extra Text: a 4th text zone, identical to the others (same tags + absorb gate);
     -- anchors per extraTextAlign, capped at 95% of the bar width (ellipsis truncation).
-    local extraText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local extraTextHolder = CreateFrame("Frame", nil, frame)
+    extraTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._extraTextHolder = extraTextHolder
+    local extraText = extraTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(extraText, ets)
     extraText:SetWordWrap(false)
     extraText:SetTextColor(1, 1, 1)
@@ -6951,19 +7373,28 @@ local function StyleFullFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -6984,7 +7415,7 @@ local function StyleFullFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -7097,6 +7528,23 @@ local function StyleFullFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -7222,6 +7670,52 @@ local function StyleFocusFrame(frame, unit)
         end
     end
 
+    -- Secondary raid target marker icon, anchored to the Focus cast bar
+    -- itself (left or right of it) instead of the frame. oUF only supports
+    -- one RaidTargetIndicator element per frame (the one above), so this
+    -- second icon is driven manually off RAID_TARGET_UPDATE / focus-change
+    -- events rather than reusing the oUF element.
+    if frame.Castbar then
+        local cb = frame.Castbar
+        local cbParent = cb:GetParent()
+        local cbmHolder = CreateFrame("Frame", nil, cbParent)
+        cbmHolder:SetFrameLevel(cbParent:GetFrameLevel() + 20)
+        local cbmIcon = cbmHolder:CreateTexture(nil, "OVERLAY", nil, 7)
+        cbmIcon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+        local function UpdateCastbarRaidMarker()
+            local s = GetSettingsForUnit("focus")
+            local size = s.castbarRaidMarkerSize or 16
+            local side = s.castbarRaidMarkerSide or "right"
+            local xo    = s.castbarRaidMarkerX or 0
+            local yo    = s.castbarRaidMarkerY or 0
+            cbmIcon:SetSize(size, size)
+            cbmIcon:ClearAllPoints()
+            if side == "left" then
+                cbmIcon:SetPoint("RIGHT", cbParent, "LEFT", -4 + xo, yo)
+            else
+                cbmIcon:SetPoint("LEFT", cbParent, "RIGHT", 4 + xo, yo)
+            end
+            if not s.castbarRaidMarkerEnabled then
+                cbmIcon:Hide()
+                return
+            end
+            local index = GetRaidTargetIndex("focus")
+            if index then
+                SetRaidTargetIconTexture(cbmIcon, index)
+                cbmIcon:Show()
+            else
+                cbmIcon:Hide()
+            end
+        end
+        cbmHolder:RegisterEvent("RAID_TARGET_UPDATE")
+        cbmHolder:RegisterEvent("PLAYER_FOCUS_CHANGED")
+        cbmHolder:SetScript("OnEvent", UpdateCastbarRaidMarker)
+        frame._castbarRaidMarkerIcon = cbmIcon
+        frame._castbarRaidMarkerHolder = cbmHolder
+        frame._castbarRaidMarkerUpdate = UpdateCastbarRaidMarker
+        UpdateCastbarRaidMarker()
+    end
+
     -- Text overlay frame -- sits above the StatusBar and unified border.
     -- Parented to frame (not Health) so text is not clipped by the health bar.
     local textOverlay = CreateFrame("Frame", nil, frame)
@@ -7239,19 +7733,33 @@ local function StyleFocusFrame(frame, unit)
     local cts = settings.centerTextSize or settings.textSize or 12
     local ets = settings.extraTextSize or settings.textSize or 12
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, lts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, rts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, cts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -7259,7 +7767,10 @@ local function StyleFocusFrame(frame, unit)
 
     -- Extra Text: a 4th text zone, identical to the others (same tags + absorb gate);
     -- anchors per extraTextAlign, capped at 95% of the bar width (ellipsis truncation).
-    local extraText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local extraTextHolder = CreateFrame("Frame", nil, frame)
+    extraTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._extraTextHolder = extraTextHolder
+    local extraText = extraTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(extraText, ets)
     extraText:SetWordWrap(false)
     extraText:SetTextColor(1, 1, 1)
@@ -7281,19 +7792,28 @@ local function StyleFocusFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -7314,7 +7834,7 @@ local function StyleFocusFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -7425,6 +7945,23 @@ local function StyleFocusFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -7534,19 +8071,33 @@ local function StyleSimpleFrame(frame, unit)
     local rightContent = settings.rightTextContent or "none"
     local centerContent = settings.centerTextContent or "none"
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -7680,6 +8231,20 @@ local function StyleSimpleFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -7776,19 +8341,33 @@ local function StylePetFrame(frame, unit)
     local rightContent = settings.rightTextContent or "none"
     local centerContent = settings.centerTextContent or "none"
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -7921,6 +8500,20 @@ local function StylePetFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -8029,19 +8622,33 @@ local function StyleBossFrame(frame, unit)
     local centerContent = settings.centerTextContent or "none"
     local extraContent = settings.extraTextContent or "none"
 
-    local leftText = textOverlay:CreateFontString(nil, "OVERLAY")
+    -- Each text zone gets its own small holder frame (instead of sharing
+    -- textOverlay) so its "Strata" cog option can raise/lower it independently
+    -- of the other zones. Positioning still anchors to textOverlay/frame as
+    -- before; only the fontstring's parent (and therefore its render strata)
+    -- changes.
+    local leftTextHolder = CreateFrame("Frame", nil, frame)
+    leftTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._leftTextHolder = leftTextHolder
+    local leftText = leftTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(leftText, settings.leftTextSize or settings.textSize or 12)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
     frame.LeftText = leftText
 
-    local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local rightTextHolder = CreateFrame("Frame", nil, frame)
+    rightTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._rightTextHolder = rightTextHolder
+    local rightText = rightTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, settings.rightTextSize or settings.textSize or 12)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
     frame.RightText = rightText
 
-    local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local centerTextHolder = CreateFrame("Frame", nil, frame)
+    centerTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._centerTextHolder = centerTextHolder
+    local centerText = centerTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, settings.centerTextSize or settings.textSize or 12)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
@@ -8050,7 +8657,10 @@ local function StyleBossFrame(frame, unit)
     -- Extra Text: a 4th text zone, identical to the others (same tags + absorb
     -- gate); it only anchors per extraTextAlign and is capped at 95% of the bar
     -- width (ellipsis truncation). Mirrors the Main Frames implementation.
-    local extraText = textOverlay:CreateFontString(nil, "OVERLAY")
+    local extraTextHolder = CreateFrame("Frame", nil, frame)
+    extraTextHolder:SetFrameLevel(textOverlay:GetFrameLevel())
+    frame._extraTextHolder = extraTextHolder
+    local extraText = extraTextHolder:CreateFontString(nil, "OVERLAY")
     SetFSFont(extraText, settings.extraTextSize or settings.textSize or 12)
     extraText:SetWordWrap(false)
     extraText:SetTextColor(1, 1, 1)
@@ -8213,6 +8823,23 @@ local function StyleBossFrame(frame, unit)
             rightText:Show()
             ApplyClassColor(rightText, unit, s.rightTextClassColor, s.rightTextColorR, s.rightTextColorG, s.rightTextColorB)
         else rightText:Hide() end
+        -- Per-zone text strata (defaults to "inherit", i.e. follow the frame's
+        -- strata like it always has). A later frame-strata reset (which cascades
+        -- to child frames, same as the raid marker holder) is corrected the next
+        -- time this function re-runs, since it's re-invoked on every settings
+        -- refresh via frame._applyTextPositions.
+        if frame._leftTextHolder and s.leftTextStrata and s.leftTextStrata ~= "inherit" then
+            frame._leftTextHolder:SetFrameStrata(s.leftTextStrata)
+        end
+        if frame._rightTextHolder and s.rightTextStrata and s.rightTextStrata ~= "inherit" then
+            frame._rightTextHolder:SetFrameStrata(s.rightTextStrata)
+        end
+        if frame._centerTextHolder and s.centerTextStrata and s.centerTextStrata ~= "inherit" then
+            frame._centerTextHolder:SetFrameStrata(s.centerTextStrata)
+        end
+        if frame._extraTextHolder and s.extraTextStrata and s.extraTextStrata ~= "inherit" then
+            frame._extraTextHolder:SetFrameStrata(s.extraTextStrata)
+        end
     end
     ApplyTextPositions(settings)
     frame._applyTextPositions = ApplyTextPositions
@@ -9458,6 +10085,9 @@ local function ReloadFrames()
                                     castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
                                 end
                                 LayoutCastbarIcon(frame.Castbar, CastIconInWidth("player", settings), nil, CastIconOnRight("player", settings), CastIconOffsets("player", settings))
+                                ApplyCastbarIconDivider(frame.Castbar, CastIconInWidth("player", settings), CastIconOnRight("player", settings), settings.castbarIconDivider)
+                                ApplyConfigCastbarBorder(castbarBg, settings)
+                                ApplyConfigCastbarIconBorder(frame.Castbar, settings)
                                 -- Resize cast icon to match castbar height
                                 if frame.Castbar._iconFrame then
                                     PP.Size(frame.Castbar._iconFrame, cbH, cbH)
@@ -9965,11 +10595,14 @@ local function ReloadFrames()
                                 local cbW2 = settings.castbarWidth or 181
                                 local cbH2 = settings.castbarHeight or 14
                                 PP.Size(castbarBg, cbW2, cbH2)
+                                ApplyConfigCastbarBorder(castbarBg, settings)
                                 if castbarBg._bgTex then
                                     local cbg = settings.castBgColor
                                     castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
                                 end
                                 LayoutCastbarIcon(frame.Castbar, CastIconInWidth("target", settings), nil, CastIconOnRight("target", settings), CastIconOffsets("target", settings))
+                                ApplyCastbarIconDivider(frame.Castbar, CastIconInWidth("target", settings), CastIconOnRight("target", settings), settings.castbarIconDivider)
+                                ApplyConfigCastbarIconBorder(frame.Castbar, settings)
                                 if frame.Castbar._iconFrame then
                                     PP.Size(frame.Castbar._iconFrame, cbH2, cbH2)
                                     if not frame.Castbar:IsShown() then
@@ -10379,11 +11012,14 @@ local function ReloadFrames()
                             local cbW3 = settings.castbarWidth or 181
                             local cbH3 = settings.castbarHeight or 14
                             PP.Size(castbarBg, cbW3, cbH3)
+                            ApplyConfigCastbarBorder(castbarBg, settings)
                             if castbarBg._bgTex then
                                 local cbg = settings.castBgColor
                                 castbarBg._bgTex:SetColorTexture(cbg and cbg.r or 0, cbg and cbg.g or 0, cbg and cbg.b or 0, settings.castBgAlpha or 0.5)
                             end
                             LayoutCastbarIcon(frame.Castbar, CastIconInWidth("focus", settings), nil, CastIconOnRight("focus", settings), CastIconOffsets("focus", settings))
+                            ApplyCastbarIconDivider(frame.Castbar, CastIconInWidth("focus", settings), CastIconOnRight("focus", settings), settings.castbarIconDivider)
+                            ApplyConfigCastbarIconBorder(frame.Castbar, settings)
                             if frame.Castbar._iconFrame then
                                 PP.Size(frame.Castbar._iconFrame, cbH3, cbH3)
                                 if not frame.Castbar:IsShown() then
@@ -11063,13 +11699,23 @@ local function ReloadFrames()
             end
             -- Cast bar reuses the same bar texture as the health bar.
             if frame.Castbar then
+                if frame.Castbar._updateOutcomeEvents then frame.Castbar:_updateOutcomeEvents() end
                 local cbTexKey
                 if isMiniFrame then
-                    cbTexKey = ns.ResolveHealthBarTextureKey(settings, donorSettings)
+                    cbTexKey = settings.castbarTexture
+                        or (donorSettings and donorSettings.castbarTexture)
+                        or ns.ResolveHealthBarTextureKey(settings, donorSettings)
                 else
-                    cbTexKey = settings.healthBarTexture or db.profile.healthBarTexture or "none"
+                    cbTexKey = settings.castbarTexture or settings.healthBarTexture or db.profile.healthBarTexture or "none"
                 end
                 ns.ApplyCastBarTexture(frame.Castbar, cbTexKey)
+                -- Applying a StatusBar texture can rebuild its draw region.
+                -- Re-assert the configurable border afterwards so Target,
+                -- Focus and Boss borders retain their intended frame layer.
+                if unit == "player" or IsKickCastbarUnit(unit) then
+                    ApplyConfigCastbarBorder(frame.Castbar:GetParent(), settings)
+                    ApplyConfigCastbarIconBorder(frame.Castbar, settings)
+                end
             end
             -- Boss Hover/Target border: the border was just restyled to its normal
             -- color above, so re-apply the hover/target recolor (both default off,
@@ -11332,6 +11978,11 @@ local function ReloadFrames()
         end
     end
 
+    -- Live-update the Focus cast bar's secondary raid marker
+    if frames.focus and frames.focus._castbarRaidMarkerUpdate then
+        frames.focus._castbarRaidMarkerUpdate()
+    end
+
     -- Portrait settings (3D zoom, class style) used to live-apply through the ungated
     -- ambient repaints; the gated Override skips same-unit repaints, so settings
     -- changes now force one explicit portrait update per frame instead.
@@ -11385,11 +12036,22 @@ end
 -- mouseover hover) routes through this so a combat transition or hover can't clobber
 -- the fade. Combat state comes from the caller (the visibility loop's event-tracked
 -- _ufInCombat, which leads InCombatLockdown() on regen events). On ns for the 200-locals cap.
-function ns.ResolveFrameAlpha(s, inCombat)
+-- unitKey (optional) additionally composes the "Out of Range Alpha" fade
+-- (Target/Focus only -- see the Unit Frame Range Dimming block) so the two
+-- fades multiply instead of fighting over the last SetAlpha call. The range
+-- ticker never calls SetAlpha directly for these units; it only updates
+-- ns._oorFactor and re-runs UpdateFrameVisibility, which routes back through
+-- here.
+function ns.ResolveFrameAlpha(s, inCombat, unitKey)
+    local a = 1
     if s and s.oocFadeEnabled and not inCombat then
-        return s.oocAlpha or 0.5
+        a = s.oocAlpha or 0.5
     end
-    return 1
+    if unitKey and ns._oorFactor then
+        local f = ns._oorFactor[unitKey]
+        if f then a = a * f end
+    end
+    return a
 end
 
 local function UnitFrame_OnEnter(self)
@@ -11405,7 +12067,7 @@ local function UnitFrame_OnEnter(self)
             eligible = EllesmereUI.VisWantsMouseover(s, "barVisibility", nil, EllesmereUI.VIS_CAPS_DEFAULT)
         end
         if eligible then
-            local a = ns.ResolveFrameAlpha(s, InCombatLockdown())
+            local a = ns.ResolveFrameAlpha(s, InCombatLockdown(), unitKey)
             ;(self._visWrap or self):SetAlpha(a)
             -- 3D models don't inherit parent alpha: reveal the portrait too
             local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
@@ -11466,7 +12128,7 @@ local function UnitFrame_OnLeave(self)
                                or s.visHideHousing
                                or s.visOnlyInstances
             local keepShown = (not hiddenByOpts) and hasAnyHideOpt
-            leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0
+            leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown(), unitKey) or 0
         end
         ;(self._visWrap or self):SetAlpha(leaveAlpha)
         -- 3D models don't inherit parent alpha: hide/dim the portrait too
@@ -12836,7 +13498,7 @@ function InitializeFrames()
                 -- combat, in which case the chosen oocAlpha. Uses the event-tracked
                 -- _ufInCombat (authoritative on regen transitions, which lead
                 -- InCombatLockdown()) so the fade flips instantly.
-                local shownAlpha = ns.ResolveFrameAlpha(s, _ufInCombat)
+                local shownAlpha = ns.ResolveFrameAlpha(s, _ufInCombat, unitKey)
 
                 -- Combat-sensitive and mouseover modes use SetAlpha to show/hide
                 -- (not a restricted API); the frame stays technically shown so it can
@@ -14464,12 +15126,34 @@ function EllesmereUF:SetGrowDirectionForBar(barKey, dir)
 end
 
 -------------------------------------------------------------------------------
---  Boss Frame Range Dimming. Boss units sit outside UnitInRange's group-member
---  domain, so range is measured against a known spell instead: a harm spell for
---  attackable bosses (all specs, first known spell in the class chain wins), or
---  the class baseline heal for friendly bosses (healer specs only). Whole-frame
---  alpha follows db.profile.boss.oorAlpha; 100% means no fade and the check
---  short-circuits. The ticker exists only while a boss frame is shown.
+--  Unit Frame Range Dimming (Boss, Target, Focus)
+--  Boss units -- and Target/Focus, which aren't reliably covered by
+--  UnitInRange either -- sit outside that API's group-member domain, so
+--  range is measured against a known spell instead: a harm spell for
+--  attackable units (all specs, first known spell in the class chain
+--  wins), or the class baseline heal for friendly units (healer specs
+--  only).
+--
+--  Two independent fades share this one range check:
+--   * Whole-frame Out of Range Alpha (db.profile[key].oorAlpha; Boss/
+--     Target/Focus, "Extras"/"Indicators" section). 100% means no fade and
+--     that half of the check short-circuits.
+--   * Cast Bar-only Out of Range Alpha (db.profile[key].castbarOorAlpha;
+--     Target/Focus, inside the Cast Bar cog). Dims just the Castbar element
+--     instead of the whole frame; defaults to 100% (off) so it never
+--     changes anyone's cast bar unless they opt in.
+--
+--  Two application styles for the whole-frame fade, because Target/Focus
+--  already have their own alpha pipeline (Fade Out of Combat + mouseover/
+--  driver visibility) and Boss doesn't:
+--   * Target/Focus: the tick only updates ns._oorFactor[unitKey], then
+--     re-runs UpdateFrameVisibility() so ns.ResolveFrameAlpha composes the
+--     range fade with everything else through the single existing alpha
+--     site instead of a second SetAlpha call fighting the first.
+--   * Boss: no such pipeline exists, so the tick sets alpha directly.
+--  The Cast Bar fade always sets alpha directly (Target/Focus only; the
+--  Castbar element has no fade pipeline of its own to route through).
+--  The ticker exists only while at least one tracked frame is shown.
 --  (do-block: zero persistent main-chunk locals.)
 -------------------------------------------------------------------------------
 do
@@ -14493,8 +15177,15 @@ do
         DRUID = 8936, MONK = 116670, EVOKER = 361469,
     }
 
+    -- Full frames with their own fade/visibility pipeline: whole-frame fade
+    -- dimmed indirectly via ns._oorFactor + ns.ResolveFrameAlpha (see
+    -- UpdateFrameVisibility); Cast Bar fade dimmed directly either way.
+    local PIPELINE_UNITS = { "target", "focus" }
+
     local harmSpell, helpSpell
     local visCount, ticker = 0, nil
+
+    ns._oorFactor = ns._oorFactor or {}
 
     local function Known(sid)
         if C_SpellBook and C_SpellBook.IsSpellInSpellBook and Enum.SpellBookSpellBank then
@@ -14514,41 +15205,131 @@ do
         if role == "HEALER" then helpSpell = HELP_HEAL[pClass] end
     end
 
-    local function TickOne(f, unit)
-        if not db then return end
-        local oor = (db.profile.boss and db.profile.boss.oorAlpha) or 0.4
-        if oor >= 1 or not UnitExists(unit) then
-            f:SetAlpha(1)
-            return
-        end
+    -- Returns true/false (in range or not), or nil when the unit/spell
+    -- can't be range-checked right now (unit gone, no known spell, or a
+    -- momentarily unevaluable result that isn't secret either).
+    local function ComputeInRange(unit)
+        if not UnitExists(unit) then return nil end
         local spell
         if UnitCanAttack("player", unit) then
             spell = harmSpell
         else
             spell = helpSpell
         end
-        if spell then
-            -- Secret-safe: the result may be secret in instances, which
-            -- SetAlphaFromBoolean accepts natively -- but it can also be NIL
-            -- (unit not range-checkable right now / spell momentarily not
-            -- evaluable), which it rejects. issecretvalue runs first so the
-            -- nil check never touches a secret.
-            local inRange = C_Spell.IsSpellInRange(spell, unit)
-            if issecretvalue(inRange) or inRange ~= nil then
-                f:SetAlphaFromBoolean(inRange, 1, oor)
-            else
-                f:SetAlpha(1)
-            end
+        if not spell then return nil end
+        -- Secret-safe: the result may be secret in instances, which
+        -- SetAlphaFromBoolean accepts natively -- but it can also be NIL
+        -- (unit not range-checkable right now / spell momentarily not
+        -- evaluable), which it rejects. issecretvalue runs first so the
+        -- nil check never touches a secret.
+        local inRange = C_Spell.IsSpellInRange(spell, unit)
+        if issecretvalue(inRange) or inRange ~= nil then return inRange end
+        return nil
+    end
+
+    local function TickBoss(f, unit)
+        if not db then return end
+        local s = db.profile.boss
+        local oor = (s and s.oorAlpha) or 0.4
+        local castOor = (s and s.castbarOorAlpha) or 1
+        local cbg = f.Castbar and f.Castbar:GetParent()
+
+        if not UnitExists(unit) then
+            f:SetAlpha(1)
+            -- Castbar is reparented off "f" (see CreateCastBar) so it no
+            -- longer hides/dims with it automatically via alpha; when there
+            -- is nothing to range-check, reset both to full same as the
+            -- whole frame.
+            if cbg then cbg:SetAlpha(1) end
+            if f.Castbar then f.Castbar:SetAlpha(1) end
+            return
+        end
+
+        local inRange
+        if oor < 1 or castOor < 1 then
+            inRange = ComputeInRange(unit)
+        end
+
+        -- Whole-frame Out of Range Alpha (unchanged behavior).
+        if oor >= 1 then
+            f:SetAlpha(1)
+        elseif inRange ~= nil then
+            f:SetAlphaFromBoolean(inRange, 1, oor)
         else
             f:SetAlpha(1)
+        end
+
+        -- Castbar's parent is reparented off "f" specifically so the fade
+        -- just applied above doesn't cascade into it (see CreateCastBar);
+        -- boss frames have no alpha-only hide state to mirror here (they are
+        -- either UnitExists or not, handled above), so the gate stays open.
+        if cbg then cbg:SetAlpha(1) end
+
+        -- Cast Bar-only Out of Range Alpha: independent of the whole-frame
+        -- fade above (shares the same range check when both are active).
+        if f.Castbar then
+            if castOor >= 1 then
+                f.Castbar:SetAlpha(1)
+            elseif inRange ~= nil then
+                f.Castbar:SetAlphaFromBoolean(inRange, 1, castOor)
+            else
+                f.Castbar:SetAlpha(1)
+            end
+        end
+    end
+
+    local function ResetCastbarAlpha(unitKey)
+        local cb = frames[unitKey] and frames[unitKey].Castbar
+        if cb then cb:SetAlpha(1) end
+    end
+
+    local function TickPipelineUnit(unitKey)
+        local s = db and db.profile and db.profile[unitKey]
+        local oor = (s and s.oorAlpha) or 0.4
+        local castOor = (s and s.castbarOorAlpha) or 1
+        local inRange
+        if oor < 1 or castOor < 1 then
+            inRange = ComputeInRange(unitKey)
+        end
+
+        local factor = 1
+        if oor < 1 and inRange ~= nil then
+            factor = inRange and 1 or oor
+        end
+        ns._oorFactor[unitKey] = factor
+
+        -- Cast Bar-only Out of Range Alpha: independent of the whole-frame
+        -- fade above (shares the same range check when both are active), so
+        -- it can dim just the Castbar element on its own.
+        local cb = frames[unitKey] and frames[unitKey].Castbar
+        if cb then
+            if castOor >= 1 then
+                cb:SetAlpha(1)
+            elseif inRange ~= nil then
+                cb:SetAlphaFromBoolean(inRange, 1, castOor)
+            else
+                cb:SetAlpha(1)
+            end
         end
     end
 
     local function Tick()
         for i = 1, 5 do
             local f = frames["boss" .. i]
-            if f and f:IsVisible() then TickOne(f, "boss" .. i) end
+            if f and f:IsVisible() then TickBoss(f, "boss" .. i) end
         end
+        local anyPipeline = false
+        for _, unitKey in ipairs(PIPELINE_UNITS) do
+            local f = frames[unitKey]
+            if f and f:IsVisible() then
+                TickPipelineUnit(unitKey)
+                anyPipeline = true
+            else
+                ns._oorFactor[unitKey] = 1
+                ResetCastbarAlpha(unitKey)
+            end
+        end
+        if anyPipeline and ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
     end
 
     local function UpdateTicker()
@@ -14561,26 +15342,33 @@ do
         end
     end
 
-    local hooked = false
+    -- Per-frame hooked flag (rather than one module-level bool) so units
+    -- that spawn after the first InstallHooks pass (e.g. boss frames that
+    -- weren't up yet) still get hooked on a later PLAYER_ENTERING_WORLD.
+    local function HookFrame(f, onHide)
+        if not f or f._oorHooked then return end
+        f._oorHooked = true
+        if f:IsVisible() then visCount = visCount + 1 end
+        f:HookScript("OnShow", function()
+            visCount = visCount + 1
+            UpdateTicker()
+        end)
+        f:HookScript("OnHide", function(self)
+            visCount = math.max(0, visCount - 1)
+            if onHide then onHide(self) end
+            UpdateTicker()
+        end)
+    end
+
     local function InstallHooks()
-        if hooked or not frames["boss1"] then return end
-        hooked = true
         for i = 1, 5 do
-            local f = frames["boss" .. i]
-            if f then
-                local unit = "boss" .. i
-                if f:IsVisible() then visCount = visCount + 1 end
-                f:HookScript("OnShow", function(self)
-                    visCount = visCount + 1
-                    TickOne(self, unit)
-                    UpdateTicker()
-                end)
-                f:HookScript("OnHide", function(self)
-                    visCount = math.max(0, visCount - 1)
-                    self:SetAlpha(1)
-                    UpdateTicker()
-                end)
-            end
+            HookFrame(frames["boss" .. i], function(self) self:SetAlpha(1) end)
+        end
+        for _, unitKey in ipairs(PIPELINE_UNITS) do
+            HookFrame(frames[unitKey], function()
+                ns._oorFactor[unitKey] = 1
+                ResetCastbarAlpha(unitKey)
+            end)
         end
         UpdateTicker()
     end
