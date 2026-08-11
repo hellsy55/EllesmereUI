@@ -3111,65 +3111,77 @@ function ns.RFC_ReloadAll()
 
     local dirty, clsCache = {}, {}
 
+    -- Queued per BUTTON rather than run in one synchronous sweep across the
+    -- whole raid. ApplyDebuffConfig -- and, with the Debuff Manager active,
+    -- ns.DM_ApplyDebuffConfig -- calls SetAuraGroupMaxFrameCount with a
+    -- NONZERO cap for every active category (and again per active tile),
+    -- each an eager engine button batch. That's the same per-atom cost the
+    -- initial per-button-per-group build phase already spreads across the
+    -- queue (QueueDebuffPhase) -- but this reload sweep ran all of it for
+    -- every registered button (up to 40 in a full raid) in one unprotected
+    -- script execution, with no pcall at all. dirty/clsCache stay shared
+    -- across every queued button via closure so the class-flag/BM caching
+    -- this loop relied on is preserved -- just spread over budgeted ticks
+    -- instead of one call.
     for i = 1, #registry do
         local button = registry[i]
-        local d = ns.GetFFD and ns.GetFFD(button)
-        local container = d and d.rfcDebuffs
-        if container then
+        AK.QueueBuildJob(function()
+            local d = ns.GetFFD and ns.GetFFD(button)
+            local container = d and d.rfcDebuffs
+            if not container then return end
             local s = ProxyFor(d)
-            if s then
-                local styleKey = StyleKeyFor(d)
-                local flags = dirty[styleKey]
-                if not flags then
-                    flags = ComputeClassFlags(styleKey, s)
-                    dirty[styleKey] = flags
-                end
-                if flags.debuffCfg then
-                    AnchorDebuffContainer(container, d.rfcHealth, s)
-                    ApplyDebuffConfig(container, d, s)
-                end
-                if flags.dispLocCfg then
-                    local c2 = d.rfcDispLoc
-                    if c2 then
-                        AnchorDispLocContainer(c2, d.rfcHealth, s)
-                        ApplyDispLocConfig(c2, d, s)
-                        c2:SetShown(DispLocActive(s))
-                    elseif DispLocActive(s) and not d.rfcDispLocShell and not d.rfcDispLocBuild then
-                        -- Split enabled mid-session: containers can't be created in
-                        -- combat, so the shell build rides the OOC lane; groups+finish
-                        -- follow the normal phase.
-                        d.rfcDispLocBuild = true
-                        AK.QueueBuildJob(function()
-                            d.rfcDispLocBuild = nil
-                            if d.rfcDispLoc or d.rfcDispLocShell then return end
-                            local s2 = ProxyFor(d)
-                            if not s2 or not DispLocActive(s2) then return end
-                            local health = d.rfcHealth or d.rfcHealthRef
-                            if not health then return end
-                            local c = AK.CreateContainerShell(button, { point = { "CENTER", health, "CENTER" } })
-                            c:SetFrameLevel(button:GetFrameLevel() + (ns.LVL_AURA or 13))
-                            d.rfcDispLocShell = c
-                            d.rfcDispLocGroups = {}
-                            QueueDispLocPhase(button, health, d)
-                        end, "rf:disploc-shell") -- creation combat-legal since 68914
-                    end
-                end
-                if d.rfcDispel then
-                    if flags.dispelFilter then
-                        for j = 1, #DISPEL_SLOTS do
-                            d.rfcDispel:SetAuraSlotFilterString(DISPEL_SLOTS[j].key, flags.dispelFilter)
-                        end
-                    end
-                    d.rfcDispel:SetShown(d.rfcAssist ~= false and DispelVisible(s))
-                end
-                local cls = clsCache[styleKey]
-                if not cls then
-                    cls = BmClassPass(d)
-                    clsCache[styleKey] = cls
-                end
-                ReloadBm(button, d, s, cls)
+            if not s then return end
+            local styleKey = StyleKeyFor(d)
+            local flags = dirty[styleKey]
+            if not flags then
+                flags = ComputeClassFlags(styleKey, s)
+                dirty[styleKey] = flags
             end
-        end
+            if flags.debuffCfg then
+                AnchorDebuffContainer(container, d.rfcHealth, s)
+                ApplyDebuffConfig(container, d, s)
+            end
+            if flags.dispLocCfg then
+                local c2 = d.rfcDispLoc
+                if c2 then
+                    AnchorDispLocContainer(c2, d.rfcHealth, s)
+                    ApplyDispLocConfig(c2, d, s)
+                    c2:SetShown(DispLocActive(s))
+                elseif DispLocActive(s) and not d.rfcDispLocShell and not d.rfcDispLocBuild then
+                    -- Split enabled mid-session: containers can't be created in
+                    -- combat, so the shell build rides the OOC lane; groups+finish
+                    -- follow the normal phase.
+                    d.rfcDispLocBuild = true
+                    AK.QueueBuildJob(function()
+                        d.rfcDispLocBuild = nil
+                        if d.rfcDispLoc or d.rfcDispLocShell then return end
+                        local s2 = ProxyFor(d)
+                        if not s2 or not DispLocActive(s2) then return end
+                        local health = d.rfcHealth or d.rfcHealthRef
+                        if not health then return end
+                        local c = AK.CreateContainerShell(button, { point = { "CENTER", health, "CENTER" } })
+                        c:SetFrameLevel(button:GetFrameLevel() + (ns.LVL_AURA or 13))
+                        d.rfcDispLocShell = c
+                        d.rfcDispLocGroups = {}
+                        QueueDispLocPhase(button, health, d)
+                    end, "rf:disploc-shell") -- creation combat-legal since 68914
+                end
+            end
+            if d.rfcDispel then
+                if flags.dispelFilter then
+                    for j = 1, #DISPEL_SLOTS do
+                        d.rfcDispel:SetAuraSlotFilterString(DISPEL_SLOTS[j].key, flags.dispelFilter)
+                    end
+                end
+                d.rfcDispel:SetShown(d.rfcAssist ~= false and DispelVisible(s))
+            end
+            local cls = clsCache[styleKey]
+            if not cls then
+                cls = BmClassPass(d)
+                clsCache[styleKey] = cls
+            end
+            ReloadBm(button, d, s, cls)
+        end, "rf:reload-button")
     end
 end
 

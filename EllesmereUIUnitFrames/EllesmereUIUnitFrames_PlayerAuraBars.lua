@@ -1604,36 +1604,54 @@ local function CreateBars()
     local buffAllChain = BuffBarChain(buffCfg)
     local buffSpells = ns.PAB_ResolveSpells(buffCfg)
     buffsSlotSig = table.concat(buffSpells, ",")
-    AK.RequestContainer(buffsParent, "player", buffSpec, function(container)
-        buffsContainer = container
-        AK.SetContainerAxis(container, buffVertical)
-        declared.buffs = {}
-        ApplyGroupConfig(container, buffAllChain, declared.buffs, STYLE_BUFFS, buffGrid.effectiveMax, buffPad, buffGrid.rowGap, buffCfg, BuffCandidateExtras(buffCfg))
-        if #buffSpells > 0 then
-            local includeMap = {}
-            for i = 1, #buffSpells do includeMap[buffSpells[i]] = true end
-            AK.AddGroupToContainer(container, {
-                key = "spells",
-                filter = { "HELPFUL" },
-                style = STYLE_BUFFS,
-                maxFrameCount = buffGrid.effectiveMax,
-                candidateFilters = MergeCandidateFilters({ includeSpellIDs = includeMap }, BuffCandidateExtras(buffCfg)),
-                sortMethod = ResolveSortMethod(buffCfg),
-                sortDirection = ResolveSortDirection(buffCfg),
-            })
-            container:SetAuraGroupLayout("spells", {
-                elementSpacing = buffPad, lineSpacing = buffGrid.rowGap,
-                groupSpacing = buffPad, groupLineSpacing = buffGrid.rowGap,
-            })
-            declared.buffs.spells = true
-        end
-    end)
-    AK.RequestContainer(debuffsParent, "player", debuffSpec, function(container)
-        debuffsContainer = container
-        AK.SetContainerAxis(container, debuffVertical)
-        declared.debuffs = {}
-        ApplyGroupConfig(container, debuffChain, declared.debuffs, STYLE_DEBUFFS, debuffGrid.effectiveMax, debuffPad, debuffGrid.rowGap, debuffCfg)
-    end)
+    -- Queued rather than called inline: CreateBars runs once at PLAYER_LOGIN, and
+    -- AK.RequestContainer's callback (out of combat) fires ApplyGroupConfig
+    -- SYNCHRONOUSLY inside this same call -- the exact login-contention watchdog
+    -- risk documented on the AuraKit build scheduler ("script ran too long").
+    -- Routing through AK.QueueBuildJob costs nothing (the callback still runs
+    -- inline, just from inside the queue's own pcall) and buys the same
+    -- watchdog-retry + per-frame budget protection the unit-frame builders get.
+    local function BuildDefaultBuffs()
+        AK.RequestContainer(buffsParent, "player", buffSpec, function(container)
+            buffsContainer = container
+            AK.SetContainerAxis(container, buffVertical)
+            declared.buffs = {}
+            ApplyGroupConfig(container, buffAllChain, declared.buffs, STYLE_BUFFS, buffGrid.effectiveMax, buffPad, buffGrid.rowGap, buffCfg, BuffCandidateExtras(buffCfg))
+            if #buffSpells > 0 then
+                local includeMap = {}
+                for i = 1, #buffSpells do includeMap[buffSpells[i]] = true end
+                AK.AddGroupToContainer(container, {
+                    key = "spells",
+                    filter = { "HELPFUL" },
+                    style = STYLE_BUFFS,
+                    maxFrameCount = buffGrid.effectiveMax,
+                    candidateFilters = MergeCandidateFilters({ includeSpellIDs = includeMap }, BuffCandidateExtras(buffCfg)),
+                    sortMethod = ResolveSortMethod(buffCfg),
+                    sortDirection = ResolveSortDirection(buffCfg),
+                })
+                container:SetAuraGroupLayout("spells", {
+                    elementSpacing = buffPad, lineSpacing = buffGrid.rowGap,
+                    groupSpacing = buffPad, groupLineSpacing = buffGrid.rowGap,
+                })
+                declared.buffs.spells = true
+            end
+        end)
+    end
+    local function BuildDefaultDebuffs()
+        AK.RequestContainer(debuffsParent, "player", debuffSpec, function(container)
+            debuffsContainer = container
+            AK.SetContainerAxis(container, debuffVertical)
+            declared.debuffs = {}
+            ApplyGroupConfig(container, debuffChain, declared.debuffs, STYLE_DEBUFFS, debuffGrid.effectiveMax, debuffPad, debuffGrid.rowGap, debuffCfg)
+        end)
+    end
+    if AK.QueueBuildJob then
+        AK.QueueBuildJob(BuildDefaultBuffs, "pab:buffs")
+        AK.QueueBuildJob(BuildDefaultDebuffs, "pab:debuffs")
+    else
+        BuildDefaultBuffs()
+        BuildDefaultDebuffs()
+    end
     RegisterPABUnlock()
     ReloadAllCustomBars()
 end
@@ -2843,13 +2861,37 @@ end
 -- alongside the default bars, and safe to call again any time (profile switch): both
 -- reload functions above are idempotent no-ops when nothing changed.
 local function ReloadAllCustomBarsImpl()
+    AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
+    -- Queued per bar rather than called in a tight loop: this runs once at login
+    -- (and again on profile switch) for EVERY custom bar the user has configured,
+    -- each doing its own synchronous declare-then-flip-maxFrameCount pass
+    -- (ApplyGroupConfig) with zero pcall protection of its own. A handful of
+    -- custom debuff bars back-to-back in one script execution is the same
+    -- watchdog risk that hit the unit-frame builder, except here a trip would
+    -- surface as a raw unhandled error instead of a graceful retry. Routing
+    -- through AK.QueueBuildJob (when available) spreads the bars across
+    -- budgeted ticks and gives each one its own pcall/retry.
     local buffList = ns.PAB_CustomBuffBars()
     if buffList then
-        for i = 1, #buffList do ns.PAB_ReloadCustomBuffBar(buffList[i].id) end
+        for i = 1, #buffList do
+            local id = buffList[i].id
+            if AK and AK.QueueBuildJob then
+                AK.QueueBuildJob(function() ns.PAB_ReloadCustomBuffBar(id) end, "pab:custombuff:" .. tostring(id))
+            else
+                ns.PAB_ReloadCustomBuffBar(id)
+            end
+        end
     end
     local debuffList = ns.PAB_CustomDebuffBars()
     if debuffList then
-        for i = 1, #debuffList do ns.PAB_ReloadCustomDebuffBar(debuffList[i].id) end
+        for i = 1, #debuffList do
+            local id = debuffList[i].id
+            if AK and AK.QueueBuildJob then
+                AK.QueueBuildJob(function() ns.PAB_ReloadCustomDebuffBar(id) end, "pab:customdebuff:" .. tostring(id))
+            else
+                ns.PAB_ReloadCustomDebuffBar(id)
+            end
+        end
     end
 end
 ReloadAllCustomBars = ReloadAllCustomBarsImpl

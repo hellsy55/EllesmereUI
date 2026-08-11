@@ -1023,6 +1023,46 @@ buildWorker:SetScript("OnEvent", function(self)
     end
 end)
 
+-- Resumable container build: AK.CreateContainer (above) is synchronous and
+-- walks every group/slot in spec in ONE call -- fine for small/settings-swap
+-- containers, but a unit spec with several groups can blow the hard
+-- per-execution watchdog limit inside that single call. When that happens the
+-- RunJob retry above just reruns the same monolithic function from the top,
+-- so it trips the identical "script ran too long" every time until retries
+-- run out (the failure this was written to fix). This version adds one
+-- group/slot per pass and checks elapsed time between each, returning
+-- "again" so the scheduler can resume it on the next tick instead of
+-- re-attempting the whole thing in one shot.
+local STEP_BUDGET_MS = 4
+
+function AK.QueueContainerBuild(parent, unitToken, spec, callback, label)
+    local container = AK.CreateContainerShell(parent, spec)
+    local groups, slots = spec.groups, spec.slots
+    local gi, si = 1, 1
+
+    AK.QueueBuildJob(function()
+        local t0 = debugprofilestop()
+        if groups then
+            while gi <= #groups do
+                AK.AddGroupToContainer(container, groups[gi])
+                gi = gi + 1
+                if debugprofilestop() - t0 >= STEP_BUDGET_MS then return "again" end
+            end
+        end
+        if slots then
+            while si <= #slots do
+                AK.AddSlotToContainer(container, slots[si])
+                si = si + 1
+                if debugprofilestop() - t0 >= STEP_BUDGET_MS then return "again" end
+            end
+        end
+        AK.FinishContainer(container, unitToken)
+        if callback then callback(container, containerData[container].slotFrames) end
+    end, label or "container:build")
+
+    return container
+end
+
 function AK.QueueBuildJob(fn, label)
     buildTail = buildTail + 1
     buildQueue[buildTail] = { fn = fn, label = label }

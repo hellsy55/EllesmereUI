@@ -1286,28 +1286,20 @@ function ns.UF_HideAuraContainers(frame)
     end
 end
 
-function ns.UF_ReloadAuraContainers(frame, unit)
-    local s = SettingsFor(unit)
-    local entry = registry[unit]
-    if not s or not entry then return end
-    -- Still under construction by the deferred stepper: its final stage
-    -- runs this reload once the containers are complete.
-    if entry.building then return end
-
-    if unit:match("^boss") and ns._bossPreviewActive then
-        if entry.buffs then entry.buffs:Hide() end
-        if entry.debuffs then entry.debuffs:Hide() end
-        entry.previewHid = true
-        return
-    end
-
-    local font = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or ""
-    -- Containers hidden outside the fingerprinted flow (boss preview) must
-    -- re-drive anchor/config/visibility even with matching fingerprints.
-    local forceCfg = entry.previewHid and true or false
-    entry.previewHid = nil
-
-    for base, field in pairs({ HELPFUL = "buffs", HARMFUL = "debuffs" }) do
+-- One element's worth of the reload pass (style diff, additive group
+-- declares, anchor, and ApplyGroupConfig -- the SetAuraGroupMaxFrameCount /
+-- CandidateFilters / Layout calls, where any newly-enabled class pays for an
+-- eager engine button batch). Extracted out of ns.UF_ReloadAuraContainers so
+-- BuildUnitContainers' stepper can run buffs and debuffs as two SEPARATE
+-- watchdog-safe atoms instead of both in one non-yielding call -- doing both
+-- together in the old single call was the actual site of the "script ran too
+-- long" failure on the "uf:unit" build job: a unit with several active
+-- debuff classes at a high maxDebuffs racks up enough eager button batches
+-- in one execution to blow the client watchdog, deterministically, on every
+-- retry. All other callers (RefreshUnit's regen-wake loop, config-driven
+-- reloads) still go through ns.UF_ReloadAuraContainers below and get both
+-- elements in one call, same as before.
+local function ReloadElement(frame, unit, entry, s, font, forceCfg, base, field)
         local key = StyleKey(unit, base)
         local st = ufFP[key]
         if not st then st = {}; ufFP[key] = st end
@@ -1364,7 +1356,32 @@ function ns.UF_ReloadAuraContainers(frame, unit)
                 ApplyGroupConfig(container, unit, base, s, chain, own, declared)
             end
         end
+end
+
+function ns.UF_ReloadAuraContainers(frame, unit)
+    local s = SettingsFor(unit)
+    local entry = registry[unit]
+    if not s or not entry then return end
+    -- Still under construction by the deferred stepper: its final stage
+    -- applies both elements itself (as two separate atoms -- see
+    -- BuildUnitContainers) once the containers are complete.
+    if entry.building then return end
+
+    if unit:match("^boss") and ns._bossPreviewActive then
+        if entry.buffs then entry.buffs:Hide() end
+        if entry.debuffs then entry.debuffs:Hide() end
+        entry.previewHid = true
+        return
     end
+
+    local font = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or ""
+    -- Containers hidden outside the fingerprinted flow (boss preview) must
+    -- re-drive anchor/config/visibility even with matching fingerprints.
+    local forceCfg = entry.previewHid and true or false
+    entry.previewHid = nil
+
+    ReloadElement(frame, unit, entry, s, font, forceCfg, "HELPFUL", "buffs")
+    ReloadElement(frame, unit, entry, s, font, forceCfg, "HARMFUL", "debuffs")
 
     if unit == "player" then
         ReloadDispelSlots(frame, entry)
@@ -1518,11 +1535,39 @@ local function BuildUnitContainers(frame, unit)
         return "again"
     end
 
-    -- Final stage: the first real reload declares nothing new (entry.sig is
-    -- still unset, so its additive path walks the declared sets as no-ops,
-    -- stamps the signatures, and force-applies anchor/config/visibility).
+    -- Stage 5: apply group config (SetAuraGroupMaxFrameCount, candidate
+    -- filters, layout, anchor) via ReloadElement, one ELEMENT per
+    -- invocation instead of both through a single ns.UF_ReloadAuraContainers
+    -- call. This is the actual fix for the "uf:unit" watchdog trip: doing
+    -- buffs AND debuffs together in one non-yielding call could, for a unit
+    -- with several active debuff classes at a high maxDebuffs, rack up
+    -- enough eager per-class button batches in one execution to blow the
+    -- client's script watchdog -- deterministically, so retries never
+    -- helped. Splitting per element roughly halves the worst case.
+    if not entry.cfgBuffsDone then
+        local s = SettingsFor(unit)
+        local font = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or ""
+        ReloadElement(frame, unit, entry, s, font, false, "HELPFUL", "buffs")
+        entry.cfgBuffsDone = true
+        return "again"
+    end
+    if not entry.cfgDebuffsDone then
+        local s = SettingsFor(unit)
+        local font = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or ""
+        ReloadElement(frame, unit, entry, s, font, false, "HARMFUL", "debuffs")
+        entry.cfgDebuffsDone = true
+        return "again"
+    end
+
+    -- Final stage: the first real reload declared nothing new above
+    -- (entry.sig is still unset there, so each ReloadElement call's
+    -- additive path walked the declared sets as no-ops, stamped the
+    -- signatures, and force-applied anchor/config/visibility). Player dispel
+    -- fingerprint was already primed in Stage 4, so this is a no-op re-drive.
     entry.building = nil
-    ns.UF_ReloadAuraContainers(frame, unit)
+    if unit == "player" then
+        ReloadDispelSlots(frame, entry)
+    end
 end
 
 -- Deferred through the shared AuraKit build scheduler (budgeted per frame, never ticks
