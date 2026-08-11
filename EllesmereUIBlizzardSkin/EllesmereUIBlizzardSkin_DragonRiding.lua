@@ -339,6 +339,16 @@ local function EnsureBorder(frame)
     borderedFrames[#borderedFrames + 1] = frame
 end
 
+local function ApplyBorderEdges(frame, hideL, hideR, hideT, hideB)
+    local PP = EllesmereUI and EllesmereUI.PP
+    local edges = PP and PP.GetBorders and PP.GetBorders(frame)
+    if not edges then return end
+    edges._hideLeft = hideL or nil
+    edges._hideRight = hideR or nil
+    edges._hideTop = hideT or nil
+    edges._hideBottom = hideB or nil
+end
+
 local function ApplyBordersAll()
     local PP = EllesmereUI and EllesmereUI.PP
     if not PP then return end
@@ -351,6 +361,31 @@ local function ApplyBordersAll()
             PP.ShowBorder(f)
         else
             PP.HideBorder(f)
+        end
+    end
+
+    if thick > 0 then
+        -- At Element Spacing / Stack Spacing = 0 the touching frames each
+        -- draw their own full border, so the shared seam gets two
+        -- independently pixel-snapped lines instead of one. Suppress the
+        -- edge on one side of every seam so only a single line remains.
+        local gapTouch = p.gap == 0
+        local stackTouch = p.stackSpacing == 0
+        -- The icon spans the full column height (speed bar + both pip rows),
+        -- so its left edge also touches each row's LAST pip, not just the
+        -- speed bar, whenever Element Spacing is 0.
+        ApplyBorderEdges(speedBar, false, gapTouch, gapTouch, false)
+        for i = 1, SKYRIDING_PIPS do
+            local hideR = (stackTouch and i < SKYRIDING_PIPS) or (gapTouch and i == SKYRIDING_PIPS)
+            ApplyBorderEdges(stackFrame.pips[i], false, hideR, false, false)
+        end
+        for i = 1, SECONDWIND_PIPS do
+            local hideR = (stackTouch and i < SECONDWIND_PIPS) or (gapTouch and i == SECONDWIND_PIPS)
+            ApplyBorderEdges(swFrame.pips[i], false, hideR, false, gapTouch)
+        end
+        -- Re-snap so the updated hide flags take effect immediately.
+        for _, f in ipairs(borderedFrames) do
+            PP.SetBorderSize(f, thick)
         end
     end
 end
