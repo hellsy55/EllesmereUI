@@ -460,7 +460,12 @@ end
 -- state: "enabled" (default) or "disabled" -- controls the trailing verb so negative
 -- requirements ("disabled because X must be OFF") read "...to be disabled".
 local function DisabledTooltip(requirement, state)
-    if type(requirement) == "string" and requirement:find("^This option") then return requirement end
+    -- Already a whole sentence: skip the wrapper, but still translate it. The
+    -- catalog keys the whole sentence, so L() resolves it (and is identity on
+    -- English or when the key is missing).
+    if type(requirement) == "string" and requirement:find("^This option") then
+        return EllesmereUI.L(requirement)
+    end
     local verb = (state == "disabled") and "disabled" or "enabled"
     -- Compose via a positional template so the wrapper sentence, the requirement
     -- noun, and the verb each localize independently (word order is translator
@@ -480,7 +485,8 @@ local function ResolveDisabledTip(cfg)
     if tt == nil then return nil end
     local raw = cfg.rawTooltip
     if type(raw) == "function" then raw = raw() end
-    if raw then return tt end
+    -- rawTooltip skips the wrapper sentence, not the translation.
+    if raw then return EllesmereUI.L(tt) end
     return DisabledTooltip(tt, cfg.requireState)
 end
 
@@ -4770,10 +4776,14 @@ local function BuildCogPopup(opts)
     -- Spec Overrides capture: a cog's settings belong to the slot hosting the
     -- cog -- one setting, captured whole. When the call site passes
     -- captureRegion (the DualRow half-region the cog sits in), every row with
-    -- get/set joins that slot's capture group.
+    -- get/set joins that slot's capture group. row.noCapture opts a single
+    -- row out, the same flag DualRow honors per widget: a popup can then mix
+    -- profile-wide rows that capture with rows that must not (settings stored
+    -- per palette rather than under a flat key).
     if opts.captureRegion and EllesmereUI.AddCaptureAccessor and opts.rows then
         for _, row in ipairs(opts.rows) do
-            if row.get and row.set and row.type ~= "button" and row.type ~= "reorder" then
+            if row.get and row.set and not row.noCapture
+               and row.type ~= "button" and row.type ~= "reorder" then
                 EllesmereUI.AddCaptureAccessor(opts.captureRegion, {
                     type = row.type, text = row.label, getValue = row.get, setValue = row.set,
                     min = row.min, max = row.max, step = row.step,
