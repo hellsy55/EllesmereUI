@@ -738,6 +738,21 @@ local function BuildStyle(isBuff, cfg)
         -- passes straight to the world. Hover is deliberately untouched:
         -- click and motion are separate mouse channels, so tooltips keep
         -- following Show Tooltips below either way.
+        -- UP phase, matching Blizzard's own AuraButtonMixin ("LeftButtonUp",
+        -- "RightButtonUp"). Known limitation, field-reported 2026-08-12: for some
+        -- players the right-button PRESS falls through to WorldFrame, which starts
+        -- camera mouselook and captures the mouse, so the matching ButtonUp ends the
+        -- mouselook instead of reaching the button and the buff survives. Blizzard's
+        -- legacy icons consume that press; the engine's intrinsic AuraButton denies
+        -- tainted (addon) code the input aspects that would do the same
+        -- (Blizzard_AuraButton.xml: ForbiddenAspect AlwaysPropagateInput /
+        -- ScriptedInput), and no API re-grants a denied aspect. "RightButtonDown"
+        -- works around it but was rejected deliberately: a right-click-drag starting
+        -- on an icon would then cancel that buff on press. Do not "fix" this by
+        -- registering BOTH phases either -- Blizzard's CanCancelAuraOnClick matches
+        -- any registered token, so OnClick fires twice and the engine may have
+        -- re-assigned this button's aura instance in between, cancelling a DIFFERENT
+        -- aura on the up edge.
         cancelButtons = (isBuff and cfg.rightClickCancel ~= false) and "RightButtonUp" or nil,
 
         hideDurationText = cfg.durationShow == false,
