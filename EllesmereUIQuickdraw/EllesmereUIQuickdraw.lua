@@ -1279,6 +1279,17 @@ local function ResolveAction(slot, p)
             -- token, so the marker still lands under the cursor.
             return "worldmarker", "marker", WORLD_MARKER_ENGINE[id]
         end
+        -- Repeating ONE marker fast stalls here, where cycling eight does not:
+        -- the game holds each marker on its own cooldown -- about four spammed
+        -- presses -- and answers "You can't do that right now". Nothing to do
+        -- with this module: a plain /wm macro alone does it.
+        --
+        -- Clearing before placing, the way retail's own marker button does
+        -- (Mainline/Blizzard_CompactRaidFrameManager.lua:1065-1066), does not
+        -- buy anything from a macro: the /cwm spends the cooldown and the /wm
+        -- behind it lands inside the window, which reads as a toggle. Blizzard
+        -- gets away with it by calling both C functions straight from an
+        -- OnClick, which is not a route an addon has.
         return "macro", "macrotext", "/wm " .. WORLD_MARKER_ENGINE[id], "macro"
 
     elseif k == "dynamicrez" then
