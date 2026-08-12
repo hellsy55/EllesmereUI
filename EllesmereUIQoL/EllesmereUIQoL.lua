@@ -1655,13 +1655,13 @@ end
 --  On-screen overlay showing crit/haste/mastery/vers (+ optional tertiaries).
 -------------------------------------------------------------------------------
 do
-    local statsFrame, statsText, statsValues
+    local statsFrame, statsText
     local format = string.format
 
-    -- Two-column layout: labels left-justified, numbers right-justified in a
-    -- second FontString, so values line up regardless of label width. Both
-    -- columns share font/size/spacing, which keeps their rows in step.
-    local COL_GAP = 10   -- gap between the label and value columns
+    -- Single-string layout: one FontString, "Label:  value" per row. The
+    -- two-column split (separate right-justified values FontString) was
+    -- reverted -- per-column sizing/anchor interplay caused more issues
+    -- than the aligned numbers were worth.
     local ROW_GAP = 3    -- extra pixels between rows (SetSpacing)
 
     -- Per-stat label colors, used when no custom color is picked in options.
@@ -1675,19 +1675,59 @@ do
     }
     -- Tertiaries keep the original default: the player's class color.
 
-    -- Secret-safe percent text: stat getters can return secret numbers in restricted content, and string.format errors on a secret value.
+    -- Secret-safe percent text: stat getters can return secret numbers in
+    -- restricted content, and string.format errors on a secret value. A secret
+    -- cannot be RENDERED either (the engine text sink draws secret numbers as
+    -- 0.0), so "?" is the floor while restricted -- recovery below is what
+    -- keeps it from sticking.
+    local statUnreadable = false
     local function PctText(v)
-        if v == nil or issecretvalue(v) then return "?" end
+        if v == nil or issecretvalue(v) then
+            statUnreadable = true
+            return "?"
+        end
         return format("%.2f%%", v)
     end
 
-    local function UpdateSecondaryStats()
+    -- Load-in settle heal: the login/zone-in restriction window can outlast the
+    -- first paint AND every stat event (stats then read "?" until gear swaps).
+    -- Combat-scoped secrecy has a real edge (PLAYER_REGEN_ENABLED, registered
+    -- below); the login settle has NO event, so a paint that saw a secret arms
+    -- ONE bounded retry chain -- never a loop against persistent secrecy: the
+    -- budget stops it, and a clean paint resets it.
+    local _healPending = false
+    local UpdateSecondaryStats
+
+    local function ArmSecretHeal()
+        if _healPending then return end
+        local tries = statsFrame._secretHeals or 0
+        if tries >= 5 then return end
+        statsFrame._secretHeals = tries + 1
+        _healPending = true
+        C_Timer.After(2, function()
+            _healPending = false
+            UpdateSecondaryStats()
+        end)
+    end
+
+    function UpdateSecondaryStats()
         if not statsFrame or not statsFrame:IsShown() then return end
+        statUnreadable = false
         if not statsFrame._classHex then
+            -- Cache ONLY a resolved class color: caching the white fallback
+            -- here left class-colored labels white for the whole session
+            -- when the first paint beat the color system (login timing) --
+            -- invisible against bright scenes. Unresolved = retry next
+            -- update, white per-use below. issecretvalue FIRST: UnitClass
+            -- returns a secret in restricted content and truthiness on it
+            -- throws (a /reload inside an instance killed every update).
             local _, cls = UnitClass("player")
+            if issecretvalue(cls) then cls = nil end
             local cc = cls and EllesmereUI.GetClassColor(cls)
-            statsFrame._classHex = cc
-                and format("%02x%02x%02x", cc.r * 255, cc.g * 255, cc.b * 255) or "ffffff"
+            if cc then
+                statsFrame._classHex = format("%02x%02x%02x",
+                    cc.r * 255, cc.g * 255, cc.b * 255)
+            end
         end
         -- Label color mode: "palette" (multicolored, one hue per stat),
         -- "class" (default), or "custom". No mode saved: a stored custom
@@ -1700,7 +1740,9 @@ do
         if mode == "custom" and c then
             customHex = format("%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255)
         elseif mode == "class" then
-            customHex = statsFrame._classHex
+            -- Per-use white fallback while the class color is still
+            -- resolving; never cached, so the real color takes over.
+            customHex = statsFrame._classHex or "ffffff"
         end
 
         local crit = GetCritChance("player")
@@ -1716,13 +1758,13 @@ do
             vers = versRating + versBase
         end
 
-        local labels, values = {}, {}
+        local rows = {}
         -- Values are white unless Colored Percentages is on, which colors
         -- each value with its row so the stat reads as one piece.
         local coloredPct = EllesmereUI.QoLExtrasGet("coloredPercentages")
         local function Row(hex, label, value)
-            labels[#labels + 1] = format("|cff%s%s:|r", hex, label)
-            values[#values + 1] = format("|cff%s%s|r", coloredPct and hex or "ffffff", value)
+            rows[#rows + 1] = format("|cff%s%s:|r  |cff%s%s|r",
+                hex, label, coloredPct and hex or "ffffff", value)
         end
         Row(customHex or STAT_HEX.crit,    EllesmereUI.L("Crit"),    PctText(crit))
         Row(customHex or STAT_HEX.haste,   EllesmereUI.L("Haste"),   PctText(haste))
@@ -1735,7 +1777,7 @@ do
                 or (tc and "custom" or "class")
             local tertHex = (tmode == "custom" and tc)
                 and format("%02x%02x%02x", tc.r * 255, tc.g * 255, tc.b * 255)
-                or statsFrame._classHex
+                or statsFrame._classHex or "ffffff"
 
             local leech = GetLifesteal()
             local avoidance = GetAvoidance()
@@ -1745,11 +1787,15 @@ do
             Row(tertHex, EllesmereUI.L("Speed"),     PctText(speed))
         end
 
-        statsText:SetText(table.concat(labels, "\n"))
-        statsValues:SetText(table.concat(values, "\n"))
-        statsFrame:SetSize(
-            statsText:GetStringWidth() + COL_GAP + statsValues:GetStringWidth() + 2,
+        statsText:SetText(table.concat(rows, "\n"))
+        statsFrame:SetSize(statsText:GetStringWidth() + 2,
             statsText:GetStringHeight() + 2)
+
+        if statUnreadable then
+            ArmSecretHeal()
+        else
+            statsFrame._secretHeals = nil
+        end
     end
 
     local function ApplySecondaryStats()
@@ -1769,17 +1815,12 @@ do
             statsText = statsFrame:CreateFontString(nil, "OVERLAY")
             statsText:SetPoint("TOPLEFT")
             statsText:SetJustifyH("LEFT")
-            statsValues = statsFrame:CreateFontString(nil, "OVERLAY")
-            statsValues:SetPoint("TOPRIGHT")
-            statsValues:SetJustifyH("RIGHT")
         end
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
-            for _, fs in ipairs({ statsText, statsValues }) do
-                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, EllesmereUI.GetFontUseShadow("extras")) end
-                fs:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag("extras"))
-                fs:SetSpacing(ROW_GAP)
-            end
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
+            statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag("extras"))
+            statsText:SetSpacing(ROW_GAP)
         end
         local pos = EllesmereUI.QoLExtrasGet("secondaryStatsPos")
         local scale = 1.0
@@ -1795,12 +1836,10 @@ do
         if statsText then
             local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
             local fontSize = math.floor(12 * scale + 0.5)
-            for _, fs in ipairs({ statsText, statsValues }) do
-                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, EllesmereUI.GetFontUseShadow("extras")) end
-                fs:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag("extras"))
-                -- Row gap scales with the font so the block keeps its rhythm.
-                fs:SetSpacing(math.floor(ROW_GAP * scale + 0.5))
-            end
+            if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(statsText, EllesmereUI.GetFontUseShadow("extras")) end
+            statsText:SetFont(font, fontSize, EllesmereUI.GetFontOutlineFlag("extras"))
+            -- Row gap scales with the font so the block keeps its rhythm.
+            statsText:SetSpacing(math.floor(ROW_GAP * scale + 0.5))
         end
         -- Unit-scoped events filter at the engine (player only); a plain RegisterEvent would deliver every raid member's stat changes.
         for _, ev in ipairs({
@@ -1813,6 +1852,10 @@ do
             "COMBAT_RATING_UPDATE", "PLAYER_EQUIPMENT_CHANGED",
             "MASTERY_UPDATE", "SPELL_POWER_CHANGED", "PLAYER_DAMAGE_DONE_MODS",
             "PLAYER_SPECIALIZATION_CHANGED", "PLAYER_ENTERING_WORLD",
+            -- Combat-scoped stat secrecy has this as its lift edge: a load-in
+            -- straight into a fight paints "?" and no stat event follows, so
+            -- the end of combat is what repaints with readable values.
+            "PLAYER_REGEN_ENABLED",
         }) do
             statsFrame:RegisterEvent(ev)
         end

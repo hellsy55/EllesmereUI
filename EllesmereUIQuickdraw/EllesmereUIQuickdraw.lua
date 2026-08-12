@@ -301,6 +301,11 @@ local DB_DEFAULTS = {
         -- blue short of the resource, gray and desaturated for anything else
         -- the game refuses. The same three cues an action button gives.
         showUsability = true,
+        -- Drop entries this character cannot use AT ALL -- another class's
+        -- specializations and spells, macros it does not have -- from the
+        -- drawn menu entirely, so one shared menu fits every character.
+        -- Off draws them as the gray placeholders they always were.
+        hideUnusable = true,
         -- The dark plate behind each entry's icon is FIXED at 0.65 opacity,
         -- 0.9 selected/armed (ApplySlotVisual): it stopped being a setting,
         -- and a bgAlpha key left in stored profiles is never read.
@@ -559,6 +564,7 @@ local APPEARANCE_KEYS = {
     nestBand = true, nestScale = true, gridNestStyle = true,
     arcChildOverflow = true, arcChildMaxSpan = true,
     showCooldowns = true, showUsability = true, showActionText = true,
+    hideUnusable = true,
     selectColorCustom = true, selectColor = true, useClassColor = true,
     -- Per palette on purpose: a marker ring wants the flick it has always had,
     -- while a mount menu is worth latching open and pointing at. The Select key
@@ -691,6 +697,11 @@ local function ChildIndex(slot)
 end
 ns.ChildIndex = ChildIndex
 
+-- Assigned with the usability filter further down (it needs SpecIndexFor);
+-- ChildSlots reads through it so a nested menu contributes only what this
+-- character can use, under the nested palette's OWN setting.
+local UsableSlots
+
 -- The reachable entries of a nested palette. Capped rather than refused, so a
 -- palette that is also bound to a key keeps all twelve of its slots when it is
 -- opened directly and offers what its parent's layout can seat when it is
@@ -699,9 +710,10 @@ ns.ChildIndex = ChildIndex
 local function ChildSlots(paletteIndex, cap)
     local palette = paletteIndex and EnsurePalette(paletteIndex)
     if not palette then return nil end
+    local slots = UsableSlots(palette, PA(paletteIndex))
     local out = {}
-    for i = 1, min(cap or MAX_CHILDREN, #palette.slots) do
-        out[i] = palette.slots[i]
+    for i = 1, min(cap or MAX_CHILDREN, #slots) do
+        out[i] = slots[i]
     end
     return out, palette
 end
@@ -935,7 +947,12 @@ local REZ_BY_CLASS = {
 -- answer and hold it until something invalidated it, which is a worse failure
 -- than the reads it saves: three spellbook lookups, on a path that runs once
 -- per palette open rather than per frame. See AdvanceLiveIcons for the one that
--- does run per frame, and OnEnteringWorld for the cold-book repair.
+-- does run per frame.
+--
+-- The macro this feeds is written at push time, and SPELLS_CHANGED already
+-- requests a push for the usability filter -- so a talent swap, a spec change,
+-- levelling into a rez and the spellbook warming up after login all rebuild it
+-- with no registration of its own.
 local function RezKit()
     local _, class = UnitClass("player")
     local kit = class and REZ_BY_CLASS[class]
@@ -1019,6 +1036,91 @@ end
 function ns.HasRezKit()
     local _, class = UnitClass("player")
     return (class and REZ_BY_CLASS[class]) ~= nil
+end
+end
+
+-- The filtered answers, one per palette table. Wiped ONLY at the top of
+-- PushAllPalettes: the memo is what keeps the drawn menu and the pushed
+-- secure attributes reading the SAME list even when the spellbook shifts
+-- between the push and the open (a pet swap mid-fight, say) -- usability is
+-- allowed to go stale until the next push rather than ever disagreeing with
+-- what a cell index fires. Every input that can change an answer lands here
+-- through that same wipe: SPELLS_CHANGED and UPDATE_MACROS request a push,
+-- every slot edit and the toggle itself request one through Refresh, class
+-- and spec-list are fixed for the session, and a profile switch hands out
+-- different palette tables (weak keys let the old ones go).
+local usableMemo = setmetatable({}, { __mode = "k" })
+
+-- KnownForm, SpellKnownHere and SlotUsable are private to UsableSlots, and
+-- are scoped so they cost no main-chunk local: this file's main chunk is at
+-- Lua's ceiling of 200 locals, and merging two features into it went over.
+-- usableMemo stays outside the block -- PushAllPalettes wipes it.
+do
+-- Is this one spell id in either of this character's books, player or pet?
+local function KnownForm(sid)
+    return (sid and sid > 0)
+        and (IsPlayerSpell(sid)
+             or (C_SpellBook and C_SpellBook.IsSpellKnownOrInSpellBook
+                 and C_SpellBook.IsSpellKnownOrInSpellBook(sid)))
+        or false
+end
+
+-- Whether this character's books hold the spell in ANY of its forms: the
+-- stored id, its talent override, and its base form. Generous on purpose --
+-- hiding a castable entry is a worse failure than drawing a dead one, so
+-- every form is checked before answering no, and a malformed id answers yes
+-- and leaves the slot to render as the placeholder it always was.
+local function SpellKnownHere(id)
+    if type(id) ~= "number" or id <= 0 then return true end
+    if KnownForm(id) then return true end
+    local ovr = C_SpellBook and C_SpellBook.FindSpellOverrideByID
+        and C_SpellBook.FindSpellOverrideByID(id)
+    if ovr ~= id and KnownForm(ovr) then return true end
+    local base = C_Spell.GetBaseSpell and C_Spell.GetBaseSpell(id)
+    return base ~= id and KnownForm(base)
+end
+
+-- Can this character do anything with the slot? Only the kinds that resolve
+-- against one character's own kit are tested -- another class's
+-- specialization, a spell no book here holds, a macro this character does
+-- not have. Everything else (items, toys, mounts, pets, markers, nested
+-- menus) is account-wide or self-resolving and stays.
+local function SlotUsable(slot)
+    local k = slot and slot.kind
+    if k == "spec" then
+        return SpecIndexFor(slot) ~= nil
+    elseif k == "spell" then
+        return SpellKnownHere(tonumber(slot.id))
+    elseif k == "macro" then
+        return GetMacroInfo(slot.name or slot.id) ~= nil
+    end
+    return true
+end
+
+-- The entries of the palette this character can use ("Hide Unusable
+-- Entries"). A view, never a mutation: returns the stored array itself while
+-- nothing is filtered or the setting is off, and a fresh dense array
+-- otherwise -- the stored slots keep every entry for the characters that CAN
+-- use them.
+function UsableSlots(palette, p)
+    local slots = palette and palette.slots
+    if not slots then return slots end
+    if p and p.hideUnusable == false then return slots end
+    local memo = usableMemo[palette]
+    if memo then return memo end
+    local out
+    for i = 1, #slots do
+        if not SlotUsable(slots[i]) then
+            if not out then
+                out = {}
+                for j = 1, i - 1 do out[j] = slots[j] end
+            end
+        elseif out then
+            out[#out + 1] = slots[i]
+        end
+    end
+    usableMemo[palette] = out or slots
+    return out or slots
 end
 end
 
@@ -1309,9 +1411,16 @@ local function SlotDisplay(slot)
             local _, name, _, icon = C_SpecializationInfo.GetSpecializationInfo(index)
             return icon or QUESTION_MARK, name or slot.name
         end
-        -- A spec this character does not have. Drawn as an occupied slot with
-        -- whatever name it was picked up under, like every other entry whose
-        -- target has gone away.
+        -- A spec this character's class does not have. Its identity is still
+        -- global -- the specID answers by itself -- so the editor and an
+        -- unfiltered menu draw the real specialization, not a placeholder.
+        local want = tonumber(slot.specID)
+        if want and GetSpecializationInfoByID then
+            local _, name, _, icon = GetSpecializationInfoByID(want)
+            if icon or name then
+                return icon or QUESTION_MARK, name or slot.name
+            end
+        end
         return QUESTION_MARK, slot.name
 
     elseif k == "battlepet" then
@@ -2327,9 +2436,9 @@ end
 -- ring with no room left spills the rest into a second ring one child pitch
 -- further out rather than growing its own radius until the angle buys enough
 -- room, which is unbounded.
-function PaletteView:ChildGeom(shown, palette)
+function PaletteView:ChildGeom(shown, slots)
     local p = self:P()
-    if not p or not palette or shown < 1 then return nil end
+    if not p or not slots or shown < 1 then return nil end
     -- An editor draws no nests. What a nested entry holds is that palette's own
     -- business -- switch to it and it is the whole preview -- and drawing every
     -- nest at once buries the palette actually being arranged. It would also
@@ -2351,11 +2460,11 @@ function PaletteView:ChildGeom(shown, palette)
     end
     local claims
     for i = 1, shown do
-        local kids = ChildSlots(ChildIndex(palette.slots[i]), cap)
+        local kids = ChildSlots(ChildIndex(slots[i]), cap)
         if kids and #kids > 0 then
             claims = claims or {}
             claims[#claims + 1] = { parent = i, n = #kids, slots = kids,
-                                    palette = ChildIndex(palette.slots[i]) }
+                                    palette = ChildIndex(slots[i]) }
         end
     end
     if not claims then return nil end
@@ -4418,8 +4527,16 @@ function PaletteView:Layout(paletteIndex)
     -- the previous geometry says nothing about this one.
     self._steerX = nil
     self.paletteIndex = paletteIndex
+    -- What this view draws: the stored slots for the editor -- assigning and
+    -- arranging entries has to show all of them, whoever is logged in -- and
+    -- the usable view for everything else (Hide Unusable Entries). Kept on
+    -- the view so CellSlot maps a cell index through the SAME list this
+    -- drawing was laid out from.
+    local slots = opts.interactive and palette.slots
+        or UsableSlots(palette, p)
+    self._slots = slots
     -- Derived, never stored: the palette is exactly as big as what is on it.
-    local n = #palette.slots
+    local n = #slots
     -- The editor's "+" add button. On the ARC it takes the CENTRE -- the
     -- ground the live menu spends on hub art, which the editor does not draw
     -- -- so the ring holds only real entries and the connector line runs out
@@ -4452,7 +4569,7 @@ function PaletteView:Layout(paletteIndex)
     -- Worked out before the frame is sized, not with the entries it places: a
     -- nested arc reaches further out than the palette's own ring, and a frame
     -- sized to the ring alone would clip every child drawn beyond it.
-    local claims = self:ChildGeom(shown, palette)
+    local claims = self:ChildGeom(shown, slots)
     local outer = radius
     -- Half-extents a block layout's nests reach to, in the frame's own units.
     local nestX, nestY = 0, 0
@@ -4540,9 +4657,12 @@ function PaletteView:Layout(paletteIndex)
         -- The fan never labels its entries: at strip spacing the captions of
         -- neighbouring icons collide, and the centre entry -- the only one that
         -- can be fired -- is already named on the hub.
-        PaintCell(w, palette.slots[i], palette.slots[i] == nil,
+        PaintCell(w, slots[i], slots[i] == nil,
                   showLabels, showCooldowns, not fan, iconSize, showUsability)
-        if HasLiveIcon(palette.slots[i]) then liveCells[#liveCells + 1] = i end
+        -- slots, not palette.slots: the same list the cell was just painted
+        -- from. Once Hide Unusable Entries filters anything the two part
+        -- company, and testing the stored array would collect the wrong cells.
+        if HasLiveIcon(slots[i]) then liveCells[#liveCells + 1] = i end
         w:Show()
     end
 
@@ -4774,7 +4894,13 @@ function PaletteView:CellSlot(index)
     -- the profile for a pure read.
     local palette = ReadPalette(self.paletteIndex)
     if not palette then return nil end
-    if index <= self.shownCount then return palette.slots[index] end
+    if index <= self.shownCount then
+        -- The list this drawing was laid out from (Layout), which is the
+        -- usable view on a live menu -- indexing the stored array here would
+        -- hand back the wrong entry the moment anything was filtered.
+        local slots = self._slots or palette.slots
+        return slots[index]
+    end
     local claims = self.claims
     for k = 1, (claims and #claims or 0) do
         local c = claims[k]
@@ -7569,13 +7695,6 @@ end
 -- these are ordinary insecure writes to a protected frame, which is precisely
 -- what combat forbids. A palette edited mid-fight keeps firing its previous
 -- contents until the fight ends -- the same bargain the override bindings make.
--- Whether the last push put a Dynamic Rez entry anywhere. Which spells that
--- entry resolves to moves with talents and with levelling, and those events are
--- not worth listening to for a set of palettes that holds no such entry -- so
--- the push, which walks every slot of every bound palette in any case, is what
--- decides. Raised by PushCell, read by PushAllPalettes.
--- Rez.pushed carries it; Rez.SetEvents, defined below RequestPush because that
--- is what its handler reaches, is what acts on it.
 -- How many cells each button was last given, so a palette that loses a nest
 -- clears the entries that nest used to occupy.
 local pushedCells = {}
@@ -7589,10 +7708,6 @@ local pushedClaims = {}
 -- resolve a release to -- which is what lets the snippet fire either without
 -- knowing which of the two it landed on.
 local function PushCell(btn, i, slot)
-    -- Raised on the KIND, ahead of the resolve and whatever it answers: a rez
-    -- macro that came out empty because the spellbook was cold is exactly the
-    -- case OnEnteringWorld needs this flag to catch.
-    if slot and slot.kind == "dynamicrez" then Rez.pushed = true end
     local aType, aKey, aVal = ResolveAction(slot)
     btn:SetAttribute("eqdT" .. i, aType)
     btn:SetAttribute("eqdK" .. i, aKey)
@@ -7640,14 +7755,19 @@ local function PushPalette(index)
     -- early return past here; the clear at the bottom is unconditional.
     liveView.appIndex = index
 
+    -- The usable view, same as the live drawing reads (Hide Unusable
+    -- Entries): what a cell index fires and what it draws have to come off
+    -- the same list, and the memo behind UsableSlots is what pins the two
+    -- together between this push and any open that follows it.
+    local slotsEff = UsableSlots(palette, p)
     for i = 1, MAX_SLOTS do
-        PushCell(btn, i, palette.slots[i])
+        PushCell(btn, i, slotsEff[i])
     end
 
     -- The live palette draws exactly what the palette holds -- the trailing "+"
     -- entry is the editor's -- so #slots is the count the snippet divides by, and
     -- ArcGeom is asked for the geometry rather than the snippet re-deriving it.
-    local n = #palette.slots
+    local n = #slotsEff
     local step, arcStart, full = liveView:ArcGeom(n)
     local _, _, deadZone = liveView:Geom()
     -- Where the palette's centre will be, so the snippet can work in UIParent
@@ -7749,7 +7869,7 @@ local function PushPalette(index)
     --
     -- The loop above has already cleared indices n+1 .. MAX_SLOTS, which is
     -- where these land, so the writes must come after it.
-    local claims = liveView:ChildGeom(n, palette)
+    local claims = liveView:ChildGeom(n, slotsEff)
 
     -- How far every claim-indexed loop below, and every snippet loop that
     -- reads eqdGateMax, runs. MAX_SLOTS is what a palette could hold; this is
@@ -7926,11 +8046,9 @@ local function PushAllPalettes()
         return
     end
     pushDirty = false
-    -- Recomputed by the walk below, which visits every slot of every bound
-    -- palette anyway. See Rez.SetEvents for what it is for.
-    Rez.pushed = false
+    -- The one place usability answers are allowed to change -- see usableMemo.
+    wipe(usableMemo)
     for i = 1, PaletteCount() do PushPalette(i) end
-    Rez.SetEvents(Rez.pushed)
 end
 
 -- A push is on the order of a thousand attribute writes per bound palette, and
@@ -7977,51 +8095,6 @@ FlushPendingPush = function()
     if not pushQueued then return end
     pushQueued = false
     PushAllPalettes()
-end
-
--- What a Dynamic Rez entry is depends on which resurrection spells this
--- character HAS, and the macro carrying that answer is written at push time. So
--- the three things that change the answer have to reach a push:
---
---   PLAYER_SPECIALIZATION_CHANGED   a rez that belongs to one spec
---   TRAIT_CONFIG_UPDATED            a rez that is a talent -- Intercession
---   LEARNED_SPELL_IN_SKILL_LINE     levelling into one
---
--- Not SPELLS_CHANGED, which would cover all three in one registration and fires
--- repeatedly through login and every zone change for a module that has nothing
--- to do with any of it.
---
--- Registered only while a palette actually holds such an entry, so a set of
--- palettes without one dispatches nothing at all.
-do
-local REZ_EVENTS = {
-    "PLAYER_SPECIALIZATION_CHANGED",
-    "TRAIT_CONFIG_UPDATED",
-    "LEARNED_SPELL_IN_SKILL_LINE",
-}
-local rezEventsOn = false
-
-local function OnRezSourceChanged(_, event, arg1)
-    -- The spec event fires for group members too, and somebody else's respec
-    -- changes nothing about what this character can cast.
-    if event == "PLAYER_SPECIALIZATION_CHANGED" and arg1 ~= "player" then return end
-    -- The coalesced request, not a direct push: a loadout swap fires
-    -- TRAIT_CONFIG_UPDATED several times over, and one push serves the lot.
-    RequestPush()
-end
-
-function Rez.SetEvents(on)
-    on = on and true or false
-    if on == rezEventsOn then return end
-    rezEventsOn = on
-    for _, event in ipairs(REZ_EVENTS) do
-        if on then
-            EQD:RegisterEvent(event, OnRezSourceChanged)
-        else
-            EQD:UnregisterEvent(event)
-        end
-    end
-end
 end
 
 local bindingsDirty = false
@@ -8262,16 +8335,6 @@ end
 -- key-up; drop the palette rather than leave it stuck.
 local function OnEnteringWorld()
     ns.Close()
-    -- The rez macro is built from the spellbook, and the spellbook can still be
-    -- cold at the push this module makes on its way up -- which would leave a
-    -- Dynamic Rez entry holding no macro at all, with nothing later in the
-    -- session to fix it: the events that rebuild it fire when what is known
-    -- CHANGES, and a spell that was known all along never changes. This is the
-    -- repair, and it costs nothing on a set of palettes without such an entry.
-    --
-    -- Rez.pushed is raised by the slot's KIND rather than by the macro resolving,
-    -- which is what lets a push that resolved nothing still ask to be redone.
-    if Rez.pushed then RequestPush() end
 end
 
 -- Switched off, the module wants none of these -- except while something is
@@ -8293,14 +8356,18 @@ function SetEventsEnabled(on)
         EQD:RegisterEvent("UPDATE_BINDINGS", OnUpdateBindings)
         EQD:RegisterEvent("PLAYER_REGEN_ENABLED", OnRegenEnabled)
         EQD:RegisterEvent("PLAYER_ENTERING_WORLD", OnEnteringWorld)
+        -- The usability filter's inputs (Hide Unusable Entries): the
+        -- spellbook and the macro set. A change re-pushes -- deferred and
+        -- coalesced by RequestPush, refused in combat and paid off by
+        -- PLAYER_REGEN_ENABLED like every other push.
+        EQD:RegisterEvent("SPELLS_CHANGED", RequestPush)
+        EQD:RegisterEvent("UPDATE_MACROS", RequestPush)
     else
         EQD:UnregisterEvent("UPDATE_BINDINGS")
         EQD:UnregisterEvent("PLAYER_REGEN_ENABLED")
         EQD:UnregisterEvent("PLAYER_ENTERING_WORLD")
-        -- The rez events belong to the pushed palettes, and a module switched
-        -- off pushes nothing. There is no debt to settle here the way the three
-        -- above have one: a push that never happens leaves nothing owed.
-        Rez.SetEvents(false)
+        EQD:UnregisterEvent("SPELLS_CHANGED")
+        EQD:UnregisterEvent("UPDATE_MACROS")
     end
 end
 

@@ -1180,6 +1180,7 @@ local DEFAULTS = {
             resourceColored = false,  -- "Class Resource Color" fill mode (per-spec resource/power color); takes precedence over classColored when on
             fillR       = 0.95, fillG = 0.90, fillB = 0.60, fillA = 1,
             fillOpacity = 100,  -- 0-100; below 100 the world shows through the fill
+            darkenPartialPips = true,  -- fractional Soul Shards/Essence use a darker fill while incomplete
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
             showTextOnlyIfNoPower = false,  -- only show the resource text while the power bar is hidden (see IsPowerBarHidden)
@@ -5745,14 +5746,15 @@ local function UpdateSecondaryResource()
             nextPip._rechargeBar:SetValue(frac)
             -- Partial generator (Evoker/Lock): color the filling pip like the full
             -- ones -- the threshold/band color when it applies to this slot (index
-            -- cur+1), else the base color. Dimmed (*0.75) so it still reads as
-            -- "recharging" rather than a completed pip.
+            -- cur+1), else the base color. Optionally dimmed so it still reads
+            -- as "recharging" rather than a completed pip.
             local fr, fg, fb = r, g, b
             local fi = cur + 1
             if useThresh and not (not _tsBandOn and _tsPartialOnly and fi < _tsThreshCount) then
                 fr, fg, fb = tr, tg, tb
             end
-            nextPip._rechargeBar:SetStatusBarColor(fr * 0.75, fg * 0.75, fb * 0.75, a)
+            local shade = sp.darkenPartialPips == false and 1 or 0.75
+            nextPip._rechargeBar:SetStatusBarColor(fr * shade, fg * shade, fb * shade, a)
             nextPip._rechargeBar:Show()
         end
 

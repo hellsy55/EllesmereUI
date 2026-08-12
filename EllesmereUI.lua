@@ -4154,39 +4154,34 @@ function EllesmereUI.ApplyColorsToOUF()
     -- Pull Colors From, profile switches), so drop the effective-colour cache here; the
     -- GetClassColor/GetPowerColor reads below rebuild it from the new palette + darken.
     EllesmereUI.InvalidateColorCache()
-    -- 1. Update oUF color objects. NEVER modify _G.RAID_CLASS_COLORS: taint.
-    local oUF = _G.EllesmereUF
-    if oUF and oUF.colors then
-        if oUF.colors.class then
+    -- 1. Update the unit-frame engine's shared color objects. NEVER modify
+    -- _G.RAID_CLASS_COLORS: taint.
+    local colors = EllesmereUI._UFColors
+    if colors then
+        if colors.class then
             for classToken, _ in pairs(CLASS_COLOR_MAP) do
                 local cc = EllesmereUI.GetClassColor(classToken)
-                local entry = oUF.colors.class[classToken]
-                if entry then
-                    if entry.SetRGBA then
-                        entry:SetRGBA(cc.r, cc.g, cc.b, 1)
-                    else
-                        entry[1] = cc.r; entry[2] = cc.g; entry[3] = cc.b
-                    end
+                local entry = colors.class[classToken]
+                if entry and entry.SetRGBA then
+                    entry:SetRGBA(cc.r, cc.g, cc.b, 1)
+                else
+                    colors.class[classToken] = CreateColor(cc.r, cc.g, cc.b, 1)
                 end
             end
         end
-        if oUF.colors.power then
+        if colors.power then
             for powerKey, enumVal in pairs(EllesmereUI.POWER_KEY_TO_ENUM) do
                 local pc = EllesmereUI.GetPowerColor(powerKey)
-                local entry = oUF.colors.power[enumVal]
-                if entry then
-                    if entry.SetRGBA then
-                        entry:SetRGBA(pc.r, pc.g, pc.b, 1)
-                    else
-                        entry[1] = pc.r; entry[2] = pc.g; entry[3] = pc.b
-                    end
+                local entry = colors.power[enumVal]
+                if entry and entry.SetRGBA then
+                    entry:SetRGBA(pc.r, pc.g, pc.b, 1)
+                else
+                    colors.power[enumVal] = CreateColor(pc.r, pc.g, pc.b, 1)
                 end
             end
         end
-        if oUF.objects then
-            for _, obj in next, oUF.objects do
-                obj:UpdateAllElements("ForceUpdate")
-            end
+        if EllesmereUI._UFEngineForceAll then
+            EllesmereUI._UFEngineForceAll("ForceUpdate")
         end
     end
     -- 3. Refresh nameplates (enemy + friendly)
@@ -5693,9 +5688,17 @@ do
                 print("Cannot open options in combat")
                 return
             end
-            if not EllesmereUI.EnsureOptionsLoaded() then return end
-            local real = SlashCmdList[key]
-            if real and real ~= bootstrap then real(msg) end
+            -- Deferred one tick: slash dispatch runs inside the chat edit
+            -- box's script execution, and first-open work (options addon
+            -- load + full panel build) can exceed that execution's watchdog
+            -- budget ("script ran too long"). A fresh timer execution owns
+            -- its own budget.
+            C_Timer.After(0, function()
+                if InCombatLockdown() then return end
+                if not EllesmereUI.EnsureOptionsLoaded() then return end
+                local real = SlashCmdList[key]
+                if real and real ~= bootstrap then real(msg) end
+            end)
         end
         SlashCmdList[key] = bootstrap
     end
@@ -10857,7 +10860,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.2"
+EllesmereUI.VERSION = "8.8.3"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11019,6 +11022,8 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "BetterCharacterPanel",     label = "Better Character Panel",     targets = { "EllesmereUIBlizzardSkin" },
               moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
               message = "Better Character Panel conflicts with the EllesmereUI's Character Sheet. Disable either Better Character Panel or the Character Sheet skin in Blizzard UI Enhanced settings." },
+            { addon = "idTip",                    label = "idTip",                      targets = "all",
+              message = "idTip conflicts with EllesmereUI's tooltip systems. Disable the idTip addon to stay compatible." },
             -- Old name of EllesmereUIDataBars: a leftover copy of the addon from before the rename duplicates the entire bar.
             { addon = "EllesmereUIWonderBar",     label = "EllesmereUI WonderBar",      targets = { "EllesmereUIDataBars" },
               message = "EllesmereUI WonderBar was renamed to EllesmereUI DataBars. The old WonderBar addon is still installed and both create the same bar. Please disable or delete the EllesmereUIWonderBar addon." },
@@ -11860,10 +11865,14 @@ initFrame:SetScript("OnEvent", function(self, event)
             pcall(C_CVar.SetCVar, "tooltipShowAuraSpellIDs", on and "1" or "0")
         end
         do
+            -- PLAYER_ENTERING_WORLD, not PLAYER_LOGIN: the engine settles its
+            -- session CVars after login and clobbered the early write -- aura
+            -- IDs stayed off until the user re-toggled the option (field-
+            -- reported). Kept registered: a re-assert per zone-in is one
+            -- pcall'd SetCVar and survives any later engine reset.
             local cvarBoot = CreateFrame("Frame")
-            cvarBoot:RegisterEvent("PLAYER_LOGIN")
-            cvarBoot:SetScript("OnEvent", function(self)
-                self:UnregisterEvent("PLAYER_LOGIN")
+            cvarBoot:RegisterEvent("PLAYER_ENTERING_WORLD")
+            cvarBoot:SetScript("OnEvent", function()
                 EllesmereUI.SyncAuraSpellIDCVar()
             end)
         end

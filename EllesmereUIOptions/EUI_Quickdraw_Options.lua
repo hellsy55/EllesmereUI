@@ -3239,6 +3239,18 @@ initFrame:SetScript("OnEvent", function(self)
         -- user's own animation pass.
         y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Unusable Entries", noCapture=true,
+              disabled=Disabled, disabledTooltip="the module",
+              tooltip="Hide entries this character cannot use: another class's "
+                      .."specializations and spells, and macros this character "
+                      .."does not have. One shared menu then fits every "
+                      .."character. The menu editor always shows every entry.",
+              getValue=function() return ACfg("hideUnusable") ~= false end,
+              setValue=function(v) ASet("hideUnusable", v); Refresh() end },
+            { type="label", text="" })
+        y = y - h
+
         _, h = W:Spacer(parent, y, 10); y = y - h
 
         return math.abs(y)
