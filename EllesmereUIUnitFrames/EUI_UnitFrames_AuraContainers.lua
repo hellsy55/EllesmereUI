@@ -1177,7 +1177,9 @@ local function ApplyDispelSlotStyle(button, d, style)
     if not health then return end
 
     if not d.overlay then
-        d.overlay = button:CreateTexture(nil, "ARTWORK", nil, 3)
+        -- Sublevel 2+level (3..7): higher-priority types get the higher
+        -- sublevel, since every slot shares one frame level (see below).
+        d.overlay = button:CreateTexture(nil, "ARTWORK", nil, 2 + (style.level or 1))
     end
     local tex = d.overlay
     local c = style.color
@@ -1188,7 +1190,11 @@ local function ApplyDispelSlotStyle(button, d, style)
     -- At creation this runs inside the initializeFrame window (always
     -- legal); on later restyles the level rarely changes, and a denied
     -- attempt throws so the worker defers this key to the lift re-queue.
-    local lvl = health:GetFrameLevel() + 1 + (style.level or 1)
+    -- The health bar's own level, where the legacy overlay texture lived:
+    -- below the shield and heal-absorb bars at hpBar+1, so fill/full overlays
+    -- never cover them. All slots share this level; the Magic > Curse > ...
+    -- priority is encoded in the overlay's ARTWORK sublevel above.
+    local lvl = health:GetFrameLevel()
     if d.lvl ~= lvl then
         button:SetFrameLevel(lvl)
         d.lvl = lvl
