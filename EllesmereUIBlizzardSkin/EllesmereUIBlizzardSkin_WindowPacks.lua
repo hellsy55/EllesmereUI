@@ -11173,14 +11173,25 @@ local function Skin_LootToast()
         -- Blizzard window, and SkinToast's shape test is broad (any
         -- .ItemName/.Label/.Title that can GetText). Plenty of ADDON dialogs
         -- sit at FULLSCREEN_DIALOG with a .Title, ours included; without the gate this sweep silently blanks other addons' windows.
+        --
+        -- SECRECY: this walks EVERY UIParent child, so it meets frames this
+        -- addon did not create, and a widget fed secret data hands back SECRET
+        -- values from ordinary getters (comparing one throws in addon code).
+        -- Nothing secret-aspected is ever a loot toast, so secret == skip.
+        -- Both reads resolve into locals BEFORE any comparison -- a getter
+        -- called mid-`and`-chain throws on the spot instead of skipping.
         local up = _G.UIParent
         if deep and up and up.GetChildren then
+            local isSecret = issecretvalue
             for i = 1, select("#", up:GetChildren()) do
                 local ch = select(i, up:GetChildren())
-                if ch and ch.GetFrameStrata and ch.IsForbidden and not ch:IsForbidden()
-                   and ch:IsShown() and ch:GetFrameStrata() == "FULLSCREEN_DIALOG"
-                   and not WSkin.IsForeignFrame(ch, up) then
-                    if SkinToast(ch) then known[ch] = true end
+                if ch and ch.GetFrameStrata and ch.IsForbidden and not ch:IsForbidden() then
+                    local strata, shown = ch:GetFrameStrata(), ch:IsShown()
+                    if not (isSecret and (isSecret(strata) or isSecret(shown)))
+                       and shown and strata == "FULLSCREEN_DIALOG"
+                       and not WSkin.IsForeignFrame(ch, up) then
+                        if SkinToast(ch) then known[ch] = true end
+                    end
                 end
             end
         end

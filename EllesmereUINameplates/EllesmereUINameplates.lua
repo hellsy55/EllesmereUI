@@ -4525,7 +4525,18 @@ local function IsQuestMob(unit)
                     local have, need = line.numFulfilled, line.numRequired
                     if have and need
                        and not (issecretvalue and (issecretvalue(have) or issecretvalue(need))) then
-                        objText = have .. "/" .. need
+                        -- Percent-style objectives (area progress bars)
+                        -- degenerate to 0/1 in the structured fields; the
+                        -- real progress lives only in the line text. Show
+                        -- the extracted percent when readable, else the
+                        -- count (real 0/1 kill objectives keep their count).
+                        local lt = line.leftText
+                        local pct
+                        if lt and not (issecretvalue and issecretvalue(lt))
+                           and type(lt) == "string" then
+                            pct = lt:match("(%d+)%s*%%")
+                        end
+                        objText = pct and (pct .. "%") or (have .. "/" .. need)
                     end
                 end
                 break

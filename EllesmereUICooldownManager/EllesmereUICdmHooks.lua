@@ -1113,7 +1113,15 @@ end
 --  PER-SPELL: "Hide Swipe (Charges)" also hides the radial swipe (edge only),
 --  resolved only when in use (ns._cdmAnyChargeStyle) so others pay ~0.
 -------------------------------------------------------------------------------
-local CDM_EDGE_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\edge.png"
+-- Game-indexed on purpose: the 12.1 edge channel renders game-indexed files
+-- ONLY -- loose addon art (png/tga/blp) draws nothing, silently, with clean
+-- state readbacks.
+local CDM_EDGE_TEXTURE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
+
+-- NOTE (probed 2026-08-12): the Cooldown widget clips ALL edge drawing at
+-- the frame's own rect -- scales past flush render identically, so the edge
+-- can never reach a square's corners without enlarging the cooldown frame
+-- itself. Do not re-attempt corner coverage via SetEdgeScale.
 
 -- Thin wrapper: frame spell/bar identity -> ResolveSpellSettings, the same
 -- Hero-talent-aware resolver the SetSwipeColor / cdState / desat hooks use, so
@@ -1126,8 +1134,10 @@ function ns._ResolveCdmSS(frame)
     return ResolveSpellSettings(frame, sid2, ns.GetBarSpellData and ns.GetBarSpellData(bk2))
 end
 
--- Draw the cooldown edge on a charge frame. The shape system owns the mask +
--- circular-edge flag; we add texture, gold color, per-shape scale, draw flag.
+-- Draw the styled cooldown edge -- one texture for every edge lane: the
+-- always-on charge recharge edge and the bar-wide Always Show Cooldown Edge
+-- re-assert both land here. The shape system owns the mask + circular-edge
+-- flag; this applies texture, color, scale and draw flag.
 local function ApplyCdmEdge(cd, bk2)
     if not cd then return end
     local bd = barDataByKey and barDataByKey[bk2]
@@ -1136,12 +1146,15 @@ local function ApplyCdmEdge(cd, bk2)
     -- use the action bars' baseline size, custom shapes the per-shape scale.
     local scale
     if shape == "none" or shape == "cropped" then
-        scale = 2.1
+        scale = 1.8
     else
         scale = (ns.CDM_SHAPE_EDGE_SCALES and ns.CDM_SHAPE_EDGE_SCALES[shape]) or 0.75
     end
-    if cd.SetEdgeTexture then cd:SetEdgeTexture(CDM_EDGE_TEXTURE) end
-    if cd.SetEdgeColor then cd:SetEdgeColor(0.973, 0.839, 0.604, 1) end
+    -- Color rides SetEdgeTexture: the documented signature is
+    -- (texture, r, g, b, a) with the color args required.
+    if cd.SetEdgeTexture then
+        cd:SetEdgeTexture(CDM_EDGE_TEXTURE, 1, 1, 1, 1)
+    end
     if cd.SetEdgeScale then cd:SetEdgeScale(scale) end
     if cd.SetDrawEdge then cd:SetDrawEdge(true) end
 end
@@ -1205,10 +1218,9 @@ ns.CdmChargeInfoFor = CdmChargeInfoFor
 -- Secret-safe: HasVisualDataSource_Charges is a clean bool, the ss flag is ours.
 local function ApplyCdmChargeStyle(frame, cd)
     -- Icon art suppressed (Only Show Numbers / Charges/Stacks Only): nothing for
-    -- a swipe/edge to decorate, and this is the ONLY ApplyCdmEdge caller, so
-    -- gating here covers the reactive cooldown hooks and ReapplyChargeStyle at
-    -- once. Report "handled" so callers skip their own swipe/edge defaults. The
-    -- reentry guard is SAVED and restored, never forced false: ReapplyChargeStyle
+    -- a swipe/edge to decorate. Report "handled" so callers skip their own
+    -- swipe/edge defaults. The reentry guard is SAVED and restored, never forced
+    -- false: ReapplyChargeStyle
     -- sets it before calling us and clearing it would drop its guard.
     local fdOsn = hookFrameData[frame]
     if fdOsn and fdOsn._osnOn then
@@ -2254,6 +2266,20 @@ local function DecorateFrame(frame, barData)
     fd.bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
         barData.bgB or 0.08, barData.bgA or 0.6)
 
+    -- Show Cooldown Edge: stamped per (re)claim so the cooldown hooks read one
+    -- flag instead of chasing frame -> bar -> settings on every push. Toggling
+    -- rebuilds bars, so the stamp always tracks the live setting; on the
+    -- on -> off transition drop a mid-sweep edge now instead of waiting for
+    -- Blizzard's next cooldown push.
+    local edgeOn = barData.showCooldownEdge or nil
+    if fd._edgeFeatureOn and not edgeOn and fd.cooldown and fd.cooldown.SetDrawEdge then
+        fd._isProcessingOverride = true
+        fd.cooldown:SetDrawEdge(false)
+        fd._isProcessingOverride = false
+        fd._edgeApplied = nil
+    end
+    fd._edgeFeatureOn = edgeOn
+
     -- Custom-shape bars own their border: ApplyShapeToCDMIcon draws the ring on
     -- shapeBorder and hides the square border. Re-applying the square style here
     -- would force it back on unchanged reanchors (no shape re-apply follows those),
@@ -2756,6 +2782,7 @@ local function DecorateFrame(frame, barData)
                     ns._maxStacksWatch[frame] = nil
                 end
 
+                fd._gcdSwipeSuppressed = _gcdSuppressed
                 fd._isProcessingOverride = false
             end)
             hooksecurefunc(cd, "SetDrawSwipe", function(_, show)
@@ -2779,6 +2806,20 @@ local function DecorateFrame(frame, barData)
                 -- them; non-charge frames fall to the force-true below.
                 fd._isProcessingOverride = true
                 local handled = ApplyCdmChargeStyle(frame, cd)
+                -- Bar-wide Show Cooldown Edge (non-charge frames; charge frames
+                -- get their edge from ApplyCdmChargeStyle). GCD suppression
+                -- drops an edge we applied, tracked so the disabled/default
+                -- path never issues a redundant SetDrawEdge.
+                if not handled and fd._edgeFeatureOn and cd.SetDrawEdge then
+                    if not fd._gcdSwipeSuppressed then
+                        local fcEdge = _ecmeFC[frame]
+                        ApplyCdmEdge(cd, fcEdge and fcEdge.barKey)
+                        fd._edgeApplied = true
+                    elseif fd._edgeApplied then
+                        cd:SetDrawEdge(false)
+                        fd._edgeApplied = nil
+                    end
+                end
                 fd._isProcessingOverride = false
                 if handled then return end
                 -- Per-spell Hide CD Swipe (non-charge): keep the swipe suppressed
@@ -2810,31 +2851,49 @@ local function DecorateFrame(frame, barData)
                 cd:SetDrawSwipe(true)
                 fd._isProcessingOverride = false
             end)
-            -- Hide Recharge Edge enforcement. Blizzard re-enables the edge on every
-            -- cooldown re-push (e.g. a CDR effect re-arming a charge recharge), and
-            -- the SetDrawSwipe hook only catches re-pushes that ALSO toggle the
-            -- swipe, so the edge flickers back between them. Mirrors that hook:
-            -- clean getters + our own ss flag, guarded against ApplyCdmEdge's own SetDrawEdge(true) recursing.
+            -- Cooldown edge enforcement. Re-assert the bar-wide Blizzard edge, or
+            -- per-spell Hide Recharge Edge, across Blizzard cooldown re-pushes.
             if cd.SetDrawEdge then
                 hooksecurefunc(cd, "SetDrawEdge", function(_, show)
                     if fd._isProcessingOverride then return end
-                    if not show then return end
+                    -- Edge-off pushes only matter to the bar-wide edge re-assert
+                    -- (every other branch below acts on show=true alone), so the
+                    -- disabled/default path keeps its zero-cost early-out.
+                    if not show and not fd._edgeFeatureOn then return end
+                    if fd._isBuffViewerFrame then return end
                     -- No icon art: no recharge edge, charge or not. Blizzard
                     -- re-enables it on every re-push, so this must be in the hook.
                     if fd._osnOn then
-                        fd._isProcessingOverride = true
-                        cd:SetDrawEdge(false)
-                        fd._isProcessingOverride = false
+                        if show then
+                            fd._isProcessingOverride = true
+                            cd:SetDrawEdge(false)
+                            fd._isProcessingOverride = false
+                        end
                         return
                     end
-                    if type(frame.HasVisualDataSource_Charges) ~= "function"
-                       or not frame:HasVisualDataSource_Charges() then return end
-                    if not ns._cdmAnyChargeStyle then return end
-                    local ss2 = ns._ResolveCdmSS(frame)
-                    if not (ss2 and ss2.hideRechargeEdge) then return end
-                    fd._isProcessingOverride = true
-                    cd:SetDrawEdge(false)
-                    fd._isProcessingOverride = false
+                    local hasChargeSource = type(frame.HasVisualDataSource_Charges) == "function"
+                        and frame:HasVisualDataSource_Charges()
+                    if hasChargeSource and ns._cdmAnyChargeStyle then
+                        local ss2 = ns._ResolveCdmSS(frame)
+                        if ss2 and ss2.hideRechargeEdge then
+                            if show then
+                                fd._isProcessingOverride = true
+                                cd:SetDrawEdge(false)
+                                fd._isProcessingOverride = false
+                            end
+                            return
+                        end
+                    end
+                    -- Bar-wide Show Cooldown Edge: re-assert across Blizzard's
+                    -- own edge-off pushes (stock disables it on every non-charge
+                    -- cooldown update).
+                    if fd._edgeFeatureOn and not fd._gcdSwipeSuppressed then
+                        local fcEdge = _ecmeFC[frame]
+                        fd._isProcessingOverride = true
+                        ApplyCdmEdge(cd, fcEdge and fcEdge.barKey)
+                        fd._isProcessingOverride = false
+                        fd._edgeApplied = true
+                    end
                 end)
             end
             -- Non-charge cooldown re-assert. Blizzard's CooldownViewer zeroes the

@@ -180,24 +180,27 @@ local function ApplyStyle(b, style)
 end
 
 -- Compact house duration format matching the engine aura text: bare seconds
--- under a minute, m/h above.
-local function FormatRemaining(sec)
+-- under a minute (with the unit when the style's Show S for Seconds is on),
+-- m/h above.
+local function FormatRemaining(sec, showS)
     if sec >= 3600 then return string.format("%dh", math.floor(sec / 3600 + 0.5)) end
     if sec >= 60 then return string.format("%dm", math.floor(sec / 60 + 0.5)) end
-    return string.format("%d", math.floor(sec + 0.5))
+    return string.format(showS and "%ds" or "%d", math.floor(sec + 0.5))
 end
 
 local function UpdateTexts()
     local now = GetTime()
     local anyShown = false
     for _, host in pairs(hosts) do
+        local st = Style(host.rec)
+        local showS = st and st.durationShowSeconds
         for _, b in pairs(host.buttons) do
             if b:IsShown() and b:GetAlpha() > 0 then
                 anyShown = true
                 if b._expire and b.duration:IsShown() then
                     local rem = b._expire - now
                     if rem > 0 then
-                        b.duration:SetText(FormatRemaining(rem))
+                        b.duration:SetText(FormatRemaining(rem, showS))
                     else
                         b.duration:SetText("")
                     end
