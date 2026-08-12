@@ -310,6 +310,26 @@ local DB_DEFAULTS = {
         selectColor   = { 0.047, 0.824, 0.624 },  -- the custom swatch's start
         useClassColor = false,
 
+        -- Toggle Menu Open, per palette. Off keeps the model the module was
+        -- built on: hold the key, release to fire. On latches the menu up when
+        -- the key is let go, and the Select key below is what chooses an entry.
+        --
+        -- A palette latches only when there IS a Select key -- see SNIPPET_PRE.
+        -- One with the switch on and no key set behaves exactly as it did
+        -- before, which is the only sane reading of "you have not finished
+        -- setting this up yet": the alternative is a menu that opens and cannot
+        -- be answered.
+        toggleMode = false,
+        -- The key that fires the hovered entry of a latched menu, as a binding
+        -- chord. One key for every palette. Claimed as an override binding for
+        -- exactly as long as a menu is up and handed straight back on close, so
+        -- it keeps whatever it normally does the rest of the time -- which is
+        -- what makes a plain mouse button a reasonable thing to put here.
+        --
+        -- Empty rather than nil: a nil in a defaults table is not merged, so
+        -- there would be no key to write to.
+        confirmKey = "",
+
         paletteCount   = 1,
         -- palette.slots is a DENSE, ORDERED array: the palette auto-sizes to what the
         -- user has actually assigned, so three actions means three big entries
@@ -539,6 +559,11 @@ local APPEARANCE_KEYS = {
     arcChildOverflow = true, arcChildMaxSpan = true,
     showCooldowns = true, showUsability = true, showActionText = true,
     selectColorCustom = true, selectColor = true, useClassColor = true,
+    -- Per palette on purpose: a marker ring wants the flick it has always had,
+    -- while a mount menu is worth latching open and pointing at. The Select key
+    -- the latched one answers to is NOT here -- it is one profile key, so the
+    -- gesture means the same thing whichever menu is up.
+    toggleMode = true,
 }
 ns.APPEARANCE_KEYS = APPEARANCE_KEYS
 
@@ -1413,6 +1438,35 @@ local openedAt = 0
 -- A held key whose up-event never reaches us (alt-tab, /reload prompt, a
 -- taxi takeoff) would otherwise leave the palette on screen forever.
 local OPEN_TIMEOUT = 30
+
+-- The same backstop for a LATCHED palette (Toggle Menu Open), which has no key
+-- held and is meant to sit there while the player decides. Long enough not to
+-- pull the menu out from under that, short enough that one forgotten in a bank
+-- does not hold the Select key -- which may well be a mouse button -- for the
+-- rest of the session. See the confirm binding in SNIPPET_PRE.
+local LATCH_TIMEOUT = 120
+
+-- The mouse-button token the Select key's click arrives under. The palette's own
+-- keybind clicks the same button as "LeftButton" (SetOverrideBindingClick's
+-- default), so this is the whole of what tells a confirm click apart from a
+-- palette-key click inside the snippet, which gets `button` and nothing else.
+--
+-- A real button name rather than an invented token: RegisterForClicks("AnyDown",
+-- "AnyUp") covers it for certain, and the button has EnableMouse(false), so no
+-- actual right-click can ever reach it and be mistaken for a confirm.
+local CONFIRM_BUTTON = "RightButton"
+
+-- ESCAPE out of a LATCHED menu, under a token of its own on the same button.
+--
+-- A held palette sends ESCAPE to the shared cancel button, which only raises a
+-- flag -- the teardown then rides the key release that is always coming. A
+-- latched menu has no such release, so its ESCAPE has to do the closing itself,
+-- and doing it from the cancel button's Lua PostClick would leave the bindings
+-- and the gates standing for the whole of any fight it happened during: every
+-- one of those calls is protected. Routed HERE it is the palette button's own
+-- release, so SNIPPET_POST performs the identical teardown it performs for
+-- every other close, inside the sandbox, in combat or out.
+local CANCEL_BUTTON = "MiddleButton"
 
 -- Selection is drawn with two cues: the icon border takes the selection
 -- color, and the entry grows. No additive glow -- at palette scale it bloomed
@@ -5342,9 +5396,31 @@ end
 
 local function OnPaletteUpdate(_, elapsed)
     local now = GetTime()
-    if now - openedAt > OPEN_TIMEOUT then
-        ns.Close()
-        return
+    -- A latched menu has no key held, so the backstop that catches a lost
+    -- key-up is not what it needs -- it is meant to sit there while the player
+    -- decides. It still gets one, well past the held palette's: a menu left
+    -- open holds the Select key, which may be a plain mouse button.
+    --
+    -- Read off the button rather than off the profile: the latch is the
+    -- SNIPPET's answer, and a palette with the switch on but no Select key set
+    -- never latched at all. Reading an attribute is unrestricted in combat.
+    local btn = secureButtons[liveView:GetPaletteIndex()]
+    local latched = btn and btn:GetAttribute("eqdLatched")
+    -- ns.Close is INSECURE, and a latched menu's teardown -- the two bindings,
+    -- the ownership stamp, the gates -- is every one of the protected calls a
+    -- fight refuses. Timing out mid-fight would put the menu off screen and
+    -- leave the Select key claimed until PLAYER_REGEN_ENABLED picked the rest
+    -- up, so the timer simply does not run there: it takes effect the moment
+    -- the fight ends, and this handler is still ticking to notice. A menu the
+    -- player latched open and took into a fight is one they asked for.
+    --
+    -- The held palette's own backstop is unaffected -- its close rides a key
+    -- release through the sandbox and was never refused anything.
+    if not (latched and InCombatLockdown()) then
+        if now - openedAt > (latched and LATCH_TIMEOUT or OPEN_TIMEOUT) then
+            ns.Close()
+            return
+        end
     end
     if not liveView:SteerUnchanged() then
         if liveView:IsPointerLayout() then
@@ -5664,6 +5740,17 @@ local SNIPPET_PRE = [==[
     local catcher = self:GetFrameRef("catcher")
     local cancel = self:GetFrameRef("cancel")
 
+    -- The Select key of a latched menu, which the press below bound to THIS
+    -- button under its own mouse-button token. `button` is the only thing that
+    -- separates the two clicks in here -- the palette's own keybind arrives as
+    -- "LeftButton", the token SetOverrideBindingClick defaults to.
+    local isConfirm = (button == "__CONFIRM_BUTTON__")
+    -- ESCAPE out of a latched menu, routed to this button so the teardown below
+    -- is the same one every other close runs. Both tokens only ever exist while
+    -- this palette is latched: the press binds them and the close drops them.
+    local isEscape = (button == "__CANCEL_BUTTON__")
+    local isMenuKey = isConfirm or isEscape
+
     -- One palette at a time owns the screen, and the sandbox has to enforce it
     -- for itself: the Lua PreClick that refuses the second key its live view
     -- runs BEFORE this, and cannot stop the snippet behind it. The catcher, the
@@ -5677,7 +5764,18 @@ local SNIPPET_PRE = [==[
     if cancel then
         local owner = cancel:GetAttribute("eqdOwner")
         local me = self:GetAttribute("eqdPalette")
-        if down then
+        if isMenuKey then
+            -- Positive ownership for a latched menu's own keys too, and it is
+            -- not the same test as the release below: both bindings are
+            -- registered by this palette's own press and dropped on its close,
+            -- so either one reaching a palette that does not hold the screen is
+            -- a binding that outlived the menu it was made for. It does nothing.
+            if owner ~= me then
+                self:SetAttribute("eqdWhy", "taken")
+                self:SetAttribute("type", nil)
+                return nil, 1
+            end
+        elseif down then
             if owner and owner ~= me then
                 self:SetAttribute("eqdWhy", "taken")
                 self:SetAttribute("type", nil)
@@ -5695,7 +5793,37 @@ local SNIPPET_PRE = [==[
         end
     end
 
+    -- Neither key does anything on its press: the acting edge is the release
+    -- (useOnKeyDown is pinned false on this button), and choosing here would
+    -- resolve a cell one edge before the click that performs it.
+    if isMenuKey and down then
+        self:SetAttribute("type", nil)
+        return nil, 1
+    end
+
+    -- ESCAPE out of a latched menu. It closes and fires nothing, so it skips
+    -- the choosing entirely -- but it drops the latch first, which is what puts
+    -- the whole of SNIPPET_POST's teardown behind it.
+    if isEscape then
+        self:SetAttribute("eqdLatched", nil)
+        self:SetAttribute("eqdIdx", nil)
+        self:SetAttribute("eqdWhy", "escaped")
+        self:SetAttribute("type", nil)
+        return nil, 1
+    end
+
     if down then
+        -- A latched menu whose own key is pressed again is the toggle shutting
+        -- it. Only the latch is dropped here; the teardown waits for this
+        -- press's RELEASE, where SNIPPET_POST already does every part of it,
+        -- and dropping the latch is exactly what lets that run.
+        if self:GetAttribute("eqdLatched") then
+            self:SetAttribute("eqdLatched", nil)
+            self:SetAttribute("eqdWhy", "toggleclose")
+            self:SetAttribute("eqdIdx", nil)
+            self:SetAttribute("type", nil)
+            return nil, 1
+        end
         self:SetAttribute("eqdWhy", "pressed")
         self:SetAttribute("eqdIdx", nil)
         -- Claim ESCAPE for as long as this palette is up, and clear whatever a
@@ -5705,8 +5833,29 @@ local SNIPPET_PRE = [==[
         -- Every layout gets this -- the flag is read before any of the steering
         -- below, so escaping out is one rule, not three.
         if catcher then catcher:SetAttribute("eqdCancel", nil) end
+        self:SetAttribute("eqdLatched", nil)
         if cancel then
-            cancel:SetBindingClick(true, "ESCAPE", cancel, "LeftButton")
+            -- Toggle Menu Open: the menu is about to outlive the key that
+            -- opened it, so the key that chooses an entry has to be claimed for
+            -- as long as it is up. Owned by the cancel button along with
+            -- ESCAPE, so the one ClearBindings on close hands both back
+            -- together -- which is what keeps a Select key bound to a plain
+            -- mouse button usable for its ordinary purpose the rest of the time.
+            --
+            -- BOTH have to be there to latch. A palette with the switch on and
+            -- no Select key set would otherwise open a menu with nothing able
+            -- to answer it, so it keeps the hold-to-fire model instead.
+            local confirm = self:GetAttribute("eqdConfirm")
+            if confirm and self:GetAttribute("eqdToggle") then
+                self:SetAttribute("eqdLatched", 1)
+                cancel:SetBindingClick(true, confirm, self, "__CONFIRM_BUTTON__")
+                -- ESCAPE onto THIS button rather than the cancel button, which
+                -- only raises a flag for a release that is never coming here.
+                -- See CANCEL_BUTTON.
+                cancel:SetBindingClick(true, "ESCAPE", self, "__CANCEL_BUTTON__")
+            else
+                cancel:SetBindingClick(true, "ESCAPE", cancel, "LeftButton")
+            end
         end
         -- Kept on the button, not in a snippet global: every palette shares one
         -- header, so a global would let palette 2's press reset palette 1's origin.
@@ -5904,6 +6053,22 @@ local SNIPPET_PRE = [==[
     end
 
     self:SetAttribute("type", nil)
+
+    -- The release of the press that LATCHED the menu open. It chooses nothing
+    -- and tears nothing down -- SNIPPET_POST leaves on the same flag -- so the
+    -- menu simply stays up, which is the whole of what Toggle Menu Open means.
+    -- Every other way out of a latched menu clears the latch first: the Select
+    -- key below, ESCAPE through the catcher's flag, and the second press of the
+    -- palette's own key.
+    if self:GetAttribute("eqdLatched") and not isConfirm then
+        self:SetAttribute("eqdWhy", "latched")
+        return nil, 1
+    end
+    -- The Select key ends the menu whatever it lands on: a click into the dead
+    -- zone is a decision to take nothing, the same reading a held palette gives
+    -- a release there. Dropped BEFORE the choosing below so every cancel path
+    -- out of it still leaves SNIPPET_POST free to tear the menu down.
+    self:SetAttribute("eqdLatched", nil)
 
     -- Escaped out while the key was still held. Checked before anything is
     -- steered, so it beats every layout's own cancel and cannot be undone by
@@ -6320,11 +6485,21 @@ SNIPPET_PRE = SNIPPET_PRE:gsub("__LATTICE_MAX__", tostring(MAX_LATTICE))
 -- replacement string as a capture reference, and a fragment that ever grows a
 -- modulo would otherwise fail here rather than where it was written.
 SNIPPET_PRE = SNIPPET_PRE:gsub("__ARM_CLAIM__", function() return ARM_CLAIM end)
+-- Parenthesised: gsub returns the count as a second value, and an unparenthesised
+-- call in a multiple-assignment or an argument list leaks it into the next slot.
+SNIPPET_PRE = (SNIPPET_PRE:gsub("__CONFIRM_BUTTON__", CONFIRM_BUTTON))
+SNIPPET_PRE = (SNIPPET_PRE:gsub("__CANCEL_BUTTON__", CANCEL_BUTTON))
 
 -- Leaves nothing armed: the next press has to choose again from scratch.
 local SNIPPET_POST = [==[
     if down then return end
     self:SetAttribute("type", nil)
+    -- A latched menu keeps everything standing -- the ownership stamp, the
+    -- ESCAPE and Select bindings, the catcher, every gate. This is the release
+    -- of the key that opened it, and the menu is meant to outlive that key.
+    -- Whatever ends the menu clears the latch first, so the run that really
+    -- does close it reaches the teardown below (see SNIPPET_PRE).
+    if self:GetAttribute("eqdLatched") then return end
     -- Only the palette that owns the screen may put any of this away: all of it
     -- is shared, and a second key pressed during another palette's hold was
     -- refused its press (see SNIPPET_PRE), so its release has nothing of its
@@ -6970,7 +7145,14 @@ function ReleaseSecureState(index)
     if cancelButton then cancelButton:SetAttribute("eqdOwner", nil) end
 
     local btn = index and secureButtons[index]
-    if btn then btn:SetAttribute("eqdArmed", nil) end
+    if btn then
+        btn:SetAttribute("eqdArmed", nil)
+        -- With this left standing the next press of the key would read as the
+        -- toggle shutting a menu that is no longer on screen, and be swallowed.
+        -- Refused in combat like every other write here, which is what
+        -- secureCloseDirty hands to PLAYER_REGEN_ENABLED.
+        btn:SetAttribute("eqdLatched", nil)
+    end
     local pool = index and gatePools[index]
     if not pool then return end
     if pool.fgate then pool.fgate:Hide() end
@@ -7003,8 +7185,16 @@ local function OwnsLiveView(self)
     return liveView and liveView:GetPaletteIndex() == self._palette
 end
 
-local function OnPreClick(self, _, down)
+local function OnPreClick(self, button, down)
+    -- A latched menu's own two keys open nothing: the menu they answer is
+    -- already up. Everything they do happens in the snippet and in OnPostClick.
+    if button == CONFIRM_BUTTON or button == CANCEL_BUTTON then return end
     if down then
+        -- A latched menu whose key is pressed again is toggling shut, not
+        -- opening. Read before the snippet, which runs after this and is what
+        -- clears the flag -- so this is the last moment it still says which of
+        -- the two a press is.
+        if self:GetAttribute("eqdLatched") then return end
         -- Between an edit and the coalescer's timer the palette DRAWS the new
         -- contents while the button would still fire the old ones. A press is
         -- the moment that stops being tolerable, so it lands the push itself.
@@ -7067,6 +7257,10 @@ local function OnPostClick(self, _, down)
     -- down a palette its owner is still holding.
     local why = self:GetAttribute("eqdWhy")
     if not OwnsLiveView(self) then return end
+    -- The release that latched the menu open closes nothing. Every other value
+    -- reaching here ends it, including "toggleclose" -- the second press of the
+    -- palette's own key -- which fires nothing on its way out.
+    if why == "latched" then return end
     if why == "fire" or why == "emptyslot" then
         local idx = tonumber(self:GetAttribute("eqdIdx"))
         local slot = liveView:CellSlot(idx)
@@ -7220,6 +7414,19 @@ local function PushPalette(index)
     btn:SetAttribute("eqdMode", model)
     btn:SetAttribute("eqdShown", n)
     btn:SetAttribute("eqdInvert", p.fanInvert == true)
+
+    -- Toggle Menu Open, and the key a latched menu answers to. Both are read by
+    -- the press branch of SNIPPET_PRE, which latches only when it has the two of
+    -- them -- so a palette left half-configured keeps the hold-to-fire model
+    -- rather than opening a menu nothing can choose from.
+    --
+    -- The Select key comes off the profile rather than the palette: p is the
+    -- appearance view, and a key that is not an APPEARANCE_KEY falls through it
+    -- to the profile, which is where this one lives.
+    btn:SetAttribute("eqdToggle", p.toggleMode == true or nil)
+    local confirmKey = p.confirmKey
+    btn:SetAttribute("eqdConfirm",
+        (type(confirmKey) == "string" and confirmKey ~= "") and confirmKey or nil)
 
     -- Pointer layouts: the cell centres, worked out here rather than in the
     -- snippet. GridDims and GridBase already encode the auto-column rule and the

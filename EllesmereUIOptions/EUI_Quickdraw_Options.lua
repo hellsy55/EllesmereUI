@@ -2030,7 +2030,25 @@ initFrame:SetScript("OnEvent", function(self)
     -- through CommitKey, theft dialog and all, not a saved key of our own.
     -- The palette index is baked at build time like every other row here --
     -- switching the edited menu rebuilds the page.
-    local function BuildKeybindButton(rgn)
+    -- spec is nil for the palette's own keybind, which is the button this was
+    -- written for and still its default behaviour. The Select key passes one:
+    --
+    --   read()          the chord currently held, or nil
+    --   commit(chord)   store it; nil unbinds
+    --   plainMouse      allow a bare left-click to bind BUTTON1
+    --
+    -- plainMouse is the one real divergence, and it moves where the two
+    -- gestures live rather than adding one. The palette's key refuses bare left
+    -- and right clicks because they keep their widget meanings -- arm and
+    -- unbind -- and the Blizzard bindings page refuses them for the same
+    -- reason. A bare mouse button is precisely what a Select key is for, so
+    -- there the meaning follows the STATE instead of the button:
+    --
+    --   resting     left arms the picker, right unbinds
+    --   listening   any click is the chord, any key is the chord, Escape backs out
+    --
+    -- so BUTTON1 and BUTTON2 are both reachable and unbind is still one click.
+    local function BuildKeybindButton(rgn, spec)
         local PPQ = EllesmereUI.PanelPP
         local kbBtn = CreateFrame("Button", nil, rgn)
         PPQ.Size(kbBtn, 126, 29)
@@ -2048,6 +2066,9 @@ initFrame:SetScript("OnEvent", function(self)
         local palette = editPalette
         local action = BINDING_PREFIX .. palette
         local listening = false
+        local ReadKey = spec and spec.read or function() return GetBindingKey(action) end
+        local Commit = spec and spec.commit or function(chord) CommitKey(palette, chord) end
+        local plainMouse = spec and spec.plainMouse
         -- BuildPage's own Disabled() is a local of that function and out of
         -- scope here, the same reason BuildMenuSelector reads Cfg directly.
         local function Disabled() return Cfg("enabled") ~= true end
@@ -2062,8 +2083,18 @@ initFrame:SetScript("OnEvent", function(self)
             return table.concat(parts, " + ")
         end
 
+        -- Always AFTER the commit, never before it. Reading first and painting
+        -- the old key was the same answer for the palette's keybind -- a
+        -- CommitKey the user declines or combat refuses leaves the binding
+        -- alone, and one that lands rebuilds the whole page over this button --
+        -- but the Select key's commit only writes the profile, so a label
+        -- painted before it stayed a whole interaction behind the value: the
+        -- click that bound BUTTON1 still read "Not Bound", and the right-click
+        -- that unbound it still read BUTTON1. Reading after is correct for
+        -- both, because a refused commit leaves exactly what the pre-read was
+        -- there to preserve.
         local function RefreshLabel()
-            kbLbl:SetText(FormatKey(GetBindingKey(action)))
+            kbLbl:SetText(FormatKey(ReadKey()))
         end
 
         kbBtn:SetScript("OnClick", function(self, button)
@@ -2078,13 +2109,21 @@ initFrame:SetScript("OnEvent", function(self)
             -- Blizzard bindings page applies to mouse input. The wheel stays
             -- uncapturable on purpose: a tick cannot be HELD, and hold is the
             -- palette's whole input model -- key down opens, key up fires.
+            -- plainMouse takes every bare click while LISTENING as a chord,
+            -- left and right alike, which is what makes BUTTON1 and BUTTON2
+            -- reachable at all. It costs nothing: unbind moves to a right-click
+            -- from the resting state, which is where a user reaches for it
+            -- anyway, and Escape still backs out of an armed picker. Without
+            -- this the two most obvious Select keys are the two this widget
+            -- cannot take.
             if listening and ((button ~= "LeftButton" and button ~= "RightButton")
-                or IsModifierKeyDown()) then
+                or IsModifierKeyDown()
+                or plainMouse) then
                 listening = false
                 self:EnableKeyboard(false)
-                RefreshLabel()
-                CommitKey(palette, CreateKeyChordStringUsingMetaKeyState(
+                Commit(CreateKeyChordStringUsingMetaKeyState(
                     GetConvertedKeyOrButton(button)))
+                RefreshLabel()
                 return
             end
             if button == "RightButton" then
@@ -2092,8 +2131,8 @@ initFrame:SetScript("OnEvent", function(self)
                     listening = false
                     self:EnableKeyboard(false)
                 end
+                Commit(nil)
                 RefreshLabel()
-                CommitKey(palette, nil)
                 return
             end
             -- The extra mouse buttons only mean something while listening.
@@ -2119,13 +2158,10 @@ initFrame:SetScript("OnEvent", function(self)
             self:SetPropagateKeyboardInput(false)
             listening = false
             self:EnableKeyboard(false)
-            -- Old key back on the label first: CommitKey's rejection paths
-            -- (combat, a declined theft dialog) then read as nothing having
-            -- happened, and a successful commit rebuilds the page over it.
-            RefreshLabel()
             if key ~= "ESCAPE" then
-                CommitKey(palette, CreateKeyChordStringUsingMetaKeyState(key))
+                Commit(CreateKeyChordStringUsingMetaKeyState(key))
             end
+            RefreshLabel()
         end)
 
         kbBtn:SetScript("OnEnter", function(self)
@@ -2139,8 +2175,13 @@ initFrame:SetScript("OnEvent", function(self)
             if kbBtn._border and kbBtn._border.SetColor then
                 kbBtn._border:SetColor(1, 1, 1, 0.3)
             end
-            EllesmereUI.ShowWidgetTooltip(self,
-                "Left-click to set a keybind.\nRight-click to unbind.")
+            -- Right-click means two different things on a plainMouse picker
+            -- depending on whether it is armed, so it has to say which.
+            EllesmereUI.ShowWidgetTooltip(self, plainMouse
+                and "Left-click to set a keybind, then press any key or\n"
+                    .. "click any mouse button to use it.\n"
+                    .. "Escape cancels. Right-click here to unbind."
+                or "Left-click to set a keybind.\nRight-click to unbind.")
         end)
         kbBtn:SetScript("OnLeave", function()
             if listening then return end
@@ -2649,6 +2690,42 @@ initFrame:SetScript("OnEvent", function(self)
             { type="label", text="Action Menu Keybind" })
         BuildMenuSelector(row._leftRegion)
         BuildKeybindButton(row._rightRegion)
+        y = y - h
+
+        -- Toggle Menu Open, and the key a toggled menu answers to. Together on
+        -- one row because neither does anything without the other: the switch
+        -- latches nothing while there is no Select key, and the Select key means
+        -- nothing to a menu that closes with its own keybind.
+        --
+        -- The switch is per menu (ASet) and the key is one for the profile
+        -- (Set): the gesture that picks an entry should mean the same thing
+        -- whichever menu is up.
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Toggle Menu Open", noCapture=true,
+              disabled=Disabled, disabledTooltip="the module",
+              tooltip="Keep this menu open when you let go of its keybind.\n"
+                  .. "Point at an entry and press the Select Key to use it.\n"
+                  .. "Press the menu's own keybind again, or Escape, to close it.",
+              getValue=function() return ACfg("toggleMode") == true end,
+              -- Refresh, not RebuildPage: this changes nothing on the page but
+              -- the box itself, and the push it triggers is what the secure
+              -- button needs to hear about the change.
+              setValue=function(v) ASet("toggleMode", v); Refresh() end },
+            -- A label half, like the keybind row above: the control underneath
+            -- is the same bespoke listening button, attached after the row.
+            { type="label", text="Select Key" })
+        BuildKeybindButton(row._rightRegion, {
+            read = function()
+                local key = Cfg("confirmKey")
+                if type(key) ~= "string" or key == "" then return nil end
+                return key
+            end,
+            -- "" rather than nil for an unbind: the profile default is a string,
+            -- and a nil would simply be re-merged from the defaults table.
+            commit = function(chord) Set("confirmKey", chord or ""); Refresh() end,
+            -- A bare mouse button is the point of this one. See BuildKeybindButton.
+            plainMouse = true,
+        })
         y = y - h
 
         y = y - BuildPreview(parent, y)
