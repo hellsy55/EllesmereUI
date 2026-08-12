@@ -1619,12 +1619,28 @@ local function SnapBarPos(frame, point, relPoint, x, y)
     return PP.SnapForES(x, es), PP.SnapForES(y, es)
 end
 
+-- Centered growth needs a position whose meaning does not change with the mover's
+-- configured grid size. Rebase any edge-anchored saved position to CENTER/CENTER at
+-- the frame's current visual center before resizing it.
+local function RebaseBarPositionToCenter(frame, pos)
+    if pos and pos.point == "CENTER" and (pos.relPoint or pos.point) == "CENTER" then return pos end
+    local cx, cy = frame:GetCenter()
+    local ux, uy = UIParent:GetCenter()
+    if not (cx and cy and ux and uy) then return pos end
+    local x, y = cx - ux, cy - uy
+    local sx, sy = SnapBarPos(frame, "CENTER", "CENTER", x, y)
+    frame:ClearAllPoints()
+    frame:SetPoint("CENTER", UIParent, "CENTER", sx, sy)
+    return { point = "CENTER", relPoint = "CENTER", x = x, y = y }
+end
+
 -- Applies the saved position (if any) or the default to the given parent frame.
 -- Shared between initial creation and the unlock-mode applyPos callback so the two
 -- never drift into different SetPoint logic.
 local function ApplyBarPosition(parent, isBuff)
     local s = PAB()
-    local pos = s and s[BarPositionKey(isBuff)]
+    local posKey = BarPositionKey(isBuff)
+    local pos = s and s[posKey]
     local def = isBuff and DEFAULT_POS.buffs or DEFAULT_POS.debuffs
     parent:ClearAllPoints()
     if pos and pos.point then
@@ -1633,6 +1649,10 @@ local function ApplyBarPosition(parent, isBuff)
     else
         local x, y = SnapBarPos(parent, def.point, def.relPoint, def.x, def.y)
         parent:SetPoint(def.point, UIParent, def.relPoint, x, y)
+    end
+    local cfg = s and (isBuff and DefaultBuffsCfg(s) or DefaultDebuffsCfg(s))
+    if cfg and (cfg.growDirection == "CENTER_HORIZONTAL" or cfg.growDirection == "CENTER_VERTICAL") then
+        s[posKey] = RebaseBarPositionToCenter(parent, pos)
     end
 end
 
@@ -1670,7 +1690,7 @@ local function ShiftBuffsForEnchants(container, parent, cfg, grid)
     container:ClearAllPoints()
     if dir == "CENTER_HORIZONTAL" then
         local span = n * cell
-        container:SetPoint("CENTER", parent, "CENTER", 0, 0)
+        container:SetPoint("CENTER", parent, "CENTER", span / 2, 0)
         if ns._weaponEnchPAB then
             ns._weaponEnchPAB.parent = container
             ns._weaponEnchPAB.corner = nil
@@ -1683,7 +1703,8 @@ local function ShiftBuffsForEnchants(container, parent, cfg, grid)
         return
     end
     if dir == "CENTER_VERTICAL" then
-        container:SetPoint("CENTER", parent, "CENTER", 0, 0)
+        local span = n * cell
+        container:SetPoint("CENTER", parent, "CENTER", 0, -span / 2)
         if ns._weaponEnchPAB then
             ns._weaponEnchPAB.parent = container
             ns._weaponEnchPAB.corner = nil
@@ -1990,6 +2011,10 @@ local function ApplyLiveConfig(isBuff)
     -- geometry so rapid slider updates cannot read a stale prior size.
     local posKey = BarPositionKey(isBuff)
     local pos = s[posKey]
+    if cfg.growDirection == "CENTER_HORIZONTAL" or cfg.growDirection == "CENTER_VERTICAL" then
+        pos = RebaseBarPositionToCenter(parent, pos)
+        s[posKey] = pos
+    end
     if cfg.growDirection ~= "CENTER_HORIZONTAL" and cfg.growDirection ~= "CENTER_VERTICAL" and pos and pos.point == "CENTER"
         and prev and (prev.w ~= grid.width or prev.h ~= grid.height) then
         pos.x = pos.x + (prev.w - grid.width) / 2
@@ -2136,10 +2161,12 @@ function ns.PAB_SetGrowDirection(barKey, dir)
     if not s then return end
     if barKey == "PAB_Buffs" then
         DefaultBuffsCfg(s).growDirection = dir
+        RestyleBars()
         ApplyLiveConfig(true)
         return
     elseif barKey == "PAB_Debuffs" then
         DefaultDebuffsCfg(s).growDirection = dir
+        RestyleBars()
         ApplyLiveConfig(false)
         return
     end
@@ -2706,6 +2733,10 @@ local function ApplyCustomBarPosition(parent, bar, barId)
     parent:ClearAllPoints()
     local x, y = SnapBarPos(parent, pos.point, pos.relPoint or pos.point, pos.x, pos.y)
     parent:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, x, y)
+    if bar.growDirection == "CENTER_HORIZONTAL" or bar.growDirection == "CENTER_VERTICAL" then
+        local centeredPos = RebaseBarPositionToCenter(parent, pos)
+        if bar.pos or centeredPos ~= pos then bar.pos = centeredPos end
+    end
 end
 
 local function CustomBuffSpellSignature(spells)
@@ -2848,16 +2879,17 @@ local function ReloadCustomBuffBarImpl(barId)
     -- under that key.
     AK.RestyleSoon(styleKey)
 
+    local grid = ComputeGrid(true, bar)
     local parent = customBuffParents[barId]
     if not parent then
         parent = CreateFrame("Frame", "EllesmereUIPlayerAuraBars_CustomBuff" .. barId, UIParent)
         customBuffParents[barId] = parent
+        parent:SetSize(grid.width, grid.height)
     end
     ApplyCustomBarPosition(parent, bar, barId)
     parent:SetShown(bar.enabled ~= false)
     if bar.enabled == false then return end
 
-    local grid = ComputeGrid(true, bar)
     parent:SetSize(grid.width, grid.height)
 
     local spells = ns.PAB_ResolveSpells(bar)
@@ -2971,16 +3003,17 @@ local function ReloadCustomDebuffBarImpl(barId)
     -- Required for the same reason as ReloadCustomBuffBarImpl above.
     AK.RestyleSoon(styleKey)
 
+    local grid = ComputeGrid(false, bar)
     local parent = customDebuffParents[barId]
     if not parent then
         parent = CreateFrame("Frame", "EllesmereUIPlayerAuraBars_CustomDebuff" .. barId, UIParent)
         customDebuffParents[barId] = parent
+        parent:SetSize(grid.width, grid.height)
     end
     ApplyCustomBarPosition(parent, bar, barId)
     parent:SetShown(bar.enabled ~= false)
     if bar.enabled == false then return end
 
-    local grid = ComputeGrid(false, bar)
     parent:SetSize(grid.width, grid.height)
 
     local chain = BuildChain("HARMFUL", function(class) return ClassEnabled(class, false, bar) or (PAB_FxSafeToForce(class) and PAB_FxWantsCategory(bar.fxList, class.key)) end, bar.showAllDebuffs ~= false, DebuffSubtractFn(bar))
