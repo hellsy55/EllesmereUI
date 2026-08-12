@@ -1033,6 +1033,28 @@ local function ApplyGroupConfig(container, chain, declaredSet, styleKey, effecti
     end
 end
 
+-- Retire a container we are abandoning. AuraContainer frames are PERMANENT and a
+-- declared group can NEVER be un-declared (the sweep above can only zero one), so
+-- AK.ReleaseContainer hides the frame but leaves every group live on it at whatever
+-- frame count it last had. Anything that shows that frame again renders the OLD
+-- content -- and a bar that was on Show All Buffs before the user pointed it at a
+-- filter set left a fully-populated catch-all behind, which resurfaces as "the bar is
+-- showing every buff, mount included". Zero what we know about while we still hold the
+-- declared set; "spells" is declared outside the chain, so it goes by name. pcall:
+-- zeroing a key this container never declared is not worth an error.
+local function RetireContainer(container, declaredSet)
+    if not container then return end
+    if declaredSet then
+        for key in pairs(declaredSet) do
+            if key:sub(1, 7) ~= "__cand|" then
+                pcall(container.SetAuraGroupMaxFrameCount, container, key, 0)
+            end
+        end
+    end
+    pcall(container.SetAuraGroupMaxFrameCount, container, "spells", 0)
+    AK.ReleaseContainer(container)
+end
+
 -- Grid sizing. AK's flow layout only exposes a row WIDTH (pixels) to wrap on, no
 -- native "max lines" cap, so a row cap is enforced indirectly by capping
 -- maxFrameCount to rows*cols; the anchor frame's footprint is our own bounding-box
@@ -1857,7 +1879,7 @@ local function ApplyLiveConfig(isBuff)
             -- SetContainerAnchor/etc calls above ran against the OLD container and are
             -- harmless overhead. A group's candidateFilters is fixed at declaration, so a
             -- spell-list change requires this release+rebuild.
-            AK.ReleaseContainer(container)
+            RetireContainer(container, declared.buffs)
             local _, spec, specVertical = BuildContainerSpec(parent, cfg, grid)
             AK.RequestContainer(parent, "player", spec, function(newContainer)
                 buffsContainer = newContainer
@@ -2642,7 +2664,7 @@ local function ReloadCustomBuffBarImpl(barId)
     if not bar then
         -- Deleted: release the container (frees its slot-button tracking; engine
         -- frames themselves are never destroyed) and hide the now-orphaned parent.
-        if customBuffContainers[barId] then AK.ReleaseContainer(customBuffContainers[barId]) end
+        if customBuffContainers[barId] then RetireContainer(customBuffContainers[barId], customBuffDeclared[barId]) end
         if customBuffParents[barId] then customBuffParents[barId]:Hide() end
         customBuffContainers[barId], customBuffParents[barId], customBuffSig[barId], customBuffDeclared[barId] = nil, nil, nil, nil
         return
@@ -2712,7 +2734,7 @@ local function ReloadCustomBuffBarImpl(barId)
             ApplyGroupConfig(container, allChain, customBuffDeclared[barId], styleKey, grid.effectiveMax, bar.padding or 5, grid.rowGap, bar, BuffCandidateExtras(bar))
             return -- nothing structural to rebuild
         end
-        AK.ReleaseContainer(container) -- safe: dedicated container, nothing else on it
+        RetireContainer(container, customBuffDeclared[barId]) -- safe: dedicated container, nothing else on it
         customBuffContainers[barId] = nil
     end
 
