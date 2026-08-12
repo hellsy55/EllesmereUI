@@ -12364,8 +12364,9 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
     if mode == "in_party" then return state.inParty end
     if mode == "solo" then return not state.inRaid and not state.inParty end
     if mode == "show_dragonriding" then
-        -- Approximates the secure-macro [advflyable,flying] driver: show only while airborne on
-        -- a glide-capable (skyriding) mount. The shared predicate lives in EllesmereUI_Visibility.lua and is also used by the multi-select visibility engine.
+        -- Mirrors the secure-macro [advflyable,flying] driver: show only while airborne and
+        -- glide-capable (skyriding mounts and flight forms alike). The shared predicate lives in
+        -- EllesmereUI_Visibility.lua and is also used by the multi-select visibility engine.
         return (EllesmereUI.IsAirborneSkyriding and EllesmereUI.IsAirborneSkyriding()) or false
     end
     if mode == "show_not_dragonriding" then
