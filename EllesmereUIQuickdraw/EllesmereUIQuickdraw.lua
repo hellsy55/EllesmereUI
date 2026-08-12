@@ -7461,12 +7461,17 @@ do
 -- through BUTTON31 (SecureTemplates.lua:90-93). A Select key bound to one left
 -- off this list is a key the gates swallow, which is the very failure the note
 -- above describes.
-local PASS_BUTTONS = { "LeftButton", "RightButton", "MiddleButton" }
-for n = 4, 31 do PASS_BUTTONS[#PASS_BUTTONS + 1] = "Button" .. n end
+-- Built on the first gate rather than at load: a session that never opens a
+-- palette builds no gates, and this module costs nothing while switched off.
+local PASS_BUTTONS
 
 local function GateMouse(gate)
     gate:SetMouseMotionEnabled(true)
     if gate.SetPassThroughButtons then
+        if not PASS_BUTTONS then
+            PASS_BUTTONS = { "LeftButton", "RightButton", "MiddleButton" }
+            for n = 4, 31 do PASS_BUTTONS[#PASS_BUTTONS + 1] = "Button" .. n end
+        end
         gate:SetMouseClickEnabled(true)
         gate:SetPassThroughButtons(unpack(PASS_BUTTONS))
     else
