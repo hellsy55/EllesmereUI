@@ -855,7 +855,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             setValue = function(v) cfg.borderSize = v; apply() end
         },
         {
-            type = "slider", text = "Spacing", min = 0, max = 20, step = 1, trackWidth = 120,
+            type = "slider", text = "Spacing", min = -5, max = 20, step = 1, trackWidth = 120,
             getValue = function() return cfg.padding or 5 end,
             setValue = function(v) cfg.padding = v; apply() end
         }

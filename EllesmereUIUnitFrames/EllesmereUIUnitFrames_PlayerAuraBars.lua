@@ -566,6 +566,12 @@ local OPPOSITE_POINT = {
     CENTER = "CENTER",
 }
 
+local function SetTexturePixelSnap(texture, enabled)
+    if not (texture and texture.SetSnapToPixelGrid) then return end
+    texture:SetSnapToPixelGrid(enabled)
+    texture:SetTexelSnappingBias(0)
+end
+
 -- Secondary text-styling pass: AK calls style.applyExtra as (button, d, style), where
 -- d.duration/d.stack are the FontStrings AK's own initializer creates. Adds what AK has
 -- no native field for: duration/stack text color and independent stack-text show/hide
@@ -669,6 +675,26 @@ local function PAB_ApplyExtraText(button, d, style)
     if style.fxList or d.pabFxGlow or d.pabFxBdr then
         PAB_ApplyDmFx(button, d, style)
     end
+
+    -- Centered runs can have an odd content width/height, whose CENTER anchor is a
+    -- half pixel. Let textures use Blizzard's normal pixel snapping so
+    -- icon art cannot bleed over PP's one-pixel border. Edge-growing bars keep EUI's
+    -- usual unsnapped rendering.
+    d.pabCenteredSnap = style.centeredGrowth == true
+    if d.icon and not d.pabIconSnapHooked then
+        d.pabIconSnapHooked = true
+        hooksecurefunc(d.icon, "SetTexture", function(texture)
+            if d.pabCenteredSnap then SetTexturePixelSnap(texture, true) end
+        end)
+    end
+    SetTexturePixelSnap(d.icon, d.pabCenteredSnap)
+    local border = d.borderHost and EllesmereUI.PP.GetBorders(d.borderHost)
+    if border then
+        SetTexturePixelSnap(border._top, d.pabCenteredSnap)
+        SetTexturePixelSnap(border._bottom, d.pabCenteredSnap)
+        SetTexturePixelSnap(border._left, d.pabCenteredSnap)
+        SetTexturePixelSnap(border._right, d.pabCenteredSnap)
+    end
 end
 
 -- Icon-text outline flag for duration/stack text. Default follows the house icon-text
@@ -715,6 +741,7 @@ local function BuildStyle(isBuff, cfg)
     local style = {
         width = iconSize,
         height = iconSize,
+        centeredGrowth = cfg.growDirection == "CENTER_HORIZONTAL" or cfg.growDirection == "CENTER_VERTICAL",
         iconCrop = true,
         iconZoom = iconZoom or 0.055,
 
@@ -1137,14 +1164,9 @@ local function ComputeGrid(isBuff, cfg)
     -- modes: a "line" is a column, so lineExtent -> height -- see
     -- CornerFor/BuildContainerSpec for the matching growthH/growthV swap.
     local lineExtent = cols * iconSize + (cols - 1) * layoutPad
-    -- Wrap budget handed to the engine (AK.SetContainerRowWidth / layout.rowWidth),
-    -- deliberately NOT lineExtent: the engine reserves a TRAILING elementSpacing
-    -- after every element (not only between), so a full line needs
-    -- cols * (icon + spacing) or the last icon of every row wraps. lineExtent
-    -- still sizes the bar's own frame, so the drag box measures the icons, not
-    -- the phantom trailing gap (the preview builder models the same and drops
-    -- the trailing gap).
-    local rowWidth = math.max(iconSize, lineExtent + layoutPad)
+    -- Maximum line size covers the configured icon limit and only the gaps between
+    -- them. Adding a trailing gap makes negative spacing wrap the final icon early.
+    local rowWidth = math.max(iconSize, lineExtent)
     local crossExtent = usedRows * iconSize + (usedRows - 1) * layoutRowGap
     local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN" or cfg.growDirection == "CENTER_VERTICAL")
     local width = vertical and crossExtent or lineExtent
@@ -1532,6 +1554,8 @@ local function BuildContainerSpec(parent, cfg, grid)
     }, vertical
 end
 
+local containerDirections = setmetatable({}, { __mode = "k" })
+
 -- Re-applies container anchor/axis/growth/padding/rowWidth for an already-created
 -- container against `parent`'s current grid. Shared by ApplyLiveConfig and the
 -- existing-container branches of ReloadCustomBuffBarImpl/ReloadCustomDebuffBarImpl so
@@ -1539,7 +1563,14 @@ end
 -- so it is live-settable like any other frame anchor.
 local function ApplyContainerAnchorAndGrowth(container, parent, cfg, grid)
     local containerAnchor, spec, vertical = BuildContainerSpec(parent, cfg, grid)
+    local direction = cfg.growDirection or "LEFT"
+    local directionChanged = containerDirections[container] and containerDirections[container] ~= direction
+    containerDirections[container] = direction
+    if directionChanged then container:Hide() end
+
+    local size = EllesmereUI.PP.Scale(cfg.iconSize or 32)
     container:ClearAllPoints()
+    container:SetSize(size, size)
     container:SetPoint(containerAnchor, parent, containerAnchor, 0, 0)
     AK.SetContainerAnchor(container, spec.layout.anchorPoint)
     AK.SetContainerAxis(container, vertical)
@@ -1548,6 +1579,12 @@ local function ApplyContainerAnchorAndGrowth(container, parent, cfg, grid)
     end
     AK.SetContainerPadding(container, 0, 0, 0, 0)
     AK.SetContainerRowWidth(container, grid.rowWidth)
+
+    if directionChanged then
+        container:SetUnit("player")
+        container:UpdateAllAuras()
+        container:Show()
+    end
 end
 
 -- Default anchor when no saved position exists yet. Independent per bar (bars must be
@@ -1756,8 +1793,8 @@ local function CreateBars()
     local buffPad = buffCfg.padding or 5
     local debuffPad = debuffCfg.padding or 5
 
-    local buffCorner, buffSpec, buffVertical = BuildContainerSpec(buffsParent, buffCfg, buffGrid)
-    local _, debuffSpec, debuffVertical = BuildContainerSpec(debuffsParent, debuffCfg, debuffGrid)
+    local buffCorner, buffSpec = BuildContainerSpec(buffsParent, buffCfg, buffGrid)
+    local _, debuffSpec = BuildContainerSpec(debuffsParent, debuffCfg, debuffGrid)
 
     -- Weapon enchant lead icons (oils/imbues are not auras; see
     -- EUI_UnitFrames_WeaponEnchants.lua): opt-in (showWeaponEnchants, default
@@ -1810,7 +1847,7 @@ local function CreateBars()
     buffsSlotSig = table.concat(buffSpells, ",")
     AK.RequestContainer(buffsParent, "player", buffSpec, function(container)
         buffsContainer = container
-        AK.SetContainerAxis(container, buffVertical)
+        ApplyContainerAnchorAndGrowth(container, buffsParent, buffCfg, buffGrid)
         ShiftBuffsForEnchants(container, buffsParent, buffCfg, buffGrid)
         if ns.WeaponEnchants_Layout then ns.WeaponEnchants_Layout() end
         declared.buffs = {}
@@ -1833,7 +1870,7 @@ local function CreateBars()
     end)
     AK.RequestContainer(debuffsParent, "player", debuffSpec, function(container)
         debuffsContainer = container
-        AK.SetContainerAxis(container, debuffVertical)
+        ApplyContainerAnchorAndGrowth(container, debuffsParent, debuffCfg, debuffGrid)
         declared.debuffs = {}
         ApplyGroupConfig(container, debuffChain, declared.debuffs, STYLE_DEBUFFS, debuffGrid.effectiveMax, debuffPad, debuffGrid.rowGap, debuffCfg)
     end)
@@ -2013,10 +2050,10 @@ local function ApplyLiveConfig(isBuff)
             -- harmless overhead. A group's candidateFilters is fixed at declaration, so a
             -- spell-list change requires this release+rebuild.
             RetireContainer(container, declared.buffs)
-            local _, spec, specVertical = BuildContainerSpec(parent, cfg, grid)
+            local _, spec = BuildContainerSpec(parent, cfg, grid)
             AK.RequestContainer(parent, "player", spec, function(newContainer)
                 buffsContainer = newContainer
-                AK.SetContainerAxis(newContainer, specVertical)
+                ApplyContainerAnchorAndGrowth(newContainer, parent, cfg, grid)
                 ShiftBuffsForEnchants(newContainer, parent, cfg, grid)
                 if ns.WeaponEnchants_Layout then ns.WeaponEnchants_Layout() end
                 declared.buffs = {}
@@ -2865,11 +2902,11 @@ local function ReloadCustomBuffBarImpl(barId)
         customBuffContainers[barId] = nil
     end
 
-    local _, spec, specVertical = BuildContainerSpec(parent, bar, grid)
+    local _, spec = BuildContainerSpec(parent, bar, grid)
     local pad = bar.padding or 5
     AK.RequestContainer(parent, "player", spec, function(container)
         customBuffContainers[barId] = container
-        AK.SetContainerAxis(container, specVertical)
+        ApplyContainerAnchorAndGrowth(container, parent, bar, grid)
         customBuffSig[barId] = sig
         customBuffDeclared[barId] = {}
         ApplyGroupConfig(container, allChain, customBuffDeclared[barId], styleKey, grid.effectiveMax, pad, grid.rowGap, bar, BuffCandidateExtras(bar))
@@ -2947,13 +2984,13 @@ local function ReloadCustomDebuffBarImpl(barId)
     parent:SetSize(grid.width, grid.height)
 
     local chain = BuildChain("HARMFUL", function(class) return ClassEnabled(class, false, bar) or (PAB_FxSafeToForce(class) and PAB_FxWantsCategory(bar.fxList, class.key)) end, bar.showAllDebuffs ~= false, DebuffSubtractFn(bar))
-    local _, spec, vertical = BuildContainerSpec(parent, bar, grid)
+    local _, spec = BuildContainerSpec(parent, bar, grid)
     local pad = bar.padding or 5
 
     if not customDebuffContainers[barId] then
         AK.RequestContainer(parent, "player", spec, function(container)
             customDebuffContainers[barId] = container
-            AK.SetContainerAxis(container, vertical)
+            ApplyContainerAnchorAndGrowth(container, parent, bar, grid)
             customDebuffDeclared[barId] = {}
             ApplyGroupConfig(container, chain, customDebuffDeclared[barId], styleKey, grid.effectiveMax, pad, grid.rowGap, bar)
         end)
