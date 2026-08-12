@@ -11173,14 +11173,28 @@ local function Skin_LootToast()
         -- Blizzard window, and SkinToast's shape test is broad (any
         -- .ItemName/.Label/.Title that can GetText). Plenty of ADDON dialogs
         -- sit at FULLSCREEN_DIALOG with a .Title, ours included; without the gate this sweep silently blanks other addons' windows.
+        --
+        -- SECRECY: this walks EVERY UIParent child, so it meets frames no part of
+        -- this addon created. A widget that has been fed secret data hands back
+        -- SECRET values from ordinary getters, and comparing one throws for us --
+        -- addon execution is never untainted, and only untainted code may inspect a
+        -- secret. Field report: "attempt to compare a secret string value" out of
+        -- GetFrameStrata on ANOTHER ADDON's engine aura container parented to
+        -- UIParent. Nothing secret-aspected is ever a loot toast, so secret == skip.
+        -- Both reads are resolved before any comparison: an `and` chain that calls
+        -- the getter mid-condition throws on the spot instead of skipping.
         local up = _G.UIParent
         if deep and up and up.GetChildren then
+            local isSecret = issecretvalue
             for i = 1, select("#", up:GetChildren()) do
                 local ch = select(i, up:GetChildren())
-                if ch and ch.GetFrameStrata and ch.IsForbidden and not ch:IsForbidden()
-                   and ch:IsShown() and ch:GetFrameStrata() == "FULLSCREEN_DIALOG"
-                   and not WSkin.IsForeignFrame(ch, up) then
-                    if SkinToast(ch) then known[ch] = true end
+                if ch and ch.GetFrameStrata and ch.IsForbidden and not ch:IsForbidden() then
+                    local strata, shown = ch:GetFrameStrata(), ch:IsShown()
+                    if not (isSecret and (isSecret(strata) or isSecret(shown)))
+                       and shown and strata == "FULLSCREEN_DIALOG"
+                       and not WSkin.IsForeignFrame(ch, up) then
+                        if SkinToast(ch) then known[ch] = true end
+                    end
                 end
             end
         end
