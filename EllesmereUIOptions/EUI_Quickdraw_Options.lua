@@ -2104,9 +2104,18 @@ initFrame:SetScript("OnEvent", function(self)
         local ReadKey = spec and spec.read or function() return GetBindingKey(action) end
         local Commit = spec and spec.commit or function(chord) CommitKey(palette, chord) end
         local plainMouse = spec and spec.plainMouse
+        -- What the key IS, shown above the how-to-bind instructions: the
+        -- palette's own keybind row sits under a heading that already says,
+        -- but a spec-driven picker (the Select Key) has only its label.
+        local intro = spec and spec.intro
         -- BuildPage's own Disabled() is a local of that function and out of
         -- scope here, the same reason BuildMenuSelector reads Cfg directly.
-        local function Disabled() return Cfg("enabled") ~= true end
+        -- A spec may widen the gate (the Select Key: also disabled while the
+        -- edited menu's Toggle Menu Open is off -- the key answers only
+        -- latched menus) and name the requirement for the disabled tooltip.
+        local Disabled = (spec and spec.disabled)
+            or function() return Cfg("enabled") ~= true end
+        local disabledReason = (spec and spec.disabledReason) or "the module"
 
         local function FormatKey(key)
             if not key then return EllesmereUI.L("Not Bound") end
@@ -2202,7 +2211,7 @@ initFrame:SetScript("OnEvent", function(self)
         kbBtn:SetScript("OnEnter", function(self)
             if Disabled() then
                 EllesmereUI.ShowWidgetTooltip(self,
-                    EllesmereUI.DisabledTooltip("the module"))
+                    EllesmereUI.DisabledTooltip(disabledReason))
                 return
             end
             kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G,
@@ -2212,11 +2221,13 @@ initFrame:SetScript("OnEvent", function(self)
             end
             -- Right-click means two different things on a plainMouse picker
             -- depending on whether it is armed, so it has to say which.
-            EllesmereUI.ShowWidgetTooltip(self, plainMouse
+            local tip = plainMouse
                 and "Left-click to set a keybind, then press any key or\n"
                     .. "click any mouse button to use it.\n"
                     .. "Escape cancels. Right-click here to unbind."
-                or "Left-click to set a keybind.\nRight-click to unbind.")
+                or "Left-click to set a keybind.\nRight-click to unbind."
+            if intro then tip = intro .. "\n\n" .. tip end
+            EllesmereUI.ShowWidgetTooltip(self, tip)
         end)
         kbBtn:SetScript("OnLeave", function()
             if listening then return end
@@ -2727,29 +2738,36 @@ initFrame:SetScript("OnEvent", function(self)
         BuildKeybindButton(row._rightRegion)
         y = y - h
 
-        -- Toggle Menu Open, and the key a toggled menu answers to. Together on
-        -- one row because neither does anything without the other: the switch
-        -- latches nothing while there is no Select key, and the Select key means
-        -- nothing to a menu that closes with its own keybind.
+        -- The Select Key, then the switch that needs it: the key is the
+        -- PREREQUISITE (a latched menu nothing can answer would be a trap), so
+        -- it binds first and is never gated, and Toggle Menu Open stays
+        -- disabled until a key exists. Together on one row because neither
+        -- does anything without the other.
         --
-        -- The switch is per menu (ASet) and the key is one for the profile
-        -- (Set): the gesture that picks an entry should mean the same thing
+        -- The key is one for the profile (Set) and the switch is per menu
+        -- (ASet): the gesture that picks an entry should mean the same thing
         -- whichever menu is up.
+        local function HasSelectKey()
+            local key = Cfg("confirmKey")
+            return type(key) == "string" and key ~= ""
+        end
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="Toggle Menu Open", noCapture=true,
-              disabled=Disabled, disabledTooltip="the module",
-              tooltip="Keep this menu open when you let go of its keybind.\n"
-                  .. "Point at an entry and press the Select Key to use it.\n"
-                  .. "Press the menu's own keybind again, or Escape, to close it.",
-              getValue=function() return ACfg("toggleMode") == true end,
-              -- Refresh, not RebuildPage: this changes nothing on the page but
-              -- the box itself, and the push it triggers is what the secure
-              -- button needs to hear about the change.
-              setValue=function(v) ASet("toggleMode", v); Refresh() end },
             -- A label half, like the keybind row above: the control underneath
             -- is the same bespoke listening button, attached after the row.
-            { type="label", text="Select Key" })
-        BuildKeybindButton(row._rightRegion, {
+            { type="label", text="Toggled Menu Select Action" },
+            { type="toggle", text="Toggle Menu Open", noCapture=true,
+              disabled=function() return Disabled() or not HasSelectKey() end,
+              disabledTooltip="a Toggled Menu Select Action keybind",
+              tooltip="Keep this menu open when you let go of its keybind.\n"
+                  .. "Point at an entry and press the Select Action key to use it.\n"
+                  .. "Press the menu's own keybind again, or Escape, to close it.",
+              getValue=function() return ACfg("toggleMode") == true end,
+              setValue=function(v) ASet("toggleMode", v); Refresh() end })
+        BuildKeybindButton(row._leftRegion, {
+            intro = "Uses the entry you are pointing at while a menu is kept "
+                .. "open with Toggle Menu Open. One key shared by every menu, "
+                .. "claimed only while a menu is up -- a mouse button keeps "
+                .. "its normal use the rest of the time.",
             read = function()
                 local key = Cfg("confirmKey")
                 if type(key) ~= "string" or key == "" then return nil end
@@ -2757,7 +2775,13 @@ initFrame:SetScript("OnEvent", function(self)
             end,
             -- "" rather than nil for an unbind: the profile default is a string,
             -- and a nil would simply be re-merged from the defaults table.
-            commit = function(chord) Set("confirmKey", chord or ""); Refresh() end,
+            -- RefreshPage as well as Refresh: Toggle Menu Open beside this
+            -- takes its disabled state from whether a key is bound.
+            commit = function(chord)
+                Set("confirmKey", chord or "")
+                Refresh()
+                EllesmereUI:RefreshPage()
+            end,
             -- A bare mouse button is the point of this one. See BuildKeybindButton.
             plainMouse = true,
         })
@@ -3253,7 +3277,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- user's own animation pass.
         y = y - h
 
-        _, h = W:DualRow(parent, y,
+        local wmRow
+        wmRow, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Unusable Entries", noCapture=true,
               disabled=Disabled, disabledTooltip="the module",
               tooltip="Hide entries this character cannot use: another class's "
@@ -3276,6 +3301,31 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return ACfg("worldMarkerToggle") ~= false end,
               setValue=function(v) ASet("worldMarkerToggle", v); Refresh() end })
         y = y - h
+
+        -- Inline cog on Toggle World Markers: the placed-marker pip opt-out.
+        if not EllesmereUI._prebuilding then
+            local rgn = wmRow._rightRegion
+            local _, wmCogShow = EllesmereUI.BuildCogPopup({
+                title = "World Marker Entries",
+                rows = {
+                    { type="toggle", label="Show Placed-Marker Pips",
+                      tooltip="Mark a world marker entry whose marker is on the ground with a small corner square, so you can see whether pressing it places or picks up.",
+                      get=function() return ACfg("worldMarkerPip") ~= false end,
+                      set=function(v) ASet("worldMarkerPip", v); Refresh() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) wmCogShow(self) end)
+        end
 
         _, h = W:Spacer(parent, y, 10); y = y - h
 

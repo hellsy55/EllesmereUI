@@ -2976,11 +2976,21 @@ end
 -- fine for members merely out of 40yd spell range, and gating on it made buff
 -- displays and health-color effects vanish for out-of-range party members (the
 -- unit frame's own oorAlpha fade already dims the containers -- they are children
--- of the button). Local player's own flags never degrade, so self is exempt.
+-- of the button). Local player's own flags never degrade EXCEPT in a vehicle:
+-- boarding one makes the player unit non-assistable, the engine skips the
+-- spell-ID filters, and every include-list container on the player's own frame
+-- degrades to "any buff" (field-confirmed: reliable on every vehicle entry).
+-- Outside a vehicle self stays exempt from the full probe.
 -- Identity APIs can return SECRET booleans under teardown; any secret errors
 -- inside the pcall and reads fail-closed.
 local function AssistProbe(unit)
-    if UnitIsUnit(unit, "player") then return true end
+    if UnitIsUnit(unit, "player") then
+        -- UsingVehicle over InVehicle: it is also true during the boarding and
+        -- exiting TRANSITIONS, and the filters already degrade while boarding
+        -- (field: a second of "any buff" before the seated state landed).
+        local probe = UnitUsingVehicle or UnitInVehicle
+        return not probe("player")
+    end
     if not (UnitIsConnected(unit)
         and not UnitIsDeadOrGhost(unit)
         and UnitCanAssist("player", unit)
@@ -3294,6 +3304,12 @@ assistWatch:RegisterEvent("UNIT_PHASE")
 assistWatch:RegisterEvent("UNIT_CONNECTION")
 assistWatch:RegisterEvent("UNIT_IN_RANGE_UPDATE")
 assistWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
+-- Vehicle occupancy flips assistability for the occupant (the one state where
+-- even the local player's own flags degrade -- see AssistProbe). ENTERING as
+-- well as ENTERED: degradation starts with the boarding transition.
+assistWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
+assistWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
+assistWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
 -- Death/release/resurrection transitions (the alive requirement of the probe)
 -- signal through UNIT_FLAGS; chatty in combat, but the coalescer below reduces any
 -- burst to one deferred sweep.
@@ -3307,7 +3323,16 @@ local function AssistSweepDrain()
     assistSweepPending = false
     AssistSweep()
 end
-assistWatch:SetScript("OnEvent", function()
+assistWatch:SetScript("OnEvent", function(_, event)
+    -- Vehicle edges sweep IMMEDIATELY: they are rare (no storm to coalesce)
+    -- and the quarter-second defer reads as a visible flash of degraded
+    -- "any buff" content on the player's own frame while boarding.
+    if event == "UNIT_ENTERING_VEHICLE"
+        or event == "UNIT_ENTERED_VEHICLE"
+        or event == "UNIT_EXITED_VEHICLE" then
+        AssistSweep()
+        return
+    end
     if assistSweepPending then return end
     assistSweepPending = true
     C_Timer.After(0.25, AssistSweepDrain)

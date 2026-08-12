@@ -4029,8 +4029,12 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
                 { tooltip = "Power Colored",
                   getValue = function()
+                      -- gpp() is nil for specs with no primary power (BM/MM
+                      -- hunter: Focus is the class resource bar) -- fall to
+                      -- the default swatch color rather than index with nil.
                       local gpp = _G._ERB_GetPrimaryPowerType
-                      local pc = gpp and _G._ERB_PowerColors and _G._ERB_PowerColors[gpp()]
+                      local pt = gpp and gpp()
+                      local pc = pt and _G._ERB_PowerColors and _G._ERB_PowerColors[pt]
                       if pc then return pc[1], pc[2], pc[3], 1 end
                       return 0x23/255, 0x8F/255, 0xE7/255, 1
                   end,
@@ -4204,8 +4208,12 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
                 { tooltip = "Power Colored",
                   getValue = function()
+                      -- gpp() is nil for specs with no primary power (BM/MM
+                      -- hunter: Focus is the class resource bar) -- fall to
+                      -- the default swatch color rather than index with nil.
                       local gpp = _G._ERB_GetPrimaryPowerType
-                      local pc = gpp and _G._ERB_PowerColors and _G._ERB_PowerColors[gpp()]
+                      local pt = gpp and gpp()
+                      local pc = pt and _G._ERB_PowerColors and _G._ERB_PowerColors[pt]
                       if pc then return pc[1], pc[2], pc[3], 1 end
                       return 0x23/255, 0x8F/255, 0xE7/255, 1
                   end,

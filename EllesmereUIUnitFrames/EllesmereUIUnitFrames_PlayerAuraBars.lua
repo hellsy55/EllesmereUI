@@ -58,7 +58,7 @@ local CLASS_LABELS = {
     RoleAura          = { "Role Debuffs",       "Shows only debuffs flagged for your role" },
     -- "Important" matches Raid Frames' wording for this isPriorityAura flag.
     PriorityAura      = { "Important",          "Shows only debuffs Blizzard flags as important" },
-    NonPlayer         = { "Non-Player Auras",   "Shows only debuffs not caused by any player or player pet" },
+    NonPlayer         = { "Non-Player Auras",   "Shows only debuffs not caused by any player or player pet (this is what shows most pve debuffs, do not check this while All Debuffs is selected!" },
     -- Any dispel-typed debuff whether removable or not; distinct from "Dispellable
     -- By You". Mirrors Raid Frames' "Dispels" filter.
     DispelTyped       = { "Dispels", "Shows any debuff with a dispel type (Magic, Curse, Disease, Poison, Bleed), even if you cannot remove it" },
@@ -4145,12 +4145,47 @@ function ns.PAB_SetEnabled(v)
     if v then CreateBars() end
 end
 
+-- Cinematic recovery. An addon-cancelled cinematic (CINEMATIC_STOP) puts the
+-- engine aura containers through a hide/re-show whose re-parse can land while
+-- the teardown's filter state is still degraded -- filtered bars then render
+-- the FULL buff set, and with no aura event following, the wrong content
+-- sticks. The one lever Lua holds over engine-owned content is config: re-run
+-- the group config for every live container (candidate filters are the
+-- live-changeable channel, so re-setting them forces a fresh parse), one tick
+-- after the event so the teardown has finished. Coalesced; rare event.
+local cineFixPending = false
+local function ReapplyAllAfterCinematic()
+    if cineFixPending then return end
+    if not (buffsContainer or debuffsContainer) then return end
+    cineFixPending = true
+    C_Timer.After(0, function()
+        cineFixPending = false
+        ApplyLiveConfig(true)
+        ApplyLiveConfig(false)
+        local cb = ns.PAB_CustomBuffBars()
+        if cb then
+            for _, bar in ipairs(cb) do ns.PAB_ReloadCustomBuffBar(bar.id) end
+        end
+        local db2 = ns.PAB_CustomDebuffBars()
+        if db2 then
+            for _, bar in ipairs(db2) do ns.PAB_ReloadCustomDebuffBar(bar.id) end
+        end
+    end)
+end
+
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         TryCreateBars()
+        -- Registered only for sessions where the feature runs at all; the
+        -- handler's container guard covers the module-disabled stand-down.
+        if ns.PAB_Enabled() then
+            self:RegisterEvent("CINEMATIC_STOP")
+        end
+        return
     end
+    ReapplyAllAfterCinematic()
 end)
 

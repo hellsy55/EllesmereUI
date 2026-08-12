@@ -1211,18 +1211,6 @@ function EllesmereUI.ApplyProfileData(profileData)
                     and profile.bagDefaultBagType == nil and profile.bagDefaultOneBag == true then
                     profile.bagDefaultBagType = "onebag"
                 end
-                -- Pre-tsMode imports carry tsEnabled/tsRaidEnabled booleans but no
-                -- tsMode/tsRaidMode. The bool->mode migration is SKIPPED for imported
-                -- profiles (inherited migration flags), so forward-copy here BEFORE
-                -- DeepMergeDefaults fills the tsMode default and masks the legacy keys.
-                -- Party only: raid hard-defaults to "never" (not migrated), so leave
-                -- tsRaidMode unset and let DeepMergeDefaults apply the default.
-                if entry.folder == "EllesmereUIRaidFrames" then
-                    if profile.tsMode == nil then
-                        if profile.tsEnabled == false then profile.tsMode = "never"
-                        elseif profile.tsEnabled == true then profile.tsMode = "whenHealing" end
-                    end
-                end
                 -- Pre-split imports carry the legacy single miniboss color but no
                 -- boss color. The mini-boss/boss split migration is SKIPPED for
                 -- imported profiles (inherited migration flags), so forward-copy

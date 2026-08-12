@@ -660,25 +660,6 @@ local defaults = {
         debuffDurTextOffsetX = 0,
         debuffDurTextOffsetY = 0,
 
-        -- Targeted spells (see EUI_RF_TargetedSpells.lua). ts* = party, tsRaid* =
-        -- raid; tsRaid* keys are deliberately NOT in PARTY_KEY_SECTION, keeping them out of raid/party section sync.
-        tsEnabled   = true,   -- legacy boolean; superseded by tsMode (kept harmless)
-        tsMode      = "whenHealing",  -- never | whenHealing | always
-        tsIconSize  = 24,
-        tsPosition  = "center",
-        tsGrowDirection = "CENTER",
-        tsOffsetX   = 0,
-        tsOffsetY   = 0,
-        tsMaxIcons  = 3,
-        tsRaidEnabled   = true,   -- legacy boolean; superseded by tsRaidMode (kept harmless)
-        tsRaidMode      = "never",  -- raid hard-defaults OFF (NOT migrated from tsRaidEnabled)
-        tsRaidIconSize  = 24,
-        tsRaidPosition  = "center",
-        tsRaidGrowDirection = "CENTER",
-        tsRaidOffsetX   = 0,
-        tsRaidOffsetY   = 0,
-        tsRaidMaxIcons  = 3,
-
         -- Range & misc
         oorAlpha         = 0.4,
         -- showTooltip is the on/off fallback the "Show Raid Frames Tooltip"
@@ -721,8 +702,6 @@ local defaults = {
 -------------------------------------------------------------------------------
 local allButtons     = {}   -- flat list of all created buttons
 local unitToButton   = {}   -- unitToken -> button map (rebuilt on roster change)
-ns._raidUnitToButton = unitToButton  -- alias for Targeted Spells (same table:
-                            -- rebuilds wipe in place, never replace)
 ns._xfUnitToButton   = {}   -- unitToken -> Extra Frames duplicate (XF.CAP-bounded;
                             -- owned by XF_Apply, never by the rebuild paths)
 local separatedHdrs  = {}   -- [1..8] group headers
@@ -6878,9 +6857,6 @@ ns._ResizePartyButtons = function(w, h)
             end
         end
     end
-    -- Targeted Spells icons read the same Auto Resize scale; one call
-    -- restyles and relayouts every button's icons (and the preview).
-    if autoResize and ns.TS_ApplySettings then ns.TS_ApplySettings() end
     -- Container resize deferred to drag end (SetSize on the container makes
     -- SecureGroupHeaderTemplate re-process children -> blink). Slot offsets +
     -- the header's own size DO follow the live size: keeps the self button
@@ -9035,10 +9011,6 @@ ns.ReloadPartyFrames = function()
     if ns.UpdatePowerEventRegistration then ns.UpdatePowerEventRegistration() end
     ns._UpdateAllPartyButtons()
 
-    -- Targeted Spells icons scale through the party Auto Resize factor
-    -- recomputed above; restyle them with everything else.
-    if ns.TS_ApplySettings then ns.TS_ApplySettings() end
-
     -- Aura containers read the party class through its scaled proxy; the
     -- fingerprint guards make this near-free when nothing party-side changed.
     if ns.RFC_ReloadAll then ns.RFC_ReloadAll() end
@@ -9496,9 +9468,6 @@ end
 local function PvActive()
     return previewActive or ns._partyPvActive
 end
--- Raid-preview state for the Targeted Spells module (previewActive /
--- previewFrames are file-locals; the closure tracks the live values)
-ns._TSRaidPvState = function() return previewActive, previewFrames end
 -- Party preview reads party-scaled / party-prefixed settings so aura icons match
 -- the party frames (size, position, colors); raid preview reads the live profile
 -- through the real-preview effective overlay (below) so an open panel's view
@@ -12943,7 +12912,6 @@ local function RefreshPreview()
         end
         overlayContainer:Show()
     end
-    if ns.TS_RefreshRaidPreview then ns.TS_RefreshRaidPreview() end
 end
 
 -- Mouse-blocking overlays + alpha-based real-frame hide for the options preview.
@@ -13894,9 +13862,6 @@ local function RefreshPartyPreview()
         end
     end
 
-    -- Targeted Spells preview icon: re-style with the scale recomputed above
-    -- (also makes it appear/disappear with the party preview itself).
-    if ns.TS_RefreshPreview then ns.TS_RefreshPreview() end
 end
 
 local function ShowPartyPreview()
