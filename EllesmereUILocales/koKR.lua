@@ -317,7 +317,7 @@ L["Mana"] = "마나"
 L["Marker Size"] = "징표 크기"
 L["Matte"] = "무광"
 L["Max"] = "최대"
-L["Max Debuffs"] = "최대 약화 효과 개수"
+L["Max Debuffs"] = "약화 효과 개수"
 L["Medium"] = "보통"
 L["Micro Menu"] = "게임 메뉴"
 L["Midnight"] = "한밤"
@@ -468,6 +468,10 @@ L["Standard"] = "표준"
 L["Stealth"] = "은신"
 L["Striped"] = "줄무늬"
 L["Striped Reversed"] = "줄무늬 반전"
+L["Striped Thick"] = "굵은 줄무늬"
+L["Striped Thick Reversed"] = "굵은 줄무늬 반전"
+L["Darken Partially Filled Resources"] = "덜 찬 자원 어둡게"
+L["Makes partially filled Soul Shards and Essence darker than completed ones."] = "덜 채워진 영혼의 조각과 정수를 완성된 것보다 어둡게 표시합니다."
 L["Strong"] = "강함"
 L["Suppress Lua Errors"] = "Lua 오류 숨김"
 L["Sync"] = "동기화"
@@ -2213,7 +2217,7 @@ L["When enabled, nameplates stack vertically instead of overlapping."] = "활성
 L["When your interrupt is on cooldown now but will be ready before the enemy cast finishes, color the part of the cast bar during which your interrupt will be available. The color clears the instant your interrupt comes off cooldown."] = "차단 기술이 지금은 재사용 대기 중이지만 적의 시전이 끝나기 전에 준비되는 경우, 차단을 쓸 수 있는 시전 바 구간을 색칠합니다. 차단 기술의 재사용 대기시간이 끝나는 순간 색이 사라집니다."
 L["Widens the clickable hitbox of enemy nameplates. 100% = matches bar width. Increase to make nameplates easier to click."] = "적 이름표의 클릭 가능 히트박스 너비를 넓힙니다. 100% = 바 너비와 동일. 높이면 이름표가 더 쉽게 클릭됩니다."
 -- add Nameplates Popup (이름표 팝업)
-L["Changing Max Debuffs requires a UI reload to take effect."] = "'최대 약화 효과 개수' 변경은 UI 리로드 후 적용됩니다."
+L["Changing Max Debuffs requires a UI reload to take effect."] = "'약화 효과 개수' 변경은 UI 리로드 후 적용됩니다."
 -- add Nameplates Format (이름표 포맷)
 L["%1$s Slot Settings"] = "%s 슬롯 설정"   -- live key: core calls Lf("%1$s Slot Settings", L(slotLabel)) (본체가 Lf로 호출하는 살아있는 키)
 L["Level %d"] = "%d레벨"
@@ -2269,6 +2273,17 @@ L["Subtitle Text Settings"] = "부제목 글자 설정"
 L["Show <> Around Guild"] = "길드를 <> 로 감싸기"
 L["Show the player's title inline with their name, and/or their guild on a line below it, on friendly nameplates."] = "아군 이름표에서 칭호를 이름과 같은 줄에, 길드를 그 아래 줄에 표시합니다."
 L["Your focus target's nameplate never fades with the non-target opacity."] = "주시 대상 이름표는 대상이 아닐 때의 투명도로 흐려지지 않습니다."
+-- 2026-08-12 신규 (이름표 오라 필터 팝업)
+L["INCLUDED DEBUFFS"] = "포함된 약화 효과"
+L["Debuff Custom Spell IDs"] = "약화 효과 사용자 지정 주문 ID"
+L["CC Custom Spell IDs"] = "군중 제어 사용자 지정 주문 ID"
+L["Debuffs + CC Custom Spell IDs"] = "약화 효과 + 군중 제어 사용자 지정 주문 ID"
+L["Enter the spell ID to always show on nameplates."] = "이름표에 항상 표시할 주문 ID를 입력하세요."
+L["Enter the spell ID to always show."] = "항상 표시할 주문 ID를 입력하세요."
+L["Enter the spell ID to exclude."] = "제외할 주문 ID를 입력하세요."
+L["Enter the spell ID to always show on this frame."] = "이 프레임에 항상 표시할 주문 ID를 입력하세요."
+L["Enter the spell ID to exclude from this frame."] = "이 프레임에서 제외할 주문 ID를 입력하세요."
+
 
 -- 2026-08-12 신규 (핵심 위치 - 추적 목록 편집. 유닛 프레임 설정에서도 같은 키 사용)
 -- 비전투 시 적 어둡게 / 위협 근접 톱니 팝업
@@ -2689,6 +2704,14 @@ L["Show aura tooltips when hovering this bar's icons."] = "이 바의 아이콘�
 L["DISPEL COLORS"] = "해제 색상"
 L["Custom buff bar"] = "사용자 지정 강화 효과 바"
 L["Custom debuff bar"] = "사용자 지정 약화 효과 바"
+-- 2026-08-12 신규 4차 (플레이어 오라 바 - 무기 마법부여 / 초 표시 / 필터 툴팁)
+L["Show S for Seconds"] = "초 단위 s 표시"
+L["Weapon Enchants"] = "무기 마법부여"
+L["Show every buff. While this is on, checked filters below are hidden from the bar instead of added."] = "모든 강화 효과를 표시합니다. 켜져 있는 동안 아래에서 체크한 필터는 바에 추가하는 대신 숨기는 쪽으로 동작합니다."
+L["Show every buff that has a duration (hides permanent buffs). While this is on, checked filters below are hidden instead of added."] = "지속시간이 있는 강화 효과만 표시합니다(영구 효과는 숨김). 켜져 있는 동안 아래에서 체크한 필터는 추가하는 대신 숨기는 쪽으로 동작합니다."
+L["Show every buff. While this is on, checked filters below are hidden from the frame instead of added."] = "모든 강화 효과를 표시합니다. 켜져 있는 동안 아래에서 체크한 필터는 프레임에 추가하는 대신 숨기는 쪽으로 동작합니다."
+L["Show weapon oil and imbue icons at the front of this bar. They are weapon enchants rather than auras, so they show independently of the options above -- and the aura grid is shifted inward to make room for them, with every row shifting over by the same amount."] = "무기 기름과 마법부여 아이콘을 이 바의 맨 앞에 표시합니다. 오라가 아닌 무기 마법부여라서 위 옵션과 무관하게 표시됩니다 - 그리고 자리를 내기 위해 오라 격자가 안쪽으로 밀리며, 모든 줄이 같은 만큼 밀립니다."
+
 
 -- == add RaidFrames (공격대 프레임) =============================================
 L["Previewing Override: %1$s"] = "재정의 미리보기: %1$s"
@@ -2838,7 +2861,7 @@ L["Hover Border"] = "마우스오버 테두리"
 L["HoverCast"] = "클릭(호버)시전"
 L["Hydrobubble"] = "수력방울"
 L["Icon Indicator"] = "아이콘 표시기"
-L["Icons Per Row"] = "줄당 아이콘 수"
+L["Icons Per Row"] = "줄당 아이콘"
 L["Indicator"] = "표시기"
 L["Indicators"] = "표시기"
 L["Indicators & Auras"] = "표시기 & 오라"
@@ -3250,6 +3273,8 @@ L["Delete this filter? It is removed from every indicator using it."] = "이 필
 L["Delete this indicator? Its settings are removed from the profile."] = "이 표시기를 삭제할까요? 설정이 프로필에서 제거됩니다."
 L["Health bar spans the full frame height and the power bar draws on top of it."] = "생명력 바가 프레임 전체 높이를 차지하고 마나 바가 그 위에 겹쳐 표시됩니다."
 L["Loss-of-control debuffs. These lead the row and carry the CC glow."] = "행동 불가 계열 약화 효과입니다. 줄 맨 앞에 오고 군중 제어 발광 효과가 적용됩니다."
+L["Loss-of-control debuffs. When shown, these lead the row and carry the CC glow."] = "행동 불가 계열 약화 효과입니다. 표시될 때는 줄 맨 앞에 오고 군중 제어 발광 효과가 적용됩니다."
+L["Debuffs not caused by any player or player pet (this is what shows most pve debuffs, do not check this while All Debuffs is selected!)."] = "플레이어나 플레이어 소환수가 건 것이 아닌 약화 효과입니다 (PVE 약화 효과 대부분이 여기에 해당합니다. '모든 약화 효과'가 선택된 동안에는 체크하지 마세요!)."
 L["Only show these buffs when you cast them."] = "내가 시전한 경우에만 이 강화 효과를 표시합니다."
 L["Selected"] = "선택됨"
 L["Show every debuff in the base grid. The Base Filters dropdown is ignored while this is on."] = "기본 격자에 모든 약화 효과를 표시합니다. 이 옵션이 켜져 있으면 기본 필터 선택은 무시됩니다."
@@ -4400,6 +4425,19 @@ L["Rebind"] = "다시 지정"
 L["Keep"] = "유지"
 L["%1$s is bound to \"%2$s\". Binding it to \"%3$s\" will leave that unbound."] = "%1$s 키는 \"%2$s\"에 지정되어 있습니다. \"%3$s\"에 지정하면 기존 지정이 해제됩니다."
 L["Delete %1$s and its contents? Entries in other action menus that open it are removed too, and the menus after it move up one place."] = "%1$s(을)를 내용과 함께 삭제할까요? 이 메뉴를 여는 다른 동작 메뉴의 항목도 함께 제거되고, 뒤의 메뉴들이 한 자리씩 앞으로 당겨집니다."
+-- 2026-08-12 신규 (8.8.4: 메뉴 열어 두기 / 사용 불가 항목 숨기기 / 장소 표식 토글)
+L["Toggle Menu Open"] = "메뉴 열어 두기"
+L["Toggled Menu Select Action"] = "열린 메뉴 선택 동작"
+L["a Toggled Menu Select Action keybind"] = "'열린 메뉴 선택 동작' 단축키"
+L["Keep this menu open when you let go of its keybind.\nPoint at an entry and press the Select Action key to use it.\nPress the menu's own keybind again, or Escape, to close it."] = "단축키에서 손을 떼도 이 메뉴를 열어 둡니다.\n항목을 가리키고 선택 동작 키를 누르면 그 항목을 사용합니다.\n메뉴 단축키를 다시 누르거나 Escape 를 누르면 닫힙니다."
+L["Uses the entry you are pointing at while a menu is kept open with Toggle Menu Open. One key shared by every menu, claimed only while a menu is up -- a mouse button keeps its normal use the rest of the time.\n\nLeft-click to set a keybind, then press any key or\nclick any mouse button to use it.\nEscape cancels. Right-click here to unbind."] = "메뉴 열어 두기로 메뉴가 열려 있는 동안, 가리키고 있는 항목을 사용하는 키입니다. 모든 메뉴가 키 하나를 같이 쓰고, 메뉴가 떠 있는 동안에만 키를 차지합니다 - 마우스 버튼이라면 그 외에는 평소 기능 그대로입니다.\n\n왼쪽 클릭으로 지정을 시작한 뒤 아무 키나 누르거나\n아무 마우스 버튼이나 클릭하면 그 키로 지정됩니다.\nEscape 는 취소, 여기를 오른쪽 클릭하면 해제됩니다."
+L["Left-click to set a keybind, then press any key or\nclick any mouse button to use it.\nEscape cancels. Right-click here to unbind."] = "왼쪽 클릭으로 지정을 시작한 뒤 아무 키나 누르거나\n아무 마우스 버튼이나 클릭하면 그 키로 지정됩니다.\nEscape 는 취소, 여기를 오른쪽 클릭하면 해제됩니다."
+L["Hide Unusable Entries"] = "사용 불가 항목 숨기기"
+L["Hide entries this character cannot use: another class's specializations and spells, and macros this character does not have. One shared menu then fits every character. The menu editor always shows every entry."] = "이 캐릭터가 쓸 수 없는 항목을 숨깁니다: 다른 직업의 전문화와 주문, 이 캐릭터에 없는 매크로. 그러면 공용 메뉴 하나가 모든 캐릭터에 맞습니다. 메뉴 편집기에는 항상 모든 항목이 표시됩니다."
+L["Toggle World Markers"] = "장소 표식 토글"
+L["Use a world marker entry again to pick that marker back up. Off places the marker again, at the new position.\nThis does not change the entry that clears all world markers, or the cycling entry."] = "장소 표식 항목을 다시 사용하면 그 표식을 도로 집어 듭니다. 끄면 새 위치에 표식을 다시 놓습니다.\n모든 장소 표식을 지우는 항목과 순환 항목은 이 설정의 영향을 받지 않습니다."
+L["Disable Quickdraw"] = "빠른 실행 비활성화"
+
 
 
 -- == add QoL (편의 기능) ====================================================
@@ -6682,6 +6720,13 @@ L["|cffFFFFFFLeft Click:|r"] = "|cffFFFFFF좌클릭:|r"
 L["|cffFFFFFFRight Click:|r"] = "|cffFFFFFF우클릭:|r"
 L["|cffFFFFFFShift + Left Click:|r"] = "|cffFFFFFF쉬프트 + 좌클릭:|r"
 L["|cffFFFFFFShift + Middle Click:|r"] = "|cffFFFFFF쉬프트 + 가운데 클릭:|r"
+-- 2026-08-12 신규 (골드 툴팁 표시 항목 / 지연 시간 / 귀환석)
+L["Show Tooltip Data"] = "툴팁 표시 항목"
+L["Which sections the gold tooltip shows."] = "골드 툴팁에 어떤 항목을 표시할지 고릅니다."
+L["Which latency to show: home, world, or both side by side."] = "표시할 지연 시간: 홈, 월드, 또는 둘을 나란히."
+L["Shows a house or globe icon marking which latency each value is."] = "각 값이 어느 쪽 지연 시간인지 집/지구본 아이콘으로 표시합니다."
+L["Which hearthstone the left click uses. Random Hearthstone picks a random owned variant each cast. Right click always rolls a random one."] = "왼쪽 클릭에 사용할 귀환석입니다. 무작위 귀환석은 시전할 때마다 보유한 귀환석 중 하나를 무작위로 고르고, 오른쪽 클릭은 항상 무작위로 고릅니다."
+
 -- 2026-07-20 신규
 L["Background texture for this bar, tinted by the bar's color and opacity."] = "이 바의 배경 무늬입니다. 바의 색상과 투명도가 함께 적용됩니다."
 L["Icon Color"] = "아이콘 색상"
