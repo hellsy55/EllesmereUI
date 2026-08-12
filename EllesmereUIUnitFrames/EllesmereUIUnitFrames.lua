@@ -6191,7 +6191,20 @@ local function CreateCastBar(frame, unit, settings)
         castbarBg:SetFrameStrata(frame:GetFrameStrata())
         castbarBg:SetFrameLevel(frame:GetFrameLevel() + 1)
         if not frame:IsShown() then castbarBg:Hide() end
-        frame:HookScript("OnShow", function() castbarBg:Show() end)
+        -- Only force castbarBg visible here when "Hide Cast Bar When Inactive"
+        -- is OFF (Always Show). When it's on (the default), retargeting must
+        -- NOT show the (black) background on its own -- an active cast already
+        -- shows it via PostCastStart above, and the outcome-message/dismiss
+        -- paths show/hide it correctly too. Blindly Show()-ing here on every
+        -- target acquisition displayed an idle black bar under the new target
+        -- until the next real cast event cleaned it up.
+        frame:HookScript("OnShow", function()
+            local s = GetSettingsForUnit(unit)
+            local hideWhenInactive = (not s or s.castbarHideWhenInactive == nil) and true or s.castbarHideWhenInactive
+            if not hideWhenInactive then
+                castbarBg:Show()
+            end
+        end)
         frame:HookScript("OnHide", function() castbarBg:Hide() end)
     end
 
