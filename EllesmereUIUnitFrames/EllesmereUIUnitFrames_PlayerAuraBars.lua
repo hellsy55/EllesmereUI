@@ -509,8 +509,8 @@ local STYLE_DEBUFFS = "playerAuraBars_debuffs"
 -- lineSpacing/groupLineSpacing only, nil falls back to `padding`; elementSpacing/
 -- groupSpacing, icon-to-icon within a row, always stay tied to `padding`); maxTotal
 -- (overall icon cap); iconsPerRow (row width in columns); maxRows (row cap; with
--- iconsPerRow also bounds maxTotal, see ComputeGrid()); growDirection ("LEFT"/"RIGHT",
--- default LEFT, a TOPRIGHT anchor growing inward like Blizzard's own BuffFrame).
+-- iconsPerRow also bounds maxTotal, see ComputeGrid()); growDirection ("LEFT"/"RIGHT"/
+-- "CENTER_HORIZONTAL"/"CENTER_VERTICAL"/"UP"/"DOWN", default LEFT).
 -- Buff bars (default AND custom, one model): filters ([filterId]=true, shared PAB
 -- Filters registry); spells ({spellID,...}, direct/"Extra Spells"); showAllBuffs
 -- (default bar ONLY, custom buff bars never read it; defaults true, else an
@@ -944,6 +944,22 @@ local function EnsurePabSizedStyle(baseKey, size)
     return variantKey
 end
 
+local function BuildGroupLayout(cfg, gap, rowGap, size)
+    local PP = EllesmereUI.PP
+    rowGap = rowGap or gap
+    size = PP.Scale(size or cfg.iconSize or 32)
+    gap = PP.Scale(gap)
+    rowGap = PP.Scale(rowGap)
+    return {
+        elementWidth = size,
+        elementHeight = size,
+        elementSpacing = gap,
+        lineSpacing = rowGap,
+        groupSpacing = gap,
+        groupLineSpacing = rowGap,
+    }
+end
+
 local function ApplyGroupConfig(container, chain, declaredSet, styleKey, effectiveMax, gap, rowGap, cfg, extraCand)
     local sortMethod = ResolveSortMethod(cfg)
     local sortDirection = ResolveSortDirection(cfg)
@@ -954,28 +970,13 @@ local function ApplyGroupConfig(container, chain, declaredSet, styleKey, effecti
     -- distance is overridable independently of icon-to-icon spacing (cfg.rowSpacing in
     -- the Settings Schema comment). Container-level padding is a THIRD, unrelated
     -- concept: the OUTER edge inset, fixed at 0 elsewhere and never affected by either.
-    rowGap = rowGap or gap
-    -- Snap both to the physical pixel grid before the native engine's layout math
-    -- (SetAuraGroupLayout below): raw values can land the engine's OWN internal row
-    -- positioning a hair off a pixel boundary at a non-pixel-perfect UIParent scale,
-    -- which the border (independently pixel-perfect via GetEffectiveScale) then
-    -- visibly disagrees with by ~1px.
-    local PP = EllesmereUI.PP
-    gap = PP.Scale(gap)
-    rowGap = PP.Scale(rowGap)
-    local layout = {
-        elementSpacing = gap,
-        lineSpacing = rowGap,
-        groupSpacing = gap,
-        groupLineSpacing = rowGap,
-    }
-
     local active = {}
     for i = 1, #chain do
         local link = chain[i]
         -- Size override, debuffs only: cfg.fxList is nil for buffs, so szOv is always
         -- nil there.
         local szOv = PAB_FxSizeFor(cfg.fxList, link.key)
+        local layout = BuildGroupLayout(cfg, gap, rowGap, szOv)
         -- Token strings are declaration-fixed too, so the effective key embeds the
         -- link's token set: a changed negation shape (subtract flips, class-set edits)
         -- declares a fresh variant instead of leaving a stale filter on the old group.
@@ -1023,6 +1024,7 @@ local function ApplyGroupConfig(container, chain, declaredSet, styleKey, effecti
                 candidateFilters = candidateFilters,
                 sortMethod = sortMethod,
                 sortDirection = sortDirection,
+                layout = layout,
                 -- Icon Effects Per-Filter: stamps this button's category (matched
                 -- against fxList blocks by PAB_ApplyDmFx) and arms the glow/border
                 -- overlay inside the one legal creation window. style.applyExtra runs
@@ -1121,6 +1123,8 @@ local function ComputeGrid(isBuff, cfg)
     local iconSize = MaxIconSizeFor(isBuff, cfg)
     local pad = cfg.padding or 5
     local rowGap = cfg.rowSpacing or 12
+    local layoutPad = EllesmereUI.PP.Scale(pad)
+    local layoutRowGap = EllesmereUI.PP.Scale(rowGap)
     local cols = math.max(1, cfg.iconsPerRow or (isBuff and 11 or 8))
     local rows = math.max(1, cfg.maxRows or (isBuff and 3 or 2))
     local configuredMax = cfg.maxTotal or (isBuff and 32 or 16)
@@ -1130,9 +1134,9 @@ local function ComputeGrid(isBuff, cfg)
     -- `lineExtent` is the icons' own extent on the line axis (iconsPerRow
     -- icons of iconSize + gaps); `crossExtent` is the other axis (lines actually used).
     -- Horizontal growth: a "line" is a row, so lineExtent -> width. Vertical growth
-    -- (Up/Down): a "line" is a column, so lineExtent -> height -- see
+    -- modes: a "line" is a column, so lineExtent -> height -- see
     -- CornerFor/BuildContainerSpec for the matching growthH/growthV swap.
-    local lineExtent = cols * iconSize + (cols - 1) * pad
+    local lineExtent = cols * iconSize + (cols - 1) * layoutPad
     -- Wrap budget handed to the engine (AK.SetContainerRowWidth / layout.rowWidth),
     -- deliberately NOT lineExtent: the engine reserves a TRAILING elementSpacing
     -- after every element (not only between), so a full line needs
@@ -1140,9 +1144,9 @@ local function ComputeGrid(isBuff, cfg)
     -- still sizes the bar's own frame, so the drag box measures the icons, not
     -- the phantom trailing gap (the preview builder models the same and drops
     -- the trailing gap).
-    local rowWidth = lineExtent + pad
-    local crossExtent = usedRows * iconSize + (usedRows - 1) * rowGap
-    local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN")
+    local rowWidth = math.max(iconSize, lineExtent + layoutPad)
+    local crossExtent = usedRows * iconSize + (usedRows - 1) * layoutRowGap
+    local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN" or cfg.growDirection == "CENTER_VERTICAL")
     local width = vertical and crossExtent or lineExtent
     local height = vertical and lineExtent or crossExtent
     return {
@@ -1425,7 +1429,7 @@ local buffsParent, debuffsParent
 -- ApplyGroupConfig): reset only when a container is (re-)created, never on a live
 -- settings change.
 local declared = { buffs = {}, debuffs = {} } -- buffs: only the "Show All Buffs" catch-all key ("all"); debuffs: every class-token chain key
-local lastSize = { buffs = nil, debuffs = nil } -- {w=,h=} last-applied grid size, for CENTER-anchor compensation (see ApplyLiveConfig)
+local lastSize = { buffs = nil, debuffs = nil } -- {w=,h=} last-applied grid size, for fixed-edge compensation (see ApplyLiveConfig)
 local buffsSlotSig -- signature of the default Buffs bar's last-applied resolved spell list (ns.PAB_ResolveSpells), mirrors customBuffSig[barId] for the per-bar slots model
 local RegisterPABUnlock -- forward-declared; defined after CreateBars, called from it
 -- Last label the Buffs mover was registered under, so ApplyLiveConfig can
@@ -1434,10 +1438,28 @@ local lastUnlockBuffLabel
 local ReloadAllCustomBars -- forward-declared; defined after CreateBars (custom bars section), called from it
 local PAB_MaybeRefreshPreview -- forward-declared; assigned in the options-page preview section, called from every live-apply function so an open bar-detail preview box tracks slider drags without those functions knowing it exists
 
+local restrictedApplies = {}
+local restrictionHooked = false
+local function DeferRestrictedApply(key, fn)
+    AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
+    if not (AK and AK.AurasRestricted and AK.AurasRestricted()) then return false end
+    restrictedApplies[key] = fn
+    if not restrictionHooked then
+        restrictionHooked = true
+        AK.OnRestrictionLift(function()
+            if not next(restrictedApplies) then return end
+            local pending = restrictedApplies
+            restrictedApplies = {}
+            for _, apply in pairs(pending) do apply() end
+        end)
+    end
+    return true
+end
+
 -- Grow direction. AK.ApplyContainerLayout only applies growth when BOTH growthH and
 -- growthV are set. Values are AnchorUtil.FlowDirection members, NOT strings
 -- (Blizzard_SharedXMLBase/AnchorUtil.lua: Left=-1, Right=1, Up=1, Down=-1); our
--- settings store "LEFT"/"RIGHT" strings, matching EUI_UnlockMode.lua's dropdown
+-- settings store uppercase direction strings, matching EUI_UnlockMode.lua's dropdown
 -- `val` convention.
 --
 -- CRITICAL: AnchorUtil.ApplyFlowLayout positions every element via
@@ -1460,10 +1482,11 @@ local PAB_MaybeRefreshPreview -- forward-declared; assigned in the options-page 
 local function ToGrowthH(dirStr, wrapStr)
     local FlowDir = AnchorUtil and AnchorUtil.FlowDirection
     if not FlowDir then return nil end
+    if dirStr == "CENTER_VERTICAL" then return FlowDir.Right end
     if dirStr == "UP" or dirStr == "DOWN" then
         return wrapStr == "RIGHT" and FlowDir.Right or FlowDir.Left
     end
-    return dirStr == "RIGHT" and FlowDir.Right or FlowDir.Left
+    return (dirStr == "RIGHT" or dirStr == "CENTER_HORIZONTAL") and FlowDir.Right or FlowDir.Left
 end
 local function ToGrowthV(dirStr)
     local FlowDir = AnchorUtil and AnchorUtil.FlowDirection
@@ -1476,12 +1499,13 @@ end
 -- growthH side), same rule horizontal or vertical (LEFT/RIGHT: growthV is always Down
 -- -> TOP component; growthH Right/Left -> LEFT/RIGHT component).
 local function CornerFor(dirStr, wrapStr)
+    if dirStr == "CENTER_VERTICAL" then return "TOP" end
     if dirStr == "UP" or dirStr == "DOWN" then
         local vSide = (dirStr == "UP") and "BOTTOM" or "TOP"
         local hSide = (wrapStr == "RIGHT") and "LEFT" or "RIGHT"
         return vSide .. hSide
     end
-    return dirStr == "RIGHT" and "TOPLEFT" or "TOPRIGHT"
+    return (dirStr == "RIGHT" or dirStr == "CENTER_HORIZONTAL") and "TOPLEFT" or "TOPRIGHT"
 end
 
 -- Shared by every container, default and custom alike: builds the AK.RequestContainer
@@ -1493,12 +1517,13 @@ end
 local function BuildContainerSpec(parent, cfg, grid)
     local dir = cfg.growDirection or "LEFT"
     local wrap = cfg.iconWrapDirection or "LEFT"
-    local vertical = (dir == "UP" or dir == "DOWN")
-    local corner = CornerFor(dir, wrap)
-    return corner, {
-        point = { corner, parent, corner, 0, 0 },
+    local vertical = (dir == "UP" or dir == "DOWN" or dir == "CENTER_VERTICAL")
+    local layoutAnchor = dir == "CENTER_HORIZONTAL" and "LEFT" or CornerFor(dir, wrap)
+    local containerAnchor = (dir == "CENTER_HORIZONTAL" or dir == "CENTER_VERTICAL") and "CENTER" or layoutAnchor
+    return containerAnchor, {
+        point = { containerAnchor, parent, containerAnchor, 0, 0 },
         layout = {
-            anchorPoint = corner,
+            anchorPoint = layoutAnchor,
             padding = { 0, 0, 0, 0 },
             rowWidth = grid.rowWidth,
             growthH = ToGrowthH(dir, wrap),
@@ -1513,10 +1538,10 @@ end
 -- the three cannot drift. The outer frame anchor is a plain SetPoint (not AK-managed),
 -- so it is live-settable like any other frame anchor.
 local function ApplyContainerAnchorAndGrowth(container, parent, cfg, grid)
-    local corner, spec, vertical = BuildContainerSpec(parent, cfg, grid)
+    local containerAnchor, spec, vertical = BuildContainerSpec(parent, cfg, grid)
     container:ClearAllPoints()
-    container:SetPoint(corner, parent, corner, 0, 0)
-    AK.SetContainerAnchor(container, corner)
+    container:SetPoint(containerAnchor, parent, containerAnchor, 0, 0)
+    AK.SetContainerAnchor(container, spec.layout.anchorPoint)
     AK.SetContainerAxis(container, vertical)
     if spec.layout.growthH then
         AK.SetContainerGrowth(container, spec.layout.growthH, spec.layout.growthV)
@@ -1601,21 +1626,52 @@ end
 -- leaves the anchor byte-identical. Full rows overflow the reserved grid by
 -- the shift while an oil is up -- accepted; the shift is transient.
 local function ShiftBuffsForEnchants(container, parent, cfg, grid)
-    local n = (ns._weaponEnchPAB and ns.WeaponEnchants_Count and ns.WeaponEnchants_Count()) or 0
-    if n == 0 then return end
-    local corner = BuildContainerSpec(parent, cfg, grid)
+    local n = (cfg.showWeaponEnchants == true and ns.WeaponEnchants_Count and ns.WeaponEnchants_Count()) or 0
+    local containerAnchor = BuildContainerSpec(parent, cfg, grid)
     local dir = cfg.growDirection or "LEFT"
+    local cell = EllesmereUI.PP.Scale(cfg.iconSize or 32) + EllesmereUI.PP.Scale(cfg.padding or 5)
+    container:ClearAllPoints()
+    if dir == "CENTER_HORIZONTAL" then
+        local span = n * cell
+        container:SetPoint("CENTER", parent, "CENTER", 0, 0)
+        if ns._weaponEnchPAB then
+            ns._weaponEnchPAB.parent = container
+            ns._weaponEnchPAB.corner = nil
+            ns._weaponEnchPAB.point = "LEFT"
+            ns._weaponEnchPAB.relativePoint = "LEFT"
+            ns._weaponEnchPAB.x = -span
+            ns._weaponEnchPAB.y = 0
+            ns._weaponEnchPAB.dir = "RIGHT"
+        end
+        return
+    end
+    if dir == "CENTER_VERTICAL" then
+        container:SetPoint("CENTER", parent, "CENTER", 0, 0)
+        if ns._weaponEnchPAB then
+            ns._weaponEnchPAB.parent = container
+            ns._weaponEnchPAB.corner = nil
+            ns._weaponEnchPAB.point = "BOTTOM"
+            ns._weaponEnchPAB.relativePoint = "TOP"
+            ns._weaponEnchPAB.x = 0
+            ns._weaponEnchPAB.y = math.max(0, n - 1) * cell + EllesmereUI.PP.Scale(cfg.padding or 5)
+            ns._weaponEnchPAB.dir = "DOWN"
+        end
+        return
+    end
+
     local dx, dy = 0, 0
     if dir == "RIGHT" then dx = 1 elseif dir == "LEFT" then dx = -1
     elseif dir == "UP" then dy = 1 elseif dir == "DOWN" then dy = -1 end
-    -- Both terms snapped, matching the engine's own cell stride exactly:
-    -- ApplyGroupConfig feeds it PP.Scale(padding) as elementSpacing and
-    -- BuildStyle PP.Scale(iconSize) as the element width. Leaving the gap raw
-    -- here drifts the reservation by PP.Scale(pad) - pad per cell at a
-    -- non-pixel-perfect UIParent scale.
-    local cell = EllesmereUI.PP.Scale(cfg.iconSize or 32) + EllesmereUI.PP.Scale(cfg.padding or 5)
-    container:ClearAllPoints()
-    container:SetPoint(corner, parent, corner, dx * n * cell, dy * n * cell)
+    container:SetPoint(containerAnchor, parent, containerAnchor, dx * n * cell, dy * n * cell)
+    if ns._weaponEnchPAB then
+        ns._weaponEnchPAB.parent = parent
+        ns._weaponEnchPAB.corner = containerAnchor
+        ns._weaponEnchPAB.point = nil
+        ns._weaponEnchPAB.relativePoint = nil
+        ns._weaponEnchPAB.x = nil
+        ns._weaponEnchPAB.y = nil
+        ns._weaponEnchPAB.dir = dir
+    end
 end
 
 -- Combat-path re-shift for enchant count changes: re-seating the CONTAINER
@@ -1629,20 +1685,7 @@ function ns.PAB_ReShiftEnchants()
     if not (AK and s and buffsContainer and buffsParent) then return end
     local cfg = DefaultBuffsCfg(s)
     local grid = ComputeGrid(true, cfg)
-    local corner = BuildContainerSpec(buffsParent, cfg, grid)
-    local n = (ns._weaponEnchPAB and ns.WeaponEnchants_Count and ns.WeaponEnchants_Count()) or 0
-    local dir = cfg.growDirection or "LEFT"
-    local dx, dy = 0, 0
-    if dir == "RIGHT" then dx = 1 elseif dir == "LEFT" then dx = -1
-    elseif dir == "UP" then dy = 1 elseif dir == "DOWN" then dy = -1 end
-    -- Both terms snapped, matching the engine's own cell stride exactly:
-    -- ApplyGroupConfig feeds it PP.Scale(padding) as elementSpacing and
-    -- BuildStyle PP.Scale(iconSize) as the element width. Leaving the gap raw
-    -- here drifts the reservation by PP.Scale(pad) - pad per cell at a
-    -- non-pixel-perfect UIParent scale.
-    local cell = EllesmereUI.PP.Scale(cfg.iconSize or 32) + EllesmereUI.PP.Scale(cfg.padding or 5)
-    buffsContainer:ClearAllPoints()
-    buffsContainer:SetPoint(corner, buffsParent, corner, dx * n * cell, dy * n * cell)
+    ShiftBuffsForEnchants(buffsContainer, buffsParent, cfg, grid)
 end
 
 local function CreateBars()
@@ -1734,7 +1777,9 @@ local function CreateBars()
     else
         ns._weaponEnchPAB = nil
     end
-    if ns.WeaponEnchants_Layout then ns.WeaponEnchants_Layout() end
+    if buffCfg.growDirection ~= "CENTER_HORIZONTAL" and buffCfg.growDirection ~= "CENTER_VERTICAL" and ns.WeaponEnchants_Layout then
+        ns.WeaponEnchants_Layout()
+    end
 
     -- Groups are declared additively right after creation (not via spec.groups) so
     -- the same ApplyGroupConfig path handles both initial creation and every later
@@ -1767,6 +1812,7 @@ local function CreateBars()
         buffsContainer = container
         AK.SetContainerAxis(container, buffVertical)
         ShiftBuffsForEnchants(container, buffsParent, buffCfg, buffGrid)
+        if ns.WeaponEnchants_Layout then ns.WeaponEnchants_Layout() end
         declared.buffs = {}
         ApplyGroupConfig(container, buffAllChain, declared.buffs, STYLE_BUFFS, buffGrid.effectiveMax, buffPad, buffGrid.rowGap, buffCfg, BuffCandidateExtras(buffCfg))
         if #buffSpells > 0 then
@@ -1780,10 +1826,7 @@ local function CreateBars()
                 candidateFilters = MergeCandidateFilters({ includeSpellIDs = includeMap }, BuffCandidateExtras(buffCfg)),
                 sortMethod = ResolveSortMethod(buffCfg),
                 sortDirection = ResolveSortDirection(buffCfg),
-            })
-            container:SetAuraGroupLayout("spells", {
-                elementSpacing = buffPad, lineSpacing = buffGrid.rowGap,
-                groupSpacing = buffPad, groupLineSpacing = buffGrid.rowGap,
+                layout = BuildGroupLayout(buffCfg, buffPad, buffGrid.rowGap),
             })
             declared.buffs.spells = true
         end
@@ -1893,6 +1936,8 @@ ns.PAB_Restyle = RestyleBars
 local function ApplyLiveConfig(isBuff)
     local s = PAB()
     if not (AK and s) then return end
+    if DeferRestrictedApply(isBuff and "default-buffs" or "default-debuffs",
+        function() ApplyLiveConfig(isBuff) end) then return end
     local container = isBuff and buffsContainer or debuffsContainer
     local parent = isBuff and buffsParent or debuffsParent
     if not container or not parent then return end
@@ -1902,15 +1947,14 @@ local function ApplyLiveConfig(isBuff)
     local sizeKey = isBuff and "buffs" or "debuffs"
     local prev = lastSize[sizeKey]
 
-    -- Compensate for CENTER-anchored saved positions: SetSize on a CENTER/CENTER point
-    -- grows/shrinks symmetrically, so any size change visibly shifts the icons. Shift
-    -- the saved position by half the delta so the CENTER point stays put. Uses OUR OWN
-    -- last-applied size (lastSize), not parent:GetWidth/GetHeight -- querying the live
-    -- frame is jitter-prone across rapid successive calls (slider drags), since its
-    -- rendered size may not yet reflect the previous call. Skipped when unchanged.
+    -- Edge-growing containers use a fixed parent corner, so move a CENTER-saved parent
+    -- by half the size delta to keep that corner fixed. Centered growth deliberately
+    -- skips this: the parent center is its fixed anchor. Uses lastSize rather than live
+    -- geometry so rapid slider updates cannot read a stale prior size.
     local posKey = BarPositionKey(isBuff)
     local pos = s[posKey]
-    if pos and pos.point == "CENTER" and prev and (prev.w ~= grid.width or prev.h ~= grid.height) then
+    if cfg.growDirection ~= "CENTER_HORIZONTAL" and cfg.growDirection ~= "CENTER_VERTICAL" and pos and pos.point == "CENTER"
+        and prev and (prev.w ~= grid.width or prev.h ~= grid.height) then
         pos.x = pos.x + (prev.w - grid.width) / 2
         pos.y = pos.y + (prev.h - grid.height) / 2
         -- Snap against the NEW grid.width/height (what parent:SetSize is about to
@@ -1974,6 +2018,7 @@ local function ApplyLiveConfig(isBuff)
                 buffsContainer = newContainer
                 AK.SetContainerAxis(newContainer, specVertical)
                 ShiftBuffsForEnchants(newContainer, parent, cfg, grid)
+                if ns.WeaponEnchants_Layout then ns.WeaponEnchants_Layout() end
                 declared.buffs = {}
                 ApplyGroupConfig(newContainer, allChain, declared.buffs, STYLE_BUFFS, grid.effectiveMax, pad, grid.rowGap, cfg, BuffCandidateExtras(cfg))
                 if #spells > 0 then
@@ -1987,10 +2032,7 @@ local function ApplyLiveConfig(isBuff)
                         candidateFilters = MergeCandidateFilters({ includeSpellIDs = includeMap }, BuffCandidateExtras(cfg)),
                         sortMethod = ResolveSortMethod(cfg),
                         sortDirection = ResolveSortDirection(cfg),
-                    })
-                    newContainer:SetAuraGroupLayout("spells", {
-                        elementSpacing = pad, lineSpacing = grid.rowGap,
-                        groupSpacing = pad, groupLineSpacing = grid.rowGap,
+                        layout = BuildGroupLayout(cfg, pad, grid.rowGap),
                     })
                     declared.buffs.spells = true
                 end
@@ -2005,10 +2047,7 @@ local function ApplyLiveConfig(isBuff)
             ApplyGroupConfig(container, allChain, declared.buffs, STYLE_BUFFS, grid.effectiveMax, pad, grid.rowGap, cfg, BuffCandidateExtras(cfg))
             if declared.buffs.spells then
                 container:SetAuraGroupMaxFrameCount("spells", grid.effectiveMax)
-                container:SetAuraGroupLayout("spells", {
-                    elementSpacing = pad, lineSpacing = grid.rowGap,
-                    groupSpacing = pad, groupLineSpacing = grid.rowGap,
-                })
+                container:SetAuraGroupLayout("spells", BuildGroupLayout(cfg, pad, grid.rowGap))
                 local liveIncludeMap = {}
                 for i = 1, #spells do liveIncludeMap[spells[i]] = true end
                 container:SetAuraGroupCandidateFilters("spells",
@@ -2748,6 +2787,8 @@ ns.PAB_RegisterCustomUnlock = RegisterPABCustomUnlock
 local function ReloadCustomBuffBarImpl(barId)
     AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
     if not AK then return end
+    if DeferRestrictedApply("custom-buff-" .. barId,
+        function() ns.PAB_ReloadCustomBuffBar(barId) end) then return end
 
     local bar = ns.PAB_GetCustomBuffBar(barId)
     if not bar then
@@ -2806,10 +2847,7 @@ local function ReloadCustomBuffBarImpl(barId)
             if #spells > 0 then
                 local livePad = bar.padding or 5
                 container:SetAuraGroupMaxFrameCount("spells", grid.effectiveMax)
-                container:SetAuraGroupLayout("spells", {
-                    elementSpacing = livePad, lineSpacing = grid.rowGap,
-                    groupSpacing = livePad, groupLineSpacing = grid.rowGap,
-                })
+                container:SetAuraGroupLayout("spells", BuildGroupLayout(bar, livePad, grid.rowGap))
                 local liveIncludeMap = {}
                 for i = 1, #spells do liveIncludeMap[spells[i]] = true end
                 container:SetAuraGroupCandidateFilters("spells",
@@ -2846,10 +2884,7 @@ local function ReloadCustomBuffBarImpl(barId)
                 candidateFilters = MergeCandidateFilters({ includeSpellIDs = includeMap }, BuffCandidateExtras(bar)),
                 sortMethod = ResolveSortMethod(bar),
                 sortDirection = ResolveSortDirection(bar),
-            })
-            container:SetAuraGroupLayout("spells", {
-                elementSpacing = pad, lineSpacing = grid.rowGap,
-                groupSpacing = pad, groupLineSpacing = grid.rowGap,
+                layout = BuildGroupLayout(bar, pad, grid.rowGap),
             })
         end
     end)
@@ -2869,6 +2904,8 @@ end
 local function ReloadCustomDebuffBarImpl(barId)
     AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
     if not AK then return end
+    if DeferRestrictedApply("custom-debuff-" .. barId,
+        function() ns.PAB_ReloadCustomDebuffBar(barId) end) then return end
 
     local bar = ns.PAB_GetCustomDebuffBar(barId)
     if not bar then
@@ -3678,7 +3715,8 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     -- box/divider while doing it.
     local growDir = cfg.growDirection or "LEFT"
     local wrapDir = cfg.iconWrapDirection or "LEFT"
-    local vertical = (growDir == "UP" or growDir == "DOWN")
+    local centeredVertical = growDir == "CENTER_VERTICAL"
+    local vertical = (growDir == "UP" or growDir == "DOWN" or centeredVertical)
     local corner = CornerFor(growDir, wrapDir)
     local pad = cfg.padding or 5
     local rowGap = cfg.rowSpacing or 12
@@ -3801,12 +3839,15 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
             -- btn's own anchor point is `corner` (matching growDirection/
             -- iconWrapDirection), placed at an offset from the box's CENTER -- see the
             -- block-centering comment above `local rows = ...`. Vertical growth
-            -- (Up/Down) swaps which step drives X vs Y: the within-line step (icons
+            -- swaps which step drives X vs Y: the within-line step (icons
             -- stacking inside one column) becomes Y, the across-lines step (columns
             -- wrapping sideways) becomes X -- mirrors the corner/growthH/growthV swap
             -- in CornerFor/BuildContainerSpec used by the real (non-preview) bars.
             local btnX, btnY
-            if vertical then
+            if centeredVertical then
+                btnY = halfPrimary - withinLineStep - slotSize[i] / 2
+                btnX = -halfCross + acrossLinesStep + slotSize[i] / 2
+            elseif vertical then
                 btnY = growUp and (-halfPrimary + withinLineStep) or (halfPrimary - withinLineStep)
                 btnX = wrapRight and (-halfCross + acrossLinesStep) or (halfCross - acrossLinesStep)
             else
@@ -3814,7 +3855,7 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
                 btnY = halfCross - acrossLinesStep
             end
             btn:ClearAllPoints()
-            btn:SetPoint(corner, box, "CENTER", btnX, btnY)
+            btn:SetPoint(centeredVertical and "CENTER" or corner, box, "CENTER", btnX, btnY)
             btn:SetSize(slotSize[i], slotSize[i])
 
             local slot = slots[i]
