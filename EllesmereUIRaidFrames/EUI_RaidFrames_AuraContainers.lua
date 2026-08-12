@@ -550,7 +550,11 @@ local function ApplyRFDispelSlot(button, dd, style)
     -- Change-guarded, stamped AFTER the call: SetFrameLevel on the slot button is
     -- denied while auras are secret (creation-window calls are legal); a restyle-time
     -- throw defers this key to the restriction-lift re-queue.
-    local lvl = health:GetFrameLevel() + 1 + def.level
+    -- health+1: below the absorb shield bars (health+3) so fill/full overlays
+    -- never cover the shield, above the heal-absorb/heal-prediction fills
+    -- (same level, ARTWORK 2). All slots share this level; the Magic > Curse
+    -- > ... priority is encoded in the overlay's ARTWORK sublevel below.
+    local lvl = health:GetFrameLevel() + 1
     if dd.lvl ~= lvl then
         button:SetFrameLevel(lvl)
         dd.lvl = lvl
@@ -562,9 +566,10 @@ local function ApplyRFDispelSlot(button, dd, style)
     local typeA = (c and c.a) or 1
     local alpha = (style.opacity or 100) / 100 * typeA
 
-    -- Overlay texture (fill / full / gradient), legacy ARTWORK sublevel 3.
+    -- Overlay texture (fill / full / gradient). Sublevel 2+def.level (3..7)
+    -- gives higher-priority types the higher sublevel at the shared level.
     if not dd.overlay then
-        dd.overlay = button:CreateTexture(nil, "ARTWORK", nil, 3)
+        dd.overlay = button:CreateTexture(nil, "ARTWORK", nil, 2 + def.level)
     end
     local tex = dd.overlay
     tex:ClearAllPoints()
