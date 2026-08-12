@@ -73,7 +73,7 @@ local ADDON_DB_MAP = {
     { folder = "EllesmereUIDragonRiding",      display = "Dragon Riding",       svName = "EllesmereUIDragonRidingDB",      suffix = "DragonRiding",     hostAddon = "EllesmereUIBlizzardSkin" },
     { folder = "EllesmereUIBags",              display = "Bags",                svName = "EllesmereUIBagsDB",              suffix = "Bags"              },
     { folder = "EllesmereUIFriends",           display = "Friends List",        svName = "EllesmereUIFriendsDB",           suffix = "Friends"           },
-    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",       svName = "EllesmereUIMythicTimerDB",       suffix = "MythicTimer"       },
+    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Tools",       svName = "EllesmereUIMythicTimerDB",       suffix = "MythicTimer"       },
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",       svName = "EllesmereUIQuestTrackerDB",      suffix = "QuestTracker"      },
     { folder = "EllesmereUIMinimap",           display = "Minimap",             svName = "EllesmereUIMinimapDB",           suffix = "Minimap"           },
     { folder = "EllesmereUIDamageMeters",     display = "Damage Meters",       svName = "EllesmereUIDamageMetersDB",      suffix = "DamageMeters"      },
@@ -1391,9 +1391,14 @@ function EllesmereUI.RefreshAllAddons()
     if _G._ECL_ApplyCastCircle then _G._ECL_ApplyCastCircle() end
     -- Crosshair
     if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
-    -- QoL extras (FPS counter + Secondary Stats) -- per-profile, so re-apply on swap
-    if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
-    if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
+    -- QoL extras (FPS counter + Secondary Stats) -- per-profile, so re-apply on
+    -- swap. One call for both: the FPS readout may be drawn by the Secondary
+    -- Stats block, so the two owners have to re-evaluate together.
+    if EllesmereUI._applyFPSDisplay then
+        EllesmereUI._applyFPSDisplay()
+    elseif EllesmereUI._applySecondaryStats then
+        EllesmereUI._applySecondaryStats()
+    end
     -- AuraBuffReminders (refresh + position)
     if _G._EABR_RequestRefresh then _G._EABR_RequestRefresh() end
     if _G._EABR_ApplyUnlockPos then _G._EABR_ApplyUnlockPos() end

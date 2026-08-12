@@ -2021,11 +2021,22 @@ local function GetTBBMaxCharges(cfg)
 end
 ns.GetTBBMaxCharges = GetTBBMaxCharges
 
-local function ParseTickValues(str)
+-- "all" (any case, anywhere in the list) puts a tick between every stack: N
+-- stacks give N-1 interior divisions, the same convention as the charge hash
+-- lines below. Numbers listed alongside it are redundant and ignored.
+local function ParseTickValues(str, maxStacks)
     if not str or str == "" then return nil end
     local vals = {}
     for s in str:gmatch("[^,]+") do
-        local n = tonumber(s:match("^%s*(.-)%s*$"))
+        local tok = s:match("^%s*(.-)%s*$")
+        if tok:lower() == "all" then
+            local m = maxStacks and math.floor(maxStacks) or 0
+            if m < 2 then return nil end
+            local out = {}
+            for i = 1, m - 1 do out[i] = i end
+            return out
+        end
+        local n = tonumber(tok)
         if n and n > 0 then vals[#vals + 1] = n end
     end
     return #vals > 0 and vals or nil
@@ -2033,7 +2044,7 @@ end
 
 local function ApplyTBBTickMarks(sb, cfg, tickCache, isVert, tickParent)
     local maxStacks = cfg.stackThresholdMax or 10
-    local vals = ParseTickValues(cfg.stackThresholdTicks)
+    local vals = ParseTickValues(cfg.stackThresholdTicks, maxStacks)
     if tickCache then
         for i = 1, #tickCache do tickCache[i]:Hide() end
     end
@@ -3940,16 +3951,12 @@ local _cdActive = false
 -- ticking down on its own, and only a CDR/reset-adjusted cooldown needs a fresh fetch.
 local _cdGen = 0
 
--- Static base cooldown (ms) as the arm-time seed before any clean read. Tries both API homes
--- and validates each: an existing-but-differently-shaped C_Spell variant must fall through to the global, never mask it.
+-- Static base cooldown (ms) as the arm-time seed before any clean read. The API lives
+-- ONLY at the global (client-verified: no C_Spell form exists); static data, never secret,
+-- but validated anyway since the seed feeds arithmetic.
 local function _cdBaseDuration(sid)
-    local ms
-    if C_Spell and C_Spell.GetSpellBaseCooldown then
-        ms = C_Spell.GetSpellBaseCooldown(sid)
-    end
-    if not (_tbbCleanNum(ms) and ms > 0) and GetSpellBaseCooldown then
-        ms = GetSpellBaseCooldown(sid)
-    end
+    if not GetSpellBaseCooldown then return nil end
+    local ms = GetSpellBaseCooldown(sid)
     if _tbbCleanNum(ms) and ms > 0 then return ms / 1000 end
     return nil
 end

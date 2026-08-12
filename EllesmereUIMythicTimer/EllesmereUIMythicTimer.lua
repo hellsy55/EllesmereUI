@@ -185,6 +185,77 @@ local DB_DEFAULTS = {
         deathTextColor    = { r = 0.93, g = 0.33, b = 0.33 },
         enemyBarUseAccent = true,
         enemyBarColor     = { r = 0.35, g = 0.55, b = 0.8 },
+        -- Targeted Spell Bars (Mythic+ Tools tab): replica nameplate cast bars
+        -- collected into one movable group. Disabled by default; the feature
+        -- registers its events only while enabled (zero cost off). Runtime in
+        -- EUI_MythicTimer_TargetedSpellBars.lua.
+        tsb = {
+            enabled          = false,
+            growUp           = false,  -- false = new bars stack downward
+            width            = 240,
+            height           = 20,
+            spacing          = 4,
+            maxBars          = 5,
+            texture          = "none",
+            barColor         = { r = 0.70, g = 0.40, b = 0.90 },
+            bgColor          = { r = 0, g = 0, b = 0, a = 0.45 },
+            borderSize       = 1,
+            showIcon         = true,
+            showSpellName    = true,
+            nameSize         = 10,
+            nameX            = 0,
+            nameY            = 0,
+            showTarget       = true,
+            targetSize       = 10,
+            targetX          = 0,
+            targetY          = 0,
+            targetClassColor = true,
+            targetColor      = { r = 1, g = 1, b = 1 },
+            showTimer        = true,
+            timerSize        = 10,
+            timerX           = 0,
+            timerY           = 0,
+        },
+        -- Target/Focus standalone cast bars (Mythic+ Tools tab): unlock-mode
+        -- placeable cast bars carrying the nameplate interrupt color/effects
+        -- system. Both disabled by default. Runtime in
+        -- EUI_MythicTimer_TargetFocusBars.lua.
+        tfb = {
+            castColor        = { r = 0.70, g = 0.40, b = 0.90 },
+            interruptReady   = { r = 0.92, g = 0.35, b = 0.20 },
+            uninterruptible  = { r = 0.45, g = 0.45, b = 0.45 },
+            importantColor   = { r = 1, g = 0.2, b = 0.2 },
+            importantEnabled = false,
+            midCastColor     = { r = 0.318, g = 0.820, b = 0.357 },
+            kickTickColor    = { r = 1, g = 1, b = 1 },
+            kickTickEnabled  = true,
+            midCastEnabled   = false,
+            showShield       = true,
+            showSpark        = true,
+            interruptedFlash = true,
+            interruptedColor = { r = 0.8, g = 0, b = 0 },
+            showTarget       = true,
+            targetClassColor = true,
+            targetColor      = { r = 1, g = 1, b = 1 },
+            target = {
+                enabled = false,
+                width = 260, height = 22,
+                texture = "none",
+                showIcon = true,
+                showSpellName = true, nameSize = 11,
+                showTimer = true, timerSize = 11,
+                targetSize = 10,
+            },
+            focus = {
+                enabled = false,
+                width = 260, height = 22,
+                texture = "none",
+                showIcon = true,
+                showSpellName = true, nameSize = 11,
+                showTimer = true, timerSize = 11,
+                targetSize = 10,
+            },
+        },
     },
 }
 
@@ -2782,6 +2853,11 @@ function EMT:OnInitialize()
 end
 
 function EMT:OnEnable()
+    -- Mythic+ Tools features initialize BEFORE the timer's own enable guard:
+    -- they carry their own per-feature enable flags and must work with the
+    -- timer feature turned off. Both are no-ops while their flags are off.
+    if ns.TSB_OnEnable then ns.TSB_OnEnable(db) end
+    if ns.TFB_OnEnable then ns.TFB_OnEnable(db) end
     if not db or not db.profile.enabled then return end
 
     if EllesmereUI and EllesmereUI.RegisterUnlockModeListener then

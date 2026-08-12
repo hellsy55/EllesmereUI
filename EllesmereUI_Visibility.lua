@@ -291,17 +291,21 @@ for _, k in ipairs(VIS_REPRESENTATIVE_ORDER) do VIS_COMBINABLE_KEYS[k] = true en
 EUI.VIS_COMBINABLE_KEYS = VIS_COMBINABLE_KEYS
 
 -- Airborne skyriding predicate shared by CheckVisibilityMode's dragonriding
--- branches and the multi-select engine. Approximates the secure driver's
--- [advflyable,flying]; the additional IsMounted() requirement is a
--- deliberate, documented drift (Druid Flight Form matches the secure driver
--- but not this predicate).
+-- branches and the multi-select engine. Mirrors the secure driver's
+-- [advflyable,flying]: glide capability plus airborne, and nothing else.
+-- An IsMounted() term used to sit here, which made every non-secure module
+-- disagree with the secure Action Bars driver in a flight form (Druid and
+-- Haranir flight forms are shapeshifts, not mounts, so IsMounted() is false
+-- while [advflyable] still matches).
 function EUI.IsAirborneSkyriding()
-    if not (IsMounted and IsMounted() and IsFlying and IsFlying()) then return false end
+    if not (IsFlying and IsFlying()) then return false end
     if C_PlayerInfo and C_PlayerInfo.GetGlidingInfo then
         local _, canGlide = C_PlayerInfo.GetGlidingInfo()
         return canGlide == true
     end
-    return true
+    -- No capability API to consult: keep the old mounted heuristic rather
+    -- than count ordinary (non-skyriding) flight as dragonriding.
+    return (IsMounted and IsMounted()) and true or false
 end
 
 local function VisRepresentative(modes)

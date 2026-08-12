@@ -9458,7 +9458,7 @@ local CLASS_POWER_TYPES = {
     SHAMAN      = { [263] = { "MAELSTROM_WEAPON", 10 } },
     HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 },
-                    [71]  = { "SWEEPING_STRIKES", 12 } },
+                    [71]  = { "SWEEPING_STRIKES", 18 } },  -- 12.1 cap: 12 + 6 Broad Strokes
 }
 
 -- Returns true if the player's current spec has a class resource in CLASS_POWER_TYPES
@@ -12588,7 +12588,9 @@ local function UnitFrame_OnLeave(self)
             local hasAnyHideOpt = s.visHideNoTarget
                                or s.visHideNoEnemy
                                or s.visHideMounted
+                               or s.visOnlyMounted
                                or s.visHideHousing
+                               or s.visOnlyHousing
                                or s.visOnlyInstances
             local keepShown = (not hiddenByOpts) and hasAnyHideOpt
             leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown(), unitKey) or 0
@@ -14000,7 +14002,9 @@ function InitializeFrames()
                     local hasAnyHideOpt = s.visHideNoTarget
                                        or s.visHideNoEnemy
                                        or s.visHideMounted
+                                       or s.visOnlyMounted
                                        or s.visHideHousing
+                                       or s.visOnlyHousing
                                        or s.visOnlyInstances
                     if hiddenByOpts then
                         bodyAlpha = 0

@@ -179,7 +179,7 @@ local function BuildModuleAliases()
     -- how players actually abbreviate the modules. Folders that never
     -- registered a module simply don't get their shorthands.
     local EXTRA_ALIASES = {
-        EllesmereUIMythicTimer     = { "m+ timer", "m+" },
+        EllesmereUIMythicTimer     = { "m+ timer", "m+", "m+ tools", "mythic+ timer" },
         EllesmereUICooldownManager = { "cdm" },
         EllesmereUIQuickdraw       = { "radial", "wheel", "ring menu", "palette", "grid", "arc", "fan", "action wheel", "action palette", "action menu" },
     }

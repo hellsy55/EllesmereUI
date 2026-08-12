@@ -1527,18 +1527,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Dependent rows: hidden entirely while the timer is disabled
         -- (SectionToggleSetValue on the master rebuilds the page).
         if Cfg("standaloneTimer") then
-            -- "Hold Shift+Click..." label | Anchor to Windows
-            _, h = W:DualRow(parent, y,
-                { type="label", text="Hold Shift+Click to Freely Move Standalone Timer" },
-                { type="dropdown", text="Anchor to Windows",
-                  values = { free = "Free Move", topleft = "Top Left", topright = "Top Right",
-                             bottomleft = "Bottom Left", bottomright = "Bottom Right" },
-                  order = { "free", "topleft", "topright", "bottomleft", "bottomright" },
-                  getValue = function() return Cfg("standaloneTimerAnchor") or "free" end,
-                  setValue = function(v) Set("standaloneTimerAnchor", v); ApplySAT() end })
-            y = y - h
-
-            -- Show Out of Combat (with inline cog) | Add to Unlock Mode
+            -- Show Out of Combat (with inline cog) | Anchor to Windows
             local oocRow
             oocRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Show Out of Combat",
@@ -1550,7 +1539,12 @@ initFrame:SetScript("OnEvent", function(self)
                       -- skipped at panel-open while Show OOC covered the display)
                       if not v and ns.ShowSATimerPreview then ns.ShowSATimerPreview() end
                   end },
-                { type="label", text="" })
+                { type="dropdown", text="Anchor to Windows",
+                  values = { free = "Free Move", topleft = "Top Left", topright = "Top Right",
+                             bottomleft = "Bottom Left", bottomright = "Bottom Right" },
+                  order = { "free", "topleft", "topright", "bottomleft", "bottomright" },
+                  getValue = function() return Cfg("standaloneTimerAnchor") or "free" end,
+                  setValue = function(v) Set("standaloneTimerAnchor", v); ApplySAT() end })
             -- Inline cog on Show Out of Combat for the desaturation option
             if not EllesmereUI._prebuilding then
                 local rgn = oocRow._leftRegion
@@ -1577,6 +1571,15 @@ initFrame:SetScript("OnEvent", function(self)
                 cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
                 cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
             end
+            y = y - h
+
+            -- "Hold Shift+Click..." label | Lock Position & Disable Click
+            _, h = W:DualRow(parent, y,
+                { type="label", text="Hold Shift+Click to Freely Move Standalone Timer" },
+                { type="toggle", text="Lock Position & Disable Click",
+                  tooltip = "Lock the timer in place and make it click-through; no dragging and no mouse interaction until unlocked.",
+                  getValue = function() return Cfg("standaloneTimerLocked") or false end,
+                  setValue = function(v) Set("standaloneTimerLocked", v); ApplySAT() end })
             y = y - h
         end
 

@@ -626,10 +626,10 @@ local function GetSecondaryResource()
     elseif classFile == "WARRIOR" and spec == 1
            and ERB.db and ERB.db.profile and ERB.db.profile.secondary
            and ERB.db.profile.secondary.armsSweepingStrikesBar then
-        -- Arms Sweeping Strikes charges (12, or 18 with Improved Sweeping Strikes).
-        -- Base max here; BuildBars refreshes from the tracker. Opt-in, default off;
-        -- Unit Frames/personal Nameplate readouts ignore the toggle.
-        return { power = "SWEEPING_STRIKES", max = 12, type = "custom" }
+        -- Arms Sweeping Strikes charges: flat 18 cap since 12.1 (12 from the ability +
+        -- 6 from Broad Strokes). Base max here; BuildBars refreshes from the tracker.
+        -- Opt-in, default off; Unit Frames/personal Nameplate readouts ignore the toggle.
+        return { power = "SWEEPING_STRIKES", max = 18, type = "custom" }
     end
 
     return nil
@@ -1795,6 +1795,24 @@ local function CreateStatusBar(parent, name, w, h, borderSize, borderR, borderG,
             self._border._frame:SetFrameLevel(behind and math.max(0, pl - 1) or (pl + 1))
         end
         self._border:ApplyStyle(sz, r, g, b, a, textureKey, texOffset, texOffsetY, shiftX, shiftY, addonKey, sizeKey)
+    end
+
+    -- Lift the border above an overlay that draws inside the bar's rect. The
+    -- default level (+1 over the bar, strips +1 over that) only clears the
+    -- legacy fill; the 12.1 Ebon Might engine slot renders its own StatusBar
+    -- deeper in the tree, so it paints over the strips and Border Size/Color
+    -- look like they do nothing. "Show Behind" is honored -- that border is
+    -- meant to sit under the fill. Idempotent: safe to re-assert every update.
+    function bar:RaiseBorderAbove(coverLevel, behind)
+        local bf = self._border and self._border._frame
+        if not bf then return end
+        local lvl = behind and math.max(0, self:GetFrameLevel() - 1) or (coverLevel + 1)
+        bf:SetFrameLevel(lvl)
+        -- Re-assert on the PP strip container too: it was levelled off the
+        -- border frame at creation, and the textured-border backdrop tracks
+        -- the border frame's level directly.
+        local edges = PP and PP.GetBorders and PP.GetBorders(bf)
+        if edges then edges:SetFrameLevel(lvl + 1) end
     end
 
     -- Text overlay (above all bar borders)
@@ -8655,6 +8673,12 @@ local function OnEvent(self, event, ...)
                 if newMax > 0 and newMax ~= cachedSecondary.max then
                     cachedSecondary.max = newMax
                     BuildBars()
+                    -- BuildBars re-shows the frames; re-apply conditional hides
+                    -- (same as the UNIT_MAXPOWER rebuild below). Without this a
+                    -- max-health change -- gearing up, an item upgrade, a stamina
+                    -- buff -- leaves bars that a visibility condition had hidden
+                    -- parked visible until the next visibility event.
+                    UpdateVisibility()
                 end
             end
             UpdateSecondaryResource()
