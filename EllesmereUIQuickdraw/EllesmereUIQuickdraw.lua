@@ -2034,6 +2034,16 @@ local function CreateSlotWidget(view, index)
     w.count:Hide()
     AdoptFontString(w.count, true)
 
+    -- "This world marker is on the ground right now", in the corner the count
+    -- does not use. Drawn above the border host so a selected entry does not
+    -- bury it. Shown only by PaletteView:MarkerPip, which is also what sizes
+    -- and colors it; created here unconditionally because a widget is reused
+    -- for whatever entry the next open puts in it.
+    w.markerPip = w:CreateTexture(nil, "OVERLAY", nil, 7)
+    w.markerPip:SetTexture("Interface\\Buttons\\WHITE8X8")
+    w.markerPip:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
+    w.markerPip:Hide()
+
     w.label = w:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     AdoptFontString(w.label)
     w.label:SetPoint("TOP", w, "BOTTOM", 0, -2)
@@ -4570,6 +4580,11 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     end
     w.count:SetShown(hasCount)
 
+    -- Through the view because PaintCell is not a method and the pip needs one
+    -- (see MarkerPip). Every open repaints every cell, so this is the reading
+    -- that matters; the event below only keeps a menu left open honest.
+    if w.view then w.view:MarkerPip(w, slot, iconSize) end
+
     ApplySlotVisual(w, false)
 end
 
@@ -4928,6 +4943,78 @@ end
 -- that is not (the list is empty and this returns on the first line), and
 -- textures are touched only on the frames the state actually changes -- one
 -- press of shift, not one per frame it stays down.
+-- The pip that says this world marker is down right now, so an entry says
+-- whether pressing it places the marker or picks it back up before it is
+-- pressed. Blizzard's own manager draws the same distinction, swapping its
+-- button art between "applied" and "available"
+-- (Mainline/Blizzard_CompactRaidFrameManager.lua:1107-1112).
+--
+-- Read on every open, which is where nearly all of its value is: firing an
+-- entry closes the menu (see the release handler), so a press never updates a
+-- pip the presser can still see.
+--
+-- IsRaidMarkerActive is unrestricted and answers a plain bool -- it is neither
+-- protected nor a secret value, unlike GetRaidTargetIndex beside it in the
+-- documentation -- so this reads the same in combat as out of it.
+--
+-- Every other kind hides the pip rather than leaving it alone: one widget is
+-- reused for whatever the next open puts in it, and a stale pip would claim a
+-- spell was a marker that is on the ground.
+--
+-- A method rather than a local function, like MarkerPip's caller and
+-- RefreshMarkerPips below: the main chunk is at Lua's ceiling of 200 locals
+-- and has no room for another name.
+function PaletteView:MarkerPip(w, slot, iconSize)
+    local pip = w.markerPip
+    if not pip then return end
+    local id
+    if slot then
+        if slot.kind == "worldmarker" then
+            id = tonumber(slot.id)
+        elseif slot.kind == "cycleworldmarker" then
+            -- The one the NEXT press places, which is the marker this entry is
+            -- already drawing (SlotDisplay). Through CycleNext rather than off
+            -- the stored position, so the pip and the icon cannot disagree
+            -- about which marker the entry is currently offering.
+            --
+            -- The target-marker cycle is NOT this: raid targets sit on units,
+            -- and IsRaidMarkerActive answers for world markers alone -- which
+            -- Blizzard says in as many words at
+            -- Mainline/Blizzard_CompactRaidFrameManager.lua:1088.
+            id = CycleNext(slot)
+        end
+    end
+    if not id or id < 1 or id > 8
+       or not IsRaidMarkerActive(WORLD_MARKER_ENGINE[id]) then
+        pip:Hide()
+        return
+    end
+    -- The widget's own width when no size is passed: a nest scales its
+    -- children as it opens, and the refresh below runs long after the paint
+    -- that knew the unscaled figure.
+    local s = max(3, floor((iconSize or w:GetWidth() or 40) * 0.18))
+    pip:SetSize(s, s)
+    local ar, ag, ab = 0.047, 0.824, 0.624
+    if EllesmereUI.ResolveActiveAccent then
+        ar, ag, ab = EllesmereUI.ResolveActiveAccent()
+    end
+    pip:SetVertexColor(ar, ag, ab, 1)
+    pip:Show()
+end
+
+-- Every drawn cell's pip, for a menu that is already up when the markers move.
+-- Walks the cells rather than a collected list the way AdvanceLiveIcons does:
+-- that list earns itself by being read every frame, and this runs a handful of
+-- times a pull.
+function PaletteView:RefreshMarkerPips()
+    local n = self.cellCount
+    if not n then return end
+    for i = 1, n do
+        local w = self.widgets[i]
+        if w then self:MarkerPip(w, self:CellSlot(i)) end
+    end
+end
+
 function PaletteView:AdvanceLiveIcons()
     local cells = self._liveCells
     if not cells or #cells == 0 then return end
@@ -8433,6 +8520,25 @@ function SetEventsEnabled(on)
         -- PLAYER_REGEN_ENABLED like every other push.
         EQD:RegisterEvent("SPELLS_CHANGED", RequestPush)
         EQD:RegisterEvent("UPDATE_MACROS", RequestPush)
+        -- Which world markers are down, for a menu that is open while they
+        -- move. That is SOMEBODY ELSE's doing: firing an entry closes the menu,
+        -- so the presser never sees their own pip change. It is worth the one
+        -- registration anyway -- a menu latched open sits there for as long as
+        -- the user leaves it, and marking is something a group does together.
+        --
+        -- Refreshed on the event rather than polled by the live-icon tick: that
+        -- tick costs its API calls every frame, and this cue moves a handful of
+        -- times a pull. RAID_TARGET_UPDATE is what Blizzard's own manager
+        -- refreshes its marker buttons on
+        -- (Mainline/Blizzard_CompactRaidFrameManager.lua:282-283).
+        --
+        -- Inline rather than a named handler, unlike every registration above
+        -- it: the main chunk is at Lua's ceiling of 200 locals.
+        EQD:RegisterEvent("RAID_TARGET_UPDATE", function()
+            if liveView and liveView:GetFrame():IsShown() then
+                liveView:RefreshMarkerPips()
+            end
+        end)
     else
         EQD:UnregisterEvent("UPDATE_BINDINGS")
         EQD:UnregisterEvent("PLAYER_REGEN_ENABLED")
