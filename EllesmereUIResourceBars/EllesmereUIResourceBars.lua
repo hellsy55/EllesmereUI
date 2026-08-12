@@ -8578,6 +8578,12 @@ local function OnEvent(self, event, ...)
                 if newMax > 0 and newMax ~= cachedSecondary.max then
                     cachedSecondary.max = newMax
                     BuildBars()
+                    -- BuildBars re-shows the frames; re-apply conditional hides
+                    -- (same as the UNIT_MAXPOWER rebuild below). Without this a
+                    -- max-health change -- gearing up, an item upgrade, a stamina
+                    -- buff -- leaves bars that a visibility condition had hidden
+                    -- parked visible until the next visibility event.
+                    UpdateVisibility()
                 end
             end
             UpdateSecondaryResource()
