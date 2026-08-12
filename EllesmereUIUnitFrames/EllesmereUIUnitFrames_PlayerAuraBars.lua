@@ -1083,19 +1083,29 @@ local function ComputeGrid(isBuff, cfg)
     local effectiveMax = math.min(configuredMax, rows * cols)
     -- Actual rows needed for the effective cap, never more than the row limit
     local usedRows = math.min(rows, math.max(1, math.ceil(effectiveMax / cols)))
-    -- `lineExtent` is the AK rowWidth/line-size value (icons-per-line axis: iconsPerRow
+    -- `lineExtent` is the icons' own extent on the line axis (iconsPerRow
     -- icons of iconSize + gaps); `crossExtent` is the other axis (lines actually used).
     -- Horizontal growth: a "line" is a row, so lineExtent -> width. Vertical growth
     -- (Up/Down): a "line" is a column, so lineExtent -> height -- see
     -- CornerFor/BuildContainerSpec for the matching growthH/growthV swap.
     local lineExtent = cols * iconSize + (cols - 1) * pad
+    -- Wrap budget handed to the engine (AK.SetContainerRowWidth / layout.rowWidth), and
+    -- deliberately NOT lineExtent: the engine reserves a TRAILING elementSpacing after
+    -- every element rather than only BETWEEN them, so it needs cols * (icon + spacing)
+    -- to seat a full line. A budget of exactly lineExtent is one spacing short, and the
+    -- last icon of every row wrapped -- each bar rendered one icon per row FEWER than
+    -- its Icons Per Row setting. Field-verified by a slider sweep: 5 gave 4 per row, 2
+    -- gave 1, and at the default 11 the shortfall reads as a stray icon on row 2.
+    -- lineExtent still sizes the bar's own frame, so the drag box keeps measuring the
+    -- icons rather than the phantom trailing gap.
+    local rowWidth = lineExtent + pad
     local crossExtent = usedRows * iconSize + (usedRows - 1) * rowGap
     local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN")
     local width = vertical and crossExtent or lineExtent
     local height = vertical and lineExtent or crossExtent
     return {
         effectiveMax = effectiveMax,
-        rowWidth = lineExtent,
+        rowWidth = rowWidth,
         width = width,
         height = height,
         rowGap = rowGap,
