@@ -5440,6 +5440,19 @@ local function RefreshCDMIconAppearance(barKey)
         if showItemCount and barData.itemCountOOC and _inCombat then
             showItemCount = false
         end
+        -- Show Charge/Stack Text (buff-family bars; per-spell override wins):
+        -- hides both counter lanes via ALPHA -- Blizzard re-shows these
+        -- fontstrings on state pushes, so Hide() cannot stick. Alpha is safe
+        -- to own HERE only because buff frames never enroll in the cd/utility
+        -- zero-charge / Hide Charge Text alpha channel (CdmHooks); non-buff
+        -- bars never write (csAlpha nil), so that channel keeps single
+        -- ownership of its counters.
+        local csAlpha
+        if barData.barType == "buffs" or barData.barType == "custom_buff" then
+            local showCS = barData.showChargeStackText ~= false
+            if ssb and ssb.showChargeStackText ~= nil then showCS = ssb.showChargeStackText end
+            csAlpha = showCS and 1 or 0
+        end
         -- Text must render above borders. Levels are relative to the icon's own frame level (CdmHooks: border +13, text +23).
         local textLvl = icon:GetFrameLevel() + 23
         -- Applications (buff stacks/aura applications) -- not an item count. Blizzard manages show/hide based on whether stacks exist; we only restyle position/font and never gate visibility on showItemCount.
@@ -5450,6 +5463,7 @@ local function RefreshCDMIconAppearance(barKey)
                 SetBlizzCDMFont(appsFS, scFont, scSize, scR, scG, scB)
                 appsFS:ClearAllPoints()
                 appsFS:SetPoint(scPoint, icon, scPoint, scX, scY)
+                if csAlpha then appsFS:SetAlpha(csAlpha) end
             end
         end
         -- ChargeCount (spell charges like Sigil/Roll) -- not an item count. Blizzard manages show/hide based on charge state.
@@ -5460,6 +5474,7 @@ local function RefreshCDMIconAppearance(barKey)
                 SetBlizzCDMFont(chargeFS, scFont, scSize, scR, scG, scB)
                 chargeFS:ClearAllPoints()
                 chargeFS:SetPoint(scPoint, icon, scPoint, scX, scY)
+                if csAlpha then chargeFS:SetAlpha(csAlpha) end
             end
         end
         -- Item count text (potions/healthstones) -- our own frame, safe to reparent

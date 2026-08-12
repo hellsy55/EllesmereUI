@@ -5693,7 +5693,14 @@ initFrame:SetScript("OnEvent", function(self)
 
             local RefreshBoth
             local COL_W = 228
-            local function MakeSpellColumn(x, titleText, promptText, listFn, otherFn)
+            -- Any-caster OPT-OUTS for the INCLUDED column (sibling map beside
+            -- the tri-state list): entries default to Only My Casts (the
+            -- PLAYER-cast npincmine group); flagged ids ride the any-caster
+            -- npinc group instead.
+            local function AnyMap()
+                return ns.NPF_IncludeAny and ns.NPF_IncludeAny(side)
+            end
+            local function MakeSpellColumn(x, titleText, promptText, listFn, otherFn, withMine)
                 -- Section label (options-page section style: small gray caps).
                 local colTitle = panel:CreateFontString(nil, "OVERLAY")
                 colTitle:SetFont(fp2, 11, "")
@@ -5773,13 +5780,44 @@ initFrame:SetScript("OnEvent", function(self)
                             row.name = row:CreateFontString(nil, "OVERLAY")
                             row.name:SetFont(fp2, 13, "")
                             row.name:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-                            row.name:SetPoint("RIGHT", row, "RIGHT", -24, 0)
+                            row.name:SetPoint("RIGHT", row, "RIGHT", withMine and -52 or -24, 0)
                             row.name:SetJustifyH("LEFT")
                             row.name:SetWordWrap(false)
                             row.x = CreateFrame("Button", nil, row)
                             row.x:SetSize(14, 14)
                             row.x:SetPoint("RIGHT", row, "RIGHT", -4, 0)
                             row.x:SetFrameLevel(row:GetFrameLevel() + 2)
+                            if withMine then
+                                -- Only My Casts tag (DEFAULT ON): accent when
+                                -- restricted to your casts, gray when opted
+                                -- out to any caster.
+                                row.mine = CreateFrame("Button", nil, row)
+                                row.mine:SetSize(30, 16)
+                                row.mine:SetPoint("RIGHT", row.x, "LEFT", -2, 0)
+                                row.mine:SetFrameLevel(row:GetFrameLevel() + 2)
+                                row.mine.txt = row.mine:CreateFontString(nil, "OVERLAY")
+                                row.mine.txt:SetFont(fp2, 11, "")
+                                row.mine.txt:SetPoint("CENTER")
+                                row.mine.txt:SetText(EllesmereUI.L("MINE"))
+                                row.mine:SetScript("OnClick", function()
+                                    local am = AnyMap()
+                                    if not am then return end
+                                    if am[row._id] then am[row._id] = nil
+                                    else am[row._id] = true end
+                                    if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                                    RefreshList()
+                                end)
+                                row.mine:SetScript("OnEnter", function(self)
+                                    local am = AnyMap()
+                                    EllesmereUI.ShowWidgetTooltip(self,
+                                        (am and am[row._id])
+                                        and EllesmereUI.L("Showing this aura from any caster; click for your casts only.")
+                                        or EllesmereUI.L("Showing this aura from your casts only; click for any caster."))
+                                end)
+                                row.mine:SetScript("OnLeave", function()
+                                    EllesmereUI.HideWidgetTooltip()
+                                end)
+                            end
                             row.x.tex = row.x:CreateTexture(nil, "OVERLAY")
                             row.x.tex:SetAllPoints()
                             row.x.tex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png")
@@ -5813,6 +5851,18 @@ initFrame:SetScript("OnEvent", function(self)
                         row.icon:SetDesaturated(not entry.on)
                         row.icon:SetAlpha(entry.on and 1 or 0.45)
                         row.name:SetAlpha(entry.on and 0.9 or 0.45)
+                        if row.mine then
+                            local am = AnyMap()
+                            if am and am[row._id] then
+                                -- Opted out to any caster: dim gray tag.
+                                row.mine.txt:SetTextColor(0.6, 0.6, 0.6,
+                                    entry.on and 0.4 or 0.25)
+                            else
+                                -- Default: restricted to your own casts.
+                                row.mine.txt:SetTextColor(EG.r, EG.g, EG.b,
+                                    entry.on and 1 or 0.45)
+                            end
+                        end
                         row:SetScript("OnClick", function()
                             local l2 = listFn()
                             if l2 then
@@ -5824,6 +5874,10 @@ initFrame:SetScript("OnEvent", function(self)
                         row.x:SetScript("OnClick", function()
                             local l2 = listFn()
                             if l2 then l2[row._id] = nil end
+                            if withMine then
+                                local am = AnyMap()
+                                if am then am[row._id] = nil end
+                            end
                             if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
                             RefreshList()
                         end)
@@ -5844,6 +5898,11 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- One list per spell: adding here removes it from the opposite list.
                                 local other = otherFn()
                                 if other then other[id] = nil end
+                                -- Fresh adds default to Only My Casts (no
+                                -- opt-out flag); a spell migrating to the
+                                -- exclude list drops any stale flag.
+                                local am = AnyMap()
+                                if am then am[id] = nil end
                                 list[id] = true
                                 if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
                                 if RefreshBoth then RefreshBoth() end
@@ -5857,7 +5916,8 @@ initFrame:SetScript("OnEvent", function(self)
             local refreshInc = MakeSpellColumn(24, "INCLUDED DEBUFFS",
                 EllesmereUI.L("Enter the spell ID to always show on nameplates."),
                 function() return ns.NPF_Include and ns.NPF_Include(side) end,
-                function() return ns.NPF_Exclude and ns.NPF_Exclude(side) end)
+                function() return ns.NPF_Exclude and ns.NPF_Exclude(side) end,
+                true)
             local refreshEx = MakeSpellColumn(268, "EXCLUDED DEBUFFS",
                 EllesmereUI.L("Enter the spell ID to exclude from nameplates."),
                 function() return ns.NPF_Exclude and ns.NPF_Exclude(side) end,
@@ -5897,6 +5957,12 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetSize(26, 26)
             btn:SetPoint("RIGHT", rgn._control, "LEFT", -8, 0)
             rgn._lastInline = btn
+            -- The core eyes anchor to THIS, not _lastInline: the tracked-auras
+            -- link below becomes _lastInline but is HIDDEN for the raid marker
+            -- and rare/quest slots (the only slots the eyes land on), and a
+            -- hidden frame keeps its width -- anchoring left of it stranded
+            -- the eye far from the cog.
+            rgn._coreCogBtn = btn
             btn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             btn:SetAlpha(0.4)
             local tex = btn:CreateTexture(nil, "OVERLAY")
@@ -6146,8 +6212,10 @@ initFrame:SetScript("OnEvent", function(self)
                 local rgn = info[1][info[2]]
                 eyeBtn:ClearAllPoints()
                 eyeBtn:SetParent(rgn)
-                -- Anchor next to the cog icon
-                eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                -- Anchor next to the cog icon (_coreCogBtn), never _lastInline:
+                -- that is the tracked-auras link, hidden-but-still-wide on the
+                -- slots this eye lands on, which stranded the eye far left.
+                eyeBtn:SetPoint("RIGHT", rgn._coreCogBtn or rgn._control, "LEFT", -8, 0)
                 eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
                 eyeBtn:Show()
             end
@@ -6191,8 +6259,10 @@ initFrame:SetScript("OnEvent", function(self)
                 local rgn = info[1][info[2]]
                 eyeBtn:ClearAllPoints()
                 eyeBtn:SetParent(rgn)
-                -- Anchor next to the cog icon
-                eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                -- Anchor next to the cog icon (_coreCogBtn), never _lastInline:
+                -- that is the tracked-auras link, hidden-but-still-wide on the
+                -- slots this eye lands on, which stranded the eye far left.
+                eyeBtn:SetPoint("RIGHT", rgn._coreCogBtn or rgn._control, "LEFT", -8, 0)
                 eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
                 eyeBtn:Show()
             end

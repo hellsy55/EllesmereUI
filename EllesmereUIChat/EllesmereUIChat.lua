@@ -595,7 +595,15 @@ function ECHAT.ApplyFonts()
         local cf = _G["ChatFrame" .. i]
         if cf and cf.SetFont then
             local size = GetFrameFontSize(i)
-            cf:SetFont(font, size, outline)
+            -- Same per-window font FAMILY as our display view (CJK members):
+            -- the invisible Blizzard frame owns hyperlink hit-zones, so its
+            -- glyph metrics must match ours on lines carrying CJK text.
+            local fam = ECHAT.EngineFontFamily and ECHAT.EngineFontFamily(i, font, size, outline)
+            if fam then
+                cf:SetFontObject(fam)
+            else
+                cf:SetFont(font, size, outline)
+            end
         end
         local eb = _G["ChatFrame" .. i .. "EditBox"]
         if eb then
@@ -4147,7 +4155,17 @@ local function SkinChatFrame(cf)
     -- copy so its hyperlink hit-zones sit under the same characters, and the
     -- hosted combat log renders through it.
     local cfId = cf:GetID()
-    cf:SetFont(GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
+    do
+        -- Family over raw file (CJK members) -- same object the engine view
+        -- uses, keeping both layouts congruent.
+        local fam = ECHAT.EngineFontFamily
+            and ECHAT.EngineFontFamily(cfId, GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
+        if fam then
+            cf:SetFontObject(fam)
+        else
+            cf:SetFont(GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
+        end
+    end
     if cf.SetShadowOffset then cf:SetShadowOffset(1, -1) end
     if cf.SetShadowColor then cf:SetShadowColor(0, 0, 0, 0.8) end
     cf:SetFading(false)
@@ -4483,12 +4501,20 @@ initFrame:SetScript("OnEvent", function(self)
             if cf and not _skinned[cf] then
                 SkinChatFrame(cf)
             end
-            -- Re-apply font if Blizzard reset it (e.g. font size change)
+            -- Re-apply font if Blizzard reset it (e.g. font size change).
+            -- Family form, not raw SetFont: a raw write here would detach
+            -- the CJK font family the skin pass attached.
             if cf and _skinned[cf] then
                 local curFont = cf:GetFont()
                 if curFont and curFont ~= wantFont then
                     local _, sz = cf:GetFont()
-                    cf:SetFont(wantFont, sz, wantOutline)
+                    local fam = ECHAT.EngineFontFamily
+                        and ECHAT.EngineFontFamily(cf:GetID(), wantFont, sz, wantOutline)
+                    if fam then
+                        cf:SetFontObject(fam)
+                    else
+                        cf:SetFont(wantFont, sz, wantOutline)
+                    end
                 end
             end
         end

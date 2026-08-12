@@ -3000,6 +3000,20 @@ function PortraitOverride(self, event, evtUnit)
         -- which the model path does not read, and repainting it would mean a
         -- ClearModel + SetUnit reload every time the client streams a batch.
         or (event == "PORTRAITS_UPDATED" and not isModel)
+        -- Frame re-show: PlayerModel widgets DROP their model while hidden
+        -- (loading screens hide the unit frames; the PEW fan-out skips hidden
+        -- frames, so the re-show is the one trigger that reliably follows --
+        -- with guid and availability both reading unchanged, field-traced).
+        -- Models only: 2D textures survive Hide/Show.
+        or (event == "Show" and isModel)
+        -- Blank-model heal: the Show repaint can run before the unit's model
+        -- data streams -- SetUnit lands NOTHING (fid nil, field-traced) and no
+        -- model event follows. PORTRAITS_UPDATED is the client's "portrait
+        -- assets finished streaming" signal and reliably follows; use it to
+        -- re-SetUnit ONLY a still-blank model, so loaded models never churn
+        -- (the reason the plain-model exclusion above exists).
+        or (event == "PORTRAITS_UPDATED" and isModel
+            and element.GetModelFileID and element:GetModelFileID() == nil)
     if hasStateChanged then
         if isModel then
             if not isAvailable then

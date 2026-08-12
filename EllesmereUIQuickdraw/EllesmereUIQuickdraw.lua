@@ -22,8 +22,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  turn the module opened life as is simply the arc's 360-degree case.
 --
 --  Each palette owns one hidden SecureActionButtonTemplate button; the palette's
---  keybind is routed to it with SetOverrideBindingClick, and it is registered
---  for "AnyDown","AnyUp":
+--  keybind is routed to it with SetOverrideBindingClick -- along with every
+--  modifier combination of that key nothing else holds, so a modifier pressed
+--  or let go during the hold still reaches the button (see "Modifier variants
+--  of a palette's key") -- and it is registered for "AnyDown","AnyUp":
 --
 --    key DOWN -> our PreClick opens the palette; a secure snippet wrapped around
 --                OnClick clears "type", so the press itself fires nothing
@@ -74,6 +76,10 @@ local GetCursorPosition = GetCursorPosition
 local GetBindingKey = GetBindingKey
 local InCombatLockdown = InCombatLockdown
 local GetTime = GetTime
+-- Read every frame an open palette holds an entry whose icon can move under it
+-- -- see AdvanceLiveIcons.
+local IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown =
+    IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
 
 local TWO_PI = pi * 2
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -310,6 +316,44 @@ local DB_DEFAULTS = {
         selectColor   = { 0.047, 0.824, 0.624 },  -- the custom swatch's start
         useClassColor = false,
 
+        -- Toggle Menu Open, per palette. Off keeps the model the module was
+        -- built on: hold the key, release to fire. On latches the menu up when
+        -- the key is let go, and the Select key below is what chooses an entry.
+        --
+        -- A palette latches only when there IS a Select key -- see SNIPPET_PRE.
+        -- One with the switch on and no key set behaves exactly as it did
+        -- before, which is the only sane reading of "you have not finished
+        -- setting this up yet": the alternative is a menu that opens and cannot
+        -- be answered.
+        toggleMode = false,
+        -- Toggle World Markers, per palette. On, a world marker entry answers
+        -- for its own marker in both directions: place it if it is not down,
+        -- pick it up if it is. Off places every press, which moves the marker
+        -- to wherever the cursor is now.
+        --
+        -- On by default. The raid manager offers both halves -- left click
+        -- places, right click picks up
+        -- (Mainline/Blizzard_CompactRaidFrameManager.lua:1058-1067) -- and a
+        -- menu entry has one press to spend rather than two mouse buttons, so
+        -- alternating is how it reaches the same pair.
+        --
+        -- The clear-all entry is unaffected, and so are the cycling entries.
+        -- See the worldmarker branch of ResolveAction for why.
+        worldMarkerToggle = true,
+        -- The placed-marker corner pip on live menus (see MarkerPip). On by
+        -- default: it is what tells a toggled entry's press apart -- place or
+        -- pick up -- before it is pressed.
+        worldMarkerPip = true,
+        -- The key that fires the hovered entry of a latched menu, as a binding
+        -- chord. One key for every palette. Claimed as an override binding for
+        -- exactly as long as a menu is up and handed straight back on close, so
+        -- it keeps whatever it normally does the rest of the time -- which is
+        -- what makes a plain mouse button a reasonable thing to put here.
+        --
+        -- Empty rather than nil: a nil in a defaults table is not merged, so
+        -- there would be no key to write to.
+        confirmKey = "",
+
         paletteCount   = 1,
         -- palette.slots is a DENSE, ORDERED array: the palette auto-sizes to what the
         -- user has actually assigned, so three actions means three big entries
@@ -540,6 +584,16 @@ local APPEARANCE_KEYS = {
     showCooldowns = true, showUsability = true, showActionText = true,
     hideUnusable = true,
     selectColorCustom = true, selectColor = true, useClassColor = true,
+    -- Per palette on purpose: a marker ring wants the flick it has always had,
+    -- while a mount menu is worth latching open and pointing at. The Select key
+    -- the latched one answers to is NOT here -- it is one profile key, so the
+    -- gesture means the same thing whichever menu is up.
+    toggleMode = true,
+    -- Per palette for the same reason: a pull-timer menu that drops the eight
+    -- markers in one pass wants each press to place, and a menu kept open to
+    -- tidy them up afterwards wants each press to answer for its own marker.
+    worldMarkerToggle = true,
+    worldMarkerPip = true,
 }
 ns.APPEARANCE_KEYS = APPEARANCE_KEYS
 
@@ -869,6 +923,182 @@ local function SpecIndexFor(slot)
     return nil
 end
 
+-------------------------------------------------------------------------------
+--  Dynamic Rez
+--
+--  One entry that is whichever resurrection spell this character has, so a
+--  palette shared between a druid, a priest and a death knight carries the rez
+--  once rather than three times over with two of them dead on every character.
+--
+--  single and group are the out-of-combat casts; battle is the in-combat one.
+--  The same kit the raid frames' Dynamic Rez click-cast binding uses
+--  (EUI_RaidFrames_ClickCast.lua:90), kept as a copy of the table rather than
+--  read across from it: that is a separate addon the user can switch off, and
+--  an entry on a palette must not stop working when they do. The two lists have
+--  to be changed together when a class gains or loses a rez.
+--
+--  One table rather than a local per entry point, and everything else scoped to
+--  the do-block below. That is not tidiness: this file's main chunk sits within
+--  a handful of Lua's ceiling of 200 locals, and neither a field nor a
+--  block-local costs one of them.
+-------------------------------------------------------------------------------
+local Rez = {}
+do
+local UnitExists, UnitIsFriend, UnitIsDeadOrGhost =
+    UnitExists, UnitIsFriend, UnitIsDeadOrGhost
+
+local REZ_BY_CLASS = {
+    PRIEST      = { single = 2006,   group = 212036 },
+    PALADIN     = { single = 7328,   group = 212056, battle = 391054 },
+    SHAMAN      = { single = 2008,   group = 212048 },
+    DRUID       = { single = 50769,  group = 212040, battle = 20484 },
+    MONK        = { single = 115178, group = 212051 },
+    EVOKER      = { single = 361227, group = 361178 },
+    DEATHKNIGHT = { battle = 61999 },
+    WARLOCK     = { battle = 20707 },
+}
+
+-- battle, single, group for this character, any of them nil. Filtered by what
+-- is actually in the spellbook, because the macro below picks a branch by
+-- CONDITION rather than by knowledge: a /cast line naming a spell the character
+-- has not got is a branch that matches and then casts nothing, which would eat
+-- the fallback the next branch was there to be.
+--
+-- Not cached, and deliberately so. What is known moves with talents --
+-- Intercession is a holy paladin's -- and it is also simply WRONG for a moment
+-- at login, while the spellbook is still cold. A cache would latch that empty
+-- answer and hold it until something invalidated it, which is a worse failure
+-- than the reads it saves: three spellbook lookups, on a path that runs once
+-- per palette open rather than per frame. See AdvanceLiveIcons for the one that
+-- does run per frame.
+--
+-- The macro this feeds is written at push time, and SPELLS_CHANGED already
+-- requests a push for the usability filter -- so a talent swap, a spec change,
+-- levelling into a rez and the spellbook warming up after login all rebuild it
+-- with no registration of its own.
+local function RezKit()
+    local _, class = UnitClass("player")
+    local kit = class and REZ_BY_CLASS[class]
+    if not kit then return nil end
+    local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
+    local function Known(id)
+        if not id then return nil end
+        if C_SpellBook.IsSpellInSpellBook and bank
+           and not C_SpellBook.IsSpellInSpellBook(id, bank, true) then
+            return nil
+        end
+        return id
+    end
+    return Known(kit.battle), Known(kit.single), Known(kit.group)
+end
+
+-- A corpse worth casting the single-target rez at. UnitIsDeadOrGhost rather
+-- than UnitIsDead, to agree with the macro's [dead]: that conditional is true
+-- for a player who has released as well, and a released player is exactly who
+-- needs resurrecting.
+--
+-- Identity APIs can answer SECRET booleans in restricted content, and this
+-- runs EVERY FRAME from IconState while a menu holding a live-icon entry is
+-- open -- truthiness on a secret throws, and a throw here storms the whole
+-- OnUpdate. Every read is issecretvalue-guarded FIRST and a secret fails to
+-- false: an unknowable corpse keeps the current branch, and the next
+-- readable frame corrects the picture.
+function Rez.HasDeadTarget()
+    local exists = UnitExists("target")
+    if issecretvalue(exists) or not exists then return false end
+    local friend = UnitIsFriend("player", "target")
+    if issecretvalue(friend) or not friend then return false end
+    local dead = UnitIsDeadOrGhost("target")
+    if issecretvalue(dead) or not dead then return false end
+    return true
+end
+
+-- Which spell the entry would cast RIGHT NOW, for the icon and the live state
+-- beneath it. Display only -- the macro decides again at fire time and the game
+-- evaluates its conditionals then -- so this exists to keep the picture honest,
+-- and its branch order has to match Rez.MacroText's exactly or the palette shows
+-- one spell and casts another.
+function Rez.SpellNow()
+    local battle, single, group = RezKit()
+    -- A class whose only rez is the battle one casts it in every state, which
+    -- is what the bare macro line below does for the same case.
+    if not (single or group) then return battle end
+    if battle and InCombatLockdown() then return battle end
+    if single and Rez.HasDeadTarget() then return single end
+    return group or single
+end
+
+-- The macro a Dynamic Rez entry fires, or nil for a character with no rez at
+-- all. One /cast with a fallback chain rather than a line each: the chain
+-- attempts exactly ONE cast -- the first branch whose condition holds -- where
+-- separate lines would each try in turn and the second would land on "another
+-- action is in progress".
+function Rez.MacroText()
+    local battle, single, group = RezKit()
+    local Name = C_Spell.GetSpellName
+    if not Name then return nil end
+
+    local parts = {}
+    local function Add(cond, id)
+        -- By NAME: /cast resolves against the localized one, and a hardcoded
+        -- English name would fail silently on every other client.
+        local name = id and Name(id)
+        if name then parts[#parts + 1] = cond .. name end
+    end
+
+    -- [combat] only when there is something after it to be the out-of-combat
+    -- answer. A death knight or a warlock, whose only rez IS the battle one,
+    -- would otherwise cast nothing out of combat -- where that spell works
+    -- perfectly well.
+    Add((single or group) and "[combat] " or "", battle)
+    -- Not a safety check: a corpse is a rez's only valid target, so there is no
+    -- exists/nodead here the way there is on an ordinary cast. This condition is
+    -- how the single-target spell is chosen over the group one.
+    Add("[@target,help,dead] ", single)
+    -- Bare, and last: the group rez takes no target, so it is the honest answer
+    -- to "none of the above".
+    --
+    -- Falling back to the single one when there is no group rez -- a character
+    -- still levelling into it -- is what keeps this line in step with
+    -- Rez.SpellNow, which ends on the same `group or single`. Without the
+    -- fallback the macro has no unconditional branch at all, and the entry
+    -- draws the single rez, tints it usable and casts nothing. Attempting it
+    -- and being told there is no target is the same answer the spell gives from
+    -- an action bar, and it matches the picture.
+    Add("", group or single)
+
+    if #parts == 0 then return nil end
+    return "/cast " .. table.concat(parts, "; ")
+end
+
+-- Does this character's class have a resurrection spell at all? The picker asks
+-- so it can leave the entry out for a class that has none -- an entry that
+-- could never do anything is worse than no entry. By CLASS rather than by what
+-- is currently in the spellbook: a paladin who has not taken Intercession still
+-- has Redemption, and a druid at level 10 will have Rebirth soon enough.
+function ns.HasRezKit()
+    local _, class = UnitClass("player")
+    return (class and REZ_BY_CLASS[class]) ~= nil
+end
+end
+
+-- The filtered answers, one per palette table. Wiped ONLY at the top of
+-- PushAllPalettes: the memo is what keeps the drawn menu and the pushed
+-- secure attributes reading the SAME list even when the spellbook shifts
+-- between the push and the open (a pet swap mid-fight, say) -- usability is
+-- allowed to go stale until the next push rather than ever disagreeing with
+-- what a cell index fires. Every input that can change an answer lands here
+-- through that same wipe: SPELLS_CHANGED and UPDATE_MACROS request a push,
+-- every slot edit and the toggle itself request one through Refresh, class
+-- and spec-list are fixed for the session, and a profile switch hands out
+-- different palette tables (weak keys let the old ones go).
+local usableMemo = setmetatable({}, { __mode = "k" })
+
+-- KnownForm, SpellKnownHere and SlotUsable are private to UsableSlots, and
+-- are scoped so they cost no main-chunk local: this file's main chunk is at
+-- Lua's ceiling of 200 locals, and merging two features into it went over.
+-- usableMemo stays outside the block -- PushAllPalettes wipes it.
+do
 -- Is this one spell id in either of this character's books, player or pet?
 local function KnownForm(sid)
     return (sid and sid > 0)
@@ -896,8 +1126,9 @@ end
 -- Can this character do anything with the slot? Only the kinds that resolve
 -- against one character's own kit are tested -- another class's
 -- specialization, a spell no book here holds, a macro this character does
--- not have. Everything else (items, toys, mounts, pets, markers, nested
--- menus) is account-wide or self-resolving and stays.
+-- not have, a resurrection this class has none of. Everything else (items,
+-- toys, mounts, pets, markers, nested menus) is account-wide or
+-- self-resolving and stays.
 local function SlotUsable(slot)
     local k = slot and slot.kind
     if k == "spec" then
@@ -906,21 +1137,17 @@ local function SlotUsable(slot)
         return SpellKnownHere(tonumber(slot.id))
     elseif k == "macro" then
         return GetMacroInfo(slot.name or slot.id) ~= nil
+    elseif k == "dynamicrez" then
+        -- By CLASS rather than by what is in the book right now, which is what
+        -- ns.HasRezKit answers: a paladin who has not taken Intercession still
+        -- has Redemption, and a druid too low for Rebirth will have it. Hiding
+        -- the entry on those would take it away from the character it is FOR.
+        -- A mage carrying the shared menu is the case this catches, and it is
+        -- the one the entry's own note names.
+        return ns.HasRezKit()
     end
     return true
 end
-
--- The filtered answers, one per palette table. Wiped ONLY at the top of
--- PushAllPalettes: the memo is what keeps the drawn menu and the pushed
--- secure attributes reading the SAME list even when the spellbook shifts
--- between the push and the open (a pet swap mid-fight, say) -- usability is
--- allowed to go stale until the next push rather than ever disagreeing with
--- what a cell index fires. Every input that can change an answer lands here
--- through that same wipe: SPELLS_CHANGED and UPDATE_MACROS request a push,
--- every slot edit and the toggle itself request one through Refresh, class
--- and spec-list are fixed for the session, and a profile switch hands out
--- different palette tables (weak keys let the old ones go).
-local usableMemo = setmetatable({}, { __mode = "k" })
 
 -- The entries of the palette this character can use ("Hide Unusable
 -- Entries"). A view, never a mutation: returns the stored array itself while
@@ -947,13 +1174,19 @@ function UsableSlots(palette, p)
     usableMemo[palette] = out or slots
     return out or slots
 end
+end
 
 -- kind -> attribute triple for the secure button, plus an optional 4th value:
 -- a sibling attribute key that must be cleared because the same action type
 -- would otherwise read it in preference. Returns nil for the kinds with no
 -- secure action type at all (battlepet, spec, randommount), which
 -- FireInsecure handles instead.
-local function ResolveAction(slot)
+--
+-- p is the palette's appearance view, for the one kind whose action depends on
+-- a setting rather than only on the slot (worldmarker). It is the view of the
+-- palette being PUSHED, which for a nest's cells is the owner's -- the same
+-- palette whose appearance draws them.
+local function ResolveAction(slot, p)
     if not slot or not slot.kind then return nil end
     local k = slot.kind
 
@@ -1058,13 +1291,55 @@ local function ResolveAction(slot)
             -- gets baked -- a hardcoded "all" would fail on a localized client.
             return "macro", "macrotext", "/cwm " .. (ALL or "all"), "macro"
         end
+        if p == nil or p.worldMarkerToggle ~= false then
+            -- Toggle World Markers. Not a macro: /wm is PlaceRaidMarker with
+            -- no test at all (SlashCommands.lua:820), and no macro conditional
+            -- reports a world marker as down. SECURE_ACTIONS.worldmarker does
+            -- the test itself (SecureTemplates.lua:602-618), and still costs
+            -- the ONE attribute a cell may spend -- it reads "marker" and
+            -- "action", and "action" falls back to "toggle" when unset, which
+            -- the snippet's clear guarantees it is.
+            --
+            -- Placement is unchanged: neither Blizzard nor /wm passes a unit
+            -- token, so the marker still lands under the cursor.
+            return "worldmarker", "marker", WORLD_MARKER_ENGINE[id]
+        end
+        -- Repeating ONE marker fast stalls here, where cycling eight does not:
+        -- the game holds each marker on its own cooldown -- about four spammed
+        -- presses -- and answers "You can't do that right now". Nothing to do
+        -- with this module: a plain /wm macro alone does it.
+        --
+        -- Clearing before placing, the way retail's own marker button does
+        -- (Mainline/Blizzard_CompactRaidFrameManager.lua:1065-1066), does not
+        -- buy anything from a macro: the /cwm spends the cooldown and the /wm
+        -- behind it lands inside the window, which reads as a toggle. Blizzard
+        -- gets away with it by calling both C functions straight from an
+        -- OnClick, which is not a route an addon has.
         return "macro", "macrotext", "/wm " .. WORLD_MARKER_ENGINE[id], "macro"
+
+    elseif k == "dynamicrez" then
+        -- Fired as macro text, which is what makes it dynamic in the way that
+        -- matters: the attributes are written out of combat, and a rez has to
+        -- pick its branch DURING the fight. The game evaluates [combat] when
+        -- the macro runs, so a menu pushed before the pull still casts the
+        -- battle rez in it. A resolved spellID could not do that.
+        local text = Rez.MacroText()
+        if not text then return nil end
+        return "macro", "macrotext", text, "macro"
 
     elseif k == "cycleraidtarget" or k == "cycleworldmarker" then
         -- The step the position on the slot says is up. The snippet overwrites
         -- this with its own answer on every press -- see the eqdCycN branch --
         -- so what is pushed here is only what the entry would fire if the
         -- cycle attributes went missing: the right marker, just not advancing.
+        --
+        -- Deliberately NOT affected by Toggle World Markers, though the step
+        -- machinery would carry a marker number as readily as a macro. A cycle
+        -- is a run THROUGH the eight, and a step that picks its marker back up
+        -- because that one happened to be down already breaks the run: the
+        -- press that should have placed the circle places nothing, and the
+        -- position still advances. Placing every time is the only behavior
+        -- that keeps a cycle predictable.
         local steps = CycleSteps(k)
         return "macro", "macrotext", steps[CycleNext(slot)], "macro"
     end
@@ -1100,6 +1375,61 @@ local function FireInsecure(slot)
     end
 end
 
+-- The fileID behind the question mark path above. GetMacroInfo answers a fileID
+-- rather than a path, so the two cannot be compared without this.
+local QUESTION_MARK_ID = GetFileIDFromPath and GetFileIDFromPath(QUESTION_MARK)
+
+-- The icon for what a macro would fire RIGHT NOW, or nil to fall back to the
+-- icon the macro was saved with.
+--
+-- A macro's conditionals are evaluated when it runs, so a [mod] macro fires a
+-- different spell depending on what is held at the release -- and the palette
+-- has to draw the branch it is going to take, or it shows one picture and casts
+-- the other. GetMacroSpell and GetMacroItem answer the current branch.
+--
+-- ONLY for a macro sitting on the dynamic "?" icon, which is what the caller's
+-- question-mark test is for. A macro the player gave a real icon keeps it, the
+-- way Blizzard's own action buttons keep it: that icon is a choice, and
+-- resolving over the top of it would take the choice away. It also makes this
+-- safe whichever of the two things GetMacroInfo does -- return the saved icon,
+-- or resolve the dynamic one itself -- because in the resolving case a "?" macro
+-- never reaches here with a question mark to begin with.
+--
+-- By macro NAME resolved to an index, which is the pairing the rest of the suite
+-- settled on (EllesmereUICooldownManager.lua:6986-6992): the id a macro action
+-- carries is not reliably a macro index, and these two want the index.
+local function MacroIcon(nameOrIndex)
+    if not nameOrIndex then return nil end
+    local index = nameOrIndex
+    if type(index) ~= "number" then index = GetMacroIndexByName(index) end
+    if not index or index <= 0 then return nil end
+
+    local spellID = GetMacroSpell(index)
+    if spellID then
+        local info = C_Spell.GetSpellInfo(spellID)
+        if info and info.iconID then return info.iconID end
+    end
+
+    -- An item branch answers no spell. The link, not the name: it carries the
+    -- itemID, and a name would have to be looked up again to get one.
+    --
+    -- The existence guard is a statement rather than `GetMacroItem and
+    -- GetMacroItem(index)` -- an `and` expression is truncated to ONE value, so
+    -- that form would drop the link and leave every item macro on its saved
+    -- icon. Same trap SlotDisplay's own note names, one function below.
+    if GetMacroItem then
+        local _, link = GetMacroItem(index)
+        if link then
+            local _, _, _, _, icon = C_Item.GetItemInfoInstant(link)
+            if icon then return icon end
+        end
+    end
+
+    -- Neither -- a macro that only marks, targets or emotes. The saved icon is
+    -- the honest answer for those, and it is the one the caller falls back to.
+    return nil
+end
+
 -- icon, name for display. Never returns nil for icon so a slot whose target
 -- has been removed from the game still renders as an occupied slot.
 --
@@ -1126,11 +1456,30 @@ local function SlotDisplay(slot)
         return icon or QUESTION_MARK, name or slot.name
 
     elseif k == "macro" then
-        local name, icon = GetMacroInfo(slot.name or slot.id)
+        local nameOrIndex = slot.name or slot.id
+        local name, icon = GetMacroInfo(nameOrIndex)
+        -- A question mark here means the macro carries no icon of its own, so
+        -- what it is about to fire is the only thing left to draw. Anything else
+        -- is an icon the player picked, and it stands. See MacroIcon.
+        if icon == nil or icon == QUESTION_MARK or icon == QUESTION_MARK_ID then
+            icon = MacroIcon(nameOrIndex) or icon
+        end
         return icon or QUESTION_MARK, name or slot.name
 
     elseif k == "macrotext" then
         return slot.icon or QUESTION_MARK, slot.name or "Macro"
+
+    elseif k == "dynamicrez" then
+        -- The spell it would cast, not a fixed emblem: the entry is worth
+        -- having because it changes, and one picture over three different casts
+        -- would hide the only thing it has to say.
+        local id = Rez.SpellNow()
+        local info = id and C_Spell.GetSpellInfo(id)
+        if info then return info.iconID or QUESTION_MARK, info.name end
+        -- A character with no resurrection spell at all -- the mage carrying
+        -- the shared palette. Drawn as an occupied slot under its own name, the
+        -- same as a spec this character does not have.
+        return QUESTION_MARK, "Dynamic Rez"
 
     elseif k == "mount" then
         if type(slot.id) ~= "number" then return QUESTION_MARK, slot.name end
@@ -1232,17 +1581,32 @@ ns.SlotDisplay = SlotDisplay
 --
 -- Items keep the plain numeric path -- C_Item.GetItemCooldown carries no secret
 -- flag and there is no duration-object equivalent for items.
+--
+-- The spellID an entry's live state is read from, for the kinds that HAVE one.
+-- A Dynamic Rez answers the branch it would take right now, so its cooldown
+-- swipe, its charge count and its usability tint all describe the one spell its
+-- icon is drawn from -- three separate resolutions could disagree.
+local function SlotSpellID(slot)
+    if not slot then return nil end
+    if slot.kind == "spell" then
+        return type(slot.id) == "number" and slot.id or nil
+    elseif slot.kind == "dynamicrez" then
+        return Rez.SpellNow()
+    end
+    return nil
+end
+
 local function SlotCooldown(slot)
     if not slot then return nil end
     local k = slot.kind
-    if k == "spell" or k == "mount" then
+    if k == "spell" or k == "mount" or k == "dynamicrez" then
         local id
         if k == "mount" then
             -- No falling back to slot.id here: that is a mountID, and looking
             -- a mountID up as a spellID reports some unrelated spell's cooldown.
             id = slot.spellID or select(2, C_MountJournal.GetMountInfoByID(slot.id))
         else
-            id = slot.id
+            id = SlotSpellID(slot)
         end
         if id and C_Spell.GetSpellCooldownDuration then
             -- Parenthesised, so only the duration comes back: 12.1 returns a
@@ -1281,9 +1645,12 @@ local function SlotCount(slot)
     if not slot then return false end
     local k = slot.kind
 
-    if k == "spell" then
-        if type(slot.id) ~= "number" or not C_Spell.GetSpellCharges then return false end
-        local charges = C_Spell.GetSpellCharges(slot.id)
+    -- A battle rez is the charge-carrying spell this matters most for: how many
+    -- are left is the whole question a raid asks of it.
+    if k == "spell" or k == "dynamicrez" then
+        local id = SlotSpellID(slot)
+        if not id or not C_Spell.GetSpellCharges then return false end
+        local charges = C_Spell.GetSpellCharges(id)
         if not charges then return false end
         return true, charges.currentCharges
 
@@ -1340,10 +1707,11 @@ local function SlotUsability(slot)
     if not slot then return nil end
     local k = slot.kind
 
-    if k == "spell" then
-        if type(slot.id) ~= "number" then return nil end
-        if C_Spell.IsSpellInRange(slot.id) == false then return "OUTOFRANGE" end
-        local usable, noPower = C_Spell.IsSpellUsable(slot.id)
+    if k == "spell" or k == "dynamicrez" then
+        local id = SlotSpellID(slot)
+        if not id then return nil end
+        if C_Spell.IsSpellInRange(id) == false then return "OUTOFRANGE" end
+        local usable, noPower = C_Spell.IsSpellUsable(id)
         if usable then return nil end
         return noPower and "NOPOWER" or "UNUSABLE"
 
@@ -1444,6 +1812,35 @@ local openedAt = 0
 -- A held key whose up-event never reaches us (alt-tab, /reload prompt, a
 -- taxi takeoff) would otherwise leave the palette on screen forever.
 local OPEN_TIMEOUT = 30
+
+-- The same backstop for a LATCHED palette (Toggle Menu Open), which has no key
+-- held and is meant to sit there while the player decides. Long enough not to
+-- pull the menu out from under that, short enough that one forgotten in a bank
+-- does not hold the Select key -- which may well be a mouse button -- for the
+-- rest of the session. See the confirm binding in SNIPPET_PRE.
+local LATCH_TIMEOUT = 120
+
+-- The mouse-button token the Select key's click arrives under. The palette's own
+-- keybind clicks the same button as "LeftButton" (SetOverrideBindingClick's
+-- default), so this is the whole of what tells a confirm click apart from a
+-- palette-key click inside the snippet, which gets `button` and nothing else.
+--
+-- A real button name rather than an invented token: RegisterForClicks("AnyDown",
+-- "AnyUp") covers it for certain, and the button has EnableMouse(false), so no
+-- actual right-click can ever reach it and be mistaken for a confirm.
+local CONFIRM_BUTTON = "RightButton"
+
+-- ESCAPE out of a LATCHED menu, under a token of its own on the same button.
+--
+-- A held palette sends ESCAPE to the shared cancel button, which only raises a
+-- flag -- the teardown then rides the key release that is always coming. A
+-- latched menu has no such release, so its ESCAPE has to do the closing itself,
+-- and doing it from the cancel button's Lua PostClick would leave the bindings
+-- and the gates standing for the whole of any fight it happened during: every
+-- one of those calls is protected. Routed HERE it is the palette button's own
+-- release, so SNIPPET_POST performs the identical teardown it performs for
+-- every other close, inside the sandbox, in combat or out.
+local CANCEL_BUTTON = "MiddleButton"
 
 -- Selection is drawn with two cues: the icon border takes the selection
 -- color, and the entry grows. No additive glow -- at palette scale it bloomed
@@ -1661,6 +2058,16 @@ local function CreateSlotWidget(view, index)
     w.count:SetJustifyH("RIGHT")
     w.count:Hide()
     AdoptFontString(w.count, true)
+
+    -- "This world marker is on the ground right now", in the corner the count
+    -- does not use. Drawn above the border host so a selected entry does not
+    -- bury it. Shown only by PaletteView:MarkerPip, which is also what sizes
+    -- and colors it; created here unconditionally because a widget is reused
+    -- for whatever entry the next open puts in it.
+    w.markerPip = w:CreateTexture(nil, "OVERLAY", nil, 7)
+    w.markerPip:SetTexture("Interface\\Buttons\\WHITE8X8")
+    w.markerPip:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
+    w.markerPip:Hide()
 
     w.label = w:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     AdoptFontString(w.label)
@@ -4118,6 +4525,32 @@ end
 -- iconSize is the size the LAYOUT gave this cell, before any falloff or
 -- selection zoom: the corner count is sized off it, and reading the widget's
 -- current size instead would make the number breathe with the entry.
+-- Everything an open palette's icons can move under, as one number, so "has any
+-- of it changed" is a single comparison. Read every frame while such a cell is
+-- on screen, which is why it is five C calls and no allocation.
+--
+-- The three modifiers are what a macro's [mod] conditionals see. Combat and a
+-- dead friendly target are what a Dynamic Rez branches on. Nothing else can
+-- change what an entry draws.
+local function IconState()
+    return (IsShiftKeyDown() and 1 or 0)
+         + (IsControlKeyDown() and 2 or 0)
+         + (IsAltKeyDown() and 4 or 0)
+         + (InCombatLockdown() and 8 or 0)
+         + (Rez.HasDeadTarget() and 16 or 0)
+end
+
+-- Does this cell's icon depend on any of that? Two kinds do: a macro, whose
+-- conditionals are evaluated at the release (see MacroIcon), and a Dynamic Rez,
+-- which is three spells wearing one slot (see Rez.SpellNow). Every other kind
+-- resolves to one fixed thing, and the built-in macrotext kinds -- markers,
+-- world markers, the cycling pair -- carry an icon of their own that no
+-- conditional can move.
+local function HasLiveIcon(slot)
+    if slot == nil then return false end
+    return slot.kind == "macro" or slot.kind == "dynamicrez"
+end
+
 local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLabel,
                          iconSize, showUsability)
     w.isPlaceholder = placeholder
@@ -4137,7 +4570,7 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     w.plus:SetShown(placeholder)
 
     local labelled = showLabels and wantLabel and name ~= nil
-    w.label:SetText((labelled and name) or "")
+    w.label:SetText((labelled and EllesmereUI.L(name)) or "")
     w.label:SetShown(labelled or false)
 
     -- A palette has no cooldown of its own, and borrowing its first entry's
@@ -4171,6 +4604,11 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
         w.count:SetText(count)
     end
     w.count:SetShown(hasCount)
+
+    -- Through the view because PaintCell is not a method and the pip needs one
+    -- (see MarkerPip). Every open repaints every cell, so this is the reading
+    -- that matters; the event below only keeps a menu left open honest.
+    if w.view then w.view:MarkerPip(w, slot, iconSize) end
 
     ApplySlotVisual(w, false)
 end
@@ -4295,6 +4733,13 @@ function PaletteView:Layout(paletteIndex)
     local showUsability = opts.showUsability
     if showUsability == nil then showUsability = p.showUsability ~= false end
 
+    -- The cells whose icon can move under them, collected as they are painted
+    -- so an open with none of them leaves an empty list and AdvanceLiveIcons
+    -- costs nothing at all. Reused rather than rebuilt: this runs on every open.
+    local liveCells = self._liveCells
+    if not liveCells then liveCells = {}; self._liveCells = liveCells end
+    for k = #liveCells, 1, -1 do liveCells[k] = nil end
+
     for i = 1, shown do
         local w = self.widgets[i]
         -- Switching modes leaves the other mode's depth cues behind.
@@ -4318,6 +4763,10 @@ function PaletteView:Layout(paletteIndex)
         -- can be fired -- is already named on the hub.
         PaintCell(w, slots[i], slots[i] == nil,
                   showLabels, showCooldowns, not fan, iconSize, showUsability)
+        -- slots, not palette.slots: the same list the cell was just painted
+        -- from. Once Hide Unusable Entries filters anything the two part
+        -- company, and testing the stored array would collect the wrong cells.
+        if HasLiveIcon(slots[i]) then liveCells[#liveCells + 1] = i end
         w:Show()
     end
 
@@ -4348,6 +4797,9 @@ function PaletteView:Layout(paletteIndex)
                 w:EnableMouse(false)
                 PaintCell(w, c.slots[j], false, showLabels, showCooldowns,
                           c.label ~= false, c.icon, showUsability)
+                if HasLiveIcon(c.slots[j]) then
+                    liveCells[#liveCells + 1] = cells
+                end
                 -- Hidden until its own claim is previewed or opened -- see
                 -- UpdateNestShown.
                 w:Hide()
@@ -4356,6 +4808,10 @@ function PaletteView:Layout(paletteIndex)
     end
     self.claims = claims
     self.cellCount = cells
+    -- The paint above already drew every macro cell for the modifiers held right
+    -- now, so recording them here is what keeps the palette's first tick from
+    -- repainting the lot for a state that has not moved.
+    self._liveState = IconState()
     -- Every cell was just hidden and every entry repainted plain, so all three
     -- of these describe a drawing that no longer exists.
     self._openClaim, self._previewClaim, self._armedParent = nil, nil, nil
@@ -4486,6 +4942,144 @@ function PaletteView:Layout(paletteIndex)
     -- selection writes just the action's name -- see SetSelection.
     hub.text:SetText("")
     hub.hint:SetText("")
+end
+
+-- Redraw the cells whose icon can move, if anything they follow has moved since
+-- the last time this asked.
+--
+-- The palette fires on the RELEASE, and both of these kinds decide what they
+-- cast at that moment: a macro's conditionals are evaluated then, and a Dynamic
+-- Rez picks its branch then. So the player can press a modifier, pull a boss or
+-- click a corpse at any point during the hold and change what the entry under
+-- the cursor is going to do. Without this the palette keeps drawing whichever
+-- branch happened to be current when it opened, and the only way to find out
+-- that it swapped is to fire it.
+--
+-- A latched menu makes this matter more than a hold does: it stays up across a
+-- pull, which is exactly the transition the rez branches on.
+--
+-- ICON only, deliberately. The label stays the name the paint gave it -- for a
+-- macro that is the macro's own name, which is what Blizzard's action buttons
+-- show and what the player recognises -- and the usability tint stays where the
+-- paint left it, for the reason PaintCell gives: a colour that moves under a
+-- settled hand reads as a flicker.
+--
+-- Five C calls per frame for a palette holding one of these kinds, none for one
+-- that is not (the list is empty and this returns on the first line), and
+-- textures are touched only on the frames the state actually changes -- one
+-- press of shift, not one per frame it stays down.
+-- The pip that says this world marker is down right now, so an entry says
+-- whether pressing it places the marker or picks it back up before it is
+-- pressed. Blizzard's own manager draws the same distinction, swapping its
+-- button art between "applied" and "available"
+-- (Mainline/Blizzard_CompactRaidFrameManager.lua:1107-1112).
+--
+-- Read on every open, which is where nearly all of its value is: firing an
+-- entry closes the menu (see the release handler), so a press never updates a
+-- pip the presser can still see.
+--
+-- IsRaidMarkerActive is unrestricted and answers a plain bool -- it is neither
+-- protected nor a secret value, unlike GetRaidTargetIndex beside it in the
+-- documentation -- so this reads the same in combat as out of it.
+--
+-- Every other kind hides the pip rather than leaving it alone: one widget is
+-- reused for whatever the next open puts in it, and a stale pip would claim a
+-- spell was a marker that is on the ground.
+--
+-- A method rather than a local function, like MarkerPip's caller and
+-- RefreshMarkerPips below: the main chunk is at Lua's ceiling of 200 locals
+-- and has no room for another name.
+function PaletteView:MarkerPip(w, slot, iconSize)
+    local pip = w.markerPip
+    if not pip then return end
+    -- Live menus only: the pip reads REAL marker state, which is noise on the
+    -- options preview and the editor -- those show arrangement, not the
+    -- battlefield. Hidden rather than skipped, so a reused widget never
+    -- carries a stale pip across views.
+    if not (self.opts and self.opts.live) then
+        pip:Hide()
+        return
+    end
+    -- Per-palette opt-out (Show Placed-Marker Pips, in the Toggle World
+    -- Markers cog).
+    local pp = self:P()
+    if pp and pp.worldMarkerPip == false then
+        pip:Hide()
+        return
+    end
+    local id
+    if slot then
+        if slot.kind == "worldmarker" then
+            id = tonumber(slot.id)
+        elseif slot.kind == "cycleworldmarker" then
+            -- The one the NEXT press places, which is the marker this entry is
+            -- already drawing (SlotDisplay). Through CycleNext rather than off
+            -- the stored position, so the pip and the icon cannot disagree
+            -- about which marker the entry is currently offering.
+            --
+            -- The target-marker cycle is NOT this: raid targets sit on units,
+            -- and IsRaidMarkerActive answers for world markers alone -- which
+            -- Blizzard says in as many words at
+            -- Mainline/Blizzard_CompactRaidFrameManager.lua:1088.
+            id = CycleNext(slot)
+        end
+    end
+    if not id or id < 1 or id > 8
+       or not IsRaidMarkerActive(WORLD_MARKER_ENGINE[id]) then
+        pip:Hide()
+        return
+    end
+    -- The widget's own width when no size is passed: a nest scales its
+    -- children as it opens, and the refresh below runs long after the paint
+    -- that knew the unscaled figure.
+    local s = max(3, floor((iconSize or w:GetWidth() or 40) * 0.18))
+    pip:SetSize(s, s)
+    local ar, ag, ab = 0.047, 0.824, 0.624
+    if EllesmereUI.ResolveActiveAccent then
+        ar, ag, ab = EllesmereUI.ResolveActiveAccent()
+    end
+    pip:SetVertexColor(ar, ag, ab, 1)
+    pip:Show()
+end
+
+-- Every drawn cell's pip, for a menu that is already up when the markers move.
+-- Walks the cells rather than a collected list the way AdvanceLiveIcons does:
+-- that list earns itself by being read every frame, and this runs a handful of
+-- times a pull.
+function PaletteView:RefreshMarkerPips()
+    local n = self.cellCount
+    if not n then return end
+    for i = 1, n do
+        local w = self.widgets[i]
+        if w then
+            -- Through a local, NOT straight into the call: CellSlot answers a
+            -- nested cell with slot, claim, subIndex, and in final argument
+            -- position all three would expand -- landing the claim table in
+            -- MarkerPip's iconSize, which the size arithmetic there then
+            -- multiplies. Top-level cells return one value and hid this.
+            local slot = self:CellSlot(i)
+            self:MarkerPip(w, slot)
+        end
+    end
+end
+
+function PaletteView:AdvanceLiveIcons()
+    local cells = self._liveCells
+    if not cells or #cells == 0 then return end
+    local state = IconState()
+    if state == self._liveState then return end
+    self._liveState = state
+
+    for k = 1, #cells do
+        local index = cells[k]
+        local w = self.widgets[index]
+        local slot = self:CellSlot(index)
+        if w and slot then
+            local icon = SlotDisplay(slot)
+            w.icon:SetTexture(icon or QUESTION_MARK)
+            ApplyIconCrop(w.icon, icon)
+        end
+    end
 end
 
 -- The slot a cell index draws, and the claim it belongs to for a nested one.
@@ -4684,10 +5278,10 @@ function PaletteView:SetSelection(index)
             if claim then
                 local _, parentName = SlotDisplay(self:CellSlot(claim.parent))
                 if parentName and name then
-                    name = parentName .. " \194\187 " .. name
+                    name = EllesmereUI.L(parentName) .. " \194\187 " .. EllesmereUI.L(name)
                 end
             end
-            hub.text:SetText(name or (w.isPlaceholder and "Add Action") or ("Slot " .. index))
+            hub.text:SetText((name and EllesmereUI.L(name)) or (w.isPlaceholder and EllesmereUI.L("Add Action")) or ("Slot " .. index))
             hub.text:SetTextColor(r, g, b)
 
             local aw = widgets[claim and claim.parent or index]
@@ -5317,9 +5911,31 @@ end
 
 local function OnPaletteUpdate(_, elapsed)
     local now = GetTime()
-    if now - openedAt > OPEN_TIMEOUT then
-        ns.Close()
-        return
+    -- A latched menu has no key held, so the backstop that catches a lost
+    -- key-up is not what it needs -- it is meant to sit there while the player
+    -- decides. It still gets one, well past the held palette's: a menu left
+    -- open holds the Select key, which may be a plain mouse button.
+    --
+    -- Read off the button rather than off the profile: the latch is the
+    -- SNIPPET's answer, and a palette with the switch on but no Select key set
+    -- never latched at all. Reading an attribute is unrestricted in combat.
+    local btn = secureButtons[liveView:GetPaletteIndex()]
+    local latched = btn and btn:GetAttribute("eqdLatched")
+    -- ns.Close is INSECURE, and a latched menu's teardown -- the two bindings,
+    -- the ownership stamp, the gates -- is every one of the protected calls a
+    -- fight refuses. Timing out mid-fight would put the menu off screen and
+    -- leave the Select key claimed until PLAYER_REGEN_ENABLED picked the rest
+    -- up, so the timer simply does not run there: it takes effect the moment
+    -- the fight ends, and this handler is still ticking to notice. A menu the
+    -- player latched open and took into a fight is one they asked for.
+    --
+    -- The held palette's own backstop is unaffected -- its close rides a key
+    -- release through the sandbox and was never refused anything.
+    if not (latched and InCombatLockdown()) then
+        if now - openedAt > (latched and LATCH_TIMEOUT or OPEN_TIMEOUT) then
+            ns.Close()
+            return
+        end
     end
     if not liveView:SteerUnchanged() then
         if liveView:IsPointerLayout() then
@@ -5332,6 +5948,9 @@ local function OnPaletteUpdate(_, elapsed)
     end
     -- Time-based, so it runs even on the frames the steer skip above took.
     UpdatePaletteAlpha()
+    -- Outside the steer skip for the same reason: a modifier goes down without
+    -- the cursor moving, and that is the whole gesture this answers.
+    liveView:AdvanceLiveIcons()
     -- Outside the steer skip: the connector line's grow-in and sweep both
     -- keep moving under a cursor that is holding still. Costs two table
     -- reads per frame when no line is up.
@@ -5636,6 +6255,17 @@ local SNIPPET_PRE = [==[
     local catcher = self:GetFrameRef("catcher")
     local cancel = self:GetFrameRef("cancel")
 
+    -- The Select key of a latched menu, which the press below bound to THIS
+    -- button under its own mouse-button token. `button` is the only thing that
+    -- separates the two clicks in here -- the palette's own keybind arrives as
+    -- "LeftButton", the token SetOverrideBindingClick defaults to.
+    local isConfirm = (button == "__CONFIRM_BUTTON__")
+    -- ESCAPE out of a latched menu, routed to this button so the teardown below
+    -- is the same one every other close runs. Both tokens only ever exist while
+    -- this palette is latched: the press binds them and the close drops them.
+    local isEscape = (button == "__CANCEL_BUTTON__")
+    local isMenuKey = isConfirm or isEscape
+
     -- One palette at a time owns the screen, and the sandbox has to enforce it
     -- for itself: the Lua PreClick that refuses the second key its live view
     -- runs BEFORE this, and cannot stop the snippet behind it. The catcher, the
@@ -5649,7 +6279,18 @@ local SNIPPET_PRE = [==[
     if cancel then
         local owner = cancel:GetAttribute("eqdOwner")
         local me = self:GetAttribute("eqdPalette")
-        if down then
+        if isMenuKey then
+            -- Positive ownership for a latched menu's own keys too, and it is
+            -- not the same test as the release below: both bindings are
+            -- registered by this palette's own press and dropped on its close,
+            -- so either one reaching a palette that does not hold the screen is
+            -- a binding that outlived the menu it was made for. It does nothing.
+            if owner ~= me then
+                self:SetAttribute("eqdWhy", "taken")
+                self:SetAttribute("type", nil)
+                return nil, 1
+            end
+        elseif down then
             if owner and owner ~= me then
                 self:SetAttribute("eqdWhy", "taken")
                 self:SetAttribute("type", nil)
@@ -5667,7 +6308,37 @@ local SNIPPET_PRE = [==[
         end
     end
 
+    -- Neither key does anything on its press: the acting edge is the release
+    -- (useOnKeyDown is pinned false on this button), and choosing here would
+    -- resolve a cell one edge before the click that performs it.
+    if isMenuKey and down then
+        self:SetAttribute("type", nil)
+        return nil, 1
+    end
+
+    -- ESCAPE out of a latched menu. It closes and fires nothing, so it skips
+    -- the choosing entirely -- but it drops the latch first, which is what puts
+    -- the whole of SNIPPET_POST's teardown behind it.
+    if isEscape then
+        self:SetAttribute("eqdLatched", nil)
+        self:SetAttribute("eqdIdx", nil)
+        self:SetAttribute("eqdWhy", "escaped")
+        self:SetAttribute("type", nil)
+        return nil, 1
+    end
+
     if down then
+        -- A latched menu whose own key is pressed again is the toggle shutting
+        -- it. Only the latch is dropped here; the teardown waits for this
+        -- press's RELEASE, where SNIPPET_POST already does every part of it,
+        -- and dropping the latch is exactly what lets that run.
+        if self:GetAttribute("eqdLatched") then
+            self:SetAttribute("eqdLatched", nil)
+            self:SetAttribute("eqdWhy", "toggleclose")
+            self:SetAttribute("eqdIdx", nil)
+            self:SetAttribute("type", nil)
+            return nil, 1
+        end
         self:SetAttribute("eqdWhy", "pressed")
         self:SetAttribute("eqdIdx", nil)
         -- Claim ESCAPE for as long as this palette is up, and clear whatever a
@@ -5677,8 +6348,29 @@ local SNIPPET_PRE = [==[
         -- Every layout gets this -- the flag is read before any of the steering
         -- below, so escaping out is one rule, not three.
         if catcher then catcher:SetAttribute("eqdCancel", nil) end
+        self:SetAttribute("eqdLatched", nil)
         if cancel then
-            cancel:SetBindingClick(true, "ESCAPE", cancel, "LeftButton")
+            -- Toggle Menu Open: the menu is about to outlive the key that
+            -- opened it, so the key that chooses an entry has to be claimed for
+            -- as long as it is up. Owned by the cancel button along with
+            -- ESCAPE, so the one ClearBindings on close hands both back
+            -- together -- which is what keeps a Select key bound to a plain
+            -- mouse button usable for its ordinary purpose the rest of the time.
+            --
+            -- BOTH have to be there to latch. A palette with the switch on and
+            -- no Select key set would otherwise open a menu with nothing able
+            -- to answer it, so it keeps the hold-to-fire model instead.
+            local confirm = self:GetAttribute("eqdConfirm")
+            if confirm and self:GetAttribute("eqdToggle") then
+                self:SetAttribute("eqdLatched", 1)
+                cancel:SetBindingClick(true, confirm, self, "__CONFIRM_BUTTON__")
+                -- ESCAPE onto THIS button rather than the cancel button, which
+                -- only raises a flag for a release that is never coming here.
+                -- See CANCEL_BUTTON.
+                cancel:SetBindingClick(true, "ESCAPE", self, "__CANCEL_BUTTON__")
+            else
+                cancel:SetBindingClick(true, "ESCAPE", cancel, "LeftButton")
+            end
         end
         -- Kept on the button, not in a snippet global: every palette shares one
         -- header, so a global would let palette 2's press reset palette 1's origin.
@@ -5876,6 +6568,33 @@ local SNIPPET_PRE = [==[
     end
 
     self:SetAttribute("type", nil)
+
+    -- The release of the press that LATCHED the menu open. It chooses nothing
+    -- and tears nothing down -- SNIPPET_POST leaves on the same flag -- so the
+    -- menu simply stays up, which is the whole of what Toggle Menu Open means.
+    -- Every other way out of a latched menu clears the latch first: the Select
+    -- key below, ESCAPE through the catcher's flag, and the second press of the
+    -- palette's own key.
+    if self:GetAttribute("eqdLatched") and not isConfirm then
+        self:SetAttribute("eqdWhy", "latched")
+        return nil, 1
+    end
+    -- The Select key ends the menu whatever it lands on: a click into the dead
+    -- zone is a decision to take nothing, the same reading a held palette gives
+    -- a release there. Dropped BEFORE the choosing below so every cancel path
+    -- out of it still leaves SNIPPET_POST free to tear the menu down.
+    self:SetAttribute("eqdLatched", nil)
+
+    -- The release of the press that toggled a latched menu SHUT. Its own down
+    -- edge dropped the latch, which is what lets the teardown run -- and which
+    -- also means the guard above cannot catch this release. Without this it
+    -- goes on to resolve a cell and fire it, so pressing the menu's key to put
+    -- it away would also cast whatever the pointer happened to be resting on.
+    --
+    -- Safe to read eqdWhy for this: the only writer of "toggleclose" is that
+    -- down edge, one edge earlier, and every fresh press overwrites it with
+    -- "pressed" before any release can see it again.
+    if self:GetAttribute("eqdWhy") == "toggleclose" then return nil, 1 end
 
     -- Escaped out while the key was still held. Checked before anything is
     -- steered, so it beats every layout's own cancel and cannot be undone by
@@ -6264,7 +6983,14 @@ local SNIPPET_PRE = [==[
     -- "action" is the marker sweep's key, and type="raidtarget" falls back to
     -- "toggle" when it is unset -- so a sweep left behind would turn the next
     -- raidtarget slot into a clear-all of the whole group.
+    --
+    -- "marker" is the other half of that pair, read by both raidtarget and
+    -- worldmarker. Every cell that uses it writes it, so no stale value can
+    -- reach one of those -- but clearing it is what keeps the fallback in
+    -- SECURE_ACTIONS.worldmarker honest, and the pair is only safe cleared
+    -- together.
     self:SetAttribute("action", nil)
+    self:SetAttribute("marker", nil)
 
     -- A cycling entry names a different marker on every press, and the position
     -- it has reached has to advance HERE: an insecure SetAttribute is refused
@@ -6292,11 +7018,21 @@ SNIPPET_PRE = SNIPPET_PRE:gsub("__LATTICE_MAX__", tostring(MAX_LATTICE))
 -- replacement string as a capture reference, and a fragment that ever grows a
 -- modulo would otherwise fail here rather than where it was written.
 SNIPPET_PRE = SNIPPET_PRE:gsub("__ARM_CLAIM__", function() return ARM_CLAIM end)
+-- Parenthesised: gsub returns the count as a second value, and an unparenthesised
+-- call in a multiple-assignment or an argument list leaks it into the next slot.
+SNIPPET_PRE = (SNIPPET_PRE:gsub("__CONFIRM_BUTTON__", CONFIRM_BUTTON))
+SNIPPET_PRE = (SNIPPET_PRE:gsub("__CANCEL_BUTTON__", CANCEL_BUTTON))
 
 -- Leaves nothing armed: the next press has to choose again from scratch.
 local SNIPPET_POST = [==[
     if down then return end
     self:SetAttribute("type", nil)
+    -- A latched menu keeps everything standing -- the ownership stamp, the
+    -- ESCAPE and Select bindings, the catcher, every gate. This is the release
+    -- of the key that opened it, and the menu is meant to outlive that key.
+    -- Whatever ends the menu clears the latch first, so the run that really
+    -- does close it reaches the teardown below (see SNIPPET_PRE).
+    if self:GetAttribute("eqdLatched") then return end
     -- Only the palette that owns the screen may put any of this away: all of it
     -- is shared, and a second key pressed during another palette's hold was
     -- refused its press (see SNIPPET_PRE), so its release has nothing of its
@@ -6724,7 +7460,58 @@ end
 -- PushPalette repositions and re-shows or hides what is already there.
 local gatePools = {}
 
-local function EnsureGates(index, btn, need)
+-- The gate builders share GateMouse and LatticeSnippet, and nothing outside
+-- them uses either. Wrapped in a block so those two cost no main-chunk local:
+-- this file sits within a couple of Lua's ceiling of 200.
+local EnsureGates, EnsureLatticeGates
+do
+-- Every gate wants MOTION and nothing else: it is a hover detector, and it must
+-- never be the frame that ANSWERS a mouse button. Gates are under the cursor for
+-- the whole of an open -- the floor gate covers the screen -- and a Select key
+-- bound to a mouse button reaches the palette through an override binding, which
+-- the client runs only when nothing under the cursor has claimed that button.
+--
+-- SetMouseClickEnabled(false) alone was not enough. With it, a latched menu's
+-- mouse Select key did nothing for as long as any claim was armed: nested
+-- entries could not be picked at all, and the next top-level entry stayed dead
+-- until a retreat through the centre disarmed and took the floor gate down with
+-- it. A keyboard Select key was unaffected throughout, which is what identified
+-- the gates as the thing in the way. (Confirmed in game, 2026-08-11.)
+--
+-- So the buttons are declared not ours OUTRIGHT rather than merely left
+-- unhandled: clicks are enabled, and every button is passed through. This is the
+-- shape Blizzard's own map pins use to let a button reach the canvas beneath
+-- them (MapCanvas_DataProviderBase.lua:288-301). SetPassThroughButtons carries
+-- IsProtectedFunction, exactly like the SetMouseClickEnabled and EnableMouse
+-- calls this file already makes on these same frames, and every gate is built
+-- out of combat.
+--
+-- Without the method -- an older client -- clicks stay off, which is where this
+-- began: hover-driven nesting works and a mouse Select key does not.
+-- EVERY button the client knows, not the five a common mouse carries: an MMO
+-- mouse reports its side buttons as BUTTON6 and up, and Blizzard names them
+-- through BUTTON31 (SecureTemplates.lua:90-93). A Select key bound to one left
+-- off this list is a key the gates swallow, which is the very failure the note
+-- above describes.
+-- Built on the first gate rather than at load: a session that never opens a
+-- palette builds no gates, and this module costs nothing while switched off.
+local PASS_BUTTONS
+
+local function GateMouse(gate)
+    gate:SetMouseMotionEnabled(true)
+    if gate.SetPassThroughButtons then
+        if not PASS_BUTTONS then
+            PASS_BUTTONS = { "LeftButton", "RightButton", "MiddleButton" }
+            for n = 4, 31 do PASS_BUTTONS[#PASS_BUTTONS + 1] = "Button" .. n end
+        end
+        gate:SetMouseClickEnabled(true)
+        gate:SetPassThroughButtons(unpack(PASS_BUTTONS))
+    else
+        gate:SetMouseClickEnabled(false)
+    end
+end
+
+function EnsureGates(index, btn, need)
     local pool = gatePools[index]
     if not pool then
         pool = { pgate = {}, rgate = {}, built = 0 }
@@ -6756,17 +7543,16 @@ local function EnsureGates(index, btn, need)
         -- do is leave a way off the ground that misses it; below the region
         -- gates (level 10) and the parent gates (20), so every rect of a
         -- claim's real ground still wins the cursor and the floor is only ever
-        -- reached where the ground is not. Motion only, never
-        -- SetMouseClickEnabled: clicks -- the secure activation path itself --
-        -- pass straight through it, exactly as they do through the gates it
-        -- sits under.
+        -- reached where the ground is not. Motion only: clicks -- the secure
+        -- activation path itself, including a latched menu's Select key -- pass
+        -- straight through it, exactly as they do through the gates it sits
+        -- under. See GateMouse, which is what makes that true.
         local fgate = CreateFrame("Frame", "EUIQuickdrawButton" .. index .. "FGate",
             UIParent, "SecureHandlerEnterLeaveTemplate")
         fgate:SetAllPoints(UIParent)
         fgate:SetFrameStrata(LIVE_STRATA)
         fgate:SetFrameLevel(5)
-        fgate:SetMouseClickEnabled(false)
-        fgate:SetMouseMotionEnabled(true)
+        GateMouse(fgate)
         fgate:Hide()
 
         SecureHandlerSetFrameRef(fgate, "btn", btn)
@@ -6787,8 +7573,7 @@ local function EnsureGates(index, btn, need)
             UIParent, "SecureHandlerEnterLeaveTemplate")
         pgate:SetFrameStrata(LIVE_STRATA)
         pgate:SetFrameLevel(20)
-        pgate:SetMouseClickEnabled(false)
-        pgate:SetMouseMotionEnabled(true)
+        GateMouse(pgate)
         pgate:Hide()
 
         SecureHandlerSetFrameRef(pgate, "btn", btn)
@@ -6824,8 +7609,7 @@ local function EnsureGates(index, btn, need)
                 UIParent, "SecureHandlerEnterLeaveTemplate")
             rgate:SetFrameStrata(LIVE_STRATA)
             rgate:SetFrameLevel(10)
-            rgate:SetMouseClickEnabled(false)
-            rgate:SetMouseMotionEnabled(true)
+            GateMouse(rgate)
             rgate:Hide()
 
             SecureHandlerSetFrameRef(rgate, "btn", btn)
@@ -6882,7 +7666,7 @@ end
 -- sized by the window, not by how many entries nest, and nine lean frames is
 -- what the whole thing costs. Only a strip that actually nests something
 -- ever builds it -- see the call in PushPalette.
-local function EnsureLatticeGates(index, btn)
+function EnsureLatticeGates(index, btn)
     local pool = gatePools[index]
     if not pool or pool.lattice then return end
     pool.lattice = {}
@@ -6895,8 +7679,7 @@ local function EnsureLatticeGates(index, btn)
             UIParent, "SecureHandlerEnterLeaveTemplate")
         g:SetFrameStrata(LIVE_STRATA)
         g:SetFrameLevel(20)
-        g:SetMouseClickEnabled(false)
-        g:SetMouseMotionEnabled(true)
+        GateMouse(g)
         g:Hide()
         SecureHandlerSetFrameRef(g, "btn", btn)
         SecureHandlerSetFrameRef(g, "catcher", EnsureScrollCatcher())
@@ -6908,6 +7691,7 @@ local function EnsureLatticeGates(index, btn)
         SecureHandlerSetFrameRef(btn, "lgate" .. d, g)
         pool.lattice[d] = g
     end
+end
 end
 
 -- Declared up beside ns.Close, which is the only caller: the closes that never
@@ -6942,7 +7726,14 @@ function ReleaseSecureState(index)
     if cancelButton then cancelButton:SetAttribute("eqdOwner", nil) end
 
     local btn = index and secureButtons[index]
-    if btn then btn:SetAttribute("eqdArmed", nil) end
+    if btn then
+        btn:SetAttribute("eqdArmed", nil)
+        -- With this left standing the next press of the key would read as the
+        -- toggle shutting a menu that is no longer on screen, and be swallowed.
+        -- Refused in combat like every other write here, which is what
+        -- secureCloseDirty hands to PLAYER_REGEN_ENABLED.
+        btn:SetAttribute("eqdLatched", nil)
+    end
     local pool = index and gatePools[index]
     if not pool then return end
     if pool.fgate then pool.fgate:Hide() end
@@ -6975,8 +7766,16 @@ local function OwnsLiveView(self)
     return liveView and liveView:GetPaletteIndex() == self._palette
 end
 
-local function OnPreClick(self, _, down)
+local function OnPreClick(self, button, down)
+    -- A latched menu's own two keys open nothing: the menu they answer is
+    -- already up. Everything they do happens in the snippet and in OnPostClick.
+    if button == CONFIRM_BUTTON or button == CANCEL_BUTTON then return end
     if down then
+        -- A latched menu whose key is pressed again is toggling shut, not
+        -- opening. Read before the snippet, which runs after this and is what
+        -- clears the flag -- so this is the last moment it still says which of
+        -- the two a press is.
+        if self:GetAttribute("eqdLatched") then return end
         -- Between an edit and the coalescer's timer the palette DRAWS the new
         -- contents while the button would still fire the old ones. A press is
         -- the moment that stops being tolerable, so it lands the push itself.
@@ -7039,6 +7838,10 @@ local function OnPostClick(self, _, down)
     -- down a palette its owner is still holding.
     local why = self:GetAttribute("eqdWhy")
     if not OwnsLiveView(self) then return end
+    -- The release that latched the menu open closes nothing. Every other value
+    -- reaching here ends it, including "toggleclose" -- the second press of the
+    -- palette's own key -- which fires nothing on its way out.
+    if why == "latched" then return end
     if why == "fire" or why == "emptyslot" then
         local idx = tonumber(self:GetAttribute("eqdIdx"))
         local slot = liveView:CellSlot(idx)
@@ -7122,8 +7925,8 @@ local pushedClaims = {}
 -- contribute are pushed through here, under the cell index the snippet will
 -- resolve a release to -- which is what lets the snippet fire either without
 -- knowing which of the two it landed on.
-local function PushCell(btn, i, slot)
-    local aType, aKey, aVal = ResolveAction(slot)
+local function PushCell(btn, i, slot, p)
+    local aType, aKey, aVal = ResolveAction(slot, p)
     btn:SetAttribute("eqdT" .. i, aType)
     btn:SetAttribute("eqdK" .. i, aKey)
     btn:SetAttribute("eqdV" .. i, aVal)
@@ -7176,7 +7979,7 @@ local function PushPalette(index)
     -- together between this push and any open that follows it.
     local slotsEff = UsableSlots(palette, p)
     for i = 1, MAX_SLOTS do
-        PushCell(btn, i, slotsEff[i])
+        PushCell(btn, i, slotsEff[i], p)
     end
 
     -- The live palette draws exactly what the palette holds -- the trailing "+"
@@ -7197,6 +8000,19 @@ local function PushPalette(index)
     btn:SetAttribute("eqdMode", model)
     btn:SetAttribute("eqdShown", n)
     btn:SetAttribute("eqdInvert", p.fanInvert == true)
+
+    -- Toggle Menu Open, and the key a latched menu answers to. Both are read by
+    -- the press branch of SNIPPET_PRE, which latches only when it has the two of
+    -- them -- so a palette left half-configured keeps the hold-to-fire model
+    -- rather than opening a menu nothing can choose from.
+    --
+    -- The Select key comes off the profile rather than the palette: p is the
+    -- appearance view, and a key that is not an APPEARANCE_KEY falls through it
+    -- to the profile, which is where this one lives.
+    btn:SetAttribute("eqdToggle", p.toggleMode == true or nil)
+    local confirmKey = p.confirmKey
+    btn:SetAttribute("eqdConfirm",
+        (type(confirmKey) == "string" and confirmKey ~= "") and confirmKey or nil)
 
     -- Pointer layouts: the cell centres, worked out here rather than in the
     -- snippet. GridDims and GridBase already encode the auto-column rule and the
@@ -7301,7 +8117,7 @@ local function PushPalette(index)
         c.base = total
         for j = 1, c.n do
             total = total + 1
-            PushCell(btn, total, c.slots[j])
+            PushCell(btn, total, c.slots[j], p)
             -- A block layout's nests carry a BOX. Half-extents are what tells
             -- the snippet these cells are tested by containment rather than by
             -- nearness -- the palette's own entries have no half-extents, and
@@ -7320,7 +8136,7 @@ local function PushPalette(index)
     -- palette does not pay a hundred attribute writes on every options tick.
     for i = max(total, MAX_SLOTS) + 1, (pushedCells[index] or 0) do
         -- nil for the slot, which is also how PushCell clears a cycle's steps.
-        PushCell(btn, i, nil)
+        PushCell(btn, i, nil, p)
         btn:SetAttribute("eqdBX" .. i, nil)
         btn:SetAttribute("eqdBY" .. i, nil)
         btn:SetAttribute("eqdHW" .. i, nil)
@@ -7502,6 +8318,118 @@ end
 local bindingsDirty = false
 local bindingSig = nil
 
+-------------------------------------------------------------------------------
+--  Modifier variants of a palette's key
+--
+--  A keybind matches ONE modifier combination exactly, and the palette performs
+--  its action on the RELEASE edge. With only the configured combination bound,
+--  the modifiers held at that release are therefore pinned to whatever the bind
+--  itself requires -- shift is down for the whole of a SHIFT- bind, and an
+--  unmodified bind is only reachable with nothing held at all.
+--
+--  That decides what a macro fires. SECURE_ACTIONS.macro hands the name to
+--  RunMacro (SecureTemplates.lua:441-455), which evaluates the body's
+--  conditionals live at that moment -- as does the macrotext branch beside it
+--  -- so a slot holding
+--
+--      /cast [nomod] Anu'relos, Flame's Guidance; Alabaster Stormtalon
+--
+--  can only ever take one of its two branches: the [nomod] one on an unmodified
+--  bind, the other on a modified one. Nothing here caches or flattens the
+--  macro -- the pinned modifier state is the whole of it.
+--
+--  So every combination of the key is bound to the same button, and the player
+--  can press or let go of a modifier during the hold. Only combinations nothing
+--  else holds are taken: this hands the palette keys that were going spare, it
+--  does not take keys away.
+-------------------------------------------------------------------------------
+
+-- The combinations, written the way the client composes a key string
+-- (Blizzard_SharedXML/KeyCommand.lua:9-25 -- ALT, then CTRL, then SHIFT).
+local MOD_COMBOS = {
+    "", "ALT-", "CTRL-", "ALT-CTRL-",
+    "SHIFT-", "ALT-SHIFT-", "CTRL-SHIFT-", "ALT-CTRL-SHIFT-",
+}
+
+-- The same prefixes plus META, to take back off a key the player bound with
+-- one. META is stripped but never re-added: a macro's [mod] conditionals know
+-- shift, ctrl and alt only, so the eight combinations above are the whole of
+-- what changes what a slot fires. The gap that leaves is the Command key on a
+-- Mac -- pressed during a hold, it still costs that hold its release.
+local MOD_STRIP = { "ALT-", "CTRL-", "SHIFT-", "META-" }
+
+local function BaseKey(key)
+    for i = 1, #MOD_STRIP do
+        local m = MOD_STRIP[i]
+        if key:sub(1, #m) == m then key = key:sub(#m + 1) end
+    end
+    return key
+end
+
+-- Held by nothing the player would miss. GetBindingAction answers the BASE
+-- binding, leaving override bindings out -- ours and any other addon's alike --
+-- which is what this wants: our own overrides are the thing being decided here,
+-- so counting them would make the answer depend on whether this had already run
+-- once, and the last writer wins between addons either way.
+--
+-- A CLICK binding onto one of our own buttons is answered as free rather than
+-- taken, for the case where that is wrong. It only reaches this line at all if
+-- overrides ARE counted, and the cost of assuming they are not would be a key
+-- the player takes back in the Keybindings panel and never gets: the signature
+-- would already read it as taken, so nothing would rebuild and the override
+-- would keep shadowing their new binding until a reload.
+local function KeyIsFree(key)
+    local action = GetBindingAction(key)
+    if action == nil or action == "" then return true end
+    return action:find("^CLICK EUIQuickdrawButton") ~= nil
+end
+
+-- Which combinations of a key are ours to take, as eight characters of the
+-- binding signature. They belong in it: a combination the player later binds to
+-- something else has to be handed straight back, and UPDATE_BINDINGS is the
+-- only notice of that arriving.
+local function ModifierSig(key)
+    if not key then return "" end
+    local base, out = BaseKey(key), "|"
+    for i = 1, #MOD_COMBOS do
+        out = out .. (KeyIsFree(MOD_COMBOS[i] .. base) and "1" or "0")
+    end
+    return out
+end
+
+-- `claimed` carries the keys already spoken for across the whole pass, so no
+-- palette's variant can land on top of a key another palette was given.
+local function BindWithModifiers(name, key, claimed)
+    if not key then return end
+    local base = BaseKey(key)
+    -- What the player is already holding to press this key at all. Only
+    -- combinations that keep ALL of it are ours: the point of the variants is
+    -- that a hold survives a modifier picked up DURING it, and dropping one the
+    -- binding requires is a different gesture entirely. Without this, a palette
+    -- on SHIFT-T also took plain T whenever T was free -- an opening the player
+    -- never asked for, on a key they left alone.
+    local mods = key:sub(1, #key - #base)
+    -- META is in MOD_STRIP but not in MOD_COMBOS, so a key bound with it has no
+    -- variant that keeps it. Pass 1 has already bound the key itself; leave it
+    -- at that rather than hand out combinations that all drop the Command key.
+    if mods:find("META-", 1, true) then return end
+    local alt   = mods:find("ALT-",   1, true) ~= nil
+    local ctrl  = mods:find("CTRL-",  1, true) ~= nil
+    local shift = mods:find("SHIFT-", 1, true) ~= nil
+    for i = 1, #MOD_COMBOS do
+        local combo = MOD_COMBOS[i]
+        if (not alt   or combo:find("ALT-",   1, true))
+           and (not ctrl  or combo:find("CTRL-",  1, true))
+           and (not shift or combo:find("SHIFT-", 1, true)) then
+            local k = combo .. base
+            if not claimed[k] and KeyIsFree(k) then
+                SetOverrideBindingClick(bindOwner, false, k, name)
+                claimed[k] = true
+            end
+        end
+    end
+end
+
 -- ClearOverrideBindings / SetOverrideBindingClick are protected, so a combat
 -- refresh is deferred to PLAYER_REGEN_ENABLED. Nothing is lost by waiting:
 -- the bindings already in place keep working until then.
@@ -7521,6 +8449,7 @@ function ns.UpdateBindings()
     for i = 1, count do
         local k1, k2 = GetBindingKey(BINDING_PREFIX .. i)
         sig = sig .. "|" .. (k1 or "") .. "/" .. (k2 or "")
+        sig = sig .. ModifierSig(k1) .. ModifierSig(k2)
     end
     if sig == bindingSig then return end
 
@@ -7542,14 +8471,43 @@ function ns.UpdateBindings()
     -- binds two of its sixteen pays for two. PushPalette skips an index with no
     -- button, so the ones left unbound cost no attribute writes either -- their
     -- entries still reach the sandbox through whichever palette nests them.
+    --
+    -- Two passes, and the order is what makes them right: every key the player
+    -- actually chose is placed first, so a modifier variant one palette would
+    -- like can never land on top of a key another palette was GIVEN, whichever
+    -- order the two palettes come in.
+    --
+    -- `claimed` is built here rather than kept and wiped: every
+    -- SetOverrideBindingClick below fires UPDATE_BINDINGS, which re-enters this
+    -- function, and a table shared with that call is one the re-entry could
+    -- clear halfway through the loop reading it. The signature it computes is
+    -- the one just stored -- GetBindingAction answers base bindings, which none
+    -- of these writes touch -- so it turns back at the guard and this stays the
+    -- only pass; the table is what makes that true by construction rather than
+    -- by argument. One per rebind, and a rebind is a keybind change.
     local built = false
+    local claimed = {}
     for i = 1, count do
         local k1, k2 = GetBindingKey(BINDING_PREFIX .. i)
         if k1 or k2 then
             built = built or not secureButtons[i]
             local name = GetSecureButton(i):GetName()
-            if k1 then SetOverrideBindingClick(bindOwner, false, k1, name) end
-            if k2 then SetOverrideBindingClick(bindOwner, false, k2, name) end
+            if k1 then
+                SetOverrideBindingClick(bindOwner, false, k1, name)
+                claimed[k1] = true
+            end
+            if k2 then
+                SetOverrideBindingClick(bindOwner, false, k2, name)
+                claimed[k2] = true
+            end
+        end
+    end
+    for i = 1, count do
+        local k1, k2 = GetBindingKey(BINDING_PREFIX .. i)
+        if k1 or k2 then
+            local name = secureButtons[i]:GetName()
+            BindWithModifiers(name, k1, claimed)
+            BindWithModifiers(name, k2, claimed)
         end
     end
 
@@ -7641,12 +8599,32 @@ function SetEventsEnabled(on)
         -- PLAYER_REGEN_ENABLED like every other push.
         EQD:RegisterEvent("SPELLS_CHANGED", RequestPush)
         EQD:RegisterEvent("UPDATE_MACROS", RequestPush)
+        -- Which world markers are down, for a menu that is open while they
+        -- move. That is SOMEBODY ELSE's doing: firing an entry closes the menu,
+        -- so the presser never sees their own pip change. It is worth the one
+        -- registration anyway -- a menu latched open sits there for as long as
+        -- the user leaves it, and marking is something a group does together.
+        --
+        -- Refreshed on the event rather than polled by the live-icon tick: that
+        -- tick costs its API calls every frame, and this cue moves a handful of
+        -- times a pull. RAID_TARGET_UPDATE is what Blizzard's own manager
+        -- refreshes its marker buttons on
+        -- (Mainline/Blizzard_CompactRaidFrameManager.lua:282-283).
+        --
+        -- Inline rather than a named handler, unlike every registration above
+        -- it: the main chunk is at Lua's ceiling of 200 locals.
+        EQD:RegisterEvent("RAID_TARGET_UPDATE", function()
+            if liveView and liveView:GetFrame():IsShown() then
+                liveView:RefreshMarkerPips()
+            end
+        end)
     else
         EQD:UnregisterEvent("UPDATE_BINDINGS")
         EQD:UnregisterEvent("PLAYER_REGEN_ENABLED")
         EQD:UnregisterEvent("PLAYER_ENTERING_WORLD")
         EQD:UnregisterEvent("SPELLS_CHANGED")
         EQD:UnregisterEvent("UPDATE_MACROS")
+        EQD:UnregisterEvent("RAID_TARGET_UPDATE")
     end
 end
 

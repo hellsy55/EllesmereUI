@@ -1173,6 +1173,46 @@ local function CdmFrameIsActive(frame)
     return false
 end
 
+-- Blizzard resolves a cooldown item's spell through GetSpellID(), whose
+-- precedence is aura > linkedSpellID > overrideTooltip > override > base
+-- (CooldownViewerItemData.lua). When an aura ends without the item receiving the
+-- UNIT_AURA removal, cooldownInfo.linkedSpellID keeps pointing at the aura, so
+-- CheckCacheCooldownValuesFromSpellCooldown reads the cooldown from a spell that
+-- HAS none: start/dur come back 0, IsExpired() answers true, and
+-- RefreshSpellCooldownInfo takes its CooldownFrame_Clear branch on every refresh
+-- -- no swipe, no countdown text -- while RefreshIconDesaturation leaves the icon
+-- saturated. The ability is still on cooldown, so the icon reads as "never
+-- pressed" until a target switch (OnNewTarget clears the link), a re-cast of the
+-- base spell, or a cooldownID re-set. Blizzard's own repair for this,
+-- RefreshLinkedSpell, is only called from OnCooldownIDSet, never from RefreshData.
+--
+-- How the link outlives the aura: ClearAuraInstanceInfo() drops the instance but
+-- NOT the link, and the only path that drops both is OnUnitAuraRemovedEvent,
+-- which is dispatched through auraInstanceIDToItemFramesMap and is therefore
+-- missable. Any later RefreshData then clears the instance via RefreshAuraInstance
+-- and leaves the link standing.
+--
+-- Detected with nil-compares and never-secret bools ONLY. In instanced combat
+-- Cooldown:GetCooldownDuration answers a SECRET value, which is exactly why
+-- ReAssertRealCooldown's "widget reads ~0" proof fails closed there -- i.e. in
+-- the content where this is reported.
+--
+-- We repair OUR rendering only; Blizzard's item stays wrong, so its own alerts
+-- and isOnActualCooldown keep answering against the linked spell.
+--
+-- Ordered cheapest-first: linkedSpellID is nil for nearly every icon, so the
+-- common case costs two table lookups and no API call. Returns the STRUCTURAL
+-- verdict only; callers add their own "is on a real cooldown" test.
+local function CdmStaleLinkedSpell(frame)
+    local info = frame and frame.cooldownInfo
+    if info == nil or info.linkedSpellID == nil then return false end
+    -- An aura that is actually being displayed owns the widget; never fight it.
+    -- Covers the transient where UpdateLinkedSpell has set the link a moment
+    -- before RefreshAuraInstance attaches the matching instance.
+    if frame.auraInstanceID ~= nil or frame.wasSetFromAura then return false end
+    return true
+end
+
 -- Charge info for a CDM frame, resolved the way BLIZZARD resolves it.
 --
 -- We were resolving the charge spell with C_SpellBook.FindSpellOverrideByID and
@@ -2930,7 +2970,14 @@ local function DecorateFrame(frame, barData)
                 -- precede any truthiness/comparison (a secret errors on either);
                 -- a secret duration cannot prove "cleared", so fail closed (the
                 -- sigil failure moment reads a clean 0, so the fix still runs).
-                if cd.GetCooldownDuration then
+                --
+                -- SECOND PROOF, needed because the fail-closed above is permanent in
+                -- instanced combat (the duration reads secret there, so this function
+                -- could never act -- see CdmStaleLinkedSpell). A stale linked spell
+                -- means Blizzard clears this widget on EVERY refresh, so there is
+                -- nothing to fight and no duration read is required to know it.
+                local staleLink = CdmStaleLinkedSpell(frame)
+                if not staleLink and cd.GetCooldownDuration then
                     local ok, curDur = pcall(cd.GetCooldownDuration, cd)
                     if not ok then return end
                     if issecretvalue and issecretvalue(curDur) then return end
@@ -2942,6 +2989,27 @@ local function DecorateFrame(frame, barData)
                 fd._isProcessingOverride = true
                 if cd.SetUseAuraDisplayTime then cd:SetUseAuraDisplayTime(false) end
                 cd:SetCooldownFromDurationObject(durObj)
+                if staleLink then
+                    -- Blizzard's expired branch never calls SetSwipeColor, so the
+                    -- widget still carries whatever colour was painted last. For an
+                    -- aura-tracking icon that is the ACTIVE colour from the aura
+                    -- window, and it then renders over the cooldown we just armed --
+                    -- field-seen as "the swipe was still yellow". Repaint the resting
+                    -- cooldown colour, the same black the SetSwipeColor hook's
+                    -- not-active branch uses (the per-spell Cooldown Swipe Color only
+                    -- applies to buff-viewer frames, which never reach here).
+                    -- This also releases a Suppress-GCD alpha-0 that can be stuck for
+                    -- the same reason -- what we just armed is a real cooldown, never
+                    -- a GCD. Mirrors ReArmChargeRecharge, which repaints for exactly
+                    -- this reason on the charge path.
+                    -- Gated to the stale case on purpose: the placement-sigil case
+                    -- reaches here with a colour Blizzard has kept current, so it is
+                    -- left alone. Bar data is resolved LIVE rather than from the
+                    -- decorate-time closure, since pooled frames decorate once.
+                    local bkS = fc2.barKey
+                    local bdS = bkS and barDataByKey and barDataByKey[bkS]
+                    cd:SetSwipeColor(0, 0, 0, (bdS and bdS.swipeAlpha) or 0.7)
+                end
                 -- Only geometry was wiped (Blizzard's clear leaves draw-swipe on),
                 -- so re-arming the duration restores the swipe. Deliberately NOT
                 -- forcing SetDrawSwipe(true): under the override guard that would
@@ -3176,7 +3244,15 @@ local function DecorateFrame(frame, barData)
             fd._desatOverrideHooked = true
             local function onDesatChange()
                 if fd._isProcessingOverride then return end
-                if not fd._hideActiveOverriding then return end
+                -- Two owners of this path now. The Hide-Active override is the
+                -- original one. The second is the stale-linked-spell state, where
+                -- Blizzard re-clears the widget AND re-saturates the icon on every
+                -- refresh -- so the repair has to ride the same per-tick driver to
+                -- survive, and the body below already does exactly the right thing
+                -- for it: it re-arms the cooldown from OUR spell id and then sets
+                -- the desaturation from that same id's real cooldown state.
+                -- Cheap-first: the flag is one lookup, the helper two more.
+                if not (fd._hideActiveOverriding or CdmStaleLinkedSpell(frame)) then return end
                 fd._isProcessingOverride = true
                 local cdw = fd.cooldown
                 local fc2 = _ecmeFC[frame]

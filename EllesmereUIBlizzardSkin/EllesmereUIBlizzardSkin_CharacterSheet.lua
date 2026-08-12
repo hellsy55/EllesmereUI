@@ -1640,13 +1640,14 @@ local function SkinCharacterSheet()
         return 0
     end
 
-    -- Crest maximum values (per season)
+    -- Crest maximum values (per season) -- season 2 Mistcrests. Fallback only:
+    -- GetCrestMaxValue prefers the API's live seasonal max.
     local crestMaxValues = {
-        [3347] = 400,  -- Myth
-        [3345] = 400,  -- Hero
-        [3343] = 700,  -- Champion
-        [3341] = 700,  -- Veteran
-        [3383] = 700,  -- Adventurer
+        [3446] = 400,  -- Myth
+        [3445] = 400,  -- Hero
+        [3444] = 700,  -- Champion
+        [3443] = 700,  -- Veteran
+        [3442] = 700,  -- Adventurer
     }
 
     -- Crest max: prefer the API's seasonal max, fall back to the table above.
@@ -1806,11 +1807,11 @@ local function SkinCharacterSheet()
                 colorKey = "Crests",
                 color = GetCategoryColor("Crests"),
                 stats = {
-                    { name = "Myth", showCrestKey = "Myth", func = function() return GetCrestValue(3347) end, format = "%d", currencyID = 3347 },
-                    { name = "Hero", showCrestKey = "Hero", func = function() return GetCrestValue(3345) end, format = "%d", currencyID = 3345 },
-                    { name = "Champion", showCrestKey = "Champion", func = function() return GetCrestValue(3343) end, format = "%d", currencyID = 3343 },
-                    { name = "Veteran", showCrestKey = "Veteran", func = function() return GetCrestValue(3341) end, format = "%d", currencyID = 3341 },
-                    { name = "Adventurer", showCrestKey = "Adventurer", func = function() return GetCrestValue(3383) end, format = "%d", currencyID = 3383 },
+                    { name = "Myth", showCrestKey = "Myth", func = function() return GetCrestValue(3446) end, format = "%d", currencyID = 3446 },
+                    { name = "Hero", showCrestKey = "Hero", func = function() return GetCrestValue(3445) end, format = "%d", currencyID = 3445 },
+                    { name = "Champion", showCrestKey = "Champion", func = function() return GetCrestValue(3444) end, format = "%d", currencyID = 3444 },
+                    { name = "Veteran", showCrestKey = "Veteran", func = function() return GetCrestValue(3443) end, format = "%d", currencyID = 3443 },
+                    { name = "Adventurer", showCrestKey = "Adventurer", func = function() return GetCrestValue(3442) end, format = "%d", currencyID = 3442 },
                 }
             },
             {
