@@ -1722,6 +1722,19 @@ initFrame:SetScript("OnEvent", function(self)
         table.remove(p.palettes, index)
         Set("paletteCount", count - 1)
 
+        -- The auto-names close ranks with everything else. A palette the user
+        -- never renamed carries the number it was made under, so deleting
+        -- "Action Menu 1" would otherwise leave "Action Menu 2" sitting at
+        -- index 1 -- and Add, which names by index, would then hand out that
+        -- same name a second time. Only the auto-name moves: a name the user
+        -- typed is theirs, whatever it happens to look like.
+        for i = index, count - 1 do
+            local palette = Palette(i)
+            if palette and palette.name == AutoName(i + 1) then
+                palette.name = AutoName(i)
+            end
+        end
+
         for i = 1, count - 1 do
             local palette = Palette(i)
             for j = #palette.slots, 1, -1 do
