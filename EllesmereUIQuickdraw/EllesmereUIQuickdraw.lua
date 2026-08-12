@@ -6260,6 +6260,17 @@ local SNIPPET_PRE = [==[
     -- out of it still leaves SNIPPET_POST free to tear the menu down.
     self:SetAttribute("eqdLatched", nil)
 
+    -- The release of the press that toggled a latched menu SHUT. Its own down
+    -- edge dropped the latch, which is what lets the teardown run -- and which
+    -- also means the guard above cannot catch this release. Without this it
+    -- goes on to resolve a cell and fire it, so pressing the menu's key to put
+    -- it away would also cast whatever the pointer happened to be resting on.
+    --
+    -- Safe to read eqdWhy for this: the only writer of "toggleclose" is that
+    -- down edge, one edge earlier, and every fresh press overwrites it with
+    -- "pressed" before any release can see it again.
+    if self:GetAttribute("eqdWhy") == "toggleclose" then return nil, 1 end
+
     -- Escaped out while the key was still held. Checked before anything is
     -- steered, so it beats every layout's own cancel and cannot be undone by
     -- moving the pointer back onto the palette.
