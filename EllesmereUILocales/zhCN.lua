@@ -7010,3 +7010,195 @@ L["The standard buff grid"] = "标准的增益效果网格"
 L["This group's custom Buff Manager can only be activated or edited while playing one of its specs."] = "此组的自定义增益管理器只有在你使用其中一项专精时才能启用或编辑。"
 L["This module is excluded from Spec Overrides."] = "此模块不纳入专精覆盖。"
 L["This setting can't be overridden."] = "此设置无法被覆盖。"
+
+--------------------------------------------------------------------------------
+--  New in 8.8 - 8.8.2
+--  Grouped by module, in source order. Terminology follows the 8.7.9 pass:
+--  文本 / 不透明度 / 筛选 / 快捷键 / 框体 / 微缩地图.
+--------------------------------------------------------------------------------
+
+-- == Blizzard global-string NAMES, resolved by the client ====================
+-- These are looked up as globals, not shown as text; translating them here
+-- would break the lookup.
+L["AUDIO_MASTER"] = true
+L["AUDIO_SFX"] = true
+L["AUDIO_MUSIC"] = true
+L["AUDIO_AMBIENCE"] = true
+L["AUDIO_DIALOG"] = true
+
+-- == Core / Unlock Mode ======================================================
+L["Quickdraw"] = "速取"
+L["Override Anchor Direction"] = "覆盖锚点方向"
+L["Edit Anchor"] = "编辑锚点"
+L["Delete Override Anchor"] = "删除覆盖锚点"
+L["Everything New in 12.1"] = "12.1 全部新内容"
+L["Click the link, then Ctrl+C to copy it"] = "点击链接，然后按 Ctrl+C 复制"
+
+-- == Aura & Buff Reminders ===================================================
+L["You don't have this item in your bags"] = "你的背包里没有该物品"
+L["Your preferred food is out - using a backup you own"] = "你偏好的食物已用尽，正在使用你持有的备选"
+L["Click-to-use is disabled in combat"] = "战斗中无法点击使用"
+L["Open World"] = "户外世界"
+L["Normal/LFR Raid"] = "普通/随机团队副本"
+L["Mythic Dungeons"] = "史诗地下城"
+L["Non-Mythic Dungeons"] = "非史诗地下城"
+L["Timewalking"] = "时空漫游"
+L["Delve"] = "地下堡"
+L["Others are missing my buff"] = "其他人缺少我的增益"
+L["I am missing others' buffs"] = "我缺少他人的增益"
+L["Play a sound once when a reminder in this section newly appears."] = "当本区域出现新的提醒时播放一次提示音。"
+L["Reminder Sound"] = "提醒音效"
+L["Where to Show"] = "显示位置"
+L["Show how many of the consumable you have left in your bags."] = "显示背包中该消耗品的剩余数量。"
+L["Item Count Settings"] = "物品数量设置"
+L["Name Settings"] = "名称设置"
+L["Show Below"] = "低于时显示"
+L["Show reminders when remaining buff time is below this many minutes.\n0 = only when fully expired.\nIgnored in combat and during Mythic+ keys (then only when the buff is gone)."] = "当增益剩余时间低于该分钟数时显示提醒。\n0 = 仅在完全失效时显示。\n战斗中和大秘境钥石进行中忽略该设置（此时仅在增益消失后显示）。"
+L["Show Below Pre-Key"] = "钥石开始前低于时显示"
+L["Reminder threshold while you are in a dungeon before a Mythic+ key starts (Mythic 0 / keystone lobby). Set it high enough that you top up buffs and food before pulling, so you begin the key with enough duration to last it.\n0 = only when fully expired.\nIgnored once the key is active or you are in combat (then only when the buff is fully gone)."] = "大秘境钥石开始前，你身处地下城时的提醒阈值（史诗 0 层／钥石等待厅）。把它设得足够高，好让你在开怪前补满增益和食物，使钥石开始时有足够的持续时间撑完全程。\n0 = 仅在完全失效时显示。\n钥石激活后或你进入战斗时忽略该设置（此时仅在增益完全消失后显示）。"
+L["Show item or spell tooltips when hovering reminder icons."] = "鼠标悬停提醒图标时显示物品或法术的提示信息。"
+L["Missing Pet"] = "缺少宠物"
+L["Wrong Pet (Demo Lock)"] = "宠物不符（恶魔术士）"
+L["Passive Pet"] = "被动宠物"
+L["Preferred (Click to Buff)"] = "偏好（点击施放增益）"
+L["Show Without Item in Bags"] = "背包无该物品时仍显示"
+L["When on, flask/food/weapon reminders still show (dimmed) when you have no matching item in your bags, as a prompt to restock.\nWhen off, they are hidden entirely if you don't carry the item."] = "开启后，即使背包中没有对应物品，合剂／食物／武器提醒仍会以变暗状态显示，提示你补货。\n关闭后，若你未携带该物品则完全隐藏。"
+
+-- == Action Bars =============================================================
+L["Hide Blizzard's Vehicle Bar"] = "隐藏暴雪载具条"
+L["Hide Blizzard's stock vehicle and override bar."] = "隐藏暴雪自带的载具条和覆盖条。"
+L["Show When Spellbook Is Open"] = "打开法术书时显示"
+L["While the spellbook or macro panel is open, this bar appears so you can drag abilities onto it."] = "打开法术书或宏面板时显示该动作条，以便将技能拖放到上面。"
+
+-- == Chat ====================================================================
+L["Applies one text size to every chat window, saved with your profile. Individual windows can still be adjusted from their tab's right-click menu until the next login re-applies the profile size."] = "对所有聊天窗口应用统一的文本大小，并随配置保存。在下次登录重新应用配置大小之前，仍可通过各窗口标签的右键菜单单独调整。"
+L["Shortened Channel Names"] = "缩短频道名称"
+L["Abbreviates channel prefixes, like [Party] to [P] and [Guild] to [G]."] = "缩写频道前缀，例如 [小队] 缩为 [队]，[公会] 缩为 [会]。"
+L["Class Colored Names"] = "名称职业着色"
+L["Colors group and raid member names by their class when they appear in the text of Say, Yell, Party, and Raid messages."] = "当小队和团队成员的名字出现在说话、大喊、小队和团队消息的正文中时，按其职业着色。"
+
+-- == Cooldown Manager ========================================================
+L["+ Suppress GCD"] = "+ 抑制公共冷却"
+L["+ Hide Charge Text"] = "+ 隐藏充能文本"
+L["Show When Missing"] = "缺失时显示"
+L["Show Item Quality"] = "显示物品品质"
+L["Show the crafted quality rank on tracked items, matching the rank icon on the action bars. Items with no crafted quality are unaffected."] = "在追踪的物品上显示制造品质等级，与动作条上的等级图标一致。无制造品质的物品不受影响。"
+L["Show Cooldown Edge"] = "显示冷却边缘"
+L["Always show Blizzard's bright rotating edge on cooldowns in this bar. Hide Recharge Edge still overrides this for individual charge spells."] = "始终在该条的冷却动画上显示暴雪的明亮旋转边缘。对于单个充能法术，「隐藏充能边缘」仍会覆盖此设置。"
+
+-- == Nameplates ==============================================================
+L["Enter the spell ID to always show on nameplates."] = "输入要始终显示在姓名板上的法术 ID。"
+L["Edit Tracked Auras"] = "编辑追踪的光环"
+L["Change Color Instead"] = "改为更换颜色"
+L["Give out-of-combat enemy nameplates a custom color instead of darkening them."] = "为脱离战斗的敌方姓名板设置自定义颜色，而不是将其变暗。"
+L["Out of Combat Color"] = "脱离战斗颜色"
+L["Glow Nameplate When Near Aggro"] = "接近仇恨时姓名板发光"
+L["Adds a steady red glow around the nameplate while the Near Aggro color is active."] = "当「接近仇恨」颜色生效时，在姓名板周围添加持续的红色发光。"
+
+-- == Player Aura Bars (new module) ===========================================
+L["Edit Blacklist"] = "编辑黑名单"
+L["Buff Blacklist"] = "增益黑名单"
+L["All Buffs"] = "所有增益"
+L["Show every buff. While this is on, checked filters below are hidden from the bar instead of added."] = "显示所有增益。开启时，下方勾选的筛选器将从该条中隐藏，而不是添加。"
+L["Has Duration"] = "有持续时间"
+L["Show every buff that has a duration (hides permanent buffs). While this is on, checked filters below are hidden instead of added."] = "显示所有带持续时间的增益（隐藏永久增益）。开启时，下方勾选的筛选器将被隐藏，而不是添加。"
+L["All Debuffs"] = "所有减益"
+L["Show every debuff. While this is on, checked filters below are hidden from the bar instead of added."] = "显示所有减益。开启时，下方勾选的筛选器将从该条中隐藏，而不是添加。"
+L["Sort Method"] = "排序方式"
+L["Sort Direction"] = "排序方向"
+L["Growth"] = "增长方向"
+L["Icon Wrap"] = "图标换行"
+L["Max Total"] = "总数上限"
+L["Show aura tooltips when hovering this bar's icons."] = "鼠标悬停该条的图标时显示光环提示信息。"
+L["Right-Click to Cancel"] = "右键取消"
+L["Right-clicking a buff icon cancels the buff. Turning this off makes the bar's icons click-through; tooltips still follow the Show Tooltips setting."] = "右键点击增益图标可取消该增益。关闭后该条的图标将变为鼠标穿透；提示信息仍遵循「显示提示信息」设置。"
+
+-- == QoL =====================================================================
+L["Colored Percentages"] = "百分比着色"
+
+-- == Quickdraw (renamed from Action Palette in 8.8) ==========================
+L["Enable Quickdraw"] = "启用速取"
+L["Hold a keybind to open a menu of actions; point or scroll to choose, release to fire."] = "按住快捷键打开动作菜单，移动光标或滚轮选择，松开即施放。"
+L["Add Action Menu"] = "添加动作菜单"
+L["Editing Action Menu"] = "正在编辑动作菜单"
+L["Action Menu Keybind"] = "动作菜单快捷键"
+L["Delete Action Menu"] = "删除动作菜单"
+L["Rename Action Menu"] = "重命名动作菜单"
+L["Nest Another Action Menu"] = "嵌套另一个动作菜单"
+L["Shift+Scroll to see more"] = "Shift+滚轮查看更多"
+L["Apply All Settings From"] = "从以下来源应用全部设置"
+L["Copy all settings from %1$s to %2$s?"] = "将 %1$s 的全部设置复制到 %2$s？"
+L["Open At"] = "打开位置"
+L["Distance from Center"] = "距中心距离"
+L["Visible Icons"] = "可见图标数"
+L["Fan Settings"] = "扇形设置"
+L["Select Action with Mouse"] = "用鼠标选择动作"
+L["Arc Nest Shape"] = "弧形嵌套形状"
+L["Show Action Text Label"] = "显示动作文本标签"
+L["Show the selected action's name next to the selected icon."] = "在选中的图标旁显示该动作的名称。"
+
+-- == Raid Frames =============================================================
+L["Overshield is the part of an absorb exceeding your empty health. Always backfills it over current health from the shield's edge; From Left grows it from the opposite end of the bar; Never hides it."] = "溢出护盾指吸收量中超出你空缺生命值的部分。「始终」会从护盾边缘向当前生命值回填；「从左侧」会从条的另一端开始增长；「从不」则隐藏它。"
+L["From Left"] = "从左侧"
+L["Show Behind Border"] = "显示在边框后方"
+L["Draw role icons behind the frame border, including the hover and target highlight."] = "将职责图标绘制在框体边框后方，包括悬停和目标高亮。"
+L["Show Tanks Options"] = "显示坦克选项"
+L["Exclude Myself"] = "排除自己"
+L["Skips your own frame when Show Tanks duplicates the raid's tanks. Hotkey picks can still add you."] = "当「显示坦克」重复显示团队坦克时跳过你自己的框体。通过快捷键选取仍可加入你。"
+L["Healer Mana Display"] = "治疗法力显示"
+L["Shows a mana percentage row for every healer in your group as its own movable text display. Position it in Unlock Mode."] = "为队伍中每位治疗显示一行法力百分比，作为独立的可移动文本显示。可在解锁模式中调整位置。"
+L["In Party & Raid"] = "小队和团队中"
+L["In Raid"] = "团队中"
+L["Healer Mana Text Color"] = "治疗法力文本颜色"
+L["Vertical space between rows."] = "各行之间的垂直间距。"
+L["Text Growth"] = "文本增长方向"
+L["Which way the rows stack as healers are added."] = "随着治疗增加，各行的堆叠方向。"
+L["Show Names in Raid"] = "团队中显示名称"
+L["Shows each healer's name before the number while in a raid. In a party the display always shows numbers only."] = "在团队副本中于数值前显示每位治疗的名称。在小队中则始终只显示数值。"
+L["Covers Up To"] = "适用至"
+L["Highest group size that uses this layout."] = "使用该布局的最大队伍人数。"
+L["Switch At"] = "切换于"
+L["Group size at which this layout takes over from the 20 Man layout."] = "该布局从 20 人布局接管时的队伍人数。"
+L["Group size at which this layout takes over from the 25 Man layout."] = "该布局从 25 人布局接管时的队伍人数。"
+L["Show every debuff. While this is on, checked filters below are hidden from the grid instead of added."] = "显示所有减益。开启时，下方勾选的筛选器将从网格中隐藏，而不是添加。"
+L["Non-Player Auras"] = "非玩家光环"
+L["Debuffs not caused by any player or player pet, like Sated and Forbearance."] = "并非由玩家或玩家宠物造成的减益，例如「魔血」和「宽恕」。"
+L["Loss-of-control debuffs. When shown, these lead the row and carry the CC glow."] = "失去控制类减益。显示时，它们会排在该行最前并带有控制发光。"
+L["Custom Debuff Manager"] = "自定义减益管理器"
+L["Activate Custom Debuff Manager"] = "启用自定义减益管理器"
+L["Copy Player Auras Filters"] = "复制玩家光环筛选器"
+L["One-time copy of your Player Aura Bars filter setups into these filters. Same-named filters are OVERWRITTEN; the two lists stay separate afterwards."] = "将你的玩家光环条筛选器配置一次性复制到这些筛选器中。同名筛选器将被覆盖；此后两份列表相互独立。"
+L["Custom Order"] = "自定义顺序"
+L["Show this indicator's buffs in the exact order you arrange (the first 10 arranged buffs are guaranteed; any beyond follow the default sorting)."] = "严格按你排列的顺序显示该指示器的增益（前 10 个排列的增益可保证生效，超出部分沿用默认排序）。"
+L["Buff Order"] = "增益顺序"
+L["Rename Indicator"] = "重命名指示器"
+L["Enter a new name for this indicator:"] = "为该指示器输入新名称："
+L["All Non Healers/Aug"] = "所有非治疗/增辉"
+L["Only show buffs cast by you."] = "仅显示由你施放的增益。"
+L["Enable Threshold Text"] = "启用阈值文本"
+L["Anchor To"] = "锚定至"
+
+-- == Resource Bars ===========================================================
+L["Pip Border"] = "点标边框"
+L["Border on individual pips"] = "为每个点标添加边框"
+L["Draws a border around each pip instead of the bar as a whole."] = "为每个点标单独绘制边框，而不是为整条添加边框。"
+
+-- == Unit Frames =============================================================
+L["Copy Included/Excluded Spells From:"] = "从以下来源复制包含/排除的法术："
+L["This control recently changed direction: it now copies FROM the frame you choose. Confirming will copy all shared settings FROM %1$s TO %2$s."] = "该控件的方向近期已改变：现在是从你选择的框体复制过来。确认后将把所有共享设置从 %1$s 复制到 %2$s。"
+L["Main Frames Auras"] = "主框体光环"
+L["Boss Frames Auras"] = "首领框体光环"
+L["Apply Frame Strata to all Frames"] = "将框体层级应用到所有框体"
+L["Show every buff. While this is on, checked filters below are hidden from the frame instead of added."] = "显示所有增益。开启时，下方勾选的筛选器将从框体中隐藏，而不是添加。"
+L["Show every debuff. While this is on, checked filters below are hidden from the frame instead of added."] = "显示所有减益。开启时，下方勾选的筛选器将从框体中隐藏，而不是添加。"
+
+-- == Spec Overrides ==========================================================
+L["Delete Custom Debuff Manager"] = "删除自定义减益管理器"
+L["Delete the custom Debuff Manager for '%s'? Its specs return to your default Debuff Manager."] = "删除“%s”的自定义减益管理器？其专精将恢复为你的默认减益管理器。"
+L["Delete the custom Debuff Manager for '%s'? Its conditions return to your default Debuff Manager."] = "删除“%s”的自定义减益管理器？其条件将恢复为你的默认减益管理器。"
+
+-- == Shared widgets ==========================================================
+L["Select..."] = "选择……"
+L["Blacklisted spells never display."] = "黑名单中的法术永不显示。"
+L["Spell ID..."] = "法术 ID……"
+L["No blacklisted spells."] = "黑名单为空。"
