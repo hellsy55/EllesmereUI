@@ -7128,7 +7128,46 @@ end
 -- PushPalette repositions and re-shows or hides what is already there.
 local gatePools = {}
 
-local function EnsureGates(index, btn, need)
+-- The gate builders share GateMouse and LatticeSnippet, and nothing outside
+-- them uses either. Wrapped in a block so those two cost no main-chunk local:
+-- this file sits within a couple of Lua's ceiling of 200.
+local EnsureGates, EnsureLatticeGates
+do
+-- Every gate wants MOTION and nothing else: it is a hover detector, and it must
+-- never be the frame that ANSWERS a mouse button. Gates are under the cursor for
+-- the whole of an open -- the floor gate covers the screen -- and a Select key
+-- bound to a mouse button reaches the palette through an override binding, which
+-- the client runs only when nothing under the cursor has claimed that button.
+--
+-- SetMouseClickEnabled(false) alone was not enough. With it, a latched menu's
+-- mouse Select key did nothing for as long as any claim was armed: nested
+-- entries could not be picked at all, and the next top-level entry stayed dead
+-- until a retreat through the centre disarmed and took the floor gate down with
+-- it. A keyboard Select key was unaffected throughout, which is what identified
+-- the gates as the thing in the way. (Confirmed in game, 2026-08-11.)
+--
+-- So the buttons are declared not ours OUTRIGHT rather than merely left
+-- unhandled: clicks are enabled, and every button is passed through. This is the
+-- shape Blizzard's own map pins use to let a button reach the canvas beneath
+-- them (MapCanvas_DataProviderBase.lua:288-301). SetPassThroughButtons carries
+-- IsProtectedFunction, exactly like the SetMouseClickEnabled and EnableMouse
+-- calls this file already makes on these same frames, and every gate is built
+-- out of combat.
+--
+-- Without the method -- an older client -- clicks stay off, which is where this
+-- began: hover-driven nesting works and a mouse Select key does not.
+local function GateMouse(gate)
+    gate:SetMouseMotionEnabled(true)
+    if gate.SetPassThroughButtons then
+        gate:SetMouseClickEnabled(true)
+        gate:SetPassThroughButtons("LeftButton", "RightButton", "MiddleButton",
+                                   "Button4", "Button5")
+    else
+        gate:SetMouseClickEnabled(false)
+    end
+end
+
+function EnsureGates(index, btn, need)
     local pool = gatePools[index]
     if not pool then
         pool = { pgate = {}, rgate = {}, built = 0 }
@@ -7160,17 +7199,16 @@ local function EnsureGates(index, btn, need)
         -- do is leave a way off the ground that misses it; below the region
         -- gates (level 10) and the parent gates (20), so every rect of a
         -- claim's real ground still wins the cursor and the floor is only ever
-        -- reached where the ground is not. Motion only, never
-        -- SetMouseClickEnabled: clicks -- the secure activation path itself --
-        -- pass straight through it, exactly as they do through the gates it
-        -- sits under.
+        -- reached where the ground is not. Motion only: clicks -- the secure
+        -- activation path itself, including a latched menu's Select key -- pass
+        -- straight through it, exactly as they do through the gates it sits
+        -- under. See GateMouse, which is what makes that true.
         local fgate = CreateFrame("Frame", "EUIQuickdrawButton" .. index .. "FGate",
             UIParent, "SecureHandlerEnterLeaveTemplate")
         fgate:SetAllPoints(UIParent)
         fgate:SetFrameStrata(LIVE_STRATA)
         fgate:SetFrameLevel(5)
-        fgate:SetMouseClickEnabled(false)
-        fgate:SetMouseMotionEnabled(true)
+        GateMouse(fgate)
         fgate:Hide()
 
         SecureHandlerSetFrameRef(fgate, "btn", btn)
@@ -7191,8 +7229,7 @@ local function EnsureGates(index, btn, need)
             UIParent, "SecureHandlerEnterLeaveTemplate")
         pgate:SetFrameStrata(LIVE_STRATA)
         pgate:SetFrameLevel(20)
-        pgate:SetMouseClickEnabled(false)
-        pgate:SetMouseMotionEnabled(true)
+        GateMouse(pgate)
         pgate:Hide()
 
         SecureHandlerSetFrameRef(pgate, "btn", btn)
@@ -7228,8 +7265,7 @@ local function EnsureGates(index, btn, need)
                 UIParent, "SecureHandlerEnterLeaveTemplate")
             rgate:SetFrameStrata(LIVE_STRATA)
             rgate:SetFrameLevel(10)
-            rgate:SetMouseClickEnabled(false)
-            rgate:SetMouseMotionEnabled(true)
+            GateMouse(rgate)
             rgate:Hide()
 
             SecureHandlerSetFrameRef(rgate, "btn", btn)
@@ -7286,7 +7322,7 @@ end
 -- sized by the window, not by how many entries nest, and nine lean frames is
 -- what the whole thing costs. Only a strip that actually nests something
 -- ever builds it -- see the call in PushPalette.
-local function EnsureLatticeGates(index, btn)
+function EnsureLatticeGates(index, btn)
     local pool = gatePools[index]
     if not pool or pool.lattice then return end
     pool.lattice = {}
@@ -7299,8 +7335,7 @@ local function EnsureLatticeGates(index, btn)
             UIParent, "SecureHandlerEnterLeaveTemplate")
         g:SetFrameStrata(LIVE_STRATA)
         g:SetFrameLevel(20)
-        g:SetMouseClickEnabled(false)
-        g:SetMouseMotionEnabled(true)
+        GateMouse(g)
         g:Hide()
         SecureHandlerSetFrameRef(g, "btn", btn)
         SecureHandlerSetFrameRef(g, "catcher", EnsureScrollCatcher())
@@ -7312,6 +7347,7 @@ local function EnsureLatticeGates(index, btn)
         SecureHandlerSetFrameRef(btn, "lgate" .. d, g)
         pool.lattice[d] = g
     end
+end
 end
 
 -- Declared up beside ns.Close, which is the only caller: the closes that never
