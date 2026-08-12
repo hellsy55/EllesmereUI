@@ -4518,8 +4518,7 @@ end
 -- on 3+ targets also Slams the primary target, and that Slam sweeps and spends a charge.
 do
     local stacks, expiresAt = 0, nil
-    local BASE_MAX     = 12
-    local IMPROVED_MAX = 18
+    local BASE_MAX = 18
     local DURATION = 30
     local SWEEP    = 260708
     local IMPROVED = 383155   -- Improved Sweeping Strikes: 12 -> 18 charges
@@ -4563,8 +4562,10 @@ do
         end
     end
 
+    -- Since 12.1, this is hard coded in game to be 18 stacks.
+    -- Using sweeping stick at 18 will not exceed 18.
     local function MaxStacks()
-        return improvedKnown and IMPROVED_MAX or BASE_MAX
+        return BASE_MAX
     end
 
     -- Broad Strokes generators (only count with the talent known)
@@ -4591,6 +4592,7 @@ do
         [202168]  = 1,  -- Impending Victory
         [1715]    = 1,  -- Hamstring
         [1269383] = 1,  -- Heroic Strike (replaces Slam via Master of Warfare)
+        [772]     = 1,  -- Rend (in 12.1, this is now a single target ability)
         [436358]  = 2,  -- Demolish: the channel sweeps twice (damage IDs
                         -- 440884/440886) -- confirmed in-game, 2 per cast
     }
@@ -4723,7 +4725,9 @@ do
 
         if spellID == SWEEP
            or (CS_GENERATORS[spellID] and broadKnown) then
-            stacks = MaxStacks()
+            if spellID == SWEEP then stacks = stacks + 12 
+            elseif CS_GENERATORS[spellID] and broadKnown then stacks = stacks + 6 end
+            stacks = math.min(stacks, MaxStacks())
             expiresAt = GetTime() + DURATION
             cdmSeenActive, cdmInactiveSince = false, nil
             dbg("activated:", stacks, "stacks (cast", spellID .. ")")
