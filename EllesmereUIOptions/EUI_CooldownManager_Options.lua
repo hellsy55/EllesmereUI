@@ -10709,6 +10709,7 @@ initFrame:SetScript("OnEvent", function(self)
                         MakeCogRow("Charge/Stack Text", function()
                             local b = cdmBd
                             return valChanged(ss.showItemCount, (b and b.showItemCount) ~= false)
+                                or valChanged(ss.showChargeStackText, (b and b.showChargeStackText) ~= false)
                                 or valChanged(ss.stackCountSize, (b and b.stackCountSize) or 11)
                                 or colChanged(ss.stackCountR, ss.stackCountG, ss.stackCountB,
                                     (b and b.stackCountR) or 1, (b and b.stackCountG) or 1, (b and b.stackCountB) or 1)
@@ -10723,6 +10724,9 @@ initFrame:SetScript("OnEvent", function(self)
                                     { type="toggle", label="Show Item Count",
                                       get=function() if ss.showItemCount ~= nil then return ss.showItemCount end return (cdmBd and cdmBd.showItemCount) ~= false end,
                                       set=function(v) EnsureSS(); ss.showItemCount = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
+                                    { type="toggle", label="Show Charge/Stack Text",
+                                      get=function() if ss.showChargeStackText ~= nil then return ss.showChargeStackText end return (cdmBd and cdmBd.showChargeStackText) ~= false end,
+                                      set=function(v) EnsureSS(); ss.showChargeStackText = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
                                     { type="slider", label="Size", min=6, max=30, step=1,
                                       get=function() return ss.stackCountSize or (cdmBd and cdmBd.stackCountSize) or 11 end,
                                       set=function(v) EnsureSS(); ss.stackCountSize = v; if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end if row._updateLabel then row._updateLabel() end end },
@@ -18393,7 +18397,7 @@ initFrame:SetScript("OnEvent", function(self)
             scSwatch:SetAlpha(on and 1 or 0.3)
             if on then scBlock:Hide() else scBlock:Show() end
 
-            local _, scCogShow = EllesmereUI.BuildCogPopup({
+            local scPopupSpec = {
                 title = "Charge/Stack Text",
                 rows = {
                     -- View over the legacy showItemCount boolean (Never = false,
@@ -18423,6 +18427,19 @@ initFrame:SetScript("OnEvent", function(self)
                           BD().showItemQuality = v
                           if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_toggle") end
                       end },
+                    -- Buff-family only (stripped below for cd/utility): those
+                    -- bars hide counters via the per-spell Hide Charge Text
+                    -- lane, which owns their counter alpha channel.
+                    { type="toggle", label="Show Charge/Stack Text",
+                      tooltip="Show the charge and stack counters on this bar's icons.",
+                      get=function() return BD().showChargeStackText ~= false end,
+                      -- if/else, NOT `v and nil or false`: that expression is
+                      -- ALWAYS false (the nil arm falls through the or).
+                      set=function(v)
+                          if v then BD().showChargeStackText = nil
+                          else BD().showChargeStackText = false end
+                          ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                      end },
                     { type="dropdown", label="Position",
                       values={ bottomright="Bottom Right", bottom="Bottom", bottomleft="Bottom Left", left="Left", topleft="Top Left", top="Top", topright="Top Right", right="Right", center="Center" },
                       order={ "bottomright", "bottom", "bottomleft", "left", "topleft", "top", "topright", "right", "center" },
@@ -18444,7 +18461,10 @@ initFrame:SetScript("OnEvent", function(self)
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                       end },
                 },
-            })
+            }
+            -- Show Charge/Stack Text (row 3) is buff-family only -- see its comment.
+            if not isBuffGlowBar then table.remove(scPopupSpec.rows, 3) end
+            local _, scCogShow = EllesmereUI.BuildCogPopup(scPopupSpec)
             MakeCogBtn(rightRgn, scCogShow, scSwatch, EllesmereUI.DIRECTIONS_ICON)
         end
 

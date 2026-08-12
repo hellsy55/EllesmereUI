@@ -4547,6 +4547,26 @@ GetBarLabel = function(barKey)
 end
 EllesmereUI.GetBarLabel = GetBarLabel
 
+-- Re-read one already-built mover's name from its registered element. Movers are
+-- cached in `movers` for the session, and CreateMover captures the label into a
+-- plain local upvalue (`label`) that RefreshAnchoredIdle -- fired on every hover
+-- and every anchor-state change -- keeps re-painting verbatim. Setting
+-- mover._label's text directly is therefore not enough: the next hover reverts
+-- it. mover:UpdateLabel() (defined at the end of CreateMover, in the same
+-- closure as `label`) reassigns that upvalue and re-runs the same paint
+-- RefreshAnchoredIdle uses, so the change survives the next hover too.
+--
+-- No-op when the mover was never built, so callers may fire it unconditionally
+-- right after RegisterUnlockElements. Returns false in that case, or true plus
+-- the text it applied -- callers can ignore both; the return exists so the
+-- refresh can be driven (and diagnosed) straight from a /dump.
+function EllesmereUI.RefreshUnlockElementLabel(key)
+    local m = movers[key]
+    if not (m and m.UpdateLabel) then return false end
+    m:UpdateLabel()
+    return true, GetBarLabel(key)
+end
+
 -------------------------------------------------------------------------------
 --  Apply saved positions on login / reload
 -------------------------------------------------------------------------------
@@ -9813,6 +9833,19 @@ local function CreateMover(barKey)
             BuildCogMenu()
             ShowCogClickCatcher()
         end
+    end
+
+    -- Re-read this mover's name from its registered element. `label` above is
+    -- a plain local captured once at CreateMover time -- RefreshAnchoredIdle
+    -- (fired on every hover and anchor-state change, see ShowOverlayText /
+    -- RefreshAnchoredText) closes over that SAME local and keeps re-painting it
+    -- verbatim, so a caller that only did nameFS:SetText(...) directly would see
+    -- the very next hover silently revert the text. Reassigning the local here
+    -- (a plain Lua upvalue write, legal from any function sharing this closure)
+    -- is what makes the change stick.
+    function mover:UpdateLabel()
+        label = GetBarLabel(barKey)
+        RefreshAnchoredIdle()
     end
 
     movers[barKey] = mover

@@ -5646,6 +5646,13 @@ end
 -- Loads the LoadOnDemand options surface. False (with a user-facing message)
 -- only when the EllesmereUIOptions addon is missing or disabled in the AddOn List.
 function EllesmereUI.EnsureOptionsLoaded()
+    -- Standalone builds bundle the options files FLAT into the one addon --
+    -- they are resident from startup, and the LoadOnDemand addon named below
+    -- does not exist there under any name (the rename would point this at a
+    -- nonexistent "<coreToken>Options", printing MISSING and dead-ending every
+    -- options open). Loaded is simply true; EnsureLoaded's deferred-init drain
+    -- does the rest, exactly like the pre-split resident options.
+    if IS_STANDALONE then return true end
     if C_AddOns.IsAddOnLoaded("EllesmereUIOptions") then return true end
     local ok, reason = C_AddOns.LoadAddOn("EllesmereUIOptions")
     if not ok then
@@ -10861,7 +10868,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.3"
+EllesmereUI.VERSION = "8.8.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

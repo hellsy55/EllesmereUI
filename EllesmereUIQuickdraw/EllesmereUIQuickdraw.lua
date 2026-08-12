@@ -340,6 +340,10 @@ local DB_DEFAULTS = {
         -- The clear-all entry is unaffected, and so are the cycling entries.
         -- See the worldmarker branch of ResolveAction for why.
         worldMarkerToggle = true,
+        -- The placed-marker corner pip on live menus (see MarkerPip). On by
+        -- default: it is what tells a toggled entry's press apart -- place or
+        -- pick up -- before it is pressed.
+        worldMarkerPip = true,
         -- The key that fires the hovered entry of a latched menu, as a binding
         -- chord. One key for every palette. Claimed as an override binding for
         -- exactly as long as a menu is up and handed straight back on close, so
@@ -589,6 +593,7 @@ local APPEARANCE_KEYS = {
     -- markers in one pass wants each press to place, and a menu kept open to
     -- tidy them up afterwards wants each press to answer for its own marker.
     worldMarkerToggle = true,
+    worldMarkerPip = true,
 }
 ns.APPEARANCE_KEYS = APPEARANCE_KEYS
 
@@ -991,9 +996,21 @@ end
 -- than UnitIsDead, to agree with the macro's [dead]: that conditional is true
 -- for a player who has released as well, and a released player is exactly who
 -- needs resurrecting.
+--
+-- Identity APIs can answer SECRET booleans in restricted content, and this
+-- runs EVERY FRAME from IconState while a menu holding a live-icon entry is
+-- open -- truthiness on a secret throws, and a throw here storms the whole
+-- OnUpdate. Every read is issecretvalue-guarded FIRST and a secret fails to
+-- false: an unknowable corpse keeps the current branch, and the next
+-- readable frame corrects the picture.
 function Rez.HasDeadTarget()
-    return UnitExists("target") and UnitIsFriend("player", "target")
-       and UnitIsDeadOrGhost("target")
+    local exists = UnitExists("target")
+    if issecretvalue(exists) or not exists then return false end
+    local friend = UnitIsFriend("player", "target")
+    if issecretvalue(friend) or not friend then return false end
+    local dead = UnitIsDeadOrGhost("target")
+    if issecretvalue(dead) or not dead then return false end
+    return true
 end
 
 -- Which spell the entry would cast RIGHT NOW, for the icon and the live state
@@ -4975,6 +4992,21 @@ end
 function PaletteView:MarkerPip(w, slot, iconSize)
     local pip = w.markerPip
     if not pip then return end
+    -- Live menus only: the pip reads REAL marker state, which is noise on the
+    -- options preview and the editor -- those show arrangement, not the
+    -- battlefield. Hidden rather than skipped, so a reused widget never
+    -- carries a stale pip across views.
+    if not (self.opts and self.opts.live) then
+        pip:Hide()
+        return
+    end
+    -- Per-palette opt-out (Show Placed-Marker Pips, in the Toggle World
+    -- Markers cog).
+    local pp = self:P()
+    if pp and pp.worldMarkerPip == false then
+        pip:Hide()
+        return
+    end
     local id
     if slot then
         if slot.kind == "worldmarker" then
