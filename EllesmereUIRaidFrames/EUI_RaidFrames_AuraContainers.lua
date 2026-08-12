@@ -550,7 +550,11 @@ local function ApplyRFDispelSlot(button, dd, style)
     -- Change-guarded, stamped AFTER the call: SetFrameLevel on the slot button is
     -- denied while auras are secret (creation-window calls are legal); a restyle-time
     -- throw defers this key to the restriction-lift re-queue.
-    local lvl = health:GetFrameLevel() + 1 + def.level
+    -- health+1: below the absorb shield bars (health+3) so fill/full overlays
+    -- never cover the shield, above the heal-absorb/heal-prediction fills
+    -- (same level, ARTWORK 2). All slots share this level; the Magic > Curse
+    -- > ... priority is encoded in the overlay's ARTWORK sublevel below.
+    local lvl = health:GetFrameLevel() + 1
     if dd.lvl ~= lvl then
         button:SetFrameLevel(lvl)
         dd.lvl = lvl
@@ -562,9 +566,10 @@ local function ApplyRFDispelSlot(button, dd, style)
     local typeA = (c and c.a) or 1
     local alpha = (style.opacity or 100) / 100 * typeA
 
-    -- Overlay texture (fill / full / gradient), legacy ARTWORK sublevel 3.
+    -- Overlay texture (fill / full / gradient). Sublevel 2+def.level (3..7)
+    -- gives higher-priority types the higher sublevel at the shared level.
     if not dd.overlay then
-        dd.overlay = button:CreateTexture(nil, "ARTWORK", nil, 3)
+        dd.overlay = button:CreateTexture(nil, "ARTWORK", nil, 2 + def.level)
     end
     local tex = dd.overlay
     tex:ClearAllPoints()
@@ -1161,7 +1166,28 @@ end
 -- duration text and stacks unaffected).
 local function ApplyBmIconExtra(button, dd, style)
     ApplyRFDebuffText(button, dd, style)
-    if dd.icon then dd.icon:SetShown(not style.hideIcon) end
+    -- "Hide Icons" gate: like the hidden swipe (see AuraKit's style pass), a
+    -- one-shot SetShown is undone by aura content churn -- the engine's display
+    -- update re-shows the registered icon texture when the slot's aura data
+    -- refreshes. Same two-layer defense reading a LIVE flag (a hook cannot
+    -- uninstall): Show post-hook re-hides, alpha 0 covers engine paths that
+    -- re-show outside the hooked Lua method. Hook installs lazily on first hide.
+    if dd.icon then
+        dd.bmHideIcon = style.hideIcon == true
+        dd.icon:SetShown(not dd.bmHideIcon)
+        if dd.bmHideIcon and not dd.bmIconHooked then
+            dd.bmIconHooked = true
+            local icon = dd.icon
+            hooksecurefunc(icon, "Show", function()
+                if dd.bmHideIcon then icon:Hide() end
+            end)
+        end
+        local iconA = dd.bmHideIcon and 0 or 1
+        if dd.bmIconAlpha ~= iconA then
+            dd.icon:SetAlpha(iconA)
+            dd.bmIconAlpha = iconA
+        end
+    end
     -- Button-object calls are denied while auras are secret: base level is read ONCE
     -- inside the creation window and cached; alpha/level writes are change-guarded
     -- with the stamp written AFTER the call (a denied write throws, deferring the key
@@ -1270,7 +1296,19 @@ local function BmApplySquare(button, dd, style)
     local ind = style.ind
     local r, g, b = BmColor(style.sqColor, 12 / 255, 210 / 255, 157 / 255)
     dd.tex:SetColorTexture(r, g, b, 1)
-    if dd.cooldown then dd.cooldown:SetShown(ind.showDuration ~= false) end
+    -- Same hidden-swipe gate as AuraKit's style pass (engine SetCooldown re-shows
+    -- a hidden swipe on aura churn; SetDrawSwipe is the persistent style knob
+    -- that survives it), needed here too because square cooldowns are created
+    -- AFTER the bare-mode style pass runs -- creation would otherwise ship
+    -- ungated. Shares the akHideSwipe stamp so the two drivers never fight.
+    if dd.cooldown then
+        local hideSwipe = ind.showDuration == false
+        dd.cooldown:SetShown(not hideSwipe)
+        if dd.akHideSwipe ~= hideSwipe then
+            dd.akHideSwipe = hideSwipe
+            if dd.cooldown.SetDrawSwipe then dd.cooldown:SetDrawSwipe(not hideSwipe) end
+        end
+    end
     local br, bg2, bb = BmColor(ind.indBorderColor, 0, 0, 0)
     BmUpdateBorder(dd, dd.borderHost, ind.indBorderSize or 1, br, bg2, bb, 1)
     ApplyRFDebuffText(button, dd, style)
@@ -2989,7 +3027,18 @@ local function AssistProbe(unit)
         -- exiting TRANSITIONS, and the filters already degrade while boarding
         -- (field: a second of "any buff" before the seated state landed).
         local probe = UnitUsingVehicle or UnitInVehicle
-        return not probe("player")
+        if probe("player") then return false end
+        -- Cinematics fire UNIT_FACTION for every unit and briefly make even
+        -- the LOCAL PLAYER non-assistable (authors-channel consensus
+        -- 2026-08-13) -- the engine drops spell-ID filters for self exactly
+        -- like the vehicle case. A CLEANLY-false self-assist hides the
+        -- filtered displays for the transition; unreadable answers stay
+        -- fail-open (the historical self-exemption).
+        local okSelf, canSelf = pcall(UnitCanAssist, "player", "player")
+        if okSelf and not (issecretvalue and issecretvalue(canSelf)) and canSelf == false then
+            return false
+        end
+        return true
     end
     if not (UnitIsConnected(unit)
         and not UnitIsDeadOrGhost(unit)
@@ -3023,6 +3072,10 @@ local function ApplyAssistGate(button, d, unit)
     -- is redundant (settings changes re-drive via reload paths); keeps event-sweep
     -- watchers near-free.
     if d.rfcAssist == assist then return end
+    -- Explicit-false only: the login initialization is nil->true and must NOT
+    -- take the regain refresh below (a full-group UpdateAllAuras storm on the
+    -- login hot path -- the normal build owns first content).
+    local wasDenied = d.rfcAssist == false
     d.rfcAssist = assist
     local s = ProxyFor(d)
     if d.rfcDispel and s then
@@ -3047,6 +3100,22 @@ local function ApplyAssistGate(button, d, unit)
     -- Debuff Manager: its identity-gated (candidate-boolean) records hide
     -- for untrusted units; token records stay on like the legacy row.
     if ns.DM_OnAssistChanged then ns.DM_OnAssistChanged(d) end
+    -- Regain refresh: content parsed during the degraded window is WRONG
+    -- ("any buff"), and no aura edge is guaranteed to follow the transition
+    -- back (cinematic end, vehicle exit) -- the display would show stale
+    -- degraded content until the unit's next real aura change. Force one
+    -- reparse of the filtered containers on the explicit false->true flip
+    -- (wasDenied: never the login nil->true initialization). Bounded: runs
+    -- only on actual transitions, so a cinematic end costs one pass across
+    -- the group and a vehicle exit one button.
+    if assist and wasDenied then
+        if d.rfcDispel then d.rfcDispel:UpdateAllAuras() end
+        if d.rfcBm then d.rfcBm:UpdateAllAuras() end
+        if d.rfcBmChain then
+            for _, cc in pairs(d.rfcBmChain) do cc:UpdateAllAuras() end
+        end
+        if d.rfcBmSimple then d.rfcBmSimple:UpdateAllAuras() end
+    end
 end
 ns.RFC_ApplyAssistGate = ApplyAssistGate
 
@@ -3310,6 +3379,16 @@ assistWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
 assistWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
 assistWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
 assistWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
+-- Cinematics (in-world cutscenes included) fire UNIT_FACTION for EVERY unit
+-- at start and end while assistability flips -- and UNIT_FLAGS does NOT fire
+-- for that transition, so without this edge the gate misses it entirely
+-- (authors-channel etrace, 2026-08-13). The coalescer below flattens the
+-- all-units burst into one sweep. CINEMATIC_STOP joins it for the
+-- addon-cancelled skip path (same trigger set as the PAB and UF player
+-- lanes); its faction restore usually fires UNIT_FACTION too, this just
+-- closes any ordering gap.
+assistWatch:RegisterEvent("UNIT_FACTION")
+assistWatch:RegisterEvent("CINEMATIC_STOP")
 -- Death/release/resurrection transitions (the alive requirement of the probe)
 -- signal through UNIT_FLAGS; chatty in combat, but the coalescer below reduces any
 -- burst to one deferred sweep.
@@ -3324,12 +3403,13 @@ local function AssistSweepDrain()
     AssistSweep()
 end
 assistWatch:SetScript("OnEvent", function(_, event)
-    -- Vehicle edges sweep IMMEDIATELY: they are rare (no storm to coalesce)
-    -- and the quarter-second defer reads as a visible flash of degraded
-    -- "any buff" content on the player's own frame while boarding.
+    -- Vehicle and cinematic-skip edges sweep IMMEDIATELY: they are rare (no
+    -- storm to coalesce) and the quarter-second defer reads as a visible
+    -- flash of degraded "any buff" content on the player's own frame.
     if event == "UNIT_ENTERING_VEHICLE"
         or event == "UNIT_ENTERED_VEHICLE"
-        or event == "UNIT_EXITED_VEHICLE" then
+        or event == "UNIT_EXITED_VEHICLE"
+        or event == "CINEMATIC_STOP" then
         AssistSweep()
         return
     end

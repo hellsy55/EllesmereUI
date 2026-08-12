@@ -347,6 +347,8 @@ local defaults = {
     enemyNameWrap = false,
     targetScale = 100,
     nonTargetKeepFocus = true,
+    outOfRangeAlpha = 50,
+    outOfRangeMode = "disabled",
     showAllDebuffs = false,
     rangeTextEnabled = false,  -- Distance to Target Text (range bucket on the target's nameplate)
     rangeTextSize = 11,
@@ -3261,6 +3263,7 @@ function ns.RefreshAllSettings()
         end
     end
     if ns.NT_RefreshSetting then ns.NT_RefreshSetting() end
+    if ns.RangeText_Apply then ns.RangeText_Apply() end
     if ns.ApplyClassPowerSetting then ns.ApplyClassPowerSetting() end
     -- Aura containers: fingerprint-guarded, near-free when no aura setting changed.
     if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
@@ -3269,11 +3272,13 @@ end
 -------------------------------------------------------------------------------
 --  Non-Target Opacity: while the player has a target, every skinned plate that is not the
 --  target, focus or player fades to nonTargetAlpha (0-100). 100 = OFF: every hook below
---  reduces to one numeric compare. Alpha rides the plate ROOT (our own frame, parented to the
---  Blizzard nameplate), so Blizzard's own occlusion fade still multiplies in.
+--  reduces to one numeric compare. Out-of-range alpha composes into the same root multiplier.
+--  Alpha rides the plate ROOT (our own frame, parented to the Blizzard nameplate), so
+--  Blizzard's own occlusion fade still multiplies in.
 -------------------------------------------------------------------------------
 ns._ntAlpha = 1   -- cached 0..1 from the profile; 1 = inert
 ns._ntKeepFocus = true   -- cached "Keep Focus Full Opacity" (default on)
+ns._oorAlpha = 1  -- cached out-of-range alpha; 1 = inert
 
 -- Applies the correct root alpha to ONE plate. Value-guarded via _ntCurAlpha so redundant
 -- SetAlpha calls are skipped and pooled frames reset cheaply (nil = never faded).
@@ -3288,6 +3293,7 @@ function ns.NT_Apply(plate)
        and not UnitIsUnit(unit, "player") then
         a = nt
     end
+    a = a * (plate._oorCurAlpha or 1)
     if (plate._ntCurAlpha or 1) ~= a then
         plate._ntCurAlpha = a
         plate:SetAlpha(a)
@@ -3686,7 +3692,7 @@ local CLASS_POWER_MAP = {
     PRIEST      = { [258] = { "INSANITY_BAR", 100 } },     -- Shadow only
     HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 },     -- Fury
-                    [71]  = { "SWEEPING_STRIKES", 12 } },   -- Arms
+                    [71]  = { "SWEEPING_STRIKES", 18 } },   -- Arms (12.1 cap: 12 + 6 Broad Strokes)
     DEATHKNIGHT = { [250] = { Enum.PowerType.Runes, 6 },
                     [251] = { Enum.PowerType.Runes, 6 },
                     [252] = { Enum.PowerType.Runes, 6 } },
@@ -4602,12 +4608,38 @@ local function ResolveNeutralColor(unit)
     local c = _C("neutral")
     return c.r, c.g, c.b
 end
+-- Blizzard's own plate for this unit, colored by untainted code. Under HideBlizzardFrame the
+-- UnitFrame keeps its unit and its events (only castBar is silenced), so its health bar still
+-- carries whatever CompactUnitFrame_UpdateHealthColor last resolved -- including the class
+-- color we are not allowed to look up ourselves. Returns a PLAIN "have it" boolean plus three
+-- numbers that may be secret: never branch on the numbers, only ever hand them to a setter.
+-- On ns (module file is at the 200-local cap).
+function ns.GetBlizzardBarColor(frame)
+    local np = frame.nameplate
+    local uf = np and np.UnitFrame
+    -- Blizzard's plates are pooled too. Until ITS CompactUnitFrame_SetUnit has run for our
+    -- unit, that bar still wears the previous occupant's colour, and latching onto it would
+    -- paint a confidently WRONG class colour. No match, no mirror: the plain fallback applies
+    -- and the next pass retries.
+    if not uf or uf.unit ~= frame.unit then return false end
+    local hb = uf.healthBar or (uf.HealthBarsContainer and uf.HealthBarsContainer.healthBar)
+    if not hb or not hb.GetStatusBarColor then return false end
+    -- Same filter HideBlizzardFrame applies to this frame's children: reading a forbidden
+    -- widget throws, which would abort the rest of UpdateHealthColor on every health event.
+    if hb.IsForbidden and hb:IsForbidden() then return false end
+    local r, g, b = hb:GetStatusBarColor()
+    if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then return false end
+    return true, r, g, b
+end
 local function GetReactionColor(unit)
     -- Per-call marker read SYNCHRONOUSLY by UpdateHealthColor right after this
     -- returns: true only when this resolution landed on the non-tank Near
     -- Aggro color, so the near-aggro glow rides the exact same decision.
     -- On ns (module file is at the 200-local cap).
     ns._reactionNearAggro = false
+    -- Same idiom, for the enemy player class color at step 6: set when the class token
+    -- came back redacted, so UpdateHealthColor knows to mirror Blizzard's bar instead.
+    ns._reactionMirrorClass = false
     local db = p or defaults
     -- 1. Tapped always highest
     if UnitIsTapDenied(unit) then
@@ -4712,9 +4744,19 @@ local function GetReactionColor(unit)
     -- 6. Enemy player class colors
     if UnitIsPlayer(unit) and UnitCanAttack("player", unit) then
         local _, class = UnitClass(unit)
-        -- A secret class token (identity-restricted) cannot key a color table -- fall
-        -- through to the reaction color.
-        if issecretvalue(class) then class = nil end
+        -- A secret class token (identity-restricted, i.e. instanced PvP) cannot key a
+        -- color table. Blizzard resolves the same lookup UNTAINTED on its own plate and
+        -- its bar keeps updating under our suppression, so flag the plate here and let
+        -- UpdateHealthColor copy that color across without ever inspecting it. We still
+        -- fall through to the reaction color so every plain-number consumer downstream
+        -- (the skip-if-unchanged compare, the No Tint overlay tints) keeps plain numbers.
+        -- Gated on the CVar because that is what decides whether Blizzard's bar is a class
+        -- color at all: with it off the bar carries a selection/threat color, and copying
+        -- that would overwrite the user's Enemy Types color with red.
+        if issecretvalue(class) then
+            ns._reactionMirrorClass = GetCVarBool("nameplateShowClassColor") == true
+            class = nil
+        end
         local c = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
         if c then
             return c.r, c.g, c.b
@@ -5766,6 +5808,11 @@ function NameplateFrame:SetUnit(unit, nameplate)
             self:ApplyTarget()
             self:ApplyMouseover()
             self:UpdateCast()
+            -- Mirrored class colour only: on a fresh plate Blizzard's own SetUnit may not have
+            -- run yet, in which case the same-unit guard refused to mirror and the plate is
+            -- wearing the plain fallback. Retry once a frame later so it does not sit there
+            -- until the unit's next health event.
+            if self._mirrorPending then self:UpdateHealthColor() end
         end
     end
     C_Timer.After(0, self._deferredSetupCB)
@@ -5779,6 +5826,7 @@ function NameplateFrame:ClearUnit()
         self:SetAlpha(1)
     end
     self._ntCurAlpha = nil
+    self._oorCurAlpha = nil
 
     if self.isCasting then
         self.isCasting = false
@@ -5835,6 +5883,7 @@ function NameplateFrame:ClearUnit()
     self.nameplate = nil
     self._absorbHidden = nil
     self._lastHCr, self._lastHCg, self._lastHCb = nil, nil, nil
+    self._mirrorPending = nil
     -- Health-text value memo (UpdateHealthValues): a recycled plate must
     -- always write its first values, never skip against the old unit's.
     self._hpTxtPct, self._hpTxtCur = nil, nil
@@ -6173,7 +6222,26 @@ function NameplateFrame:UpdateHealthColor()
     -- path verified non-secret). Threat events fire constantly with an unchanged result, so
     -- compare against the last applied values and skip the setter. Cache nil'd in ClearUnit.
     local hr, hg, hb = GetReactionColor(unit)
-    if hr ~= self._lastHCr or hg ~= self._lastHCg or hb ~= self._lastHCb then
+    -- Enemy player whose class token was redacted (instanced PvP): paint the bar from
+    -- Blizzard's plate instead. A secret cannot go through the skip-if-unchanged compare, so
+    -- this re-reads and re-applies every pass rather than latching -- a latch would freeze the
+    -- bar on a stale colour when Blizzard's changes (a disconnect greys it, the CVar is
+    -- toggled mid-match). Two C calls against the dozen GetReactionColor already spent, on
+    -- the few plates that take this path. hr/hg/hb stay the plain fallback for the tints below.
+    local mirrored, mr, mg, mb = false
+    if ns._reactionMirrorClass then
+        mirrored, mr, mg, mb = ns.GetBlizzardBarColor(self)
+        -- Wanted to mirror but Blizzard's plate was not on this unit yet: the deferred
+        -- setup pass retries. Only ever set on the plates that take this path.
+        self._mirrorPending = not mirrored or nil
+    else
+        self._mirrorPending = nil
+    end
+    if mirrored then
+        -- Cache invalidated, never written with a secret: the next plain colour must reapply.
+        self._lastHCr, self._lastHCg, self._lastHCb = nil, nil, nil
+        self.health:SetStatusBarColor(mr, mg, mb)
+    elseif hr ~= self._lastHCr or hg ~= self._lastHCg or hb ~= self._lastHCb then
         self._lastHCr, self._lastHCg, self._lastHCb = hr, hg, hb
         self.health:SetStatusBarColor(hr, hg, hb)
     end
@@ -6212,21 +6280,35 @@ function NameplateFrame:UpdateHealthColor()
         local texPath = ns._focusOverlayTexPath
         local overlayAlpha = db2.focusOverlayAlpha or defaults.focusOverlayAlpha
         local ocr, ocg, ocb
+        -- No Tint means "wear the bar's colour", so on a mirrored plate it has to take the
+        -- mirrored values, not the plain fallback -- tinting from hr/hg/hb there would show
+        -- the exact mismatch No Tint exists to avoid. Secrets cannot be value-keyed, so
+        -- forced re-applies every pass and the cache is left unset (the `or` below
+        -- short-circuits before any compare touches them).
+        local forced = false
         if NoTintFlag(db2, "focusOverlayNoTint") then
-            ocr, ocg, ocb = hr, hg, hb
+            if mirrored then
+                ocr, ocg, ocb, forced = mr, mg, mb, true
+            else
+                ocr, ocg, ocb = hr, hg, hb
+            end
         else
             local oc = db2.focusOverlayColor or defaults.focusOverlayColor
             ocr, ocg, ocb = oc.r, oc.g, oc.b
         end
         local bgAlpha = OverlayBgAlpha(db2.focusOverlayFullBgAlpha, overlayAlpha)
-        if not self._ovFocShown or self._ovFocTex ~= texPath
+        if forced or not self._ovFocShown or self._ovFocTex ~= texPath
             or self._ovFocAlpha ~= overlayAlpha or self._ovFocBgAlpha ~= bgAlpha
             or self._ovFocR ~= ocr or self._ovFocG ~= ocg or self._ovFocB ~= ocb then
             EnsureFocusOverlay(self)
             self._ovFocShown = true
             self._ovFocTex, self._ovFocAlpha = texPath, overlayAlpha
             self._ovFocBgAlpha = bgAlpha
-            self._ovFocR, self._ovFocG, self._ovFocB = ocr, ocg, ocb
+            if forced then
+                self._ovFocR, self._ovFocG, self._ovFocB = nil, nil, nil
+            else
+                self._ovFocR, self._ovFocG, self._ovFocB = ocr, ocg, ocb
+            end
             ApplyOverlayGeometry(self.focusOverlayFill, self.focusOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[focusTex] == true)
             self.focusOverlayFill:SetTexture(texPath)
             self.focusOverlayFill:SetAlpha(overlayAlpha)
@@ -6258,21 +6340,31 @@ function NameplateFrame:UpdateHealthColor()
         local texPath = ns._targetOverlayTexPath
         local overlayAlpha = db2.targetOverlayAlpha or defaults.targetOverlayAlpha
         local ocr, ocg, ocb
+        -- Mirrored plate: same reasoning as the focus overlay above.
+        local forced = false
         if NoTintFlag(db2, "targetOverlayNoTint") then
-            ocr, ocg, ocb = hr, hg, hb
+            if mirrored then
+                ocr, ocg, ocb, forced = mr, mg, mb, true
+            else
+                ocr, ocg, ocb = hr, hg, hb
+            end
         else
             local oc = db2.targetOverlayColor or defaults.targetOverlayColor
             ocr, ocg, ocb = oc.r, oc.g, oc.b
         end
         local bgAlpha = OverlayBgAlpha(db2.targetOverlayFullBgAlpha, overlayAlpha)
-        if not self._ovTgtShown or self._ovTgtTex ~= texPath
+        if forced or not self._ovTgtShown or self._ovTgtTex ~= texPath
             or self._ovTgtAlpha ~= overlayAlpha or self._ovTgtBgAlpha ~= bgAlpha
             or self._ovTgtR ~= ocr or self._ovTgtG ~= ocg or self._ovTgtB ~= ocb then
             ns.EnsureTargetOverlay(self)
             self._ovTgtShown = true
             self._ovTgtTex, self._ovTgtAlpha = texPath, overlayAlpha
             self._ovTgtBgAlpha = bgAlpha
-            self._ovTgtR, self._ovTgtG, self._ovTgtB = ocr, ocg, ocb
+            if forced then
+                self._ovTgtR, self._ovTgtG, self._ovTgtB = nil, nil, nil
+            else
+                self._ovTgtR, self._ovTgtG, self._ovTgtB = ocr, ocg, ocb
+            end
             ApplyOverlayGeometry(self.targetOverlayFill, self.targetOverlayBg, self.health, ns.OVERLAY_STRIPE_KEYS[targetTex] == true)
             self.targetOverlayFill:SetTexture(texPath)
             self.targetOverlayFill:SetAlpha(overlayAlpha)
@@ -8139,13 +8231,14 @@ function npAddon:OnEnable()
 end
 
 -------------------------------------------------------------------------------
---  Distance to Target Text (EXTRAS): a range BUCKET on the target's nameplate -- "15+" =
+--  Nameplate range features: target distance text plus out-of-range plate alpha.
+--  Distance text is a range BUCKET on the target's nameplate -- "15+" =
 --  beyond the 15yd rung, inside the next longer one. The API exposes no exact enemy distance;
 --  the lower bound comes from the shared range engine's spell ladder (EllesmereUI_Range.lua),
---  active only while this is enabled. Anchoring: 5px left of whatever text occupies the Right
---  Text core slot, else just outside the health bar's right edge. Zero cost while disabled
---  (nothing created until first enabled); enabled, one OnUpdate driver ticks 5x/s. Secret range
---  results are skipped -- fail-open to no text, never an error.
+--  active only while either feature is enabled. Distance-text anchoring: 5px left of whatever
+--  text occupies the Right Text core slot, else just outside the health bar's right edge. Zero
+--  cost while both are disabled; enabled, one OnUpdate driver ticks 5x/s. Secret range results
+--  are skipped -- fail-open to no text or fade, never an error.
 -------------------------------------------------------------------------------
 do
     -- Single-table state: this file sits at Lua 5.1's 200-local cap, so the whole feature uses ONE chunk local (RT), everything else as table fields.
@@ -8228,6 +8321,67 @@ do
         end
     end
 
+    -- Round-robin BUDGETED sweep: each range verdict is a multi-C-call probe
+    -- walk, so classifying every plate every tick is unbounded in crowded
+    -- scenes (40 plates x 5Hz x spell+item probes was thousands of C calls
+    -- per second). 8 plates per 0.2s tick = full coverage inside ~1s at a
+    -- full plate cap, imperceptible for a fade; small scenes still resolve
+    -- every tick. Verdicts come from Range_SweepBeyond (per-unit short-TTL
+    -- cache; never touches the crosshair/QoL single-slot target caches).
+    -- Melee note: at cutoff 5 verdicts rely on the protection-gated item
+    -- walk, so in instanced combat the fade can degrade to "no fade" for
+    -- melee specs -- deliberate fail-open, never a blocked action.
+    function RT.FadeTick()
+        local customCutoff = p and p.outOfRangeMode == "custom" and p.outOfRangeCustomRange
+        local cutoff = EllesmereUI.Range_GetAttackCutoff(customCutoff)
+        local q = RT.fadeQ
+        if not q then q = {}; RT.fadeQ = q end
+        if not RT.fadeIdx or RT.fadeIdx > #q then
+            -- New cycle: snapshot the live plate set (reused table, one wipe
+            -- per cycle). Plates that detach mid-cycle are re-checked below.
+            wipe(q)
+            for _, plate in pairs(ns.plates) do q[#q + 1] = plate end
+            RT.fadeIdx = 1
+        end
+        local budget = 8
+        while RT.fadeIdx <= #q and budget > 0 do
+            local plate = q[RT.fadeIdx]
+            RT.fadeIdx = RT.fadeIdx + 1
+            budget = budget - 1
+            local unit = plate.unit
+            if unit and ns.plates[unit] == plate then
+                local beyond
+                -- Cleanly-non-attackable plates (friendly/neutral NPCs) can
+                -- never answer an attack-range probe; skip the whole walk.
+                -- Only a READABLY-false flag skips -- a secret answer falls
+                -- through to the probes, whose own gates fail open.
+                local okAtt, att = pcall(UnitCanAttack, "player", unit)
+                local skip = okAtt and not (issecretvalue and issecretvalue(att)) and att == false
+                if not skip then
+                    beyond = EllesmereUI.Range_SweepBeyond(unit, cutoff)
+                end
+                local alpha = beyond == true and ns._oorAlpha or 1
+                if (plate._oorCurAlpha or 1) ~= alpha then
+                    plate._oorCurAlpha = alpha
+                    ns.NT_Apply(plate)
+                end
+            end
+        end
+    end
+
+    function RT.ResetFade()
+        -- Drop the round-robin cursor and its plate snapshot too: a disable
+        -- mid-cycle must not pin recycled plates in the reused queue.
+        if RT.fadeQ then wipe(RT.fadeQ) end
+        RT.fadeIdx = nil
+        for _, plate in pairs(ns.plates) do
+            if plate._oorCurAlpha then
+                plate._oorCurAlpha = nil
+                ns.NT_Apply(plate)
+            end
+        end
+    end
+
     -- Options: re-apply font/color/anchor on the live attachment.
     ns.RangeText_Refresh = function()
         if RT.plate and RT.fs then
@@ -8237,7 +8391,13 @@ do
     end
 
     ns.RangeText_Apply = function()
-        if p and p.rangeTextEnabled then
+        local alpha = tonumber(p and p.outOfRangeAlpha) or defaults.outOfRangeAlpha
+        if alpha < 0 then alpha = 0 elseif alpha > 100 then alpha = 100 end
+        ns._oorAlpha = alpha / 100
+        local textEnabled = p and p.rangeTextEnabled
+        ns._oorFadeEnabled = ((p and p.outOfRangeMode) or defaults.outOfRangeMode) ~= "disabled" and ns._oorAlpha < 1
+        local fadeEnabled = ns._oorFadeEnabled
+        if textEnabled or fadeEnabled then
             if not RT.drv then
                 RT.drv = CreateFrame("Frame")
                 RT.drv:Hide()
@@ -8245,18 +8405,63 @@ do
                     RT.acc = RT.acc + dt
                     if RT.acc < 0.2 then return end
                     RT.acc = 0
-                    RT.Tick()
+                    if p and p.rangeTextEnabled then RT.Tick() end
+                    if ns._oorFadeEnabled then RT.FadeTick() end
                 end)
             end
             -- Ladder builds and invalidation live in the shared range engine.
-            EllesmereUI.Range_SetActive("npRangeText", true)
+            EllesmereUI.Range_SetActive("npRange", true)
             RT.drv:Show()
-        elseif RT.drv then
-            EllesmereUI.Range_SetActive("npRangeText", false)
-            RT.drv:Hide()
-            RT.Detach()
+        else
+            EllesmereUI.Range_SetActive("npRange", false)
+            if RT.drv then RT.drv:Hide() end
         end
+        if not textEnabled then RT.Detach() end
+        if not fadeEnabled then RT.ResetFade() end
     end
 
 end
+
+-------------------------------------------------------------------------------
+--  Hide Enemy Nameplates Out of Combat (EXTRAS): drives nameplateShowEnemies,
+--  the same CVar behind Blizzard's combat-legal "Show Enemy Name Plates"
+--  keybind, so plates flip cleanly at the combat edges. The combat events are
+--  registered only while the setting is on (zero cost off); disabling the
+--  setting restores plates ON only if this feature ever hid them. All state
+--  lives on ns -- this chunk is at the 200-local cap.
+-------------------------------------------------------------------------------
+ns._oocPlatesCtl = CreateFrame("Frame")
+ns.ApplyOOCPlates = function()
+    local ctl = ns._oocPlatesCtl
+    local on = p and p.hideEnemyPlatesOOC == true
+    if on then
+        ctl:RegisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:RegisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:RegisterEvent("PLAYER_ENTERING_WORLD")
+        ns._oocPlatesOwned = true
+        SetCVar("nameplateShowEnemies", InCombatLockdown() and "1" or "0")
+    else
+        ctl:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        if ns._oocPlatesOwned then
+            ns._oocPlatesOwned = nil
+            SetCVar("nameplateShowEnemies", "1")
+        end
+    end
+end
+ns._oocPlatesCtl:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_LOGIN" then
+        self:UnregisterEvent("PLAYER_LOGIN")
+        ns.ApplyOOCPlates()
+        return
+    end
+    if event == "PLAYER_REGEN_DISABLED" then
+        SetCVar("nameplateShowEnemies", "1")
+    elseif not InCombatLockdown() then
+        -- REGEN_ENABLED, or a world entry that lands out of combat.
+        SetCVar("nameplateShowEnemies", "0")
+    end
+end)
+ns._oocPlatesCtl:RegisterEvent("PLAYER_LOGIN")
 

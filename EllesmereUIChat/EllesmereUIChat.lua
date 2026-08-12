@@ -4169,6 +4169,14 @@ local function SkinChatFrame(cf)
     if cf.SetShadowOffset then cf:SetShadowOffset(1, -1) end
     if cf.SetShadowColor then cf:SetShadowColor(0, 0, 0, 0.8) end
     cf:SetFading(false)
+    -- Must match win.smf's SetIndentedWordWrap(true) (Engine.lua CreateWindowSMF):
+    -- Blizzard's own hyperlink hit-zone positions for this frame are computed
+    -- against ITS OWN indent setting, not just its text. Leaving this at the
+    -- default (false) here while our visible copy indents wrapped lines desyncs
+    -- every hyperlink hit-zone from the visible glyphs on that line -- root
+    -- cause of player-name/channel-tag links (e.g. whispers, party chat)
+    -- clicking several characters off from where the name is drawn.
+    cf:SetIndentedWordWrap(true)
 
     -- 3. Hyperlink handlers: hover tooltip only. Blizzard's invisible text
     --    layer still owns all hyperlink hit-testing (its clicks run SetItemRef
@@ -4516,6 +4524,11 @@ initFrame:SetScript("OnEvent", function(self)
                         cf:SetFont(wantFont, sz, wantOutline)
                     end
                 end
+                -- Blizzard resets this alongside the font/dock passes above;
+                -- re-assert every pass rather than gating on a changed-check
+                -- (a plain boolean set costs nothing). See SkinChatFrame for
+                -- why this must stay congruent with win.smf's own setting.
+                cf:SetIndentedWordWrap(true)
             end
         end
         UpdateTabColors()

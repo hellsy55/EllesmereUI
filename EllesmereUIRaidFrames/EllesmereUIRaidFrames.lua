@@ -7800,6 +7800,15 @@ local function OnEvent(self, event, arg1, ...)
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
             end
+            -- Healer Mana Display: its rebuild normally rides the raid/party
+            -- frame paths above (UpdatePowerEventRegistration tails). A roster
+            -- change that lands with BOTH frame sets hidden -- leaving a raid
+            -- to solo, or to a party while EUI party frames are disabled --
+            -- skipped every rebuild, so the display kept its last group's
+            -- content (raid-mode names included) indefinitely.
+            if not framesVisible and not ns._partyFramesVisible then
+                if ns.HM_Rebuild then ns.HM_Rebuild() end
+            end
         end)
     elseif not framesVisible and not ns._partyFramesVisible then
         -- Skip all per-unit event processing when no frames are visible

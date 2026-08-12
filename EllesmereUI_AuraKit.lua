@@ -209,7 +209,24 @@ local function ApplyStyleToRegions(button, style)
         d.cooldown:SetReverse(style.cooldownReverse ~= false)
         d.cooldown:SetDrawEdge(style.cooldownDrawEdge == true)
         d.cooldown:SetHideCountdownNumbers(true) -- duration text comes from the binding, not the swipe
-        d.cooldown:SetShown(style.hideSwipe ~= true)
+        -- Hidden-swipe gate. SetShown alone does not stick: the engine calls
+        -- Cooldown:SetCooldown on this frame whenever the slot's aura data
+        -- refreshes, and that native API implicitly re-Shows the frame.
+        -- Withholding the frame from SetDurationCooldown does not work either --
+        -- that registration is the button's DURATION SOURCE, so a button
+        -- without one loses its duration TEXT along with the swipe.
+        -- SetDrawSwipe is the knob that means what we want: keep the cooldown
+        -- registered and running, draw no swipe from it. It is persistent
+        -- cooldown STYLE rather than visibility (SetCooldown never resets it),
+        -- and it is annotated AllowedWhenTainted. With swipe, edge, and
+        -- countdown numbers all off, a re-shown frame draws nothing, so the
+        -- engine's re-Show is harmless.
+        local hideSwipe = style.hideSwipe == true
+        d.cooldown:SetShown(not hideSwipe)
+        if d.akHideSwipe ~= hideSwipe then
+            d.akHideSwipe = hideSwipe
+            if d.cooldown.SetDrawSwipe then d.cooldown:SetDrawSwipe(not hideSwipe) end
+        end
     end
 
     -- Modules with their own text pipeline (fonts, anchors, outline rules) set
@@ -453,9 +470,41 @@ local function ApplyStyleToRegions(button, style)
     -- noTooltips). Running here also covers every Restyle, so a settings change cannot
     -- re-open either one. Same deferral as the neighbours above when the button is
     -- locked down while auras are secret.
-    if not style.cancelButtons and button.SetMouseClickEnabled then
-        if not pcall(button.SetMouseClickEnabled, button, false)
-            and d.styleKey and AK.AurasRestricted() then
+    -- The click channel is symmetric, unlike the click-off-only pass this used to be.
+    -- A style that GAINS cancelButtons later only reaches its already-created buttons
+    -- through Restyle (PAB's per-bar "Right-Click to Cancel" toggled off and back on, a
+    -- profile switch into a profile that has it on), and nothing undid the earlier
+    -- SetMouseClickEnabled(false) -- the bar stayed click-through until the next
+    -- /reload, with the right-click landing on the container below the icon. Field
+    -- report 2026-08-12: player buffs that cannot be right-click cancelled, /fstack
+    -- showing no button above the AuraContainer. SetCancelAuraButtons is re-asserted in
+    -- the same breath: it ran at button creation only, so the re-enabled toggle also
+    -- needed its click token registered again (Blizzard's own
+    -- AuraButtonSharedMixin:SetCancelAuraButtons -> RegisterForClicks). Change-guarded
+    -- by stamps, both deferred to the restriction lift like the neighbours above.
+    if style.cancelButtons then
+        if d.akClickOff and button.SetMouseClickEnabled then
+            if pcall(button.SetMouseClickEnabled, button, true) then
+                d.akClickOff = nil
+            elseif d.styleKey and AK.AurasRestricted() then
+                deferredRestyles[d.styleKey] = true
+            end
+        end
+        if d.akCancel ~= style.cancelButtons and button.SetCancelAuraButtons then
+            if pcall(button.SetCancelAuraButtons, button, style.cancelButtons) then
+                d.akCancel = style.cancelButtons
+            elseif d.styleKey and AK.AurasRestricted() then
+                deferredRestyles[d.styleKey] = true
+            end
+        end
+    elseif button.SetMouseClickEnabled then
+        -- Re-asserted every pass (not stamp-guarded): configuring tooltip behaviour on
+        -- an engine button turns its mouse back on, which silently re-opened the
+        -- nameplate click-eater. The stamp only records that WE own the off state, for
+        -- the re-arm above.
+        if pcall(button.SetMouseClickEnabled, button, false) then
+            d.akClickOff = true
+        elseif d.styleKey and AK.AurasRestricted() then
             deferredRestyles[d.styleKey] = true
         end
     end
@@ -641,8 +690,12 @@ function AK.MakeInitializer(styleKey, extra)
         -- restyles; duration opts otherwise land only here at creation).
         d.durationFmtS = style.durationShowSeconds and true or false
 
-        if style.cancelButtons then
+        -- Creation-time guarantee, stamp-guarded: ApplyStyleToRegions above already
+        -- wires the click token on this pass, so this only fires if that call was
+        -- denied (secret-value lockdown), leaving the deferred restyle to repair it.
+        if style.cancelButtons and d.akCancel ~= style.cancelButtons then
             button:SetCancelAuraButtons(style.cancelButtons)
+            d.akCancel = style.cancelButtons
         end
 
         GetStyleSet(styleKey)[button] = true
@@ -867,6 +920,9 @@ function AK.CreateContainerShell(parent, spec)
     -- Combat creation is legal since 68914 (PTR-7 notes; /euit3 field PASS
     -- 2026-07-23). The old in-combat zombie soft-fail -- and the OOC assert
     -- that guarded against it -- are gone.
+    if not C_AddOns.IsAddOnLoaded("Blizzard_AuraContainer") then
+        C_AddOns.LoadAddOn("Blizzard_AuraContainer")
+    end
     local container = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
 
     -- Anchor and a provisional size up front: the engine drains its parse and
@@ -1125,9 +1181,8 @@ end
 ------------------------------------------------------------------------------
 -- Restriction probe
 --
--- There is no official "are auras secret" query. This is a best-effort helper
--- for the surviving spellID-lookup paths that want to know whether silent
--- absence semantics are in effect. Never treat it as a data source.
+-- Prefer Blizzard's official secrecy query; retain the aura-data probe as a fallback
+-- for builds where that API is unavailable. Never treat either as a data source.
 --
 -- Cached per frame time: while restricted, the probe THROWS (and catches) a
 -- real Lua error, and error construction is the expensive part -- callers
@@ -1145,6 +1200,10 @@ end
 local restrictedStamp = -1
 function AK.AurasRestricted()
     local now = GetTime()
+    if C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() then
+        restrictedStamp = now
+        return true
+    end
     if now == restrictedStamp then return true end
     if pcall(C_UnitAuras.GetAuraDataByIndex, "player", 1, "HELPFUL") then
         return false
