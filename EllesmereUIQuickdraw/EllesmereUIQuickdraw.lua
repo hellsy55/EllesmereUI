@@ -5011,7 +5011,15 @@ function PaletteView:RefreshMarkerPips()
     if not n then return end
     for i = 1, n do
         local w = self.widgets[i]
-        if w then self:MarkerPip(w, self:CellSlot(i)) end
+        if w then
+            -- Through a local, NOT straight into the call: CellSlot answers a
+            -- nested cell with slot, claim, subIndex, and in final argument
+            -- position all three would expand -- landing the claim table in
+            -- MarkerPip's iconSize, which the size arithmetic there then
+            -- multiplies. Top-level cells return one value and hid this.
+            local slot = self:CellSlot(i)
+            self:MarkerPip(w, slot)
+        end
     end
 end
 
