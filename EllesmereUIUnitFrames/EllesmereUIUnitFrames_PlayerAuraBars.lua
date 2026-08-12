@@ -523,9 +523,11 @@ local STYLE_DEBUFFS = "playerAuraBars_debuffs"
 -- showAllBuffs); dispelColorMagic/Curse/Disease/Poison/Bleed (optional Color-like
 -- {r,g,b}, falls back to the Raid Frames palette).
 --
--- No durationFormat variants ("colon"/"seconds"): AK.GetDurationFormatter() returns
--- ONE shared formatter instance (bare seconds under 60, then Xm/Xh/Xd), no per-style
--- choice -- variants would mean extending AuraKit itself (shared with Raid Frames).
+-- Duration format: AK.GetDurationFormatter(showSecondsUnit) serves two cached
+-- variants -- bare seconds under 60 (the suite default) or unit-suffixed
+-- ("10s") via the per-bar "Show S for Seconds" cog (style.durationShowSeconds);
+-- both keep Xm/Xh/Xd above the minute. No other format variants ("colon" etc.):
+-- those would mean new AuraKit breakpoint schemas (shared with Raid Frames).
 -- DISPEL_SLOTS below is a local copy of EUI_RaidFrames_AuraContainers.lua's: ns is
 -- per-addon-private, so tokens/fallback colors are duplicated on purpose for suite-wide
 -- consistency -- a RaidFrames palette change must be mirrored here by hand, no shared source.
@@ -597,6 +599,24 @@ local function PAB_ApplyExtraText(button, d, style)
         end
         local c = style.durationColor
         d.duration:SetTextColor(c and c.r or 1, c and c.g or 1, c and c.b or 1)
+        -- "Show S for Seconds" rebind: duration opts land once at creation;
+        -- re-register when the style's formatter choice changed. The nil
+        -- gate skips the creation-time applyExtra pass (the creation block
+        -- registers and stamps right after). Stamp-after-success, the
+        -- BmRebindDurationCurve rule: a denied registration under the
+        -- secret-aura button restriction must leave the stamp unchanged so
+        -- the next restyle retries.
+        local wantS = style.durationShowSeconds and true or false
+        if d.durationFmtS ~= nil and d.durationFmtS ~= wantS then
+            local AK = EllesmereUI.AuraKit
+            local durationOpts = AK.BuildDurationTextOpts(
+                AK.GetDurationFormatter(style.durationShowSeconds),
+                style.durationColorCurve, style.durationUpdateInterval)
+            local ok, full = AK.SetDurationTextSafe(button, d.duration, durationOpts)
+            if ok and (full or not style.durationColorCurve) then
+                d.durationFmtS = wantS
+            end
+        end
     end
     if d.stack then
         local fKey = path .. "|" .. (style.stackFontSize or 11) .. "|" .. flag
@@ -721,6 +741,10 @@ local function BuildStyle(isBuff, cfg)
         cancelButtons = (isBuff and cfg.rightClickCancel ~= false) and "RightButtonUp" or nil,
 
         hideDurationText = cfg.durationShow == false,
+        -- "Show S for Seconds" (Duration cog, default off): sub-minute
+        -- readings keep their unit ("10s"); selects AK's s-variant duration
+        -- formatter at creation, PAB_ApplyExtraText rebinds live.
+        durationShowSeconds = cfg.durationShowSeconds == true,
         -- Show Tooltips (per-bar, default on): AK's noTooltips path kills
         -- hover on this style's buttons; the flip-back handles re-enables.
         noTooltips = (cfg.showTooltips == false) or nil,
@@ -1036,12 +1060,10 @@ end
 -- Retire a container we are abandoning. AuraContainer frames are PERMANENT and a
 -- declared group can NEVER be un-declared (the sweep above can only zero one), so
 -- AK.ReleaseContainer hides the frame but leaves every group live on it at whatever
--- frame count it last had. Anything that shows that frame again renders the OLD
--- content -- and a bar that was on Show All Buffs before the user pointed it at a
--- filter set left a fully-populated catch-all behind, which resurfaces as "the bar is
--- showing every buff, mount included". Zero what we know about while we still hold the
--- declared set; "spells" is declared outside the chain, so it goes by name. pcall:
--- zeroing a key this container never declared is not worth an error.
+-- frame count it last had -- anything that shows that frame again renders the old
+-- content. Zero what we know about while we still hold the declared set; "spells"
+-- is declared outside the chain, so it goes by name. pcall: zeroing a key this
+-- container never declared is not worth an error.
 local function RetireContainer(container, declaredSet)
     if not container then return end
     if declaredSet then
@@ -1111,15 +1133,13 @@ local function ComputeGrid(isBuff, cfg)
     -- (Up/Down): a "line" is a column, so lineExtent -> height -- see
     -- CornerFor/BuildContainerSpec for the matching growthH/growthV swap.
     local lineExtent = cols * iconSize + (cols - 1) * pad
-    -- Wrap budget handed to the engine (AK.SetContainerRowWidth / layout.rowWidth), and
-    -- deliberately NOT lineExtent: the engine reserves a TRAILING elementSpacing after
-    -- every element rather than only BETWEEN them, so it needs cols * (icon + spacing)
-    -- to seat a full line. A budget of exactly lineExtent is one spacing short, and the
-    -- last icon of every row wrapped -- each bar rendered one icon per row FEWER than
-    -- its Icons Per Row setting. Field-verified by a slider sweep: 5 gave 4 per row, 2
-    -- gave 1, and at the default 11 the shortfall reads as a stray icon on row 2.
-    -- lineExtent still sizes the bar's own frame, so the drag box keeps measuring the
-    -- icons rather than the phantom trailing gap.
+    -- Wrap budget handed to the engine (AK.SetContainerRowWidth / layout.rowWidth),
+    -- deliberately NOT lineExtent: the engine reserves a TRAILING elementSpacing
+    -- after every element (not only between), so a full line needs
+    -- cols * (icon + spacing) or the last icon of every row wraps. lineExtent
+    -- still sizes the bar's own frame, so the drag box measures the icons, not
+    -- the phantom trailing gap (the preview builder models the same and drops
+    -- the trailing gap).
     local rowWidth = lineExtent + pad
     local crossExtent = usedRows * iconSize + (usedRows - 1) * rowGap
     local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN")
@@ -1659,11 +1679,14 @@ local function CreateBars()
     local _, debuffSpec, debuffVertical = BuildContainerSpec(debuffsParent, debuffCfg, debuffGrid)
 
     -- Weapon enchant lead icons (oils/imbues are not auras; see
-    -- EUI_UnitFrames_WeaponEnchants.lua): published only while the bar's
-    -- broad-content mode admits generic duration buffs (All Buffs or Has
-    -- Duration on -- the same gate as the catch-all group). They render with
-    -- the bar's live style, so every customization follows automatically.
-    if buffCfg.showAllBuffs ~= false or buffCfg.hasDuration == true then
+    -- EUI_UnitFrames_WeaponEnchants.lua): opt-in (showWeaponEnchants,
+    -- default off -- the cell shift offsets the aura grid), and published
+    -- only while the bar's broad-content mode admits generic duration buffs
+    -- (All Buffs or Has Duration on -- the same gate as the catch-all
+    -- group). They render with the bar's live style, so every customization
+    -- follows automatically.
+    if buffCfg.showWeaponEnchants == true
+        and (buffCfg.showAllBuffs ~= false or buffCfg.hasDuration == true) then
         ns._weaponEnchPAB = { parent = buffsParent, corner = buffCorner,
             dir = buffCfg.growDirection or "LEFT",
             pad = buffPad, styleKey = STYLE_BUFFS, canCancel = true }
@@ -1854,9 +1877,10 @@ local function ApplyLiveConfig(isBuff)
 
     if isBuff then
         -- Keep the weapon-enchant cells riding the bar's live geometry and
-        -- filter state (same broad-content gate as the catch-all group),
-        -- then shift the engine run inward past them.
-        if cfg.showAllBuffs ~= false or cfg.hasDuration == true then
+        -- filter state (opt-in + the same broad-content gate as the
+        -- catch-all group), then shift the engine run inward past them.
+        if cfg.showWeaponEnchants == true
+            and (cfg.showAllBuffs ~= false or cfg.hasDuration == true) then
             local liveCorner = BuildContainerSpec(parent, cfg, grid)
             ns._weaponEnchPAB = { parent = parent, corner = liveCorner,
                 dir = cfg.growDirection or "LEFT",

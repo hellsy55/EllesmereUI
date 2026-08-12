@@ -11174,15 +11174,12 @@ local function Skin_LootToast()
         -- .ItemName/.Label/.Title that can GetText). Plenty of ADDON dialogs
         -- sit at FULLSCREEN_DIALOG with a .Title, ours included; without the gate this sweep silently blanks other addons' windows.
         --
-        -- SECRECY: this walks EVERY UIParent child, so it meets frames no part of
-        -- this addon created. A widget that has been fed secret data hands back
-        -- SECRET values from ordinary getters, and comparing one throws for us --
-        -- addon execution is never untainted, and only untainted code may inspect a
-        -- secret. Field report: "attempt to compare a secret string value" out of
-        -- GetFrameStrata on ANOTHER ADDON's engine aura container parented to
-        -- UIParent. Nothing secret-aspected is ever a loot toast, so secret == skip.
-        -- Both reads are resolved before any comparison: an `and` chain that calls
-        -- the getter mid-condition throws on the spot instead of skipping.
+        -- SECRECY: this walks EVERY UIParent child, so it meets frames this
+        -- addon did not create, and a widget fed secret data hands back SECRET
+        -- values from ordinary getters (comparing one throws in addon code).
+        -- Nothing secret-aspected is ever a loot toast, so secret == skip.
+        -- Both reads resolve into locals BEFORE any comparison -- a getter
+        -- called mid-`and`-chain throws on the spot instead of skipping.
         local up = _G.UIParent
         if deep and up and up.GetChildren then
             local isSecret = issecretvalue

@@ -1113,8 +1113,15 @@ end
 --  PER-SPELL: "Hide Swipe (Charges)" also hides the radial swipe (edge only),
 --  resolved only when in use (ns._cdmAnyChargeStyle) so others pay ~0.
 -------------------------------------------------------------------------------
-local CDM_EDGE_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\edge.png"
-local BLIZZARD_CDM_EDGE_TEXTURE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
+-- Game-indexed on purpose: the 12.1 edge channel renders game-indexed files
+-- ONLY -- loose addon art (png/tga/blp) draws nothing, silently, with clean
+-- state readbacks.
+local CDM_EDGE_TEXTURE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
+
+-- NOTE (probed 2026-08-12): the Cooldown widget clips ALL edge drawing at
+-- the frame's own rect -- scales past flush render identically, so the edge
+-- can never reach a square's corners without enlarging the cooldown frame
+-- itself. Do not re-attempt corner coverage via SetEdgeScale.
 
 -- Thin wrapper: frame spell/bar identity -> ResolveSpellSettings, the same
 -- Hero-talent-aware resolver the SetSwipeColor / cdState / desat hooks use, so
@@ -1127,31 +1134,26 @@ function ns._ResolveCdmSS(frame)
     return ResolveSpellSettings(frame, sid2, ns.GetBarSpellData and ns.GetBarSpellData(bk2))
 end
 
--- Draw the baseline gold edge on charge frames, or Blizzard's native edge when
--- the bar-wide Show Cooldown Edge setting is enabled. The shape system owns the
--- mask + circular-edge flag; this applies texture, color, scale and draw flag.
+-- Draw the styled cooldown edge -- one texture for every edge lane: the
+-- always-on charge recharge edge and the bar-wide Always Show Cooldown Edge
+-- re-assert both land here. The shape system owns the mask + circular-edge
+-- flag; this applies texture, color, scale and draw flag.
 local function ApplyCdmEdge(cd, bk2)
     if not cd then return end
     local bd = barDataByKey and barDataByKey[bk2]
     local shape = (bd and bd.iconShape) or "none"
-    local useBlizzardEdge = bd and bd.showCooldownEdge
     -- SetEdgeScale is frame-relative so the edge tracks icon size: plain icons
     -- use the action bars' baseline size, custom shapes the per-shape scale.
     local scale
     if shape == "none" or shape == "cropped" then
-        scale = useBlizzardEdge and 1.8 or 2.1
+        scale = 1.8
     else
         scale = (ns.CDM_SHAPE_EDGE_SCALES and ns.CDM_SHAPE_EDGE_SCALES[shape]) or 0.75
     end
+    -- Color rides SetEdgeTexture: the documented signature is
+    -- (texture, r, g, b, a) with the color args required.
     if cd.SetEdgeTexture then
-        cd:SetEdgeTexture(useBlizzardEdge and BLIZZARD_CDM_EDGE_TEXTURE or CDM_EDGE_TEXTURE)
-    end
-    if cd.SetEdgeColor then
-        if useBlizzardEdge then
-            cd:SetEdgeColor(1, 1, 1, 1)
-        else
-            cd:SetEdgeColor(0.973, 0.839, 0.604, 1)
-        end
+        cd:SetEdgeTexture(CDM_EDGE_TEXTURE, 1, 1, 1, 1)
     end
     if cd.SetEdgeScale then cd:SetEdgeScale(scale) end
     if cd.SetDrawEdge then cd:SetDrawEdge(true) end
@@ -2264,6 +2266,20 @@ local function DecorateFrame(frame, barData)
     fd.bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
         barData.bgB or 0.08, barData.bgA or 0.6)
 
+    -- Show Cooldown Edge: stamped per (re)claim so the cooldown hooks read one
+    -- flag instead of chasing frame -> bar -> settings on every push. Toggling
+    -- rebuilds bars, so the stamp always tracks the live setting; on the
+    -- on -> off transition drop a mid-sweep edge now instead of waiting for
+    -- Blizzard's next cooldown push.
+    local edgeOn = barData.showCooldownEdge or nil
+    if fd._edgeFeatureOn and not edgeOn and fd.cooldown and fd.cooldown.SetDrawEdge then
+        fd._isProcessingOverride = true
+        fd.cooldown:SetDrawEdge(false)
+        fd._isProcessingOverride = false
+        fd._edgeApplied = nil
+    end
+    fd._edgeFeatureOn = edgeOn
+
     -- Custom-shape bars own their border: ApplyShapeToCDMIcon draws the ring on
     -- shapeBorder and hides the square border. Re-applying the square style here
     -- would force it back on unchanged reanchors (no shape re-apply follows those),
@@ -2762,13 +2778,18 @@ local function DecorateFrame(frame, barData)
                 -- them; non-charge frames fall to the force-true below.
                 fd._isProcessingOverride = true
                 local handled = ApplyCdmChargeStyle(frame, cd)
-                if not handled and cd.SetDrawEdge then
-                    local fcEdge = _ecmeFC[frame]
-                    local bdEdge = fcEdge and fcEdge.barKey and barDataByKey[fcEdge.barKey]
-                    if bdEdge and bdEdge.showCooldownEdge and not fd._gcdSwipeSuppressed then
-                        ApplyCdmEdge(cd, fcEdge.barKey)
-                    else
+                -- Bar-wide Show Cooldown Edge (non-charge frames; charge frames
+                -- get their edge from ApplyCdmChargeStyle). GCD suppression
+                -- drops an edge we applied, tracked so the disabled/default
+                -- path never issues a redundant SetDrawEdge.
+                if not handled and fd._edgeFeatureOn and cd.SetDrawEdge then
+                    if not fd._gcdSwipeSuppressed then
+                        local fcEdge = _ecmeFC[frame]
+                        ApplyCdmEdge(cd, fcEdge and fcEdge.barKey)
+                        fd._edgeApplied = true
+                    elseif fd._edgeApplied then
                         cd:SetDrawEdge(false)
+                        fd._edgeApplied = nil
                     end
                 end
                 fd._isProcessingOverride = false
@@ -2807,6 +2828,10 @@ local function DecorateFrame(frame, barData)
             if cd.SetDrawEdge then
                 hooksecurefunc(cd, "SetDrawEdge", function(_, show)
                     if fd._isProcessingOverride then return end
+                    -- Edge-off pushes only matter to the bar-wide edge re-assert
+                    -- (every other branch below acts on show=true alone), so the
+                    -- disabled/default path keeps its zero-cost early-out.
+                    if not show and not fd._edgeFeatureOn then return end
                     if fd._isBuffViewerFrame then return end
                     -- No icon art: no recharge edge, charge or not. Blizzard
                     -- re-enables it on every re-push, so this must be in the hook.
@@ -2831,12 +2856,15 @@ local function DecorateFrame(frame, barData)
                             return
                         end
                     end
-                    local fcEdge = _ecmeFC[frame]
-                    local bdEdge = fcEdge and fcEdge.barKey and barDataByKey[fcEdge.barKey]
-                    if bdEdge and bdEdge.showCooldownEdge and not fd._gcdSwipeSuppressed then
+                    -- Bar-wide Show Cooldown Edge: re-assert across Blizzard's
+                    -- own edge-off pushes (stock disables it on every non-charge
+                    -- cooldown update).
+                    if fd._edgeFeatureOn and not fd._gcdSwipeSuppressed then
+                        local fcEdge = _ecmeFC[frame]
                         fd._isProcessingOverride = true
-                        ApplyCdmEdge(cd, fcEdge.barKey)
+                        ApplyCdmEdge(cd, fcEdge and fcEdge.barKey)
                         fd._isProcessingOverride = false
+                        fd._edgeApplied = true
                     end
                 end)
             end

@@ -3619,6 +3619,20 @@ do
             end
             return cdAlphaCurve
         end
+        -- Mount-state memo, one IsMounted per frame no matter how many
+        -- buttons repaint in it (the GcdStep pattern): the banked-count
+        -- probe below exists only for vigor-style abilities, which only
+        -- exist while mounted -- so dismounted combat (the cooldown-storm
+        -- case) pays zero extra C calls for it.
+        local _mountedAt, _mountedNow
+        local function MountedNow()
+            local t = GetTime()
+            if _mountedAt ~= t then
+                _mountedAt = t
+                _mountedNow = IsMounted() and true or false
+            end
+            return _mountedNow
+        end
         -- Desaturation + on-CD alpha for ONE button, from live cooldown data.
         -- Called from the cooldown event loop (data prefetched; false = known
         -- absent) and from each button's OnCooldownDone edge + the infrequent
@@ -3657,6 +3671,33 @@ do
                 useRealCurve = true
             end
             local active = cdInfo and cdInfo.isActive and durObj
+            -- Banked-use gate, BOTH branches: uses remaining = ready look,
+            -- with no reliance on the stale-prone isOnGCD flag. Charge
+            -- spells read currentCharges (their recharge duration total is
+            -- above the GCD step even with charges banked -- and a vigor
+            -- ability's regen "recharge" is ALWAYS running below max, so any
+            -- stale-isOnGCD repaint greyed it). Vigor sometimes reports as
+            -- charges and sometimes only as a plain action count, hence the
+            -- count fallback for the non-charge shape. Secret or zero values
+            -- change nothing (fall to the existing classification).
+            local banked = false
+            if active then
+                if useRealCurve and chargeInfo then
+                    local cur = chargeInfo.currentCharges
+                    if not (issecretvalue and issecretvalue(cur))
+                        and type(cur) == "number" and cur > 0 then
+                        banked = true
+                    end
+                elseif not useRealCurve and GetActionCount and MountedNow() then
+                    -- Mounted-only: the count shape exists only for vigor
+                    -- abilities, so dismounted repaints skip the probe.
+                    local cnt = GetActionCount(action)
+                    if not (issecretvalue and issecretvalue(cnt))
+                        and type(cnt) == "number" and cnt > 0 then
+                        banked = true
+                    end
+                end
+            end
             -- A GCD must never classify a button as being on cooldown, for
             -- either channel. The GCD-length Step curve above answers that from
             -- the TOTAL duration, which is the same value for the cooldown's
@@ -3672,7 +3713,7 @@ do
             -- toward the threshold, which then rejects the GCD anyway.
             if desatOn then
                 local val = 0
-                if active then
+                if active and not banked then
                     local curve = GetDesatCurve()
                     if curve and durObj.EvaluateTotalDuration then
                         if not useRealCurve or not cdInfo.isOnGCD then
@@ -3695,7 +3736,7 @@ do
             end
             if alphaOn then
                 local alphaSet = false
-                if active then
+                if active and not banked then
                     local curve = GetCdAlphaCurve(cdAlpha)
                     if curve and durObj.EvaluateTotalDuration then
                         if not useRealCurve or not cdInfo.isOnGCD then
