@@ -12284,8 +12284,13 @@ function EllesmereUI.IsPlayerMountedLike()
     return false
 end
 
+-- canGlide is already scoped to being on a glide-capable mount or form, so it
+-- needs no mount-shaped prefilter. IsPlayerMountedLike used to gate this and
+-- hard-returns false off DRUID, which silently excluded the non-druid flight
+-- forms (Dracthyr Soar, Haranir) from "Hide when Dragonriding". Deliberately
+-- no IsFlying() term: unlike the show/hide visibility MODES, this option fires
+-- on the ground too, as soon as the skyriding bar is available.
 function EllesmereUI.IsPlayerSkyriding()
-    if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return false end
     if C_PlayerInfo and C_PlayerInfo.GetGlidingInfo then
         local _, canGlide = C_PlayerInfo.GetGlidingInfo()
         return canGlide == true
@@ -12362,13 +12367,14 @@ function EllesmereUI.CheckVisibilityMode(mode, state)
     if mode == "in_party" then return state.inParty end
     if mode == "solo" then return not state.inRaid and not state.inParty end
     if mode == "show_dragonriding" then
-        -- Approximates the secure-macro [advflyable,flying] driver: show only while airborne on
-        -- a glide-capable (skyriding) mount. The shared predicate lives in EllesmereUI_Visibility.lua and is also used by the multi-select visibility engine.
+        -- Mirrors the secure-macro [advflyable,flying] driver: show only while airborne and
+        -- glide-capable (skyriding mounts and flight forms alike). The shared predicate lives in
+        -- EllesmereUI_Visibility.lua and is also used by the multi-select visibility engine.
         return (EllesmereUI.IsAirborneSkyriding and EllesmereUI.IsAirborneSkyriding()) or false
     end
     if mode == "show_not_dragonriding" then
-        -- Exact inverse of show_dragonriding: show whenever NOT airborne on
-        -- a glide-capable (skyriding) mount.
+        -- Exact inverse of show_dragonriding: show whenever NOT airborne and
+        -- glide-capable (skyriding mounts and flight forms alike).
         return not (EllesmereUI.IsAirborneSkyriding and EllesmereUI.IsAirborneSkyriding())
     end
     -- "always" and "mouseover" both return true (mouseover handled separately)
