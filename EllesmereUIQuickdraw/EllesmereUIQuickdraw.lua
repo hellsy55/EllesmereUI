@@ -7448,12 +7448,19 @@ do
 --
 -- Without the method -- an older client -- clicks stay off, which is where this
 -- began: hover-driven nesting works and a mouse Select key does not.
+-- EVERY button the client knows, not the five a common mouse carries: an MMO
+-- mouse reports its side buttons as BUTTON6 and up, and Blizzard names them
+-- through BUTTON31 (SecureTemplates.lua:90-93). A Select key bound to one left
+-- off this list is a key the gates swallow, which is the very failure the note
+-- above describes.
+local PASS_BUTTONS = { "LeftButton", "RightButton", "MiddleButton" }
+for n = 4, 31 do PASS_BUTTONS[#PASS_BUTTONS + 1] = "Button" .. n end
+
 local function GateMouse(gate)
     gate:SetMouseMotionEnabled(true)
     if gate.SetPassThroughButtons then
         gate:SetMouseClickEnabled(true)
-        gate:SetPassThroughButtons("LeftButton", "RightButton", "MiddleButton",
-                                   "Button4", "Button5")
+        gate:SetPassThroughButtons(unpack(PASS_BUTTONS))
     else
         gate:SetMouseClickEnabled(false)
     end
