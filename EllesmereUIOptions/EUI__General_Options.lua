@@ -955,6 +955,128 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.8.4",
+        -- No hero tier this patch (same shape as 8.7.7): features present,
+        -- so the tiers render normally and this is not a mini patch.
+        features = {
+            {
+                module = "Cooldown Manager",
+                title  = "Show Charge/Stack Text",
+                desc   = "Hide the stack counters on buff bars, per bar or per spell",
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Charge/Stack Size" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "Toggle Menu Open",
+                desc   = "Keep a menu up and choose with a Select Key",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "Dynamic Rez Entry",
+                desc   = "One entry casts the right resurrection for the moment",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "World Marker Toggling",
+                desc   = "Entries pick their marker back up, with placed-marker pips",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Standalone Weapon Enchants",
+                desc   = "A Buffs bar filter shows oils and imbues on their own",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Player Aura Bars" },
+            },
+        },
+        fixes = {
+            { module = "Bags", text = "Season 1 currencies that Blizzard delisted can now be untracked; they list under a new Retired group at the top of Enabled Currencies." },
+            { module = "Blizz UI Enhanced", text = "The character sheet's Crests section now tracks the Season 2 Mistcrests." },
+            { module = "Chat", text = "Chinese and Korean text now renders instead of showing empty boxes, sized to match your chat font." },
+            { module = "Cooldown Manager", text = "Aura-tracking icons like Touch of the Magi no longer go blank for the rest of a long cooldown." },
+            { module = "Cooldown Manager", text = "Tracking Bars with stacks disabled no longer show stack text whenever another bar has it enabled." },
+            { module = "Localization", text = "Korean clients no longer lose the first letter of class names in spec override labels." },
+            { module = "Localization", text = "Quickdraw is now fully translatable, and the Korean translation gained around 300 new entries." },
+            { module = "Nameplates", text = "Tracked debuffs now show only your own applications by default; a MINE tag on each included spell lets it show from any caster instead." },
+            { module = "Nameplates", text = "The preview eyeball for Raid Marker and Rare/Quest Indicator selections now sits beside its cog instead of floating off to the left." },
+            { module = "QoL", text = "Secondary Stats no longer stick at \"?\" after loading in; values recover as soon as the game allows reading them." },
+            { module = "QoL", text = "The Upgrade Calculator now counts Season 2 Mistcrests." },
+            { module = "Quickdraw", text = "Macros with modifier conditions now respond to modifiers pressed during a hold." },
+            { module = "Quickdraw", text = "Fixed a menu bound to a modified key also opening on the bare key, duplicate names after deleting a menu, and an error from nested world marker entries." },
+            { module = "Raid Frames", text = "Debuff Manager Icon Effects tiles now render instead of erroring on every application." },
+            { module = "Raid Frames", text = "Entering a vehicle no longer fills your own frame's aura displays with random buffs; filtered displays hide while boarded and return on exit." },
+            { module = "Raid Frames", text = "The Healer Mana Display's Show Names in Raid and Class Colored Names toggles can be turned back on after being turned off." },
+            { module = "Resource Bars", text = "Arms Warrior Sweeping Strikes now tracks 12.1's rules: Sweeping Strike adds 12 charges, Broad Strokes adds 6, capped at 18, and Rend consumes charges." },
+            { module = "Resource Bars", text = "Rune recharge on vertical bars now fills vertically, and threshold hash lines on vertical bars sit at the correct height." },
+            { module = "Resource Bars", text = "Opening the options on a Beast Mastery or Marksmanship Hunter no longer errors." },
+            { module = "Unit Frames", text = "3D portraits no longer disappear after zone changes." },
+            { module = "Unit Frames", text = "Custom Player Aura Bars no longer fill with default buffs after an addon-skipped cinematic." },
+        },
+    },
+    {
+        version = "8.8.3",
+        -- No hero tier this patch (same shape as 8.7.7): features present,
+        -- so the tiers render normally and this is not a mini patch.
+        features = {
+            {
+                module = "Cooldown Manager",
+                title  = "Always Show Cooldown Edge",
+                desc   = "The rotating edge on every cooldown, per bar",
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "EXTRAS", highlight = "Always Show Cooldown Edge" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "Hide Unusable Entries",
+                desc   = "One shared menu fits every class",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Resource Bars",
+                title  = "Darken Partially Filled Resources",
+                desc   = "Toggle the dimmed look of partial Soul Shards and Essence",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "CLASS RESOURCE BAR", highlight = "Fill Color" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Show Weapon Enchants",
+                desc   = "Weapon oils and imbues on the Player Aura Bars Buffs bar",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Player Aura Bars" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Show S for Seconds",
+                desc   = "Keep the \"s\" unit on sub-minute aura durations",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Player Aura Bars" },
+            },
+        },
+        fixes = {
+            { module = "Action Bars", text = "Dragonriding abilities with vigor left no longer grey out during the global cooldown under Desaturate on Cooldown." },
+            { module = "Action Bars", text = "Custom keybind text colors no longer revert to white when hovering a button." },
+            { module = "Blizz UI Enhanced", text = "Fixed a secret-value error from loot toast styling when certain other addons' frames are present." },
+            { module = "Chat", text = "The main chat window can now be dragged and arrow-nudged fully into every screen corner in Unlock Mode." },
+            { module = "Chat", text = "Undocking and dragging chat tabs works again, working around a 12.1 bug that crashed and hid the window." },
+            { module = "Chat", text = "The main chat window keeps its resized size and position through /reload and login, and no longer snaps back on first hover." },
+            { module = "Cooldown Manager", text = "The recharge edge on charge spells now shows a crisper, brighter edge style on all CDM bars." },
+            { module = "Data Bars", text = "The Experience bar now hides at the level cap instead of showing \"0% to level 91\", matching the Action Bars XP bar." },
+            { module = "General", text = "Opening the options for the first time via a slash command no longer errors with \"script ran too long\"." },
+            { module = "General", text = "Spell IDs on aura tooltips now work at login without re-toggling the option." },
+            { module = "General", text = "idTip added to the incompatible addons warning." },
+            { module = "Localization", text = "Brazilian Portuguese translation completed, aligned with the ptBR game client." },
+            { module = "Nameplates", text = "Quest progress text on nameplates now shows the real percent for progress-style quests instead of 0/1." },
+            { module = "QoL", text = "Secondary Stats returned to the classic single-line layout; the new color options (Multicolored, Class Color, Custom, Colored Percentages) remain." },
+            { module = "QoL", text = "Secondary Stats labels no longer turn invisible after login, and the display keeps updating after a /reload inside instanced content." },
+            { module = "Quickdraw", text = "Menu entries for another class's specializations now show their real icon and name in the editor instead of a question mark." },
+            { module = "Raid Frames", text = "Buffs, health bar colors, and dispel icons no longer vanish for party and raid members who are out of range; they now dim with the frame instead." },
+            { module = "Resource Bars", text = "Fixed the Dragonriding HUD's doubled border lines at zero spacing, drifting pip dividers between the two charge rows, and the speed text hiding behind the pips." },
+            { module = "Unit Frames", text = "Player Aura Bars now render the full Icons Per Row count instead of one fewer." },
+            { module = "Unit Frames", text = "Custom Player Aura Bars no longer start showing every buff after a reload or cinematic." },
+            { module = "Unit Frames", text = "Entering or leaving a vehicle no longer loses the player frame portrait." },
+            { module = "Unit Frames", text = "The player cast bar's Spell Target no longer shows the previous cast's target during channeled spells." },
+            { module = "Unit Frames", text = "Target and focus cast bars show the Uninterruptible Cast color tint again." },
+        },
+    },
+    {
         version = "8.8",
         heroes = {
             {
@@ -1067,7 +1189,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
             {
                 module = "QoL",
                 title  = "Secondary Stats Redesign",
-                desc   = "Aligned columns and new color options",
+                desc   = "New label and value color options",
                 nav    = { module = "EllesmereUIQoL", page = "QoL", section = "EXTRAS", highlight = "Secondary Stat Display" },
             },
             {

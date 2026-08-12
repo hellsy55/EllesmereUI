@@ -260,6 +260,11 @@ end
 -- function; nil results (parent not ready) are NOT cached, so early-login lookups
 -- retry. One memo input: parent palette (invalidation hook below).
 local POWER_COLORS = setmetatable({}, { __index = function(t, powerKey)
+    -- nil lookups are LEGAL here and must answer nil, never cache: BM/MM
+    -- hunters have no primary power (GetPrimaryPowerType returns nil by
+    -- design -- Focus is the class resource bar), and the options swatches
+    -- index this memo with that result. rawset with a nil key throws.
+    if powerKey == nil then return nil end
     if not EllesmereUI then return nil end
     local key = ResolvePowerKey(powerKey)
     if key and EllesmereUI.GetPowerColor then
@@ -1180,6 +1185,7 @@ local DEFAULTS = {
             resourceColored = false,  -- "Class Resource Color" fill mode (per-spec resource/power color); takes precedence over classColored when on
             fillR       = 0.95, fillG = 0.90, fillB = 0.60, fillA = 1,
             fillOpacity = 100,  -- 0-100; below 100 the world shows through the fill
+            darkenPartialPips = true,  -- fractional Soul Shards/Essence use a darker fill while incomplete
             bgR         = 1, bgG = 1, bgB = 1, bgA = 0.1,
             showText    = true,
             showTextOnlyIfNoPower = false,  -- only show the resource text while the power bar is hidden (see IsPowerBarHidden)
@@ -2726,6 +2732,23 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
     -- pure function of the args plus the bar's size/pixel multiplier -- never the
     -- live resource value. Without this guard every tick texture is torn down and
     -- rebuilt continuously.
+    -- Orientation: a plain container (the pip/rune strip, secondaryFrame)
+    -- carries a stamped token (_ticksOri, written beside the pip layout --
+    -- it has no inner StatusBar for the probe below to read); bar-type
+    -- callers resolve through their inner StatusBar. Vertical bars lay ticks
+    -- ALONG Y as horizontal strips; reverse fill / VERTICAL_DOWN measures
+    -- from the top, matching the pip slot mapping and ApplyBarOrientation.
+    local vert, revFill
+    local oriTok = sb and sb._ticksOri
+    if oriTok then
+        vert = oriTok ~= "HORIZONTAL"
+        revFill = oriTok == "VERTICAL_DOWN" or oriTok == "VERTICAL"
+    else
+        local oriSb = sb and (sb._sb or (sb.GetOrientation and sb))
+        vert = (oriSb and oriSb.GetOrientation
+            and oriSb:GetOrientation() == "VERTICAL") or false
+        revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
+    end
     if sb then
         local _pp = EllesmereUI and EllesmereUI.PP
         local w, h = sb:GetWidth(), sb:GetHeight()
@@ -2734,7 +2757,8 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
         if st and st.maxVal == maxVal and st.tickStr == tickStr and st.hw == hashWidth
            and st.r == hashR and st.g == hashG and st.b == hashB and st.a == hashA
            and st.pct == hashIsPercent and st.cap == maxRenderVal and st.vi == vInset
-           and st.w == w and st.h == h and st.mult == mult then
+           and st.w == w and st.h == h and st.mult == mult
+           and st.vert == vert and st.rev == revFill then
             return
         end
         if not st then st = {}; sb._tickState = st end
@@ -2742,6 +2766,7 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
         st.r, st.g, st.b, st.a = hashR, hashG, hashB, hashA
         st.pct, st.cap, st.vi = hashIsPercent, maxRenderVal, vInset
         st.w, st.h, st.mult = w, h, mult
+        st.vert, st.rev = vert, revFill
     end
 
     local vals = ParseTickValues(tickStr)
@@ -2779,8 +2804,13 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
     local barW = sb:GetWidth()
     local barH = sb:GetHeight()
     local vI = vInset or 0
-    -- Clamp so a fat border on a short bar can never invert the height.
-    if vI * 2 >= barH then vI = math.max(0, (barH - 1) / 2) end
+    -- Clamp so a fat border on a short bar can never invert the cross-axis
+    -- span (the inset shrinks the tick along whichever axis it spans).
+    if vert then
+        if vI * 2 >= barW then vI = math.max(0, (barW - 1) / 2) end
+    else
+        if vI * 2 >= barH then vI = math.max(0, (barH - 1) / 2) end
+    end
     local tickH = barH - vI * 2
     for i, v in ipairs(vals) do
         local frac, inRange
@@ -2800,9 +2830,19 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
             local t = tickCache[i]
             t:SetColorTexture(tR, tG, tB, tA)
             t:ClearAllPoints()
-            local off = PP and PP.Scale(barW * frac) or (barW * frac)
-            t:SetSize(pxW, tickH)
-            t:SetPoint("TOPLEFT", sb, "TOPLEFT", off, -vI)
+            if vert then
+                local off = PP and PP.Scale(barH * frac) or (barH * frac)
+                t:SetSize(barW - vI * 2, pxW)
+                if revFill then
+                    t:SetPoint("TOPLEFT", sb, "TOPLEFT", vI, -off)
+                else
+                    t:SetPoint("BOTTOMLEFT", sb, "BOTTOMLEFT", vI, off)
+                end
+            else
+                local off = PP and PP.Scale(barW * frac) or (barW * frac)
+                t:SetSize(pxW, tickH)
+                t:SetPoint("TOPLEFT", sb, "TOPLEFT", off, -vI)
+            end
             t:Show()
         end
     end
@@ -3266,6 +3306,11 @@ local function BuildBars()
         local pipSp = sp.pipSpacing or 1
         local pipOri = sp.pipOrientation or "HORIZONTAL"
         local isVertical = (pipOri ~= "HORIZONTAL")
+        -- Tick-orientation stamp for the pip/rune hash lanes: secondaryFrame
+        -- is a plain container, so ApplyResourceBarTicks cannot probe an inner
+        -- StatusBar for it. Always written (HORIZONTAL included) so a flip
+        -- back never reads stale.
+        secondaryFrame._ticksOri = pipOri
         local isReversed = (pipOri == "VERTICAL_UP")
         local totalW
 
@@ -4898,6 +4943,21 @@ local function UpdateSecondaryResource()
                             rf._rechargeBar = sb
                         end
 
+                        -- Recharge fill follows the pip orientation: a lazily
+                        -- created StatusBar defaults to HORIZONTAL and persists
+                        -- across orientation swaps. Same direction convention
+                        -- as ApplyBarOrientation (VERTICAL_DOWN = reverse =
+                        -- fills from the top). Change-guarded on the full
+                        -- orientation token (up/down differ only in reverse).
+                        if rf._rechargeOri ~= pipOri then
+                            local vertPip = pipOri ~= "HORIZONTAL"
+                            rf._rechargeBar:SetOrientation(vertPip and "VERTICAL" or "HORIZONTAL")
+                            rf._rechargeBar:SetRotatesTexture(vertPip)
+                            rf._rechargeBar:SetReverseFill(
+                                pipOri == "VERTICAL_DOWN" or pipOri == "VERTICAL")
+                            rf._rechargeOri = pipOri
+                        end
+
                         -- Compute recharge fraction (0 = just started, 1 = almost ready)
                         local frac = 0
                         local rStart, rDur = _runeStart[runeIdx], _runeDuration[runeIdx]
@@ -5745,14 +5805,15 @@ local function UpdateSecondaryResource()
             nextPip._rechargeBar:SetValue(frac)
             -- Partial generator (Evoker/Lock): color the filling pip like the full
             -- ones -- the threshold/band color when it applies to this slot (index
-            -- cur+1), else the base color. Dimmed (*0.75) so it still reads as
-            -- "recharging" rather than a completed pip.
+            -- cur+1), else the base color. Optionally dimmed so it still reads
+            -- as "recharging" rather than a completed pip.
             local fr, fg, fb = r, g, b
             local fi = cur + 1
             if useThresh and not (not _tsBandOn and _tsPartialOnly and fi < _tsThreshCount) then
                 fr, fg, fb = tr, tg, tb
             end
-            nextPip._rechargeBar:SetStatusBarColor(fr * 0.75, fg * 0.75, fb * 0.75, a)
+            local shade = sp.darkenPartialPips == false and 1 or 0.75
+            nextPip._rechargeBar:SetStatusBarColor(fr * shade, fg * shade, fb * shade, a)
             nextPip._rechargeBar:Show()
         end
 

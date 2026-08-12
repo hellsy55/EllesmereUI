@@ -169,6 +169,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- active M+ (EllesmereUI.lua:1519), which is precisely when a user would
     -- hit them and see nothing happen.
     local function Complain(msg)
+        msg = EllesmereUI.L(msg)
         if _G.UIErrorsFrame then
             UIErrorsFrame:AddMessage(msg, 1.0, 0.3, 0.3, 1.0)
         else
@@ -248,9 +249,8 @@ initFrame:SetScript("OnEvent", function(self)
             local keyText = GetBindingText(chord) or chord
             EllesmereUI:ShowConfirmPopup({
                 title       = "Key Already Bound",
-                message     = keyText .. " is bound to \""
-                    .. BindingLabel(stolenFrom) .. "\". Binding it to \""
-                    .. BindingLabel(action) .. "\" will leave that unbound.",
+                message     = EllesmereUI.Lf("%1$s is bound to \"%2$s\". Binding it to \"%3$s\" will leave that unbound.",
+                    keyText, BindingLabel(stolenFrom), BindingLabel(action)),
                 confirmText = "Rebind",
                 cancelText  = "Keep",
                 -- Re-checked rather than trusted: the dialog sits open for as
@@ -473,18 +473,23 @@ initFrame:SetScript("OnEvent", function(self)
                         and "world marker, next on each press")
                     or (slot.kind == "randommount" and "mount")
                     or (slot.kind == "spec" and "specialization")
+                    -- The name above is already the spell this character would
+                    -- cast, so the caption says what picked it rather than
+                    -- repeating it.
+                    or (slot.kind == "dynamicrez"
+                        and "resurrection, chosen for this character")
                     or slot.kind
             end
-            text = (name or slot.kind)
-                .. "\n|cff999999" .. caption .. "|r"
-                .. "\n|cff66ccffDrag to reorder."
-                .. "\nRight-click to change action."
-                .. "\nMiddle-click to remove."
-                .. "\nDrop an action here to replace it.|r"
+            text = EllesmereUI.L(name or slot.kind)
+                .. "\n|cff999999" .. EllesmereUI.L(caption) .. "|r"
+                .. EllesmereUI.L("\n|cff66ccffDrag to reorder."
+                    .. "\nRight-click to change action."
+                    .. "\nMiddle-click to remove."
+                    .. "\nDrop an action here to replace it.|r")
         else
-            text = "Add an action"
+            text = EllesmereUI.L("Add an action"
                 .. "\n|cff66ccffLeft-click to pick an action from a list."
-                .. "\nYou can also drop an action from the cursor here.|r"
+                .. "\nYou can also drop an action from the cursor here.|r")
         end
         if EllesmereUI.ShowWidgetTooltip then
             EllesmereUI.ShowWidgetTooltip(widget, text)
@@ -563,6 +568,21 @@ initFrame:SetScript("OnEvent", function(self)
             seen[spellID] = true
             out[#out + 1] = { icon = icon, name = name,
                               slot = { kind = "spell", id = spellID } }
+        end
+
+        -- Dynamic Rez ahead of the spellbook itself, the way the Mount Journal's
+        -- random roll leads the mounts: it is one entry that is whichever
+        -- resurrection spell the character holding the palette has, so a palette
+        -- shared between characters carries the rez once instead of once per
+        -- class with all but one of them dead. pin is what holds it at the top
+        -- past the sort. Left out entirely for a class with no rez at all.
+        if ns.HasRezKit and ns.HasRezKit() then
+            local slot = { kind = "dynamicrez" }
+            local icon = ns.SlotDisplay(slot)
+            -- Named for what the ENTRY is, not for the spell it happens to
+            -- resolve to today: this row is picked from a list, and "Rebirth"
+            -- sitting above the real Rebirth would read as a duplicate.
+            out[1] = { icon = icon, name = "Dynamic Rez", slot = slot, pin = true }
         end
 
         -- There is no C_SpellBook.GetNumSpellBookItems in this client. The book
@@ -931,7 +951,7 @@ initFrame:SetScript("OnEvent", function(self)
         if bAr.SetSnapToPixelGrid then bAr:SetSnapToPixelGrid(false); bAr:SetTexelSnappingBias(0) end
         local bTx = EllesmereUI.MakeFont(menu.back, 11, nil, tR, tG, tB, tA)
         bTx:SetPoint("LEFT", bAr, "RIGHT", 6, 0)
-        bTx:SetText("Categories")
+        bTx:SetText(EllesmereUI.L("Categories"))
         -- Named, because a sub-category's entries go back to the sub-list
         -- rather than to the root and the row has to say which.
         menu.backText = bTx
@@ -971,7 +991,7 @@ initFrame:SetScript("OnEvent", function(self)
         menu.searchPH:SetFont(FONT, 11, "")
         menu.searchPH:SetTextColor(0.5, 0.5, 0.5, 0.6)
         menu.searchPH:SetPoint("LEFT", menu.search, "LEFT", 6, 0)
-        menu.searchPH:SetText("Search...")
+        menu.searchPH:SetText(EllesmereUI.L("Search..."))
         menu.search:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
         menu.search:SetScript("OnEnterPressed", function(s) s:ClearFocus() end)
         menu.search:SetScript("OnTextChanged", function(s)
@@ -1105,7 +1125,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local nameLbl = EllesmereUI.MakeFont(custom, 10, nil, tR, tG, tB, tA)
         nameLbl:SetPoint("TOPLEFT", custom, "TOPLEFT", 1, 0)
-        nameLbl:SetText("Label")
+        nameLbl:SetText(EllesmereUI.L("Label"))
         local nameBox = MakeInput(custom, 22, false)
         nameBox:SetPoint("TOPLEFT", nameLbl, "BOTTOMLEFT", 0, -3)
         nameBox:SetPoint("RIGHT", custom, "RIGHT", -1, 0)
@@ -1113,7 +1133,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local textLbl = EllesmereUI.MakeFont(custom, 10, nil, tR, tG, tB, tA)
         textLbl:SetPoint("TOPLEFT", nameBox, "BOTTOMLEFT", 0, -8)
-        textLbl:SetText("Macro Text")
+        textLbl:SetText(EllesmereUI.L("Macro Text"))
         local textBox = MakeInput(custom, 62, true)
         textBox:SetPoint("TOPLEFT", textLbl, "BOTTOMLEFT", 0, -3)
         textBox:SetPoint("RIGHT", custom, "RIGHT", -1, 0)
@@ -1129,7 +1149,7 @@ initFrame:SetScript("OnEvent", function(self)
         EllesmereUI.MakeBorder(addBtn, ACCENT.r, ACCENT.g, ACCENT.b, 0.7, EllesmereUI.PP)
         local aTx = EllesmereUI.MakeFont(addBtn, 11, nil, 1, 1, 1, 0.9)
         aTx:SetPoint("CENTER")
-        aTx:SetText("Add")
+        aTx:SetText(EllesmereUI.L("Add"))
         addBtn:SetScript("OnEnter", function()
             aBg:SetColorTexture(ACCENT.r, ACCENT.g, ACCENT.b, 0.35)
         end)
@@ -1205,10 +1225,10 @@ initFrame:SetScript("OnEvent", function(self)
         -- to filter. The Back row is the one thing that differs between the two
         -- levels -- the root has nowhere above it.
         menu.cat = nil
-        menu.title:SetText(parent and parent.label
-            or (pickerReplaceIndex and "Change Action" or "Add Action"))
+        menu.title:SetText(EllesmereUI.L(parent and parent.label
+            or (pickerReplaceIndex and "Change Action" or "Add Action")))
         menu.back:SetShown(parent ~= nil)
-        menu.backText:SetText("Categories")
+        menu.backText:SetText(EllesmereUI.L("Categories"))
         -- Focus first: hiding a focused edit box leaves the keyboard captured by
         -- a box that is no longer on screen.
         menu.search:ClearFocus()
@@ -1227,7 +1247,7 @@ initFrame:SetScript("OnEvent", function(self)
             r.label:ClearAllPoints()
             r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            r.label:SetText(cat.label)
+            r.label:SetText(EllesmereUI.L(cat.label))
             r:SetScript("OnClick", function()
                 if cat.custom then
                     ShowPickerCustom()
@@ -1253,7 +1273,7 @@ initFrame:SetScript("OnEvent", function(self)
             r.label:ClearAllPoints()
             r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            r.label:SetText("Remove Action")
+            r.label:SetText(EllesmereUI.L("Remove Action"))
             r:SetScript("OnClick", function()
                 -- Before HidePicker, which clears the index on OnHide. The
                 -- guard mirrors AssignEntry's: a slot already gone leaves
@@ -1276,9 +1296,9 @@ initFrame:SetScript("OnEvent", function(self)
     ShowPickerCategory = function(cat)
         local menu = EnsurePickerMenu()
         menu.cat = cat
-        menu.title:SetText(cat.label)
+        menu.title:SetText(EllesmereUI.L(cat.label))
         menu.back:Show()
-        menu.backText:SetText(cat.parent and cat.parent.label or "Categories")
+        menu.backText:SetText(EllesmereUI.L(cat.parent and cat.parent.label or "Categories"))
         -- Focus first when hiding: a hidden edit box keeps the keyboard.
         if cat.noSearch then
             menu.search:ClearFocus()
@@ -1327,7 +1347,7 @@ initFrame:SetScript("OnEvent", function(self)
                 r.label:ClearAllPoints()
                 r.label:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
                 r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-                r.label:SetText(entry.name)
+                r.label:SetText(EllesmereUI.L(entry.name))
                 r:SetScript("OnClick", function() AssignEntry(entry) end)
                 r:Show()
             end
@@ -1341,7 +1361,7 @@ initFrame:SetScript("OnEvent", function(self)
             r.label:ClearAllPoints()
             r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            r.label:SetText(filter == "" and "Nothing to add" or "No matches")
+            r.label:SetText(filter == "" and EllesmereUI.L("Nothing to add") or EllesmereUI.L("No matches"))
             r:SetScript("OnClick", nil)
             r:Show()
             shown = 1
@@ -1357,11 +1377,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- No cat recorded: menu.cat means "a list view is up, re-filter it on a
         -- keystroke", and there is no list here.
         menu.cat = nil
-        menu.title:SetText("Custom Macro")
+        menu.title:SetText(EllesmereUI.L("Custom Macro"))
         menu.back:Show()
         -- Restated rather than left as it was: the row is shared, and the view
         -- before this one may have been a sub-category's.
-        menu.backText:SetText("Categories")
+        menu.backText:SetText(EllesmereUI.L("Categories"))
         menu.search:ClearFocus()
         menu.search:Hide()
         -- Hiding the scroll frame takes the pooled rows with it: they are its
@@ -1598,7 +1618,9 @@ initFrame:SetScript("OnEvent", function(self)
             palette.slots = {}
             palette.icon = nil
             palette.appearance = nil
-            palette.name = (preset and preset.label) or AutoName(count + 1)
+            -- Seed the name in the player's language: it is user data from the
+            -- moment it exists (renameable), so store the translated label.
+            palette.name = (preset and EllesmereUI.L(preset.label)) or AutoName(count + 1)
             for _, s in ipairs(slots or {}) do
                 if not ns.AddSlot(palette, s) then break end
             end
@@ -1643,7 +1665,7 @@ initFrame:SetScript("OnEvent", function(self)
         menu:ClearAllPoints()
         menu:SetPoint("TOP", anchor, "BOTTOM", 0, -4)
         menu.cat = nil
-        menu.title:SetText(title)
+        menu.title:SetText(EllesmereUI.L(title))
         menu.back:Hide()
         menu.search:ClearFocus()
         menu.search:Hide()
@@ -1660,7 +1682,7 @@ initFrame:SetScript("OnEvent", function(self)
         local menu = OpenListMenu(anchor, "Add Action Menu")
         if not menu then return end
 
-        MenuRow(menu, 1, nil, "Empty Action Menu", function() AddPalette(nil) end)
+        MenuRow(menu, 1, nil, EllesmereUI.L("Empty Action Menu"), function() AddPalette(nil) end)
         local n = 1
         for _, preset in ipairs(PALETTE_PRESETS) do
             local slots = preset.build()
@@ -1668,7 +1690,7 @@ initFrame:SetScript("OnEvent", function(self)
                 n = n + 1
                 local icon = ns.SlotDisplay(slots[1])
                 MenuRow(menu, n, icon or QUESTION_MARK,
-                    preset.label .. "  |cff808080(" .. #slots .. ")|r",
+                    EllesmereUI.L(preset.label) .. "  |cff808080(" .. #slots .. ")|r",
                     function() AddPalette(preset, slots) end)
             end
         end
@@ -1701,6 +1723,19 @@ initFrame:SetScript("OnEvent", function(self)
 
         table.remove(p.palettes, index)
         Set("paletteCount", count - 1)
+
+        -- The auto-names close ranks with everything else. A palette the user
+        -- never renamed carries the number it was made under, so deleting
+        -- "Action Menu 1" would otherwise leave "Action Menu 2" sitting at
+        -- index 1 -- and Add, which names by index, would then hand out that
+        -- same name a second time. Only the auto-name moves: a name the user
+        -- typed is theirs, whatever it happens to look like.
+        for i = index, count - 1 do
+            local palette = Palette(i)
+            if palette and palette.name == AutoName(i + 1) then
+                palette.name = AutoName(i)
+            end
+        end
 
         for i = 1, count - 1 do
             local palette = Palette(i)
@@ -1933,9 +1968,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local nm = (pal2 and pal2.name) or AutoName(idx)
                 EllesmereUI:ShowConfirmPopup({
                     title = "Delete Action Menu",
-                    message = "Delete " .. nm .. " and its contents? Entries "
+                    message = EllesmereUI.Lf("Delete %1$s and its contents? Entries "
                         .. "in other action menus that open it are removed "
-                        .. "too, and the menus after it move up one place.",
+                        .. "too, and the menus after it move up one place.", nm),
                     confirmText = "Delete",
                     cancelText = "Cancel",
                     onConfirm = function() DeletePalette(idx) end,
@@ -1947,7 +1982,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local cur = (pal2 and pal2.name) or AutoName(idx)
                 EllesmereUI:ShowInputPopup({
                     title = "Rename Action Menu",
-                    message = "Enter a new name for \"" .. cur .. "\":",
+                    message = EllesmereUI.Lf("Enter a new name for \"%1$s\":", cur),
                     placeholder = cur,
                     confirmText = "Rename",
                     cancelText = "Cancel",
@@ -2030,7 +2065,25 @@ initFrame:SetScript("OnEvent", function(self)
     -- through CommitKey, theft dialog and all, not a saved key of our own.
     -- The palette index is baked at build time like every other row here --
     -- switching the edited menu rebuilds the page.
-    local function BuildKeybindButton(rgn)
+    -- spec is nil for the palette's own keybind, which is the button this was
+    -- written for and still its default behaviour. The Select key passes one:
+    --
+    --   read()          the chord currently held, or nil
+    --   commit(chord)   store it; nil unbinds
+    --   plainMouse      allow a bare left-click to bind BUTTON1
+    --
+    -- plainMouse is the one real divergence, and it moves where the two
+    -- gestures live rather than adding one. The palette's key refuses bare left
+    -- and right clicks because they keep their widget meanings -- arm and
+    -- unbind -- and the Blizzard bindings page refuses them for the same
+    -- reason. A bare mouse button is precisely what a Select key is for, so
+    -- there the meaning follows the STATE instead of the button:
+    --
+    --   resting     left arms the picker, right unbinds
+    --   listening   any click is the chord, any key is the chord, Escape backs out
+    --
+    -- so BUTTON1 and BUTTON2 are both reachable and unbind is still one click.
+    local function BuildKeybindButton(rgn, spec)
         local PPQ = EllesmereUI.PanelPP
         local kbBtn = CreateFrame("Button", nil, rgn)
         PPQ.Size(kbBtn, 126, 29)
@@ -2048,9 +2101,21 @@ initFrame:SetScript("OnEvent", function(self)
         local palette = editPalette
         local action = BINDING_PREFIX .. palette
         local listening = false
+        local ReadKey = spec and spec.read or function() return GetBindingKey(action) end
+        local Commit = spec and spec.commit or function(chord) CommitKey(palette, chord) end
+        local plainMouse = spec and spec.plainMouse
+        -- What the key IS, shown above the how-to-bind instructions: the
+        -- palette's own keybind row sits under a heading that already says,
+        -- but a spec-driven picker (the Select Key) has only its label.
+        local intro = spec and spec.intro
         -- BuildPage's own Disabled() is a local of that function and out of
         -- scope here, the same reason BuildMenuSelector reads Cfg directly.
-        local function Disabled() return Cfg("enabled") ~= true end
+        -- A spec may widen the gate (the Select Key: also disabled while the
+        -- edited menu's Toggle Menu Open is off -- the key answers only
+        -- latched menus) and name the requirement for the disabled tooltip.
+        local Disabled = (spec and spec.disabled)
+            or function() return Cfg("enabled") ~= true end
+        local disabledReason = (spec and spec.disabledReason) or "the module"
 
         local function FormatKey(key)
             if not key then return EllesmereUI.L("Not Bound") end
@@ -2062,8 +2127,18 @@ initFrame:SetScript("OnEvent", function(self)
             return table.concat(parts, " + ")
         end
 
+        -- Always AFTER the commit, never before it. Reading first and painting
+        -- the old key was the same answer for the palette's keybind -- a
+        -- CommitKey the user declines or combat refuses leaves the binding
+        -- alone, and one that lands rebuilds the whole page over this button --
+        -- but the Select key's commit only writes the profile, so a label
+        -- painted before it stayed a whole interaction behind the value: the
+        -- click that bound BUTTON1 still read "Not Bound", and the right-click
+        -- that unbound it still read BUTTON1. Reading after is correct for
+        -- both, because a refused commit leaves exactly what the pre-read was
+        -- there to preserve.
         local function RefreshLabel()
-            kbLbl:SetText(FormatKey(GetBindingKey(action)))
+            kbLbl:SetText(FormatKey(ReadKey()))
         end
 
         kbBtn:SetScript("OnClick", function(self, button)
@@ -2078,13 +2153,21 @@ initFrame:SetScript("OnEvent", function(self)
             -- Blizzard bindings page applies to mouse input. The wheel stays
             -- uncapturable on purpose: a tick cannot be HELD, and hold is the
             -- palette's whole input model -- key down opens, key up fires.
+            -- plainMouse takes every bare click while LISTENING as a chord,
+            -- left and right alike, which is what makes BUTTON1 and BUTTON2
+            -- reachable at all. It costs nothing: unbind moves to a right-click
+            -- from the resting state, which is where a user reaches for it
+            -- anyway, and Escape still backs out of an armed picker. Without
+            -- this the two most obvious Select keys are the two this widget
+            -- cannot take.
             if listening and ((button ~= "LeftButton" and button ~= "RightButton")
-                or IsModifierKeyDown()) then
+                or IsModifierKeyDown()
+                or plainMouse) then
                 listening = false
                 self:EnableKeyboard(false)
-                RefreshLabel()
-                CommitKey(palette, CreateKeyChordStringUsingMetaKeyState(
+                Commit(CreateKeyChordStringUsingMetaKeyState(
                     GetConvertedKeyOrButton(button)))
+                RefreshLabel()
                 return
             end
             if button == "RightButton" then
@@ -2092,8 +2175,8 @@ initFrame:SetScript("OnEvent", function(self)
                     listening = false
                     self:EnableKeyboard(false)
                 end
+                Commit(nil)
                 RefreshLabel()
-                CommitKey(palette, nil)
                 return
             end
             -- The extra mouse buttons only mean something while listening.
@@ -2119,19 +2202,16 @@ initFrame:SetScript("OnEvent", function(self)
             self:SetPropagateKeyboardInput(false)
             listening = false
             self:EnableKeyboard(false)
-            -- Old key back on the label first: CommitKey's rejection paths
-            -- (combat, a declined theft dialog) then read as nothing having
-            -- happened, and a successful commit rebuilds the page over it.
-            RefreshLabel()
             if key ~= "ESCAPE" then
-                CommitKey(palette, CreateKeyChordStringUsingMetaKeyState(key))
+                Commit(CreateKeyChordStringUsingMetaKeyState(key))
             end
+            RefreshLabel()
         end)
 
         kbBtn:SetScript("OnEnter", function(self)
             if Disabled() then
                 EllesmereUI.ShowWidgetTooltip(self,
-                    EllesmereUI.DisabledTooltip("the module"))
+                    EllesmereUI.DisabledTooltip(disabledReason))
                 return
             end
             kbBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G,
@@ -2139,8 +2219,15 @@ initFrame:SetScript("OnEvent", function(self)
             if kbBtn._border and kbBtn._border.SetColor then
                 kbBtn._border:SetColor(1, 1, 1, 0.3)
             end
-            EllesmereUI.ShowWidgetTooltip(self,
-                "Left-click to set a keybind.\nRight-click to unbind.")
+            -- Right-click means two different things on a plainMouse picker
+            -- depending on whether it is armed, so it has to say which.
+            local tip = plainMouse
+                and "Left-click to set a keybind, then press any key or\n"
+                    .. "click any mouse button to use it.\n"
+                    .. "Escape cancels. Right-click here to unbind."
+                or "Left-click to set a keybind.\nRight-click to unbind."
+            if intro then tip = intro .. "\n\n" .. tip end
+            EllesmereUI.ShowWidgetTooltip(self, tip)
         end)
         kbBtn:SetScript("OnLeave", function()
             if listening then return end
@@ -2651,6 +2738,55 @@ initFrame:SetScript("OnEvent", function(self)
         BuildKeybindButton(row._rightRegion)
         y = y - h
 
+        -- The Select Key, then the switch that needs it: the key is the
+        -- PREREQUISITE (a latched menu nothing can answer would be a trap), so
+        -- it binds first and is never gated, and Toggle Menu Open stays
+        -- disabled until a key exists. Together on one row because neither
+        -- does anything without the other.
+        --
+        -- The key is one for the profile (Set) and the switch is per menu
+        -- (ASet): the gesture that picks an entry should mean the same thing
+        -- whichever menu is up.
+        local function HasSelectKey()
+            local key = Cfg("confirmKey")
+            return type(key) == "string" and key ~= ""
+        end
+        row, h = W:DualRow(parent, y,
+            -- A label half, like the keybind row above: the control underneath
+            -- is the same bespoke listening button, attached after the row.
+            { type="label", text="Toggled Menu Select Action" },
+            { type="toggle", text="Toggle Menu Open", noCapture=true,
+              disabled=function() return Disabled() or not HasSelectKey() end,
+              disabledTooltip="a Toggled Menu Select Action keybind",
+              tooltip="Keep this menu open when you let go of its keybind.\n"
+                  .. "Point at an entry and press the Select Action key to use it.\n"
+                  .. "Press the menu's own keybind again, or Escape, to close it.",
+              getValue=function() return ACfg("toggleMode") == true end,
+              setValue=function(v) ASet("toggleMode", v); Refresh() end })
+        BuildKeybindButton(row._leftRegion, {
+            intro = "Uses the entry you are pointing at while a menu is kept "
+                .. "open with Toggle Menu Open. One key shared by every menu, "
+                .. "claimed only while a menu is up -- a mouse button keeps "
+                .. "its normal use the rest of the time.",
+            read = function()
+                local key = Cfg("confirmKey")
+                if type(key) ~= "string" or key == "" then return nil end
+                return key
+            end,
+            -- "" rather than nil for an unbind: the profile default is a string,
+            -- and a nil would simply be re-merged from the defaults table.
+            -- RefreshPage as well as Refresh: Toggle Menu Open beside this
+            -- takes its disabled state from whether a key is bound.
+            commit = function(chord)
+                Set("confirmKey", chord or "")
+                Refresh()
+                EllesmereUI:RefreshPage()
+            end,
+            -- A bare mouse button is the point of this one. See BuildKeybindButton.
+            plainMouse = true,
+        })
+        y = y - h
+
         y = y - BuildPreview(parent, y)
 
         -- Hidden with a single menu: nothing to copy from.
@@ -2791,10 +2927,9 @@ initFrame:SetScript("OnEvent", function(self)
                       return Disabled() or ACfg("gridAutoColumns") ~= false
                   end,
                   requireState="disabled", disabledTooltip="Auto Columns",
-                  tooltip="How many entries a row of the grid holds. 1 stacks "
-                      .."them into a single column; " .. MAX_SLOTS
-                      .. " -- the most slots an action menu can hold -- lays them "
-                      .."out in a single row.",
+                  tooltip=EllesmereUI.Lf("How many entries a row of the grid holds. 1 stacks "
+                      .."them into a single column; %1$s -- the most slots an "
+                      .."action menu can hold -- lays them out in a single row.", MAX_SLOTS),
                   getValue=function() return ACfg("gridColumns") or 4 end,
                   setValue=function(v) ASet("gridColumns", v); Refresh() end })
             y = y - h
@@ -3141,6 +3276,56 @@ initFrame:SetScript("OnEvent", function(self)
         -- off in the module (FalloffRatios / SelectedZoom), pending the
         -- user's own animation pass.
         y = y - h
+
+        local wmRow
+        wmRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Unusable Entries", noCapture=true,
+              disabled=Disabled, disabledTooltip="the module",
+              tooltip="Hide entries this character cannot use: another class's "
+                      .."specializations and spells, and macros this character "
+                      .."does not have. One shared menu then fits every "
+                      .."character. The menu editor always shows every entry.",
+              getValue=function() return ACfg("hideUnusable") ~= false end,
+              setValue=function(v) ASet("hideUnusable", v); Refresh() end },
+            -- Beside the filter rather than in ACTION MENU SETUP: both of
+            -- these change what an entry does once the menu is drawn, and both
+            -- are per menu. It also keeps this the last row of the section
+            -- with no half of it empty.
+            { type="toggle", text="Toggle World Markers", noCapture=true,
+              disabled=Disabled, disabledTooltip="the module",
+              tooltip="Use a world marker entry again to pick that marker "
+                      .."back up. Off places the marker again, at the new "
+                      .."position.\n"
+                      .."This does not change the entry that clears all world "
+                      .."markers, or the cycling entry.",
+              getValue=function() return ACfg("worldMarkerToggle") ~= false end,
+              setValue=function(v) ASet("worldMarkerToggle", v); Refresh() end })
+        y = y - h
+
+        -- Inline cog on Toggle World Markers: the placed-marker pip opt-out.
+        if not EllesmereUI._prebuilding then
+            local rgn = wmRow._rightRegion
+            local _, wmCogShow = EllesmereUI.BuildCogPopup({
+                title = "World Marker Entries",
+                rows = {
+                    { type="toggle", label="Show Placed-Marker Pips",
+                      tooltip="Mark a world marker entry whose marker is on the ground with a small corner square, so you can see whether pressing it places or picks up.",
+                      get=function() return ACfg("worldMarkerPip") ~= false end,
+                      set=function(v) ASet("worldMarkerPip", v); Refresh() end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) wmCogShow(self) end)
+        end
 
         _, h = W:Spacer(parent, y, 10); y = y - h
 

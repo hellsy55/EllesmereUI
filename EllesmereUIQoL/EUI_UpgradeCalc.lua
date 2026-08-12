@@ -29,28 +29,28 @@ end
 -- Add or remove tracks from Data.trackOrder to match the season's track list.
 Data.tracks = {
     Adventurer = {
-        crestName = "Adventurer Crest",
-        hexColor = "|cff1eff00", currID = 3383, tier = 1,
+        crestName = "Adventurer Mistcrest",
+        hexColor = "|cff1eff00", currID = 3442, tier = 1,
         ranks = { 220, 224, 227, 230, 233, 237 },
     },
     Veteran = {
-        crestName = "Veteran Crest",
-        hexColor = "|cff0070dd", currID = 3341, tier = 2,
+        crestName = "Veteran Mistcrest",
+        hexColor = "|cff0070dd", currID = 3443, tier = 2,
         ranks = { 233, 237, 240, 243, 246, 250 },
     },
     Champion = {
-        crestName = "Champion Crest",
-        hexColor = "|cffa335ee", currID = 3343, tier = 3,
+        crestName = "Champion Mistcrest",
+        hexColor = "|cffa335ee", currID = 3444, tier = 3,
         ranks = { 246, 250, 253, 256, 259, 263 },
     },
     Hero = {
-        crestName = "Hero Crest",
-        hexColor = "|cffff8000", currID = 3345, tier = 4,
+        crestName = "Hero Mistcrest",
+        hexColor = "|cffff8000", currID = 3445, tier = 4,
         ranks = { 259, 263, 266, 269, 272, 276 },
     },
     Myth = {
-        crestName = "Myth Crest",
-        hexColor = "|cffffd100", currID = 3347, tier = 5,
+        crestName = "Myth Mistcrest",
+        hexColor = "|cffffd100", currID = 3446, tier = 5,
         ranks = { 272, 276, 279, 282, 285, 289 },
     },
 }

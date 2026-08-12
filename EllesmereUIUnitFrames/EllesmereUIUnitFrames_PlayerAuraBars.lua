@@ -58,7 +58,7 @@ local CLASS_LABELS = {
     RoleAura          = { "Role Debuffs",       "Shows only debuffs flagged for your role" },
     -- "Important" matches Raid Frames' wording for this isPriorityAura flag.
     PriorityAura      = { "Important",          "Shows only debuffs Blizzard flags as important" },
-    NonPlayer         = { "Non-Player Auras",   "Shows only debuffs not caused by any player or player pet" },
+    NonPlayer         = { "Non-Player Auras",   "Shows only debuffs not caused by any player or player pet (this is what shows most pve debuffs, do not check this while All Debuffs is selected!" },
     -- Any dispel-typed debuff whether removable or not; distinct from "Dispellable
     -- By You". Mirrors Raid Frames' "Dispels" filter.
     DispelTyped       = { "Dispels", "Shows any debuff with a dispel type (Magic, Curse, Disease, Poison, Bleed), even if you cannot remove it" },
@@ -523,9 +523,11 @@ local STYLE_DEBUFFS = "playerAuraBars_debuffs"
 -- showAllBuffs); dispelColorMagic/Curse/Disease/Poison/Bleed (optional Color-like
 -- {r,g,b}, falls back to the Raid Frames palette).
 --
--- No durationFormat variants ("colon"/"seconds"): AK.GetDurationFormatter() returns
--- ONE shared formatter instance (bare seconds under 60, then Xm/Xh/Xd), no per-style
--- choice -- variants would mean extending AuraKit itself (shared with Raid Frames).
+-- Duration format: AK.GetDurationFormatter(showSecondsUnit) serves two cached
+-- variants -- bare seconds under 60 (the suite default) or unit-suffixed
+-- ("10s") via the per-bar "Show S for Seconds" cog (style.durationShowSeconds);
+-- both keep Xm/Xh/Xd above the minute. No other format variants ("colon" etc.):
+-- those would mean new AuraKit breakpoint schemas (shared with Raid Frames).
 -- DISPEL_SLOTS below is a local copy of EUI_RaidFrames_AuraContainers.lua's: ns is
 -- per-addon-private, so tokens/fallback colors are duplicated on purpose for suite-wide
 -- consistency -- a RaidFrames palette change must be mirrored here by hand, no shared source.
@@ -597,6 +599,24 @@ local function PAB_ApplyExtraText(button, d, style)
         end
         local c = style.durationColor
         d.duration:SetTextColor(c and c.r or 1, c and c.g or 1, c and c.b or 1)
+        -- "Show S for Seconds" rebind: duration opts land once at creation;
+        -- re-register when the style's formatter choice changed. The nil
+        -- gate skips the creation-time applyExtra pass (the creation block
+        -- registers and stamps right after). Stamp-after-success, the
+        -- BmRebindDurationCurve rule: a denied registration under the
+        -- secret-aura button restriction must leave the stamp unchanged so
+        -- the next restyle retries.
+        local wantS = style.durationShowSeconds and true or false
+        if d.durationFmtS ~= nil and d.durationFmtS ~= wantS then
+            local AK = EllesmereUI.AuraKit
+            local durationOpts = AK.BuildDurationTextOpts(
+                AK.GetDurationFormatter(style.durationShowSeconds),
+                style.durationColorCurve, style.durationUpdateInterval)
+            local ok, full = AK.SetDurationTextSafe(button, d.duration, durationOpts)
+            if ok and (full or not style.durationColorCurve) then
+                d.durationFmtS = wantS
+            end
+        end
     end
     if d.stack then
         local fKey = path .. "|" .. (style.stackFontSize or 11) .. "|" .. flag
@@ -721,6 +741,10 @@ local function BuildStyle(isBuff, cfg)
         cancelButtons = (isBuff and cfg.rightClickCancel ~= false) and "RightButtonUp" or nil,
 
         hideDurationText = cfg.durationShow == false,
+        -- "Show S for Seconds" (Duration cog, default off): sub-minute
+        -- readings keep their unit ("10s"); selects AK's s-variant duration
+        -- formatter at creation, PAB_ApplyExtraText rebinds live.
+        durationShowSeconds = cfg.durationShowSeconds == true,
         -- Show Tooltips (per-bar, default on): AK's noTooltips path kills
         -- hover on this style's buttons; the flip-back handles re-enables.
         noTooltips = (cfg.showTooltips == false) or nil,
@@ -1033,6 +1057,26 @@ local function ApplyGroupConfig(container, chain, declaredSet, styleKey, effecti
     end
 end
 
+-- Retire a container we are abandoning. AuraContainer frames are PERMANENT and a
+-- declared group can NEVER be un-declared (the sweep above can only zero one), so
+-- AK.ReleaseContainer hides the frame but leaves every group live on it at whatever
+-- frame count it last had -- anything that shows that frame again renders the old
+-- content. Zero what we know about while we still hold the declared set; "spells"
+-- is declared outside the chain, so it goes by name. pcall: zeroing a key this
+-- container never declared is not worth an error.
+local function RetireContainer(container, declaredSet)
+    if not container then return end
+    if declaredSet then
+        for key in pairs(declaredSet) do
+            if key:sub(1, 7) ~= "__cand|" then
+                pcall(container.SetAuraGroupMaxFrameCount, container, key, 0)
+            end
+        end
+    end
+    pcall(container.SetAuraGroupMaxFrameCount, container, "spells", 0)
+    AK.ReleaseContainer(container)
+end
+
 -- Grid sizing. AK's flow layout only exposes a row WIDTH (pixels) to wrap on, no
 -- native "max lines" cap, so a row cap is enforced indirectly by capping
 -- maxFrameCount to rows*cols; the anchor frame's footprint is our own bounding-box
@@ -1083,19 +1127,27 @@ local function ComputeGrid(isBuff, cfg)
     local effectiveMax = math.min(configuredMax, rows * cols)
     -- Actual rows needed for the effective cap, never more than the row limit
     local usedRows = math.min(rows, math.max(1, math.ceil(effectiveMax / cols)))
-    -- `lineExtent` is the AK rowWidth/line-size value (icons-per-line axis: iconsPerRow
+    -- `lineExtent` is the icons' own extent on the line axis (iconsPerRow
     -- icons of iconSize + gaps); `crossExtent` is the other axis (lines actually used).
     -- Horizontal growth: a "line" is a row, so lineExtent -> width. Vertical growth
     -- (Up/Down): a "line" is a column, so lineExtent -> height -- see
     -- CornerFor/BuildContainerSpec for the matching growthH/growthV swap.
     local lineExtent = cols * iconSize + (cols - 1) * pad
+    -- Wrap budget handed to the engine (AK.SetContainerRowWidth / layout.rowWidth),
+    -- deliberately NOT lineExtent: the engine reserves a TRAILING elementSpacing
+    -- after every element (not only between), so a full line needs
+    -- cols * (icon + spacing) or the last icon of every row wraps. lineExtent
+    -- still sizes the bar's own frame, so the drag box measures the icons, not
+    -- the phantom trailing gap (the preview builder models the same and drops
+    -- the trailing gap).
+    local rowWidth = lineExtent + pad
     local crossExtent = usedRows * iconSize + (usedRows - 1) * rowGap
     local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN")
     local width = vertical and crossExtent or lineExtent
     local height = vertical and lineExtent or crossExtent
     return {
         effectiveMax = effectiveMax,
-        rowWidth = lineExtent,
+        rowWidth = rowWidth,
         width = width,
         height = height,
         rowGap = rowGap,
@@ -1115,6 +1167,31 @@ local function DefaultDebuffsCfg(s)
 end
 ns.PAB_DefaultBuffsCfg = DefaultBuffsCfg
 ns.PAB_DefaultDebuffsCfg = DefaultDebuffsCfg
+
+-- True while the default Buffs bar shows NOTHING but weapon enchants: the
+-- opt-in is on and neither broad-content mode admits generic buffs. Filters /
+-- Extra Spells are deliberately NOT considered -- they resolve to a finite
+-- add-set that comes and goes as the user edits it, and letting that flip the
+-- bar's name and grid underneath them would be unpredictable.
+function ns.PAB_IsWeaponEnchantsOnly(cfg)
+    return cfg ~= nil and cfg.showWeaponEnchants == true
+        and cfg.showAllBuffs == false and cfg.hasDuration ~= true
+end
+
+-- Default Buffs bar display name, following what the bar actually shows.
+-- Weapon enchants are a content source of their own, so they rename the bar
+-- outright when nothing else is on and append to it otherwise; Has Duration
+-- counts as a broad buff mode here, the bar still leads with generic buffs.
+--
+-- Returns the RAW English key: unlock mode stores element labels untranslated
+-- (EUI_UnlockMode.lua's GetBarLabel hands back elem.label verbatim), and the
+-- options page wraps the result in L() itself. Defined here, next to the cfg
+-- it reads, so the options page and the unlock element cannot drift apart.
+function ns.PAB_DefaultBuffsName(cfg)
+    if not (cfg and cfg.showWeaponEnchants == true) then return "Buffs" end
+    if ns.PAB_IsWeaponEnchantsOnly(cfg) then return "Weapon Enchants" end
+    return "Buffs & Weapon Enchants"
+end
 
 -- One-time seed of the default Buffs/Debuffs bars' position/size/grid from Blizzard's
 -- EditMode Buff/Debuff frame setup, so a first-time PAB user doesn't lose an
@@ -1351,6 +1428,9 @@ local declared = { buffs = {}, debuffs = {} } -- buffs: only the "Show All Buffs
 local lastSize = { buffs = nil, debuffs = nil } -- {w=,h=} last-applied grid size, for CENTER-anchor compensation (see ApplyLiveConfig)
 local buffsSlotSig -- signature of the default Buffs bar's last-applied resolved spell list (ns.PAB_ResolveSpells), mirrors customBuffSig[barId] for the per-bar slots model
 local RegisterPABUnlock -- forward-declared; defined after CreateBars, called from it
+-- Last label the Buffs mover was registered under, so ApplyLiveConfig can
+-- re-register on a name change without doing it on every slider drag.
+local lastUnlockBuffLabel
 local ReloadAllCustomBars -- forward-declared; defined after CreateBars (custom bars section), called from it
 local PAB_MaybeRefreshPreview -- forward-declared; assigned in the options-page preview section, called from every live-apply function so an open bar-detail preview box tracks slider drags without those functions knowing it exists
 
@@ -1627,11 +1707,14 @@ local function CreateBars()
     local _, debuffSpec, debuffVertical = BuildContainerSpec(debuffsParent, debuffCfg, debuffGrid)
 
     -- Weapon enchant lead icons (oils/imbues are not auras; see
-    -- EUI_UnitFrames_WeaponEnchants.lua): published only while the bar's
-    -- broad-content mode admits generic duration buffs (All Buffs or Has
-    -- Duration on -- the same gate as the catch-all group). They render with
-    -- the bar's live style, so every customization follows automatically.
-    if buffCfg.showAllBuffs ~= false or buffCfg.hasDuration == true then
+    -- EUI_UnitFrames_WeaponEnchants.lua): opt-in (showWeaponEnchants, default
+    -- off -- the cell shift offsets the aura grid), exposed as the "Weapon
+    -- Enchants" pinned row in the bar's Filters dropdown. A content source of
+    -- its own, NOT gated on the broad-content modes: enchants are not auras
+    -- and never come from the catch-all group, so checking the row alone
+    -- shows just the enchant cells. They render with the bar's live style, so
+    -- every customization follows automatically.
+    if buffCfg.showWeaponEnchants == true then
         ns._weaponEnchPAB = { parent = buffsParent, corner = buffCorner,
             dir = buffCfg.growDirection or "LEFT",
             pad = buffPad, styleKey = STYLE_BUFFS, canCancel = true }
@@ -1752,11 +1835,26 @@ function RegisterPABUnlock()
         })
     end
 
+    -- Buffs mover carries the bar's content-derived name (see
+    -- ns.PAB_DefaultBuffsName), so an enchants-only bar reads "Weapon Enchants"
+    -- in unlock mode instead of "Buffs". Baked in at registration --
+    -- EUI_UnlockMode.lua's GetBarLabel returns the stored string -- which is why
+    -- ApplyLiveConfig re-registers when the name changes.
+    local s = PAB()
+    local buffLabel = ns.PAB_DefaultBuffsName(s and DefaultBuffsCfg(s) or nil)
+    lastUnlockBuffLabel = buffLabel
+
     local elements = {
-        MakeBarElement("PAB_Buffs", "Buffs", 700, true, function() return buffsParent end),
+        MakeBarElement("PAB_Buffs", buffLabel, 700, true, function() return buffsParent end),
         MakeBarElement("PAB_Debuffs", "Debuffs", 701, false, function() return debuffsParent end),
     }
     EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIUnitFrames")
+    -- Registration alone only updates the element table; a mover already built
+    -- this session keeps the label CreateMover baked into its FontString. No-op
+    -- before the first unlock session, so it is safe on the CreateBars path too.
+    if EllesmereUI.RefreshUnlockElementLabel then
+        EllesmereUI.RefreshUnlockElementLabel("PAB_Buffs")
+    end
 end
 
 -- Public hook for the Options UI: rebuild both style tables and re-decorate every
@@ -1822,9 +1920,9 @@ local function ApplyLiveConfig(isBuff)
 
     if isBuff then
         -- Keep the weapon-enchant cells riding the bar's live geometry and
-        -- filter state (same broad-content gate as the catch-all group),
-        -- then shift the engine run inward past them.
-        if cfg.showAllBuffs ~= false or cfg.hasDuration == true then
+        -- filter state (opt-in only -- an independent content source, see the
+        -- publish in CreateBars), then shift the engine run inward past them.
+        if cfg.showWeaponEnchants == true then
             local liveCorner = BuildContainerSpec(parent, cfg, grid)
             ns._weaponEnchPAB = { parent = parent, corner = liveCorner,
                 dir = cfg.growDirection or "LEFT",
@@ -1834,6 +1932,15 @@ local function ApplyLiveConfig(isBuff)
         end
         ShiftBuffsForEnchants(container, parent, cfg, grid)
         if ns.WeaponEnchants_Layout then ns.WeaponEnchants_Layout() end
+
+        -- Unlock mode bakes the mover's label at registration, so a Filters
+        -- change would leave the old name on it until the next CreateBars.
+        -- Re-register only when the name actually changed -- this function runs
+        -- on every slider drag.
+        local label = ns.PAB_DefaultBuffsName(cfg)
+        if label ~= lastUnlockBuffLabel and RegisterPABUnlock then
+            RegisterPABUnlock()
+        end
     end
 
     if isBuff then
@@ -1847,7 +1954,7 @@ local function ApplyLiveConfig(isBuff)
             -- SetContainerAnchor/etc calls above ran against the OLD container and are
             -- harmless overhead. A group's candidateFilters is fixed at declaration, so a
             -- spell-list change requires this release+rebuild.
-            AK.ReleaseContainer(container)
+            RetireContainer(container, declared.buffs)
             local _, spec, specVertical = BuildContainerSpec(parent, cfg, grid)
             AK.RequestContainer(parent, "player", spec, function(newContainer)
                 buffsContainer = newContainer
@@ -2632,7 +2739,7 @@ local function ReloadCustomBuffBarImpl(barId)
     if not bar then
         -- Deleted: release the container (frees its slot-button tracking; engine
         -- frames themselves are never destroyed) and hide the now-orphaned parent.
-        if customBuffContainers[barId] then AK.ReleaseContainer(customBuffContainers[barId]) end
+        if customBuffContainers[barId] then RetireContainer(customBuffContainers[barId], customBuffDeclared[barId]) end
         if customBuffParents[barId] then customBuffParents[barId]:Hide() end
         customBuffContainers[barId], customBuffParents[barId], customBuffSig[barId], customBuffDeclared[barId] = nil, nil, nil, nil
         return
@@ -2702,7 +2809,7 @@ local function ReloadCustomBuffBarImpl(barId)
             ApplyGroupConfig(container, allChain, customBuffDeclared[barId], styleKey, grid.effectiveMax, bar.padding or 5, grid.rowGap, bar, BuffCandidateExtras(bar))
             return -- nothing structural to rebuild
         end
-        AK.ReleaseContainer(container) -- safe: dedicated container, nothing else on it
+        RetireContainer(container, customBuffDeclared[barId]) -- safe: dedicated container, nothing else on it
         customBuffContainers[barId] = nil
     end
 
@@ -2999,6 +3106,55 @@ local function PreviewSpellIcon(spellID)
     local icon = (info and info.iconID) or 134400
     previewIconCache[spellID] = icon
     return icon
+end
+
+-- Weapon-enchant preview cells, leading the bar exactly like the live ones
+-- (EUI_UnitFrames_WeaponEnchants.lua publishes them ahead of the engine run).
+-- Main hand + off hand only: those are the two slots reachable in current
+-- retail content, even though both that module's SLOTS and Blizzard's
+-- UpdateTemporaryEnchantmentBuffs still poll a third (ranged) -- so a bar sized
+-- for three enchants shows one placeholder cell of genuine spare capacity here,
+-- which is what the live bar would do too.
+--
+-- Paints the player's OWN equipped weapon icons rather than an invented sample:
+-- that is literally what the live buttons draw (PaintContent ->
+-- GetInventoryItemTexture), so the preview matches the real thing instead of
+-- approximating it. 134400 is the codebase's standard unknown-icon fallback,
+-- used when a slot is empty.
+local PREVIEW_ENCHANT_SLOTS = { INVSLOT_MAINHAND or 16, INVSLOT_OFFHAND or 17 }
+
+-- Only slots actually holding a weapon get a cell. With a two-hander (or any
+-- empty off hand) there is no second weapon to enchant, and drawing the
+-- unknown-icon question mark there would advertise a cell the player can never
+-- fill. An unarmed character still gets the single main-hand cell, so ticking
+-- the option always previews as something rather than silently nothing.
+local function PreviewEnchantSlots()
+    local out = {}
+    for i = 1, #PREVIEW_ENCHANT_SLOTS do
+        local slot = PREVIEW_ENCHANT_SLOTS[i]
+        if GetInventoryItemTexture("player", slot) then out[#out + 1] = slot end
+    end
+    if #out == 0 then out[1] = PREVIEW_ENCHANT_SLOTS[1] end
+    return out
+end
+
+-- Empty-slot art per weapon slot, for a character with nothing equipped:
+-- Blizzard's own character-pane silhouette reads as "a weapon goes here", where
+-- the generic unknown-icon question mark reads as "something is broken".
+-- C_PaperDollInfo.GetInventorySlotInfo(slotName) -> id, textureName, checkRelic
+-- (verified against Blizzard_UIPanels_Game/PaperDollFrame.lua, which uses the
+-- same namespaced call).
+local PREVIEW_ENCHANT_SLOT_NAMES = { [INVSLOT_MAINHAND or 16] = "MainHandSlot",
+    [INVSLOT_OFFHAND or 17] = "SecondaryHandSlot" }
+local function PreviewEnchantIcon(slot)
+    local tex = GetInventoryItemTexture("player", slot)
+    if tex then return tex end
+    local name = PREVIEW_ENCHANT_SLOT_NAMES[slot]
+    if name and C_PaperDollInfo and C_PaperDollInfo.GetInventorySlotInfo then
+        local _, slotTex = C_PaperDollInfo.GetInventorySlotInfo(name)
+        if slotTex then return slotTex end
+    end
+    return 134400
 end
 
 -- Same memoization for the preview's "Name" sort simulation below.
@@ -3333,19 +3489,46 @@ local function BuildPreviewSlots(isBuff, cfg, list, listLen, count)
     -- surviving first `count` per sort, so changing sort would swap WHICH spells
     -- appear, not just their order. Truncate to `count` on the stable, sort-
     -- independent mixed order FIRST, then sort that fixed selection for display.
+    -- Weapon enchants take the LEADING cells and are never sorted into the aura
+    -- content: they are not auras. They are also ADDITIVE, not a slice of the
+    -- bar's capacity -- the live container keeps its full maxFrameCount and is
+    -- shifted past them wholesale (ShiftBuffsForEnchants), so an enchant never
+    -- costs an aura its slot.
+    local numEnch, enchSlots = 0, nil
+    if isBuff and cfg.showWeaponEnchants == true then
+        enchSlots = PreviewEnchantSlots()
+        numEnch = #enchSlots
+    end
+    -- The two modes are genuinely different shapes and the preview mirrors both:
+    --   * alongside auras -- the container keeps its full maxFrameCount and is
+    --     shifted past the enchants wholesale, so they cost no aura its slot and
+    --     the first row overflows the reserved grid by the shift.
+    --   * enchants-only -- the grid was auto-sized FOR the enchants
+    --     (SyncWeaponEnchantsGrid) and the container holds no groups, so the
+    --     cells sit INSIDE that reserved width. The leftover cells stay as
+    --     placeholders on purpose: they are what explains where the bar's width
+    --     comes from, and dropping them made the 3-wide frame look arbitrary.
+    local avail = count
+    if isBuff and ns.PAB_IsWeaponEnchantsOnly(cfg) then
+        avail = math.max(0, count - numEnch)
+    end
+
     local mixed = isBuff and DedupeByIcon(BuildMixedRealSpells(cfg)) or nil
     local extraIDs
     if mixed then
-        local numSelected = math.min(#mixed, count)
+        local numSelected = math.min(#mixed, avail)
         local selected = {}
         for i = 1, numSelected do selected[i] = mixed[i] end
         extraIDs = SortPreviewList(selected, isBuff, cfg)
     end
     local numExtra = extraIDs and #extraIDs or 0
-    local numFiller = count - numExtra
+    local numFiller = avail - numExtra
     local slots = {}
+    for i = 1, numEnch do
+        slots[i] = { kind = "enchant", slot = enchSlots[i] }
+    end
     for i = 1, numExtra do
-        slots[i] = { kind = "extra", spellID = extraIDs[i] }
+        slots[numEnch + i] = { kind = "extra", spellID = extraIDs[i] }
     end
     if numFiller > 0 then
         if hasFiller then
@@ -3390,15 +3573,15 @@ local function BuildPreviewSlots(isBuff, cfg, list, listLen, count)
             fillerSelected = SortPreviewList(fillerSelected, isBuff, cfg)
             for i = 1, numFiller do
                 local e = fillerSelected[i]
-                slots[numExtra + i] = e and { kind = "fake", entry = e } or { kind = "placeholder" }
+                slots[numEnch + numExtra + i] = e and { kind = "fake", entry = e } or { kind = "placeholder" }
             end
         else
             for i = 1, numFiller do
-                slots[numExtra + i] = { kind = "placeholder" }
+                slots[numEnch + numExtra + i] = { kind = "placeholder" }
             end
         end
     end
-    return slots
+    return slots, numEnch
 end
 
 -- Icon Effects Per-Filter preview: applies a matched fx block's Glow/Border to a
@@ -3495,7 +3678,11 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     -- selects the fixed filler slice from this stable, shuffled-once order FIRST, sorts after.
     local list = (pool and #pool > 0 and pool) or (isBuff and PREVIEW_BUFF_SPELLS or PREVIEW_DEBUFF_SPELLS)
     local listLen = #list
-    local slots = BuildPreviewSlots(isBuff, cfg, list, listLen, count)
+    local slots, numEnch = BuildPreviewSlots(isBuff, cfg, list, listLen, count)
+    -- Enchants are additive leading cells, so the rendered total exceeds the
+    -- bar's aura capacity by however many are showing.
+    local total = #slots
+    local auraCount = total - numEnch
 
     -- Icon Effects Per-Filter preview (debuffs only): deliberately NOT tied to the
     -- bar's own active Base Filters/Show All Debuffs state -- requiring a matching
@@ -3527,7 +3714,7 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
         end
     end
 
-    local rows = math.max(1, math.ceil(count / cols))
+    local rows = math.max(1, math.ceil(auraCount / cols))
 
     -- Real per-icon flow packing: each slot's OWN actual render size (its fx Size
     -- override, or the bar's base iconSize) drives its own footprint directly, so
@@ -3535,7 +3722,7 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     -- neighbors get pushed out -- true flow-layout behavior rather than a uniform
     -- worst-case cell grid (which left too much gap around every normal icon).
     local slotSize = {}
-    for i = 1, count do
+    for i = 1, total do
         local e = fxBySlot and fxBySlot[i]
         local sz = e and tonumber(e.size)
         slotSize[i] = (sz and sz > 0) and sz or iconSize
@@ -3543,10 +3730,24 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
 
     local rowWidth, rowHeight, colOffset, rowYOffset = {}, {}, {}, {}
     do
+        -- Weapon enchants lead row 0 at the bar's own corner, and the aura block
+        -- starts past them on EVERY row -- ShiftBuffsForEnchants moves the whole
+        -- container, not just its first line, so lower rows stay indented by the
+        -- same amount and the first row overflows the reserved grid by the
+        -- shift. That asymmetry is the real bar's behavior; packing enchants as
+        -- plain leading members of one uniform flow would wrap row 2 back to the
+        -- bar's edge and misrepresent it.
+        local enchShift = 0
+        for k = 1, numEnch do
+            colOffset[k] = enchShift
+            enchShift = enchShift + slotSize[k] + pad
+            rowHeight[0] = math.max(rowHeight[0] or 0, slotSize[k])
+        end
+
         local runningX, runningY = {}, 0
-        for r = 0, rows - 1 do runningX[r] = 0 end
-        for i = 1, count do
-            local r = math.floor((i - 1) / cols)
+        for r = 0, rows - 1 do runningX[r] = enchShift end
+        for i = numEnch + 1, total do
+            local r = math.floor((i - numEnch - 1) / cols)
             colOffset[i] = runningX[r]
             runningX[r] = runningX[r] + slotSize[i] + pad
             rowHeight[r] = math.max(rowHeight[r] or 0, slotSize[i])
@@ -3569,15 +3770,18 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     local growUp = (growDir == "UP")
     local wrapRight = (wrapDir == "RIGHT")
 
-    for i = 1, math.max(count, #icons) do
-        if i <= count then
+    for i = 1, math.max(total, #icons) do
+        if i <= total then
             local btn = icons[i]
             if not btn then
                 btn = CreatePreviewIcon(box)
                 icons[i] = btn
             end
 
-            local row = math.floor((i - 1) / cols)
+            -- Enchant cells all live on row 0; aura slots index into their own
+            -- block, which starts after them (see the packing block above).
+            local row = (i <= numEnch) and 0
+                or math.floor((i - numEnch - 1) / cols)
             local withinLineStep = colOffset[i]
             local acrossLinesStep = rowYOffset[row]
             -- btn's own anchor point is `corner` (matching growDirection/
@@ -3619,18 +3823,23 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
                 btn.placeholder:Hide()
                 btn.textHost:Show()
 
-                local spellID
-                if slot.kind == "extra" then
-                    -- Real Extra Spell: always its own actual icon, never folded into
-                    -- the fake cycling pool.
-                    spellID = slot.spellID
-                else -- "fake"
-                    local entry = slot.entry
-                    spellID = isBuff and entry or entry.id
-                    dispel = (not isBuff) and entry.dispel or nil
+                if slot.kind == "enchant" then
+                    -- Weapon enchant: an ITEM texture, not a spell icon -- the
+                    -- live buttons paint the equipped weapon the same way.
+                    btn.icon:SetTexture(PreviewEnchantIcon(slot.slot))
+                else
+                    local spellID
+                    if slot.kind == "extra" then
+                        -- Real Extra Spell: always its own actual icon, never folded into
+                        -- the fake cycling pool.
+                        spellID = slot.spellID
+                    else -- "fake"
+                        local entry = slot.entry
+                        spellID = isBuff and entry or entry.id
+                        dispel = (not isBuff) and entry.dispel or nil
+                    end
+                    btn.icon:SetTexture(PreviewSpellIcon(spellID))
                 end
-
-                btn.icon:SetTexture(PreviewSpellIcon(spellID))
                 local z = style.iconZoom or 0.055
                 btn.icon:SetTexCoord(z, 1 - z, z, 1 - z)
             end
@@ -3936,12 +4145,47 @@ function ns.PAB_SetEnabled(v)
     if v then CreateBars() end
 end
 
+-- Cinematic recovery. An addon-cancelled cinematic (CINEMATIC_STOP) puts the
+-- engine aura containers through a hide/re-show whose re-parse can land while
+-- the teardown's filter state is still degraded -- filtered bars then render
+-- the FULL buff set, and with no aura event following, the wrong content
+-- sticks. The one lever Lua holds over engine-owned content is config: re-run
+-- the group config for every live container (candidate filters are the
+-- live-changeable channel, so re-setting them forces a fresh parse), one tick
+-- after the event so the teardown has finished. Coalesced; rare event.
+local cineFixPending = false
+local function ReapplyAllAfterCinematic()
+    if cineFixPending then return end
+    if not (buffsContainer or debuffsContainer) then return end
+    cineFixPending = true
+    C_Timer.After(0, function()
+        cineFixPending = false
+        ApplyLiveConfig(true)
+        ApplyLiveConfig(false)
+        local cb = ns.PAB_CustomBuffBars()
+        if cb then
+            for _, bar in ipairs(cb) do ns.PAB_ReloadCustomBuffBar(bar.id) end
+        end
+        local db2 = ns.PAB_CustomDebuffBars()
+        if db2 then
+            for _, bar in ipairs(db2) do ns.PAB_ReloadCustomDebuffBar(bar.id) end
+        end
+    end)
+end
+
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         TryCreateBars()
+        -- Registered only for sessions where the feature runs at all; the
+        -- handler's container guard covers the module-disabled stand-down.
+        if ns.PAB_Enabled() then
+            self:RegisterEvent("CINEMATIC_STOP")
+        end
+        return
     end
+    ReapplyAllAfterCinematic()
 end)
 

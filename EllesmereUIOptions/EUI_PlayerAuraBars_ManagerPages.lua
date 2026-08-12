@@ -193,6 +193,50 @@ local function TruncateFilterName(name)
     return (name or ""):sub(1, 3) .. "..."
 end
 
+-- Both defined in EllesmereUIUnitFrames_PlayerAuraBars.lua next to the cfg they
+-- read, so this page and the unlock-mode mover label cannot drift apart. The
+-- module returns raw English keys; only the options page translates them.
+local function IsWeaponEnchantsOnly(cfg)
+    return ns.PAB_IsWeaponEnchantsOnly ~= nil
+        and ns.PAB_IsWeaponEnchantsOnly(cfg)
+end
+
+local function DefaultBuffBarName(cfg)
+    return L(ns.PAB_DefaultBuffsName and ns.PAB_DefaultBuffsName(cfg) or "Buffs")
+end
+
+-- Weapon-enchants-only is a fundamentally different shape of bar -- at most
+-- three cells (main hand / off hand / ranged, see EUI_UnitFrames_
+-- WeaponEnchants.lua's SLOTS, which matches Blizzard's own
+-- UpdateTemporaryEnchantmentBuffs) instead of a wrapping buff grid. Resize the
+-- grid to fit on the way in and restore it on the way out.
+--
+-- The user's own iconsPerRow/maxRows/maxTotal are stashed rather than assumed:
+-- restoring hardcoded defaults would silently eat a customized grid. Storing
+-- nil for an unset key is intentional -- the stash is then empty and restoring
+-- puts the keys back to nil, i.e. ComputeGrid's own 11/3/32 buff fallbacks.
+--
+-- Returns true when it actually crossed the boundary. Callers use that to pick
+-- a FORCE page rebuild: crossing rewrites the three grid sliders and the bar's
+-- name, and none of those are RegisterWidgetRefresh clients, so the usual
+-- lightweight refresh would leave them showing stale numbers.
+local function SyncWeaponEnchantsGrid(cfg)
+    if not cfg then return false end
+    if IsWeaponEnchantsOnly(cfg) then
+        if cfg.enchGridSaved then return false end
+        cfg.enchGridSaved = { iconsPerRow = cfg.iconsPerRow,
+            maxRows = cfg.maxRows, maxTotal = cfg.maxTotal }
+        cfg.iconsPerRow, cfg.maxRows, cfg.maxTotal = 3, 1, 3
+        return true
+    end
+    if not cfg.enchGridSaved then return false end
+    local saved = cfg.enchGridSaved
+    cfg.iconsPerRow, cfg.maxRows, cfg.maxTotal =
+        saved.iconsPerRow, saved.maxRows, saved.maxTotal
+    cfg.enchGridSaved = nil
+    return true
+end
+
 local function BuildBuffBarSubtitle(bar)
     local extraCount = bar.spells and #bar.spells or 0
 
@@ -272,7 +316,7 @@ end
 -- "Selected" plus the "Custom Spell ID" action -- no "Presets" group, there is
 -- nothing to browse. Used by BOTH the default Buffs bar and every custom buff bar
 -- (unified onto one model).
-local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
+local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply, isDefault)
     local W = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
     local _, hh = 0, 0
@@ -289,6 +333,13 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
     --                      its own, MUTUALLY EXCLUSIVE with All Buffs:
     --                      the catch-all narrowed to duration-carrying
     --                      buffs via candidateFilters.maxDuration)
+    --   [ ] Weapon Enchants (cfg.showWeaponEnchants, default-bar only --
+    --                      the enchant cells publish from the default
+    --                      Buffs bar alone. INDEPENDENT of the two modes
+    --                      above and of the real filters: oils/imbues are
+    --                      not auras, so they come from their own source
+    --                      rather than the catch-all group, and a mode
+    --                      flip must not clear it)
     --   ------------------ (isHeader divider)
     --   [ ] <real filters, alphabetical>
     --
@@ -319,6 +370,7 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
     ); sy = sy - hh
 
     local PAB_ALL_BUFFS_KEY, PAB_HAS_DURATION_KEY = "__allBuffs", "__hasDuration"
+    local PAB_WEAPON_ENCH_KEY = "__weaponEnchants"
 
     -- LEFT: Filters checkbox dropdown, "Edit Filters" pinned top action.
     do
@@ -360,8 +412,14 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
                   tooltip = "Show every buff. While this is on, checked filters below are hidden from the bar instead of added." },
                 { key = PAB_HAS_DURATION_KEY, label = "Has Duration",
                   tooltip = "Show every buff that has a duration (hides permanent buffs). While this is on, checked filters below are hidden instead of added." },
-                { isHeader = true, label = "" },
             }
+            -- Default Buffs bar only: the enchant cells publish from that bar
+            -- alone, so the row would be a dead switch on custom buff bars.
+            if isDefault then
+                items[#items + 1] = { key = PAB_WEAPON_ENCH_KEY, label = "Weapon Enchants",
+                  tooltip = "Show weapon oil and imbue icons at the front of this bar. They are weapon enchants rather than auras, so they show independently of the options above -- and the aura grid is shifted inward to make room for them, with every row shifting over by the same amount." }
+            end
+            items[#items + 1] = { isHeader = true, label = "" }
             for i = 1, #filters do
                 items[#items + 1] = { key = filters[i].id, label = filters[i].name }
             end
@@ -373,6 +431,7 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
             function(k)
                 if k == PAB_ALL_BUFFS_KEY then return AllBuffsOn() end
                 if k == PAB_HAS_DURATION_KEY then return cfg.hasDuration == true end
+                if k == PAB_WEAPON_ENCH_KEY then return cfg.showWeaponEnchants == true end
                 cfg.filters = cfg.filters or {}
                 return cfg.filters[k] == true
             end,
@@ -385,11 +444,15 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
                     -- are broad-content modes. Extra Spells stay untouched.
                     cfg.hasDuration = nil
                     cfg.filters = nil
+                    local gridChanged = SyncWeaponEnchantsGrid(cfg)
                     apply()
                     -- Non-force, same as every other row: the open menu
                     -- refreshes its own checks/locks in place, so a mode
-                    -- flip must not tear the page down under it.
-                    EllesmereUI:RefreshPage()
+                    -- flip must not tear the page down under it. The one
+                    -- exception is crossing the enchants-only boundary, which
+                    -- rewrites grid sliders and the bar name (see
+                    -- SyncWeaponEnchantsGrid).
+                    EllesmereUI:RefreshPage(gridChanged and true or nil)
                     return
                 end
                 if k == PAB_HAS_DURATION_KEY then
@@ -398,8 +461,24 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply)
                     -- own); mode flips clear the filter selection, same as All Buffs.
                     if v then cfg.showAllBuffs = false end
                     cfg.filters = nil
+                    local gridChanged = SyncWeaponEnchantsGrid(cfg)
                     apply()
-                    EllesmereUI:RefreshPage()
+                    EllesmereUI:RefreshPage(gridChanged and true or nil)
+                    return
+                end
+                if k == PAB_WEAPON_ENCH_KEY then
+                    -- Its own content source (oils/imbues are not auras), so it
+                    -- neither clears nor is cleared by the two modes above and
+                    -- never touches cfg.filters -- which is also why the mode
+                    -- rows' `cfg.filters = nil` resets leave it standing.
+                    cfg.showWeaponEnchants = v and true or nil
+                    SyncWeaponEnchantsGrid(cfg)
+                    apply()
+                    -- Force: entering/leaving enchants-only rewrites the grid
+                    -- sliders (Icons per Row / Max Rows / Max Total) and the
+                    -- bar's name, none of which are RegisterWidgetRefresh
+                    -- clients -- a lightweight pass would leave them stale.
+                    EllesmereUI:RefreshPage(true)
                     return
                 end
                 cfg.filters = cfg.filters or {}
@@ -724,6 +803,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
               values = AURA_POINT_VALUES, order = AURA_POINT_ORDER,
               get = function() return cfg.durationPosition or "CENTER" end,
               set = function(v) cfg.durationPosition = v; apply() end },
+            { type = "toggle", label = "Show S for Seconds",
+              get = function() return cfg.durationShowSeconds == true end,
+              set = function(v) cfg.durationShowSeconds = v and true or nil; apply() end },
         })
     end
     do
@@ -877,7 +959,10 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
     end
 
     -- Buff bars only: debuffs are never player-cancelable, so the row would
-    -- be a dead switch there.
+    -- be a dead switch there. (Weapon enchants used to share this row as a
+    -- second toggle; they are a content source rather than a display tweak,
+    -- so they now live as the "Weapon Enchants" pinned row in the Filters
+    -- dropdown -- see BuildAssignedBuffsFields.)
     if isBuff then
         _, hh = W:DualRow(frame, sy,
             {
@@ -1278,11 +1363,12 @@ local function BuildDefaultBarDetail(frame, fontPath, isBuff)
     end
     local body = WrapCompensatedBody(frame, scrollTop)
     local sy = 0
-    sy = BuildBarTitle(body, fontPath, isBuff and L("Buffs") or L("Debuffs"),
+    sy = BuildBarTitle(body, fontPath,
+        isBuff and DefaultBuffBarName(cfg) or L("Debuffs"),
         L("Built-in bar. Cannot be deleted"), sy)
 
     if isBuff then
-        sy = BuildAssignedBuffsFields(body, fontPath, sy, cfg, ApplyBar)
+        sy = BuildAssignedBuffsFields(body, fontPath, sy, cfg, ApplyBar, true)
     else
         sy = BuildAssignedDebuffsFields(body, fontPath, sy, cfg, ApplyBar)
     end
@@ -2385,9 +2471,14 @@ function ns.PABMP_BuildPage(pageName, parent, yOffset)
         hdr:SetTextColor(0.6, 0.6, 0.6)
         tileY = tileY - 35
 
+        -- Name follows the bar's content (see DefaultBuffBarName). Static, not
+        -- a refresh client: every toggle that can change it forces a full page
+        -- rebuild, which re-runs this.
+        local sPAB = ns.db and ns.db.profile and ns.db.profile.playerAuraBars
         tileY = tileY - BuildTile(sidebarChild, tileY, {
             width = sidebarW, fontPath = fontPath,
-            title = L("Buffs"),
+            title = DefaultBuffBarName(sPAB and ns.PAB_DefaultBuffsCfg
+                and ns.PAB_DefaultBuffsCfg(sPAB) or nil),
             subtitle = L("Default"),
             selected = (pabSel and pabSel.kind == "buff" and pabSel.id == "default"),
             showToggle = false,

@@ -4154,39 +4154,34 @@ function EllesmereUI.ApplyColorsToOUF()
     -- Pull Colors From, profile switches), so drop the effective-colour cache here; the
     -- GetClassColor/GetPowerColor reads below rebuild it from the new palette + darken.
     EllesmereUI.InvalidateColorCache()
-    -- 1. Update oUF color objects. NEVER modify _G.RAID_CLASS_COLORS: taint.
-    local oUF = _G.EllesmereUF
-    if oUF and oUF.colors then
-        if oUF.colors.class then
+    -- 1. Update the unit-frame engine's shared color objects. NEVER modify
+    -- _G.RAID_CLASS_COLORS: taint.
+    local colors = EllesmereUI._UFColors
+    if colors then
+        if colors.class then
             for classToken, _ in pairs(CLASS_COLOR_MAP) do
                 local cc = EllesmereUI.GetClassColor(classToken)
-                local entry = oUF.colors.class[classToken]
-                if entry then
-                    if entry.SetRGBA then
-                        entry:SetRGBA(cc.r, cc.g, cc.b, 1)
-                    else
-                        entry[1] = cc.r; entry[2] = cc.g; entry[3] = cc.b
-                    end
+                local entry = colors.class[classToken]
+                if entry and entry.SetRGBA then
+                    entry:SetRGBA(cc.r, cc.g, cc.b, 1)
+                else
+                    colors.class[classToken] = CreateColor(cc.r, cc.g, cc.b, 1)
                 end
             end
         end
-        if oUF.colors.power then
+        if colors.power then
             for powerKey, enumVal in pairs(EllesmereUI.POWER_KEY_TO_ENUM) do
                 local pc = EllesmereUI.GetPowerColor(powerKey)
-                local entry = oUF.colors.power[enumVal]
-                if entry then
-                    if entry.SetRGBA then
-                        entry:SetRGBA(pc.r, pc.g, pc.b, 1)
-                    else
-                        entry[1] = pc.r; entry[2] = pc.g; entry[3] = pc.b
-                    end
+                local entry = colors.power[enumVal]
+                if entry and entry.SetRGBA then
+                    entry:SetRGBA(pc.r, pc.g, pc.b, 1)
+                else
+                    colors.power[enumVal] = CreateColor(pc.r, pc.g, pc.b, 1)
                 end
             end
         end
-        if oUF.objects then
-            for _, obj in next, oUF.objects do
-                obj:UpdateAllElements("ForceUpdate")
-            end
+        if EllesmereUI._UFEngineForceAll then
+            EllesmereUI._UFEngineForceAll("ForceUpdate")
         end
     end
     -- 3. Refresh nameplates (enemy + friendly)
@@ -4514,20 +4509,18 @@ do
     end
 end
 
--- Sweeping Strikes tracker (Arms Warrior). 260708 grants 12 charges (18 with Improved
--- Sweeping Strikes 383155); single-target damaging abilities spend a charge to strike an
--- extra enemy within ~8 yd, and only when a sweep partner is actually in range. Broad
--- Strokes (1261049): Colossus Smash / Warbreaker also activate it. Buff 30s, cooldown
--- 30s. Charges from the ability and Broad Strokes stack, but we track only to the visual
--- cap so either source just refreshes to max. Fervor of Battle (202316): Cleave/Whirlwind
--- on 3+ targets also Slams the primary target, and that Slam sweeps and spends a charge.
+-- Sweeping Strikes tracker (Arms Warrior), 12.1 rules: 260708 ADDS 12 charges, and
+-- with Broad Strokes (1261049) Colossus Smash / Warbreaker ADD 6, both capped at a
+-- hardcoded 18 (Improved Sweeping Strikes no longer exists); either source refreshes
+-- the 30s buff. Single-target damaging abilities spend a charge to strike an extra
+-- enemy within ~8 yd, and only when a sweep partner is actually in range. Fervor of
+-- Battle (202316): Cleave/Whirlwind on 3+ targets also Slams the primary target, and
+-- that Slam sweeps and spends a charge.
 do
     local stacks, expiresAt = 0, nil
-    local BASE_MAX     = 12
-    local IMPROVED_MAX = 18
+    local BASE_MAX = 18
     local DURATION = 30
     local SWEEP    = 260708
-    local IMPROVED = 383155   -- Improved Sweeping Strikes: 12 -> 18 charges
     local BROAD    = 1261049  -- Broad Strokes: Colossus Smash activates Sweep
     local FERVOR   = 202316   -- Fervor of Battle: Cleave/WW on 3+ targets Slams
     -- Bladestorm: Slayer's Unhinged auto-casts Mortal Strike during it, but those do NOT
@@ -4547,16 +4540,15 @@ do
     -- HandleSweepingStrikes runs on every player cast for every class; IsSpellKnown is a
     -- C call and talents cannot change in combat, so resolve once per login/spec/talent
     -- event. Non-warriors never register the watcher: flags stay false, callers early-out.
-    local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
+    local sweepKnown, broadKnown, fervorKnown = false, false, false
     do
         local _, cls = UnitClass("player")
         if cls == "WARRIOR" then
             local function RefreshKnown()
                 local sb = C_SpellBook
-                sweepKnown    = (sb and sb.IsSpellKnown(SWEEP)) or false
-                improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
-                broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
-                fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
+                sweepKnown  = (sb and sb.IsSpellKnown(SWEEP)) or false
+                broadKnown  = (sb and sb.IsSpellKnown(BROAD)) or false
+                fervorKnown = (sb and sb.IsSpellKnown(FERVOR)) or false
             end
             local watcher = CreateFrame("Frame")
             watcher:RegisterEvent("PLAYER_LOGIN")
@@ -4568,8 +4560,10 @@ do
         end
     end
 
+    -- 12.1: the cap is a hardcoded 18 for every build (Improved Sweeping
+    -- Strikes was removed from the tree).
     local function MaxStacks()
-        return improvedKnown and IMPROVED_MAX or BASE_MAX
+        return BASE_MAX
     end
 
     -- Broad Strokes generators (only count with the talent known)
@@ -4579,7 +4573,8 @@ do
     }
 
     -- Single-target damaging cast IDs in the Sweeping Strikes affected-spells list,
-    -- mapped to charges consumed. Rend and Storm Bolt do NOT sweep: deliberately absent.
+    -- mapped to charges consumed. Storm Bolt does NOT sweep: deliberately absent.
+    -- Rend joined the list with its 12.1 single-target rework.
     local SPENDERS = {
         [12294]   = 1,  -- Mortal Strike
         [7384]    = 1,  -- Overpower
@@ -4596,6 +4591,7 @@ do
         [202168]  = 1,  -- Impending Victory
         [1715]    = 1,  -- Hamstring
         [1269383] = 1,  -- Heroic Strike (replaces Slam via Master of Warfare)
+        [772]     = 1,  -- Rend (single-target since 12.1, sweeps)
         [436358]  = 2,  -- Demolish: the channel sweeps twice (damage IDs
                         -- 440884/440886) -- confirmed in-game, 2 per cast
     }
@@ -4728,7 +4724,9 @@ do
 
         if spellID == SWEEP
            or (CS_GENERATORS[spellID] and broadKnown) then
-            stacks = MaxStacks()
+            -- 12.1 additive rules: the ability adds 12, a Broad Strokes
+            -- generator adds 6, capped at the hardcoded 18.
+            stacks = math.min(stacks + (spellID == SWEEP and 12 or 6), MaxStacks())
             expiresAt = GetTime() + DURATION
             cdmSeenActive, cdmInactiveSince = false, nil
             dbg("activated:", stacks, "stacks (cast", spellID .. ")")
@@ -5650,6 +5648,13 @@ end
 -- Loads the LoadOnDemand options surface. False (with a user-facing message)
 -- only when the EllesmereUIOptions addon is missing or disabled in the AddOn List.
 function EllesmereUI.EnsureOptionsLoaded()
+    -- Standalone builds bundle the options files FLAT into the one addon --
+    -- they are resident from startup, and the LoadOnDemand addon named below
+    -- does not exist there under any name (the rename would point this at a
+    -- nonexistent "<coreToken>Options", printing MISSING and dead-ending every
+    -- options open). Loaded is simply true; EnsureLoaded's deferred-init drain
+    -- does the rest, exactly like the pre-split resident options.
+    if IS_STANDALONE then return true end
     if C_AddOns.IsAddOnLoaded("EllesmereUIOptions") then return true end
     local ok, reason = C_AddOns.LoadAddOn("EllesmereUIOptions")
     if not ok then
@@ -5693,9 +5698,17 @@ do
                 print("Cannot open options in combat")
                 return
             end
-            if not EllesmereUI.EnsureOptionsLoaded() then return end
-            local real = SlashCmdList[key]
-            if real and real ~= bootstrap then real(msg) end
+            -- Deferred one tick: slash dispatch runs inside the chat edit
+            -- box's script execution, and first-open work (options addon
+            -- load + full panel build) can exceed that execution's watchdog
+            -- budget ("script ran too long"). A fresh timer execution owns
+            -- its own budget.
+            C_Timer.After(0, function()
+                if InCombatLockdown() then return end
+                if not EllesmereUI.EnsureOptionsLoaded() then return end
+                local real = SlashCmdList[key]
+                if real and real ~= bootstrap then real(msg) end
+            end)
         end
         SlashCmdList[key] = bootstrap
     end
@@ -10857,7 +10870,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.2"
+EllesmereUI.VERSION = "8.8.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11019,6 +11032,8 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "BetterCharacterPanel",     label = "Better Character Panel",     targets = { "EllesmereUIBlizzardSkin" },
               moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
               message = "Better Character Panel conflicts with the EllesmereUI's Character Sheet. Disable either Better Character Panel or the Character Sheet skin in Blizzard UI Enhanced settings." },
+            { addon = "idTip",                    label = "idTip",                      targets = "all",
+              message = "idTip conflicts with EllesmereUI's tooltip systems. Disable the idTip addon to stay compatible." },
             -- Old name of EllesmereUIDataBars: a leftover copy of the addon from before the rename duplicates the entire bar.
             { addon = "EllesmereUIWonderBar",     label = "EllesmereUI WonderBar",      targets = { "EllesmereUIDataBars" },
               message = "EllesmereUI WonderBar was renamed to EllesmereUI DataBars. The old WonderBar addon is still installed and both create the same bar. Please disable or delete the EllesmereUIWonderBar addon." },
@@ -11860,10 +11875,14 @@ initFrame:SetScript("OnEvent", function(self, event)
             pcall(C_CVar.SetCVar, "tooltipShowAuraSpellIDs", on and "1" or "0")
         end
         do
+            -- PLAYER_ENTERING_WORLD, not PLAYER_LOGIN: the engine settles its
+            -- session CVars after login and clobbered the early write -- aura
+            -- IDs stayed off until the user re-toggled the option (field-
+            -- reported). Kept registered: a re-assert per zone-in is one
+            -- pcall'd SetCVar and survives any later engine reset.
             local cvarBoot = CreateFrame("Frame")
-            cvarBoot:RegisterEvent("PLAYER_LOGIN")
-            cvarBoot:SetScript("OnEvent", function(self)
-                self:UnregisterEvent("PLAYER_LOGIN")
+            cvarBoot:RegisterEvent("PLAYER_ENTERING_WORLD")
+            cvarBoot:SetScript("OnEvent", function()
                 EllesmereUI.SyncAuraSpellIDCVar()
             end)
         end

@@ -2971,13 +2971,26 @@ end
 -- instead (token-only groups -- debuffs, externals, defensives, CC -- are unaffected).
 -- Degradation is NOT directly queryable; assist+visible+not-phased still PASSED for
 -- degraded units (a released ghost near the group is visible, unphased, assistable
--- via resurrection, yet leaked "any buff"). Hence require-everything: connected,
--- alive, assistable, visible, not phased, AND in 40yd group range -- anything failing
--- those cannot be dispelled or tracked anyway. Local player's own flags never
--- degrade, so self is exempt. Identity APIs can return SECRET booleans under
--- teardown; any secret errors inside the pcall and reads fail-closed.
+-- via resurrection, yet leaked "any buff"). Hence: connected, alive, assistable,
+-- visible, not phased. RANGE is deliberately NOT a disqualifier: aura data streams
+-- fine for members merely out of 40yd spell range, and gating on it made buff
+-- displays and health-color effects vanish for out-of-range party members (the
+-- unit frame's own oorAlpha fade already dims the containers -- they are children
+-- of the button). Local player's own flags never degrade EXCEPT in a vehicle:
+-- boarding one makes the player unit non-assistable, the engine skips the
+-- spell-ID filters, and every include-list container on the player's own frame
+-- degrades to "any buff" (field-confirmed: reliable on every vehicle entry).
+-- Outside a vehicle self stays exempt from the full probe.
+-- Identity APIs can return SECRET booleans under teardown; any secret errors
+-- inside the pcall and reads fail-closed.
 local function AssistProbe(unit)
-    if UnitIsUnit(unit, "player") then return true end
+    if UnitIsUnit(unit, "player") then
+        -- UsingVehicle over InVehicle: it is also true during the boarding and
+        -- exiting TRANSITIONS, and the filters already degrade while boarding
+        -- (field: a second of "any buff" before the seated state landed).
+        local probe = UnitUsingVehicle or UnitInVehicle
+        return not probe("player")
+    end
     if not (UnitIsConnected(unit)
         and not UnitIsDeadOrGhost(unit)
         and UnitCanAssist("player", unit)
@@ -2985,59 +2998,18 @@ local function AssistProbe(unit)
         and not UnitPhaseReason(unit)) then
         return false
     end
-    -- Range is DISQUALIFYING-only: closes the gate solely when the API positively
-    -- reports out-of-range. Requiring a positive in-range answer hid every display
-    -- whenever the check was unavailable (checkedRange false/nil), so when range
-    -- can't be checked the five positive checks above decide; secret returns skip it
-    -- the same way.
-    local inRange, checkedRange = UnitInRange(unit)
-    if not (issecretvalue and (issecretvalue(inRange) or issecretvalue(checkedRange))) then
-        if checkedRange and not inRange then return false end
-    end
     return true
 end
 
--- Secret-safe range gating. UnitInRange returns a SECRET boolean in restricted content
--- (button range fade already handles this via SetAlphaFromBoolean), so Lua can never
--- DECIDE on range there -- requiring a readable positive hid every display, and
--- skipping the check when secret let degraded (released/phased/far) units leak "any
--- buff" renders. The engine sink decides instead: candidate-dependent containers
--- slave their alpha to the range boolean, so an unvouched-for unit renders invisible
--- regardless of the readable gate. Re-driven every gate pass since the boolean may be
--- secret -- no readable same-state cache can guard it.
-local function SetRangeAlpha(f, v)
-    if not f then return end
-    if f.SetAlphaFromBoolean then
-        pcall(f.SetAlphaFromBoolean, f, v, 1, 0)
-    elseif not (issecretvalue and issecretvalue(v)) then
-        f:SetAlpha(v and 1 or 0)
-    end
-end
-
--- Self is exempt (UnitInRange never reports the player in range); any secret in the
--- identity chain errors inside the caller's pcall and reads as out-of-range
--- (fail-closed). Returns UnitInRange's first value, which may be SECRET -- callers
--- must only pass it to secret sinks.
-local function RangeProbe(unit)
-    if UnitIsUnit(unit, "player") then return true end
-    return (UnitInRange(unit))
-end
-
-local function ApplyRangeAlpha(d, unit)
-    local ok, v = pcall(RangeProbe, unit)
-    if not ok then v = false end
-    SetRangeAlpha(d.rfcDispel, v)
-    SetRangeAlpha(d.rfcBm, v)
-    SetRangeAlpha(d.rfcBmSimple, v)
-    if d.rfcBmChain then
-        for _, cc in pairs(d.rfcBmChain) do SetRangeAlpha(cc, v) end
-    end
-end
+-- NOTE: the range alpha-slaving lane (containers hard-hidden at alpha 0 for
+-- out-of-range units via SetAlphaFromBoolean on the range boolean) was REMOVED
+-- 2026-08-12: it made buffs and health-color effects vanish for members merely
+-- out of 40yd spell range, while aura data still streams for them. The
+-- containers are children of the unit button and inherit its oorAlpha range
+-- fade, which is the wanted presentation. Do not re-add a range hide here
+-- without fresh evidence of out-of-range filter degradation on the live client.
 
 local function ApplyAssistGate(button, d, unit)
-    -- The range-alpha pass rides EVERY evaluation, before the readable
-    -- same-state early-out below (a secret range flip is invisible to it).
-    if unit then ApplyRangeAlpha(d, unit) end
     -- Faction AND phase: the engine's identity gate degrades for members who are
     -- cross-faction (open world) or phased/far away (filter flags haven't streamed;
     -- UnitPhaseReason is the eye-icon signal for that state). While degraded, filter
@@ -3332,6 +3304,12 @@ assistWatch:RegisterEvent("UNIT_PHASE")
 assistWatch:RegisterEvent("UNIT_CONNECTION")
 assistWatch:RegisterEvent("UNIT_IN_RANGE_UPDATE")
 assistWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
+-- Vehicle occupancy flips assistability for the occupant (the one state where
+-- even the local player's own flags degrade -- see AssistProbe). ENTERING as
+-- well as ENTERED: degradation starts with the boarding transition.
+assistWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
+assistWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
+assistWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
 -- Death/release/resurrection transitions (the alive requirement of the probe)
 -- signal through UNIT_FLAGS; chatty in combat, but the coalescer below reduces any
 -- burst to one deferred sweep.
@@ -3345,7 +3323,16 @@ local function AssistSweepDrain()
     assistSweepPending = false
     AssistSweep()
 end
-assistWatch:SetScript("OnEvent", function()
+assistWatch:SetScript("OnEvent", function(_, event)
+    -- Vehicle edges sweep IMMEDIATELY: they are rare (no storm to coalesce)
+    -- and the quarter-second defer reads as a visible flash of degraded
+    -- "any buff" content on the player's own frame while boarding.
+    if event == "UNIT_ENTERING_VEHICLE"
+        or event == "UNIT_ENTERED_VEHICLE"
+        or event == "UNIT_EXITED_VEHICLE" then
+        AssistSweep()
+        return
+    end
     if assistSweepPending then return end
     assistSweepPending = true
     C_Timer.After(0.25, AssistSweepDrain)

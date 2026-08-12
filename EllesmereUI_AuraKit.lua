@@ -71,9 +71,9 @@ end
 -- the minute -- see the note inside the breakpoint table.
 ------------------------------------------------------------------------------
 
-local durationFormatter
+local durationFormatter, durationFormatterS
 
-local function BuildRuleDurationFormatter()
+local function BuildRuleDurationFormatter(withSecondsUnit)
     if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
         and Enum.NumericRuleFormatRounding) then
         return nil
@@ -86,7 +86,7 @@ local function BuildRuleDurationFormatter()
     -- (The original nested step/rounding inside components -- silently
     -- rejected or default-rounded depending on validation strictness.)
     local ok = pcall(formatter.SetBreakpoints, formatter, {
-        { threshold = 0,     format = "%d",  step = 1, rounding = Up },
+        { threshold = 0,     format = withSecondsUnit and "%ds" or "%d",  step = 1, rounding = Up },
         -- Minute-boundary catcher (field report: text flashed "0" just under a minute).
         -- Seconds round UP, so a raw value in (59, 60) can reach 60 and land at this
         -- threshold; the old Down bucket here floored the raw back to 0 -> "0m" for a
@@ -122,7 +122,18 @@ local function BuildSecondsDurationFormatter()
     return formatter
 end
 
-function AK.GetDurationFormatter()
+-- showSecondsUnit: sub-minute readings keep their unit ("10s" instead of
+-- "10"); minutes and up are identical. Two cached instances -- omitting the
+-- arg (every pre-existing caller) returns the original bare-seconds
+-- formatter unchanged. The SecondsFormatter fallback shows the unit in both
+-- variants (it cannot drop it) -- the accepted degraded look either way.
+function AK.GetDurationFormatter(showSecondsUnit)
+    if showSecondsUnit then
+        if not durationFormatterS then
+            durationFormatterS = BuildRuleDurationFormatter(true) or BuildSecondsDurationFormatter()
+        end
+        return durationFormatterS
+    end
     if not durationFormatter then
         durationFormatter = BuildRuleDurationFormatter() or BuildSecondsDurationFormatter()
     end
@@ -622,9 +633,13 @@ function AK.MakeInitializer(styleKey, extra)
         button:SetDurationCooldown(d.cooldown)
         button:SetApplicationCount(d.stack, {})
 
-        local durationOpts = AK.BuildDurationTextOpts(AK.GetDurationFormatter(),
+        local durationOpts = AK.BuildDurationTextOpts(
+            AK.GetDurationFormatter(style.durationShowSeconds),
             style.durationColorCurve, style.durationUpdateInterval)
         AK.SetDurationTextSafe(button, d.duration, durationOpts)
+        -- Formatter-choice stamp for live rebinds (style.applyExtra reruns on
+        -- restyles; duration opts otherwise land only here at creation).
+        d.durationFmtS = style.durationShowSeconds and true or false
 
         if style.cancelButtons then
             button:SetCancelAuraButtons(style.cancelButtons)

@@ -594,7 +594,15 @@ function ECHAT.ApplyFonts()
         local cf = _G["ChatFrame" .. i]
         if cf and cf.SetFont then
             local size = GetFrameFontSize(i)
-            cf:SetFont(font, size, outline)
+            -- Same per-window font FAMILY as our display view (CJK members):
+            -- the invisible Blizzard frame owns hyperlink hit-zones, so its
+            -- glyph metrics must match ours on lines carrying CJK text.
+            local fam = ECHAT.EngineFontFamily and ECHAT.EngineFontFamily(i, font, size, outline)
+            if fam then
+                cf:SetFontObject(fam)
+            else
+                cf:SetFont(font, size, outline)
+            end
         end
         local eb = _G["ChatFrame" .. i .. "EditBox"]
         if eb then
@@ -849,7 +857,72 @@ function ECHAT._PositionChatPanelNow(cf)
     -- hidden strands them when chat is moved. Hidden frames keep live rects.
     if not cf:IsShown() and cf ~= _G.ChatFrame1 then return end
     local l, t, r, cb = cf:GetLeft(), cf:GetTop(), cf:GetRight(), cf:GetBottom()
-    if not (l and t and r and cb) then return end
+    if not (l and t and r and cb) then
+        -- Undock rescue: dragging a tab off the dock can end with Blizzard's
+        -- StopMovingOrSizing clearing the frame's anchors and never baking the
+        -- drop position back on (12.1). The point-less frame then crashes
+        -- FCF_SavePositionAndDimensions every frame (GetLeft nil) and renders
+        -- nowhere. A shown, undocked chat frame with zero points is only ever
+        -- that broken state: re-anchor it at the cursor (the drop spot) so the
+        -- next drag-stop iteration saves cleanly and the window stays where
+        -- the user dropped it. Costs nothing when healthy -- this branch is
+        -- the existing nil-rect early-out.
+        if cf ~= _G.ChatFrame1 and not cf.isDocked and cf:IsShown()
+            and cf:GetNumPoints() == 0 then
+            local cx, cy = GetCursorPosition()
+            local es = cf:GetEffectiveScale()
+            local issec = _G.issecretvalue
+            if cx and cy and es and es > 0
+                and not (issec and (issec(cx) or issec(cy))) then
+                pcall(function()
+                    cf:SetPoint("CENTER", UIParent, "BOTTOMLEFT", cx / es, cy / es)
+                end)
+            else
+                pcall(function()
+                    cf:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                end)
+            end
+        end
+        return
+    end
+    -- Secret-gated like every other per-tick rect read (grip doctrine): a
+    -- mid-drag or restricted-content rect must never reach the arithmetic
+    -- below at follower cadence. A frame riding StartMoving's hardware
+    -- capture reads secret for its whole drag (12.1), so instead of freezing
+    -- the panel until the drop, follow by cursor delta from the last healthy
+    -- corners -- no secret value is ever read, and the panel+text ride the
+    -- drag like the Blizzard-owned art does.
+    local issecret = _G.issecretvalue
+    if issecret and (issecret(l) or issecret(t) or issecret(r) or issecret(cb)) then
+        if _G.MOVING_CHATFRAME == cf and d._bgL then
+            local mx, my = GetCursorPosition()
+            if mx and my and not (issecret(mx) or issecret(my)) then
+                local ui2 = UIParent:GetEffectiveScale()
+                if ui2 and ui2 > 0 then
+                    mx, my = mx / ui2, my / ui2
+                    local base = d._dragCursorBase
+                    if not base then
+                        base = { x = mx, y = my,
+                                 l = d._bgL, t = d._bgT, r = d._bgR, b = d._bgB }
+                        d._dragCursorBase = base
+                    end
+                    local dx, dy = mx - base.x, my - base.y
+                    d._bgL, d._bgT = base.l + dx, base.t + dy
+                    d._bgR, d._bgB = base.r + dx, base.b + dy
+                    bg:ClearAllPoints()
+                    bg:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", d._bgL, d._bgT)
+                    bg:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMLEFT", d._bgR, d._bgB)
+                end
+            end
+        end
+        return
+    end
+    d._dragCursorBase = nil
+    -- Rest-rect cache (frame-local space) for the tab-drag ownership lane:
+    -- the broken StartMoving capture scrambles the rect before any post-hook
+    -- can read it, so drag-start grab offsets come from here instead.
+    d._cfL, d._cfT = l, t
+    d._cfWasDocked = cf.isDocked and true or nil
     -- Rects come back in each frame's own space; convert to UIParent's.
     local ui = UIParent:GetEffectiveScale()
     if not ui or ui == 0 then return end
@@ -893,6 +966,26 @@ function ECHAT.PositionChatPanelsNow()
     -- The owned tab strip is anchored to the panel and follows for free.
 end
 
+-- The main window ships with clamp-rect insets that extend its clamp box
+-- ~25-60px past every edge (phantom room reserved for the stock tab strip
+-- and edit box). Our panel draws its own tabs and input INSIDE the window,
+-- so the reservation only blocks corner placement: the screen clamp pins
+-- the frame that far from every edge, which also silently eats unlock-mode
+-- drags and arrow nudges toward a corner (the anchor moves, the resolved
+-- rect stays pinned). Zero the insets so the clamp lands exactly at the
+-- screen edges; clamped-to-screen itself stays on as the cannot-lose-the-
+-- window safety net. Compare-gated (write-free when settled) because dock
+-- passes can rewrite the insets; asserted from the state sync and the
+-- position chokepoint.
+local function EnsureChatClampInsets()
+    local cf1 = _G.ChatFrame1
+    if not (cf1 and cf1.GetClampRectInsets) then return end
+    local l, r, t, b = cf1:GetClampRectInsets()
+    if l ~= 0 or r ~= 0 or t ~= 0 or b ~= 0 then
+        cf1:SetClampRectInsets(0, 0, 0, 0)
+    end
+end
+
 -- State sync for what the panels lost by no longer being chat frame children,
 -- plus two Blizzard buttons hidden by alpha: Blizzard fades ButtonFrame /
 -- ScrollToBottomButton back in on hover (UIFrameFadeIn drives only their
@@ -901,6 +994,46 @@ end
 -- shown-follow from re-showing panels the full-hide put away.
 function ECHAT.SyncChatFrameState()
     if ECHAT.SuppressChatEditModeSelection then ECHAT.SuppressChatEditModeSelection() end
+    EnsureChatClampInsets()
+    -- Size drift self-heal: Edit Mode's late layout passes can re-rect the
+    -- main window through paths the ApplySystemAnchor guard never sees,
+    -- leaving the frame on its stale explicit size while the panel still
+    -- shows ours. Verify the saved size holds and re-assert on drift.
+    -- Compare-gated (two reads when settled); suspended during the grip
+    -- drag and unlock sessions, whose live geometry rules.
+    local cfgSz = ECHAT.DB()
+    local pos = cfgSz and cfgSz.chatPosition
+    local sz = pos and cfgSz.chatSize
+    if sz and sz.w and sz.h and not ns._chatSizingActive
+        and not (_G.EllesmereUI and _G.EllesmereUI._unlockActive) then
+        local cf1s = _G.ChatFrame1
+        -- Armed only after the settled-sight apply (the anchor guard is
+        -- installed there): position ownership must never begin early, or
+        -- this heal re-rects chat mid-login while Blizzard's dock passes are
+        -- still resolving (ghost tab strip built against half-resolved
+        -- geometry = invisible tabs until the next pass).
+        local d1 = cf1s and CFD(cf1s)
+        if d1 and d1.anchorGuarded then
+            local w = cf1s:GetWidth()
+            local h = cf1s:GetHeight()
+            local isec = _G.issecretvalue
+            local drift = false
+            if w and h and not (isec and (isec(w) or isec(h)))
+                and (math.abs(w - sz.w) > 1.5 or math.abs(h - sz.h) > 1.5) then
+                drift = true
+            end
+            -- Position drift too (canonical BOTTOMLEFT saves): Edit Mode's
+            -- late writes move the rect as well as resizing it.
+            if not drift and pos.point == "BOTTOMLEFT" and pos.x and pos.y then
+                local l, b = cf1s:GetLeft(), cf1s:GetBottom()
+                if l and b and not (isec and (isec(l) or isec(b)))
+                    and (math.abs(l - pos.x) > 1.5 or math.abs(b - pos.y) > 1.5) then
+                    drift = true
+                end
+            end
+            if drift and ECHAT.ApplyChatPosition then ECHAT.ApplyChatPosition() end
+        end
+    end
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
         if cf then
@@ -1234,6 +1367,9 @@ local function ApplyChatPosition()
     local pos = cfg.chatPosition
     local cf1 = _G.ChatFrame1
     if not cf1 then return end
+    -- Corner positions only resolve with the clamp insets zeroed; assert
+    -- before anchoring so the enforcement itself can never land clamped.
+    EnsureChatClampInsets()
     local px, py = pos.x, pos.y
     local PPa = EllesmereUI and EllesmereUI.PP
     if PPa and px and py then
@@ -1258,13 +1394,24 @@ local function ApplyChatPosition()
     -- Blizzard SetSize is overridden by the anchors.
     local size = cfg.chatSize
     if size and size.w and size.h then
+        local composed = false
         if pos.point == "BOTTOMLEFT" and (pos.relPoint or "BOTTOMLEFT") == "BOTTOMLEFT" then
             cf1:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT",
                 (px or 0) + size.w, (py or 0) + size.h)
-        else
-            -- Foreign anchor form (an unlock-mode drag save): once the rect
-            -- resolves, self-normalize to BOTTOMLEFT so the size anchor
-            -- composes on the next apply.
+            composed = true
+        elseif pos.point == "TOPLEFT" and (pos.relPoint or "TOPLEFT") == "TOPLEFT" then
+            -- Unlock-mode drag saves land in TOPLEFT form: compose the size
+            -- anchor directly. A single-anchor apply would leave the rect on
+            -- the frame's explicit (Edit Mode, stale) size until the deferred
+            -- normalize below lands -- a window where a late Edit Mode pass
+            -- baked the old size in.
+            cf1:SetPoint("BOTTOMRIGHT", UIParent, "TOPLEFT",
+                (px or 0) + size.w, (py or 0) - size.h)
+            composed = true
+        end
+        if not composed or pos.point ~= "BOTTOMLEFT" then
+            -- Canonicalize foreign forms to BOTTOMLEFT once the rect
+            -- resolves, so every later apply composes on the fast path.
             C_Timer.After(0, function()
                 local cfg2 = ECHAT.DB()
                 if not cfg2 or not cfg2.chatPosition or ns._chatSizingActive then return end
@@ -1279,8 +1426,46 @@ local function ApplyChatPosition()
     -- The visible stack follows numerically; sync it now rather than at the
     -- next event so drags and guard re-applies land in one motion.
     if ECHAT.PositionChatPanelsNow then ECHAT.PositionChatPanelsNow() end
+    -- The sync above reads the rect the SetPoints just changed, and same-tick
+    -- reads can lag the engine layout pass (the grip-save rule) -- the panel,
+    -- the tab band anchored to it, and the strip's clip then disagree for a
+    -- tick (ghost tabs clipped to slivers). One coalesced deferred re-sync
+    -- lands panels-then-strip on the resolved rect for EVERY apply path.
+    if not ns._chatPosResync then
+        ns._chatPosResync = true
+        C_Timer.After(0, function()
+            ns._chatPosResync = nil
+            if ECHAT.PositionChatPanelsNow then ECHAT.PositionChatPanelsNow() end
+            if ECHAT.TabsRefreshNow then ECHAT.TabsRefreshNow() end
+        end)
+    end
 end
 ECHAT.ApplyChatPosition = ApplyChatPosition
+
+-- Edit Mode's layout apply (login server-data arrival, layout switches) can
+-- re-rect the main window through paths the ApplySystemAnchor guard never
+-- sees, taking the last word over the settled-sight apply -- the frame sits
+-- at Edit Mode's rect while the panel stack holds ours until an interaction
+-- re-arms enforcement. Its own event is the precise edge: re-assert there,
+-- deferred out of Edit Mode's execution, gated on ownership having begun
+-- (anchor guard installed) so it can never fire early.
+do
+    local emWatch = CreateFrame("Frame")
+    emWatch:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    emWatch:SetScript("OnEvent", function()
+        local cfg = ECHAT.DB()
+        if not (cfg and cfg.chatPosition) then return end
+        local cf1 = _G.ChatFrame1
+        local d1 = cf1 and CFD(cf1)
+        if not (d1 and d1.anchorGuarded) then return end
+        C_Timer.After(0, function()
+            if ns._chatSizingActive then return end
+            if _G.EllesmereUI and _G.EllesmereUI._unlockActive then return end
+            local c2 = ECHAT.DB()
+            if c2 and c2.chatPosition then ApplyChatPosition() end
+        end)
+    end)
+end
 
 -- Genesis capture: on the first settled sight with no saved position,
 -- ChatFrame1's current (Edit-Mode-placed) rect becomes OUR saved position.
@@ -3355,6 +3540,98 @@ local function SkinChatFrame(cf)
     local name = cf:GetName()
     if not name then return end
 
+    -- Undock drop guard: 12.1's StopMovingOrSizing can end a tab-drag undock
+    -- with the frame's anchors stripped and never re-baked; the next line of
+    -- Blizzard's secure drag-stop then crashes on GetLeft (nil) and loops the
+    -- tab's OnUpdate until the script suspends. This post-hook fires between
+    -- the strip and that read: re-anchor the point-less frame at the cursor
+    -- (the drop spot) so the position save completes cleanly. Same shipped
+    -- object-hook shape as the ApplySystemAnchor guard; fires only when a
+    -- chat frame stops moving (user drag), self-gates to the broken state.
+    hooksecurefunc(cf, "StopMovingOrSizing", function(f)
+        if f.isDocked then return end
+        if f:GetNumPoints() == 0 then
+            -- TOPLEFT, matching Blizzard's own undock anchor convention (the
+            -- tab drag grabs near the frame's top-left, so a later re-attach
+            -- by anchor point lands without a jump; CENTER produced one).
+            local issec = _G.issecretvalue
+            local mx, my = GetCursorPosition()
+            local es = f:GetEffectiveScale()
+            local w, h = f:GetWidth() or 430, f:GetHeight() or 120
+            if mx and my and es and es > 0
+                and not (issec and (issec(mx) or issec(my) or issec(w) or issec(h))) then
+                f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT",
+                    mx / es - w / 2, my / es + h / 2)
+            else
+                f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            end
+        end
+    end)
+
+    -- Tab-drag ownership for undockable frames: 12.1's StartMoving capture is
+    -- broken for chat frames -- measured: zero-offset init (frame teleports
+    -- to the screen corner at drag start), center-snapped to the cursor with
+    -- the grab offset discarded, anchor rewritten to CENTER, and the final
+    -- bake stripping all points every drag. The grip lane instead: end the
+    -- capture the moment it engages and drive the drag with plain per-tick
+    -- corner anchors (grab offset preserved, rect readable throughout, so
+    -- the panel+text follow natively). Blizzard's drag-stop bookkeeping
+    -- (redock, tab position, position save) runs unchanged on our geometry;
+    -- its no-op StopMovingOrSizing at release strips nothing.
+    local dragTab = _G[name .. "Tab"]
+    if dragTab and cf ~= _G.ChatFrame1 then
+        dragTab:HookScript("OnDragStart", function()
+            if cf.isDocked then return end
+            pcall(function() cf:StopMovingOrSizing() end)
+            local dcf = CFD(cf)
+            -- Grab reference: the frame's last at-rest rect from the follower
+            -- cache -- the capture has already scrambled the live rect by the
+            -- time this post-hook runs. Fresh undocks (cache still says
+            -- docked) start from the live rect instead: the drop guard just
+            -- re-anchored them centered under the cursor, the stock undock
+            -- feel. Immediate SetPoint pins the choice before this frame
+            -- renders, so re-drags never flash at the guard's spot.
+            local l, t
+            if not dcf._cfWasDocked and dcf._cfL and dcf._cfT then
+                l, t = dcf._cfL, dcf._cfT
+            else
+                l, t = cf:GetLeft(), cf:GetTop()
+            end
+            local mx, my = GetCursorPosition()
+            local es = cf:GetEffectiveScale()
+            local issec = _G.issecretvalue
+            if not (l and t and mx and my and es and es > 0) then return end
+            if issec and (issec(l) or issec(t) or issec(mx) or issec(my)) then return end
+            pcall(function()
+                cf:ClearAllPoints()
+                cf:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+            end)
+            dcf._tabDragOffX = l - mx / es
+            dcf._tabDragOffY = t - my / es
+            local tk = dcf._tabDragTicker
+            if not tk then
+                tk = CreateFrame("Frame")
+                tk:Hide()
+                tk:SetScript("OnUpdate", function()
+                    if cf.isDocked or not IsMouseButtonDown("LeftButton") then
+                        tk:Hide()
+                        return
+                    end
+                    local cx, cy = GetCursorPosition()
+                    local es2 = cf:GetEffectiveScale()
+                    local isec2 = _G.issecretvalue
+                    if not (cx and cy and es2 and es2 > 0) then return end
+                    if isec2 and (isec2(cx) or isec2(cy)) then return end
+                    cf:ClearAllPoints()
+                    cf:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT",
+                        cx / es2 + dcf._tabDragOffX, cy / es2 + dcf._tabDragOffY)
+                end)
+                dcf._tabDragTicker = tk
+            end
+            tk:Show()
+        end)
+    end
+
     -- NEVER HookScript("OnEvent") on chat frames -- even post-hooks taint the
     -- C-level event dispatcher. Idle reset + pulse detection live on standalone
     -- event frames (sections 5/6 below).
@@ -3804,7 +4081,17 @@ local function SkinChatFrame(cf)
     -- copy so its hyperlink hit-zones sit under the same characters, and the
     -- hosted combat log renders through it.
     local cfId = cf:GetID()
-    cf:SetFont(GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
+    do
+        -- Family over raw file (CJK members) -- same object the engine view
+        -- uses, keeping both layouts congruent.
+        local fam = ECHAT.EngineFontFamily
+            and ECHAT.EngineFontFamily(cfId, GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
+        if fam then
+            cf:SetFontObject(fam)
+        else
+            cf:SetFont(GetFont(), GetFrameFontSize(cfId), GetOutlineFlag())
+        end
+    end
     if cf.SetShadowOffset then cf:SetShadowOffset(1, -1) end
     if cf.SetShadowColor then cf:SetShadowColor(0, 0, 0, 0.8) end
     cf:SetFading(false)
@@ -4140,12 +4427,20 @@ initFrame:SetScript("OnEvent", function(self)
             if cf and not _skinned[cf] then
                 SkinChatFrame(cf)
             end
-            -- Re-apply font if Blizzard reset it (e.g. font size change)
+            -- Re-apply font if Blizzard reset it (e.g. font size change).
+            -- Family form, not raw SetFont: a raw write here would detach
+            -- the CJK font family the skin pass attached.
             if cf and _skinned[cf] then
                 local curFont = cf:GetFont()
                 if curFont and curFont ~= wantFont then
                     local _, sz = cf:GetFont()
-                    cf:SetFont(wantFont, sz, wantOutline)
+                    local fam = ECHAT.EngineFontFamily
+                        and ECHAT.EngineFontFamily(cf:GetID(), wantFont, sz, wantOutline)
+                    if fam then
+                        cf:SetFontObject(fam)
+                    else
+                        cf:SetFont(wantFont, sz, wantOutline)
+                    end
                 end
             end
         end
@@ -4311,6 +4606,25 @@ initFrame:SetScript("OnEvent", function(self)
             -- Font size follows the profile: capture on first sight,
             -- re-assert on every later login.
             if ECHAT.SyncChatFontSize then ECHAT.SyncChatFontSize() end
+            -- (ApplyChatPosition self-resyncs panels+strip one tick later,
+            -- and the EDIT_MODE_LAYOUTS_UPDATED watcher re-asserts if Edit
+            -- Mode's late layout apply lands after this.)
+            -- Post-login heal window: Edit Mode's last write can land through
+            -- paths none of the event answers see, leaving chat at EM's rect
+            -- (short by the tab area) until the first hover armed the
+            -- follower's drift heal. Run the state sync -- which carries that
+            -- heal -- on a short bounded cadence instead, then self-destruct.
+            local healTicks = 0
+            local healFrame = CreateFrame("Frame")
+            local healAccum = 0
+            healFrame:SetScript("OnUpdate", function(w, dt)
+                healAccum = healAccum + dt
+                if healAccum < 0.1 then return end
+                healAccum = 0
+                healTicks = healTicks + 1
+                if ECHAT.SyncChatFrameState then ECHAT.SyncChatFrameState() end
+                if healTicks >= 40 then w:SetScript("OnUpdate", nil) end
+            end)
         end)
     end
 

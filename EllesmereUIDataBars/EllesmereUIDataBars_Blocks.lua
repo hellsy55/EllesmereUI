@@ -2071,11 +2071,24 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
     local function D() return blockCfg.settings or {} end
     local function BC() return barCtx.cfg end
 
+    -- Max-level check with layered fallbacks, matching the Action Bars XP bar's:
+    -- the Is* helpers are nil-guarded, so client API churn can silently disable
+    -- them -- a plain numeric compare against the expansion max level backstops
+    -- the check so XP mode can never show for a max-level character.
+    local function XPAtMaxLevel()
+        local level = UnitLevel("player") or 0
+        if IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel() then return true end
+        if IsLevelAtEffectiveMaxLevel and IsLevelAtEffectiveMaxLevel(level) then return true end
+        local maxLevel = (GetMaxLevelForPlayerExpansion and GetMaxLevelForPlayerExpansion())
+            or (GetMaxPlayerLevel and GetMaxPlayerLevel())
+        return (maxLevel and level >= maxLevel) or false
+    end
+
     local function UpdateMode()
         local d = D()
         if d.mode == "xp"  then mode = "xp";  return end
         if d.mode == "rep" then mode = "rep"; return end
-        local atMax = IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel()
+        local atMax = XPAtMaxLevel()
         local xpOff = IsXPUserDisabled and IsXPUserDisabled()
         mode = "rep"
         if not atMax and not xpOff then mode = "xp" end
@@ -2138,7 +2151,7 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
         if mode == "xp" then
             -- At the level cap (or with XP gains off) there is no XP: collapse like rep mode
             -- with no watched faction, even when the user forced Experience mode (otherwise "0% to level cap+1" junk).
-            local atMax = IsPlayerAtEffectiveMaxLevel and IsPlayerAtEffectiveMaxLevel()
+            local atMax = XPAtMaxLevel()
             local xpOff = IsXPUserDisabled and IsXPUserDisabled()
             if atMax or xpOff then return nil end
             local curXP = UnitXP("player") or 0

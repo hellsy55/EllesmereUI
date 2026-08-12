@@ -1113,7 +1113,15 @@ end
 --  PER-SPELL: "Hide Swipe (Charges)" also hides the radial swipe (edge only),
 --  resolved only when in use (ns._cdmAnyChargeStyle) so others pay ~0.
 -------------------------------------------------------------------------------
-local CDM_EDGE_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\edge.png"
+-- Game-indexed on purpose: the 12.1 edge channel renders game-indexed files
+-- ONLY -- loose addon art (png/tga/blp) draws nothing, silently, with clean
+-- state readbacks.
+local CDM_EDGE_TEXTURE = "Interface\\Cooldown\\UI-HUD-ActionBar-SecondaryCooldown"
+
+-- NOTE (probed 2026-08-12): the Cooldown widget clips ALL edge drawing at
+-- the frame's own rect -- scales past flush render identically, so the edge
+-- can never reach a square's corners without enlarging the cooldown frame
+-- itself. Do not re-attempt corner coverage via SetEdgeScale.
 
 -- Thin wrapper: frame spell/bar identity -> ResolveSpellSettings, the same
 -- Hero-talent-aware resolver the SetSwipeColor / cdState / desat hooks use, so
@@ -1126,8 +1134,10 @@ function ns._ResolveCdmSS(frame)
     return ResolveSpellSettings(frame, sid2, ns.GetBarSpellData and ns.GetBarSpellData(bk2))
 end
 
--- Draw the cooldown edge on a charge frame. The shape system owns the mask +
--- circular-edge flag; we add texture, gold color, per-shape scale, draw flag.
+-- Draw the styled cooldown edge -- one texture for every edge lane: the
+-- always-on charge recharge edge and the bar-wide Always Show Cooldown Edge
+-- re-assert both land here. The shape system owns the mask + circular-edge
+-- flag; this applies texture, color, scale and draw flag.
 local function ApplyCdmEdge(cd, bk2)
     if not cd then return end
     local bd = barDataByKey and barDataByKey[bk2]
@@ -1136,12 +1146,15 @@ local function ApplyCdmEdge(cd, bk2)
     -- use the action bars' baseline size, custom shapes the per-shape scale.
     local scale
     if shape == "none" or shape == "cropped" then
-        scale = 2.1
+        scale = 1.8
     else
         scale = (ns.CDM_SHAPE_EDGE_SCALES and ns.CDM_SHAPE_EDGE_SCALES[shape]) or 0.75
     end
-    if cd.SetEdgeTexture then cd:SetEdgeTexture(CDM_EDGE_TEXTURE) end
-    if cd.SetEdgeColor then cd:SetEdgeColor(0.973, 0.839, 0.604, 1) end
+    -- Color rides SetEdgeTexture: the documented signature is
+    -- (texture, r, g, b, a) with the color args required.
+    if cd.SetEdgeTexture then
+        cd:SetEdgeTexture(CDM_EDGE_TEXTURE, 1, 1, 1, 1)
+    end
     if cd.SetEdgeScale then cd:SetEdgeScale(scale) end
     if cd.SetDrawEdge then cd:SetDrawEdge(true) end
 end
@@ -1158,6 +1171,46 @@ local function CdmFrameIsActive(frame)
         end
     end
     return false
+end
+
+-- Blizzard resolves a cooldown item's spell through GetSpellID(), whose
+-- precedence is aura > linkedSpellID > overrideTooltip > override > base
+-- (CooldownViewerItemData.lua). When an aura ends without the item receiving the
+-- UNIT_AURA removal, cooldownInfo.linkedSpellID keeps pointing at the aura, so
+-- CheckCacheCooldownValuesFromSpellCooldown reads the cooldown from a spell that
+-- HAS none: start/dur come back 0, IsExpired() answers true, and
+-- RefreshSpellCooldownInfo takes its CooldownFrame_Clear branch on every refresh
+-- -- no swipe, no countdown text -- while RefreshIconDesaturation leaves the icon
+-- saturated. The ability is still on cooldown, so the icon reads as "never
+-- pressed" until a target switch (OnNewTarget clears the link), a re-cast of the
+-- base spell, or a cooldownID re-set. Blizzard's own repair for this,
+-- RefreshLinkedSpell, is only called from OnCooldownIDSet, never from RefreshData.
+--
+-- How the link outlives the aura: ClearAuraInstanceInfo() drops the instance but
+-- NOT the link, and the only path that drops both is OnUnitAuraRemovedEvent,
+-- which is dispatched through auraInstanceIDToItemFramesMap and is therefore
+-- missable. Any later RefreshData then clears the instance via RefreshAuraInstance
+-- and leaves the link standing.
+--
+-- Detected with nil-compares and never-secret bools ONLY. In instanced combat
+-- Cooldown:GetCooldownDuration answers a SECRET value, which is exactly why
+-- ReAssertRealCooldown's "widget reads ~0" proof fails closed there -- i.e. in
+-- the content where this is reported.
+--
+-- We repair OUR rendering only; Blizzard's item stays wrong, so its own alerts
+-- and isOnActualCooldown keep answering against the linked spell.
+--
+-- Ordered cheapest-first: linkedSpellID is nil for nearly every icon, so the
+-- common case costs two table lookups and no API call. Returns the STRUCTURAL
+-- verdict only; callers add their own "is on a real cooldown" test.
+local function CdmStaleLinkedSpell(frame)
+    local info = frame and frame.cooldownInfo
+    if info == nil or info.linkedSpellID == nil then return false end
+    -- An aura that is actually being displayed owns the widget; never fight it.
+    -- Covers the transient where UpdateLinkedSpell has set the link a moment
+    -- before RefreshAuraInstance attaches the matching instance.
+    if frame.auraInstanceID ~= nil or frame.wasSetFromAura then return false end
+    return true
 end
 
 -- Charge info for a CDM frame, resolved the way BLIZZARD resolves it.
@@ -1205,10 +1258,9 @@ ns.CdmChargeInfoFor = CdmChargeInfoFor
 -- Secret-safe: HasVisualDataSource_Charges is a clean bool, the ss flag is ours.
 local function ApplyCdmChargeStyle(frame, cd)
     -- Icon art suppressed (Only Show Numbers / Charges/Stacks Only): nothing for
-    -- a swipe/edge to decorate, and this is the ONLY ApplyCdmEdge caller, so
-    -- gating here covers the reactive cooldown hooks and ReapplyChargeStyle at
-    -- once. Report "handled" so callers skip their own swipe/edge defaults. The
-    -- reentry guard is SAVED and restored, never forced false: ReapplyChargeStyle
+    -- a swipe/edge to decorate. Report "handled" so callers skip their own
+    -- swipe/edge defaults. The reentry guard is SAVED and restored, never forced
+    -- false: ReapplyChargeStyle
     -- sets it before calling us and clearing it would drop its guard.
     local fdOsn = hookFrameData[frame]
     if fdOsn and fdOsn._osnOn then
@@ -2254,6 +2306,20 @@ local function DecorateFrame(frame, barData)
     fd.bg:SetColorTexture(barData.bgR or 0.08, barData.bgG or 0.08,
         barData.bgB or 0.08, barData.bgA or 0.6)
 
+    -- Show Cooldown Edge: stamped per (re)claim so the cooldown hooks read one
+    -- flag instead of chasing frame -> bar -> settings on every push. Toggling
+    -- rebuilds bars, so the stamp always tracks the live setting; on the
+    -- on -> off transition drop a mid-sweep edge now instead of waiting for
+    -- Blizzard's next cooldown push.
+    local edgeOn = barData.showCooldownEdge or nil
+    if fd._edgeFeatureOn and not edgeOn and fd.cooldown and fd.cooldown.SetDrawEdge then
+        fd._isProcessingOverride = true
+        fd.cooldown:SetDrawEdge(false)
+        fd._isProcessingOverride = false
+        fd._edgeApplied = nil
+    end
+    fd._edgeFeatureOn = edgeOn
+
     -- Custom-shape bars own their border: ApplyShapeToCDMIcon draws the ring on
     -- shapeBorder and hides the square border. Re-applying the square style here
     -- would force it back on unchanged reanchors (no shape re-apply follows those),
@@ -2728,6 +2794,7 @@ local function DecorateFrame(frame, barData)
                     ns._maxStacksWatch[frame] = nil
                 end
 
+                fd._gcdSwipeSuppressed = _gcdSuppressed
                 fd._isProcessingOverride = false
             end)
             hooksecurefunc(cd, "SetDrawSwipe", function(_, show)
@@ -2751,6 +2818,20 @@ local function DecorateFrame(frame, barData)
                 -- them; non-charge frames fall to the force-true below.
                 fd._isProcessingOverride = true
                 local handled = ApplyCdmChargeStyle(frame, cd)
+                -- Bar-wide Show Cooldown Edge (non-charge frames; charge frames
+                -- get their edge from ApplyCdmChargeStyle). GCD suppression
+                -- drops an edge we applied, tracked so the disabled/default
+                -- path never issues a redundant SetDrawEdge.
+                if not handled and fd._edgeFeatureOn and cd.SetDrawEdge then
+                    if not fd._gcdSwipeSuppressed then
+                        local fcEdge = _ecmeFC[frame]
+                        ApplyCdmEdge(cd, fcEdge and fcEdge.barKey)
+                        fd._edgeApplied = true
+                    elseif fd._edgeApplied then
+                        cd:SetDrawEdge(false)
+                        fd._edgeApplied = nil
+                    end
+                end
                 fd._isProcessingOverride = false
                 if handled then return end
                 -- Per-spell Hide CD Swipe (non-charge): keep the swipe suppressed
@@ -2782,31 +2863,49 @@ local function DecorateFrame(frame, barData)
                 cd:SetDrawSwipe(true)
                 fd._isProcessingOverride = false
             end)
-            -- Hide Recharge Edge enforcement. Blizzard re-enables the edge on every
-            -- cooldown re-push (e.g. a CDR effect re-arming a charge recharge), and
-            -- the SetDrawSwipe hook only catches re-pushes that ALSO toggle the
-            -- swipe, so the edge flickers back between them. Mirrors that hook:
-            -- clean getters + our own ss flag, guarded against ApplyCdmEdge's own SetDrawEdge(true) recursing.
+            -- Cooldown edge enforcement. Re-assert the bar-wide Blizzard edge, or
+            -- per-spell Hide Recharge Edge, across Blizzard cooldown re-pushes.
             if cd.SetDrawEdge then
                 hooksecurefunc(cd, "SetDrawEdge", function(_, show)
                     if fd._isProcessingOverride then return end
-                    if not show then return end
+                    -- Edge-off pushes only matter to the bar-wide edge re-assert
+                    -- (every other branch below acts on show=true alone), so the
+                    -- disabled/default path keeps its zero-cost early-out.
+                    if not show and not fd._edgeFeatureOn then return end
+                    if fd._isBuffViewerFrame then return end
                     -- No icon art: no recharge edge, charge or not. Blizzard
                     -- re-enables it on every re-push, so this must be in the hook.
                     if fd._osnOn then
-                        fd._isProcessingOverride = true
-                        cd:SetDrawEdge(false)
-                        fd._isProcessingOverride = false
+                        if show then
+                            fd._isProcessingOverride = true
+                            cd:SetDrawEdge(false)
+                            fd._isProcessingOverride = false
+                        end
                         return
                     end
-                    if type(frame.HasVisualDataSource_Charges) ~= "function"
-                       or not frame:HasVisualDataSource_Charges() then return end
-                    if not ns._cdmAnyChargeStyle then return end
-                    local ss2 = ns._ResolveCdmSS(frame)
-                    if not (ss2 and ss2.hideRechargeEdge) then return end
-                    fd._isProcessingOverride = true
-                    cd:SetDrawEdge(false)
-                    fd._isProcessingOverride = false
+                    local hasChargeSource = type(frame.HasVisualDataSource_Charges) == "function"
+                        and frame:HasVisualDataSource_Charges()
+                    if hasChargeSource and ns._cdmAnyChargeStyle then
+                        local ss2 = ns._ResolveCdmSS(frame)
+                        if ss2 and ss2.hideRechargeEdge then
+                            if show then
+                                fd._isProcessingOverride = true
+                                cd:SetDrawEdge(false)
+                                fd._isProcessingOverride = false
+                            end
+                            return
+                        end
+                    end
+                    -- Bar-wide Show Cooldown Edge: re-assert across Blizzard's
+                    -- own edge-off pushes (stock disables it on every non-charge
+                    -- cooldown update).
+                    if fd._edgeFeatureOn and not fd._gcdSwipeSuppressed then
+                        local fcEdge = _ecmeFC[frame]
+                        fd._isProcessingOverride = true
+                        ApplyCdmEdge(cd, fcEdge and fcEdge.barKey)
+                        fd._isProcessingOverride = false
+                        fd._edgeApplied = true
+                    end
                 end)
             end
             -- Non-charge cooldown re-assert. Blizzard's CooldownViewer zeroes the
@@ -2843,7 +2942,14 @@ local function DecorateFrame(frame, barData)
                 -- precede any truthiness/comparison (a secret errors on either);
                 -- a secret duration cannot prove "cleared", so fail closed (the
                 -- sigil failure moment reads a clean 0, so the fix still runs).
-                if cd.GetCooldownDuration then
+                --
+                -- SECOND PROOF, needed because the fail-closed above is permanent in
+                -- instanced combat (the duration reads secret there, so this function
+                -- could never act -- see CdmStaleLinkedSpell). A stale linked spell
+                -- means Blizzard clears this widget on EVERY refresh, so there is
+                -- nothing to fight and no duration read is required to know it.
+                local staleLink = CdmStaleLinkedSpell(frame)
+                if not staleLink and cd.GetCooldownDuration then
                     local ok, curDur = pcall(cd.GetCooldownDuration, cd)
                     if not ok then return end
                     if issecretvalue and issecretvalue(curDur) then return end
@@ -2855,6 +2961,27 @@ local function DecorateFrame(frame, barData)
                 fd._isProcessingOverride = true
                 if cd.SetUseAuraDisplayTime then cd:SetUseAuraDisplayTime(false) end
                 cd:SetCooldownFromDurationObject(durObj)
+                if staleLink then
+                    -- Blizzard's expired branch never calls SetSwipeColor, so the
+                    -- widget still carries whatever colour was painted last. For an
+                    -- aura-tracking icon that is the ACTIVE colour from the aura
+                    -- window, and it then renders over the cooldown we just armed --
+                    -- field-seen as "the swipe was still yellow". Repaint the resting
+                    -- cooldown colour, the same black the SetSwipeColor hook's
+                    -- not-active branch uses (the per-spell Cooldown Swipe Color only
+                    -- applies to buff-viewer frames, which never reach here).
+                    -- This also releases a Suppress-GCD alpha-0 that can be stuck for
+                    -- the same reason -- what we just armed is a real cooldown, never
+                    -- a GCD. Mirrors ReArmChargeRecharge, which repaints for exactly
+                    -- this reason on the charge path.
+                    -- Gated to the stale case on purpose: the placement-sigil case
+                    -- reaches here with a colour Blizzard has kept current, so it is
+                    -- left alone. Bar data is resolved LIVE rather than from the
+                    -- decorate-time closure, since pooled frames decorate once.
+                    local bkS = fc2.barKey
+                    local bdS = bkS and barDataByKey and barDataByKey[bkS]
+                    cd:SetSwipeColor(0, 0, 0, (bdS and bdS.swipeAlpha) or 0.7)
+                end
                 -- Only geometry was wiped (Blizzard's clear leaves draw-swipe on),
                 -- so re-arming the duration restores the swipe. Deliberately NOT
                 -- forcing SetDrawSwipe(true): under the override guard that would
@@ -3089,7 +3216,15 @@ local function DecorateFrame(frame, barData)
             fd._desatOverrideHooked = true
             local function onDesatChange()
                 if fd._isProcessingOverride then return end
-                if not fd._hideActiveOverriding then return end
+                -- Two owners of this path now. The Hide-Active override is the
+                -- original one. The second is the stale-linked-spell state, where
+                -- Blizzard re-clears the widget AND re-saturates the icon on every
+                -- refresh -- so the repair has to ride the same per-tick driver to
+                -- survive, and the body below already does exactly the right thing
+                -- for it: it re-arms the cooldown from OUR spell id and then sets
+                -- the desaturation from that same id's real cooldown state.
+                -- Cheap-first: the flag is one lookup, the helper two more.
+                if not (fd._hideActiveOverriding or CdmStaleLinkedSpell(frame)) then return end
                 fd._isProcessingOverride = true
                 local cdw = fd.cooldown
                 local fc2 = _ecmeFC[frame]
