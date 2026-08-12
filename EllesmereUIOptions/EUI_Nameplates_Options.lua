@@ -3706,7 +3706,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetScript("OnLeave", function(self) UpdateCogAlpha() end)
         end
 
-        -- Row 4: Distance to Target Text -- range bucket ("15+") on the target's nameplate (see the runtime block at the end of the main file).
+        -- Row 4: Distance to Target Text
         local tfRangeOff = function() return DBVal("rangeTextEnabled") ~= true end
         local tfRangeRow
         tfRangeRow, h = W:DualRow(parent, y,
@@ -3956,7 +3956,35 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetAlpha(questObjOff() and 0.15 or 0.4)
         end
 
-        -- Row 4: Execute Pulse Glow | (blank)
+        -- Row 4: disabled, automatic class/spec cutoff, or profile-level custom cutoff.
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Range Check",
+              values={ disabled="Disabled", auto="Auto (Class/Spec)", custom="Custom" },
+              order={ "disabled", "auto", "custom" },
+              tooltip="Disabled runs no nameplate range checks. Auto uses your class and specialization's normal attack range. Custom uses the range selected beside this option.",
+              getValue=function() return DBVal("outOfRangeMode") or defaults.outOfRangeMode end,
+              setValue=function(v)
+                DB().outOfRangeMode = v
+                if v == "custom" and DB().outOfRangeCustomRange == nil then
+                    DB().outOfRangeCustomRange = EllesmereUI.Range_GetAttackCutoff()
+                end
+                if ns.RangeText_Apply then ns.RangeText_Apply() end
+                EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Custom Range",
+              tooltip="Attack-range cutoff used by Out of Range Alpha. Five-yard steps match the available fallback range checks.",
+              min=5, max=50, step=5,
+              disabled=function() return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) ~= "custom" end,
+              disabledTooltip="Range Check: Custom",
+              getValue=function()
+                  return DBVal("outOfRangeCustomRange") or EllesmereUI.Range_GetAttackCutoff()
+              end,
+              setValue=function(v)
+                DB().outOfRangeCustomRange = v
+                if ns.RangeText_Apply then ns.RangeText_Apply() end
+              end });  y = y - h
+
+        -- Row 5: Execute Pulse Glow | Out of Range Alpha
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Execute Pulse Glow",
               tooltip="Pulses a red glow on enemy nameplates below 30% health.",
@@ -3965,7 +3993,16 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().lowHpGlow = v
                 ns.RefreshAllSettings()
               end },
-            { type="label", text="" });  y = y - h
+            { type="slider", text="Out of Range Alpha",
+              tooltip="Alpha used for enemy nameplates outside the selected attack range.",
+              min=0, max=100, step=1,
+              disabled=function() return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) == "disabled" end,
+              disabledTooltip="Range Check: Auto or Custom",
+              getValue=function() return DBVal("outOfRangeAlpha") or defaults.outOfRangeAlpha end,
+              setValue=function(v)
+                DB().outOfRangeAlpha = v
+                if ns.RangeText_Apply then ns.RangeText_Apply() end
+              end });  y = y - h
 
         return math.abs(y)
     end
