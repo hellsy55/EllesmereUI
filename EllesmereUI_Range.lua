@@ -1,8 +1,9 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUI_Range.lua
---  Shared range-check engine for the suite's three range consumers:
+--  Shared range-check engine for the suite's range consumers:
 --    - Nameplates "Distance to Target Text"  (spell-ladder lower bound)
+--    - Nameplates "Out of Range Alpha"       (class/spec cutoff probes)
 --    - QoL "Target Distance Text"            (item bracket or spell lower bound)
 --    - QoL crosshair out-of-range recolor    (cutoff probes + item fallback)
 --
@@ -78,6 +79,47 @@ local function ResetCaches()
     lbCache.has = false
     brCache.has = false
     RG.probeCutoff = nil
+end
+
+local DRUID_MELEE_FORMS = { [1] = true, [2] = true } -- Bear, Cat
+
+-- Attack range shared by range-aware UI. An explicit cutoff wins; otherwise
+-- class/spec decides. Holy Paladins can opt into melee range for the crosshair.
+function EllesmereUI.Range_GetAttackCutoff(customCutoff, holyPaladinMelee)
+    customCutoff = tonumber(customCutoff)
+    if customCutoff then
+        customCutoff = math.floor((customCutoff + 2.5) / 5) * 5
+        return math.max(5, math.min(50, customCutoff))
+    end
+
+    local _, classFile = UnitClass("player")
+    if classFile == "DRUID" and DRUID_MELEE_FORMS[GetShapeshiftForm()] then return 5 end
+
+    local specIndex = GetSpecialization()
+    local specID = specIndex and GetSpecializationInfo(specIndex)
+    if not specID then return 5 end
+
+    if classFile == "DRUID" then
+        if specID == 102 or specID == 105 then
+            return IsPlayerSpell(197488) and 45 or 40 -- Astral Influence
+        end
+        return 5
+    elseif classFile == "DEMONHUNTER" then
+        return (specID == 577 or specID == 581) and 5 or 25
+    elseif classFile == "EVOKER" then
+        return specID == 1468 and 30 or 25
+    elseif classFile == "HUNTER" then
+        return (specID == 253 or specID == 254) and 40 or 5
+    elseif classFile == "PALADIN" then
+        return specID == 65 and not holyPaladinMelee and 40 or 5
+    elseif classFile == "SHAMAN" then
+        return specID == 263 and 5 or 40
+    elseif classFile == "MONK" then
+        return specID == 270 and 40 or 5
+    elseif classFile == "PRIEST" or classFile == "MAGE" or classFile == "WARLOCK" then
+        return 40
+    end
+    return 5
 end
 
 local function BuildLadder()
@@ -290,6 +332,19 @@ function EllesmereUI.Range_BeyondCutoff(unit, cutoff)
         end
     end
     return nil
+end
+
+-- True/false when the unit can be classified against the supplied (or normal
+-- class/spec) attack range; nil when no spell or item probe answered.
+function EllesmereUI.Range_IsBeyondAttackRange(unit, cutoff)
+    cutoff = cutoff or EllesmereUI.Range_GetAttackCutoff()
+    if cutoff > 5 then
+        local beyond = EllesmereUI.Range_BeyondCutoff(unit, cutoff)
+        if beyond ~= nil then return beyond end
+    end
+    local minY, maxY = EllesmereUI.Range_ItemBracket(unit, cutoff)
+    if minY == nil then return nil end
+    return maxY == nil or maxY > cutoff
 end
 
 
