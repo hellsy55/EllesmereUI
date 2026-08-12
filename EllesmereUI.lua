@@ -4412,8 +4412,7 @@ end
 -- the primary target -- that Slam sweeps and consumes a charge.
 do
     local stacks, expiresAt = 0, nil
-    local BASE_MAX     = 12
-    local IMPROVED_MAX = 18
+    local BASE_MAX = 18
     local DURATION = 30
     local SWEEP    = 260708
     local IMPROVED = 383155   -- Improved Sweeping Strikes: 12 -> 18 charges
@@ -4467,7 +4466,7 @@ do
     -- Since 12.1, this is hard coded in game to be 18 stacks.
     -- Using sweeping stick at 18 will not exceed 18.
     local function MaxStacks()
-        return 18
+        return BASE_MAX
     end
 
     -- Broad Strokes generators (only count with the talent known)
