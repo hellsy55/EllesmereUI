@@ -1,6 +1,6 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
+-- German (Germany) localization for EllesmereUI by Dlarge.
 -- Encoding: UTF-8 without BOM. See CONTRIBUTING_TRANSLATIONS.md.
--- German (Germany) localization for EllesmereUI. Community-maintained. (Dlarge)
 -- Seed locale: high-frequency common vocabulary. Run /euiloc dump deDE in-game
 -- to generate the full remaining key list. Untranslated keys fall back to English.
 
