@@ -76,7 +76,8 @@ local GetCursorPosition = GetCursorPosition
 local GetBindingKey = GetBindingKey
 local InCombatLockdown = InCombatLockdown
 local GetTime = GetTime
--- Read every frame an open palette holds a macro entry -- see AdvanceMacroIcons.
+-- Read every frame an open palette holds an entry whose icon can move under it
+-- -- see AdvanceLiveIcons.
 local IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown =
     IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
 
@@ -887,6 +888,140 @@ local function SpecIndexFor(slot)
     return nil
 end
 
+-------------------------------------------------------------------------------
+--  Dynamic Rez
+--
+--  One entry that is whichever resurrection spell this character has, so a
+--  palette shared between a druid, a priest and a death knight carries the rez
+--  once rather than three times over with two of them dead on every character.
+--
+--  single and group are the out-of-combat casts; battle is the in-combat one.
+--  The same kit the raid frames' Dynamic Rez click-cast binding uses
+--  (EUI_RaidFrames_ClickCast.lua:90), kept as a copy of the table rather than
+--  read across from it: that is a separate addon the user can switch off, and
+--  an entry on a palette must not stop working when they do. The two lists have
+--  to be changed together when a class gains or loses a rez.
+--
+--  One table rather than a local per entry point, and everything else scoped to
+--  the do-block below. That is not tidiness: this file's main chunk sits within
+--  a handful of Lua's ceiling of 200 locals, and neither a field nor a
+--  block-local costs one of them.
+-------------------------------------------------------------------------------
+local Rez = {}
+do
+local UnitExists, UnitIsFriend, UnitIsDeadOrGhost =
+    UnitExists, UnitIsFriend, UnitIsDeadOrGhost
+
+local REZ_BY_CLASS = {
+    PRIEST      = { single = 2006,   group = 212036 },
+    PALADIN     = { single = 7328,   group = 212056, battle = 391054 },
+    SHAMAN      = { single = 2008,   group = 212048 },
+    DRUID       = { single = 50769,  group = 212040, battle = 20484 },
+    MONK        = { single = 115178, group = 212051 },
+    EVOKER      = { single = 361227, group = 361178 },
+    DEATHKNIGHT = { battle = 61999 },
+    WARLOCK     = { battle = 20707 },
+}
+
+-- battle, single, group for this character, any of them nil. Filtered by what
+-- is actually in the spellbook, because the macro below picks a branch by
+-- CONDITION rather than by knowledge: a /cast line naming a spell the character
+-- has not got is a branch that matches and then casts nothing, which would eat
+-- the fallback the next branch was there to be.
+--
+-- Not cached, and deliberately so. What is known moves with talents --
+-- Intercession is a holy paladin's -- and it is also simply WRONG for a moment
+-- at login, while the spellbook is still cold. A cache would latch that empty
+-- answer and hold it until something invalidated it, which is a worse failure
+-- than the reads it saves: three spellbook lookups, on a path that runs once
+-- per palette open rather than per frame. See AdvanceLiveIcons for the one that
+-- does run per frame, and OnEnteringWorld for the cold-book repair.
+local function RezKit()
+    local _, class = UnitClass("player")
+    local kit = class and REZ_BY_CLASS[class]
+    if not kit then return nil end
+    local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
+    local function Known(id)
+        if not id then return nil end
+        if C_SpellBook.IsSpellInSpellBook and bank
+           and not C_SpellBook.IsSpellInSpellBook(id, bank, true) then
+            return nil
+        end
+        return id
+    end
+    return Known(kit.battle), Known(kit.single), Known(kit.group)
+end
+
+-- A corpse worth casting the single-target rez at. UnitIsDeadOrGhost rather
+-- than UnitIsDead, to agree with the macro's [dead]: that conditional is true
+-- for a player who has released as well, and a released player is exactly who
+-- needs resurrecting.
+function Rez.HasDeadTarget()
+    return UnitExists("target") and UnitIsFriend("player", "target")
+       and UnitIsDeadOrGhost("target")
+end
+
+-- Which spell the entry would cast RIGHT NOW, for the icon and the live state
+-- beneath it. Display only -- the macro decides again at fire time and the game
+-- evaluates its conditionals then -- so this exists to keep the picture honest,
+-- and its branch order has to match Rez.MacroText's exactly or the palette shows
+-- one spell and casts another.
+function Rez.SpellNow()
+    local battle, single, group = RezKit()
+    -- A class whose only rez is the battle one casts it in every state, which
+    -- is what the bare macro line below does for the same case.
+    if not (single or group) then return battle end
+    if battle and InCombatLockdown() then return battle end
+    if single and Rez.HasDeadTarget() then return single end
+    return group or single
+end
+
+-- The macro a Dynamic Rez entry fires, or nil for a character with no rez at
+-- all. One /cast with a fallback chain rather than a line each: the chain
+-- attempts exactly ONE cast -- the first branch whose condition holds -- where
+-- separate lines would each try in turn and the second would land on "another
+-- action is in progress".
+function Rez.MacroText()
+    local battle, single, group = RezKit()
+    local Name = C_Spell.GetSpellName
+    if not Name then return nil end
+
+    local parts = {}
+    local function Add(cond, id)
+        -- By NAME: /cast resolves against the localized one, and a hardcoded
+        -- English name would fail silently on every other client.
+        local name = id and Name(id)
+        if name then parts[#parts + 1] = cond .. name end
+    end
+
+    -- [combat] only when there is something after it to be the out-of-combat
+    -- answer. A death knight or a warlock, whose only rez IS the battle one,
+    -- would otherwise cast nothing out of combat -- where that spell works
+    -- perfectly well.
+    Add((single or group) and "[combat] " or "", battle)
+    -- Not a safety check: a corpse is a rez's only valid target, so there is no
+    -- exists/nodead here the way there is on an ordinary cast. This condition is
+    -- how the single-target spell is chosen over the group one.
+    Add("[@target,help,dead] ", single)
+    -- Bare, and last: the group rez takes no target, so it is the honest answer
+    -- to "none of the above".
+    Add("", group)
+
+    if #parts == 0 then return nil end
+    return "/cast " .. table.concat(parts, "; ")
+end
+
+-- Does this character's class have a resurrection spell at all? The picker asks
+-- so it can leave the entry out for a class that has none -- an entry that
+-- could never do anything is worse than no entry. By CLASS rather than by what
+-- is currently in the spellbook: a paladin who has not taken Intercession still
+-- has Redemption, and a druid at level 10 will have Rebirth soon enough.
+function ns.HasRezKit()
+    local _, class = UnitClass("player")
+    return (class and REZ_BY_CLASS[class]) ~= nil
+end
+end
+
 -- kind -> attribute triple for the secure button, plus an optional 4th value:
 -- a sibling attribute key that must be cleared because the same action type
 -- would otherwise read it in preference. Returns nil for the kinds with no
@@ -998,6 +1133,16 @@ local function ResolveAction(slot)
             return "macro", "macrotext", "/cwm " .. (ALL or "all"), "macro"
         end
         return "macro", "macrotext", "/wm " .. WORLD_MARKER_ENGINE[id], "macro"
+
+    elseif k == "dynamicrez" then
+        -- Fired as macro text, which is what makes it dynamic in the way that
+        -- matters: the attributes are written out of combat, and a rez has to
+        -- pick its branch DURING the fight. The game evaluates [combat] when
+        -- the macro runs, so a menu pushed before the pull still casts the
+        -- battle rez in it. A resolved spellID could not do that.
+        local text = Rez.MacroText()
+        if not text then return nil end
+        return "macro", "macrotext", text, "macro"
 
     elseif k == "cycleraidtarget" or k == "cycleworldmarker" then
         -- The step the position on the slot says is up. The snippet overwrites
@@ -1133,6 +1278,18 @@ local function SlotDisplay(slot)
     elseif k == "macrotext" then
         return slot.icon or QUESTION_MARK, slot.name or "Macro"
 
+    elseif k == "dynamicrez" then
+        -- The spell it would cast, not a fixed emblem: the entry is worth
+        -- having because it changes, and one picture over three different casts
+        -- would hide the only thing it has to say.
+        local id = Rez.SpellNow()
+        local info = id and C_Spell.GetSpellInfo(id)
+        if info then return info.iconID or QUESTION_MARK, info.name end
+        -- A character with no resurrection spell at all -- the mage carrying
+        -- the shared palette. Drawn as an occupied slot under its own name, the
+        -- same as a spec this character does not have.
+        return QUESTION_MARK, "Dynamic Rez"
+
     elseif k == "mount" then
         if type(slot.id) ~= "number" then return QUESTION_MARK, slot.name end
         local name, _, icon = C_MountJournal.GetMountInfoByID(slot.id)
@@ -1226,17 +1383,32 @@ ns.SlotDisplay = SlotDisplay
 --
 -- Items keep the plain numeric path -- C_Item.GetItemCooldown carries no secret
 -- flag and there is no duration-object equivalent for items.
+--
+-- The spellID an entry's live state is read from, for the kinds that HAVE one.
+-- A Dynamic Rez answers the branch it would take right now, so its cooldown
+-- swipe, its charge count and its usability tint all describe the one spell its
+-- icon is drawn from -- three separate resolutions could disagree.
+local function SlotSpellID(slot)
+    if not slot then return nil end
+    if slot.kind == "spell" then
+        return type(slot.id) == "number" and slot.id or nil
+    elseif slot.kind == "dynamicrez" then
+        return Rez.SpellNow()
+    end
+    return nil
+end
+
 local function SlotCooldown(slot)
     if not slot then return nil end
     local k = slot.kind
-    if k == "spell" or k == "mount" then
+    if k == "spell" or k == "mount" or k == "dynamicrez" then
         local id
         if k == "mount" then
             -- No falling back to slot.id here: that is a mountID, and looking
             -- a mountID up as a spellID reports some unrelated spell's cooldown.
             id = slot.spellID or select(2, C_MountJournal.GetMountInfoByID(slot.id))
         else
-            id = slot.id
+            id = SlotSpellID(slot)
         end
         if id and C_Spell.GetSpellCooldownDuration then
             -- Parenthesised, so only the duration comes back: 12.1 returns a
@@ -1275,9 +1447,12 @@ local function SlotCount(slot)
     if not slot then return false end
     local k = slot.kind
 
-    if k == "spell" then
-        if type(slot.id) ~= "number" or not C_Spell.GetSpellCharges then return false end
-        local charges = C_Spell.GetSpellCharges(slot.id)
+    -- A battle rez is the charge-carrying spell this matters most for: how many
+    -- are left is the whole question a raid asks of it.
+    if k == "spell" or k == "dynamicrez" then
+        local id = SlotSpellID(slot)
+        if not id or not C_Spell.GetSpellCharges then return false end
+        local charges = C_Spell.GetSpellCharges(id)
         if not charges then return false end
         return true, charges.currentCharges
 
@@ -1334,10 +1509,11 @@ local function SlotUsability(slot)
     if not slot then return nil end
     local k = slot.kind
 
-    if k == "spell" then
-        if type(slot.id) ~= "number" then return nil end
-        if C_Spell.IsSpellInRange(slot.id) == false then return "OUTOFRANGE" end
-        local usable, noPower = C_Spell.IsSpellUsable(slot.id)
+    if k == "spell" or k == "dynamicrez" then
+        local id = SlotSpellID(slot)
+        if not id then return nil end
+        if C_Spell.IsSpellInRange(id) == false then return "OUTOFRANGE" end
+        local usable, noPower = C_Spell.IsSpellUsable(id)
         if usable then return nil end
         return noPower and "NOPOWER" or "UNUSABLE"
 
@@ -4141,21 +4317,30 @@ end
 -- iconSize is the size the LAYOUT gave this cell, before any falloff or
 -- selection zoom: the corner count is sized off it, and reading the widget's
 -- current size instead would make the number breathe with the entry.
--- Which modifiers are held, as one number, so "has this changed" is a single
--- comparison. Only the three a macro's [mod] conditionals know about: nothing
--- else can change what an entry draws.
-local function ModifierState()
+-- Everything an open palette's icons can move under, as one number, so "has any
+-- of it changed" is a single comparison. Read every frame while such a cell is
+-- on screen, which is why it is five C calls and no allocation.
+--
+-- The three modifiers are what a macro's [mod] conditionals see. Combat and a
+-- dead friendly target are what a Dynamic Rez branches on. Nothing else can
+-- change what an entry draws.
+local function IconState()
     return (IsShiftKeyDown() and 1 or 0)
          + (IsControlKeyDown() and 2 or 0)
          + (IsAltKeyDown() and 4 or 0)
+         + (InCombatLockdown() and 8 or 0)
+         + (Rez.HasDeadTarget() and 16 or 0)
 end
 
--- Does this cell's icon depend on the modifiers held? Only a macro's does: every
--- other kind resolves to one fixed thing, and the built-in macrotext kinds
--- (markers, world markers, the cycling pair) carry an icon of their own that no
--- conditional can move. See MacroIcon.
-local function HasModifierIcon(slot)
-    return slot ~= nil and slot.kind == "macro"
+-- Does this cell's icon depend on any of that? Two kinds do: a macro, whose
+-- conditionals are evaluated at the release (see MacroIcon), and a Dynamic Rez,
+-- which is three spells wearing one slot (see Rez.SpellNow). Every other kind
+-- resolves to one fixed thing, and the built-in macrotext kinds -- markers,
+-- world markers, the cycling pair -- carry an icon of their own that no
+-- conditional can move.
+local function HasLiveIcon(slot)
+    if slot == nil then return false end
+    return slot.kind == "macro" or slot.kind == "dynamicrez"
 end
 
 local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLabel,
@@ -4327,12 +4512,12 @@ function PaletteView:Layout(paletteIndex)
     local showUsability = opts.showUsability
     if showUsability == nil then showUsability = p.showUsability ~= false end
 
-    -- The cells whose icon follows the modifiers, collected as they are painted
-    -- so an open with no macro in it leaves an empty list and AdvanceMacroIcons
+    -- The cells whose icon can move under them, collected as they are painted
+    -- so an open with none of them leaves an empty list and AdvanceLiveIcons
     -- costs nothing at all. Reused rather than rebuilt: this runs on every open.
-    local modCells = self._modCells
-    if not modCells then modCells = {}; self._modCells = modCells end
-    for k = #modCells, 1, -1 do modCells[k] = nil end
+    local liveCells = self._liveCells
+    if not liveCells then liveCells = {}; self._liveCells = liveCells end
+    for k = #liveCells, 1, -1 do liveCells[k] = nil end
 
     for i = 1, shown do
         local w = self.widgets[i]
@@ -4357,7 +4542,7 @@ function PaletteView:Layout(paletteIndex)
         -- can be fired -- is already named on the hub.
         PaintCell(w, palette.slots[i], palette.slots[i] == nil,
                   showLabels, showCooldowns, not fan, iconSize, showUsability)
-        if HasModifierIcon(palette.slots[i]) then modCells[#modCells + 1] = i end
+        if HasLiveIcon(palette.slots[i]) then liveCells[#liveCells + 1] = i end
         w:Show()
     end
 
@@ -4388,8 +4573,8 @@ function PaletteView:Layout(paletteIndex)
                 w:EnableMouse(false)
                 PaintCell(w, c.slots[j], false, showLabels, showCooldowns,
                           c.label ~= false, c.icon, showUsability)
-                if HasModifierIcon(c.slots[j]) then
-                    modCells[#modCells + 1] = cells
+                if HasLiveIcon(c.slots[j]) then
+                    liveCells[#liveCells + 1] = cells
                 end
                 -- Hidden until its own claim is previewed or opened -- see
                 -- UpdateNestShown.
@@ -4402,7 +4587,7 @@ function PaletteView:Layout(paletteIndex)
     -- The paint above already drew every macro cell for the modifiers held right
     -- now, so recording them here is what keeps the palette's first tick from
     -- repainting the lot for a state that has not moved.
-    self._modState = ModifierState()
+    self._liveState = IconState()
     -- Every cell was just hidden and every entry repainted plain, so all three
     -- of these describe a drawing that no longer exists.
     self._openClaim, self._previewClaim, self._armedParent = nil, nil, nil
@@ -4535,31 +4720,36 @@ function PaletteView:Layout(paletteIndex)
     hub.hint:SetText("")
 end
 
--- Redraw the macro cells for the modifiers held now, if they have moved since
+-- Redraw the cells whose icon can move, if anything they follow has moved since
 -- the last time this asked.
 --
--- The palette fires on the RELEASE, and a macro's conditionals are evaluated
--- then, so the player may press or let go of a modifier at any point during the
--- hold and change what the entry under the cursor is going to cast. Without
--- this the palette keeps drawing whichever branch happened to be current when it
--- opened, and the only way to find out that shift swapped the spell is to fire
--- it.
+-- The palette fires on the RELEASE, and both of these kinds decide what they
+-- cast at that moment: a macro's conditionals are evaluated then, and a Dynamic
+-- Rez picks its branch then. So the player can press a modifier, pull a boss or
+-- click a corpse at any point during the hold and change what the entry under
+-- the cursor is going to do. Without this the palette keeps drawing whichever
+-- branch happened to be current when it opened, and the only way to find out
+-- that it swapped is to fire it.
 --
--- ICON only, deliberately. The label stays the macro's own name -- which is what
--- Blizzard's action buttons show for a macro, and what the player recognises --
--- and the usability tint stays where the paint left it, for the reason PaintCell
--- gives: a colour that moves under a settled hand reads as a flicker.
+-- A latched menu makes this matter more than a hold does: it stays up across a
+-- pull, which is exactly the transition the rez branches on.
 --
--- Three C calls per frame for a palette holding a macro, none for one that is
--- not (the list is empty and this returns on the first line), and textures are
--- touched only on the frames the state actually changes -- one press of shift,
--- not one per frame it stays down.
-function PaletteView:AdvanceMacroIcons()
-    local cells = self._modCells
+-- ICON only, deliberately. The label stays the name the paint gave it -- for a
+-- macro that is the macro's own name, which is what Blizzard's action buttons
+-- show and what the player recognises -- and the usability tint stays where the
+-- paint left it, for the reason PaintCell gives: a colour that moves under a
+-- settled hand reads as a flicker.
+--
+-- Five C calls per frame for a palette holding one of these kinds, none for one
+-- that is not (the list is empty and this returns on the first line), and
+-- textures are touched only on the frames the state actually changes -- one
+-- press of shift, not one per frame it stays down.
+function PaletteView:AdvanceLiveIcons()
+    local cells = self._liveCells
     if not cells or #cells == 0 then return end
-    local state = ModifierState()
-    if state == self._modState then return end
-    self._modState = state
+    local state = IconState()
+    if state == self._liveState then return end
+    self._liveState = state
 
     for k = 1, #cells do
         local index = cells[k]
@@ -5435,7 +5625,7 @@ local function OnPaletteUpdate(_, elapsed)
     UpdatePaletteAlpha()
     -- Outside the steer skip for the same reason: a modifier goes down without
     -- the cursor moving, and that is the whole gesture this answers.
-    liveView:AdvanceMacroIcons()
+    liveView:AdvanceLiveIcons()
     -- Outside the steer skip: the connector line's grow-in and sweep both
     -- keep moving under a cursor that is holding still. Costs two table
     -- reads per frame when no line is up.
@@ -7332,6 +7522,13 @@ end
 -- these are ordinary insecure writes to a protected frame, which is precisely
 -- what combat forbids. A palette edited mid-fight keeps firing its previous
 -- contents until the fight ends -- the same bargain the override bindings make.
+-- Whether the last push put a Dynamic Rez entry anywhere. Which spells that
+-- entry resolves to moves with talents and with levelling, and those events are
+-- not worth listening to for a set of palettes that holds no such entry -- so
+-- the push, which walks every slot of every bound palette in any case, is what
+-- decides. Raised by PushCell, read by PushAllPalettes.
+-- Rez.pushed carries it; Rez.SetEvents, defined below RequestPush because that
+-- is what its handler reaches, is what acts on it.
 -- How many cells each button was last given, so a palette that loses a nest
 -- clears the entries that nest used to occupy.
 local pushedCells = {}
@@ -7345,6 +7542,10 @@ local pushedClaims = {}
 -- resolve a release to -- which is what lets the snippet fire either without
 -- knowing which of the two it landed on.
 local function PushCell(btn, i, slot)
+    -- Raised on the KIND, ahead of the resolve and whatever it answers: a rez
+    -- macro that came out empty because the spellbook was cold is exactly the
+    -- case OnEnteringWorld needs this flag to catch.
+    if slot and slot.kind == "dynamicrez" then Rez.pushed = true end
     local aType, aKey, aVal = ResolveAction(slot)
     btn:SetAttribute("eqdT" .. i, aType)
     btn:SetAttribute("eqdK" .. i, aKey)
@@ -7678,7 +7879,11 @@ local function PushAllPalettes()
         return
     end
     pushDirty = false
+    -- Recomputed by the walk below, which visits every slot of every bound
+    -- palette anyway. See Rez.SetEvents for what it is for.
+    Rez.pushed = false
     for i = 1, PaletteCount() do PushPalette(i) end
+    Rez.SetEvents(Rez.pushed)
 end
 
 -- A push is on the order of a thousand attribute writes per bound palette, and
@@ -7725,6 +7930,51 @@ FlushPendingPush = function()
     if not pushQueued then return end
     pushQueued = false
     PushAllPalettes()
+end
+
+-- What a Dynamic Rez entry is depends on which resurrection spells this
+-- character HAS, and the macro carrying that answer is written at push time. So
+-- the three things that change the answer have to reach a push:
+--
+--   PLAYER_SPECIALIZATION_CHANGED   a rez that belongs to one spec
+--   TRAIT_CONFIG_UPDATED            a rez that is a talent -- Intercession
+--   LEARNED_SPELL_IN_SKILL_LINE     levelling into one
+--
+-- Not SPELLS_CHANGED, which would cover all three in one registration and fires
+-- repeatedly through login and every zone change for a module that has nothing
+-- to do with any of it.
+--
+-- Registered only while a palette actually holds such an entry, so a set of
+-- palettes without one dispatches nothing at all.
+do
+local REZ_EVENTS = {
+    "PLAYER_SPECIALIZATION_CHANGED",
+    "TRAIT_CONFIG_UPDATED",
+    "LEARNED_SPELL_IN_SKILL_LINE",
+}
+local rezEventsOn = false
+
+local function OnRezSourceChanged(_, event, arg1)
+    -- The spec event fires for group members too, and somebody else's respec
+    -- changes nothing about what this character can cast.
+    if event == "PLAYER_SPECIALIZATION_CHANGED" and arg1 ~= "player" then return end
+    -- The coalesced request, not a direct push: a loadout swap fires
+    -- TRAIT_CONFIG_UPDATED several times over, and one push serves the lot.
+    RequestPush()
+end
+
+function Rez.SetEvents(on)
+    on = on and true or false
+    if on == rezEventsOn then return end
+    rezEventsOn = on
+    for _, event in ipairs(REZ_EVENTS) do
+        if on then
+            EQD:RegisterEvent(event, OnRezSourceChanged)
+        else
+            EQD:UnregisterEvent(event)
+        end
+    end
+end
 end
 
 local bindingsDirty = false
@@ -7965,6 +8215,16 @@ end
 -- key-up; drop the palette rather than leave it stuck.
 local function OnEnteringWorld()
     ns.Close()
+    -- The rez macro is built from the spellbook, and the spellbook can still be
+    -- cold at the push this module makes on its way up -- which would leave a
+    -- Dynamic Rez entry holding no macro at all, with nothing later in the
+    -- session to fix it: the events that rebuild it fire when what is known
+    -- CHANGES, and a spell that was known all along never changes. This is the
+    -- repair, and it costs nothing on a set of palettes without such an entry.
+    --
+    -- Rez.pushed is raised by the slot's KIND rather than by the macro resolving,
+    -- which is what lets a push that resolved nothing still ask to be redone.
+    if Rez.pushed then RequestPush() end
 end
 
 -- Switched off, the module wants none of these -- except while something is
@@ -7990,6 +8250,10 @@ function SetEventsEnabled(on)
         EQD:UnregisterEvent("UPDATE_BINDINGS")
         EQD:UnregisterEvent("PLAYER_REGEN_ENABLED")
         EQD:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        -- The rez events belong to the pushed palettes, and a module switched
+        -- off pushes nothing. There is no debt to settle here the way the three
+        -- above have one: a push that never happens leaves nothing owed.
+        Rez.SetEvents(false)
     end
 end
 

@@ -473,6 +473,11 @@ initFrame:SetScript("OnEvent", function(self)
                         and "world marker, next on each press")
                     or (slot.kind == "randommount" and "mount")
                     or (slot.kind == "spec" and "specialization")
+                    -- The name above is already the spell this character would
+                    -- cast, so the caption says what picked it rather than
+                    -- repeating it.
+                    or (slot.kind == "dynamicrez"
+                        and "resurrection, chosen for this character")
                     or slot.kind
             end
             text = (name or slot.kind)
@@ -563,6 +568,21 @@ initFrame:SetScript("OnEvent", function(self)
             seen[spellID] = true
             out[#out + 1] = { icon = icon, name = name,
                               slot = { kind = "spell", id = spellID } }
+        end
+
+        -- Dynamic Rez ahead of the spellbook itself, the way the Mount Journal's
+        -- random roll leads the mounts: it is one entry that is whichever
+        -- resurrection spell the character holding the palette has, so a palette
+        -- shared between characters carries the rez once instead of once per
+        -- class with all but one of them dead. pin is what holds it at the top
+        -- past the sort. Left out entirely for a class with no rez at all.
+        if ns.HasRezKit and ns.HasRezKit() then
+            local slot = { kind = "dynamicrez" }
+            local icon = ns.SlotDisplay(slot)
+            -- Named for what the ENTRY is, not for the spell it happens to
+            -- resolve to today: this row is picked from a list, and "Rebirth"
+            -- sitting above the real Rebirth would read as a duplicate.
+            out[1] = { icon = icon, name = "Dynamic Rez", slot = slot, pin = true }
         end
 
         -- There is no C_SpellBook.GetNumSpellBookItems in this client. The book
