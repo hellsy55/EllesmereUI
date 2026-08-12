@@ -8,7 +8,6 @@ local math_floor, math_ceil, math_max, math_min, math_abs =
 local string_format = string.format
 local issecretvalue = issecretvalue
 
-local oUF = ns.oUF or oUF
 local PP = EllesmereUI.PP
 
 -- Taint-safe DisableBlizzard override. Stock lib reparents inline via a SetParent
@@ -80,7 +79,6 @@ do
         Unreg(frame.DebuffFrame)
     end
 
-    local origDisableBlizzard = oUF.DisableBlizzard
     -- Standalone Midnight player alt-power bars live under PlayerFrameAlternatePowerBarArea
     -- (a PlayerFrame child), so reparenting PlayerFrame makes them descendants of an
     -- insecure frame. 12.1 build 68824 made aura access a hard-error API (RequiresUnitAuraAccess): these bars
@@ -100,7 +98,7 @@ do
         end
     end
 
-    function oUF:DisableBlizzard(unit)
+    function ns.UF_HideBlizzard(unit)
         if not unit then return end
         if unit == "player" then
             HandleFrame(PlayerFrame)
@@ -121,9 +119,8 @@ do
                     HandleFrame("Boss" .. i .. "TargetFrame", true)
                 end
             end
-        else
-            return origDisableBlizzard(self, unit)
         end
+        -- Unmapped units (tot/fot ride their parents' children) are no-ops.
     end
 end
 
@@ -167,10 +164,6 @@ do
     })
 end
 
-if not oUF then
-    error("EllesmereUIUnitFrames: oUF library not found! Please install oUF to Libraries\\oUF\\ folder.")
-    return
-end
 
 -- Portrait UNIT_MODEL_CHANGED on eventless frames (TargetTarget) triggers UnitIsUnit,
 -- which returns secret booleans in protected instances; we unregister that event after
@@ -1389,7 +1382,12 @@ ns.ApplyCastBarTexture = function(castbar, texKey)
         UnsnapTex(fill)
     end
     if castbar.castTintLayer then castbar.castTintLayer:SetTexture(path) end
-    if castbar._shieldedTint then castbar._shieldedTint:SetTexture(path) end
+    -- The shield tint keeps its creation WHITE8X8: 12.1 renders the loose
+    -- statusbar art BLANK on plain overlay textures (negative synthetic
+    -- fileID, healthy alpha/rect/shown readbacks -- measured in-game
+    -- 2026-08-12, the invisible-interrupt-shield report), so re-pointing it
+    -- at the art killed the shield entirely. A flat wash tints the textured
+    -- fill below it; SetAlphaFromBoolean keeps driving it secret-safe.
 end
 
 -- Cast bar Fill Opacity (player/target/focus). Below 100 the active-cast tint layer
@@ -1602,7 +1600,7 @@ local function UF_SecretSafeHealthColor(self, event, unit)
         end
     elseif element.colorReaction and UnitReaction(unit, "player") then
         color = self.colors.reaction[UnitReaction(unit, "player")]
-    elseif element.colorSmooth and self.colors.health:GetCurve() then
+    elseif element.colorSmooth and element.values and self.colors.health:GetCurve() then
         color = element.values:EvaluateCurrentHealthPercent(self.colors.health:GetCurve())
     elseif element.colorHealth then
         color = self.colors.health
@@ -1784,11 +1782,8 @@ ns.ApplyDarkTheme = ApplyDarkTheme
 -- which RefreshDarkMode() calls right after these refreshers.
 if EllesmereUI.RegisterDarkModeRefresh then
     EllesmereUI.RegisterDarkModeRefresh(function()
-        local oUF = _G.EllesmereUF
-        if oUF and oUF.objects then
-            for _, obj in next, oUF.objects do
-                if obj.Health then ApplyDarkTheme(obj.Health) end
-            end
+        for _, obj in pairs(frames) do
+            if type(obj) == "table" and obj.Health then ApplyDarkTheme(obj.Health) end
         end
         -- Boss "Activate Preview" fake frames need their red class-color
         -- substitute re-applied after the dark repaint above.
@@ -1796,6 +1791,122 @@ if EllesmereUI.RegisterDarkModeRefresh then
             ns._ReapplyBossPreviewColor()
         end
     end)
+end
+
+-------------------------------------------------------------------------------
+--  Engine painters (oUF extraction). ns.Colors carries the exact color table
+--  the shared color chains read through frame.colors: same value sources and
+--  shapes as before, so every existing color decision lands on identical
+--  numbers. Class entries are overwritten by the suite palette sync (the same
+--  flow that used to write the library's table); reaction entries by the
+--  module's own reaction sync. Published as EllesmereUI._UFColors so the
+--  parent's color chokepoint can reach it.
+-------------------------------------------------------------------------------
+do
+    local CreateColor = _G.CreateColor
+    local colors = {
+        health       = CreateColor(49 / 255, 207 / 255, 37 / 255),
+        disconnected = CreateColor(0.6, 0.6, 0.6),
+        tapped       = CreateColor(0.6, 0.6, 0.6),
+        class    = {},
+        reaction = {},
+        threat   = {},
+        power    = {},
+    }
+    for token, c in pairs(RAID_CLASS_COLORS) do
+        colors.class[token] = CreateColor(c.r, c.g, c.b)
+    end
+    for idx, c in pairs(FACTION_BAR_COLORS) do
+        colors.reaction[idx] = CreateColor(c.r, c.g, c.b)
+    end
+    for i = 0, 3 do
+        colors.threat[i] = CreateColor(GetThreatStatusColor(i))
+    end
+    -- Both key forms land: Blizzard's table carries string tokens plus numeric
+    -- aliases, and the painter looks up number-first, token-second.
+    for key, c in pairs(PowerBarColor) do
+        if type(c) == "table" and c.r then
+            colors.power[key] = CreateColor(c.r, c.g, c.b)
+        end
+    end
+    -- Dispel colors keyed by the game's dispel-type indices (the aura rows'
+    -- type overlay reads these through a step curve). Blizzard's shared color
+    -- objects are referenced directly; Enrage has no stock color.
+    colors.dispel = {
+        [0]  = _G.DEBUFF_TYPE_NONE_COLOR,
+        [1]  = _G.DEBUFF_TYPE_MAGIC_COLOR,
+        [2]  = _G.DEBUFF_TYPE_CURSE_COLOR,
+        [3]  = _G.DEBUFF_TYPE_DISEASE_COLOR,
+        [4]  = _G.DEBUFF_TYPE_POISON_COLOR,
+        [9]  = CreateColor(243 / 255, 95 / 255, 245 / 255),
+        [11] = _G.DEBUFF_TYPE_BLEED_COLOR,
+    }
+    ns.Colors = colors
+    EllesmereUI._UFColors = colors
+
+    -- Health value pass: min/max plus current (offline paints a full bar, the
+    -- behavior users already see), native interpolation via the bar's own
+    -- .smoothing, then the shared secret-safe color chain.
+    local function PaintHealth(frame, unit, event)
+        local element = frame.Health
+        if not element or not unit or not UnitExists(unit) then return end
+        if not ns.Engine.ElementOn(frame, "Health") then return end
+        local max = UnitHealthMax(unit)
+        element:SetMinMaxValues(0, max)
+        if UnitIsConnected(unit) then
+            element:SetValue(UnitHealth(unit), element.smoothing)
+        else
+            element:SetValue(max, element.smoothing)
+        end
+        UF_SecretSafeHealthColor(frame, event, unit)
+    end
+    ns.Engine.SetPainter("health", PaintHealth)
+
+    -- Power value pass: display-power resolution first (the player bar's
+    -- spec-override hook publishes the resolved type for the text formatters),
+    -- then min/max/value with offline painting full, then the base power-type
+    -- color with the bar's own PostUpdateColor/PostUpdate layered on top in
+    -- the same order as before.
+    local function PaintPower(frame, unit, event)
+        local element = frame.Power
+        if not element or not unit or not UnitExists(unit) then return end
+        if not ns.Engine.ElementOn(frame, "Power") then return end
+        local ptype
+        if element.displayAltPower and element.GetDisplayPower then
+            ptype = element:GetDisplayPower(unit)
+        end
+        element.displayType = ptype
+        local pnum, ptoken
+        if ptype then pnum = ptype else pnum, ptoken = UnitPowerType(unit) end
+        local max = UnitPowerMax(unit, pnum)
+        element:SetMinMaxValues(0, max)
+        local cur
+        if UnitIsConnected(unit) then
+            cur = UnitPower(unit, pnum)
+            element:SetValue(cur, element.smoothing)
+        else
+            cur = max
+            element:SetValue(max, element.smoothing)
+        end
+        if element.colorPower then
+            local color = ns.Colors.power[pnum] or (ptoken and ns.Colors.power[ptoken])
+            if color then element:SetStatusBarColor(color:GetRGB()) end
+        end
+        if element.PostUpdateColor then element:PostUpdateColor(unit) end
+        if element.PostUpdate then element:PostUpdate(unit, cur, 0, max) end
+    end
+    ns.Engine.SetPainter("power", PaintPower)
+
+    -- Absorbs: the HealthPrediction Override was always our own complete
+    -- painter (bars, clips, text gates); the engine simply becomes its event
+    -- source. Identity repaints arrive as pseudo-events, which the Override
+    -- already treats as gate-refresh triggers.
+    local function PaintAbsorb(frame, unit, event)
+        if not ns.Engine.ElementOn(frame, "HealthPrediction") then return end
+        local hp = frame.HealthPrediction
+        if hp and hp.Override then hp.Override(frame, event or "ForceUpdate", unit) end
+    end
+    ns.Engine.SetPainter("absorb", PaintAbsorb)
 end
 
 -- Global Dark Mode master: exposes darkTheme so the parent addon's master toggle can
@@ -1899,8 +2010,10 @@ function ns.ApplyTextDecimalGlobals()
     end
 end
 
+-- Shared text-piece functions consumed by the zone formatter table below.
+local TagFns = {}
+
 do
-  local tagName = "curhpshort"
   local function AbbrevHP(unit)
     if not unit or not UnitExists(unit) then return "" end
     if not UnitIsConnected(unit) then return "OFFLINE" end
@@ -1914,12 +2027,11 @@ do
     return cfg and AbbreviateNumbers(hp, cfg) or AbbreviateNumbers(hp)
   end
 
-  oUF.Tags.Methods[tagName] = AbbrevHP
-  oUF.Tags.Events[tagName] = "UNIT_HEALTH UNIT_MAXHEALTH"
+  TagFns.curhpshort = AbbrevHP
 end
 
 do
-  oUF.Tags.Methods["perhpnosign"] = function(unit)
+  TagFns.perhpnosign = function(unit)
     if not unit or not UnitExists(unit) then return "" end
     if not UnitIsConnected(unit) then return "OFFLINE" end
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
@@ -1930,76 +2042,21 @@ do
     end
     return string_format(_G._EUI_TextDecimals and "%.1f" or "%d", pct)
   end
-  oUF.Tags.Events["perhpnosign"] = "UNIT_HEALTH UNIT_MAXHEALTH"
 end
 
--- Resolved power type per unit. Updated by the GetDisplayPower override so tags
--- match the power bar when powerTypeOverride is active (e.g. Balance Druid
--- showing Mana instead of Astral Power).
+-- Resolved power type per unit. Updated by the GetDisplayPower override so the
+-- power text matches the power bar when powerTypeOverride is active (e.g.
+-- Balance Druid showing Mana instead of Astral Power).
 _G._EUI_ResolvedPowerType = _G._EUI_ResolvedPowerType or {}
 
--- eui-perpp: power percent using the resolved power type (runs in the oUF _PROXY
--- env). Deliberately NOT decimal-gated: "Show Decimal on Text" is health-only.
-oUF.Tags.Methods["eui-perpp"] = [[function(u)
-    local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
-    return string.format('%d', UnitPowerPercent(u, pType, true, CurveConstants.ScaleTo100))
-end]]
-oUF.Tags.Events["eui-perpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
+-- (The perpp/curpp/absorb piece functions live in the zone-formatter block
+-- below; they read the _EUI_ globals above.)
 
--- eui-perhp: health percent, EUI-owned so "Show Decimal on Text" can switch
--- %d / %.1f without editing the vendored oUF [perhp]. Otherwise identical.
-oUF.Tags.Methods["eui-perhp"] = [[function(u)
-    local fmt = _EUI_TextDecimals and '%.1f' or '%d'
-    if _EUI_BossExtraDecimal and string.sub(u, 1, 4) == 'boss' then fmt = '%.2f' end
-    return string.format(fmt, UnitHealthPercent(u, true, CurveConstants.ScaleTo100))
-end]]
-oUF.Tags.Events["eui-perhp"] = "UNIT_HEALTH UNIT_MAXHEALTH"
-
--- eui-curpp: current power abbreviated. NOT decimal-gated (health-only feature).
-oUF.Tags.Methods["eui-curpp"] = [[function(u)
-    local pType = _EUI_ResolvedPowerType[u] or UnitPowerType(u)
-    return AbbreviateNumbers(UnitPower(u, pType))
-end]]
-oUF.Tags.Events["eui-curpp"] = "UNIT_POWER_UPDATE UNIT_MAXPOWER UNIT_DISPLAYPOWER"
-
--- eui-absorb: full absorb amount, blank when zero
-oUF.Tags.Methods["eui-absorb"] = [[function(u)
-    if not u or not UnitExists(u) then return "" end
-    return string.format("%s", C_StringUtil.TruncateWhenZero(UnitGetTotalAbsorbs(u) or 0))
-end]]
-oUF.Tags.Events["eui-absorb"] = "UNIT_ABSORB_AMOUNT_CHANGED"
-
--- eui-absorbshort: absorb abbreviated (e.g. 236k). AbbreviateNumbers is
--- secret-safe (same call [curhpshort] uses on secret health). Shows "0" with no
--- shield: AbbreviateNumbers has no blank-at-zero, only TruncateWhenZero blanks.
-oUF.Tags.Methods["eui-absorbshort"] = [[function(u)
-    if not u or not UnitExists(u) then return "" end
-    local cfg = _EUI_AbbrevDecimalCfg
-    return cfg and AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0, cfg) or AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0)
-end]]
-oUF.Tags.Events["eui-absorbshort"] = "UNIT_ABSORB_AMOUNT_CHANGED"
-
--- eui-healabsorb: full heal-absorb amount, blank when zero (mirrors eui-absorb
--- with UnitGetTotalHealAbsorbs). TruncateWhenZero blanks naturally at zero.
-oUF.Tags.Methods["eui-healabsorb"] = [[function(u)
-    if not u or not UnitExists(u) then return "" end
-    return string.format("%s", C_StringUtil.TruncateWhenZero(UnitGetTotalHealAbsorbs(u) or 0))
-end]]
-oUF.Tags.Events["eui-healabsorb"] = "UNIT_HEAL_ABSORB_AMOUNT_CHANGED"
-
--- eui-healabsorbshort: heal-absorb abbreviated (e.g. 80k). Like eui-absorbshort
--- it shows "0" at zero, so the "Heal Absorb Short" text gate hides it then.
-oUF.Tags.Methods["eui-healabsorbshort"] = [[function(u)
-    if not u or not UnitExists(u) then return "" end
-    local cfg = _EUI_AbbrevDecimalCfg
-    return cfg and AbbreviateNumbers(UnitGetTotalHealAbsorbs(u) or 0, cfg) or AbbreviateNumbers(UnitGetTotalHealAbsorbs(u) or 0)
-end]]
-oUF.Tags.Events["eui-healabsorbshort"] = "UNIT_HEAL_ABSORB_AMOUNT_CHANGED"
-
--- eui-level: effective level (scaling-aware), "??" when unknowable (skull bosses). A
--- SECRET level is returned RAW -- display-safe as a %s arg through SetFormattedText,
--- never compared/formatted in Lua (same rule as the secret name in eui-tgtname).
-oUF.Tags.Methods["eui-level"] = function(u)
+-- Effective level (scaling-aware), "??" when unknowable (skull bosses). A
+-- SECRET level is returned RAW -- display-safe as a %s arg through
+-- SetFormattedText, never compared/formatted in Lua (same rule as the secret
+-- name in the target-name piece).
+TagFns.level = function(u)
     if not u or not UnitExists(u) then return "" end
     local l = UnitEffectiveLevel(u)
     if UnitIsWildBattlePet(u) or UnitIsBattlePetCompanion(u) then
@@ -2009,7 +2066,6 @@ oUF.Tags.Methods["eui-level"] = function(u)
     if not l or l <= 0 then return "??" end
     return l
 end
-oUF.Tags.Events["eui-level"] = "UNIT_LEVEL PLAYER_LEVEL_UP"
 
 -- Class/reaction color for a unit's NAME, enemy-aware: players (and AI party members)
 -- get class color; NPCs use reaction color (hostile red, neutral yellow, friendly
@@ -2033,7 +2089,7 @@ ns.ResolveUnitNameColor = function(unit)
         end
         local reaction = UnitReaction(unit, "player")
         if reaction and not issecretvalue(reaction) then
-            local c = (oUF.colors and oUF.colors.reaction and oUF.colors.reaction[reaction])
+            local c = (ns.Colors and ns.Colors.reaction and ns.Colors.reaction[reaction])
                 or FACTION_BAR_COLORS[reaction]
             if c then return c.r, c.g, c.b end
         end
@@ -2111,50 +2167,42 @@ end
 
 -- Nickname-aware replacement for the stock [name] tag (see ContentToTag). Returns
 -- the nickname when one applies, else the raw unit name.
-oUF.Tags.Methods["eui-name"] = function(unit)
+TagFns.name = function(unit)
     -- Truncation is width-based (per-slot Width % clamp), never character-based:
     -- FontString width boxes ellipsize in the renderer, which also works on SECRET
     -- enemy names Lua cannot measure or substring.
     return ns.ResolveUnitNickname(unit)
 end
-oUF.Tags.Events["eui-name"] = "UNIT_NAME_UPDATE"
 
--- Live name refresh: re-run every spawned frame's tags so added/removed nicknames
--- (or a flipped provider checkbox) apply without a /reload. Fired by the provider
--- callbacks below; cheap (a handful of frames).
+-- Live name refresh: repaint every frame's text zones so added/removed
+-- nicknames (or a flipped provider checkbox) apply without a /reload. Fired by
+-- the provider callbacks below; cheap (a handful of frames).
 function ns.RefreshAllUnitNames()
     for _, f in pairs(frames) do
-        if type(f) == "table" and f.UpdateTags then f:UpdateTags() end
+        if type(f) == "table" and f._euiTextZones then
+            ns.UF_PaintText(f, f.unit)
+        end
     end
 end
--- Name tags only re-render on name events or via the refresh above, so a raw
+-- Name text only re-renders on name events or via the refresh above, so a raw
 -- db restore (Spec Overrides apply, profile swap) needs this exported.
 _G._EUF_RefreshUnitNames = ns.RefreshAllUnitNames
 
 -- Cold-login text repaint: on a first (uncached) login a fontstring can hold the
 -- correct string yet render blank until /reload, since it only repaints on a text
--- CHANGE and re-running the tag sets the same string (a no-op). Force a "" -> value
--- transition on every tagged fontstring shortly after login, repeated since timing
--- varies. Only ._curTag strings are blanked (UpdateTags restores them); synchronous, no flicker.
+-- CHANGE and repainting sets the same string (a no-op). Force a "" -> value
+-- transition on every zone fontstring shortly after login, repeated since timing
+-- varies; the zone repaint restores the real strings synchronously, no flicker.
 do
-    local TEXT_FIELDS = { "LeftText", "RightText", "CenterText", "ExtraText" }
-
     local function ForceTextRepaint()
         for _, f in pairs(frames) do
-            if type(f) == "table" then
-                local changed = false
-                for _, host in ipairs({ f, f.BottomTextBar }) do
-                    if type(host) == "table" then
-                        for _, key in ipairs(TEXT_FIELDS) do
-                            local fs = host[key]
-                            if fs and fs._curTag and fs.SetText then
-                                fs:SetText("")
-                                changed = true
-                            end
-                        end
-                    end
+            if type(f) == "table" and f._euiTextZones then
+                local zones = f._euiTextZones
+                for i = 1, #zones do
+                    local fs = zones[i].fs
+                    if fs and fs.SetText then fs:SetText("") end
                 end
-                if changed and f.UpdateTags then f:UpdateTags() end
+                if #zones > 0 then ns.UF_PaintText(f, f.unit) end
             end
         end
     end
@@ -2235,44 +2283,14 @@ end
 -- target name), else a fixed "rrggbb" hex, closed with |r so a missing [eui-tgtcol]
 -- can't inherit it. Decoded separators/escapes are cached: fires on every target
 -- change, must not allocate after warmup.
-do
-    local sepCache = {}   -- sepHex -> " sep " (decoded, space-padded)
-    local escCache = {}   -- rrggbb -> "|cffrrggbb"
-    local function HexToChar(h) return string.char(tonumber(h, 16)) end
-    oUF.Tags.Methods["eui-tgtsep"] = function(unit, _, sepHex, colorSpec)
-        if not (unit and UnitExists(unit .. "target")) then return "" end
-        local sep = " > "
-        if sepHex then
-            sep = sepCache[sepHex]
-            if not sep then
-                sep = " " .. sepHex:gsub("%x%x", HexToChar) .. " "
-                sepCache[sepHex] = sep
-            end
-        end
-        if colorSpec == "class" then
-            local r, g, b = ns.ResolveUnitNameColor(unit .. "target")
-            if r then
-                return string.format("|cff%02x%02x%02x%s|r",
-                    math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
-                    math.floor(b * 255 + 0.5), sep)
-            end
-            return sep
-        elseif colorSpec then
-            local esc = escCache[colorSpec]
-            if not esc then esc = "|cff" .. colorSpec; escCache[colorSpec] = esc end
-            return esc .. sep .. "|r"
-        end
-        return sep
-    end
-end
--- UNIT_FACTION mirrors [eui-tgtcol]: the class-colored indicator must recolor when
--- the target's reaction flips, like the target name it precedes.
-oUF.Tags.Events["eui-tgtsep"] = "UNIT_TARGET PLAYER_TARGET_CHANGED UNIT_FACTION"
+-- (The separator between "Name > Target" is built per-zone by
+-- ns.MakeTgtSepPiece in the formatter block below; it closes over the decoded
+-- separator and color mode from settings and recolors class-mode per call.)
 
 -- The target's class/reaction colour escape (e.g. "|cffc41f3b"), or "". Uses
 -- ns.ResolveUnitNameColor, the SAME resolver ApplyClassColor uses for the Target
 -- of Target name. No unit NAME is touched, so it is fully secret-safe.
-oUF.Tags.Methods["eui-tgtcol"] = function(unit)
+TagFns.tgtcol = function(unit)
     local tunit = unit and (unit .. "target")
     if not tunit or not UnitExists(tunit) then return "" end
     local r, g, b = ns.ResolveUnitNameColor(tunit)
@@ -2280,21 +2298,212 @@ oUF.Tags.Methods["eui-tgtcol"] = function(unit)
     return string.format("|cff%02x%02x%02x", math.floor(r * 255 + 0.5),
         math.floor(g * 255 + 0.5), math.floor(b * 255 + 0.5))
 end
-oUF.Tags.Events["eui-tgtcol"] = "UNIT_TARGET PLAYER_TARGET_CHANGED UNIT_FACTION"
 
 -- The unit's target NAME (nickname-aware via ResolveUnitNickname; otherwise the
 -- raw, possibly secret name -- display-safe via SetFormattedText, never
 -- inspected). Colour comes from [eui-tgtcol] in front of it.
-oUF.Tags.Methods["eui-tgtname"] = function(unit)
+TagFns.tgtname = function(unit)
     local tunit = unit and (unit .. "target")
     if not tunit or not UnitExists(tunit) then return "" end
     return ns.ResolveUnitNickname(tunit)
 end
-oUF.Tags.Events["eui-tgtname"] = "UNIT_TARGET PLAYER_TARGET_CHANGED UNIT_NAME_UPDATE"
+
+-------------------------------------------------------------------------------
+--  Text pieces + zone formatters (oUF extraction). Each options content key
+--  maps to a format string plus piece functions; the engine's text painter
+--  renders a zone with SetFormattedText(fmt, piece1(u), piece2(u), ...).
+--  Secret rule: name/level/target-name pieces may return RAW secret values by
+--  design; they are never concatenated or inspected in Lua -- the format-arg
+--  lane is the only thing that touches them, exactly as the tag engine did,
+--  so restricted-content rendering is unchanged.
+-------------------------------------------------------------------------------
+do
+    local sf = string.format
+    local P = {}
+    ns.TextPieces = P
+
+    -- Function-registered tag methods are shared directly: one body, no drift.
+    P.curhpshort  = TagFns.curhpshort
+    P.perhpnosign = TagFns.perhpnosign
+    P.level       = TagFns.level
+    P.name        = TagFns.name
+    P.tgtcol      = TagFns.tgtcol
+    P.tgtname     = TagFns.tgtname
+
+    -- String-compiled tag methods get real equivalents (same logic, same
+    -- _EUI_ globals; the compiled strings stay registered only while the tag
+    -- engine still runs).
+    P.perhp = function(u)
+        local fmt = _G._EUI_TextDecimals and "%.1f" or "%d"
+        if _G._EUI_BossExtraDecimal and string.sub(u, 1, 4) == "boss" then fmt = "%.2f" end
+        return sf(fmt, UnitHealthPercent(u, true, CurveConstants.ScaleTo100))
+    end
+    P.perpp = function(u)
+        local pType = _G._EUI_ResolvedPowerType[u] or UnitPowerType(u)
+        return sf("%d", UnitPowerPercent(u, pType, true, CurveConstants.ScaleTo100))
+    end
+    P.curpp = function(u)
+        local pType = _G._EUI_ResolvedPowerType[u] or UnitPowerType(u)
+        return AbbreviateNumbers(UnitPower(u, pType))
+    end
+    P.absorb = function(u)
+        if not u or not UnitExists(u) then return "" end
+        return sf("%s", C_StringUtil.TruncateWhenZero(UnitGetTotalAbsorbs(u) or 0))
+    end
+    P.absorbshort = function(u)
+        if not u or not UnitExists(u) then return "" end
+        local cfg = _G._EUI_AbbrevDecimalCfg
+        return cfg and AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0, cfg)
+            or AbbreviateNumbers(UnitGetTotalAbsorbs(u) or 0)
+    end
+    P.healabsorb = function(u)
+        if not u or not UnitExists(u) then return "" end
+        return sf("%s", C_StringUtil.TruncateWhenZero(UnitGetTotalHealAbsorbs(u) or 0))
+    end
+    P.healabsorbshort = function(u)
+        if not u or not UnitExists(u) then return "" end
+        local cfg = _G._EUI_AbbrevDecimalCfg
+        return cfg and AbbreviateNumbers(UnitGetTotalHealAbsorbs(u) or 0, cfg)
+            or AbbreviateNumbers(UnitGetTotalHealAbsorbs(u) or 0)
+    end
+    P.group = function(u)
+        if not IsInRaid() then return "" end
+        local idx = UnitInRaid(u)
+        if idx then
+            local _, _, subgroup = GetRaidRosterInfo(idx)
+            return subgroup or ""
+        end
+        return ""
+    end
+
+    -- Separator piece for "Name > Target": resolved from settings at apply
+    -- time (re-applied whenever settings change, like everything else on the
+    -- page), closing over the decoded separator and its color mode. Class
+    -- mode recolors per call so the indicator tracks the target's reaction.
+    function ns.MakeTgtSepPiece(prefix, settings)
+        local sep = settings[prefix .. "TargetSep"]
+        if type(sep) ~= "string" or sep == "" then sep = ">" end
+        sep = " " .. sep .. " "
+        if settings[prefix .. "TargetSepClassColor"] then
+            return function(u)
+                if not (u and UnitExists(u .. "target")) then return "" end
+                local r, g, b = ns.ResolveUnitNameColor(u .. "target")
+                if r then
+                    return sf("|cff%02x%02x%02x%s|r",
+                        math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
+                        math.floor(b * 255 + 0.5), sep)
+                end
+                return sep
+            end
+        end
+        local c = settings[prefix .. "TargetSepColor"]
+        local esc
+        if type(c) == "table" then
+            esc = sf("|cff%02x%02x%02x", math.floor((c.r or 1) * 255 + 0.5),
+                math.floor((c.g or 1) * 255 + 0.5), math.floor((c.b or 1) * 255 + 0.5))
+        else
+            esc = "|cffffffff"
+        end
+        local colored = esc .. sep .. "|r"
+        return function(u)
+            if not (u and UnitExists(u .. "target")) then return "" end
+            return colored
+        end
+    end
+
+    -- Content key -> zone definition. Mirrors ContentToTag's output shapes
+    -- one-for-one so rendered text is byte-identical.
+    local ZONE_STATIC = {
+        name         = { "%s", "name" },
+        levelname    = { "%s | %s", "level", "name" },
+        namelevel    = { "%s | %s", "name", "level" },
+        level        = { "%s", "level" },
+        both         = { "%s | %s%%", "curhpshort", "perhp" },
+        bothdash     = { "%s - %s%%", "curhpshort", "perhp" },
+        perhpnum     = { "%s%% | %s", "perhp", "curhpshort" },
+        perhpnumdash = { "%s%% - %s", "perhp", "curhpshort" },
+        curhpshort   = { "%s", "curhpshort" },
+        perhp        = { "%s%%", "perhp" },
+        perhpnosign  = { "%s", "perhpnosign" },
+        perpp        = { "%s%%", "perpp" },
+        curpp        = { "%s", "curpp" },
+        curhp_curpp  = { "%s | %s", "curhpshort", "curpp" },
+        perhp_perpp  = { "%s%% | %s%%", "perhp", "perpp" },
+        absorb       = { "%s", "absorb" },
+        absorbshort  = { "%s", "absorbshort" },
+        healabsorb   = { "%s", "healabsorb" },
+        healabsorbshort = { "%s", "healabsorbshort" },
+        group        = { "%s", "group" },
+    }
+
+    --- Resolves a content key to (fmt, piecesArray) for a zone, or nil for
+    --- "none"/unknown. nametotarget builds its settings-closure separator.
+    function ns.ContentToZone(content, prefix, settings)
+        if content == "nametotarget" then
+            return "%s%s%s%s", { P.name, ns.MakeTgtSepPiece(prefix, settings), P.tgtcol, P.tgtname }
+        end
+        local def = ZONE_STATIC[content]
+        if not def then return nil end
+        local pieces = { }
+        for i = 2, #def do pieces[#pieces + 1] = P[def[i]] end
+        return def[1], pieces
+    end
+
+    -- The text painter: renders every registered zone on the frame. Piece
+    -- returns route through a scratch table + unpack (tables carry secrets
+    -- fine; nothing inspects them).
+    local scratch = {}
+    local function PaintText(frame, unit)
+        local zones = frame._euiTextZones
+        if not zones then return end
+        for i = 1, #zones do
+            local z = zones[i]
+            local pieces = z.pieces
+            local n = #pieces
+            for k = 1, n do scratch[k] = pieces[k](unit) end
+            z.fs:SetFormattedText(z.fmt, unpack(scratch, 1, n))
+        end
+    end
+    ns.UF_PaintText = PaintText
+    ns.Engine.SetPainter("text", PaintText)
+
+    --- Registers/updates one text zone on a frame: resolves the content key
+    --- and stores the def the text painter renders. nil/none content removes
+    --- the zone (the position code hides the fontstring separately, as
+    --- before). Zones are keyed by fontstring; re-apply replaces in place.
+    function ns.SetTextZone(frame, fs, content, prefix, settings)
+        local zones = frame._euiTextZones
+        if not zones then zones = {}; frame._euiTextZones = zones end
+        local fmt, pieces
+        if content then fmt, pieces = ns.ContentToZone(content, prefix, settings) end
+        for i = #zones, 1, -1 do
+            if zones[i].fs == fs then table.remove(zones, i) end
+        end
+        if fmt then
+            zones[#zones + 1] = { fs = fs, fmt = fmt, pieces = pieces }
+        else
+            fs:SetText("")
+        end
+    end
+
+    --- Raw-zone variant for callers that assemble their own format (the power
+    --- percent text's curpp/perpp/smart combinations). nil fmt removes.
+    function ns.SetTextZoneRaw(frame, fs, fmt, pieces)
+        local zones = frame._euiTextZones
+        if not zones then zones = {}; frame._euiTextZones = zones end
+        for i = #zones, 1, -1 do
+            if zones[i].fs == fs then table.remove(zones, i) end
+        end
+        if fmt then
+            zones[#zones + 1] = { fs = fs, fmt = fmt, pieces = pieces }
+        else
+            fs:SetText("")
+        end
+    end
+end
 
 local optionsFrame
 local optionsCategoryID
-_G.EllesmereUF_StylesRegistered = _G.EllesmereUF_StylesRegistered or false
 
 local unitSettingsMap
 local function GetSettingsForUnit(unit)
@@ -2689,60 +2898,8 @@ end
 -- Build the per-slot "Name > Target" indicator tag. The separator is hex-encoded
 -- per byte so any user-typed character (commas, parens, multibyte symbols)
 -- survives the tag brackets; color rides as "class" or rrggbb hex (default white).
-local function BuildTgtSepTag(prefix, settings)
-    local sep = settings[prefix .. "TargetSep"]
-    if type(sep) ~= "string" or sep == "" then sep = ">" end
-    local hex = sep:gsub(".", function(ch) return string.format("%02x", ch:byte()) end)
-    local col
-    if settings[prefix .. "TargetSepClassColor"] then
-        col = "class"
-    else
-        local c = settings[prefix .. "TargetSepColor"]
-        if type(c) == "table" then
-            col = string.format("%02x%02x%02x",
-                math.floor((c.r or 1) * 255 + 0.5),
-                math.floor((c.g or 1) * 255 + 0.5),
-                math.floor((c.b or 1) * 255 + 0.5))
-        else
-            col = "ffffff"
-        end
-    end
-    return "[eui-tgtsep(" .. hex .. "," .. col .. ")]"
-end
-
--- Resolve a leftTextContent / rightTextContent value to an oUF tag string.
--- content: "name", "both", "curhpshort", "perhp", "perhpnosign", "perhpnum", "none"
-local function ContentToTag(content, prefix, settings)
-    if content == "name" then return "[eui-name]"
-    elseif content == "nametotarget" then
-        return "[eui-name]"
-            .. BuildTgtSepTag(prefix, settings) .. "[eui-tgtcol][eui-tgtname]"
-    elseif content == "levelname" then
-        return "[eui-level] | [eui-name]"
-    elseif content == "namelevel" then
-        return "[eui-name] | [eui-level]"
-    elseif content == "level" then return "[eui-level]"
-    elseif content == "both" then return "[curhpshort] | [eui-perhp]%"
-    elseif content == "bothdash" then return "[curhpshort] - [eui-perhp]%"
-    elseif content == "perhpnum" then return "[eui-perhp]% | [curhpshort]"
-    elseif content == "perhpnumdash" then return "[eui-perhp]% - [curhpshort]"
-    elseif content == "curhpshort" then return "[curhpshort]"
-    elseif content == "perhp" then return "[eui-perhp]%"
-    elseif content == "perhpnosign" then return "[perhpnosign]"
-    -- Power content uses secret-safe eui- power tags (identical to power bar text).
-    -- Stock [curpp]/[perpp] read raw UnitPower, secret for enemies, which bugs out the
-    -- fontstring on target change; eui- tags resolve power type from the cache and stay display-safe.
-    elseif content == "perpp" then return "[eui-perpp]%"
-    elseif content == "curpp" then return "[eui-curpp]"
-    elseif content == "curhp_curpp" then return "[curhpshort] | [eui-curpp]"
-    elseif content == "perhp_perpp" then return "[eui-perhp]% | [eui-perpp]%"
-    elseif content == "absorb" then return "[eui-absorb]"
-    elseif content == "absorbshort" then return "[eui-absorbshort]"
-    elseif content == "healabsorb" then return "[eui-healabsorb]"
-    elseif content == "healabsorbshort" then return "[eui-healabsorbshort]"
-    elseif content == "group" then return "[group]"
-    else return nil end
-end
+-- (The old content-key -> tag-string mapping lived here; text zones now
+-- resolve through ns.ContentToZone and the engine text painter.)
 
 -- Estimated pixel width per text content type, for name truncation. Flat
 -- assumptions matching the nameplate system.
@@ -2804,7 +2961,8 @@ end
 -- on eventless frames; the gate keeps repaint-on-any-event dispatch cheap). PostUpdate
 -- runs only after a real repaint: 2D heals what SetPortraitTexture resets, 3D
 -- re-applies zoom after SetUnit -- nothing to heal without a repaint.
-local function PortraitOverride(self, event, evtUnit)
+local PortraitOverride  -- forward declaration; painter registrations below the definition
+function PortraitOverride(self, event, evtUnit)
     local element = self.Portrait
     if not element then return end
     local u = self.unit
@@ -2824,6 +2982,10 @@ local function PortraitOverride(self, event, evtUnit)
         or event == "UNIT_PORTRAIT_UPDATE"
         or event == "UNIT_MODEL_CHANGED"
         or event == "ForceUpdate"
+        -- Unit swaps (vehicle enter/exit) always repaint: the swap moment can
+        -- paint before the new unit's art/model streams in, and nothing with
+        -- a changed guid follows.
+        or event == "UnitChanged"
         -- World transitions can reset PlayerModel widget state at the same guid;
         -- repaint once per zone so 3D portraits never come back blank.
         or event == "PLAYER_ENTERING_WORLD"
@@ -2863,12 +3025,359 @@ local function PortraitOverride(self, event, evtUnit)
                 element:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]])
             end
         end
-        element.guid = guid
+        -- Recovery-preserving stamp: an UNAVAILABLE paint (fallback art --
+        -- transition windows, streaming models) must not cache its guid, or
+        -- the gate skips every later same-guid trigger and the fallback is
+        -- what sticks (vehicle swaps lost the portrait this way). Leaving
+        -- the guid unstamped makes the next trigger a guid-change repaint.
+        element.guid = isAvailable and guid or nil
         element.state = isAvailable
     end
     if hasStateChanged and element.PostUpdate then
         return element:PostUpdate(u, hasStateChanged)
     end
+end
+
+-- Portraits: PortraitOverride was already the complete painter (GUID/state
+-- gated 2D/3D handling); the engine becomes its event source. Raid target
+-- icon: index lookup straight onto the icon texture.
+ns.Engine.SetPainter("portrait", function(frame, unit, event)
+    if frame.Portrait and ns.Engine.ElementOn(frame, "Portrait") then
+        PortraitOverride(frame, event or "ForceUpdate", unit)
+    end
+end)
+-- Element ForceUpdate stamp: the settings code refreshes portraits through
+-- frame.Portrait:ForceUpdate(), and mode swaps replace the Portrait object,
+-- so the stamp is re-applied wherever the field is reassigned.
+function ns.UF_StampPortraitForceUpdate(frame)
+    local p = frame.Portrait
+    if not p or p.ForceUpdate then return end
+    p.ForceUpdate = function()
+        if ns.Engine.ElementOn(frame, "Portrait") then
+            PortraitOverride(frame, "ForceUpdate", frame.unit)
+        end
+    end
+end
+ns.Engine.SetPainter("raidicon", function(frame, unit)
+    if not ns.Engine.ElementOn(frame, "RaidTargetIndicator") then return end
+    local element = frame.RaidTargetIndicator
+    if not element then return end
+    -- The styles create the icon as a bare texture; the marker SHEET must be
+    -- assigned before SetRaidTargetIconTexture's texcoords can render (the
+    -- old element wiring auto-assigned it on enable -- same file the
+    -- nameplate markers use).
+    if not element:GetTexture() then
+        element:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+    end
+    local index = UnitExists(unit) and GetRaidTargetIndex(unit) or nil
+    if index then
+        SetRaidTargetIconTexture(element, index)
+        element:Show()
+    else
+        element:Hide()
+    end
+end)
+
+-------------------------------------------------------------------------------
+--  Simple aura rows (the Buffs/Debuffs icon displays). Original container
+--  driven by the engine's auras channel: same button anatomy, ordering, and
+--  flow layout as before, so the rows render identically. Full scans on
+--  identity changes; payload deltas otherwise, performing the same reads in
+--  the same order, so restricted-content behavior is unchanged.
+-------------------------------------------------------------------------------
+do
+    -- Game dispel-type indices (SpellDispelType db2).
+    local DISPEL_INDEX = { 0, 1, 2, 3, 4, 9, 11 }
+
+    local function AuraTooltipUpdate(self)
+        if GameTooltip:IsForbidden() then return end
+        GameTooltip:SetUnitAuraByAuraInstanceID(self:GetParent().__owner.unit, self.auraInstanceID)
+    end
+    local function AuraOnEnter(self)
+        if GameTooltip:IsForbidden() or not self:IsVisible() then return end
+        local host = self:GetParent()
+        GameTooltip:SetOwner(self, host.__restricted and "ANCHOR_CURSOR" or host.tooltipAnchor)
+        self:UpdateTooltip()
+    end
+    local function AuraOnLeave()
+        if GameTooltip:IsForbidden() then return end
+        GameTooltip:Hide()
+    end
+
+    local function NewAuraButton(element, index)
+        local button = CreateFrame("Button", element:GetDebugName() .. "Button" .. index, element)
+        local cd = CreateFrame("Cooldown", "$parentCooldown", button, "CooldownFrameTemplate")
+        cd:SetAllPoints()
+        button.Cooldown = cd
+        local icon = button:CreateTexture(nil, "BORDER")
+        icon:SetAllPoints()
+        button.Icon = icon
+        local countFrame = CreateFrame("Frame", nil, button)
+        countFrame:SetAllPoints(button)
+        countFrame:SetFrameLevel(cd:GetFrameLevel() + 1)
+        local count = countFrame:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+        count:SetPoint("BOTTOMRIGHT", countFrame, "BOTTOMRIGHT", -1, 0)
+        button.Count = count
+        local overlay = button:CreateTexture(nil, "OVERLAY")
+        overlay:SetTexture([[Interface\Buttons\UI-Debuff-Overlays]])
+        overlay:SetAllPoints()
+        overlay:SetTexCoord(0.296875, 0.5703125, 0, 0.515625)
+        button.Overlay = overlay
+        local stealable = button:CreateTexture(nil, "OVERLAY")
+        stealable:SetTexture([[Interface\TargetingFrame\UI-TargetingFrame-Stealable]])
+        stealable:SetPoint("TOPLEFT", -3, 3)
+        stealable:SetPoint("BOTTOMRIGHT", 3, -3)
+        stealable:SetBlendMode("ADD")
+        button.Stealable = stealable
+        button.UpdateTooltip = AuraTooltipUpdate
+        button:SetScript("OnEnter", AuraOnEnter)
+        button:SetScript("OnLeave", AuraOnLeave)
+        if element.PostCreateButton then element:PostCreateButton(button) end
+        return button
+    end
+
+    local function LayoutAuras(element, count)
+        local width = element.width or element.size or 16
+        local height = element.height or element.size or 16
+        local strideX = width + (element.spacingX or element.spacing or 0)
+        local strideY = height + (element.spacingY or element.spacing or 0)
+        local anchor = element.initialAnchor or "BOTTOMLEFT"
+        local dirX = (element.growthX == "LEFT" and -1) or 1
+        local dirY = (element.growthY == "DOWN" and -1) or 1
+        local cols = element.maxCols or math.floor(element:GetWidth() / strideX + 0.5)
+        if cols < 1 then cols = 1 end
+        for i = 1, count do
+            local button = element[i]
+            if not button then break end
+            local col = (i - 1) % cols
+            local row = math.floor((i - 1) / cols)
+            button:ClearAllPoints()
+            button:SetPoint(anchor, element, anchor, col * strideX * dirX, row * strideY * dirY)
+        end
+    end
+
+    local function PaintAuraButton(element, unit, data, position)
+        local button = element[position]
+        if not button then
+            button = (element.CreateButton or NewAuraButton)(element, position)
+            element[position] = button
+        end
+        button.auraInstanceID = data.auraInstanceID
+        if button.Cooldown and not element.disableCooldown then
+            local duration = C_UnitAuras.GetAuraDuration(unit, data.auraInstanceID)
+            if duration then
+                button.Cooldown:SetCooldownFromDurationObject(duration)
+                button.Cooldown:Show()
+            else
+                button.Cooldown:Hide()
+            end
+        end
+        if button.Overlay then
+            if element.showType or (data.isHarmfulAura and element.showDebuffType)
+                or (not data.isHarmfulAura and element.showBuffType) then
+                local color = C_UnitAuras.GetAuraDispelTypeColor(unit, data.auraInstanceID, element.dispelColorCurve)
+                if color == nil then color = element.dispelColorCurve:Evaluate(0) end
+                button.Overlay:SetVertexColor(color:GetRGBA())
+                button.Overlay:Show()
+            else
+                button.Overlay:Hide()
+            end
+        end
+        if button.Stealable then
+            if element.showStealableBuffs and not UnitCanCooperate("player", unit) then
+                button.Stealable:SetAlphaFromBoolean(data.isStealable, 1, 0)
+            else
+                button.Stealable:SetAlpha(0)
+            end
+        end
+        if button.Icon then button.Icon:SetTexture(data.icon) end
+        if button.Count then
+            button.Count:SetText(C_UnitAuras.GetAuraApplicationDisplayCount(unit, data.auraInstanceID,
+                element.minCount or 2, element.maxCount or 999))
+        end
+        button:SetSize(element.width or element.size or 16, element.height or element.size or 16)
+        button:EnableMouse(not element.disableMouse)
+        button:Show()
+        if element.PostUpdateButton then element:PostUpdateButton(button, unit, data, position) end
+    end
+
+    local function ProcessAura(element, unit, data, filter)
+        if not data then return end
+        data.isPlayerAura = not C_UnitAuras.IsAuraFilteredOutByInstanceID(unit, data.auraInstanceID, filter .. "|PLAYER")
+        data.isHarmfulAura = filter:find("HARMFUL") and true
+        return data
+    end
+
+    local function KeepAura(element, unit, data)
+        if (element.onlyShowPlayer and data.isPlayerAura) or not element.onlyShowPlayer then
+            return true
+        end
+    end
+
+    local function ByPriority(a, b)
+        if a.isPlayerAura ~= b.isPlayerAura then return a.isPlayerAura end
+        return a.auraInstanceID < b.auraInstanceID
+    end
+
+    local function InitAuraElement(element, frame)
+        element.__owner = frame
+        element.__restricted = not pcall(frame.GetCenter, frame)
+        element.tooltipAnchor = element.tooltipAnchor or "ANCHOR_BOTTOMRIGHT"
+        element.needFullUpdate = true
+        if not element.dispelColorCurve then
+            local curve = C_CurveUtil.CreateColorCurve()
+            curve:SetType(Enum.LuaCurveType.Step)
+            local dispel = ns.Colors.dispel
+            for i = 1, #DISPEL_INDEX do
+                local idx = DISPEL_INDEX[i]
+                if dispel[idx] then curve:AddPoint(idx, dispel[idx]) end
+            end
+            element.dispelColorCurve = curve
+        end
+        element._euiAuraInit = true
+        element:Show()
+    end
+
+    local function UpdateSide(element, frame, unit, updateInfo, defaultNum, defaultFilter)
+        if not element._euiAuraInit then InitAuraElement(element, frame) end
+        local isFull = (not updateInfo or updateInfo.isFullUpdate) or element.needFullUpdate
+        element.needFullUpdate = false
+        local filter = element.filter or defaultFilter
+        if type(filter) == "function" then filter = filter(element, unit) end
+        local changed = false
+        if isFull then
+            element.all = table.wipe(element.all or {})
+            element.active = table.wipe(element.active or {})
+            changed = true
+            local slots = { C_UnitAuras.GetAuraSlots(unit, filter) }
+            for i = 2, #slots do
+                local data = ProcessAura(element, unit, C_UnitAuras.GetAuraDataBySlot(unit, slots[i]), filter)
+                if data then
+                    element.all[data.auraInstanceID] = data
+                    if (element.FilterAura or KeepAura)(element, unit, data, filter) then
+                        element.active[data.auraInstanceID] = true
+                    end
+                end
+            end
+        else
+            if updateInfo.addedAuras then
+                for _, data in next, updateInfo.addedAuras do
+                    if not C_UnitAuras.IsAuraFilteredOutByInstanceID(unit, data.auraInstanceID, filter) then
+                        local processed = ProcessAura(element, unit, data, filter)
+                        element.all[processed.auraInstanceID] = processed
+                        if (element.FilterAura or KeepAura)(element, unit, processed, filter) then
+                            element.active[processed.auraInstanceID] = true
+                            changed = true
+                        end
+                    end
+                end
+            end
+            if updateInfo.updatedAuraInstanceIDs then
+                for _, id in next, updateInfo.updatedAuraInstanceIDs do
+                    if element.all[id] then
+                        element.all[id] = ProcessAura(element, unit, C_UnitAuras.GetAuraDataByAuraInstanceID(unit, id), filter)
+                        if element.active[id] then changed = true end
+                    end
+                end
+            end
+            if updateInfo.removedAuraInstanceIDs then
+                for _, id in next, updateInfo.removedAuraInstanceIDs do
+                    if element.all[id] then
+                        element.all[id] = nil
+                        if element.active[id] then
+                            element.active[id] = nil
+                            changed = true
+                        end
+                    end
+                end
+            end
+        end
+        if not changed then return end
+        element.sorted = table.wipe(element.sorted or {})
+        for id in next, element.active do
+            element.sorted[#element.sorted + 1] = element.all[id]
+        end
+        table.sort(element.sorted, element.SortAuras or ByPriority)
+        local numVisible = math.min(element.num or defaultNum, #element.sorted)
+        for i = 1, numVisible do
+            PaintAuraButton(element, unit, element.sorted[i], i)
+        end
+        for i = numVisible + 1, #element do
+            element[i]:Hide()
+        end
+        LayoutAuras(element, numVisible)
+    end
+
+    local function PaintSimpleAuras(frame, unit, event, _, updateInfo)
+        -- Hidden containers are inert (the settings toggles Hide them, the
+        -- enable path Shows + forces a full refresh) -- the same effective
+        -- behavior as the old per-element disable.
+        if frame.Buffs and frame.Buffs:IsShown() and ns.Engine.ElementOn(frame, "Buffs") then
+            UpdateSide(frame.Buffs, frame, unit, updateInfo, 32, "HELPFUL")
+        end
+        if frame.Debuffs and frame.Debuffs:IsShown() and ns.Engine.ElementOn(frame, "Debuffs") then
+            UpdateSide(frame.Debuffs, frame, unit, updateInfo, 40, "HARMFUL")
+        end
+    end
+    ns.Engine.SetPainter("auras", PaintSimpleAuras)
+    ns.UF_PaintSimpleAuras = PaintSimpleAuras
+
+    --- Full aura refresh for one container (settings changes: size, crop,
+    --- visibility toggles). Pre-init containers just mark themselves; their
+    --- first paint is a full scan anyway.
+    function ns.UF_ForceAuraUpdate(container)
+        if not container then return end
+        container.needFullUpdate = true
+        local owner = container.__owner
+        if owner and owner.unit then
+            PaintSimpleAuras(owner, owner.unit, "ForceUpdate")
+        end
+    end
+end
+
+-- One-stop engine wiring for a freshly spawned frame: the shared colors
+-- table, the castbar owner backref, the channel set derived from the widgets
+-- the style actually built, the matching Blizzard-frame suppression, and the
+-- first full paint.
+function ns.UF_AttachEngineFrame(frame, unit, polled)
+    frame.colors = ns.Colors
+    -- Smoothing defaults the old element wiring seeded on enable: painters
+    -- pass element.smoothing into every SetValue/SetTimerDuration, and the
+    -- old build guaranteed Immediate until settings stamped otherwise
+    -- (ReloadFrames overrides Health's; Power and Castbar keep this).
+    local IMMEDIATE = Enum and Enum.StatusBarInterpolation
+        and Enum.StatusBarInterpolation.Immediate
+    if frame.Health and not frame.Health.smoothing then
+        frame.Health.smoothing = IMMEDIATE
+    end
+    if frame.Power and not frame.Power.smoothing then
+        frame.Power.smoothing = IMMEDIATE
+    end
+    if frame.Castbar and not frame.Castbar.smoothing then
+        frame.Castbar.smoothing = IMMEDIATE
+    end
+    local channels = {}
+    if frame.Health then channels[#channels + 1] = "health" end
+    if frame.Power then channels[#channels + 1] = "power" end
+    channels[#channels + 1] = "text"
+    if frame.HealthPrediction then channels[#channels + 1] = "absorb" end
+    if frame.Portrait then
+        channels[#channels + 1] = "portrait"
+        ns.UF_StampPortraitForceUpdate(frame)
+    end
+    if frame.Castbar then
+        frame.Castbar.__owner = frame
+        channels[#channels + 1] = "castbar"
+    end
+    if frame.RaidTargetIndicator then channels[#channels + 1] = "raidicon" end
+    if frame.Buffs or frame.Debuffs then channels[#channels + 1] = "auras" end
+    if polled then
+        ns.Engine.AttachPolled(frame, unit, channels)
+    else
+        ns.Engine.Attach(frame, unit, channels)
+    end
+    ns.Engine.HideBlizzardUnitFrame(unit)
+    ns.Engine.RepaintAll(frame, "Spawn")
 end
 
 -- Mask and border paths for detached portrait shapes.
@@ -2947,7 +3456,7 @@ local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
                 if reaction then
                     -- Prefer oUF's reaction table (carries the custom Enemy Colors
                     -- override) so the border matches the health bar.
-                    local c = (oUF.colors and oUF.colors.reaction and oUF.colors.reaction[reaction])
+                    local c = (ns.Colors and ns.Colors.reaction and ns.Colors.reaction[reaction])
                         or FACTION_BAR_COLORS[reaction]
                     if c then bR, bG, bB = c.r, c.g, c.b end
                 end
@@ -3176,16 +3685,10 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
     btb._textOverlay = textOvr
 
     local function ApplyBTBTextTags(lc, rc, cc)
-        local lt = ContentToTag(lc, "btbLeft", settings)
-        local rt = ContentToTag(rc, "btbRight", settings)
-        local ct = ContentToTag(cc, "btbCenter", settings)
-        if leftFS._curTag then frame:Untag(leftFS); leftFS._curTag = nil end
-        if rightFS._curTag then frame:Untag(rightFS); rightFS._curTag = nil end
-        if centerFS._curTag then frame:Untag(centerFS); centerFS._curTag = nil end
-        if lt then frame:Tag(leftFS, lt); leftFS._curTag = lt end
-        if rt then frame:Tag(rightFS, rt); rightFS._curTag = rt end
-        if ct then frame:Tag(centerFS, ct); centerFS._curTag = ct end
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.SetTextZone(frame, leftFS, lc, "btbLeft", settings)
+        ns.SetTextZone(frame, rightFS, rc, "btbRight", settings)
+        ns.SetTextZone(frame, centerFS, cc, "btbCenter", settings)
+        ns.UF_PaintText(frame, frame.unit or unit)
     end
 
     -- Power-color override for power-content text. Mirrors the power bar text
@@ -4863,7 +5366,7 @@ local function CreatePowerBar(frame, unit, settings)
 
         if pos == "none" then
             ppFS:Hide()
-            if ppFS._curTag then frame:Untag(ppFS); ppFS._curTag = nil end
+            ns.SetTextZoneRaw(frame, ppFS, nil)
             return
         end
 
@@ -4878,25 +5381,27 @@ local function CreatePowerBar(frame, unit, settings)
             PP.Point(ppFS, "CENTER", ppTextOvr, "CENTER", ox, oy)
         end
 
-        if ppFS._curTag then frame:Untag(ppFS); ppFS._curTag = nil end
         local showPct = s.powerShowPercent ~= false
-        local pctSuffix = showPct and "%" or ""
+        local pctSuffix = showPct and "%%" or ""
         local fmt = s.powerTextFormat or "perpp"
-        local tag
+        local TP = ns.TextPieces
         if fmt == "curpp" then
-            tag = "[eui-curpp]"
+            ns.SetTextZoneRaw(frame, ppFS, "%s", { TP.curpp })
         elseif fmt == "both" then
-            tag = "[eui-curpp] | [eui-perpp]" .. pctSuffix
+            ns.SetTextZoneRaw(frame, ppFS, "%s | %s" .. pctSuffix, { TP.curpp, TP.perpp })
         elseif fmt == "smart" then
             -- Percent for mana-based specs, numeric otherwise; resolved at apply
             -- time and re-applied on spec change via ReloadAndUpdate.
             local isPercent = EUI_IsSmartPowerPercent()
-            tag = isPercent and ("[eui-perpp]" .. pctSuffix) or "[eui-curpp]"
+            if isPercent then
+                ns.SetTextZoneRaw(frame, ppFS, "%s" .. pctSuffix, { TP.perpp })
+            else
+                ns.SetTextZoneRaw(frame, ppFS, "%s", { TP.curpp })
+            end
         else -- "perpp" default
-            tag = "[eui-perpp]" .. pctSuffix
+            ns.SetTextZoneRaw(frame, ppFS, "%s" .. pctSuffix, { TP.perpp })
         end
-        frame:Tag(ppFS, tag); ppFS._curTag = tag
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.UF_PaintText(frame, frame.unit or unit)
 
         -- Priority: power-colored (per-unit) > custom color > white.
         ApplyPowerTextColor(s)
@@ -5301,14 +5806,22 @@ local function ApplyUnitFrameCastColor(castbar)
         -- from the secret "not interruptible" flag, so the colour is always set and
         -- only becomes visible on uninterruptible casts.
         local uc = (settings and settings.castbarUninterruptibleColor) or UF_UNINTERRUPT_GREY
-        castbar._shieldedTint:SetVertexColor(uc.r, uc.g, uc.b)
+        -- Explicit vertex alpha: Midnight's 3-arg SetVertexColor leaves the
+        -- vertex alpha at an unexpected value (measured 0.5 with the gray
+        -- default -- GetVertexColor returned a=r), and the composite with the
+        -- region alpha rendered the shield faint-to-invisible. Visibility
+        -- stays owned by SetAlphaFromBoolean below on the region slot.
+        castbar._shieldedTint:SetVertexColor(uc.r, uc.g, uc.b, 1)
         local uninterruptible = GetCastbarUninterruptible(castbar)
         -- Visible alpha honors Fill Opacity (castbar._fillOp, nil at 100); both
-        -- branches pass it as a plain number, never touching the secret.
-        if castbar._shieldedTint.SetAlphaFromBoolean then
-            castbar._shieldedTint:SetAlphaFromBoolean(uninterruptible, castbar._fillOp or 1, 0)
+        -- branches pass it as a plain number, never touching the secret. The
+        -- boolean alpha drives the HOST FRAME -- texture SetAlphaFromBoolean
+        -- renders 0 on Midnight despite healthy readbacks (see creation).
+        local shieldTarget = castbar._shieldHost or castbar._shieldedTint
+        if shieldTarget.SetAlphaFromBoolean then
+            shieldTarget:SetAlphaFromBoolean(uninterruptible, castbar._fillOp or 1, 0)
         else
-            castbar._shieldedTint:SetAlpha(uninterruptible and (castbar._fillOp or 1) or 0)
+            shieldTarget:SetAlpha(uninterruptible and (castbar._fillOp or 1) or 0)
         end
     end
 end
@@ -5848,12 +6361,6 @@ local function CreateCastBar(frame, unit, settings)
         if self._layoutTextZones then self:_layoutTextZones() end
     end
 
-    local shield = castbar:CreateTexture(nil, "OVERLAY")
-    shield:SetSize(1, 1)
-    shield:SetAlpha(0)
-    shield:Hide()
-    castbar.Shield = shield
-
     local castTintLayer = castbar:CreateTexture(nil, "ARTWORK", nil, 1)
     castTintLayer:SetPoint("TOPLEFT", castbar:GetStatusBarTexture(), "TOPLEFT")
     castTintLayer:SetPoint("BOTTOMRIGHT", castbar:GetStatusBarTexture(), "BOTTOMRIGHT")
@@ -5864,13 +6371,21 @@ local function CreateCastBar(frame, unit, settings)
     castbar.castTintLayer = castTintLayer
     castbar._castTintOn = nil
 
-    local shieldedTint = castbar:CreateTexture(nil, "ARTWORK", nil, 2)
+    -- The shield tint lives on its own child FRAME: the secret-safe show/hide
+    -- rides SetAlphaFromBoolean, and on Midnight that API renders 0 on
+    -- TEXTURES while GetAlpha reads back the true-branch value (measured
+    -- 2026-08-12 -- perfect state readbacks, nothing painted). Frame alpha is
+    -- the proven boolean lane (range fading uses it suite-wide).
+    local shieldHost = CreateFrame("Frame", nil, castbar)
+    shieldHost:SetAllPoints(castbar)
+    shieldHost:SetAlpha(0)
+    local shieldedTint = shieldHost:CreateTexture(nil, "ARTWORK", nil, 2)
     shieldedTint:SetPoint("TOPLEFT", castbar:GetStatusBarTexture(), "TOPLEFT")
     shieldedTint:SetPoint("BOTTOMRIGHT", castbar:GetStatusBarTexture(), "BOTTOMRIGHT")
     shieldedTint:SetTexture("Interface\\Buttons\\WHITE8X8")
-    shieldedTint:SetVertexColor(0.5, 0.5, 0.5)
-    shieldedTint:SetAlpha(0)
+    shieldedTint:SetVertexColor(0.5, 0.5, 0.5, 1)
     castbar._shieldedTint = shieldedTint
+    castbar._shieldHost = shieldHost
 
     -- Cast bar reuses the unit's health bar texture (overridden donor-aware in ReloadFrames).
     ns.ApplyCastBarTexture(castbar, (settings and (settings.castbarTexture or settings.healthBarTexture)) or db.profile.healthBarTexture or "none")
@@ -6080,7 +6595,12 @@ local function SetupShowOnCastBar(frame, unit)
         if self.Target then
             local spellTarget, spellTargetClass
             local ownerUnit = self.__owner and self.__owner.unit
-            if ownerUnit
+            -- Channels are excluded: UnitSpellTargetName tracks the last CAST
+            -- and keeps returning the previous hard-cast's target for the
+            -- whole channel (field-verified stale), and no channel-target API
+            -- exists -- so channels show no target name rather than a wrong
+            -- one. Empowered casts read correctly and keep theirs.
+            if ownerUnit and not self.channeling
                and UnitShouldDisplaySpellTargetName and UnitShouldDisplaySpellTargetName(ownerUnit) then
                 local rawTarget = UnitSpellTargetName and UnitSpellTargetName(ownerUnit)
                 if rawTarget then
@@ -6642,7 +7162,7 @@ local function ApplyAuraCooldownText(container, showCD, cdSize, stackSize, cdOff
         if container.width ~= cropW or container.height ~= cropH then
             container.width = cropW
             container.height = cropH
-            if container.ForceUpdate then container:ForceUpdate() end
+            ns.UF_ForceAuraUpdate(container)
         end
     elseif container.width ~= nil or container.height ~= nil then
         -- No explicit size (e.g. boss simple debuffs): fall back to element.size.
@@ -7425,23 +7945,15 @@ local function StyleFullFrame(frame, unit)
     -- based anchor, 95%-of-bar-width clamp with ellipsis truncation).
     local function ApplyTextTags(lc, rc, cc, ec)
         ec = ec or (settings.extraTextContent or "none")
-        local ltag = ContentToTag(lc, "leftText", settings)
-        local rtag = ContentToTag(rc, "rightText", settings)
-        local ctag = ContentToTag(cc, "centerText", settings)
-        local etag = ContentToTag(ec, "extraText", settings)
-        if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
-        if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
-        if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
-        if extraText._curTag then frame:Untag(extraText); extraText._curTag = nil end
-        if ltag then frame:Tag(leftText, ltag); leftText._curTag = ltag end
-        if rtag then frame:Tag(rightText, rtag); rightText._curTag = rtag end
-        if ctag then frame:Tag(centerText, ctag); centerText._curTag = ctag end
-        if etag then frame:Tag(extraText, etag); extraText._curTag = etag end
+        ns.SetTextZone(frame, leftText, lc, "leftText", settings)
+        ns.SetTextZone(frame, rightText, rc, "rightText", settings)
+        ns.SetTextZone(frame, centerText, cc, "centerText", settings)
+        ns.SetTextZone(frame, extraText, ec, "extraText", settings)
         ApplyAbsorbGate("left", leftText, lc)
         ApplyAbsorbGate("right", rightText, rc)
         ApplyAbsorbGate("center", centerText, cc)
         ApplyAbsorbGate("extra", extraText, ec)
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.UF_PaintText(frame, frame.unit or unit)
     end
     ApplyTextTags(leftContent, rightContent, centerContent, extraContent)
     frame._applyTextTags = ApplyTextTags
@@ -7844,23 +8356,15 @@ local function StyleFocusFrame(frame, unit)
     -- based anchor, 95%-of-bar-width clamp with ellipsis truncation).
     local function ApplyTextTags(lc, rc, cc, ec)
         ec = ec or (settings.extraTextContent or "none")
-        local ltag = ContentToTag(lc, "leftText", settings)
-        local rtag = ContentToTag(rc, "rightText", settings)
-        local ctag = ContentToTag(cc, "centerText", settings)
-        local etag = ContentToTag(ec, "extraText", settings)
-        if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
-        if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
-        if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
-        if extraText._curTag then frame:Untag(extraText); extraText._curTag = nil end
-        if ltag then frame:Tag(leftText, ltag); leftText._curTag = ltag end
-        if rtag then frame:Tag(rightText, rtag); rightText._curTag = rtag end
-        if ctag then frame:Tag(centerText, ctag); centerText._curTag = ctag end
-        if etag then frame:Tag(extraText, etag); extraText._curTag = etag end
+        ns.SetTextZone(frame, leftText, lc, "leftText", settings)
+        ns.SetTextZone(frame, rightText, rc, "rightText", settings)
+        ns.SetTextZone(frame, centerText, cc, "centerText", settings)
+        ns.SetTextZone(frame, extraText, ec, "extraText", settings)
         ApplyAbsorbGate("left", leftText, lc)
         ApplyAbsorbGate("right", rightText, rc)
         ApplyAbsorbGate("center", centerText, cc)
         ApplyAbsorbGate("extra", extraText, ec)
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.UF_PaintText(frame, frame.unit or unit)
     end
     ApplyTextTags(leftContent, rightContent, centerContent, extraContent)
     frame._applyTextTags = ApplyTextTags
@@ -8161,19 +8665,13 @@ local function StyleSimpleFrame(frame, unit)
     end
 
     local function ApplyTextTags(lc, rc, cc)
-        local ltag = ContentToTag(lc, "leftText", settings)
-        local rtag = ContentToTag(rc, "rightText", settings)
-        local ctag = ContentToTag(cc, "centerText", settings)
-        if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
-        if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
-        if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
-        if ltag then frame:Tag(leftText, ltag); leftText._curTag = ltag end
-        if rtag then frame:Tag(rightText, rtag); rightText._curTag = rtag end
-        if ctag then frame:Tag(centerText, ctag); centerText._curTag = ctag end
+        ns.SetTextZone(frame, leftText, lc, "leftText", settings)
+        ns.SetTextZone(frame, rightText, rc, "rightText", settings)
+        ns.SetTextZone(frame, centerText, cc, "centerText", settings)
         ApplyAbsorbGate("left", leftText, lc)
         ApplyAbsorbGate("right", rightText, rc)
         ApplyAbsorbGate("center", centerText, cc)
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.UF_PaintText(frame, frame.unit or unit)
     end
     ApplyTextTags(leftContent, rightContent, centerContent)
     frame._applyTextTags = ApplyTextTags
@@ -8430,19 +8928,13 @@ local function StylePetFrame(frame, unit)
     end
 
     local function ApplyTextTags(lc, rc, cc)
-        local ltag = ContentToTag(lc, "leftText", settings)
-        local rtag = ContentToTag(rc, "rightText", settings)
-        local ctag = ContentToTag(cc, "centerText", settings)
-        if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
-        if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
-        if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
-        if ltag then frame:Tag(leftText, ltag); leftText._curTag = ltag end
-        if rtag then frame:Tag(rightText, rtag); rightText._curTag = rtag end
-        if ctag then frame:Tag(centerText, ctag); centerText._curTag = ctag end
+        ns.SetTextZone(frame, leftText, lc, "leftText", settings)
+        ns.SetTextZone(frame, rightText, rc, "rightText", settings)
+        ns.SetTextZone(frame, centerText, cc, "centerText", settings)
         ApplyAbsorbGate("left", leftText, lc)
         ApplyAbsorbGate("right", rightText, rc)
         ApplyAbsorbGate("center", centerText, cc)
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.UF_PaintText(frame, frame.unit or unit)
     end
     ApplyTextTags(leftContent, rightContent, centerContent)
     frame._applyTextTags = ApplyTextTags
@@ -8726,23 +9218,15 @@ local function StyleBossFrame(frame, unit)
         -- Callers that predate the Extra Text zone pass 3 args; fall back to
         -- the stored content so those sites keep working (same as Main Frames).
         ec = ec or (settings.extraTextContent or "none")
-        local ltag = ContentToTag(lc, "leftText", settings)
-        local rtag = ContentToTag(rc, "rightText", settings)
-        local ctag = ContentToTag(cc, "centerText", settings)
-        local etag = ContentToTag(ec, "extraText", settings)
-        if leftText._curTag then frame:Untag(leftText); leftText._curTag = nil end
-        if rightText._curTag then frame:Untag(rightText); rightText._curTag = nil end
-        if centerText._curTag then frame:Untag(centerText); centerText._curTag = nil end
-        if extraText._curTag then frame:Untag(extraText); extraText._curTag = nil end
-        if ltag then frame:Tag(leftText, ltag); leftText._curTag = ltag end
-        if rtag then frame:Tag(rightText, rtag); rightText._curTag = rtag end
-        if ctag then frame:Tag(centerText, ctag); centerText._curTag = ctag end
-        if etag then frame:Tag(extraText, etag); extraText._curTag = etag end
+        ns.SetTextZone(frame, leftText, lc, "leftText", settings)
+        ns.SetTextZone(frame, rightText, rc, "rightText", settings)
+        ns.SetTextZone(frame, centerText, cc, "centerText", settings)
+        ns.SetTextZone(frame, extraText, ec, "extraText", settings)
         ApplyAbsorbGate("left", leftText, lc)
         ApplyAbsorbGate("right", rightText, rc)
         ApplyAbsorbGate("center", centerText, cc)
         ApplyAbsorbGate("extra", extraText, ec)
-        if frame.UpdateTags then frame:UpdateTags() end
+        ns.UF_PaintText(frame, frame.unit or unit)
     end
     ApplyTextTags(leftContent, rightContent, centerContent, extraContent)
     frame._applyTextTags = ApplyTextTags
@@ -8846,44 +9330,10 @@ local function StyleBossFrame(frame, unit)
 end
 
 
-local function RegisterStylesOnce()
-    if _G.EllesmereUF_StylesRegistered then
-        return
-    end
-    _G.EllesmereUF_StylesRegistered = true
-
-    oUF:RegisterStyle("EllesmerePlayer", function(frame, unit)
-        StyleFullFrame(frame, unit)
-    end)
-    oUF:RegisterStyle("EllesmereTarget", function(frame, unit)
-        StyleFullFrame(frame, unit)
-    end)
-    oUF:RegisterStyle("EllesmereFocus", function(frame, unit)
-        StyleFocusFrame(frame, unit)
-    end)
-    oUF:RegisterStyle("EllesmerePet", function(frame, unit)
-        StylePetFrame(frame, unit)
-    end)
-    -- Eventless frames (TargetTarget/FocusTarget) use the same shared gated Override
-    -- as every other frame: skips the secret-hazard unitIsUnit head-check AND
-    -- guid-gates the OnUpdate poll, so it repaints only when the portrayed unit
-    -- actually changed (see PortraitOverride).
-    local function ApplyPortraitOverride(frame)
-        if not frame.Portrait then return end
-        frame.Portrait.Override = PortraitOverride
-    end
-    oUF:RegisterStyle("EllesmereTargetTarget", function(frame, unit)
-        StyleSimpleFrame(frame, unit)
-        ApplyPortraitOverride(frame)
-    end)
-    oUF:RegisterStyle("EllesmereFocusTarget", function(frame, unit)
-        StyleSimpleFrame(frame, unit)
-        ApplyPortraitOverride(frame)
-    end)
-    oUF:RegisterStyle("EllesmereBoss", function(frame, unit)
-        StyleBossFrame(frame, unit)
-    end)
-end
+-- (Styles are no longer registered anywhere: the spawn sites call
+-- StyleFullFrame/StyleFocusFrame/StylePetFrame/StyleSimpleFrame/StyleBossFrame
+-- directly, and the engine's portrait painter always routes through the shared
+-- gated PortraitOverride.)
 
 
 -- Swap portrait mode (3D/2D/class theme) without recreating frames: 2D and class
@@ -8912,10 +9362,8 @@ local function SwapPortraitMode(frame)
 
     if wantMode == curMode then return end
 
-    -- Disable the oUF element so it unregisters events for the old object
-    if frame:IsElementEnabled("Portrait") then
-        frame:DisableElement("Portrait")
-    end
+    -- (No event surgery needed on a mode swap: the engine's portrait painter
+    -- targets whatever frame.Portrait currently is.)
 
     -- Hide all
     if bd._3d then bd._3d:ClearModel(); bd._3d:Hide() end
@@ -8952,9 +9400,9 @@ local function SwapPortraitMode(frame)
         frame.Portrait = bd._2d
     end
 
-    -- Re-enable the oUF element with the new object and force an update
-    frame:EnableElement("Portrait")
-    frame.Portrait:ForceUpdate()
+    -- Repaint through the new object immediately.
+    if frame.EnableElement then frame:EnableElement("Portrait") end
+    ns.UF_StampPortraitForceUpdate(frame)
 end
 
 -------------------------------------------------------------------------------
@@ -9559,30 +10007,26 @@ local function CreateCustomClassPower(playerFrame, style)
     return container
 end
 
--- Custom enemy reaction colors: override oUF's shared reaction/tapped color table from
+-- Custom enemy reaction colors: override the shared reaction/tapped color table from
 -- db.profile.enemyColors, then repaint live frames. Each entry defaults to Blizzard
 -- FACTION_BAR_COLORS when unset, so this is idempotent and reset-safe (re-applies the
 -- active profile's colors on profile swap). Hostile = reactions 1-3, Neutral = 4, Friendly = 5-8.
 local function ApplyEnemyColors()
-    if not (oUF and oUF.colors and oUF.colors.reaction and FACTION_BAR_COLORS) then return end
+    if not (ns.Colors and ns.Colors.reaction and FACTION_BAR_COLORS) then return end
     local ec = (db and db.profile and db.profile.enemyColors) or {}
     local function setIdx(idx, custom)
         local f = FACTION_BAR_COLORS[idx]
         local r = (custom and custom.r) or (f and f.r) or 1
         local g = (custom and custom.g) or (f and f.g) or 1
         local b = (custom and custom.b) or (f and f.b) or 1
-        oUF.colors.reaction[idx] = oUF:CreateColor(r, g, b)
+        ns.Colors.reaction[idx] = CreateColor(r, g, b)
     end
     for i = 1, 3 do setIdx(i, ec.hostile)  end
     setIdx(4, ec.neutral)
     for i = 5, 8 do setIdx(i, ec.friendly) end
     local tc = ec.tapped
-    oUF.colors.tapped = oUF:CreateColor((tc and tc.r) or 0.6, (tc and tc.g) or 0.6, (tc and tc.b) or 0.6)
-    if oUF.objects then
-        for _, obj in next, oUF.objects do
-            if obj.UpdateAllElements then obj:UpdateAllElements("OnShow") end
-        end
-    end
+    ns.Colors.tapped = CreateColor((tc and tc.r) or 0.6, (tc and tc.g) or 0.6, (tc and tc.b) or 0.6)
+    ns.Engine.ForceAll("OnShow")
 end
 ns.ApplyEnemyColors = ApplyEnemyColors
 
@@ -9719,23 +10163,15 @@ local function ReloadFrames()
             if not frame:IsShown() and UnitExists(unit) then
                 frame:SetAttribute("unit", unit)
                 frame:Show()
-                -- Re-enable core oUF elements; per-feature elements (Portrait,
-                -- Buffs, HealthPrediction) are handled by the per-unit sections below
-                for _, elem in ipairs({"Health", "Power", "Debuffs"}) do
-                    if frame[elem] and not frame:IsElementEnabled(elem) then
-                        frame:EnableElement(elem)
-                    end
-                end
-                frame:UpdateAllElements("ToggleFrame")
+                -- The engine repaints in full on show (OnShow hook) and drops
+                -- events for hidden frames at dispatch, so nothing needs
+                -- re-enabling; one explicit pass covers the pre-show window.
+                ns.Engine.RepaintAll(frame, "ToggleFrame")
             end
         else
             if frame:IsShown() then
-                -- Disable all oUF elements for zero performance impact
-                for _, elem in ipairs({"Health", "Power", "Portrait", "Castbar", "Buffs", "Debuffs", "HealthPrediction"}) do
-                    if frame[elem] and frame:IsElementEnabled(elem) then
-                        frame:DisableElement(elem)
-                    end
-                end
+                -- Hidden frames already cost nothing: the engine drops their
+                -- events at dispatch and the poller skips them.
                 frame:SetAttribute("unit", nil)
                 frame:Hide()
             end
@@ -12154,10 +12590,6 @@ function InitializeFrames()
         EllesmereUI.ApplyColorsToOUF()
     end
 
-    if oUF.Tags and oUF.Tags.SetEventUpdateTimer then
-        oUF.Tags:SetEventUpdateTimer(0.25)
-    end
-
     local classPowerStyle = db.profile.player.classPowerStyle or "none"
     -- Per-unit frame source, resolved once for this build. When a unit is set to
     -- "blizzard" (leave Blizzard's default frame) or "hidden", the EllesmereUI frame is
@@ -12194,8 +12626,6 @@ function InitializeFrames()
 
     local enabled = db.profile.enabledFrames
 
-    RegisterStylesOnce()
-
     local function SetupUnitMenu(frame, unit)
         -- Register ALL mouse buttons (matches raid/party's "AnyUp"), not just
         -- left/right. These frames bind nothing to middle/thumb themselves, so
@@ -12230,22 +12660,24 @@ function InitializeFrames()
     end
 
     -- Spawn each unit's EllesmereUI frame only when its source is "eui". A unit set to
-    -- "blizzard" keeps Blizzard's own frame (we never call oUF:Spawn for it, so oUF
-    -- never disables it); "hidden" removes Blizzard's frame too.
-    oUF:SetActiveStyle("EllesmerePlayer")
+    -- "blizzard" keeps Blizzard's own frame (we never spawn or suppress for it);
+    -- "hidden" removes Blizzard's frame too.
     if playerFrameSource == "eui" then
         -- Spawning enables the Castbar element, which silences Blizzard's
         -- player/pet cast bars. Keep whatever a standalone cast bar addon set.
         EllesmereUI.CaptureBlizzCastBarEvents()
-        frames.player = oUF:Spawn("player", "EllesmereUIUnitFrames_Player")
+        frames.player = ns.Engine.SpawnUnitFrame("player", "EllesmereUIUnitFrames_Player")
+        StyleFullFrame(frames.player, "player")
+        ns.UF_AttachEngineFrame(frames.player, "player")
         EllesmereUI.RestoreBlizzCastBarEvents()
     elseif playerFrameSource == "hidden" then
-        -- Wrapped for the same reason as the spawn above: DisableBlizzard unregisters
-        -- PlayerFrame's cast bar child, and an unregister seen outside a capture window
-        -- reads as a third-party addon claiming the frame -- EUI would mark its own
-        -- silence as somebody else's and never hand the bar back.
+        -- Wrapped for the same reason as the spawn above: the suppression
+        -- unregisters PlayerFrame's cast bar child, and an unregister seen
+        -- outside a capture window reads as a third-party addon claiming the
+        -- frame -- EUI would mark its own silence as somebody else's and
+        -- never hand the bar back.
         EllesmereUI.CaptureBlizzCastBarEvents()
-        oUF:DisableBlizzard("player")
+        ns.Engine.HideBlizzardUnitFrame("player")
         EllesmereUI.RestoreBlizzCastBarEvents()
     end
 
@@ -12814,22 +13246,24 @@ function InitializeFrames()
 
     local targetFrameSource = ns.GetUnitFrameSource("target")
     if targetFrameSource == "eui" then
-        oUF:SetActiveStyle("EllesmereTarget")
-        frames.target = oUF:Spawn("target", "EllesmereUIUnitFrames_Target")
+        frames.target = ns.Engine.SpawnUnitFrame("target", "EllesmereUIUnitFrames_Target")
+        StyleFullFrame(frames.target, "target")
+        ns.UF_AttachEngineFrame(frames.target, "target")
         ApplyFramePosition(frames.target, "target")
         SetupUnitMenu(frames.target, "target")
     elseif targetFrameSource == "hidden" then
-        oUF:DisableBlizzard("target")
+        ns.Engine.HideBlizzardUnitFrame("target")
     end
 
     local focusFrameSource = ns.GetUnitFrameSource("focus")
     if focusFrameSource == "eui" then
-        oUF:SetActiveStyle("EllesmereFocus")
-        frames.focus = oUF:Spawn("focus", "EllesmereUIUnitFrames_Focus")
+        frames.focus = ns.Engine.SpawnUnitFrame("focus", "EllesmereUIUnitFrames_Focus")
+        StyleFocusFrame(frames.focus, "focus")
+        ns.UF_AttachEngineFrame(frames.focus, "focus")
         ApplyFramePosition(frames.focus, "focus")
         SetupUnitMenu(frames.focus, "focus")
     elseif focusFrameSource == "hidden" then
-        oUF:DisableBlizzard("focus")
+        ns.Engine.HideBlizzardUnitFrame("focus")
     end
 
     -- Combat indicator overlay on the player + target frames. Each shows its OWN
@@ -13154,18 +13588,20 @@ function InitializeFrames()
 
     local petFrameSource = ns.GetUnitFrameSource("pet")
     if petFrameSource == "eui" then
-        oUF:SetActiveStyle("EllesmerePet")
-        frames.pet = oUF:Spawn("pet", "EllesmereUIUnitFrames_Pet")
+        frames.pet = ns.Engine.SpawnUnitFrame("pet", "EllesmereUIUnitFrames_Pet")
+        StylePetFrame(frames.pet, "pet")
+        ns.UF_AttachEngineFrame(frames.pet, "pet")
         ApplyFramePosition(frames.pet, "pet")
         SetupUnitMenu(frames.pet, "pet")
     elseif petFrameSource == "hidden" then
-        oUF:DisableBlizzard("pet")
+        ns.Engine.HideBlizzardUnitFrame("pet")
     end
 
     local totFrameSource = ns.GetUnitFrameSource("targettarget")
     if totFrameSource == "eui" then
-        oUF:SetActiveStyle("EllesmereTargetTarget")
-        frames.targettarget = oUF:Spawn("targettarget", "EllesmereUIUnitFrames_TargetTarget")
+        frames.targettarget = ns.Engine.SpawnUnitFrame("targettarget", "EllesmereUIUnitFrames_TargetTarget")
+        StyleSimpleFrame(frames.targettarget, "targettarget")
+        ns.UF_AttachEngineFrame(frames.targettarget, "targettarget", true)
         ApplyFramePosition(frames.targettarget, "targettarget")
         SetupUnitMenu(frames.targettarget, "targettarget")
     end
@@ -13179,8 +13615,9 @@ function InitializeFrames()
 
     local ftFrameSource = ns.GetUnitFrameSource("focustarget")
     if ftFrameSource == "eui" then
-        oUF:SetActiveStyle("EllesmereFocusTarget")
-        frames.focustarget = oUF:Spawn("focustarget", "EllesmereUIUnitFrames_FocusTarget")
+        frames.focustarget = ns.Engine.SpawnUnitFrame("focustarget", "EllesmereUIUnitFrames_FocusTarget")
+        StyleSimpleFrame(frames.focustarget, "focustarget")
+        ns.UF_AttachEngineFrame(frames.focustarget, "focustarget", true)
         ApplyFramePosition(frames.focustarget, "focustarget")
         SetupUnitMenu(frames.focustarget, "focustarget")
     end
@@ -13193,7 +13630,6 @@ function InitializeFrames()
 
     local bossFrameSource = ns.GetUnitFrameSource("boss")
     if bossFrameSource == "eui" then
-    oUF:SetActiveStyle("EllesmereBoss")
     local bossPos = db.profile.positions.boss
 
     local bossSettings = db.profile.boss or {}
@@ -13203,7 +13639,9 @@ function InitializeFrames()
     local bossStackDir = db.profile.boss and db.profile.boss.bossStackDirection or "down"
     for i = 1, 5 do
         local bossUnit = "boss" .. i
-        local bossFrame = oUF:Spawn(bossUnit, "EllesmereUIUnitFrames_Boss" .. i)
+        local bossFrame = ns.Engine.SpawnUnitFrame(bossUnit, "EllesmereUIUnitFrames_Boss" .. i)
+        StyleBossFrame(bossFrame, bossUnit)
+        ns.UF_AttachEngineFrame(bossFrame, bossUnit)
         frames[bossUnit] = bossFrame
 
         -- boss1 anchors to UIParent; boss2..5 chain off boss1 with spacing.
@@ -13229,9 +13667,9 @@ function InitializeFrames()
         SetupUnitMenu(bossFrame, bossUnit)
     end
     elseif bossFrameSource == "hidden" then
-        -- Disabling boss1 makes oUF hide the whole BossTargetFrameContainer
+        -- Suppressing boss1 takes the whole BossTargetFrameContainer with it
         -- (and all five Boss*TargetFrame children).
-        oUF:DisableBlizzard("boss1")
+        ns.Engine.HideBlizzardUnitFrame("boss1")
     end
 
     -- Kill Blizzard's boss frames for every source except "blizzard" (where the
@@ -13626,7 +14064,10 @@ function InitializeFrames()
                                 end
                             end
                             frame:Show()
-                            frame:UpdateAllElements("GroupVisibility")
+                            -- Full engine repaint: the SetAttribute above reuses
+                            -- the same unit token, so the attribute hook sees no
+                            -- change and never repaints on its own.
+                            ns.Engine.RepaintAll(frame, "GroupVisibility")
                         end
                     else
                         if frame:IsShown() then
@@ -14494,9 +14935,9 @@ function SetupOptionsPanel()
         return { pool[1], pool[2], pool[3] }
     end
 
-    -- Override the name fontstring with a fake boss name. Untag it so the [name]
-    -- tag (driven by unit="player") stops overwriting it. SetText with a literal
-    -- string is secret-safe. Restored on clear.
+    -- Override the name fontstring with a fake boss name. Its text zone is
+    -- parked so the engine's text painter stops overwriting it; SetText with a
+    -- literal string is secret-safe. Restored on clear.
     local function BossPreviewNameFS(f)
         local s = db.profile.boss
         local lc = (s and s.leftTextContent) or "name"
@@ -14511,15 +14952,28 @@ function SetupOptionsPanel()
         local fs = BossPreviewNameFS(f)
         if not fs then return end
         f._previewNameFS = fs
-        if fs._curTag then fs._previewSavedTag = fs._curTag; f:Untag(fs); fs._curTag = nil end
+        local zones = f._euiTextZones
+        if zones and not fs._previewSavedZone then
+            for i = #zones, 1, -1 do
+                if zones[i].fs == fs then
+                    fs._previewSavedZone = table.remove(zones, i)
+                    break
+                end
+            end
+        end
         fs:SetText(name)
     end
     local function ClearBossPreviewName(f)
         local fs = f._previewNameFS
         if not fs then return end
-        if fs._previewSavedTag then f:Tag(fs, fs._previewSavedTag); fs._curTag = fs._previewSavedTag; fs._previewSavedTag = nil end
+        if fs._previewSavedZone then
+            local zones = f._euiTextZones
+            if not zones then zones = {}; f._euiTextZones = zones end
+            zones[#zones + 1] = fs._previewSavedZone
+            fs._previewSavedZone = nil
+        end
         f._previewNameFS = nil
-        if f.UpdateTags then f:UpdateTags() end
+        if ns.UF_PaintText then ns.UF_PaintText(f, f.unit) end
     end
 
     local function ApplyBossPreviewColor(f)

@@ -724,6 +724,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
               values = AURA_POINT_VALUES, order = AURA_POINT_ORDER,
               get = function() return cfg.durationPosition or "CENTER" end,
               set = function(v) cfg.durationPosition = v; apply() end },
+            { type = "toggle", label = "Show S for Seconds",
+              get = function() return cfg.durationShowSeconds == true end,
+              set = function(v) cfg.durationShowSeconds = v and true or nil; apply() end },
         })
     end
     do
@@ -758,7 +761,7 @@ end
 
 -- "Display": Border Size [swatch] | Spacing; Icons per Row (+Max Rows/Max
 -- Total/Row Spacing cog) | spacer.
-local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
+local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff, isDefault)
     local W = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
     local _, hh = 0, 0
@@ -877,7 +880,9 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
     end
 
     -- Buff bars only: debuffs are never player-cancelable, so the row would
-    -- be a dead switch there.
+    -- be a dead switch there. Show Weapon Enchants is default-bar only: the
+    -- enchant cells publish from the default Buffs bar alone, so the toggle
+    -- would be dead on custom buff bars.
     if isBuff then
         _, hh = W:DualRow(frame, sy,
             {
@@ -886,7 +891,12 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
                 getValue = function() return cfg.rightClickCancel ~= false end,
                 setValue = function(v) cfg.rightClickCancel = v; apply() end
             },
-            { type = "label", text = "" }
+            isDefault and {
+                type = "toggle", text = "Show Weapon Enchants",
+                tooltip = "Show weapon oil and imbue icons at the front of this bar. They are weapon enchants rather than auras, so the aura grid is shifted inward to make room for them -- with multiple rows showing, every row shifts over by the same amount.",
+                getValue = function() return cfg.showWeaponEnchants == true end,
+                setValue = function(v) cfg.showWeaponEnchants = v and true or nil; apply() end
+            } or { type = "label", text = "" }
         ); sy = sy - hh
     end
 
@@ -1287,7 +1297,7 @@ local function BuildDefaultBarDetail(frame, fontPath, isBuff)
         sy = BuildAssignedDebuffsFields(body, fontPath, sy, cfg, ApplyBar)
     end
     sy = BuildCoreFields(body, fontPath, sy, cfg, ApplyBar, isBuff)
-    sy = BuildDisplayFields(body, fontPath, sy, cfg, ApplyBar, isBuff)
+    sy = BuildDisplayFields(body, fontPath, sy, cfg, ApplyBar, isBuff, true)
     if not isBuff then
         sy = BuildDispelColorFields(body, fontPath, sy, cfg, ApplyBar)
         sy = BuildFxEffects(body, sy, cfg, ApplyBar)

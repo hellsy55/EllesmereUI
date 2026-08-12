@@ -5097,6 +5097,16 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Fill Settings",
                 rows = {
+                    { type = "toggle", label = "Darken Partially Filled Resources",
+                      tooltip = "Makes partially filled Soul Shards and Essence darker than completed ones.",
+                      get = function()
+                          local c = cfg()
+                          return c and c.darkenPartialPips ~= false
+                      end,
+                      set = function(v)
+                          local c = cfg(); if not c then return end
+                          c.darkenPartialPips = v; RefreshClass()
+                      end },
                     { type = "colorpicker", label = "Charged Color", hasAlpha = false,
                       get = function()
                           local c = cfg()

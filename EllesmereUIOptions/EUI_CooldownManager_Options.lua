@@ -18940,6 +18940,19 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end });  y = y - h
 
+        -- Cooldown/utility bars only: buff bars have no cooldown edge.
+        if barData.barType == "cooldowns" or barData.barType == "utility" then
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Always Show Cooldown Edge",
+              tooltip="Show the rotating cooldown edge on every cooldown in this bar, not just while a charge is recharging. Hide Recharge Edge still overrides this for individual charge spells.",
+              getValue=function() return BD().showCooldownEdge == true end,
+              setValue=function(v)
+                  BD().showCooldownEdge = v and true or nil
+                  ns.BuildAllCDMBars(); Refresh()
+              end },
+            { type="label", text="" });  y = y - h
+        end
+
         end -- custom_buff extras guard
 
         return math.abs(y)
