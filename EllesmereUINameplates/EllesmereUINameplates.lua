@@ -347,6 +347,8 @@ local defaults = {
     enemyNameWrap = false,
     targetScale = 100,
     nonTargetKeepFocus = true,
+    outOfRangeAlpha = 50,
+    outOfRangeMode = "disabled",
     showAllDebuffs = false,
     rangeTextEnabled = false,  -- Distance to Target Text (range bucket on the target's nameplate)
     rangeTextSize = 11,
@@ -3261,6 +3263,7 @@ function ns.RefreshAllSettings()
         end
     end
     if ns.NT_RefreshSetting then ns.NT_RefreshSetting() end
+    if ns.RangeText_Apply then ns.RangeText_Apply() end
     if ns.ApplyClassPowerSetting then ns.ApplyClassPowerSetting() end
     -- Aura containers: fingerprint-guarded, near-free when no aura setting changed.
     if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
@@ -3269,11 +3272,13 @@ end
 -------------------------------------------------------------------------------
 --  Non-Target Opacity: while the player has a target, every skinned plate that is not the
 --  target, focus or player fades to nonTargetAlpha (0-100). 100 = OFF: every hook below
---  reduces to one numeric compare. Alpha rides the plate ROOT (our own frame, parented to the
---  Blizzard nameplate), so Blizzard's own occlusion fade still multiplies in.
+--  reduces to one numeric compare. Out-of-range alpha composes into the same root multiplier.
+--  Alpha rides the plate ROOT (our own frame, parented to the Blizzard nameplate), so
+--  Blizzard's own occlusion fade still multiplies in.
 -------------------------------------------------------------------------------
 ns._ntAlpha = 1   -- cached 0..1 from the profile; 1 = inert
 ns._ntKeepFocus = true   -- cached "Keep Focus Full Opacity" (default on)
+ns._oorAlpha = 1  -- cached out-of-range alpha; 1 = inert
 
 -- Applies the correct root alpha to ONE plate. Value-guarded via _ntCurAlpha so redundant
 -- SetAlpha calls are skipped and pooled frames reset cheaply (nil = never faded).
@@ -3288,6 +3293,7 @@ function ns.NT_Apply(plate)
        and not UnitIsUnit(unit, "player") then
         a = nt
     end
+    a = a * (plate._oorCurAlpha or 1)
     if (plate._ntCurAlpha or 1) ~= a then
         plate._ntCurAlpha = a
         plate:SetAlpha(a)
@@ -3686,7 +3692,7 @@ local CLASS_POWER_MAP = {
     PRIEST      = { [258] = { "INSANITY_BAR", 100 } },     -- Shadow only
     HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 },     -- Fury
-                    [71]  = { "SWEEPING_STRIKES", 12 } },   -- Arms
+                    [71]  = { "SWEEPING_STRIKES", 18 } },   -- Arms (12.1 cap: 12 + 6 Broad Strokes)
     DEATHKNIGHT = { [250] = { Enum.PowerType.Runes, 6 },
                     [251] = { Enum.PowerType.Runes, 6 },
                     [252] = { Enum.PowerType.Runes, 6 } },
@@ -5779,6 +5785,7 @@ function NameplateFrame:ClearUnit()
         self:SetAlpha(1)
     end
     self._ntCurAlpha = nil
+    self._oorCurAlpha = nil
 
     if self.isCasting then
         self.isCasting = false
@@ -8139,13 +8146,14 @@ function npAddon:OnEnable()
 end
 
 -------------------------------------------------------------------------------
---  Distance to Target Text (EXTRAS): a range BUCKET on the target's nameplate -- "15+" =
+--  Nameplate range features: target distance text plus out-of-range plate alpha.
+--  Distance text is a range BUCKET on the target's nameplate -- "15+" =
 --  beyond the 15yd rung, inside the next longer one. The API exposes no exact enemy distance;
 --  the lower bound comes from the shared range engine's spell ladder (EllesmereUI_Range.lua),
---  active only while this is enabled. Anchoring: 5px left of whatever text occupies the Right
---  Text core slot, else just outside the health bar's right edge. Zero cost while disabled
---  (nothing created until first enabled); enabled, one OnUpdate driver ticks 5x/s. Secret range
---  results are skipped -- fail-open to no text, never an error.
+--  active only while either feature is enabled. Distance-text anchoring: 5px left of whatever
+--  text occupies the Right Text core slot, else just outside the health bar's right edge. Zero
+--  cost while both are disabled; enabled, one OnUpdate driver ticks 5x/s. Secret range results
+--  are skipped -- fail-open to no text or fade, never an error.
 -------------------------------------------------------------------------------
 do
     -- Single-table state: this file sits at Lua 5.1's 200-local cap, so the whole feature uses ONE chunk local (RT), everything else as table fields.
@@ -8228,6 +8236,28 @@ do
         end
     end
 
+    function RT.FadeTick()
+        local customCutoff = p and p.outOfRangeMode == "custom" and p.outOfRangeCustomRange
+        local cutoff = EllesmereUI.Range_GetAttackCutoff(customCutoff)
+        for _, plate in pairs(ns.plates) do
+            local beyond = plate.unit and EllesmereUI.Range_IsBeyondAttackRange(plate.unit, cutoff)
+            local alpha = beyond == true and ns._oorAlpha or 1
+            if (plate._oorCurAlpha or 1) ~= alpha then
+                plate._oorCurAlpha = alpha
+                ns.NT_Apply(plate)
+            end
+        end
+    end
+
+    function RT.ResetFade()
+        for _, plate in pairs(ns.plates) do
+            if plate._oorCurAlpha then
+                plate._oorCurAlpha = nil
+                ns.NT_Apply(plate)
+            end
+        end
+    end
+
     -- Options: re-apply font/color/anchor on the live attachment.
     ns.RangeText_Refresh = function()
         if RT.plate and RT.fs then
@@ -8237,7 +8267,13 @@ do
     end
 
     ns.RangeText_Apply = function()
-        if p and p.rangeTextEnabled then
+        local alpha = tonumber(p and p.outOfRangeAlpha) or defaults.outOfRangeAlpha
+        if alpha < 0 then alpha = 0 elseif alpha > 100 then alpha = 100 end
+        ns._oorAlpha = alpha / 100
+        local textEnabled = p and p.rangeTextEnabled
+        ns._oorFadeEnabled = ((p and p.outOfRangeMode) or defaults.outOfRangeMode) ~= "disabled" and ns._oorAlpha < 1
+        local fadeEnabled = ns._oorFadeEnabled
+        if textEnabled or fadeEnabled then
             if not RT.drv then
                 RT.drv = CreateFrame("Frame")
                 RT.drv:Hide()
@@ -8245,17 +8281,19 @@ do
                     RT.acc = RT.acc + dt
                     if RT.acc < 0.2 then return end
                     RT.acc = 0
-                    RT.Tick()
+                    if p and p.rangeTextEnabled then RT.Tick() end
+                    if ns._oorFadeEnabled then RT.FadeTick() end
                 end)
             end
             -- Ladder builds and invalidation live in the shared range engine.
-            EllesmereUI.Range_SetActive("npRangeText", true)
+            EllesmereUI.Range_SetActive("npRange", true)
             RT.drv:Show()
-        elseif RT.drv then
-            EllesmereUI.Range_SetActive("npRangeText", false)
-            RT.drv:Hide()
-            RT.Detach()
+        else
+            EllesmereUI.Range_SetActive("npRange", false)
+            if RT.drv then RT.drv:Hide() end
         end
+        if not textEnabled then RT.Detach() end
+        if not fadeEnabled then RT.ResetFade() end
     end
 
 end

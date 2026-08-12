@@ -2677,94 +2677,18 @@ do
     end
     EllesmereUI.GetCrosshairValue = CrosshairGet
 
-    local DRUID_MELEE_FORMS = { [1] = true, [2] = true }  -- Bear, Cat
-
-    local _, _chPlayerClass = UnitClass("player")
     local _crosshairCutoffRange = 5
 
     local function RefreshCrosshairCutoffRange()
-        local _, classFile = UnitClass("player")
-        local specIndex = GetSpecialization()
-        if not specIndex then
-            _crosshairCutoffRange = 5
-            return
-        end
-        
-        local specID = GetSpecializationInfo(specIndex)
-        if not specID then
-            _crosshairCutoffRange = 5
-            return
-        end
-        
-        if classFile == "DRUID" then
-            if specID == 102 or specID == 105 then -- Balance, Restoration
-                if IsPlayerSpell(197488) then -- Astral Influence
-                    _crosshairCutoffRange = 45
-                else
-                    _crosshairCutoffRange = 40
-                end
-            else
-                _crosshairCutoffRange = 5
-            end
-        elseif classFile == "DEMONHUNTER" then
-            if specIndex == 3 or (specID ~= 577 and specID ~= 581) then
-                _crosshairCutoffRange = 25 -- Devourer
-            else
-                _crosshairCutoffRange = 5
-            end
-        elseif classFile == "EVOKER" then
-            if specID == 1467 or specID == 1470 then -- Devastation, Augmentation
-                _crosshairCutoffRange = 25
-            elseif specID == 1468 then -- Preservation
-                _crosshairCutoffRange = 30
-            else
-                _crosshairCutoffRange = 25
-            end
-        elseif classFile == "HUNTER" then
-            if specID == 253 or specID == 254 then -- Beast Mastery, Marksmanship
-                _crosshairCutoffRange = 40
-            else
-                _crosshairCutoffRange = 5
-            end
-        elseif classFile == "PALADIN" then
-            if specID == 65 then -- Holy
-                -- Holy is a 40yd healer by default; opt into melee (5yd) via "Show Melee Range for Hpal".
-                if CrosshairGet("crosshairHpalMelee") then
-                    _crosshairCutoffRange = 5
-                else
-                    _crosshairCutoffRange = 40
-                end
-            else
-                _crosshairCutoffRange = 5
-            end
-        elseif classFile == "SHAMAN" then
-            if specID == 263 then -- Enhancement
-                _crosshairCutoffRange = 5
-            else
-                _crosshairCutoffRange = 40
-            end
-        elseif classFile == "MONK" then
-            if specID == 270 then -- Mistweaver
-                _crosshairCutoffRange = 40
-            else
-                _crosshairCutoffRange = 5
-            end
-        elseif classFile == "PRIEST" or classFile == "MAGE" or classFile == "WARLOCK" then
-            _crosshairCutoffRange = 40
-        else -- WARRIOR, ROGUE, DEATHKNIGHT
-            _crosshairCutoffRange = 5
-        end
-        -- Cutoff probe spells live in the shared range engine (EllesmereUI_Range.lua); rebuilt on spec/talent changes and whenever this cutoff moves.
+        _crosshairCutoffRange = EllesmereUI.Range_GetAttackCutoff(nil, CrosshairGet("crosshairHpalMelee"))
     end
     RefreshCrosshairCutoffRange()
     -- Exposed so the crosshair options toggle can re-resolve the cutoff live.
     EllesmereUI._RefreshCrosshairCutoffRange = RefreshCrosshairCutoffRange
 
     EllesmereUI._getCrosshairCutoffRange = function()
-        if _chPlayerClass == "DRUID" and DRUID_MELEE_FORMS[GetShapeshiftForm()] then
-            return 5
-        end
-        return _crosshairCutoffRange
+        return EllesmereUI.Range_GetAttackCutoff(nil, CrosshairGet("crosshairHpalMelee"))
+            or _crosshairCutoffRange
     end
 
     -- True only when there is an attackable, living target out of range.
@@ -2775,19 +2699,8 @@ do
         end
         local cutoff = EllesmereUI._getCrosshairCutoffRange()
 
-        -- PRIMARY: probe the player's top-range harmful spells (shared range
-        -- engine) -- exact, talented range extensions come free. A nil answer
-        -- (no probe could target right now) cascades to the item ladder below.
-        -- Melee cutoffs (5, incl. druid forms) skip straight to the ladder.
-        if cutoff > 5 then
-            local beyond = EllesmereUI.Range_BeyondCutoff("target", cutoff)
-            if beyond ~= nil then return beyond end
-        end
-
-        -- FALLBACK: shared item ladder, stopped at cutoff (rungs past it can't change the verdict). nil = nothing answered, out of range.
-        local minY, maxY = EllesmereUI.Range_ItemBracket("target", cutoff)
-        if minY == nil then return true end
-        return (maxY == nil) or (maxY > cutoff)
+        local beyond = EllesmereUI.Range_IsBeyondAttackRange("target", cutoff)
+        return beyond == nil or beyond
     end
 
     local function CreateCrosshair()
