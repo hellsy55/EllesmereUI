@@ -2021,11 +2021,22 @@ local function GetTBBMaxCharges(cfg)
 end
 ns.GetTBBMaxCharges = GetTBBMaxCharges
 
-local function ParseTickValues(str)
+-- "all" (any case, anywhere in the list) puts a tick between every stack: N
+-- stacks give N-1 interior divisions, the same convention as the charge hash
+-- lines below. Numbers listed alongside it are redundant and ignored.
+local function ParseTickValues(str, maxStacks)
     if not str or str == "" then return nil end
     local vals = {}
     for s in str:gmatch("[^,]+") do
-        local n = tonumber(s:match("^%s*(.-)%s*$"))
+        local tok = s:match("^%s*(.-)%s*$")
+        if tok:lower() == "all" then
+            local m = maxStacks and math.floor(maxStacks) or 0
+            if m < 2 then return nil end
+            local out = {}
+            for i = 1, m - 1 do out[i] = i end
+            return out
+        end
+        local n = tonumber(tok)
         if n and n > 0 then vals[#vals + 1] = n end
     end
     return #vals > 0 and vals or nil
@@ -2033,7 +2044,7 @@ end
 
 local function ApplyTBBTickMarks(sb, cfg, tickCache, isVert, tickParent)
     local maxStacks = cfg.stackThresholdMax or 10
-    local vals = ParseTickValues(cfg.stackThresholdTicks)
+    local vals = ParseTickValues(cfg.stackThresholdTicks, maxStacks)
     if tickCache then
         for i = 1, #tickCache do tickCache[i]:Hide() end
     end
