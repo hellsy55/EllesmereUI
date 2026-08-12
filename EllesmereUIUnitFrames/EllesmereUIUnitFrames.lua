@@ -13917,6 +13917,46 @@ function InitializeFrames()
     frames._bossTargetBorderUpdater:SetScript("OnEvent", ns.UpdateBossTargetBorders)
     ns.UpdateBossTargetBorders()
 
+    -- Boss castbars can get stuck on screen when a boss unit's cast is left
+    -- unresolved: the boss dies with its health hitting 0 the same instant it
+    -- stops existing (no clean UNIT_SPELLCAST_STOP), or the player leaves/zones
+    -- out of the instance mid-cast and the boss1-5 unit tokens simply go stale
+    -- with no further unit events ever firing for them again. Neither case
+    -- reaches PostCastStop/PostCastFail or the outcomeEvents watcher above, so
+    -- the last-drawn cast bar (and its icon/background) is left frozen until a
+    -- reload/relog forces a respawn. ENCOUNTER_END (boss kill or wipe) and
+    -- PLAYER_LEAVING_WORLD (zoning out, including leaving the instance mid-pull)
+    -- reliably fire regardless of unit validity, so force every boss cast bar
+    -- closed on either one.
+    ns.ForceHideBossCastbars = function()
+        for i = 1, (_G.MAX_BOSS_FRAMES or 5) do
+            local bf = frames["boss" .. i]
+            local castbar = bf and bf.Castbar
+            if castbar then
+                castbar._eufCastActive = nil
+                castbar._eufOutcomeVisible = nil
+                castbar._eufOutcomeToken = (castbar._eufOutcomeToken or 0) + 1
+                if castbar._outcomeFrame then castbar._outcomeFrame:Hide() end
+                if castbar._outcomeIconFrame then castbar._outcomeIconFrame:Hide() end
+                HideUnitFrameKickTick(castbar)
+                castbar:Hide()
+                if castbar._iconFrame then castbar._iconFrame:Hide() end
+                local bg = castbar:GetParent()
+                if bg then
+                    local s = GetSettingsForUnit("boss")
+                    local hideWhenInactive = (not s or s.castbarHideWhenInactive == nil) and true or s.castbarHideWhenInactive
+                    if hideWhenInactive then bg:Hide() else bg:Show() end
+                end
+            end
+        end
+    end
+    if not frames._bossCastbarCleanup then
+        frames._bossCastbarCleanup = CreateFrame("Frame")
+        frames._bossCastbarCleanup:RegisterEvent("ENCOUNTER_END")
+        frames._bossCastbarCleanup:RegisterEvent("PLAYER_LEAVING_WORLD")
+    end
+    frames._bossCastbarCleanup:SetScript("OnEvent", ns.ForceHideBossCastbars)
+
     -- Deferred class portrait fix: at frame creation time UnitClass() may return nil
     -- for dynamic units (target, focus) since no unit is selected yet on login/reload,
     -- causing the WARRIOR fallback. Re-apply the correct class icon once the client
