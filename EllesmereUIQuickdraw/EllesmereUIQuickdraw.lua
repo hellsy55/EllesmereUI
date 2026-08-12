@@ -1040,7 +1040,15 @@ function Rez.MacroText()
     Add("[@target,help,dead] ", single)
     -- Bare, and last: the group rez takes no target, so it is the honest answer
     -- to "none of the above".
-    Add("", group)
+    --
+    -- Falling back to the single one when there is no group rez -- a character
+    -- still levelling into it -- is what keeps this line in step with
+    -- Rez.SpellNow, which ends on the same `group or single`. Without the
+    -- fallback the macro has no unconditional branch at all, and the entry
+    -- draws the single rez, tints it usable and casts nothing. Attempting it
+    -- and being told there is no target is the same answer the spell gives from
+    -- an action bar, and it matches the picture.
+    Add("", group or single)
 
     if #parts == 0 then return nil end
     return "/cast " .. table.concat(parts, "; ")
