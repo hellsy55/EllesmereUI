@@ -3248,7 +3248,19 @@ initFrame:SetScript("OnEvent", function(self)
                       .."character. The menu editor always shows every entry.",
               getValue=function() return ACfg("hideUnusable") ~= false end,
               setValue=function(v) ASet("hideUnusable", v); Refresh() end },
-            { type="label", text="" })
+            -- Beside the filter rather than in ACTION MENU SETUP: both of
+            -- these change what an entry does once the menu is drawn, and both
+            -- are per menu. It also keeps this the last row of the section
+            -- with no half of it empty.
+            { type="toggle", text="Toggle World Markers", noCapture=true,
+              disabled=Disabled, disabledTooltip="the module",
+              tooltip="Use a world marker entry again to pick that marker "
+                      .."back up. Off places the marker again, at the new "
+                      .."position.\n"
+                      .."This does not change the entry that clears all world "
+                      .."markers, or the cycling entry.",
+              getValue=function() return ACfg("worldMarkerToggle") ~= false end,
+              setValue=function(v) ASet("worldMarkerToggle", v); Refresh() end })
         y = y - h
 
         _, h = W:Spacer(parent, y, 10); y = y - h

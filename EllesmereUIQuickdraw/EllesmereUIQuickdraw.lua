@@ -326,6 +326,20 @@ local DB_DEFAULTS = {
         -- setting this up yet": the alternative is a menu that opens and cannot
         -- be answered.
         toggleMode = false,
+        -- Toggle World Markers, per palette. On, a world marker entry answers
+        -- for its own marker in both directions: place it if it is not down,
+        -- pick it up if it is. Off places every press, which moves the marker
+        -- to wherever the cursor is now.
+        --
+        -- On by default. The raid manager offers both halves -- left click
+        -- places, right click picks up
+        -- (Mainline/Blizzard_CompactRaidFrameManager.lua:1058-1067) -- and a
+        -- menu entry has one press to spend rather than two mouse buttons, so
+        -- alternating is how it reaches the same pair.
+        --
+        -- The clear-all entry is unaffected, and so are the cycling entries.
+        -- See the worldmarker branch of ResolveAction for why.
+        worldMarkerToggle = true,
         -- The key that fires the hovered entry of a latched menu, as a binding
         -- chord. One key for every palette. Claimed as an override binding for
         -- exactly as long as a menu is up and handed straight back on close, so
@@ -571,6 +585,10 @@ local APPEARANCE_KEYS = {
     -- the latched one answers to is NOT here -- it is one profile key, so the
     -- gesture means the same thing whichever menu is up.
     toggleMode = true,
+    -- Per palette for the same reason: a pull-timer menu that drops the eight
+    -- markers in one pass wants each press to place, and a menu kept open to
+    -- tidy them up afterwards wants each press to answer for its own marker.
+    worldMarkerToggle = true,
 }
 ns.APPEARANCE_KEYS = APPEARANCE_KEYS
 
@@ -1138,7 +1156,12 @@ end
 -- would otherwise read it in preference. Returns nil for the kinds with no
 -- secure action type at all (battlepet, spec, randommount), which
 -- FireInsecure handles instead.
-local function ResolveAction(slot)
+--
+-- p is the palette's appearance view, for the one kind whose action depends on
+-- a setting rather than only on the slot (worldmarker). It is the view of the
+-- palette being PUSHED, which for a nest's cells is the owner's -- the same
+-- palette whose appearance draws them.
+local function ResolveAction(slot, p)
     if not slot or not slot.kind then return nil end
     local k = slot.kind
 
@@ -1243,6 +1266,19 @@ local function ResolveAction(slot)
             -- gets baked -- a hardcoded "all" would fail on a localized client.
             return "macro", "macrotext", "/cwm " .. (ALL or "all"), "macro"
         end
+        if p == nil or p.worldMarkerToggle ~= false then
+            -- Toggle World Markers. Not a macro: /wm is PlaceRaidMarker with
+            -- no test at all (SlashCommands.lua:820), and no macro conditional
+            -- reports a world marker as down. SECURE_ACTIONS.worldmarker does
+            -- the test itself (SecureTemplates.lua:602-618), and still costs
+            -- the ONE attribute a cell may spend -- it reads "marker" and
+            -- "action", and "action" falls back to "toggle" when unset, which
+            -- the snippet's clear guarantees it is.
+            --
+            -- Placement is unchanged: neither Blizzard nor /wm passes a unit
+            -- token, so the marker still lands under the cursor.
+            return "worldmarker", "marker", WORLD_MARKER_ENGINE[id]
+        end
         return "macro", "macrotext", "/wm " .. WORLD_MARKER_ENGINE[id], "macro"
 
     elseif k == "dynamicrez" then
@@ -1260,6 +1296,14 @@ local function ResolveAction(slot)
         -- this with its own answer on every press -- see the eqdCycN branch --
         -- so what is pushed here is only what the entry would fire if the
         -- cycle attributes went missing: the right marker, just not advancing.
+        --
+        -- Deliberately NOT affected by Toggle World Markers, though the step
+        -- machinery would carry a marker number as readily as a macro. A cycle
+        -- is a run THROUGH the eight, and a step that picks its marker back up
+        -- because that one happened to be down already breaks the run: the
+        -- press that should have placed the circle places nothing, and the
+        -- position still advances. Placing every time is the only behavior
+        -- that keeps a cycle predictable.
         local steps = CycleSteps(k)
         return "macro", "macrotext", steps[CycleNext(slot)], "macro"
     end
@@ -6793,7 +6837,14 @@ local SNIPPET_PRE = [==[
     -- "action" is the marker sweep's key, and type="raidtarget" falls back to
     -- "toggle" when it is unset -- so a sweep left behind would turn the next
     -- raidtarget slot into a clear-all of the whole group.
+    --
+    -- "marker" is the other half of that pair, read by both raidtarget and
+    -- worldmarker. Every cell that uses it writes it, so no stale value can
+    -- reach one of those -- but clearing it is what keeps the fallback in
+    -- SECURE_ACTIONS.worldmarker honest, and the pair is only safe cleared
+    -- together.
     self:SetAttribute("action", nil)
+    self:SetAttribute("marker", nil)
 
     -- A cycling entry names a different marker on every press, and the position
     -- it has reached has to advance HERE: an insecure SetAttribute is refused
@@ -7716,8 +7767,8 @@ local pushedClaims = {}
 -- contribute are pushed through here, under the cell index the snippet will
 -- resolve a release to -- which is what lets the snippet fire either without
 -- knowing which of the two it landed on.
-local function PushCell(btn, i, slot)
-    local aType, aKey, aVal = ResolveAction(slot)
+local function PushCell(btn, i, slot, p)
+    local aType, aKey, aVal = ResolveAction(slot, p)
     btn:SetAttribute("eqdT" .. i, aType)
     btn:SetAttribute("eqdK" .. i, aKey)
     btn:SetAttribute("eqdV" .. i, aVal)
@@ -7770,7 +7821,7 @@ local function PushPalette(index)
     -- together between this push and any open that follows it.
     local slotsEff = UsableSlots(palette, p)
     for i = 1, MAX_SLOTS do
-        PushCell(btn, i, slotsEff[i])
+        PushCell(btn, i, slotsEff[i], p)
     end
 
     -- The live palette draws exactly what the palette holds -- the trailing "+"
@@ -7908,7 +7959,7 @@ local function PushPalette(index)
         c.base = total
         for j = 1, c.n do
             total = total + 1
-            PushCell(btn, total, c.slots[j])
+            PushCell(btn, total, c.slots[j], p)
             -- A block layout's nests carry a BOX. Half-extents are what tells
             -- the snippet these cells are tested by containment rather than by
             -- nearness -- the palette's own entries have no half-extents, and
@@ -7927,7 +7978,7 @@ local function PushPalette(index)
     -- palette does not pay a hundred attribute writes on every options tick.
     for i = max(total, MAX_SLOTS) + 1, (pushedCells[index] or 0) do
         -- nil for the slot, which is also how PushCell clears a cycle's steps.
-        PushCell(btn, i, nil)
+        PushCell(btn, i, nil, p)
         btn:SetAttribute("eqdBX" .. i, nil)
         btn:SetAttribute("eqdBY" .. i, nil)
         btn:SetAttribute("eqdHW" .. i, nil)
