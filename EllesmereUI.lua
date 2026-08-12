@@ -4509,20 +4509,24 @@ do
     end
 end
 
--- Sweeping Strikes tracker (Arms Warrior). 260708 grants 12 charges (18 with Improved
--- Sweeping Strikes 383155); single-target damaging abilities spend a charge to strike an
--- extra enemy within ~8 yd, and only when a sweep partner is actually in range. Broad
--- Strokes (1261049): Colossus Smash / Warbreaker also activate it. Buff 30s, cooldown
--- 30s. Charges from the ability and Broad Strokes stack, but we track only to the visual
--- cap so either source just refreshes to max. Fervor of Battle (202316): Cleave/Whirlwind
--- on 3+ targets also Slams the primary target, and that Slam sweeps and spends a charge.
+-- Sweeping Strikes tracker (Arms Warrior). 260708 grants 12 charges; single-target
+-- damaging abilities spend a charge to strike an extra enemy within ~8 yd, and only when
+-- a sweep partner is actually in range. Broad Strokes (1261049): Colossus Smash /
+-- Warbreaker grant 6 charges. Buff 30s, cooldown 30s. 12.1: Improved Sweeping Strikes
+-- (383155) was REMOVED, so the cap is a flat 18 for everyone; charges from the ability
+-- and from Broad Strokes stack normally in any order, so both sources ADD (12 + 6 = the
+-- cap) instead of refreshing to max, and either application refreshes the 30s duration.
+-- The buff also displays its charge count now, which is what CdmSweepSync reads.
+-- Fervor of Battle (202316): Cleave/Whirlwind on 3+ targets also Slams the primary
+-- target, and that Slam sweeps and spends a charge.
 do
     local stacks, expiresAt = 0, nil
-    local BASE_MAX = 18
+    local MAX_STACKS  = 18    -- 12.1 cap: 12 from the ability + 6 from Broad Strokes
+    local SWEEP_GRANT = 12
+    local BROAD_GRANT = 6
     local DURATION = 30
     local SWEEP    = 260708
-    local IMPROVED = 383155   -- Improved Sweeping Strikes: 12 -> 18 charges
-    local BROAD    = 1261049  -- Broad Strokes: Colossus Smash activates Sweep
+    local BROAD    = 1261049  -- Broad Strokes: Colossus Smash grants 6 charges
     local FERVOR   = 202316   -- Fervor of Battle: Cleave/WW on 3+ targets Slams
     -- Bladestorm: Slayer's Unhinged auto-casts Mortal Strike during it, but those do NOT
     -- consume charges. No CHANNEL events and no 227847: pressing Bladestorm fires
@@ -4541,16 +4545,15 @@ do
     -- HandleSweepingStrikes runs on every player cast for every class; IsSpellKnown is a
     -- C call and talents cannot change in combat, so resolve once per login/spec/talent
     -- event. Non-warriors never register the watcher: flags stay false, callers early-out.
-    local sweepKnown, improvedKnown, broadKnown, fervorKnown = false, false, false, false
+    local sweepKnown, broadKnown, fervorKnown = false, false, false
     do
         local _, cls = UnitClass("player")
         if cls == "WARRIOR" then
             local function RefreshKnown()
                 local sb = C_SpellBook
-                sweepKnown    = (sb and sb.IsSpellKnown(SWEEP)) or false
-                improvedKnown = (sb and sb.IsSpellKnown(IMPROVED)) or false
-                broadKnown    = (sb and sb.IsSpellKnown(BROAD)) or false
-                fervorKnown   = (sb and sb.IsSpellKnown(FERVOR)) or false
+                sweepKnown  = (sb and sb.IsSpellKnown(SWEEP)) or false
+                broadKnown  = (sb and sb.IsSpellKnown(BROAD)) or false
+                fervorKnown = (sb and sb.IsSpellKnown(FERVOR)) or false
             end
             local watcher = CreateFrame("Frame")
             watcher:RegisterEvent("PLAYER_LOGIN")
@@ -4562,12 +4565,6 @@ do
         end
     end
 
-    -- Since 12.1, this is hard coded in game to be 18 stacks.
-    -- Using sweeping stick at 18 will not exceed 18.
-    local function MaxStacks()
-        return BASE_MAX
-    end
-
     -- Broad Strokes generators (only count with the talent known)
     local CS_GENERATORS = {
         [167105] = true,  -- Colossus Smash
@@ -4575,7 +4572,7 @@ do
     }
 
     -- Single-target damaging cast IDs in the Sweeping Strikes affected-spells list,
-    -- mapped to charges consumed. Rend and Storm Bolt do NOT sweep: deliberately absent.
+    -- mapped to charges consumed. Storm Bolt does NOT sweep: deliberately absent.
     local SPENDERS = {
         [12294]   = 1,  -- Mortal Strike
         [7384]    = 1,  -- Overpower
@@ -4592,7 +4589,7 @@ do
         [202168]  = 1,  -- Impending Victory
         [1715]    = 1,  -- Hamstring
         [1269383] = 1,  -- Heroic Strike (replaces Slam via Master of Warfare)
-        [772]     = 1,  -- Rend (in 12.1, this is now a single target ability)
+        [772]     = 1,  -- Rend: single-target since 12.1, and in 260708's jump-target list
         [436358]  = 2,  -- Demolish: the channel sweeps twice (damage IDs
                         -- 440884/440886) -- confirmed in-game, 2 per cast
     }
@@ -4725,12 +4722,13 @@ do
 
         if spellID == SWEEP
            or (CS_GENERATORS[spellID] and broadKnown) then
-            if spellID == SWEEP then stacks = stacks + 12 
-            elseif CS_GENERATORS[spellID] and broadKnown then stacks = stacks + 6 end
-            stacks = math.min(stacks, MaxStacks())
+            -- 12.1: both sources stack in any order, so add and clamp at the cap instead
+            -- of snapping to max. Casting at 12+ overcaps in-game too and reads as 18.
+            local grant = (spellID == SWEEP) and SWEEP_GRANT or BROAD_GRANT
+            stacks = min(MAX_STACKS, stacks + grant)
             expiresAt = GetTime() + DURATION
             cdmSeenActive, cdmInactiveSince = false, nil
-            dbg("activated:", stacks, "stacks (cast", spellID .. ")")
+            dbg("activated: +" .. grant, "->", stacks, "stacks (cast", spellID .. ")")
         elseif FOB_TRIGGERS[spellID] and stacks > 0 and fervorKnown then
             -- Fervor of Battle's triggered Slam is not a player cast event, so it is
             -- counted off the Cleave/WW cast, gated on 3 enemies in reach (with 3+ up a
@@ -4892,11 +4890,10 @@ do
         if expiresAt and now >= expiresAt then
             stacks, expiresAt = 0, nil
         end
-        -- Clamp: a mid-window respec out of Improved drops MaxStacks 18->12
-        -- while the predicted stacks upvalue keeps its old value.
-        local m = MaxStacks()
-        if stacks > m then stacks = m end
-        return stacks, m
+        -- Clamp: the cap is a flat 18 since 12.1, but a CDM snap reads Blizzard's own
+        -- count, so keep the readout inside the bar's pip count either way.
+        if stacks > MAX_STACKS then stacks = MAX_STACKS end
+        return stacks, MAX_STACKS
     end
 end
 
