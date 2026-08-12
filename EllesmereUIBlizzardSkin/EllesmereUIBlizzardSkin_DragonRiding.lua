@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIBlizzardSkin_DragonRiding.lua - Skyriding HUD
 -------------------------------------------------------------------------------
@@ -405,22 +406,20 @@ end
 --  Build / Rebuild / Redraw
 -------------------------------------------------------------------------------
 local function LayoutPips(frame, pipCount, width, height, spacing)
-    -- Distribute in whole PHYSICAL-pixel units (PP.mult), not whole
-    -- UI-coordinate units. 1 UI-unit only equals 1 physical pixel at the
-    -- "pixel perfect" scale -- at any other UI Scale, flooring to whole
-    -- UI-units left a fractional remainder unassigned, so the last pip fell
-    -- short of the frame's actual right edge (the "extra spacing between
-    -- charges and Whirling Surge" report, reproducible at UI scales where
-    -- that leftover doesn't round away to ~0).
+    -- Distribute in whole PHYSICAL-pixel units (PP.mult), not whole UI-coordinate
+    -- units. 1 UI-unit only equals 1 physical pixel at the "pixel perfect" scale -- at
+    -- any other UI Scale, flooring to whole UI-units left a fractional remainder
+    -- unassigned, so the last pip fell short of the frame's actual right edge (the
+    -- "extra spacing between charges and Whirling Surge" report, reproducible at UI
+    -- scales where that leftover doesn't round away to ~0).
     local PPdr = EllesmereUI and EllesmereUI.PP
     local px = (PPdr and PPdr.mult and PPdr.mult > 0) and PPdr.mult or 1
     local widthAvail = max(0, width - (pipCount - 1) * spacing)
-    -- If the whole row doesn't span even one physical pixel (a very small
-    -- bar at a low UI Scale, where px itself is large), snapping to whole
-    -- physical-pixel units would floor every pip to 0 width -- pips
-    -- vanishing entirely is worse than the sub-pixel gap this fix targets.
-    -- Fall back to plain UI-unit distribution (pre-fix behavior) in that
-    -- degenerate case so pips stay visible, just not perfectly pixel-snapped.
+    -- If the whole row doesn't span even one physical pixel (a very small bar at a low
+    -- UI Scale, where px itself is large), snapping to whole physical-pixel units would
+    -- floor every pip to 0 width -- pips vanishing entirely is worse than the sub-pixel
+    -- gap this fix targets. Fall back to plain UI-unit distribution (pre-fix behavior)
+    -- in that degenerate case so pips stay visible, just not perfectly pixel-snapped.
     if widthAvail < px then px = 1 end
     local totalUnits = floor(widthAvail / px + 1e-6)
     local unitsPer = floor(totalUnits / pipCount)
@@ -615,14 +614,13 @@ function RegisterUnlockElements()
                 p.width = max(60, PPdr and PPdr.Snap(w - p.gap - iconSize) or floor(w - p.gap - iconSize + 0.5))
                 Rebuild()
             end,
-            -- Height is the SUM of three independently-sized bars (Second
-            -- Wind, Skyriding charges, Speed) plus two fixed gaps between
-            -- them -- there's no single "height" field to write. Scale all
-            -- three proportionally toward the requested total, matching how
-            -- the Options page's three height sliders combine to change the
-            -- overall element size, then clamp each to its own Options-page
-            -- slider range (2-24 / 2-24 / 4-40) so a drag can't push one bar
-            -- to zero or past its usable size.
+            -- Height is the SUM of three independently-sized bars (Second Wind,
+            -- Skyriding charges, Speed) plus two fixed gaps between them -- there's no
+            -- single "height" field to write. Scale all three proportionally toward the
+            -- requested total, matching how the Options page's three height sliders
+            -- combine to change the overall element size, then clamp each to its own
+            -- Options-page slider range (2-24 / 2-24 / 4-40) so a drag can't push one
+            -- bar to zero or past its usable size.
             setHeight = function(_, h)
                 local p = db.profile
                 local PPdr = EllesmereUI and EllesmereUI.PP
@@ -653,12 +651,11 @@ function RegisterUnlockElements()
                     b.new = max(b.lo, min(b.hi, floor(b.old * scale + 0.5)))
                 end
 
-                -- A bar already at its min/max absorbs none of a further
-                -- shrink/grow, so plain proportional scaling can leave the
-                -- resize handle feeling stuck once one or two bars saturate.
-                -- Hand any leftover delta to whichever bar(s) still have
-                -- headroom instead of discarding it (bounded to 3 passes --
-                -- one per bar -- so this always terminates).
+                -- A bar already at its min/max absorbs none of a further shrink/grow,
+                -- so plain proportional scaling can leave the resize handle feeling
+                -- stuck once one or two bars saturate. Hand any leftover delta to
+                -- whichever bar(s) still have headroom instead of discarding it
+                -- (bounded to 3 passes -- one per bar -- so this always terminates).
                 for _ = 1, #bars do
                     local sum = bars[1].new + bars[2].new + bars[3].new
                     local leftover = targetSum - sum
