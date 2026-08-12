@@ -1083,8 +1083,9 @@ end
 -- Can this character do anything with the slot? Only the kinds that resolve
 -- against one character's own kit are tested -- another class's
 -- specialization, a spell no book here holds, a macro this character does
--- not have. Everything else (items, toys, mounts, pets, markers, nested
--- menus) is account-wide or self-resolving and stays.
+-- not have, a resurrection this class has none of. Everything else (items,
+-- toys, mounts, pets, markers, nested menus) is account-wide or
+-- self-resolving and stays.
 local function SlotUsable(slot)
     local k = slot and slot.kind
     if k == "spec" then
@@ -1093,6 +1094,14 @@ local function SlotUsable(slot)
         return SpellKnownHere(tonumber(slot.id))
     elseif k == "macro" then
         return GetMacroInfo(slot.name or slot.id) ~= nil
+    elseif k == "dynamicrez" then
+        -- By CLASS rather than by what is in the book right now, which is what
+        -- ns.HasRezKit answers: a paladin who has not taken Intercession still
+        -- has Redemption, and a druid too low for Rebirth will have it. Hiding
+        -- the entry on those would take it away from the character it is FOR.
+        -- A mage carrying the shared menu is the case this catches, and it is
+        -- the one the entry's own note names.
+        return ns.HasRezKit()
     end
     return true
 end
