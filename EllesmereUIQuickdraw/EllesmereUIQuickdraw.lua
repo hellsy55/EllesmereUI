@@ -8560,6 +8560,7 @@ function SetEventsEnabled(on)
         EQD:UnregisterEvent("PLAYER_ENTERING_WORLD")
         EQD:UnregisterEvent("SPELLS_CHANGED")
         EQD:UnregisterEvent("UPDATE_MACROS")
+        EQD:UnregisterEvent("RAID_TARGET_UPDATE")
     end
 end
 
