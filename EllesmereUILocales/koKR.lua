@@ -2283,6 +2283,9 @@ L["Enter the spell ID to always show."] = "항상 표시할 주문 ID를 입력�
 L["Enter the spell ID to exclude."] = "제외할 주문 ID를 입력하세요."
 L["Enter the spell ID to always show on this frame."] = "이 프레임에 항상 표시할 주문 ID를 입력하세요."
 L["Enter the spell ID to exclude from this frame."] = "이 프레임에서 제외할 주문 ID를 입력하세요."
+L["MINE"] = "내 시전"
+L["Showing this aura from any caster; click for your casts only."] = "이 오라를 모든 시전자에게서 표시 중입니다. 클릭하면 내 시전만 표시합니다."
+L["Showing this aura from your casts only; click for any caster."] = "이 오라를 내 시전만 표시 중입니다. 클릭하면 모든 시전자에게서 표시합니다."
 
 
 -- 2026-08-12 신규 (핵심 위치 - 추적 목록 편집. 유닛 프레임 설정에서도 같은 키 사용)
