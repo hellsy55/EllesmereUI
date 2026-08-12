@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe
 -- Korean localization for EllesmereUI. Community-maintained.
 -- Encoding: UTF-8 without BOM. See CONTRIBUTING_TRANSLATIONS.md.
 -- Seed locale: high-frequency common vocabulary. Run /euiloc dump koKR in-game
@@ -439,6 +440,8 @@ L["Show in Combat"] = "전투 중 보이기"
 L["Show Item Level"] = "아이템 레벨 표시"
 L["Show Spark"] = "반짝이 표시"
 L["Show Spell ID on Tooltip"] = "툴팁에 주문 ID 표시"
+L["Colored Percentages"] = "백분율 색상별 표시"
+L["Multicolored"] = "색상별"
 L["Show Icon ID"] = "아이콘 ID 표시"
 L["Show Item ID"] = "아이템 ID 표시"
 L["Show Text"] = "글자 표시"
