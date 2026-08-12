@@ -8321,20 +8321,59 @@ do
         end
     end
 
+    -- Round-robin BUDGETED sweep: each range verdict is a multi-C-call probe
+    -- walk, so classifying every plate every tick is unbounded in crowded
+    -- scenes (40 plates x 5Hz x spell+item probes was thousands of C calls
+    -- per second). 8 plates per 0.2s tick = full coverage inside ~1s at a
+    -- full plate cap, imperceptible for a fade; small scenes still resolve
+    -- every tick. Verdicts come from Range_SweepBeyond (per-unit short-TTL
+    -- cache; never touches the crosshair/QoL single-slot target caches).
+    -- Melee note: at cutoff 5 verdicts rely on the protection-gated item
+    -- walk, so in instanced combat the fade can degrade to "no fade" for
+    -- melee specs -- deliberate fail-open, never a blocked action.
     function RT.FadeTick()
         local customCutoff = p and p.outOfRangeMode == "custom" and p.outOfRangeCustomRange
         local cutoff = EllesmereUI.Range_GetAttackCutoff(customCutoff)
-        for _, plate in pairs(ns.plates) do
-            local beyond = plate.unit and EllesmereUI.Range_IsBeyondAttackRange(plate.unit, cutoff)
-            local alpha = beyond == true and ns._oorAlpha or 1
-            if (plate._oorCurAlpha or 1) ~= alpha then
-                plate._oorCurAlpha = alpha
-                ns.NT_Apply(plate)
+        local q = RT.fadeQ
+        if not q then q = {}; RT.fadeQ = q end
+        if not RT.fadeIdx or RT.fadeIdx > #q then
+            -- New cycle: snapshot the live plate set (reused table, one wipe
+            -- per cycle). Plates that detach mid-cycle are re-checked below.
+            wipe(q)
+            for _, plate in pairs(ns.plates) do q[#q + 1] = plate end
+            RT.fadeIdx = 1
+        end
+        local budget = 8
+        while RT.fadeIdx <= #q and budget > 0 do
+            local plate = q[RT.fadeIdx]
+            RT.fadeIdx = RT.fadeIdx + 1
+            budget = budget - 1
+            local unit = plate.unit
+            if unit and ns.plates[unit] == plate then
+                local beyond
+                -- Cleanly-non-attackable plates (friendly/neutral NPCs) can
+                -- never answer an attack-range probe; skip the whole walk.
+                -- Only a READABLY-false flag skips -- a secret answer falls
+                -- through to the probes, whose own gates fail open.
+                local okAtt, att = pcall(UnitCanAttack, "player", unit)
+                local skip = okAtt and not (issecretvalue and issecretvalue(att)) and att == false
+                if not skip then
+                    beyond = EllesmereUI.Range_SweepBeyond(unit, cutoff)
+                end
+                local alpha = beyond == true and ns._oorAlpha or 1
+                if (plate._oorCurAlpha or 1) ~= alpha then
+                    plate._oorCurAlpha = alpha
+                    ns.NT_Apply(plate)
+                end
             end
         end
     end
 
     function RT.ResetFade()
+        -- Drop the round-robin cursor and its plate snapshot too: a disable
+        -- mid-cycle must not pin recycled plates in the reused queue.
+        if RT.fadeQ then wipe(RT.fadeQ) end
+        RT.fadeIdx = nil
         for _, plate in pairs(ns.plates) do
             if plate._oorCurAlpha then
                 plate._oorCurAlpha = nil
@@ -8382,4 +8421,47 @@ do
     end
 
 end
+
+-------------------------------------------------------------------------------
+--  Hide Enemy Nameplates Out of Combat (EXTRAS): drives nameplateShowEnemies,
+--  the same CVar behind Blizzard's combat-legal "Show Enemy Name Plates"
+--  keybind, so plates flip cleanly at the combat edges. The combat events are
+--  registered only while the setting is on (zero cost off); disabling the
+--  setting restores plates ON only if this feature ever hid them. All state
+--  lives on ns -- this chunk is at the 200-local cap.
+-------------------------------------------------------------------------------
+ns._oocPlatesCtl = CreateFrame("Frame")
+ns.ApplyOOCPlates = function()
+    local ctl = ns._oocPlatesCtl
+    local on = p and p.hideEnemyPlatesOOC == true
+    if on then
+        ctl:RegisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:RegisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:RegisterEvent("PLAYER_ENTERING_WORLD")
+        ns._oocPlatesOwned = true
+        SetCVar("nameplateShowEnemies", InCombatLockdown() and "1" or "0")
+    else
+        ctl:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        if ns._oocPlatesOwned then
+            ns._oocPlatesOwned = nil
+            SetCVar("nameplateShowEnemies", "1")
+        end
+    end
+end
+ns._oocPlatesCtl:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_LOGIN" then
+        self:UnregisterEvent("PLAYER_LOGIN")
+        ns.ApplyOOCPlates()
+        return
+    end
+    if event == "PLAYER_REGEN_DISABLED" then
+        SetCVar("nameplateShowEnemies", "1")
+    elseif not InCombatLockdown() then
+        -- REGEN_ENABLED, or a world entry that lands out of combat.
+        SetCVar("nameplateShowEnemies", "0")
+    end
+end)
+ns._oocPlatesCtl:RegisterEvent("PLAYER_LOGIN")
 

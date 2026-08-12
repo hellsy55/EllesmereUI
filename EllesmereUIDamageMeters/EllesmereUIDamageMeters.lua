@@ -4596,8 +4596,13 @@ local function RepositionSATimer()
     _saTimer:ClearAllPoints()
 
     if anchor == "free" then
-        _saTimer:SetMovable(true)
-        _saTimer:EnableMouse(true)
+        -- Lock Position & Disable Click: click-through and immovable; the
+        -- shift+drag lane only exists while unlocked. Our own frame, so the
+        -- direct mouse-state writes are safe.
+        local locked = cfg.standaloneTimerLocked == true
+        _saTimer:SetMovable(not locked)
+        _saTimer:EnableMouse(not locked)
+        if _saTimer.EnableMouseMotion then _saTimer:EnableMouseMotion(not locked) end
         local pos = cfg.standaloneTimerPos
         if pos and pos.point then
             _saTimer:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
@@ -4617,6 +4622,7 @@ local function RepositionSATimer()
 
     _saTimer:SetMovable(false)
     _saTimer:EnableMouse(false)
+    if _saTimer.EnableMouseMotion then _saTimer:EnableMouseMotion(false) end
 
     -- Find the highest (max top) and lowest (min bottom) window
     local topWin, botWin
@@ -4663,6 +4669,9 @@ local function CreateSATimer()
     _saTimer:SetScript("OnMouseDown", function(self, button)
         if button == "LeftButton" and IsShiftKeyDown() then
             local c = DB()
+            -- Belt and braces: locked timers are click-through (EnableMouse
+            -- off), so this handler should never fire while locked.
+            if c.standaloneTimerLocked then return end
             if (c.standaloneTimerAnchor or "free") == "free" then self:StartMoving() end
         end
     end)

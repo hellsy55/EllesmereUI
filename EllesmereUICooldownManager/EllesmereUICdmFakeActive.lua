@@ -673,7 +673,17 @@ end
         AK.QueueBuildJob(function()
             st.queued = nil
             Build(rule, st)
-            if st.armed then FA121.Rescan() end
+            -- Rescan ONLY after a build that actually completed (it attaches
+            -- the fresh slot to the live icon). A BAILED build (icon not on
+            -- any bar yet -- or ever) must NOT rescan from its own job tail:
+            -- Rescan re-queues the build for unbuilt armed rules, so the tail
+            -- call turned every permanent bail into a self-feeding job loop
+            -- that burned the scheduler's full per-frame budget forever
+            -- (field: Aug Evoker Ebon Might rule = 50% idle CPU + login and
+            -- post-combat turbo-window FPS drops). Bailed builds retry on
+            -- the EXTERNAL staggered rescans (PEW/rearm + 3s/8s), which are
+            -- finite by design.
+            if st.armed and st.built then FA121.Rescan() end
         end, "cdm:fa121-shell")
     end
 
@@ -734,7 +744,21 @@ end
     -- quiet sessions cost three no-op walks of a one-entry table.
     local pew = ns.TakeShell()
     pew:RegisterEvent("PLAYER_ENTERING_WORLD")
-    pew:SetScript("OnEvent", function()
+    -- Cinematics fire UNIT_FACTION for the player and briefly drop
+    -- assistability, which disables the slot's spell-ID candidate filter
+    -- engine-side -- the fa121 slot then renders the FIRST helpful aura
+    -- instead of the rule's, and no aura edge is guaranteed to follow the
+    -- restore. Reparse armed built slots on that edge (typically one slot).
+    pew:RegisterUnitEvent("UNIT_FACTION", "player")
+    pew:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_FACTION" then
+            for _, st in pairs(FA121.byRule) do
+                if st.armed and st.built and st.container then
+                    st.container:UpdateAllAuras()
+                end
+            end
+            return
+        end
         FA121.Rescan()
         if C_Timer then
             C_Timer.After(3, FA121.Rescan)

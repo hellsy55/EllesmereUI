@@ -1391,8 +1391,13 @@ function ns.UF_ReloadAuraContainers(frame, unit)
     local font = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("unitFrames")) or ""
     -- Containers hidden outside the fingerprinted flow (boss preview) must
     -- re-drive anchor/config/visibility even with matching fingerprints.
-    local forceCfg = entry.previewHid and true or false
+    -- cfgDirty: the degradation-recovery lane below (cinematic/faction/
+    -- vehicle) needs the same force -- re-setting candidates is what makes
+    -- the engine re-honor spell-ID filters after an assistability flip, and
+    -- the fingerprints never change across one.
+    local forceCfg = (entry.previewHid or entry.cfgDirty) and true or false
     entry.previewHid = nil
+    entry.cfgDirty = nil
 
     for base, field in pairs({ HELPFUL = "buffs", HARMFUL = "debuffs" }) do
         local key = StyleKey(unit, base)
@@ -1468,6 +1473,43 @@ local function RefreshUnit(unitKey)
     if entry.buffs then entry.buffs:UpdateAllAuras() end
     if entry.debuffs then entry.debuffs:UpdateAllAuras() end
     if entry.dispel then entry.dispel:UpdateAllAuras() end
+end
+
+-- Degradation recovery for the PLAYER frame's containers: cinematics
+-- (UNIT_FACTION fires for every unit at start+end while assistability
+-- briefly drops; UNIT_FLAGS does NOT fire -- authors-channel etrace,
+-- 2026-08-13), addon-cancelled cinematics (CINEMATIC_STOP's hide/re-show
+-- can parse mid-degradation), and vehicles (assistability stays down for
+-- the whole ride) all silently disable spell-ID candidate filters
+-- engine-side -- the player buff chain's Extra Spells / filter includes
+-- degrade to the FULL buff set, and no aura edge is guaranteed to follow
+-- the restore. Same trigger set as the PAB lane and the RF assist gate.
+-- Recovery = BOTH levers, coalesced one tick after each edge: a forced
+-- config pass (cfgDirty -- re-setting candidates is what makes the engine
+-- re-honor them) plus a reparse. Cost while idle: a handful of registered
+-- events that fire only on cinematics/faction flips/vehicle transitions.
+do
+    local pending = false
+    local w = CreateFrame("Frame")
+    w:RegisterUnitEvent("UNIT_FACTION", "player")
+    w:RegisterEvent("CINEMATIC_STOP")
+    w:RegisterUnitEvent("UNIT_ENTERING_VEHICLE", "player")
+    w:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+    w:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+    w:SetScript("OnEvent", function(_, event)
+        if pending then return end
+        pending = true
+        C_Timer.After(0, function()
+            pending = false
+            local entry = registry.player
+            if not entry or entry.building then return end
+            entry.cfgDirty = true
+            if entry.frame and ns.UF_ReloadAuraContainers then
+                ns.UF_ReloadAuraContainers(entry.frame, "player")
+            end
+            RefreshUnit("player")
+        end)
+    end)
 end
 
 -- The 12.1 ping-receiver strip workaround lived here until build 68914

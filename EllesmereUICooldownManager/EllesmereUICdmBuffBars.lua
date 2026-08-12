@@ -3951,16 +3951,12 @@ local _cdActive = false
 -- ticking down on its own, and only a CDR/reset-adjusted cooldown needs a fresh fetch.
 local _cdGen = 0
 
--- Static base cooldown (ms) as the arm-time seed before any clean read. Tries both API homes
--- and validates each: an existing-but-differently-shaped C_Spell variant must fall through to the global, never mask it.
+-- Static base cooldown (ms) as the arm-time seed before any clean read. The API lives
+-- ONLY at the global (client-verified: no C_Spell form exists); static data, never secret,
+-- but validated anyway since the seed feeds arithmetic.
 local function _cdBaseDuration(sid)
-    local ms
-    if C_Spell and C_Spell.GetSpellBaseCooldown then
-        ms = C_Spell.GetSpellBaseCooldown(sid)
-    end
-    if not (_tbbCleanNum(ms) and ms > 0) and GetSpellBaseCooldown then
-        ms = GetSpellBaseCooldown(sid)
-    end
+    if not GetSpellBaseCooldown then return nil end
+    local ms = GetSpellBaseCooldown(sid)
     if _tbbCleanNum(ms) and ms > 0 then return ms / 1000 end
     return nil
 end

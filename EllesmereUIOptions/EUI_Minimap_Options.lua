@@ -487,8 +487,9 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
 
         -- "(seconds)" suffix next to the Reset Zoom slider (mirrors Damage
-        -- Meters' Refresh Rate suffix)
-        do
+        -- Meters' Refresh Rate suffix). Prebuild-guarded like the Nameplates
+        -- "(Percent)" suffix: the hidden search-index pass has no use for it.
+        if not EllesmereUI._prebuilding then
             local rgn = fmRow._rightRegion
             local suffix = rgn:CreateFontString(nil, "OVERLAY")
             suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")

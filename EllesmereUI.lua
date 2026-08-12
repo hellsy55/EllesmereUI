@@ -307,7 +307,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIQoL",               display = "Quality of Life",      search_name = "EllesmereUI Quality of Life"         },
     { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",    search_name = "EllesmereUI Blizz UI Enhanced",      syncFolder = "EllesmereUIDragonRiding", syncDisplay = "Dragon Riding" },
     { folder = "EllesmereUIFriends",           display = "Friends List",         search_name = "EllesmereUI Friends List"            },
-    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",        search_name = "EllesmereUI Mythic+ Timer"           },
+    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Tools",        search_name = "EllesmereUI Mythic+ Tools Timer"     },
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",        search_name = "EllesmereUI Quest Tracker"           },
     { folder = "EllesmereUIMinimap",           display = "Minimap",              search_name = "EllesmereUI Minimap"                 },
     { folder = "EllesmereUIChat",              display = "Chat",                 search_name = "EllesmereUI Chat"                    },
@@ -10868,7 +10868,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.4"
+EllesmereUI.VERSION = "8.8.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12218,7 +12218,11 @@ EllesmereUI.VIS_ORDER_CDM = { "never", "always", "in_combat", "out_of_combat", "
 EllesmereUI.VIS_OPT_ITEMS = {
     { key = "visOnlyInstances",    label = "Only Show in Instances" },
     { key = "visHideHousing",      label = "Hide in Housing" },
+    { key = "visOnlyHousing",      label = "Only Show in Housing",
+      tooltip = "This element will only show while you are inside a house or plot" },
     { key = "visHideMounted",      label = "Hide when Mounted" },
+    { key = "visOnlyMounted",      label = "Only Show when Mounted",
+      tooltip = "This element will only show while you are mounted" },
     { key = "visHideNoTarget",     label = "Hide without Target",
       tooltip = "*Blizzard's auto targeting (soft target) setting can cause brief flickering when your actual target dies but a soft-target is still active." },
     { key = "visHideNoEnemy",      label = "Hide without Enemy Target",
@@ -12325,9 +12329,23 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
         end
     end
 
+    -- Only Show in Housing (inverse of the above; same probe, same edges)
+    if opts.visOnlyHousing then
+        if not (C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot()) then
+            return true
+        end
+    end
+
     -- Hide when Mounted (includes druid travel/flight/aquatic forms)
     if opts.visHideMounted then
         if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
+    end
+
+    -- Only Show when Mounted (inverse; druid mount-like forms count as mounted
+    -- here too -- secure action bars carry a [nomounted] clause instead, which
+    -- cannot see forms, see BuildVisibilityString)
+    if opts.visOnlyMounted then
+        if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return true end
     end
 
     if opts.visHideDragonriding then

@@ -209,7 +209,24 @@ local function ApplyStyleToRegions(button, style)
         d.cooldown:SetReverse(style.cooldownReverse ~= false)
         d.cooldown:SetDrawEdge(style.cooldownDrawEdge == true)
         d.cooldown:SetHideCountdownNumbers(true) -- duration text comes from the binding, not the swipe
-        d.cooldown:SetShown(style.hideSwipe ~= true)
+        -- Hidden-swipe gate. SetShown alone does not stick: the engine calls
+        -- Cooldown:SetCooldown on this frame whenever the slot's aura data
+        -- refreshes, and that native API implicitly re-Shows the frame.
+        -- Withholding the frame from SetDurationCooldown does not work either --
+        -- that registration is the button's DURATION SOURCE, so a button
+        -- without one loses its duration TEXT along with the swipe.
+        -- SetDrawSwipe is the knob that means what we want: keep the cooldown
+        -- registered and running, draw no swipe from it. It is persistent
+        -- cooldown STYLE rather than visibility (SetCooldown never resets it),
+        -- and it is annotated AllowedWhenTainted. With swipe, edge, and
+        -- countdown numbers all off, a re-shown frame draws nothing, so the
+        -- engine's re-Show is harmless.
+        local hideSwipe = style.hideSwipe == true
+        d.cooldown:SetShown(not hideSwipe)
+        if d.akHideSwipe ~= hideSwipe then
+            d.akHideSwipe = hideSwipe
+            if d.cooldown.SetDrawSwipe then d.cooldown:SetDrawSwipe(not hideSwipe) end
+        end
     end
 
     -- Modules with their own text pipeline (fonts, anchors, outline rules) set
