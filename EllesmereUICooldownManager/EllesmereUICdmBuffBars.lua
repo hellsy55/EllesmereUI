@@ -3139,8 +3139,16 @@ local function UpdateStacks(bar, blzChild, cfg)
         -- NEVER compare the text (it may be secret); SetText takes it natively.
         local ok, txt = pcall(blzChild.Icon.Applications.GetText, blzChild.Icon.Applications)
         if ok and txt then
-            bar._stacksText:SetText(txt)
-            bar._stacksText:Show()
+            -- _stacksHidden (Stacks Position: None) gates every writer lane:
+            -- this helper runs for EVERY active bar once ANY bar wants stacks
+            -- (_anyStacks is a global gate), so an unguarded show here painted
+            -- stacks onto bars that disabled them.
+            if bar._stacksText and not bar._stacksHidden then
+                bar._stacksText:SetText(txt)
+                bar._stacksText:Show()
+            elseif bar._stacksText then
+                bar._stacksText:Hide()
+            end
             -- Stack count for the threshold overlay: applications can be a secret number we
             -- cannot compare, but the overlay consumes it via SetValue (FeedTBBThresholdOverlay), which accepts secrets.
             bar._stackCount = ReadStackApplications(blzChild) or 0

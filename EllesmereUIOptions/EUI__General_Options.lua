@@ -955,6 +955,66 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.8.4",
+        -- No hero tier this patch (same shape as 8.7.7): features present,
+        -- so the tiers render normally and this is not a mini patch.
+        features = {
+            {
+                module = "Cooldown Manager",
+                title  = "Show Charge/Stack Text",
+                desc   = "Hide the stack counters on buff bars, per bar or per spell",
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Charge/Stack Size" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "Toggle Menu Open",
+                desc   = "Keep a menu up and choose with a Select Key",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "Dynamic Rez Entry",
+                desc   = "One entry casts the right resurrection for the moment",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "World Marker Toggling",
+                desc   = "Entries pick their marker back up, with placed-marker pips",
+                nav    = { module = "EllesmereUIQuickdraw", page = "Quickdraw" },
+            },
+            {
+                module = "Unit Frames",
+                title  = "Standalone Weapon Enchants",
+                desc   = "A Buffs bar filter shows oils and imbues on their own",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Player Aura Bars" },
+            },
+        },
+        fixes = {
+            { module = "Bags", text = "Season 1 currencies that Blizzard delisted can now be untracked; they list under a new Retired group at the top of Enabled Currencies." },
+            { module = "Blizz UI Enhanced", text = "The character sheet's Crests section now tracks the Season 2 Mistcrests." },
+            { module = "Chat", text = "Chinese and Korean text now renders instead of showing empty boxes, sized to match your chat font." },
+            { module = "Cooldown Manager", text = "Aura-tracking icons like Touch of the Magi no longer go blank for the rest of a long cooldown." },
+            { module = "Cooldown Manager", text = "Tracking Bars with stacks disabled no longer show stack text whenever another bar has it enabled." },
+            { module = "Localization", text = "Korean clients no longer lose the first letter of class names in spec override labels." },
+            { module = "Localization", text = "Quickdraw is now fully translatable, and the Korean translation gained around 300 new entries." },
+            { module = "Nameplates", text = "Tracked debuffs now show only your own applications by default; a MINE tag on each included spell lets it show from any caster instead." },
+            { module = "Nameplates", text = "The preview eyeball for Raid Marker and Rare/Quest Indicator selections now sits beside its cog instead of floating off to the left." },
+            { module = "QoL", text = "Secondary Stats no longer stick at \"?\" after loading in; values recover as soon as the game allows reading them." },
+            { module = "QoL", text = "The Upgrade Calculator now counts Season 2 Mistcrests." },
+            { module = "Quickdraw", text = "Macros with modifier conditions now respond to modifiers pressed during a hold." },
+            { module = "Quickdraw", text = "Fixed a menu bound to a modified key also opening on the bare key, duplicate names after deleting a menu, and an error from nested world marker entries." },
+            { module = "Raid Frames", text = "Debuff Manager Icon Effects tiles now render instead of erroring on every application." },
+            { module = "Raid Frames", text = "Entering a vehicle no longer fills your own frame's aura displays with random buffs; filtered displays hide while boarded and return on exit." },
+            { module = "Raid Frames", text = "The Healer Mana Display's Show Names in Raid and Class Colored Names toggles can be turned back on after being turned off." },
+            { module = "Resource Bars", text = "Arms Warrior Sweeping Strikes now tracks 12.1's rules: Sweeping Strike adds 12 charges, Broad Strokes adds 6, capped at 18, and Rend consumes charges." },
+            { module = "Resource Bars", text = "Rune recharge on vertical bars now fills vertically, and threshold hash lines on vertical bars sit at the correct height." },
+            { module = "Resource Bars", text = "Opening the options on a Beast Mastery or Marksmanship Hunter no longer errors." },
+            { module = "Unit Frames", text = "3D portraits no longer disappear after zone changes." },
+            { module = "Unit Frames", text = "Custom Player Aura Bars no longer fill with default buffs after an addon-skipped cinematic." },
+        },
+    },
+    {
         version = "8.8.3",
         -- No hero tier this patch (same shape as 8.7.7): features present,
         -- so the tiers render normally and this is not a mini patch.

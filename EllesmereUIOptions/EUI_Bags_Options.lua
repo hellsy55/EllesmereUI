@@ -368,6 +368,50 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
 
+                -- Retired lane: tracked ids that are no longer in Blizzard's
+                -- currency list (seasonal currencies get delisted at rollover)
+                -- would otherwise have NO checkbox anywhere -- stuck tracked
+                -- forever, with no way off the bag footer. Built from the
+                -- tracked set itself so unchecking always works; names resolve
+                -- via GetCurrencyInfo, which still answers for delisted ids.
+                -- Never auto-pruned: what renders stays the user's choice.
+                do
+                    local co = EllesmereUI._BagsCurrencyOrder
+                        and EllesmereUI._BagsCurrencyOrder()
+                    if co then
+                        local listed = {}
+                        for _, item in ipairs(currencyItems) do
+                            if item.key then listed[item.key] = true end
+                        end
+                        local retired = {}
+                        for cID in pairs(co) do
+                            if type(cID) == "number" and not listed[cID] then
+                                retired[#retired + 1] = cID
+                            end
+                        end
+                        table.sort(retired)
+                        if #retired > 0 then
+                            -- Top of the menu: a leftover seasonal currency is
+                            -- exactly what this dropdown gets opened to remove,
+                            -- so it never hides under the live headers.
+                            local block = {
+                                { isHeader = true, label = EllesmereUI.L("Retired") },
+                            }
+                            for _, cID in ipairs(retired) do
+                                local cInfo = C_CurrencyInfo.GetCurrencyInfo
+                                    and C_CurrencyInfo.GetCurrencyInfo(cID)
+                                block[#block + 1] = {
+                                    key = cID,
+                                    label = (cInfo and cInfo.name) or ("Currency " .. cID),
+                                }
+                            end
+                            for i = #block, 1, -1 do
+                                table.insert(currencyItems, 1, block[i])
+                            end
+                        end
+                    end
+                end
+
                 if #currencyItems > 0 then
                     local rightRgn = catCurrRow._rightRegion
                     local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(

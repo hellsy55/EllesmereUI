@@ -834,16 +834,17 @@ local function FxApply(button, dd, style)
     local fx = style.fx
     if not (refs and fx) then return end
 
-    -- Per-filter gating: an effect tile declares one slot per EVER-checked category (add-only engine); currently-
-    -- unchecked slots render nothing. Both paths pcall-wrapped with error RECORDED, since the restyler swallows applier errors silently -- dbg.err is how we see them.
-    local ok, err
-    if not dbg.gate then
-        ok, err = pcall(FxHideAll, dd)
+    -- Per-filter gating: an effect tile declares one slot per EVER-checked category
+    -- (add-only engine -- a slot cannot be un-declared), so a slot whose category is
+    -- currently UNCHECKED must render nothing. dd.dmCat is stamped at slot creation
+    -- and fx.filters is the live checked set, so the two together are the gate.
+    -- Both paths stay pcall-wrapped: this runs inside the engine's CreateFrameBatch,
+    -- where an uncaught error aborts the whole batch and the slot never appears.
+    if dd and fx.filters and fx.filters[dd.dmCat] then
+        pcall(FxApplyInner, button, dd, refs, fx)
     else
-        ok, err = pcall(FxApplyInner, button, dd, refs, fx)
+        pcall(FxHideAll, dd)
     end
-    dbg.ok = ok
-    dbg.err = (not ok) and tostring(err) or nil
 end
 
 -- Icon-tile flow anchoring: corner-pinned chain, CENTER growth centers the

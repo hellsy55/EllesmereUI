@@ -290,6 +290,53 @@ end
 --  ApplyFonts in the module root, which keeps their (invisible) layout -- and
 --  therefore their hyperlink hit-zones -- congruent with ours.
 -------------------------------------------------------------------------------
+-- Per-window font FAMILIES: a raw SetFont(path) binds ONE file, and Western
+-- fonts carry no CJK glyphs -- Chinese/Korean messages rendered tofu boxes
+-- (Cyrillic survived; Western fonts include it). Blizzard's chat renders CJK
+-- everywhere because its chat font is a per-alphabet family, and 12.1 exposes
+-- that mechanism to Lua: CreateFontFamily(name, members). The user's font
+-- drives roman+russian; the three CJK alphabets ride the client's stock CJK
+-- files (shipped on every locale). Cached per window id; font/size/outline
+-- changes re-drive the member font objects in place. Returns nil when the
+-- API is missing or creation fails -- callers fall back to plain SetFont
+-- (the pre-family behavior, tofu included, never an error).
+local FAMS = {}
+local CJK_FILES = {
+    korean             = "Fonts\\2002.ttf",
+    simplifiedchinese  = "Fonts\\ARKai_T.ttf",
+    traditionalchinese = "Fonts\\blei00d.TTF",
+}
+function ECHAT.EngineFontFamily(id, font, size, flags)
+    flags = flags or ""
+    local fam = FAMS[id]
+    if fam == false then return nil end -- failed once; never retry-loop
+    if not fam then
+        if not CreateFontFamily then FAMS[id] = false; return nil end
+        local members = {
+            { alphabet = "roman",   file = font, height = size, flags = flags },
+            { alphabet = "russian", file = font, height = size, flags = flags },
+        }
+        -- CJK renders +2px: ideographs at latin point sizes read visibly
+        -- smaller (dense glyphs, no ascender/descender whitespace).
+        for alphabet, file in pairs(CJK_FILES) do
+            members[#members + 1] = { alphabet = alphabet, file = file, height = size + 2, flags = flags }
+        end
+        local ok, created = pcall(CreateFontFamily, "EUIChatFontFamily" .. id, members)
+        if not ok or not created then FAMS[id] = false; return nil end
+        FAMS[id] = created
+        return created
+    end
+    local ok = pcall(function()
+        fam:GetFontObjectForAlphabet("roman"):SetFont(font, size, flags)
+        fam:GetFontObjectForAlphabet("russian"):SetFont(font, size, flags)
+        for alphabet, file in pairs(CJK_FILES) do
+            fam:GetFontObjectForAlphabet(alphabet):SetFont(file, size + 2, flags)
+        end
+    end)
+    if not ok then return nil end
+    return fam
+end
+
 function ECHAT.EngineApplyFontTo(cf)
     local win = WINS[cf]
     if not win then return end
@@ -297,7 +344,12 @@ function ECHAT.EngineApplyFontTo(cf)
     local size = ECHAT.EngineFontSizeProvider and ECHAT.EngineFontSizeProvider(cf:GetID())
     local flags = ECHAT.EngineOutlineProvider and ECHAT.EngineOutlineProvider()
     if font and size then
-        win.smf:SetFont(font, size, flags or "")
+        local fam = ECHAT.EngineFontFamily(cf:GetID(), font, size, flags or "")
+        if fam then
+            win.smf:SetFontObject(fam)
+        else
+            win.smf:SetFont(font, size, flags or "")
+        end
         win.smf:SetShadowOffset(1, -1)
         win.smf:SetShadowColor(0, 0, 0, 0.8)
     end

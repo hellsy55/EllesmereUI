@@ -532,6 +532,11 @@ function ns.NPF_FP()
     ListPart("n", ns.NPF_Include("debuff"))
     ListPart("cx", ns.NPF_Exclude("cc"))
     ListPart("cn", ns.NPF_Include("cc"))
+    -- Any-caster opt-outs are re-drive inputs too: they move ids between
+    -- the npinc and npincmine groups (a memo missing an input is a
+    -- correctness bug -- toggling MINE must not no-op the reload).
+    ListPart("na", ns.NPF_IncludeAny("debuff"))
+    ListPart("cna", ns.NPF_IncludeAny("cc"))
     return table.concat(parts, ";")
 end
 
@@ -573,7 +578,8 @@ end
 -- Include lists (Tracked Auras popup, INCLUDED column): same tri-state
 -- shape and side split as the exclude lists (true = active, false =
 -- kept but disabled, nil = deleted). Included spells render through
--- their side's own any-caster group ("npinc", NPF_ApplyContainer) and are excluded from
+-- their side's own groups ("npinc" any-caster, "npincmine" own-cast for
+-- entries flagged Only My Casts; NPF_ApplyContainer) and are excluded from
 -- every other group's candidates on that container, so a spell that also matches the
 -- slot's composition (or Show All) can never double-render.
 function ns.NPF_Include(side)
@@ -584,16 +590,38 @@ function ns.NPF_Include(side)
     return t[key]
 end
 
--- Active-only include map for engine candidates (false entries stay
--- stored but must never reach the C validator).
+-- Any-caster OPT-OUTS for include entries (default is Only My Casts): a
+-- SIBLING map keyed by spell id, not a fourth tri-state value -- every
+-- `v == true` reader of the include list stays valid, and the flag
+-- survives disable/re-enable cycles.
+function ns.NPF_IncludeAny(side)
+    local t = ns.NPF_Root()
+    if not t then return nil end
+    local key = (side == "cc") and "ccIncludeAnyCaster" or "includeAnyCaster"
+    if not t[key] then t[key] = {} end
+    return t[key]
+end
+
+-- Active-only include maps for engine candidates (false entries stay
+-- stored but must never reach the C validator). Two maps: any-caster
+-- opt-outs feed the npinc group, everything else (the default) feeds
+-- npincmine (its filter string carries the PLAYER token -- the caster
+-- restriction lives in the token vocabulary, not in candidate booleans).
 local function NPF_ActiveIncludes(side)
     local inc = ns.NPF_Include(side)
-    if not inc then return nil end
-    local m
+    if not inc then return nil, nil end
+    local anym = ns.NPF_IncludeAny(side)
+    local m, mm
     for id, v in pairs(inc) do
-        if v then m = m or {}; m[id] = true end
+        if v then
+            if anym and anym[id] then
+                m = m or {}; m[id] = true
+            else
+                mm = mm or {}; mm[id] = true
+            end
+        end
     end
-    return m
+    return m, mm
 end
 
 -- Candidate-table builder: the blacklist rides EVERY debuff-side group
@@ -617,13 +645,17 @@ local function NPF_Cand(extra, side)
             end
         end
     end
-    -- Active INCLUDES are excluded here too: the npinc group owns their
-    -- display (any caster, active in every mode), so every category /
-    -- Show All group must not render its own copy.
-    local incm = NPF_ActiveIncludes(side)
+    -- Active INCLUDES are excluded here too: the npinc/npincmine groups own
+    -- their display (active in every mode), so every category / Show All
+    -- group must not render its own copy.
+    local incm, incmm = NPF_ActiveIncludes(side)
     if incm then
         m = m or {}
         for id in pairs(incm) do m[id] = true end
+    end
+    if incmm then
+        m = m or {}
+        for id in pairs(incmm) do m[id] = true end
     end
     if m then cand.excludeSpellIDs = m end
     return cand
@@ -653,6 +685,11 @@ local function NPF_ApplyContainer(container, kindKey, styleKey, cap)
     local side = (kindKey == "cc") and "cc" or "debuff"
     local declared = container._npfGroups
     if not declared then declared = {}; container._npfGroups = declared end
+    -- Mid-session declares on a container already bound to a live unit need an
+    -- explicit parse request at the end: FinishContainer's UpdateAllAuras ran
+    -- long ago, and a group added after it renders nothing until the next
+    -- SetUnit (pooled re-attach) otherwise.
+    local declaredNew = false
     local wanted = {}
     if not cfg.all then
         local recs = NPF_Records(cfg)
@@ -670,6 +707,7 @@ local function NPF_ApplyContainer(container, kindKey, styleKey, cap)
                                    elementSpacing = 4, lineSpacing = 4 },
                     })
                     declared[gkey] = true
+                    declaredNew = true
                 else
                     container:SetAuraGroupMaxFrameCount(gkey, cap)
                     container:SetAuraGroupCandidateFilters(gkey, NPF_Cand(rec.cand, side))
@@ -678,7 +716,7 @@ local function NPF_ApplyContainer(container, kindKey, styleKey, cap)
         end
     end
     for gkey in pairs(declared) do
-        if gkey ~= "npinc" and not wanted[gkey] then
+        if gkey ~= "npinc" and gkey ~= "npincmine" and not wanted[gkey] then
             container:SetAuraGroupMaxFrameCount(gkey, 0)
         end
     end
@@ -692,14 +730,16 @@ local function NPF_ApplyContainer(container, kindKey, styleKey, cap)
     -- also re-drives this -- same values, dirty-mark cheap).
     container:SetAuraGroupCandidateFilters("np", NPF_Cand(nil, side))
     container:SetAuraGroupMaxFrameCount("np", npOn and cap or 0)
-    -- Include list (Tracked Auras popup): the side's own any-caster group
-    -- on this container. It stays ACTIVE in every mode, Show All included
-    -- -- the np group's fixed filter string is PLAYER-cast (and
-    -- !CROWD_CONTROL on the debuff container), so an included spell cast
-    -- by someone else or flagged CC can only render here; every other
-    -- group excludes the included ids via NPF_Cand. Candidates re-drive
-    -- live; count follows whether any entry is active.
-    local incm = NPF_ActiveIncludes(side)
+    -- Include list (Tracked Auras popup): the side's own groups on this
+    -- container. They stay ACTIVE in every mode, Show All included -- the
+    -- np group's fixed filter string is PLAYER-cast (and !CROWD_CONTROL on
+    -- the debuff container), so an included spell cast by someone else or
+    -- flagged CC can only render here; every other group excludes the
+    -- included ids via NPF_Cand. Candidates re-drive live; count follows
+    -- whether any entry is active. Two groups because caster scope lives
+    -- in the filter STRING (fixed at declaration): npinc = any caster,
+    -- npincmine = PLAYER token for entries flagged Only My Casts.
+    local incm, incmm = NPF_ActiveIncludes(side)
     if incm and not declared.npinc then
         AK.AddGroupToContainer(container, {
             key = "npinc", filter = { "HARMFUL", "INCLUDE_NAME_PLATE_ONLY" },
@@ -710,11 +750,36 @@ local function NPF_ApplyContainer(container, kindKey, styleKey, cap)
                        elementSpacing = 4, lineSpacing = 4 },
         })
         declared.npinc = true
+        declaredNew = true
     elseif declared.npinc then
         if incm then
             container:SetAuraGroupCandidateFilters("npinc", { includeSpellIDs = incm })
         end
         container:SetAuraGroupMaxFrameCount("npinc", incm and cap or 0)
+    end
+    if incmm and not declared.npincmine then
+        AK.AddGroupToContainer(container, {
+            key = "npincmine",
+            filter = { "HARMFUL", "PLAYER", "INCLUDE_NAME_PLATE_ONLY" },
+            maxFrameCount = cap,
+            candidateFilters = { includeSpellIDs = incmm },
+            sortMethod = SORT_IMPORTANT, style = styleKey,
+            layout = { elementWidth = 24, elementHeight = 24,
+                       elementSpacing = 4, lineSpacing = 4 },
+        })
+        declared.npincmine = true
+        declaredNew = true
+    elseif declared.npincmine then
+        if incmm then
+            container:SetAuraGroupCandidateFilters("npincmine", { includeSpellIDs = incmm })
+        end
+        container:SetAuraGroupMaxFrameCount("npincmine", incmm and cap or 0)
+    end
+    -- One parse covers every group declared this pass. Only for containers
+    -- bound to a live unit (BindContainer's stamp): at pool build the unit
+    -- is "none" and the attach-time SetUnit/UpdateAllAuras pair owns it.
+    if declaredNew and container._npcBoundUnit then
+        container:UpdateAllAuras()
     end
 end
 

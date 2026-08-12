@@ -25,6 +25,7 @@ grep -rhoE 'EllesmereUI\.Lf?\("[^"]*"' \
   --include='*.lua' \
   --exclude-dir='Libs' \
   --exclude-dir='EllesmereUILocales' \
+  --exclude-dir='.release' \
   --exclude='EllesmereUI_LocaleDev.lua' \
   . \
   | sed -E 's/^EllesmereUI\.Lf?\("//; s/"$//' \

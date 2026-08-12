@@ -892,7 +892,7 @@ local function BuildBaseDetailDM(frame, fontPath)
               tooltip = "Show every debuff. While this is on, checked filters below are hidden from the grid instead of added." },
             { isHeader = true, label = "" },
             { key = "nonplayer", label = "Non-Player Auras",
-              tooltip = "Debuffs not caused by any player or player pet, like Sated and Forbearance." },
+              tooltip = "Debuffs not caused by any player or player pet (this is what shows most pve debuffs, do not check this while All Debuffs is selected!)." },
             { key = "priority", label = "Important",
               tooltip = "Debuffs Blizzard flags as priority for raid frames." },
             { key = "cc", label = "Crowd Control",
