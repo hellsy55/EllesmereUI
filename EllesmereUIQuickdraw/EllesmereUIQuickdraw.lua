@@ -8365,11 +8365,30 @@ end
 local function BindWithModifiers(name, key, claimed)
     if not key then return end
     local base = BaseKey(key)
+    -- What the player is already holding to press this key at all. Only
+    -- combinations that keep ALL of it are ours: the point of the variants is
+    -- that a hold survives a modifier picked up DURING it, and dropping one the
+    -- binding requires is a different gesture entirely. Without this, a palette
+    -- on SHIFT-T also took plain T whenever T was free -- an opening the player
+    -- never asked for, on a key they left alone.
+    local mods = key:sub(1, #key - #base)
+    -- META is in MOD_STRIP but not in MOD_COMBOS, so a key bound with it has no
+    -- variant that keeps it. Pass 1 has already bound the key itself; leave it
+    -- at that rather than hand out combinations that all drop the Command key.
+    if mods:find("META-", 1, true) then return end
+    local alt   = mods:find("ALT-",   1, true) ~= nil
+    local ctrl  = mods:find("CTRL-",  1, true) ~= nil
+    local shift = mods:find("SHIFT-", 1, true) ~= nil
     for i = 1, #MOD_COMBOS do
-        local k = MOD_COMBOS[i] .. base
-        if not claimed[k] and KeyIsFree(k) then
-            SetOverrideBindingClick(bindOwner, false, k, name)
-            claimed[k] = true
+        local combo = MOD_COMBOS[i]
+        if (not alt   or combo:find("ALT-",   1, true))
+           and (not ctrl  or combo:find("CTRL-",  1, true))
+           and (not shift or combo:find("SHIFT-", 1, true)) then
+            local k = combo .. base
+            if not claimed[k] and KeyIsFree(k) then
+                SetOverrideBindingClick(bindOwner, false, k, name)
+                claimed[k] = true
+            end
         end
     end
 end
