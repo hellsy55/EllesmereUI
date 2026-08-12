@@ -3972,7 +3972,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI:RefreshPage()
               end },
             { type="slider", text="Custom Range",
-              tooltip="Attack-range cutoff used by Out of Range Alpha. Five-yard steps match the available fallback range checks.",
+              tooltip="Attack-range cutoff used by Out of Range Opacity. Five-yard steps match the available fallback range checks.",
               min=5, max=50, step=5,
               disabled=function() return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) ~= "custom" end,
               disabledTooltip="Range Check: Custom",
@@ -3984,7 +3984,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if ns.RangeText_Apply then ns.RangeText_Apply() end
               end });  y = y - h
 
-        -- Row 5: Execute Pulse Glow | Out of Range Alpha
+        -- Row 5: Execute Pulse Glow | Out of Range Opacity
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Execute Pulse Glow",
               tooltip="Pulses a red glow on enemy nameplates below 30% health.",
@@ -3993,8 +3993,8 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().lowHpGlow = v
                 ns.RefreshAllSettings()
               end },
-            { type="slider", text="Out of Range Alpha",
-              tooltip="Alpha used for enemy nameplates outside the selected attack range.",
+            { type="slider", text="Out of Range Opacity",
+              tooltip="Opacity used for enemy nameplates outside the selected attack range.",
               min=0, max=100, step=1,
               disabled=function() return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) == "disabled" end,
               disabledTooltip="Range Check: Auto or Custom",
