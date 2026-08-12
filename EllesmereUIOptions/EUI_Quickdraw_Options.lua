@@ -169,6 +169,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- active M+ (EllesmereUI.lua:1519), which is precisely when a user would
     -- hit them and see nothing happen.
     local function Complain(msg)
+        msg = EllesmereUI.L(msg)
         if _G.UIErrorsFrame then
             UIErrorsFrame:AddMessage(msg, 1.0, 0.3, 0.3, 1.0)
         else
@@ -248,9 +249,8 @@ initFrame:SetScript("OnEvent", function(self)
             local keyText = GetBindingText(chord) or chord
             EllesmereUI:ShowConfirmPopup({
                 title       = "Key Already Bound",
-                message     = keyText .. " is bound to \""
-                    .. BindingLabel(stolenFrom) .. "\". Binding it to \""
-                    .. BindingLabel(action) .. "\" will leave that unbound.",
+                message     = EllesmereUI.Lf("%1$s is bound to \"%2$s\". Binding it to \"%3$s\" will leave that unbound.",
+                    keyText, BindingLabel(stolenFrom), BindingLabel(action)),
                 confirmText = "Rebind",
                 cancelText  = "Keep",
                 -- Re-checked rather than trusted: the dialog sits open for as
@@ -475,16 +475,16 @@ initFrame:SetScript("OnEvent", function(self)
                     or (slot.kind == "spec" and "specialization")
                     or slot.kind
             end
-            text = (name or slot.kind)
-                .. "\n|cff999999" .. caption .. "|r"
-                .. "\n|cff66ccffDrag to reorder."
-                .. "\nRight-click to change action."
-                .. "\nMiddle-click to remove."
-                .. "\nDrop an action here to replace it.|r"
+            text = EllesmereUI.L(name or slot.kind)
+                .. "\n|cff999999" .. EllesmereUI.L(caption) .. "|r"
+                .. EllesmereUI.L("\n|cff66ccffDrag to reorder."
+                    .. "\nRight-click to change action."
+                    .. "\nMiddle-click to remove."
+                    .. "\nDrop an action here to replace it.|r")
         else
-            text = "Add an action"
+            text = EllesmereUI.L("Add an action"
                 .. "\n|cff66ccffLeft-click to pick an action from a list."
-                .. "\nYou can also drop an action from the cursor here.|r"
+                .. "\nYou can also drop an action from the cursor here.|r")
         end
         if EllesmereUI.ShowWidgetTooltip then
             EllesmereUI.ShowWidgetTooltip(widget, text)
@@ -931,7 +931,7 @@ initFrame:SetScript("OnEvent", function(self)
         if bAr.SetSnapToPixelGrid then bAr:SetSnapToPixelGrid(false); bAr:SetTexelSnappingBias(0) end
         local bTx = EllesmereUI.MakeFont(menu.back, 11, nil, tR, tG, tB, tA)
         bTx:SetPoint("LEFT", bAr, "RIGHT", 6, 0)
-        bTx:SetText("Categories")
+        bTx:SetText(EllesmereUI.L("Categories"))
         -- Named, because a sub-category's entries go back to the sub-list
         -- rather than to the root and the row has to say which.
         menu.backText = bTx
@@ -971,7 +971,7 @@ initFrame:SetScript("OnEvent", function(self)
         menu.searchPH:SetFont(FONT, 11, "")
         menu.searchPH:SetTextColor(0.5, 0.5, 0.5, 0.6)
         menu.searchPH:SetPoint("LEFT", menu.search, "LEFT", 6, 0)
-        menu.searchPH:SetText("Search...")
+        menu.searchPH:SetText(EllesmereUI.L("Search..."))
         menu.search:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)
         menu.search:SetScript("OnEnterPressed", function(s) s:ClearFocus() end)
         menu.search:SetScript("OnTextChanged", function(s)
@@ -1105,7 +1105,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local nameLbl = EllesmereUI.MakeFont(custom, 10, nil, tR, tG, tB, tA)
         nameLbl:SetPoint("TOPLEFT", custom, "TOPLEFT", 1, 0)
-        nameLbl:SetText("Label")
+        nameLbl:SetText(EllesmereUI.L("Label"))
         local nameBox = MakeInput(custom, 22, false)
         nameBox:SetPoint("TOPLEFT", nameLbl, "BOTTOMLEFT", 0, -3)
         nameBox:SetPoint("RIGHT", custom, "RIGHT", -1, 0)
@@ -1113,7 +1113,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local textLbl = EllesmereUI.MakeFont(custom, 10, nil, tR, tG, tB, tA)
         textLbl:SetPoint("TOPLEFT", nameBox, "BOTTOMLEFT", 0, -8)
-        textLbl:SetText("Macro Text")
+        textLbl:SetText(EllesmereUI.L("Macro Text"))
         local textBox = MakeInput(custom, 62, true)
         textBox:SetPoint("TOPLEFT", textLbl, "BOTTOMLEFT", 0, -3)
         textBox:SetPoint("RIGHT", custom, "RIGHT", -1, 0)
@@ -1129,7 +1129,7 @@ initFrame:SetScript("OnEvent", function(self)
         EllesmereUI.MakeBorder(addBtn, ACCENT.r, ACCENT.g, ACCENT.b, 0.7, EllesmereUI.PP)
         local aTx = EllesmereUI.MakeFont(addBtn, 11, nil, 1, 1, 1, 0.9)
         aTx:SetPoint("CENTER")
-        aTx:SetText("Add")
+        aTx:SetText(EllesmereUI.L("Add"))
         addBtn:SetScript("OnEnter", function()
             aBg:SetColorTexture(ACCENT.r, ACCENT.g, ACCENT.b, 0.35)
         end)
@@ -1205,10 +1205,10 @@ initFrame:SetScript("OnEvent", function(self)
         -- to filter. The Back row is the one thing that differs between the two
         -- levels -- the root has nowhere above it.
         menu.cat = nil
-        menu.title:SetText(parent and parent.label
-            or (pickerReplaceIndex and "Change Action" or "Add Action"))
+        menu.title:SetText(EllesmereUI.L(parent and parent.label
+            or (pickerReplaceIndex and "Change Action" or "Add Action")))
         menu.back:SetShown(parent ~= nil)
-        menu.backText:SetText("Categories")
+        menu.backText:SetText(EllesmereUI.L("Categories"))
         -- Focus first: hiding a focused edit box leaves the keyboard captured by
         -- a box that is no longer on screen.
         menu.search:ClearFocus()
@@ -1227,7 +1227,7 @@ initFrame:SetScript("OnEvent", function(self)
             r.label:ClearAllPoints()
             r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            r.label:SetText(cat.label)
+            r.label:SetText(EllesmereUI.L(cat.label))
             r:SetScript("OnClick", function()
                 if cat.custom then
                     ShowPickerCustom()
@@ -1253,7 +1253,7 @@ initFrame:SetScript("OnEvent", function(self)
             r.label:ClearAllPoints()
             r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            r.label:SetText("Remove Action")
+            r.label:SetText(EllesmereUI.L("Remove Action"))
             r:SetScript("OnClick", function()
                 -- Before HidePicker, which clears the index on OnHide. The
                 -- guard mirrors AssignEntry's: a slot already gone leaves
@@ -1276,9 +1276,9 @@ initFrame:SetScript("OnEvent", function(self)
     ShowPickerCategory = function(cat)
         local menu = EnsurePickerMenu()
         menu.cat = cat
-        menu.title:SetText(cat.label)
+        menu.title:SetText(EllesmereUI.L(cat.label))
         menu.back:Show()
-        menu.backText:SetText(cat.parent and cat.parent.label or "Categories")
+        menu.backText:SetText(EllesmereUI.L(cat.parent and cat.parent.label or "Categories"))
         -- Focus first when hiding: a hidden edit box keeps the keyboard.
         if cat.noSearch then
             menu.search:ClearFocus()
@@ -1327,7 +1327,7 @@ initFrame:SetScript("OnEvent", function(self)
                 r.label:ClearAllPoints()
                 r.label:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
                 r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-                r.label:SetText(entry.name)
+                r.label:SetText(EllesmereUI.L(entry.name))
                 r:SetScript("OnClick", function() AssignEntry(entry) end)
                 r:Show()
             end
@@ -1341,7 +1341,7 @@ initFrame:SetScript("OnEvent", function(self)
             r.label:ClearAllPoints()
             r.label:SetPoint("LEFT", r, "LEFT", 8, 0)
             r.label:SetPoint("RIGHT", r, "RIGHT", -6, 0)
-            r.label:SetText(filter == "" and "Nothing to add" or "No matches")
+            r.label:SetText(filter == "" and EllesmereUI.L("Nothing to add") or EllesmereUI.L("No matches"))
             r:SetScript("OnClick", nil)
             r:Show()
             shown = 1
@@ -1357,11 +1357,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- No cat recorded: menu.cat means "a list view is up, re-filter it on a
         -- keystroke", and there is no list here.
         menu.cat = nil
-        menu.title:SetText("Custom Macro")
+        menu.title:SetText(EllesmereUI.L("Custom Macro"))
         menu.back:Show()
         -- Restated rather than left as it was: the row is shared, and the view
         -- before this one may have been a sub-category's.
-        menu.backText:SetText("Categories")
+        menu.backText:SetText(EllesmereUI.L("Categories"))
         menu.search:ClearFocus()
         menu.search:Hide()
         -- Hiding the scroll frame takes the pooled rows with it: they are its
@@ -1598,7 +1598,9 @@ initFrame:SetScript("OnEvent", function(self)
             palette.slots = {}
             palette.icon = nil
             palette.appearance = nil
-            palette.name = (preset and preset.label) or AutoName(count + 1)
+            -- Seed the name in the player's language: it is user data from the
+            -- moment it exists (renameable), so store the translated label.
+            palette.name = (preset and EllesmereUI.L(preset.label)) or AutoName(count + 1)
             for _, s in ipairs(slots or {}) do
                 if not ns.AddSlot(palette, s) then break end
             end
@@ -1643,7 +1645,7 @@ initFrame:SetScript("OnEvent", function(self)
         menu:ClearAllPoints()
         menu:SetPoint("TOP", anchor, "BOTTOM", 0, -4)
         menu.cat = nil
-        menu.title:SetText(title)
+        menu.title:SetText(EllesmereUI.L(title))
         menu.back:Hide()
         menu.search:ClearFocus()
         menu.search:Hide()
@@ -1660,7 +1662,7 @@ initFrame:SetScript("OnEvent", function(self)
         local menu = OpenListMenu(anchor, "Add Action Menu")
         if not menu then return end
 
-        MenuRow(menu, 1, nil, "Empty Action Menu", function() AddPalette(nil) end)
+        MenuRow(menu, 1, nil, EllesmereUI.L("Empty Action Menu"), function() AddPalette(nil) end)
         local n = 1
         for _, preset in ipairs(PALETTE_PRESETS) do
             local slots = preset.build()
@@ -1668,7 +1670,7 @@ initFrame:SetScript("OnEvent", function(self)
                 n = n + 1
                 local icon = ns.SlotDisplay(slots[1])
                 MenuRow(menu, n, icon or QUESTION_MARK,
-                    preset.label .. "  |cff808080(" .. #slots .. ")|r",
+                    EllesmereUI.L(preset.label) .. "  |cff808080(" .. #slots .. ")|r",
                     function() AddPalette(preset, slots) end)
             end
         end
@@ -1933,9 +1935,9 @@ initFrame:SetScript("OnEvent", function(self)
                 local nm = (pal2 and pal2.name) or AutoName(idx)
                 EllesmereUI:ShowConfirmPopup({
                     title = "Delete Action Menu",
-                    message = "Delete " .. nm .. " and its contents? Entries "
+                    message = EllesmereUI.Lf("Delete %1$s and its contents? Entries "
                         .. "in other action menus that open it are removed "
-                        .. "too, and the menus after it move up one place.",
+                        .. "too, and the menus after it move up one place.", nm),
                     confirmText = "Delete",
                     cancelText = "Cancel",
                     onConfirm = function() DeletePalette(idx) end,
@@ -1947,7 +1949,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local cur = (pal2 and pal2.name) or AutoName(idx)
                 EllesmereUI:ShowInputPopup({
                     title = "Rename Action Menu",
-                    message = "Enter a new name for \"" .. cur .. "\":",
+                    message = EllesmereUI.Lf("Enter a new name for \"%1$s\":", cur),
                     placeholder = cur,
                     confirmText = "Rename",
                     cancelText = "Cancel",
@@ -2791,10 +2793,9 @@ initFrame:SetScript("OnEvent", function(self)
                       return Disabled() or ACfg("gridAutoColumns") ~= false
                   end,
                   requireState="disabled", disabledTooltip="Auto Columns",
-                  tooltip="How many entries a row of the grid holds. 1 stacks "
-                      .."them into a single column; " .. MAX_SLOTS
-                      .. " -- the most slots an action menu can hold -- lays them "
-                      .."out in a single row.",
+                  tooltip=EllesmereUI.Lf("How many entries a row of the grid holds. 1 stacks "
+                      .."them into a single column; %1$s -- the most slots an "
+                      .."action menu can hold -- lays them out in a single row.", MAX_SLOTS),
                   getValue=function() return ACfg("gridColumns") or 4 end,
                   setValue=function(v) ASet("gridColumns", v); Refresh() end })
             y = y - h
