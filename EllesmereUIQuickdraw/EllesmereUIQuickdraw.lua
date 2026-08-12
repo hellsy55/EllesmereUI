@@ -22,8 +22,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  turn the module opened life as is simply the arc's 360-degree case.
 --
 --  Each palette owns one hidden SecureActionButtonTemplate button; the palette's
---  keybind is routed to it with SetOverrideBindingClick, and it is registered
---  for "AnyDown","AnyUp":
+--  keybind is routed to it with SetOverrideBindingClick -- along with every
+--  modifier combination of that key nothing else holds, so a modifier pressed
+--  or let go during the hold still reaches the button (see "Modifier variants
+--  of a palette's key") -- and it is registered for "AnyDown","AnyUp":
 --
 --    key DOWN -> our PreClick opens the palette; a secure snippet wrapped around
 --                OnClick clears "type", so the press itself fires nothing
@@ -74,6 +76,9 @@ local GetCursorPosition = GetCursorPosition
 local GetBindingKey = GetBindingKey
 local InCombatLockdown = InCombatLockdown
 local GetTime = GetTime
+-- Read every frame an open palette holds a macro entry -- see AdvanceMacroIcons.
+local IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown =
+    IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
 
 local TWO_PI = pi * 2
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -1009,6 +1014,61 @@ local function FireInsecure(slot)
     end
 end
 
+-- The fileID behind the question mark path above. GetMacroInfo answers a fileID
+-- rather than a path, so the two cannot be compared without this.
+local QUESTION_MARK_ID = GetFileIDFromPath and GetFileIDFromPath(QUESTION_MARK)
+
+-- The icon for what a macro would fire RIGHT NOW, or nil to fall back to the
+-- icon the macro was saved with.
+--
+-- A macro's conditionals are evaluated when it runs, so a [mod] macro fires a
+-- different spell depending on what is held at the release -- and the palette
+-- has to draw the branch it is going to take, or it shows one picture and casts
+-- the other. GetMacroSpell and GetMacroItem answer the current branch.
+--
+-- ONLY for a macro sitting on the dynamic "?" icon, which is what the caller's
+-- question-mark test is for. A macro the player gave a real icon keeps it, the
+-- way Blizzard's own action buttons keep it: that icon is a choice, and
+-- resolving over the top of it would take the choice away. It also makes this
+-- safe whichever of the two things GetMacroInfo does -- return the saved icon,
+-- or resolve the dynamic one itself -- because in the resolving case a "?" macro
+-- never reaches here with a question mark to begin with.
+--
+-- By macro NAME resolved to an index, which is the pairing the rest of the suite
+-- settled on (EllesmereUICooldownManager.lua:6986-6992): the id a macro action
+-- carries is not reliably a macro index, and these two want the index.
+local function MacroIcon(nameOrIndex)
+    if not nameOrIndex then return nil end
+    local index = nameOrIndex
+    if type(index) ~= "number" then index = GetMacroIndexByName(index) end
+    if not index or index <= 0 then return nil end
+
+    local spellID = GetMacroSpell(index)
+    if spellID then
+        local info = C_Spell.GetSpellInfo(spellID)
+        if info and info.iconID then return info.iconID end
+    end
+
+    -- An item branch answers no spell. The link, not the name: it carries the
+    -- itemID, and a name would have to be looked up again to get one.
+    --
+    -- The existence guard is a statement rather than `GetMacroItem and
+    -- GetMacroItem(index)` -- an `and` expression is truncated to ONE value, so
+    -- that form would drop the link and leave every item macro on its saved
+    -- icon. Same trap SlotDisplay's own note names, one function below.
+    if GetMacroItem then
+        local _, link = GetMacroItem(index)
+        if link then
+            local _, _, _, _, icon = C_Item.GetItemInfoInstant(link)
+            if icon then return icon end
+        end
+    end
+
+    -- Neither -- a macro that only marks, targets or emotes. The saved icon is
+    -- the honest answer for those, and it is the one the caller falls back to.
+    return nil
+end
+
 -- icon, name for display. Never returns nil for icon so a slot whose target
 -- has been removed from the game still renders as an occupied slot.
 --
@@ -1035,7 +1095,14 @@ local function SlotDisplay(slot)
         return icon or QUESTION_MARK, name or slot.name
 
     elseif k == "macro" then
-        local name, icon = GetMacroInfo(slot.name or slot.id)
+        local nameOrIndex = slot.name or slot.id
+        local name, icon = GetMacroInfo(nameOrIndex)
+        -- A question mark here means the macro carries no icon of its own, so
+        -- what it is about to fire is the only thing left to draw. Anything else
+        -- is an icon the player picked, and it stands. See MacroIcon.
+        if icon == nil or icon == QUESTION_MARK or icon == QUESTION_MARK_ID then
+            icon = MacroIcon(nameOrIndex) or icon
+        end
         return icon or QUESTION_MARK, name or slot.name
 
     elseif k == "macrotext" then
@@ -4020,6 +4087,23 @@ end
 -- iconSize is the size the LAYOUT gave this cell, before any falloff or
 -- selection zoom: the corner count is sized off it, and reading the widget's
 -- current size instead would make the number breathe with the entry.
+-- Which modifiers are held, as one number, so "has this changed" is a single
+-- comparison. Only the three a macro's [mod] conditionals know about: nothing
+-- else can change what an entry draws.
+local function ModifierState()
+    return (IsShiftKeyDown() and 1 or 0)
+         + (IsControlKeyDown() and 2 or 0)
+         + (IsAltKeyDown() and 4 or 0)
+end
+
+-- Does this cell's icon depend on the modifiers held? Only a macro's does: every
+-- other kind resolves to one fixed thing, and the built-in macrotext kinds
+-- (markers, world markers, the cycling pair) carry an icon of their own that no
+-- conditional can move. See MacroIcon.
+local function HasModifierIcon(slot)
+    return slot ~= nil and slot.kind == "macro"
+end
+
 local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLabel,
                          iconSize, showUsability)
     w.isPlaceholder = placeholder
@@ -4189,6 +4273,13 @@ function PaletteView:Layout(paletteIndex)
     local showUsability = opts.showUsability
     if showUsability == nil then showUsability = p.showUsability ~= false end
 
+    -- The cells whose icon follows the modifiers, collected as they are painted
+    -- so an open with no macro in it leaves an empty list and AdvanceMacroIcons
+    -- costs nothing at all. Reused rather than rebuilt: this runs on every open.
+    local modCells = self._modCells
+    if not modCells then modCells = {}; self._modCells = modCells end
+    for k = #modCells, 1, -1 do modCells[k] = nil end
+
     for i = 1, shown do
         local w = self.widgets[i]
         -- Switching modes leaves the other mode's depth cues behind.
@@ -4212,6 +4303,7 @@ function PaletteView:Layout(paletteIndex)
         -- can be fired -- is already named on the hub.
         PaintCell(w, palette.slots[i], palette.slots[i] == nil,
                   showLabels, showCooldowns, not fan, iconSize, showUsability)
+        if HasModifierIcon(palette.slots[i]) then modCells[#modCells + 1] = i end
         w:Show()
     end
 
@@ -4242,6 +4334,9 @@ function PaletteView:Layout(paletteIndex)
                 w:EnableMouse(false)
                 PaintCell(w, c.slots[j], false, showLabels, showCooldowns,
                           c.label ~= false, c.icon, showUsability)
+                if HasModifierIcon(c.slots[j]) then
+                    modCells[#modCells + 1] = cells
+                end
                 -- Hidden until its own claim is previewed or opened -- see
                 -- UpdateNestShown.
                 w:Hide()
@@ -4250,6 +4345,10 @@ function PaletteView:Layout(paletteIndex)
     end
     self.claims = claims
     self.cellCount = cells
+    -- The paint above already drew every macro cell for the modifiers held right
+    -- now, so recording them here is what keeps the palette's first tick from
+    -- repainting the lot for a state that has not moved.
+    self._modState = ModifierState()
     -- Every cell was just hidden and every entry repainted plain, so all three
     -- of these describe a drawing that no longer exists.
     self._openClaim, self._previewClaim, self._armedParent = nil, nil, nil
@@ -4380,6 +4479,44 @@ function PaletteView:Layout(paletteIndex)
     -- selection writes just the action's name -- see SetSelection.
     hub.text:SetText("")
     hub.hint:SetText("")
+end
+
+-- Redraw the macro cells for the modifiers held now, if they have moved since
+-- the last time this asked.
+--
+-- The palette fires on the RELEASE, and a macro's conditionals are evaluated
+-- then, so the player may press or let go of a modifier at any point during the
+-- hold and change what the entry under the cursor is going to cast. Without
+-- this the palette keeps drawing whichever branch happened to be current when it
+-- opened, and the only way to find out that shift swapped the spell is to fire
+-- it.
+--
+-- ICON only, deliberately. The label stays the macro's own name -- which is what
+-- Blizzard's action buttons show for a macro, and what the player recognises --
+-- and the usability tint stays where the paint left it, for the reason PaintCell
+-- gives: a colour that moves under a settled hand reads as a flicker.
+--
+-- Three C calls per frame for a palette holding a macro, none for one that is
+-- not (the list is empty and this returns on the first line), and textures are
+-- touched only on the frames the state actually changes -- one press of shift,
+-- not one per frame it stays down.
+function PaletteView:AdvanceMacroIcons()
+    local cells = self._modCells
+    if not cells or #cells == 0 then return end
+    local state = ModifierState()
+    if state == self._modState then return end
+    self._modState = state
+
+    for k = 1, #cells do
+        local index = cells[k]
+        local w = self.widgets[index]
+        local slot = self:CellSlot(index)
+        if w and slot then
+            local icon = SlotDisplay(slot)
+            w.icon:SetTexture(icon or QUESTION_MARK)
+            ApplyIconCrop(w.icon, icon)
+        end
+    end
 end
 
 -- The slot a cell index draws, and the claim it belongs to for a nested one.
@@ -5220,6 +5357,9 @@ local function OnPaletteUpdate(_, elapsed)
     end
     -- Time-based, so it runs even on the frames the steer skip above took.
     UpdatePaletteAlpha()
+    -- Outside the steer skip for the same reason: a modifier goes down without
+    -- the cursor moving, and that is the whole gesture this answers.
+    liveView:AdvanceMacroIcons()
     -- Outside the steer skip: the connector line's grow-in and sweep both
     -- keep moving under a cursor that is holding still. Costs two table
     -- reads per frame when no line is up.
@@ -7383,6 +7523,99 @@ end
 local bindingsDirty = false
 local bindingSig = nil
 
+-------------------------------------------------------------------------------
+--  Modifier variants of a palette's key
+--
+--  A keybind matches ONE modifier combination exactly, and the palette performs
+--  its action on the RELEASE edge. With only the configured combination bound,
+--  the modifiers held at that release are therefore pinned to whatever the bind
+--  itself requires -- shift is down for the whole of a SHIFT- bind, and an
+--  unmodified bind is only reachable with nothing held at all.
+--
+--  That decides what a macro fires. SECURE_ACTIONS.macro hands the name to
+--  RunMacro (SecureTemplates.lua:441-455), which evaluates the body's
+--  conditionals live at that moment -- as does the macrotext branch beside it
+--  -- so a slot holding
+--
+--      /cast [nomod] Anu'relos, Flame's Guidance; Alabaster Stormtalon
+--
+--  can only ever take one of its two branches: the [nomod] one on an unmodified
+--  bind, the other on a modified one. Nothing here caches or flattens the
+--  macro -- the pinned modifier state is the whole of it.
+--
+--  So every combination of the key is bound to the same button, and the player
+--  can press or let go of a modifier during the hold. Only combinations nothing
+--  else holds are taken: this hands the palette keys that were going spare, it
+--  does not take keys away.
+-------------------------------------------------------------------------------
+
+-- The combinations, written the way the client composes a key string
+-- (Blizzard_SharedXML/KeyCommand.lua:9-25 -- ALT, then CTRL, then SHIFT).
+local MOD_COMBOS = {
+    "", "ALT-", "CTRL-", "ALT-CTRL-",
+    "SHIFT-", "ALT-SHIFT-", "CTRL-SHIFT-", "ALT-CTRL-SHIFT-",
+}
+
+-- The same prefixes plus META, to take back off a key the player bound with
+-- one. META is stripped but never re-added: a macro's [mod] conditionals know
+-- shift, ctrl and alt only, so the eight combinations above are the whole of
+-- what changes what a slot fires. The gap that leaves is the Command key on a
+-- Mac -- pressed during a hold, it still costs that hold its release.
+local MOD_STRIP = { "ALT-", "CTRL-", "SHIFT-", "META-" }
+
+local function BaseKey(key)
+    for i = 1, #MOD_STRIP do
+        local m = MOD_STRIP[i]
+        if key:sub(1, #m) == m then key = key:sub(#m + 1) end
+    end
+    return key
+end
+
+-- Held by nothing the player would miss. GetBindingAction answers the BASE
+-- binding, leaving override bindings out -- ours and any other addon's alike --
+-- which is what this wants: our own overrides are the thing being decided here,
+-- so counting them would make the answer depend on whether this had already run
+-- once, and the last writer wins between addons either way.
+--
+-- A CLICK binding onto one of our own buttons is answered as free rather than
+-- taken, for the case where that is wrong. It only reaches this line at all if
+-- overrides ARE counted, and the cost of assuming they are not would be a key
+-- the player takes back in the Keybindings panel and never gets: the signature
+-- would already read it as taken, so nothing would rebuild and the override
+-- would keep shadowing their new binding until a reload.
+local function KeyIsFree(key)
+    local action = GetBindingAction(key)
+    if action == nil or action == "" then return true end
+    return action:find("^CLICK EUIQuickdrawButton") ~= nil
+end
+
+-- Which combinations of a key are ours to take, as eight characters of the
+-- binding signature. They belong in it: a combination the player later binds to
+-- something else has to be handed straight back, and UPDATE_BINDINGS is the
+-- only notice of that arriving.
+local function ModifierSig(key)
+    if not key then return "" end
+    local base, out = BaseKey(key), "|"
+    for i = 1, #MOD_COMBOS do
+        out = out .. (KeyIsFree(MOD_COMBOS[i] .. base) and "1" or "0")
+    end
+    return out
+end
+
+-- `claimed` carries the keys already spoken for across the whole pass, so no
+-- palette's variant can land on top of a key another palette was given.
+local function BindWithModifiers(name, key, claimed)
+    if not key then return end
+    local base = BaseKey(key)
+    for i = 1, #MOD_COMBOS do
+        local k = MOD_COMBOS[i] .. base
+        if not claimed[k] and KeyIsFree(k) then
+            SetOverrideBindingClick(bindOwner, false, k, name)
+            claimed[k] = true
+        end
+    end
+end
+
 -- ClearOverrideBindings / SetOverrideBindingClick are protected, so a combat
 -- refresh is deferred to PLAYER_REGEN_ENABLED. Nothing is lost by waiting:
 -- the bindings already in place keep working until then.
@@ -7402,6 +7635,7 @@ function ns.UpdateBindings()
     for i = 1, count do
         local k1, k2 = GetBindingKey(BINDING_PREFIX .. i)
         sig = sig .. "|" .. (k1 or "") .. "/" .. (k2 or "")
+        sig = sig .. ModifierSig(k1) .. ModifierSig(k2)
     end
     if sig == bindingSig then return end
 
@@ -7423,14 +7657,43 @@ function ns.UpdateBindings()
     -- binds two of its sixteen pays for two. PushPalette skips an index with no
     -- button, so the ones left unbound cost no attribute writes either -- their
     -- entries still reach the sandbox through whichever palette nests them.
+    --
+    -- Two passes, and the order is what makes them right: every key the player
+    -- actually chose is placed first, so a modifier variant one palette would
+    -- like can never land on top of a key another palette was GIVEN, whichever
+    -- order the two palettes come in.
+    --
+    -- `claimed` is built here rather than kept and wiped: every
+    -- SetOverrideBindingClick below fires UPDATE_BINDINGS, which re-enters this
+    -- function, and a table shared with that call is one the re-entry could
+    -- clear halfway through the loop reading it. The signature it computes is
+    -- the one just stored -- GetBindingAction answers base bindings, which none
+    -- of these writes touch -- so it turns back at the guard and this stays the
+    -- only pass; the table is what makes that true by construction rather than
+    -- by argument. One per rebind, and a rebind is a keybind change.
     local built = false
+    local claimed = {}
     for i = 1, count do
         local k1, k2 = GetBindingKey(BINDING_PREFIX .. i)
         if k1 or k2 then
             built = built or not secureButtons[i]
             local name = GetSecureButton(i):GetName()
-            if k1 then SetOverrideBindingClick(bindOwner, false, k1, name) end
-            if k2 then SetOverrideBindingClick(bindOwner, false, k2, name) end
+            if k1 then
+                SetOverrideBindingClick(bindOwner, false, k1, name)
+                claimed[k1] = true
+            end
+            if k2 then
+                SetOverrideBindingClick(bindOwner, false, k2, name)
+                claimed[k2] = true
+            end
+        end
+    end
+    for i = 1, count do
+        local k1, k2 = GetBindingKey(BINDING_PREFIX .. i)
+        if k1 or k2 then
+            local name = secureButtons[i]:GetName()
+            BindWithModifiers(name, k1, claimed)
+            BindWithModifiers(name, k2, claimed)
         end
     end
 
