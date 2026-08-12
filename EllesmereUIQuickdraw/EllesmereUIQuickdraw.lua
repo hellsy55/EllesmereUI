@@ -4553,7 +4553,7 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     w.plus:SetShown(placeholder)
 
     local labelled = showLabels and wantLabel and name ~= nil
-    w.label:SetText((labelled and name) or "")
+    w.label:SetText((labelled and EllesmereUI.L(name)) or "")
     w.label:SetShown(labelled or false)
 
     -- A palette has no cooldown of its own, and borrowing its first entry's
@@ -5246,10 +5246,10 @@ function PaletteView:SetSelection(index)
             if claim then
                 local _, parentName = SlotDisplay(self:CellSlot(claim.parent))
                 if parentName and name then
-                    name = parentName .. " \194\187 " .. name
+                    name = EllesmereUI.L(parentName) .. " \194\187 " .. EllesmereUI.L(name)
                 end
             end
-            hub.text:SetText(name or (w.isPlaceholder and "Add Action") or ("Slot " .. index))
+            hub.text:SetText((name and EllesmereUI.L(name)) or (w.isPlaceholder and EllesmereUI.L("Add Action")) or ("Slot " .. index))
             hub.text:SetTextColor(r, g, b)
 
             local aw = widgets[claim and claim.parent or index]
