@@ -150,6 +150,9 @@ end
 ECHAT.EngineLayoutWindows = function()
     for cf in pairs(WINS) do LayoutWindowSMF(cf) end
 end
+-- Single-window relayout: the input-on-top strip is released/reclaimed per
+-- frame as its edit box shows and hides, and only that frame's text area moves.
+ECHAT.EngineLayoutWindow = LayoutWindowSMF
 
 -- Thin scrollbar: visible only while scrolled back (offset > 0) or dragging.
 -- Track/thumb are our frames; drag runs a temporary OnUpdate on the track
