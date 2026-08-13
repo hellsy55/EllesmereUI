@@ -1172,7 +1172,15 @@ local addonButtonHooks = {}
 
 local function HideMinimapChild(btn)
     _suppressVisTrack = true
-    btn:Hide()
+    -- Hide() on a protected frame is blocked inside lockdown for ANY insecure caller,
+    -- taint or not, and the block is silent (no Lua error) -- so the SetAlpha below
+    -- still ran and the button just went invisible-but-shown. Skip only the blocked
+    -- call and queue the re-apply, which performs the real Hide() on PLAYER_REGEN_ENABLED.
+    if InCombatLockdown() and btn:IsProtected() then
+        QueueApplyAll()
+    else
+        btn:Hide()
+    end
     btn:SetAlpha(0)
     _suppressVisTrack = false
     if not addonButtonHooks[btn] then
