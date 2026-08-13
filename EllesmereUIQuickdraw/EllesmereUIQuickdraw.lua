@@ -354,6 +354,15 @@ local DB_DEFAULTS = {
         -- there would be no key to write to.
         confirmKey = "",
 
+        -- The key that backs OUT of an open menu without firing anything.
+        -- ESCAPE always does this and is not configurable; this is a second
+        -- key for it, and the reason it exists is that the hand holding the
+        -- menu key is nowhere near ESCAPE. A plain mouse button is the point
+        -- -- right-click is the one people reach for -- and, like the Select
+        -- key, it is claimed only for as long as a menu is up. Empty for the
+        -- same reason as confirmKey.
+        cancelKey = "",
+
         paletteCount   = 1,
         -- palette.slots is a DENSE, ORDERED array: the palette auto-sizes to what the
         -- user has actually assigned, so three actions means three big entries
@@ -6447,7 +6456,9 @@ local SNIPPET_PRE = [==[
             -- no Select key set would otherwise open a menu with nothing able
             -- to answer it, so it keeps the hold-to-fire model instead.
             local confirm = self:GetAttribute("eqdConfirm")
+            local latched
             if confirm and self:GetAttribute("eqdToggle") then
+                latched = true
                 self:SetAttribute("eqdLatched", 1)
                 cancel:SetBindingClick(true, confirm, self, "__CONFIRM_BUTTON__")
                 -- ESCAPE onto THIS button rather than the cancel button, which
@@ -6456,6 +6467,25 @@ local SNIPPET_PRE = [==[
                 cancel:SetBindingClick(true, "ESCAPE", self, "__CANCEL_BUTTON__")
             else
                 cancel:SetBindingClick(true, "ESCAPE", cancel, "LeftButton")
+            end
+            -- The user's own cancel key, on whichever of those two routes this
+            -- open is using: a latched menu has no release to read a flag on,
+            -- so its cancel has to close the menu itself (see CANCEL_BUTTON),
+            -- while a held one only raises the flag its own release reads.
+            -- Bound through the SAME owner as everything above, so the one
+            -- ClearBindings on close hands it back with the rest -- which is
+            -- what lets a plain mouse button keep its ordinary use.
+            --
+            -- Never over the Select key. The two would be bound to one chord
+            -- and the last binding written would decide, which is a menu that
+            -- cancels when the user meant to fire.
+            local cancelKey = self:GetAttribute("eqdCancelKey")
+            if cancelKey and cancelKey ~= confirm then
+                if latched then
+                    cancel:SetBindingClick(true, cancelKey, self, "__CANCEL_BUTTON__")
+                else
+                    cancel:SetBindingClick(true, cancelKey, cancel, "LeftButton")
+                end
             end
         end
         -- Kept on the button, not in a snippet global: every palette shares one
@@ -8238,6 +8268,10 @@ local function PushPalette(index)
     local confirmKey = p.confirmKey
     btn:SetAttribute("eqdConfirm",
         (type(confirmKey) == "string" and confirmKey ~= "") and confirmKey or nil)
+    -- Same story for the cancel key, and from the same place in the profile.
+    local cancelKey = p.cancelKey
+    btn:SetAttribute("eqdCancelKey",
+        (type(cancelKey) == "string" and cancelKey ~= "") and cancelKey or nil)
 
     -- Pointer layouts: the cell centres, worked out here rather than in the
     -- snippet. GridDims and GridBase already encode the auto-column rule and the

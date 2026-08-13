@@ -2847,6 +2847,50 @@ initFrame:SetScript("OnEvent", function(self)
         })
         y = y - h
 
+        -- Its opposite, and on a row of its own: nothing else belongs beside a
+        -- cancel key. Escape already backs out of any menu and stays that way;
+        -- this is a second key for the hand that is holding the menu open and
+        -- is nowhere near Escape, which is the whole of the request behind it.
+        row, h = W:DualRow(parent, y,
+            { type="label", text="Menu Cancel Action" }, { type="label", text="" })
+        BuildKeybindButton(row._leftRegion, {
+            intro = "Closes an open menu without using anything. Escape always "
+                .. "does this as well. One key shared by every menu, claimed "
+                .. "only while a menu is up -- a mouse button keeps its normal "
+                .. "use the rest of the time.",
+            read = function()
+                local key = Cfg("cancelKey")
+                if type(key) ~= "string" or key == "" then return nil end
+                return key
+            end,
+            commit = function(chord)
+                -- A menu's own key would be taken over for as long as that menu
+                -- was up, which is exactly the moment its release has to reach
+                -- the menu -- so the menu could be opened and never closed. The
+                -- Select key is refused for the reason the module gives at the
+                -- binding itself: one chord, two meanings, and the wrong one
+                -- wins.
+                if chord then
+                    if chord == Cfg("confirmKey") then
+                        Complain("Quickdraw: that key is already the Toggled Menu Select Action.")
+                        return
+                    end
+                    for i = 1, (Cfg("paletteCount") or 1) do
+                        if GetBindingKey(BINDING_PREFIX .. i) == chord then
+                            Complain("Quickdraw: that key opens a menu, so it cannot also close one.")
+                            return
+                        end
+                    end
+                end
+                Set("cancelKey", chord or "")
+                Refresh()
+            end,
+            -- The same reason as the Select key: a bare mouse button is what
+            -- this is for.
+            plainMouse = true,
+        })
+        y = y - h
+
         y = y - BuildPreview(parent, y)
 
         -- Hidden with a single menu: nothing to copy from.
