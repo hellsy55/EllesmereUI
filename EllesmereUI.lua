@@ -3500,9 +3500,9 @@ function EllesmereUI._RebuildColorCache()
     -- BG Power Color Darken: extra blacken for power-COLORED bar backgrounds, kept as a multiplier (not a palette) so it stacks on whatever power color a consumer resolved.
     local bgd = (dm and dm.powerBgDarken) or 0
     EllesmereUI._powerBgDarkenFactor = bgd > 0 and math.max(0, 1 - bgd / 100) or 1
-    -- Classes whose effective colour no longer matches Blizzard's default. Only these need the
-    -- restricted-unit recovery below; an untouched palette leaves the table empty, so that path
-    -- costs one next() and stops.
+    -- Classes whose effective colour no longer matches Blizzard's default (a swatch edit, or any
+    -- nonzero class darken). Only these need the restricted-unit recovery below; an untouched
+    -- palette leaves the table empty, so that path costs one next() and stops.
     local customized = cache.classCustomized
     wipe(customized)
     for token, def in pairs(EllesmereUI.CLASS_COLOR_MAP) do
@@ -3512,6 +3512,7 @@ function EllesmereUI._RebuildColorCache()
             customized[token] = col
         end
     end
+    EllesmereUI._restrictedCandidatesDirty = true
     EllesmereUI._colorCacheDirty = false
 end
 
@@ -4113,29 +4114,68 @@ end
 -- colour components from that secret boolean, also in C. Lua only ever handles opaque values.
 -- Returns ok, r, g, b -- ok is a PLAIN boolean, r/g/b may be SECRET numbers: feed them straight
 -- to a setter, never inspect or do arithmetic on them.
+--
+-- Which group members are worth comparing against only changes on a roster or palette edit, so
+-- the list is cached as a flat unit/colour array (no per-call allocation, no per-call UnitClass
+-- or token concat). Only the compares themselves have to run live.
+EllesmereUI._restrictedCandidates = {}
+EllesmereUI._restrictedCandidatesDirty = true
+
+-- Namespaced, not file-locals: this chunk sits at Lua's 200-local ceiling.
+function EllesmereUI._RebuildRestrictedCandidates()
+    local out = EllesmereUI._restrictedCandidates
+    wipe(out)
+    local customized = EllesmereUI._colorCache.classCustomized
+    if next(customized) then
+        local inRaid = IsInRaid()
+        local members = GetNumGroupMembers() or 0
+        -- Raid rosters run raid1..raidN (player included); party rosters are player + party1..N-1.
+        local first = inRaid and 1 or 0
+        local last  = inRaid and members or (members > 0 and members - 1 or 0)
+        for i = first, last do
+            local u = (i == 0) and "player" or ((inRaid and "raid" or "party") .. i)
+            local _, token = UnitClass(u)
+            local col = (type(token) == "string" and not issecretvalue(token)) and customized[token]
+            if col then
+                out[#out + 1] = u
+                out[#out + 1] = col
+            end
+        end
+    end
+    EllesmereUI._restrictedCandidatesDirty = false
+end
+
+-- Created on the first restricted lookup, so a profile that never needs one never registers it.
+function EllesmereUI._EnsureRestrictedRosterWatcher()
+    if EllesmereUI._restrictedRosterWatcher then return end
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("GROUP_ROSTER_UPDATE")
+    f:SetScript("OnEvent", function() EllesmereUI._restrictedCandidatesDirty = true end)
+    EllesmereUI._restrictedRosterWatcher = f
+end
+
 function EllesmereUI.GetClassColorForRestrictedUnit(unit, secretClassToken)
     if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
-    local customized = EllesmereUI._colorCache.classCustomized
-    if not next(customized) then return false end
+    if not next(EllesmereUI._colorCache.classCustomized) then return false end
     local pick = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
     if not (pick and C_ClassColor and C_ClassColor.GetClassColor) then return false end
+    EllesmereUI._EnsureRestrictedRosterWatcher()
+    if EllesmereUI._restrictedCandidatesDirty then EllesmereUI._RebuildRestrictedCandidates() end
+    local candidates = EllesmereUI._restrictedCandidates
+    local count = #candidates
+    -- Nobody around wears a customised colour: let the caller take Blizzard's shade unchanged.
+    if count == 0 then return false end
     local base = C_ClassColor.GetClassColor(secretClassToken)
     if not base then return false end
     local r, g, b = base.r, base.g, base.b
     local canCompare = C_Secrets and C_Secrets.CanCompareUnitTokens
-    local inRaid = IsInRaid()
-    local members = GetNumGroupMembers() or 0
-    -- Raid rosters run raid1..raidN (player included); party rosters are player + party1..N-1.
-    local first = inRaid and 1 or 0
-    local last  = inRaid and members or (members > 0 and members - 1 or 0)
-    for i = first, last do
-        local u = (i == 0) and "player" or ((inRaid and "raid" or "party") .. i)
-        local _, token = UnitClass(u)
-        local col = (type(token) == "string" and not issecretvalue(token)) and customized[token]
+    for i = 1, count, 2 do
+        local u = candidates[i]
         -- CanCompareUnitTokens false means UnitIsUnit would fail outright, not go secret.
-        if col and ((not canCompare) or canCompare(unit, u)) then
+        if (not canCompare) or canCompare(unit, u) then
             local isSameUnit = UnitIsUnit(unit, u)
             if type(isSameUnit) == "boolean" then
+                local col = candidates[i + 1]
                 r = pick(isSameUnit, col.r, r)
                 g = pick(isSameUnit, col.g, g)
                 b = pick(isSameUnit, col.b, b)
