@@ -87,6 +87,60 @@ function ns.RefreshBuffGlows()
     end
 end
 
+-- Take a pandemic glow down when its icon hides. The buff tick only visits SHOWN
+-- frames, so a glow lit at the moment the icon hides -- which is how every
+-- pandemic ends, the aura runs out and Blizzard hides the buff icon -- can never
+-- reach the tick's stop branch. The textures keep animating on the hidden overlay
+-- and come back up WITH the icon on the buff's next application, flashing a
+-- pandemic glow over a freshly cast aura until the next tick takes it down.
+-- Blizzard's pandemic flag is dropped with it: ShowPandemicStateFrame is the only
+-- thing that sets it and it stops being called once the item goes inactive, so a
+-- stale true would just re-light the glow on the next tick. Hooked lazily from the
+-- overlay build below, so a bar with no pandemic glow never pays for it.
+--
+-- Clearing the flag is not enough on its own when the aura ends EARLY (dispelled,
+-- target lost, pool release) instead of running out. Blizzard computes the
+-- pandemic window once, on the aura landing, and never clears it on the way out:
+-- CheckSetPandemicAlertTriggerTime returns before touching pandemicStartTime /
+-- pandemicEndTime once the aura is inactive. The item is still registered for the
+-- viewer's OnUpdate and the viewer never stops running it (visibility of the ITEM
+-- is not consulted), so a window whose aura is already gone keeps satisfying
+-- IsInPandemicTime and re-sets the flag on the hidden icon a frame later. Re-apply
+-- inside that leftover window and the tick lights a full pandemic glow over a
+-- fresh aura, held until the DEAD aura's end time passes.
+--
+-- So the flag is also marked unusable from here until the item computes a new
+-- window (ns._PandemicWindowSet). Only when the aura is really gone -- Blizzard
+-- clears auraInstanceID before hiding the icon, while a bar merely being hidden
+-- leaves it set -- so a visibility toggle mid-pandemic keeps its glow. The bias is
+-- deliberate: a suppressed glow costs a tick, a wrong one is what was reported.
+function ns._PandemicIconHide(self)
+    local fd = hookFrameData[self]
+    if fd then
+        if fd.pandemicGlowActive then
+            if fd.pandemicOverlay then ns.StopNativeGlow(fd.pandemicOverlay) end
+            fd.pandemicGlowActive = false
+        end
+        -- auraInstanceID can be SECRET in instanced combat; comparing a
+        -- secret against nil yields a secret boolean the `if` would error
+        -- testing. A secret ID means the aura state is unknowable: take the
+        -- conservative path (not stale), same bias as the visibility toggle.
+        local aid = self.auraInstanceID
+        if not (_G.issecretvalue and _G.issecretvalue(aid)) and aid == nil then
+            fd._panStale = true
+        end
+    end
+    if ns._pandemicState then ns._pandemicState[self] = nil end
+end
+
+-- Blizzard recomputed the pandemic window, so the flag describes the aura that is
+-- on the icon NOW. Runs on every application that carries time over, well before
+-- the window itself opens.
+function ns._PandemicWindowSet(self)
+    local fd = hookFrameData[self]
+    if fd then fd._panStale = nil end
+end
+
 -- External frame cache from main file
 local _ecmeFC = ns._ecmeFC
 local FC = ns.FC
@@ -4643,6 +4697,13 @@ local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID, identKey)
             local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
             if not bd2 or not bd2.showTooltip then return end
             if not self._phSpellID then return end
+            -- A placeholder that renders at alpha 0 has nothing under the
+            -- cursor to describe: "Keep Buffs in Same Place"
+            -- (bd2.hidePlaceholderIcon) and hosted "Visibility When Missing:
+            -- Hidden" (_missingHidden) both reserve the slot invisibly, so the
+            -- buff is NOT active and its tooltip must stay down. Same pair of
+            -- flags the three opacity passes test before forcing alpha 0.
+            if bd2.hidePlaceholderIcon or self._missingHidden then return end
             -- Honor the global "Show Tooltips" visibility mode (Blizzard Skin).
             if EllesmereUI and EllesmereUI._tooltipSuppressedByMode
                and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
@@ -6581,6 +6642,17 @@ local function CollectAndReanchor()
                     -- Hidden frames are collected for data (assignedSpells)
                     -- but left visually untouched so we don't override
                     -- Blizzard's "hide when inactive" state machine.
+                    -- Our own (unprotected) placeholder frames own their mouse state
+                    -- here, at the point they are injected: a freshly pooled one is
+                    -- born mouse-enabled and may never see a visibility pass before
+                    -- the cursor reaches it. Same rule ApplyCDMTooltipState uses, plus
+                    -- the alpha-0 exclusion, so flipping "Keep Buffs in Same Place"
+                    -- back off restores capture on the next collect instead of latching.
+                    if frame._isPlaceholderFrame and frame.EnableMouseMotion then
+                        frame:EnableMouseMotion((barData.showTooltip
+                            and not (container and container._mouseTrack)
+                            and not ns.IsPlaceholderRenderHidden(frame, barData)) and true or false)
+                    end
                     if frame:IsShown() and not isFocusKickBar then
                         local barHidden = container and container._visHidden
                         local fcH = _ecmeFC[frame]
@@ -6591,10 +6663,7 @@ local function CollectAndReanchor()
                             -- via frame alpha 0. The same check is mirrored in the two
                             -- other per-icon opacity passes (_CDMApplyVisibility and
                             -- ApplyBarOpacity) so none of them paint over it.
-                            -- The off-by-default bar flag is tested FIRST so anyone not
-                            -- using this feature short-circuits straight to the original
-                            -- branch below (identical code, no added work).
-                            if barData.hidePlaceholderIcon and frame._isPlaceholderFrame then
+                            if ns.IsPlaceholderRenderHidden(frame, barData) then
                                 frame:SetAlpha(0)
                             else
                                 frame:SetAlpha(barHidden and 0 or ns.EffectiveBarAlpha(barData))
@@ -6988,20 +7057,23 @@ local function CollectAndReanchor()
                             if not hasClaim then
                                 local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
                                 local isCustomSpell = sd and sd.customSpellIDs and sd.customSpellIDs[sid]
-                                -- Phase 3 injects custom frames only for spells NOT in
-                                -- Blizzard's CDM category (user-added racials/customs). If a
-                                -- spell IS in CDM, Blizzard's native frame is authoritative
-                                -- and injecting here would produce a ghost duplicate the user
-                                -- can't remove from the live bar (the picker only touches
-                                -- assignedSpells) -- e.g. a Dracthyr Evoker utility preset with
-                                -- Wing Buffet already tracked by Blizzard's CDM. So: skip
-                                -- injection only for racials Blizzard already tracks;
-                                -- user-added custom spells are always injected, even if CDM has
-                                -- its own native frame for them elsewhere.
-                                local isKnownInCDM = isRacial and ns.IsSpellKnownInCDM and ns.IsSpellKnownInCDM(sid)
-                                if isKnownInCDM then
-                                    -- Racial already in CDM; Blizzard's frame handles it.
-                                elseif not isRacial and not isCustomSpell then
+                                -- FRAMES AS TRUTH (native-first, injection-fallback): a racial
+                                -- with a LIVE Blizzard frame anywhere is a regular native
+                                -- cooldown -- hasClaim above already skipped it, and the route
+                                -- map delivers it to whichever bar lists it. Reaching here
+                                -- means NO live frame exists (untracked in Blizzard's CDM, or
+                                -- a client without native racial tracking), so our custom
+                                -- frame is the only way the racial renders at all. The old
+                                -- gate here keyed on IsSpellKnownInCDM, which reads the
+                                -- category set -- its second arg is allowUnlearned (docs), so
+                                -- "known" means LEARNED, not tracked: a racial the user
+                                -- untracked in Blizzard's CDM stayed "known", skipped
+                                -- injection, and vanished from every bar (field report).
+                                -- Login timing: viewer data can load after our first build
+                                -- (hasClaim transiently false -> we inject); the
+                                -- COOLDOWN_VIEWER_DATA_LOADED rebuild re-evaluates and the
+                                -- reanchor sweep hides the then-stale injected frame.
+                                if not isRacial and not isCustomSpell then
                                     -- Unknown spell, skip
                                 else
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid
@@ -8851,7 +8923,10 @@ function ns.SetupViewerHooks()
                                         end
                                     end
                                     if custom then
-                                        inPandemic = ns._pandemicState and ns._pandemicState[frame]
+                                        -- Not while the flag is describing an aura
+                                        -- that already ended (ns._PandemicIconHide).
+                                        inPandemic = not fd._panStale
+                                            and ns._pandemicState and ns._pandemicState[frame]
                                     elseif isNone then
                                         -- The hook only fires on the NEXT
                                         -- ShowPandemicStateFrame, so an icon already
@@ -8869,6 +8944,16 @@ function ns.SetupViewerHooks()
                                         ov:SetAllPoints(frame)
                                         ov:EnableMouse(false)
                                         fd.pandemicOverlay = ov
+                                        -- Once per frame, and only for icons that
+                                        -- actually glow: the stop edge the tick
+                                        -- cannot see, and the window edge that
+                                        -- says the flag is current again (see
+                                        -- ns._PandemicIconHide).
+                                        frame:HookScript("OnHide", ns._PandemicIconHide)
+                                        if frame.SetPandemicAlertTriggerTime then
+                                            hooksecurefunc(frame, "SetPandemicAlertTriggerTime",
+                                                ns._PandemicWindowSet)
+                                        end
                                     end
                                     -- Same base-level tracking as the buff glow, one
                                     -- level higher so pandemic sits above buff glow.

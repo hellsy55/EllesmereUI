@@ -101,6 +101,51 @@ EllesmereUI.ComputeCastBarTint = ComputeCastBarTint
 -- frames AND header-managed (party/raid) frames whose unit changes. Call
 -- AttachSecureUnitMenu(frame) on any unit button that needs a right-click menu
 -- instead of setting *type2 = "togglemenu".
+-- 12.1 zoned-out raid member -> PET menu misclassification fix. The proxy's
+-- "togglemenu" secure action classifies the menu through a UnitIsUnit chain
+-- that checks "pet" BEFORE UnitIsPlayer, and its token special-cases cover
+-- party/boss/focus/arena but NOT raid (SecureTemplates.lua SECURE_ACTIONS.
+-- togglemenu, marked "Unused by Blizzard code" -- the default UI never runs
+-- it, which is why base frames don't show the bug; party frames are immune
+-- via the token special-case, matching the raid-only field report). For a
+-- raid member whose unit data has not streamed (zoned elsewhere), the
+-- engine-side UnitIsUnit(raidN, "pet") comparison can misfire and the whole
+-- chain resolves PET. Post-hook the opener: a PET-family menu opening for a
+-- raid/party token whose GUID is a Player is that exact misfire -- re-open
+-- the correct player menu. The re-open runs from this (tainted) hook, so
+-- protected items (Set Focus/Follow) can throw for THAT menu instance only;
+-- the trade for not showing a pet menu on a player. Legitimate pet menus
+-- (unit "pet"/"partypetN"/"raidpetN") never match the signature, and the
+-- correct which comes from the TOKEN (no unit APIs -- UnitInRaid/identity
+-- reads can be SECRET for exactly these unstreamed units). Installed lazily
+-- with the first menu proxy; zero cost until a menu actually opens.
+local menuFixHooked = false
+local function InstallMenuClassifierFix()
+    if menuFixHooked or type(UnitPopup_OpenMenu) ~= "function" then return end
+    menuFixHooked = true
+    local reopening = false
+    hooksecurefunc("UnitPopup_OpenMenu", function(which, contextData)
+        if reopening then return end
+        if which ~= "PET" and which ~= "OTHERPET" and which ~= "OTHERBATTLEPET" then return end
+        local unit = contextData and contextData.unit
+        if type(unit) ~= "string" then return end
+        local lu = unit:lower()
+        local isRaidToken = lu:match("^raid[0-9]+$") ~= nil
+        if not isRaidToken and not lu:match("^party[0-9]+$") then return end
+        local guid = UnitGUID(unit)
+        if issecretvalue and issecretvalue(guid) then return end
+        if type(guid) ~= "string" or not guid:find("^Player%-") then return end
+        reopening = true
+        -- FRESH context table, never the inbound one: OpenMenu ENRICHES its
+        -- contextData in place (playerLocation/accountInfo) and asserts those
+        -- fields are nil on entry -- re-passing the first open's table throws
+        -- "assertion failed" at UnitPopupShared:53 (field-caught 2026-08-14;
+        -- the live misfire classifies as OTHERBATTLEPET, same field capture).
+        UnitPopup_OpenMenu(isRaidToken and "RAID_PLAYER" or "PARTY", { unit = unit })
+        reopening = false
+    end)
+end
+
 local menuProxies = setmetatable({}, { __mode = "k" })
 -- 12.1: proxies are GLOBALLY NAMED so bindings can reach them via "/click
 -- <name>" (macro transport). 12.1 broke the "click" secure action outright
@@ -114,6 +159,7 @@ local proxyCounter = 0
 -- touch the frame's own type attributes (so it won't clobber other bindings).
 function EllesmereUI.GetSecureMenuProxy(frame)
     if not frame then return end
+    InstallMenuClassifierFix()
     local proxy = menuProxies[frame]
     if not proxy then
         local proxyName
