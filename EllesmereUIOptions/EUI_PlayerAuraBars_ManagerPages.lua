@@ -886,7 +886,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             rows = {
                 -- nil = 12px default -- deliberately
                 -- decoupled from Spacing/padding, no longer mirrors it.
-                { type = "slider", label = "Row Spacing", min = 0, max = 20, step = 1,
+                { type = "slider", label = "Row Spacing", min = -5, max = 20, step = 1,
                   get = function() return cfg.rowSpacing or 12 end,
                   set = function(v) cfg.rowSpacing = v; apply() end },
             },
