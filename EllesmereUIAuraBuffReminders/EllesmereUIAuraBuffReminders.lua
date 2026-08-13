@@ -3586,7 +3586,10 @@ local function Refresh()
                 petLabel = "Water Elemental"
                 if specID ~= 64 or not Known(31687) then suppress = true end
             end
-            if not suppress and not (UnitExists("pet") and not UnitIsDead("pet")) then
+            -- Skipped while mounted, and for a beat after dismounting: mounting auto-dismisses the pet and the server resummons it on dismount a moment after the mount display drops, so the reminder is never actionable there (summoning would dismount you anyway). IsMounted()/GetTime() are combat-safe.
+            if not suppress and not IsMounted()
+               and not (EABR._petRemountGrace and GetTime() < EABR._petRemountGrace)
+               and not (UnitExists("pet") and not UnitIsDead("pet")) then
                 local e = AcquireEntry()
                 e.mode = "texture"
                 e.texture = petIcon
@@ -4774,6 +4777,12 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         if GetWeaponCategory(16) ~= R.we[16].cat or GetWeaponCategory(17) ~= R.we[17].cat then
             R.dirty = true
         end
+    end
+
+    -- Dismount: the pet comes back a moment AFTER the mount display drops, so the "Pet" reminder would flash in that gap. Grace-window it, and schedule the refresh that closes the window (nothing else fires when the pet is genuinely absent, which would latch the reminder off).
+    if e == "PLAYER_MOUNT_DISPLAY_CHANGED" and not IsMounted() then
+        EABR._petRemountGrace = GetTime() + 2
+        C_Timer.After(2.1, RequestRefresh)
     end
 
     -- All other events: just refresh
