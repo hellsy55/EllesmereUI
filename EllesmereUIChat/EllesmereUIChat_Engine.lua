@@ -544,8 +544,14 @@ local CJK_FILES = {
 -- chat. On a CJK client it is not a nudge, it is the whole window: every line
 -- is that alphabet, so a user asking for 17 read 19 and the glyphs outgrew the
 -- line box the roman height sizes (the "spacing got tighter" half of the same
--- report). Blizzard's own families carry one height across every member for
--- this reason, so the client's own alphabet takes the size unmodified.
+-- report). Blizzard's per-alphabet heights vary family by family, but their
+-- CHAT font is the one that matters here and it bumps nothing upward:
+-- ChatFontNormal inherits NumberFont_Shadow_Med, whose members are roman 14,
+-- simplifiedchinese 14, traditionalchinese 14, korean 13. Their tab-menu size
+-- control then bypasses the family entirely (FCF_SetChatWindowFontSize raw
+-- SetFonts the active alphabet's file at the chosen number), so a size the
+-- user picked renders literally. Ours does the same: the client's own
+-- alphabet takes the size unmodified.
 local CJK_CLIENT_ALPHABET = ({
     koKR = "korean",
     zhCN = "simplifiedchinese",
