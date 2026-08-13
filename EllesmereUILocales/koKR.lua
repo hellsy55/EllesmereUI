@@ -1434,6 +1434,29 @@ L["Whirlwind Stacks"] = "소용돌이 중첩"
 L["Windwalker"] = "풍운"
 L["X Position"] = "가로 위치"
 L["Y Position"] = "세로 위치"
+-- 2026-08-13 신규 (본체 8.8.5: 잠금 해제 기준점 / 충돌 경고 / 전문화 재정의)
+L["Grow Centered Horizontal"] = "가운데에서 가로 확장"
+L["Grow Centered Vertical"] = "가운데에서 세로 확장"
+L["Override Anchor Direction"] = "재정의 기준점 방향"
+L["Edit Anchor"] = "기준점 편집"
+L["Delete Override Anchor"] = "재정의 기준점 삭제"
+L["Select..."] = "선택..."
+L["idTip conflicts with EllesmereUI's tooltip systems. Disable the idTip addon to stay compatible."] = "idTip은 EllesmereUI 툴팁 시스템과 충돌합니다. 호환을 위해 idTip 애드온을 끄세요."
+L["EllesmereUI WonderBar was renamed to EllesmereUI DataBars. The old WonderBar addon is still installed and both create the same bar. Please disable or delete the EllesmereUIWonderBar addon."] = "EllesmereUI WonderBar는 EllesmereUI DataBars로 이름이 바뀌었습니다. 예전 WonderBar 애드온이 아직 설치돼 있어 두 애드온이 같은 바를 만듭니다. EllesmereUIWonderBar 애드온을 끄거나 삭제하세요."
+L["This group's custom Debuff Manager can only be activated or edited while playing one of its specs."] = "이 그룹의 사용자 지정 약화 효과 관리자는 그룹에 속한 전문화로 플레이할 때만 활성화하거나 편집할 수 있습니다."
+L["Another override group already provides the custom Debuff Manager for your current spec."] = "다른 재정의 그룹이 현재 전문화의 사용자 지정 약화 효과 관리자를 이미 제공하고 있습니다."
+L["Your current spec has its own custom Debuff Manager, so conditional Debuff Managers never apply to it."] = "현재 전문화에는 자체 사용자 지정 약화 효과 관리자가 있어, 조건부 약화 효과 관리자는 적용되지 않습니다."
+L["This will create a fully unique Debuff Manager for this override group. Your current Debuff Manager settings are copied as its starting point, and changes made to your default Debuff Manager will no longer affect these specs."] = "이 재정의 그룹만의 약화 효과 관리자를 새로 만듭니다. 현재 약화 효과 관리자 설정이 시작점으로 복사되며, 이후 기본 약화 효과 관리자를 바꿔도 이 전문화들에는 영향을 주지 않습니다."
+L["This will create a fully unique Debuff Manager for this conditional group. Your current Debuff Manager settings are copied as its starting point, and changes made to your default Debuff Manager will no longer affect it."] = "이 조건부 그룹만의 약화 효과 관리자를 새로 만듭니다. 현재 약화 효과 관리자 설정이 시작점으로 복사되며, 이후 기본 약화 효과 관리자를 바꿔도 영향을 주지 않습니다."
+L["Debuff Manager changes on this page apply only to this override."] = "이 페이지의 약화 효과 관리자 변경은 이 재정의에만 적용됩니다."
+L["%s Override Active"] = "%s 재정의 활성"
+L["The active override's custom %s is bound to this page. Leave the %s tab to switch to another override."] = "활성 재정의의 사용자 지정 %s이(가) 이 페이지에 묶여 있습니다. 다른 재정의로 바꾸려면 %s 탭에서 나가세요."
+L["Delete Custom Debuff Manager"] = "사용자 지정 약화 효과 관리자 삭제"
+L["Delete the custom Debuff Manager for '%s'? Its specs return to your default Debuff Manager."] = "'%s'의 사용자 지정 약화 효과 관리자를 삭제할까요? 해당 전문화는 기본 약화 효과 관리자로 돌아갑니다."
+L["Delete the custom Debuff Manager for '%s'? Its conditions return to your default Debuff Manager."] = "'%s'의 사용자 지정 약화 효과 관리자를 삭제할까요? 해당 조건은 기본 약화 효과 관리자로 돌아갑니다."
+L["These specs hold override values that no group's editing mode can reach anymore (left behind by membership changes). They still apply. Remove one to return that spec to the shared default."] = "이 전문화들에는 어떤 그룹의 편집 모드로도 더 이상 접근할 수 없는 재정의 값이 남아 있습니다 (그룹 구성 변경으로 남겨진 것). 값은 여전히 적용됩니다. 제거하면 해당 전문화가 공유 기본값으로 돌아갑니다."
+L["Enable Modules First"] = "먼저 추가기능을 활성화하세요"
+
 -- add Core Dropdown (본체 드롭다운)
 L["Add Module Font"] = "추가기능 글꼴 추가"
 L["Combat Text Font"] = "전투 글자 글꼴"
@@ -1831,6 +1854,19 @@ L["Use Blizzard's XP/Rep Bars"] = "블리자드 경험치/평판 바 사용"
 L["XP / Rep Bars"] = "경험치 / 평판 바"
 L["XP Bar"] = "경험치 바"
 L["XP Bar Visibility"] = "경험치 바 표시"
+-- 2026-08-13 신규 (행동 단축바 8.8.5)
+L["While the spellbook or macro panel is open, this bar appears so you can drag abilities onto it."] = "마법책이나 매크로 창이 열려 있는 동안 이 바가 나타나 기술을 끌어다 놓을 수 있습니다."
+L["While dragging a spell or item, this bar appears so you can drop onto it."] = "주문이나 아이템을 끄는 동안 이 바가 나타나 놓을 수 있습니다."
+L["Visibility set to Never"] = "표시 여부가 '사용 안 함'으로 설정됨"
+L["Apply Bar Background Spacing to all Bars"] = "바 배경 간격 모든 바에 적용"
+L["Apply Background Color to all Bars"] = "배경 색상 모든 바에 적용"
+L["Apply Background Opacity to all Bars"] = "배경 불투명도 모든 바에 적용"
+L["Bar Background Border"] = "바 배경 테두리"
+L["Apply Background Border Size and Color to all Bars"] = "배경 테두리 크기와 색상 모든 바에 적용"
+L["Apply Background Border Style to all Bars"] = "배경 테두리 모양 모든 바에 적용"
+L["Fit Size to Button"] = "버튼 크기에 맞춤"
+L["Caps the countdown size so it cannot spill outside small buttons."] = "작은 버튼 밖으로 넘치지 않도록 남은 시간 글자 크기를 제한합니다."
+
 
 -- add ActionBars Dropdown (행동 단축바 드롭다운)
 L["Add a spec above to configure its bars separately from Simple mode."] = "위에서 전문화를 추가하면 단순 모드와 별도로 해당 전문화의 바를 설정할 수 있습니다."
@@ -2286,6 +2322,24 @@ L["Enter the spell ID to exclude from this frame."] = "이 프레임에서 제�
 L["MINE"] = "내 시전"
 L["Showing this aura from any caster; click for your casts only."] = "이 오라를 모든 시전자에게서 표시 중입니다. 클릭하면 내 시전만 표시합니다."
 L["Showing this aura from your casts only; click for any caster."] = "이 오라를 내 시전만 표시 중입니다. 클릭하면 모든 시전자에게서 표시합니다."
+-- 2026-08-13 신규 (이름표 8.8.5: 사거리 검사 / 전투 외 적 이름표 숨김)
+L["Range Check"] = "사거리 검사"
+L["Auto (Class/Spec)"] = "자동 (직업/전문화)"
+L["Disabled runs no nameplate range checks. Auto uses your class and specialization's normal attack range. Custom uses the range set in the cog beside this option."] = "'비활성화됨'은 이름표 사거리 검사를 하지 않습니다. '자동'은 내 직업과 전문화의 기본 공격 사거리를 사용합니다. '사용자 지정'은 이 설정 옆 톱니바퀴에서 정한 사거리를 사용합니다."
+L["Out of Range Opacity"] = "사거리 밖 불투명도"
+L["Opacity used for enemy nameplates outside the selected attack range."] = "선택한 공격 사거리 밖에 있는 적 이름표에 적용할 불투명도입니다."
+L["Range Check: Auto or Custom"] = "사거리 검사: 자동 또는 사용자 지정"
+L["Range Check: Custom"] = "사거리 검사: 사용자 지정"
+L["This feature runs continuous range checks against every visible enemy nameplate. It is one of the more expensive features in EllesmereUI and can measurably increase CPU usage in crowded areas."] = "이 기능은 보이는 모든 적 이름표에 대해 사거리 검사를 계속 수행합니다. EllesmereUI에서 비용이 큰 기능 중 하나이며, 밀집 지역에서는 CPU 사용량이 눈에 띄게 늘어날 수 있습니다."
+L["Custom Range"] = "사용자 지정 사거리"
+L["Attack-range cutoff used by Out of Range Opacity. Five-yard steps match the available fallback range checks."] = "'사거리 밖 불투명도'가 사용할 공격 사거리 기준입니다. 5야드 단위는 게임이 제공하는 대체 사거리 검사에 맞춘 값입니다."
+L["Hide Enemy Nameplates out of Combat"] = "전투 중이 아닐 때 적 이름표 숨김"
+L["Hide enemy nameplates while you are out of combat; they return the moment combat starts. Drives the same game setting as the Show Enemy Name Plates keybind."] = "전투 중이 아닐 때 적 이름표를 숨기고, 전투가 시작되는 즉시 다시 표시합니다. '적 이름표 표시' 단축키와 같은 게임 설정을 사용합니다."
+-- 2026-08-13 신규 2차 (이름표 8.8.5: 전투 외 색상 / 위협 근접 발광)
+L["Give out-of-combat enemy nameplates a custom color instead of darkening them."] = "전투 중이 아닌 적 이름표를 어둡게 하는 대신 사용자 지정 색으로 표시합니다."
+L["Adds a steady red glow around the nameplate while the Near Aggro color is active."] = "'위협 근접' 색상이 적용되는 동안 이름표 주위에 붉은 발광을 계속 표시합니다."
+
+
 
 
 -- 2026-08-12 신규 (핵심 위치 - 추적 목록 편집. 유닛 프레임 설정에서도 같은 키 사용)
@@ -2423,6 +2477,21 @@ L["Target of Target"] = "대상의 대상"
 L["This option requires the position setting to be detached"] = "위치 설정이 분리 상태여야 사용할 수 있습니다"
 L["Top position is only available in Detached mode"] = "위쪽 위치는 분리 모드에서만 사용할 수 있습니다"
 L["Vertical Spacing"] = "세로 간격"
+-- 2026-08-13 신규 (유닛 프레임 8.8.5: 정예/희귀 표시기 / 소환수 프레임)
+L["This control recently changed direction: it now copies FROM the frame you choose. Confirming will copy all shared settings FROM %1$s TO %2$s."] = "이 기능의 방향이 최근에 바뀌었습니다. 이제 선택한 프레임에서 가져옵니다. 확인하면 공용 설정을 %1$s에서 %2$s(으)로 복사합니다."
+L["Main Frames Auras"] = "주요 프레임 오라"
+L["Boss Frames Auras"] = "우두머리 프레임 오라"
+L["Apply Frame Strata to all Frames"] = "프레임 우선순위 모든 프레임에 적용"
+L["Left Text Class Color"] = "왼쪽 글자 직업 색상"
+L["Right Text Class Color"] = "오른쪽 글자 직업 색상"
+L["Elite/Rare Indicator"] = "정예/희귀 표시기"
+L["Shows the nameplate-style dragon badge on elite, rare elite, and rare targets."] = "정예, 희귀 정예, 희귀 대상에 이름표와 같은 용 장식을 표시합니다."
+L["Elite Icon Size"] = "정예 아이콘 크기"
+L["Also show the badge in dungeons and raids, where most enemies are elite."] = "대부분의 적이 정예인 던전과 공격대에서도 장식을 표시합니다."
+L["Elite/Rare Indicator Settings"] = "정예/희귀 표시기 설정"
+L["Always Show Pet Frame"] = "소환수 프레임 항상 표시"
+L["Show the pet frame whenever you have a pet, ignoring the Player frame's visibility settings."] = "소환수가 있으면 항상 소환수 프레임을 표시하며, 플레이어 프레임의 표시 설정을 따르지 않습니다."
+
 
 -- add UnitFrames Dropdown (유닛 프레임 드롭다운)
 L["Above Health Bar"] = "생명력 바 위"
@@ -2714,6 +2783,35 @@ L["Show every buff. While this is on, checked filters below are hidden from the 
 L["Show every buff that has a duration (hides permanent buffs). While this is on, checked filters below are hidden instead of added."] = "지속시간이 있는 강화 효과만 표시합니다(영구 효과는 숨김). 켜져 있는 동안 아래에서 체크한 필터는 추가하는 대신 숨기는 쪽으로 동작합니다."
 L["Show every buff. While this is on, checked filters below are hidden from the frame instead of added."] = "모든 강화 효과를 표시합니다. 켜져 있는 동안 아래에서 체크한 필터는 프레임에 추가하는 대신 숨기는 쪽으로 동작합니다."
 L["Show weapon oil and imbue icons at the front of this bar. They are weapon enchants rather than auras, so they show independently of the options above -- and the aura grid is shifted inward to make room for them, with every row shifting over by the same amount."] = "무기 기름과 마법부여 아이콘을 이 바의 맨 앞에 표시합니다. 오라가 아닌 무기 마법부여라서 위 옵션과 무관하게 표시됩니다 - 그리고 자리를 내기 위해 오라 격자가 안쪽으로 밀리며, 모든 줄이 같은 만큼 밀립니다."
+-- 2026-08-13 신규 5차 (플레이어 오라 바 8.8.5: 차단 목록 / 약화 효과 필터 툴팁)
+L["Copy Raid Frames Filters"] = "공격대 프레임 필터 복사"
+L["Buff Blacklist"] = "강화 효과 차단 목록"
+L["Blacklisted spells never display."] = "차단 목록에 있는 주문은 표시되지 않습니다."
+L["No blacklisted spells."] = "차단된 주문이 없습니다."
+L["Spell ID..."] = "주문 ID..."
+L["Turns off Player Aura Bars. Requires a reload."] = "플레이어 오라 바를 끕니다. UI 다시 불러오기가 필요합니다."
+L["Show every debuff. While this is on, checked filters below are hidden from the bar instead of added."] = "모든 약화 효과를 표시합니다. 켜져 있는 동안 아래에서 체크한 필터는 바에 추가하는 대신 숨기는 쪽으로 동작합니다."
+L["Show every debuff. While this is on, checked filters below are hidden from the grid instead of added."] = "모든 약화 효과를 표시합니다. 켜져 있는 동안 아래에서 체크한 필터는 격자에 추가하는 대신 숨기는 쪽으로 동작합니다."
+L["Show every debuff. While this is on, checked filters below are hidden from the frame instead of added."] = "모든 약화 효과를 표시합니다. 켜져 있는 동안 아래에서 체크한 필터는 프레임에 추가하는 대신 숨기는 쪽으로 동작합니다."
+L["Shows only debuffs not caused by any player or player pet (this is what shows most pve debuffs, do not check this while All Debuffs is selected!"] = "플레이어나 플레이어 소환수가 걸지 않은 약화 효과만 표시합니다 (PVE 약화 효과 대부분이 여기에 해당합니다. '모든 약화 효과'가 선택된 동안에는 체크하지 마세요!)"
+L["Shows only debuffs Blizzard flags as important"] = "블리자드가 중요로 지정한 약화 효과만 표시합니다"
+L["Shows only debuffs from Blizzard's curated raid-frame debuff set"] = "블리자드가 공격대 프레임용으로 선별한 약화 효과만 표시합니다"
+L["Shows only the stricter in-combat subset of the raid set"] = "공격대 모음 중 전투 중에만 표시되는 더 엄격한 항목만 표시합니다"
+L["Shows any debuff with a dispel type (Magic, Curse, Disease, Poison, Bleed), even if you cannot remove it"] = "해제 유형(마법, 저주, 질병, 독, 출혈)이 있는 약화 효과를 모두 표시합니다. 내가 해제할 수 없는 것도 포함합니다"
+-- 2026-08-13 신규 6차 (플레이어 오라 바 8.8.5: 바 관리 / 필터 복사 / 모듈 토글)
+L["Enable Player Aura Bars"] = "플레이어 오라 바 활성화"
+L["Replaces Blizzard's default buff and debuff display with fully customizable bars."] = "블리자드 기본 강화/약화 효과 표시를 완전히 사용자 지정할 수 있는 바로 대체합니다."
+L["Player Aura Bars are now disabled. A UI reload is required to restore Blizzard's default buff and debuff display."] = "플레이어 오라 바를 껐습니다. 블리자드 기본 강화/약화 효과 표시로 되돌리려면 UI 다시 불러오기가 필요합니다."
+L["Debuff Bar"] = "약화 효과 바"
+L["Delete this buff bar?"] = "이 강화 효과 바를 삭제할까요?"
+L["Delete this debuff bar?"] = "이 약화 효과 바를 삭제할까요?"
+L["Delete this filter? It is removed from every bar using it."] = "이 필터를 삭제할까요? 이 필터를 사용하는 모든 바에서 제거됩니다."
+L["One-time copy of the Raid Frames Buff Manager filters into these filters. Same-named filters are OVERWRITTEN; the two lists stay separate afterwards."] = "공격대 프레임 효과 관리자의 필터를 이 필터 목록으로 한 번 복사합니다. 이름이 같은 필터는 덮어씁니다. 복사한 뒤에는 두 목록이 서로 별개로 유지됩니다."
+L["Enter the spell ID to track."] = "추적할 주문 ID를 입력하세요."
+L["Growth"] = "성장"
+L["Icon Wrap"] = "아이콘 줄바꿈"
+
+
 
 
 -- == add RaidFrames (공격대 프레임) =============================================
@@ -3007,6 +3105,26 @@ L["Wheel Up"] = "휠 위로"
 L["Wild Growth"] = "급속 성장"
 L["Wrap Direction"] = "줄 바꿈 방향"
 L["Zulkhar"] = "줄카르"
+-- 2026-08-13 신규 2차 (공격대 프레임 8.8.5: 초과 보호막 / 효과 관리자 기준점)
+L["Overshield is the part of an absorb exceeding your empty health. Always backfills it over current health from the shield's edge; From Left grows it from the opposite end of the bar; Never hides it."] = "초과 보호막은 빈 생명력을 넘어서는 흡수량입니다. '항상'은 보호막 끝에서 현재 생명력 위로 채우고, '왼쪽부터'는 바 반대쪽 끝에서 늘리며, '사용 안 함'은 숨깁니다."
+L["Draw role icons behind the frame border, including the hover and target highlight."] = "역할 아이콘을 프레임 테두리 뒤에 그립니다. 마우스오버와 대상 강조 표시도 포함합니다."
+L["Covers Up To"] = "적용 범위"
+L["Switch At"] = "전환 기준"
+L["Only show buffs cast by you."] = "내가 시전한 강화 효과만 표시합니다."
+L["Anchor To"] = "기준점 대상"
+L["Remove the Anchor To position"] = "기준점 대상 위치 제거"
+L["A Horizontally Growing Anchor Target"] = "가로로 확장되는 기준 대상"
+L["A Vertically Growing Anchor Target"] = "세로로 확장되는 기준 대상"
+L["An Unanchored Position"] = "기준점이 없는 위치"
+
+-- 2026-08-13 신규 (공격대 프레임 8.8.5: 표시기 이름 변경 / 사용자 지정 약화 효과 관리자)
+L["Rename Indicator"] = "표시기 이름 변경"
+L["Enter a new name for this indicator:"] = "이 표시기의 새 이름을 입력하세요:"
+L["Custom Debuff Manager"] = "사용자 지정 약화 효과 관리자"
+L["Activate Custom Debuff Manager"] = "사용자 지정 약화 효과 관리자 사용"
+L["One-time copy of your Player Aura Bars filter setups into these filters. Same-named filters are OVERWRITTEN; the two lists stay separate afterwards."] = "플레이어 오라 바의 필터 구성을 이 필터 목록으로 한 번 복사합니다. 이름이 같은 필터는 덮어씁니다. 복사한 뒤에는 두 목록이 서로 별개로 유지됩니다."
+L["Show this indicator's buffs in the exact order you arrange (the first 10 arranged buffs are guaranteed; any beyond follow the default sorting)."] = "이 표시기의 강화 효과를 직접 배치한 순서 그대로 표시합니다 (배치한 것 중 처음 10개는 보장되며, 그 이후는 기본 정렬을 따릅니다)."
+
 
 -- 2026-07-27 신규 (공격대 5번: 프레임 성장 / 약화 효과 관리자 / 상황 메뉴)
 L["Type Icon Position"] = "유형 아이콘 위치"
@@ -3480,6 +3598,21 @@ L["Spell ID"] = "주문 ID"
 L["Stack Count"] = "중첩 수"
 L["Stacks Text Settings"] = "중첩 글자 설정"
 L["Suppress GCD"] = "GCD 숨김"
+-- 2026-08-13 신규 (재사용 대기시간 관리자 8.8.5)
+L["Edit Mode Needs a Manual Fix"] = "편집 모드를 직접 수정해야 합니다"
+L["Disable CDM & Reload"] = "CDM 끄고 다시 불러오기"
+L["Not Now"] = "나중에"
+L["Comma separated stack counts to put a tick mark at. Type all to mark every stack."] = "눈금을 표시할 중첩 수를 쉼표로 구분해 입력하세요. all 을 입력하면 모든 중첩에 표시합니다."
+L["Hidden (Shift Icons)"] = "숨김 (아이콘 당기기)"
+L["Show Charge/Stack Text"] = "충전/중첩 글자 표시"
+L["Show When Missing"] = "없을 때 표시"
+L["How many icons to show on the base row (the row that fills first and that Row Growth keeps in place). The rest go on the second row."] = "기준 행에 표시할 아이콘 개수입니다 (먼저 채워지고 '행 성장'이 자리를 유지하는 행). 나머지는 두 번째 행으로 넘어갑니다."
+L["Offsets the base row's icon size in pixels from Icon Scale. The second row keeps the base size."] = "기준 행의 아이콘 크기를 '아이콘 배율' 기준으로 픽셀만큼 조정합니다. 두 번째 행은 기본 크기를 유지합니다."
+L["Offsets the second row's icon size in pixels from Icon Scale. The base row keeps the base size."] = "두 번째 행의 아이콘 크기를 '아이콘 배율' 기준으로 픽셀만큼 조정합니다. 기준 행은 기본 크기를 유지합니다."
+L["Show the crafted quality rank on tracked items, matching the rank icon on the action bars. Items with no crafted quality are unaffected."] = "추적 중인 아이템에 제작 품질 등급을 표시합니다. 행동 단축바의 등급 아이콘과 같습니다. 제작 품질이 없는 아이템은 영향을 받지 않습니다."
+L["Show the charge and stack counters on this bar's icons."] = "이 바의 아이콘에 충전과 중첩 수를 표시합니다."
+L["Keep keybind text identical when your action bar swaps -- rogue stealth, druid forms, skyriding. Also covers conditional macros like \"/cast [bonusbar:1] Backstab; Shadow Dance\", where the key would otherwise jump to whichever branch is live.\n\nThe key then only changes when you actually move the ability or rebind it.\n\nOn by default. Applies to every CDM bar at once."] = "행동 단축바가 바뀌어도 단축키 글자를 그대로 유지합니다. 도적 은신, 드루이드 변신, 스카이라이딩이 해당합니다. \"/cast [bonusbar:1] Backstab; Shadow Dance\" 같은 조건부 매크로도 포함하며, 그렇지 않으면 단축키가 현재 활성화된 갈래로 튑니다.\n\n이후에는 기술을 실제로 옮기거나 단축키를 다시 지정할 때만 바뀝니다.\n\n기본은 켜짐이며 모든 CDM 바에 한 번에 적용됩니다."
+
 -- 2026-08-12 신규 (재사용 대기 상태 효과 우클릭 메뉴 + 충전/단축키 톱니 팝업)
 --   "+ " 접두 = 메뉴에서 켜는 항목 표시. 접두까지 키의 일부다.
 L["+ Suppress GCD"] = "+ GCD 숨김"
@@ -3885,6 +4018,15 @@ L["Totem Bar"] = "토템 바"
 L["Unlock Elements"] = "요소 잠금 해제"
 L["Vertical (Down)"] = "세로 (아래쪽)"
 L["Vertical (Up)"] = "세로 (위쪽)"
+-- 2026-08-13 신규 (자원 바 8.8.5: 블리자드 기본 텍스처)
+L["Draws a border around each pip instead of the bar as a whole."] = "바 전체가 아니라 각 칸마다 테두리를 그립니다."
+L["Health Background"] = "생명력 배경"
+L["Power Background"] = "마나 배경"
+L["Bar-style class resources (Insanity, Maelstrom, Astral Power, etc.) use Blizzard's default player frame bar artwork instead of the texture above."] = "바 형태의 직업 자원(광기, 마엘스트롬, 천공의 마력 등)에 위 텍스처 대신 블리자드 기본 플레이어 프레임 바 이미지를 사용합니다."
+L["Blizzard Atlas Texture"] = "블리자드 기본 텍스처"
+L["Blizzard's bar artwork is never recolored, so fill color modes and threshold colors will not tint the bar while this is enabled. To keep threshold colors visible, use Recolor Text Instead."] = "블리자드 바 이미지는 색을 바꿀 수 없어서, 이 설정이 켜져 있으면 채움 색상 모드와 임계값 색상이 바에 적용되지 않습니다. 임계값 색상을 보려면 '글자 색 대신 변경'을 사용하세요."
+L["Show the bar full of its fill color while no global cooldown is running, instead of the background color."] = "전역 재사용 대기시간이 돌지 않는 동안 바를 배경색 대신 채움 색으로 가득 채워 표시합니다."
+
 -- 2026-07-27 신규 (자원 및 시전바 4번)
 L["Opacity of the resource fill; below 100 the world shows through the fill instead of the background."] = "자원 채움의 불투명도입니다. 100 미만이면 배경 대신 채움 부분으로 바깥 세계가 비쳐 보입니다."
 L["Class Resource Colors"] = "직업 자원 색상"
@@ -4206,6 +4348,13 @@ L["Wintergrasp"] = "겨울손아귀"
 L["Wise Tails"] = "지혜의 꼬리"
 L["Wound Poison"] = "상처 감염 독"
 L["Wrong Pet Reminder (Demo Lock)"] = "잘못된 소환수 알림 (악마 흑마법사)"
+-- 2026-08-13 신규 (오라/강화 효과 알림 8.8.5)
+L["You don't have this item in your bags"] = "가방에 이 아이템이 없습니다"
+L["Your preferred food is out - using a backup you own"] = "선호하는 음식이 떨어져 보유 중인 대체품을 사용합니다"
+L["Click-to-use is disabled in combat"] = "전투 중에는 클릭 사용이 비활성화됩니다"
+L["Show how many of the consumable you have left in your bags."] = "가방에 남은 소모품 개수를 표시합니다."
+L["Show item or spell tooltips when hovering reminder icons."] = "알림 아이콘에 마우스를 올리면 아이템 또는 주문 툴팁을 표시합니다."
+
 
 -- add AuraBuffReminders Dropdown (오라/강화 효과 알림 드롭다운)
 L["Above Icon"] = "아이콘 위"
@@ -4434,6 +4583,11 @@ L["Rebind"] = "다시 지정"
 L["Keep"] = "유지"
 L["%1$s is bound to \"%2$s\". Binding it to \"%3$s\" will leave that unbound."] = "%1$s 키는 \"%2$s\"에 지정되어 있습니다. \"%3$s\"에 지정하면 기존 지정이 해제됩니다."
 L["Delete %1$s and its contents? Entries in other action menus that open it are removed too, and the menus after it move up one place."] = "%1$s(을)를 내용과 함께 삭제할까요? 이 메뉴를 여는 다른 동작 메뉴의 항목도 함께 제거되고, 뒤의 메뉴들이 한 자리씩 앞으로 당겨집니다."
+-- 2026-08-13 신규 (빠른 실행 8.8.5: 장소 표식 항목 톱니)
+L["World Marker Entries"] = "장소 표식 항목"
+L["Show Placed-Marker Pips"] = "놓인 표식 점 표시"
+L["Mark a world marker entry whose marker is on the ground with a small corner square, so you can see whether pressing it places or picks up."] = "표식이 바닥에 놓여 있는 장소 표식 항목에 작은 모서리 사각형을 표시해, 누르면 놓는 것인지 집어 드는 것인지 알 수 있게 합니다."
+
 -- 2026-08-12 신규 (8.8.4: 메뉴 열어 두기 / 사용 불가 항목 숨기기 / 장소 표식 토글)
 L["Toggle Menu Open"] = "메뉴 열어 두기"
 L["Toggled Menu Select Action"] = "열린 메뉴 선택 동작"
@@ -4627,6 +4781,21 @@ L["Weighted Jack-o'-Lantern"] = "무거운 호박등"
 L["while at an Item Upgrade NPC."] = "아이템 강화 NPC 앞에서."
 L["Y-Offset"] = "세로 위치"
 L["|cff20c020At maximum item level|r"] = "|cff20c020최대 아이템 레벨 도달|r"
+-- 2026-08-13 신규 2차 (편의 기능 8.8.5)
+L["Disband the group?"] = "파티를 해산할까요?"
+L["Disable the Top Bar Event Text overlay in Shifter once done positioning"] = "위치 조정이 끝나면 Shifter의 상단 바 이벤트 문자 오버레이를 끄세요"
+L["Retired"] = "지원 종료"
+L["Window skins are currently disabled for this profile."] = "이 프로필에서는 창 스킨이 꺼져 있습니다."
+L["Applies one text size to every chat window, saved with your profile. Individual windows can still be adjusted from their tab's right-click menu until the next login re-applies the profile size."] = "모든 대화창에 같은 글자 크기를 적용하며 프로필과 함께 저장됩니다. 개별 창은 탭 우클릭 메뉴에서 조정할 수 있지만, 다음 접속 때 프로필 크기가 다시 적용됩니다."
+L["Reset Zoom"] = "확대 초기화"
+L["Automatically zoom back out to maximum distance after this many seconds of no manual zoom change. 0 disables the reset."] = "직접 확대를 바꾸지 않은 채 이 시간(초)이 지나면 자동으로 최대 거리까지 축소합니다. 0이면 초기화하지 않습니다."
+L["an Arc Span below 360"] = "360 미만의 호 범위"
+
+-- 2026-08-13 신규 (편의 기능 8.8.5: 공격대 도구 / 쐐기 팝업 / 보조 능력치 부착)
+L["A raid control panel with ready check, pull timer and raid markers. In a raid it only shows while you are the leader or an assistant, since none of its buttons work without that; in a party it always shows."] = "준비 확인, 공격 개시 초읽기, 공격대 표식을 모은 공격대 지휘 패널입니다. 공격대에서는 공대장이나 승급자일 때만 표시됩니다. 그렇지 않으면 어떤 버튼도 동작하지 않기 때문입니다. 파티에서는 항상 표시됩니다."
+L["/keys Popup"] = "/keys 팝업"
+L["Attach to Secondary Stats"] = "보조 능력치에 붙이기"
+
 -- 2026-07-27 신규 (편의 기능 6번)
 L["Adds Bonus Roll, Group Loot, and Alert Toast movers to Unlock Mode."] = "잠금 해제 모드에 추가 주사위 굴림, 그룹 전리품, 알림 팝업 이동 도구를 추가합니다."
 L["Alert Toasts"] = "알림 팝업"
@@ -5272,6 +5441,18 @@ L["Title Size"] = "제목 크기"
 L["Tyrannical"] = "폭군"
 L["White Ticks"] = "흰색 표시점"
 L["Xal'atath's Bargain: Ascendant"] = "칼라타스의 흥정: 초월자"
+-- 2026-08-13 신규 (쐐기돌 도구 8.8.5: 대상/주시대상 시전 바 세부)
+L["Show a shield icon on the cast bar when the cast cannot be interrupted."] = "차단할 수 없는 시전일 때 시전 바에 방패 아이콘을 표시합니다."
+L["Tint the cast bar with the Important colour when the unit casts a spell the game flags as important. Your interrupt being on cooldown still takes priority."] = "게임이 중요로 표시한 주문을 시전하면 시전 바를 '중요' 색으로 물들입니다. 내 차단 기술이 재사용 대기 중이면 그쪽이 우선합니다."
+L["Mid-Cast Bar Color"] = "시전 중 바 색상"
+L["Tick Color"] = "눈금 색상"
+L["Interrupted Flash"] = "차단 시 번쩍임"
+L["Interrupted Flash Settings"] = "차단 시 번쩍임 설정"
+L["Flash Color"] = "번쩍임 색상"
+L["Text Size (Target)"] = "글자 크기 (대상)"
+L["Text Size (Focus)"] = "글자 크기 (주시 대상)"
+L["Class Colored Names to be off"] = "'직업 색상 이름' 꺼짐"
+
 -- add MythicTimer Dropdown (신화+ 타이머 드롭다운)
 L["+1 Threshold Timer Text"] = "+1 단계 목표 시간 글자"
 L["+2 Threshold Timer Text"] = "+2 단계 목표 시간 글자"
@@ -5668,6 +5849,12 @@ L["Targets"] = "대상"
 L["Timer Text Color"] = "목표 시간 글자 색상"
 L["Title Position"] = "제목 위치"
 L["Top Text Size"] = "제목 글자 크기"
+-- 2026-08-13 신규 (데미지 미터기 8.8.5)
+L["Hide in Delves"] = "구렁에서 숨김"
+L["Hide in PvP"] = "PvP에서 숨김"
+L["Lock Position & Disable Click"] = "위치 고정 및 클릭 차단"
+L["Lock the timer in place and make it click-through; no dragging and no mouse interaction until unlocked."] = "타이머를 제자리에 고정하고 클릭이 통과하게 만듭니다. 잠금을 풀기 전에는 끌기와 마우스 조작이 되지 않습니다."
+
 -- 2026-07-27 신규 (데미지 미터기 9번)
 L["Border Follows Bar"] = "바를 따르는 테두리"
 L["Include Icon in Bar Border"] = "바 테두리에 아이콘 포함"
@@ -6752,6 +6939,13 @@ L["|cffFFFFFFLeft Click:|r"] = "|cffFFFFFF좌클릭:|r"
 L["|cffFFFFFFRight Click:|r"] = "|cffFFFFFF우클릭:|r"
 L["|cffFFFFFFShift + Left Click:|r"] = "|cffFFFFFF쉬프트 + 좌클릭:|r"
 L["|cffFFFFFFShift + Middle Click:|r"] = "|cffFFFFFF쉬프트 + 가운데 클릭:|r"
+-- 2026-08-13 신규 (데이터 바 8.8.5: 음량/지역/좌표 블록)
+L["Which audio channel the block's volume bar adjusts."] = "이 블록의 음량 바가 조절할 오디오 채널입니다."
+L["Automatic follows the zone name. Manual holds the block at a fixed width and clips longer names, so it never shifts the blocks beside it."] = "'자동'은 지역 이름에 맞춰 늘어납니다. '수동'은 블록을 고정 너비로 두고 긴 이름을 잘라내어, 옆 블록이 밀리지 않습니다."
+L["Max Width"] = "최대 너비"
+L["How wide the block stays, whatever the zone is called."] = "지역 이름과 상관없이 블록이 유지할 너비입니다."
+L["How precise the coordinates read. More decimals make the block wider."] = "좌표를 얼마나 정밀하게 표시할지 정합니다. 소수 자리가 많을수록 블록이 넓어집니다."
+
 -- 2026-08-12 신규 (골드 툴팁 표시 항목 / 지연 시간 / 귀환석)
 L["Show Tooltip Data"] = "툴팁 표시 항목"
 L["Which sections the gold tooltip shows."] = "골드 툴팁에 어떤 항목을 표시할지 고릅니다."
