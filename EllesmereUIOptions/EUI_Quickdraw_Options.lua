@@ -648,6 +648,15 @@ initFrame:SetScript("OnEvent", function(self)
             local icon, name = ns.SlotDisplay(slot)
             out[1] = { icon = icon, name = name, slot = slot, pin = true }
         end
+        -- Beside it, and pinned for the same reason: an entry that summons
+        -- whatever the player rode last. Its target changes on its own, so it
+        -- is a kind rather than a mount -- there is nothing here to pick.
+        do
+            local slot = { kind = "lastmount" }
+            local icon = ns.SlotDisplay(slot)
+            out[#out + 1] = { icon = icon, name = "Last Used Mount",
+                              slot = slot, pin = true }
+        end
         for _, mountID in ipairs(C_MountJournal.GetMountIDs()) do
             local name, spellID, icon, _, _, _, _, _, _, hideOnChar, isCollected =
                 C_MountJournal.GetMountInfoByID(mountID)

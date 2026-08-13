@@ -1402,6 +1402,17 @@ local function FireInsecure(slot)
         -- summoned anyway.
         C_MountJournal.SummonByID(0)
 
+    elseif slot.kind == "lastmount" and C_MountJournal then
+        -- The same call with the mount the player last rode, tracked rather
+        -- than stored on the slot -- the whole point of the entry is that it
+        -- changes on its own. Nothing tracked yet (a fresh profile, or a
+        -- session where the player has not mounted) falls back to the random
+        -- favorite rather than doing nothing: an entry that answers a press
+        -- with silence reads as broken.
+        local pf = P()
+        local id = pf and pf.lastMountID
+        C_MountJournal.SummonByID(type(id) == "number" and id or 0)
+
     elseif slot.kind == "spec" then
         local index = SpecIndexFor(slot)
         -- Refused in combat by the game itself, with its own error message.
@@ -1521,6 +1532,21 @@ local function SlotDisplay(slot)
         if type(slot.id) ~= "number" then return QUESTION_MARK, slot.name end
         local name, _, icon = C_MountJournal.GetMountInfoByID(slot.id)
         return icon or QUESTION_MARK, name or slot.name
+
+    elseif k == "lastmount" then
+        -- Whatever is tracked right now, so the entry shows the mount it would
+        -- actually summon. Before anything is tracked it shows what it would
+        -- fall back to, which is the random favorite (see FireInsecure), under
+        -- a name that says what the entry IS rather than what it is standing
+        -- in for.
+        local pf = P()
+        local id = pf and pf.lastMountID
+        if type(id) == "number" then
+            local name, _, icon = C_MountJournal.GetMountInfoByID(id)
+            if name then return icon or QUESTION_MARK, name end
+        end
+        local info = C_Spell.GetSpellInfo(RANDOM_FAVORITE_MOUNT)
+        return (info and info.iconID) or QUESTION_MARK, "Last Used Mount"
 
     elseif k == "randommount" then
         local info = C_Spell.GetSpellInfo(RANDOM_FAVORITE_MOUNT)
@@ -8926,6 +8952,45 @@ function SetEventsEnabled(on)
         EQD:RegisterEvent("RAID_TARGET_UPDATE", function()
             if liveView and liveView:GetFrame():IsShown() then
                 liveView:RefreshMarkerPips()
+            end
+        end)
+        -- What the "Last Used Mount" entry summons. Blizzard records no such
+        -- thing -- the whole C_MountJournal surface answers only what is
+        -- summoned RIGHT NOW -- so it is observed. Every successful player cast
+        -- is offered to GetMountFromSpell, which answers with a mountID for a
+        -- mount summon and nil for everything else, so the filter and the
+        -- answer are one call; Blizzard's own mount UI watches this same event
+        -- (Blizzard_MountCollection.lua:1022). Documented
+        -- SecretArguments = "AllowedWhenTainted", so a tainted addon may call
+        -- it (MountJournalDocumentation.lua:249-262).
+        --
+        -- Ignored outright in combat. This fires for every cast the player
+        -- makes, and a payload read there may be a secret value; nothing is
+        -- missed by skipping it, because no mount can be summoned in combat
+        -- anyway.
+        --
+        -- Stored on the profile, so the entry is not blank at the start of a
+        -- session. A profile shared between characters shares the memory too,
+        -- and the game refuses a summon the character cannot make, with its own
+        -- message -- the same answer a mount entry picked on another character
+        -- already gives.
+        --
+        -- Inline for the reason the registration above it is: the main chunk is
+        -- at Lua's ceiling of 200 locals.
+        EQD:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED", function(_, _, unit, _, spellID)
+            if unit ~= "player" or InCombatLockdown() then return end
+            if type(spellID) ~= "number" or not C_MountJournal.GetMountFromSpell then
+                return
+            end
+            local mountID = C_MountJournal.GetMountFromSpell(spellID)
+            local pf = P()
+            if mountID and pf and pf.lastMountID ~= mountID then
+                pf.lastMountID = mountID
+                -- Only a palette actually holding one of these has anything to
+                -- redraw, and RequestPush coalesces and defers like every other
+                -- push, so the cost of a mount cast is one comparison for
+                -- everyone else.
+                RequestPush()
             end
         end)
     else
