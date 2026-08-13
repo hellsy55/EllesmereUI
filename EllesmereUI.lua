@@ -4157,6 +4157,15 @@ end
 -- Returns ok, r, g, b -- ok is a PLAIN boolean, r/g/b may be SECRET numbers: feed them straight
 -- to a setter, never inspect or do arithmetic on them.
 --
+-- SCOPE, measured in a 12.1 dungeon: under an identity restriction the client will answer "is
+-- this unit me?" (CanCompareUnitTokens true, UnitIsUnit a SECRET boolean) and REFUSES every
+-- other pairing (CanCompareUnitTokens false, UnitIsUnit returns nil, both argument orders).
+-- Refuses by returning nothing, not by erroring, which is why the loop below type-checks the
+-- answer instead of trusting it. So in practice this recovers the colour when the restricted
+-- unit is the player, and other group members keep Blizzard's shade -- knowing WHICH other
+-- player an enemy is on is the exact fact the restriction exists to hide. The roster loop is
+-- kept general rather than hardcoded to "player" so it starts working if that ever relaxes.
+--
 -- Which group members are worth comparing against only changes on a roster or palette edit, so
 -- the list is cached as a flat unit/colour array (no per-call allocation, no per-call UnitClass
 -- or token concat). Only the compares themselves have to run live.
@@ -4213,9 +4222,12 @@ function EllesmereUI.GetClassColorForRestrictedUnit(unit, secretClassToken)
     local canCompare = C_Secrets and C_Secrets.CanCompareUnitTokens
     for i = 1, count, 2 do
         local u = candidates[i]
-        -- CanCompareUnitTokens false means UnitIsUnit would fail outright, not go secret.
+        -- CanCompareUnitTokens false means UnitIsUnit answers nothing, not that it goes secret.
         if (not canCompare) or canCompare(unit, u) then
             local isSameUnit = UnitIsUnit(unit, u)
+            -- Belt and braces: the predicate above should have caught a refusal, and a nil
+            -- reaching pick() would throw. type() reports a secret's underlying type, so a
+            -- secret boolean -- the whole point of this fold -- passes here.
             if type(isSameUnit) == "boolean" then
                 local col = candidates[i + 1]
                 r = pick(isSameUnit, col.r, r)
