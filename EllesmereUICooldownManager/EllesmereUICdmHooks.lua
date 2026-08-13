@@ -95,16 +95,43 @@ end
 -- pandemic glow over a freshly cast aura until the next tick takes it down.
 -- Blizzard's pandemic flag is dropped with it: ShowPandemicStateFrame is the only
 -- thing that sets it and it stops being called once the item goes inactive, so a
--- stale true would just re-light the glow on the next tick. Both re-arm from
--- Blizzard's next Show, within a tick of the icon coming back. Hooked lazily from
--- the overlay build below, so a bar with no pandemic glow never pays for it.
+-- stale true would just re-light the glow on the next tick. Hooked lazily from the
+-- overlay build below, so a bar with no pandemic glow never pays for it.
+--
+-- Clearing the flag is not enough on its own when the aura ends EARLY (dispelled,
+-- target lost, pool release) instead of running out. Blizzard computes the
+-- pandemic window once, on the aura landing, and never clears it on the way out:
+-- CheckSetPandemicAlertTriggerTime returns before touching pandemicStartTime /
+-- pandemicEndTime once the aura is inactive. The item is still registered for the
+-- viewer's OnUpdate and the viewer never stops running it (visibility of the ITEM
+-- is not consulted), so a window whose aura is already gone keeps satisfying
+-- IsInPandemicTime and re-sets the flag on the hidden icon a frame later. Re-apply
+-- inside that leftover window and the tick lights a full pandemic glow over a
+-- fresh aura, held until the DEAD aura's end time passes.
+--
+-- So the flag is also marked unusable from here until the item computes a new
+-- window (ns._PandemicWindowSet). Only when the aura is really gone -- Blizzard
+-- clears auraInstanceID before hiding the icon, while a bar merely being hidden
+-- leaves it set -- so a visibility toggle mid-pandemic keeps its glow. The bias is
+-- deliberate: a suppressed glow costs a tick, a wrong one is what was reported.
 function ns._PandemicIconHide(self)
     local fd = hookFrameData[self]
-    if fd and fd.pandemicGlowActive then
-        if fd.pandemicOverlay then ns.StopNativeGlow(fd.pandemicOverlay) end
-        fd.pandemicGlowActive = false
+    if fd then
+        if fd.pandemicGlowActive then
+            if fd.pandemicOverlay then ns.StopNativeGlow(fd.pandemicOverlay) end
+            fd.pandemicGlowActive = false
+        end
+        if self.auraInstanceID == nil then fd._panStale = true end
     end
     if ns._pandemicState then ns._pandemicState[self] = nil end
+end
+
+-- Blizzard recomputed the pandemic window, so the flag describes the aura that is
+-- on the icon NOW. Runs on every application that carries time over, well before
+-- the window itself opens.
+function ns._PandemicWindowSet(self)
+    local fd = hookFrameData[self]
+    if fd then fd._panStale = nil end
 end
 
 -- External frame cache from main file
@@ -8794,7 +8821,10 @@ function ns.SetupViewerHooks()
                                         end
                                     end
                                     if custom then
-                                        inPandemic = ns._pandemicState and ns._pandemicState[frame]
+                                        -- Not while the flag is describing an aura
+                                        -- that already ended (ns._PandemicIconHide).
+                                        inPandemic = not fd._panStale
+                                            and ns._pandemicState and ns._pandemicState[frame]
                                     elseif isNone then
                                         -- The hook only fires on the NEXT
                                         -- ShowPandemicStateFrame, so an icon already
@@ -8814,8 +8844,14 @@ function ns.SetupViewerHooks()
                                         fd.pandemicOverlay = ov
                                         -- Once per frame, and only for icons that
                                         -- actually glow: the stop edge the tick
-                                        -- cannot see (see ns._PandemicIconHide).
+                                        -- cannot see, and the window edge that
+                                        -- says the flag is current again (see
+                                        -- ns._PandemicIconHide).
                                         frame:HookScript("OnHide", ns._PandemicIconHide)
+                                        if frame.SetPandemicAlertTriggerTime then
+                                            hooksecurefunc(frame, "SetPandemicAlertTriggerTime",
+                                                ns._PandemicWindowSet)
+                                        end
                                     end
                                     -- Same base-level tracking as the buff glow, one
                                     -- level higher so pandemic sits above buff glow.
