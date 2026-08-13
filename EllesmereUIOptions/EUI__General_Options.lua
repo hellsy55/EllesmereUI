@@ -955,6 +955,48 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.8.6",
+        features = {
+            {
+                module = "Raid Frames",
+                title  = "Fully Vertical Raid Frames",
+                desc   = "Every growth combination allowed -- Up + Up lays the raid out in one straight line",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "LAYOUT", highlight = "Group Growth" },
+            },
+            {
+                module = "Chat",
+                title  = "Timestamp All Messages",
+                desc   = "Stamps system messages, loot, achievements, and addon prints, not just player chat",
+                nav    = { module = "EllesmereUIChat", page = "Chat", section = "EXTRAS", highlight = "Timestamp All Messages" },
+            },
+            {
+                module = "Quickdraw",
+                title  = "Bigger Menus & New Presets",
+                desc   = "Menus hold up to 16 entries, plus Quest Items and Professions presets, a Last Used Mount entry, and a Menu Cancel Action keybind",
+            },
+            {
+                module = "Quickdraw",
+                title  = "Smarter Pickers",
+                desc   = "Mount and toy pickers list everything you own and also search source and favorite fields",
+            },
+        },
+        fixes = {
+            { module = "General", text = "Reloading the UI while in combat no longer causes script-ran-too-long errors and half-loaded modules." },
+            { module = "Raid Frames", text = "Party frame dispel overlays now follow the configured display mode, icons, and custom dispel colors." },
+            { module = "Raid Frames", text = "Right-clicking a raid member who is in a different zone now opens the player menu instead of the pet menu." },
+            { module = "Raid Frames", text = "Buff Manager effect indicators set to an unavailable Show When mode now display instead of showing nothing." },
+            { module = "Chat", text = "Clickable links and player names on lines with shortened channel names now respond exactly where they appear, and the wheel scrolls into restored history right after a reload." },
+            { module = "Cooldown Manager", text = "Racial spells assigned to a custom bar stay there through spec changes and relogs, and racials untracked in Blizzard's Cooldown Manager display again." },
+            { module = "Cooldown Manager", text = "Pandemic Glow no longer flashes briefly when a tracked buff is freshly applied, and invisible reserved buff slots no longer show tooltips or block mouseover casts." },
+            { module = "Quickdraw", text = "Nested menus open reliably when moving the pointer to a child entry, and stack counts render pixel-sharp at every scale." },
+            { module = "Unit Frames", text = "Pinging over unit frames no longer errors in Mythic+ and raid combat; frame pings are temporarily world pings pending a Blizzard fix." },
+            { module = "Aura Buff Reminders", text = "The Missing Pet reminder no longer appears while mounted or flashes on dismount." },
+            { module = "Resource Bars", text = "All entries in the Threshold Settings spec dropdown are now clickable." },
+            { module = "Blizz UI Enhanced", text = "Fixed errors when hovering certain event UI widgets and when receiving certain loot toasts, such as while fishing." },
+            { module = "Localization", text = "Major catch-ups for German, Korean, Brazilian Portuguese, Simplified Chinese, and Traditional Chinese, plus Bags menus, prompts, and bank headers now translate." },
+        },
+    },
+    {
         version = "8.8.5",
         heroes = {
             {

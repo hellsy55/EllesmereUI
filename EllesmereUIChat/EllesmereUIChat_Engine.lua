@@ -12,7 +12,9 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --      one-time -- nothing in Blizzard code writes that alpha back)
 --    - lockstep scrolling, so Blizzard's INVISIBLE hyperlink hit-zones stay
 --      aligned under OUR visible text and keep serving link clicks from
---      their secure scripts, exactly as before this engine existed
+--      their secure scripts -- except while Shortened Channel Names is on,
+--      when the link takeover serves links from OUR windows instead
+--      (shortened text desyncs their zone layout; see the takeover section)
 --    - combat log hosting (the one window Blizzard still renders, on demand)
 --    - config mirrors (chat color changes, censor/report rebuilds)
 --
@@ -79,7 +81,8 @@ ns._chatWins = WINS
 --      never intercepts input meant for our thin bar in the same gutter
 --  Their FontStringContainer keeps its hyperlink hit-zones ARMED on purpose:
 --  invisible under our identical, lockstep-scrolled text they serve link
---  clicks from Blizzard's own secure scripts.
+--  clicks from Blizzard's own secure scripts -- unless the link takeover is
+--  armed (Shortened Channel Names on), which mouse-blocks them from above.
 -------------------------------------------------------------------------------
 local function SetBarMouse(bar, on)
     local function Apply(f)
@@ -245,6 +248,232 @@ local function BuildScrollbar(win)
     end)
 end
 
+-------------------------------------------------------------------------------
+--  Link interaction takeover -- armed ONLY while Shortened Channel Names is
+--  on. Abbreviating rewrites OUR display copy, but Blizzard's invisible
+--  hit-zone layout comes from its UNSHORTENED line, so every zone right of an
+--  abbreviation sits shifted by the width delta and clicks land off-target.
+--  The two texts genuinely differ, so congruence (the SetIndentedWordWrap fix
+--  class) cannot restore alignment; instead OUR SMF takes the mouse and
+--  serves links from its own native hit-testing, which the engine lays out
+--  from the text actually on screen. Blizzard's stored copy is NEVER
+--  rewritten in any form (field wrapper, CHAT_*_GET globals, or
+--  TransformMessages all plant tainted values where secure passes read).
+--    - A bare SMF intrinsic dispatches NO mouse scripts whatsoever
+--      (field-measured: not OnMouseDown, not the hyperlink scripts, no
+--      matter the mouse/hyperlink/FSC arming or frame level -- the
+--      OnMouseWheel refusal is the same engine class), so interaction rides
+--      a PLAIN overlay frame doing its own hit-testing against our
+--      rendered fontstrings (BuildLinkOverlay below).
+--    - Clicks forward to SetItemRef with an EXPLICIT chat frame -- the
+--      sanctioned whisper shape (an explicit frame skips ChatFrame_SendTell's
+--      FCF_OpenTemporaryWindow taint cascade). Link classes whose SetItemRef
+--      branch writes editbox/tell state are blocked in protected content
+--      with a user-visible message; secret links (lockdown lines) are
+--      blocked whole. Right-click player menus run insecure: Set Focus /
+--      Follow can throw for that one menu instance, the accepted trade.
+--    - Off = mouse off, these scripts never dispatch, and Blizzard's zones
+--      serve clicks exactly as before. Zero per-line, zero per-frame cost.
+-------------------------------------------------------------------------------
+local issecretL = _G.issecretvalue
+local SMFCF = setmetatable({}, { __mode = "k" }) -- our smf -> its Blizzard cf
+
+-- Link types whose SetItemRef branch writes editbox/tell state.
+local EDITBOX_LINK_TYPES = {
+    player = true, playerGM = true, playerCommunity = true,
+    BNplayer = true, BNplayerCommunity = true, channel = true,
+}
+
+local function LinkBlockedMsg()
+    if UIErrorsFrame then
+        UIErrorsFrame:AddMessage("This link is protected in Mythic+ and raid combat.", 1.0, 0.3, 0.3, 1.0)
+    end
+end
+
+local function WinLinkClick(smf, link, text, button)
+    if issecretL and (issecretL(link) or issecretL(text)) then
+        LinkBlockedMsg()
+        return
+    end
+    if type(link) ~= "string" then return end
+    local linkType = link:match("^([^:]+)")
+    if EDITBOX_LINK_TYPES[linkType]
+        and EUI.InProtectedInstance and EUI.InProtectedInstance() then
+        LinkBlockedMsg()
+        return
+    end
+    SetItemRef(link, text, button, SMFCF[smf] or DEFAULT_CHAT_FRAME)
+end
+
+local function WinLinkEnter(smf, link, text)
+    if issecretL and (issecretL(link) or issecretL(text)) then return end
+    local fn = ECHAT.LinkTooltipEnter
+    if fn then fn(smf, link) end
+end
+
+local function WinLinkLeave(smf)
+    local fn = ECHAT.LinkTooltipLeave
+    if fn then fn(smf) end
+end
+
+local _linkTakeover = false
+local _abbrevOn = false     -- Shortened Channel Names user setting
+local _stampAllOn = false   -- Timestamp All Messages user setting (resolved)
+local _stampFmt = nil       -- its resolved format string
+local _protActive = false   -- protected content / dev mode: transforms dormant
+
+-- Blizzard's zones cannot be killed via mouse state (field-measured: FSC
+-- dark on BOTH channels, re-asserted per message, and its zones still
+-- fired -- the arming rides the chat frame itself). They die cleanly at
+-- the source instead: hyperlinks disabled = no run registration at all.
+-- Capture-first / exact-restore; EngineTail re-asserts per message (the
+-- pipeline re-arm class).
+local function ReassertLinkSilence(win)
+    local cf = win.cf
+    if not cf or not cf.SetHyperlinksEnabled then return end
+    if win.cfNativeLinks == nil then
+        win.cfNativeLinks = (cf.GetHyperlinksEnabled and cf:GetHyperlinksEnabled()) and true or false
+    end
+    cf:SetHyperlinksEnabled(false)
+end
+
+local function RestoreLinkSilence(win)
+    local cf = win.cf
+    if not cf or win.cfNativeLinks == nil then return end
+    if cf.SetHyperlinksEnabled then cf:SetHyperlinksEnabled(win.cfNativeLinks) end
+    win.cfNativeLinks = nil
+end
+
+-- Byte-index link scan: |Hlink|hlabel|h spans in raw escaped text, the same
+-- byte semantics FindCharacterIndexAtCoordinate returns (Blizzard's own
+-- selection copy slices these indexes with :sub). Returns link, label when
+-- idx falls inside a span.
+local function LinkAtIndex(text, idx)
+    local pos = 1
+    while true do
+        local hs = text:find("|H", pos, true)
+        if not hs or hs > idx then return nil end
+        local le = text:find("|h", hs + 2, true)
+        if not le then return nil end
+        local ce = text:find("|h", le + 2, true)
+        if not ce then return nil end
+        if idx >= hs and idx <= ce + 1 then
+            return text:sub(hs + 2, le - 1), text:sub(le + 2, ce - 1)
+        end
+        pos = ce + 2
+    end
+end
+
+-- The interactive surface: a PLAIN frame over the text area. A bare SMF
+-- intrinsic dispatches NO mouse scripts at all -- not OnMouseDown, not the
+-- hyperlink scripts, regardless of EnableMouse/SetHyperlinksEnabled/FSC
+-- arming/frame level (field-measured; the OnMouseWheel refusal is the same
+-- engine class) -- so the takeover cannot ride native dispatch. The overlay
+-- does its own hit-testing against OUR smf's rendered fontstrings:
+--   - motion-only while idle; an OnUpdate runs ONLY while the cursor is
+--     inside the text area (OnEnter arms it, OnLeave/OnHide disarm)
+--   - the tick finds the fontstring under the cursor
+--     (FindCharacterIndexAtCoordinate, strict isInside only -- the mixin's
+--     own Find* wrapper falls back to nearest line, which would make every
+--     pixel "hit"), maps the byte index into a link span, and drives
+--     tooltip enter/leave plus the overlay's click channel: click-enabled
+--     ONLY while over a link, so non-link clicks fall through to the world
+--     exactly like stock chat
+--   - secret text (lockdown lines): GetText returns a secret, the scan is
+--     skipped, the spot stays click-through
+local function BuildLinkOverlay(win)
+    local smf = win.smf
+    local ov = CreateFrame("Frame", nil, smf:GetParent())
+    ov:SetAllPoints(smf)
+    ov:SetFrameLevel(smf:GetFrameLevel() + 1)
+    ov:Hide()
+    win.linkOverlay = ov
+
+    local curLink, curLabel
+    local function SetHover(link, label)
+        curLabel = label
+        if link == curLink then return end
+        if curLink then WinLinkLeave(smf) end
+        curLink = link
+        if link then WinLinkEnter(smf, link) end
+        ov:SetMouseClickEnabled(link ~= nil)
+    end
+    local function HoverTick()
+        local x, y = smf:GetScaledCursorPosition()
+        local link, label
+        local lines = smf.visibleLines
+        if lines then
+            for i = 1, #lines do
+                local fs = lines[i]
+                if fs and fs:IsShown() then
+                    local ci, inside = fs:FindCharacterIndexAtCoordinate(x, y)
+                    -- Secret-content fontstrings return SECRET ci/inside
+                    -- (boolean-testing them errors); the line serves no
+                    -- links either way. Skip, don't break: every other
+                    -- line reports inside=false for this cursor, so the
+                    -- hover correctly resolves to no link.
+                    if issecretL and (issecretL(ci) or issecretL(inside)) then
+                        ci = nil
+                    end
+                    if ci and inside then
+                        local t = fs:GetText()
+                        if type(t) == "string" and not (issecretL and issecretL(t)) then
+                            link, label = LinkAtIndex(t, ci)
+                        end
+                        break
+                    end
+                end
+            end
+        end
+        SetHover(link, label)
+    end
+    ov:SetScript("OnEnter", function(self)
+        self:SetScript("OnUpdate", HoverTick)
+    end)
+    ov:SetScript("OnLeave", function(self)
+        self:SetScript("OnUpdate", nil)
+        SetHover(nil, nil)
+    end)
+    ov:SetScript("OnHide", function(self)
+        self:SetScript("OnUpdate", nil)
+        SetHover(nil, nil)
+    end)
+    ov:SetScript("OnMouseUp", function(_, btn)
+        if curLink then
+            WinLinkClick(smf, curLink, curLabel, btn)
+        end
+    end)
+end
+
+local function ApplyLinkTakeover(win)
+    local ov = win.linkOverlay
+    if _linkTakeover then
+        if ov then
+            ov:SetMouseClickEnabled(false)
+            ov:SetMouseMotionEnabled(true)
+            ov:Show()
+        end
+        ReassertLinkSilence(win)
+    else
+        if ov then ov:Hide() end
+        RestoreLinkSilence(win)
+    end
+end
+
+-- Effective arming = any WIDTH-CHANGING transform (channel abbreviation or
+-- stamp-all -- both make our line differ from Blizzard's zone layout) MINUS
+-- protected content: in M+/raid combat/dev mode every width transform goes
+-- dormant (secret hit-test returns and secret links make our lane a
+-- degraded experience there), lines render exactly as Blizzard laid them
+-- out, and its secure zones -- aligned once more -- serve every link
+-- natively, secrets included.
+local function RecomputeTakeover()
+    local want = (_abbrevOn or _stampAllOn) and not _protActive
+    if want == _linkTakeover then return end
+    _linkTakeover = want
+    for _, win in pairs(WINS) do ApplyLinkTakeover(win) end
+end
+
 local function CreateWindowSMF(cf)
     local d = CFD(cf)
     if not d.bg then return nil end
@@ -256,28 +485,33 @@ local function CreateWindowSMF(cf)
     -- A bare intrinsic starts with scrolling disallowed; without this the
     -- mixin's ScrollUp/ScrollDown are no-ops.
     smf:SetScrollAllowed(true)
-    -- No mouse at all -- not even wheel. The bare intrinsic never
-    -- dispatches OnMouseWheel (field-measured: topmost, wheel-enabled,
-    -- IsMouseOver true, script never fires), so claiming the wheel here
-    -- SWALLOWS it. Blizzard's chat frame underneath receives the wheel
-    -- natively (modifier semantics, chat CVars, keybinds included) and the
-    -- scroll-method mirrors installed with the bridge copy its offset into
-    -- this view. Link interaction stays on Blizzard's invisible hit-zones.
+    -- No mouse at all -- ever. A bare SMF intrinsic dispatches NO mouse
+    -- scripts (not the wheel, not OnMouseDown, not the hyperlink scripts;
+    -- field-measured across all of them -- the engine simply does not route
+    -- mouse to Lua-created instances of this widget). Blizzard's chat frame
+    -- underneath receives the wheel natively and the scroll-method mirrors
+    -- installed with the bridge copy its offset into this view; link
+    -- interaction while the takeover is armed rides the PLAIN overlay
+    -- frame built below, never this widget.
     smf:EnableMouse(false)
     smf:EnableMouseWheel(false)
+    SMFCF[smf] = cf
 
     local win = { cf = cf, smf = smf }
 
-    -- One level above the chat frame (panel sits one below it), so the wheel
-    -- deterministically reaches OUR view; the sync handler then drives
-    -- Blizzard's view to the same offset.
-    smf:SetFrameLevel(d.bg:GetFrameLevel() + 2)
+    -- +4: headroom above every Blizzard zone frame in the stack (cf at
+    -- bg+1, its FontStringContainer at bg+2), so the link overlay at smf+1
+    -- sits above them all. Mouse-transparent itself, so the altitude
+    -- changes nothing while the takeover is disarmed.
+    smf:SetFrameLevel(d.bg:GetFrameLevel() + 4)
 
     win.extraLines = 0
     WINS[cf] = win
     BuildScrollbar(win)
     smf:SetOnScrollChangedCallback(function() UpdateScrollbar(win) end)
     smf:AddOnDisplayRefreshedCallback(function() UpdateScrollbar(win) end)
+    BuildLinkOverlay(win)
+    ApplyLinkTakeover(win)
     LayoutWindowSMF(cf)
     ECHAT.EngineApplyFontTo(cf)
     return win
@@ -380,6 +614,7 @@ end
 local EngineTailObserver -- optional (session history); set via ECHAT below
 local EngineTabObserver -- optional (tab strip flash/unread); set via ECHAT below
 local QueueDivergedRebuild -- forward declaration (defined with the mirrors)
+local EngineUpdateProtectedState -- forward declaration (defined with the mirrors)
 
 -------------------------------------------------------------------------------
 --  Shortened channel names (opt-in). The transform runs on OUR display copy
@@ -388,9 +623,10 @@ local QueueDivergedRebuild -- forward declaration (defined with the mirrors)
 --  exists to eliminate, and rewriting the CHAT_*_GET globals is the other
 --  field-proven poison). Matching is on the channel hyperlink KEYWORD
 --  (|Hchannel:party|h[...]|h), locale-independent, plain substring scanning.
---  Secret lines pass through whole. Known cosmetic cost: shortened lines can
---  wrap differently than Blizzard's invisible hit-zone text, so link zones
---  in scrolled-back content may sit a row off for such lines.
+--  Secret lines pass through whole. While this feature is on, the link
+--  takeover (section above CreateWindowSMF) serves hyperlinks from OUR
+--  windows -- shortened text desyncs Blizzard's invisible hit-zones, both
+--  within a line (width delta) and across wraps.
 -------------------------------------------------------------------------------
 local issecretvalue = _G.issecretvalue
 
@@ -460,9 +696,13 @@ local function AbbreviateChannelText(text)
     return table.concat(pieces)
 end
 
-local _abbrevOn = false
+-- _abbrevOn is declared with the takeover state (the two arm together:
+-- abbreviation is the one transform that changes glyph widths, so it alone
+-- desyncs Blizzard's invisible hit-zones from our text; class-colored names
+-- insert only zero-width color codes and need no takeover).
 function ECHAT.EngineSetChannelAbbrev(on)
     _abbrevOn = on == true
+    RecomputeTakeover()
 end
 
 -------------------------------------------------------------------------------
@@ -665,13 +905,65 @@ local function DisplayText(msg, event)
     if not _abbrevOn and not _ccnOn then return msg end
     if issecretvalue and issecretvalue(msg) then return msg end
     if type(msg) ~= "string" then return msg end
-    if _abbrevOn and msg:find("|Hchannel:", 1, true) then
+    if _abbrevOn and not _protActive and msg:find("|Hchannel:", 1, true) then
         msg = AbbreviateChannelText(msg)
     end
     if _ccnOn and event ~= nil
         and not (issecretvalue and issecretvalue(event))
         and CCN_EVENTS[event] then
         msg = ColorRosterNames(msg)
+    end
+    return msg
+end
+
+-------------------------------------------------------------------------------
+--  Timestamp All Messages (opt-in). Blizzard's formatter stamps ONLY ordinary
+--  player chat and pings (verified against its MessageEventHandler source);
+--  system/loot/achievement/BG/BN-toast branches and direct AddMessage calls
+--  (addon prints) are never stamped. This transform stamps OUR display copy
+--  of any line that arrives without one -- same lane as the channel
+--  abbreviations, display-only, Blizzard's stored line untouched.
+--  Secret lines pass through whole (concat on secrets errors; those are
+--  player messages, which Blizzard already stamps). Session history composes
+--  cleanly: its capture stripper removes ANY leading stamp (ours or baked)
+--  and replay re-derives the prefix from the stored serverTime.
+-------------------------------------------------------------------------------
+-- _stampAllOn/_stampFmt are declared with the takeover state: stamping is a
+-- WIDTH-CHANGING transform exactly like abbreviation, so it arms the link
+-- takeover too (a stamped loot line's item link would otherwise sit shifted
+-- off Blizzard's unstamped zone layout).
+function ECHAT.EngineSetStampAll(on, fmt)
+    if on == true and type(fmt) == "string" and fmt ~= "" then
+        _stampAllOn, _stampFmt = true, fmt
+    else
+        _stampAllOn, _stampFmt = false, nil
+    end
+    RecomputeTakeover()
+end
+
+-- Same prefix patterns as the session-history stripper (keep in sync): any
+-- line already starting with a rendered stamp is left alone, so Blizzard's
+-- baked stamps never double up.
+local function HasTimestampPrefix(msg)
+    return msg:find("^%d%d?:%d%d:%d%d%s*[AP]M%s") ~= nil
+        or msg:find("^%d%d?:%d%d:%d%d%s") ~= nil
+        or msg:find("^%d%d?:%d%d%s*[AP]M%s") ~= nil
+        or msg:find("^%d%d?:%d%d%s") ~= nil
+end
+
+-- when: server time for the stamp; nil = now. date() (not BetterDate) to
+-- match the session-history replay prefix exactly.
+local function StampDisplay(msg, when)
+    -- Dormant in protected content, same as the abbreviations: the takeover
+    -- is disarmed there and a width-changed line would desync Blizzard's
+    -- restored zones.
+    if not _stampAllOn or _protActive then return msg end
+    if type(msg) ~= "string" then return msg end
+    if issecretvalue and issecretvalue(msg) then return msg end
+    if HasTimestampPrefix(msg) then return msg end
+    local ok, ts = pcall(date, _stampFmt, when and math.floor(when) or nil)
+    if ok and type(ts) == "string" and ts ~= "" then
+        return ts .. msg
     end
     return msg
 end
@@ -684,10 +976,16 @@ local function ExtractLineID(eventArgs)
 end
 
 local function EngineTail(cf, msg, r, g, b, chatTypeID, accessID, typeID, event, eventArgs)
+    -- Cheap per-message probe: catches protected-state flips that have no
+    -- zone-in edge (dev mode toggles) before the next line renders.
+    if EngineUpdateProtectedState then EngineUpdateProtectedState() end
     local win = WINS[cf]
-    local display = DisplayText(msg, event)
+    local display = StampDisplay(DisplayText(msg, event))
     if win then
         win.smf:AddMessage(display, r, g, b, chatTypeID, ExtractLineID(eventArgs), event)
+        -- The pipeline re-arms Blizzard chat widget state per line (the PMOff
+        -- zombie class); while the takeover is armed, keep their zones silent.
+        if _linkTakeover then ReassertLinkSilence(win) end
         -- Divergence check: if Blizzard's buffer was cleared behind our back
         -- (window reset, a third-party Clear call, temp-window pool reuse),
         -- its count falls below ours the moment the next line lands. Both
@@ -743,6 +1041,31 @@ end
 -- our view. Semantics: plain = 3 lines, Shift = top/bottom, Ctrl = page.
 local function ChatFrameWheel(cf, delta)
     local up = delta > 0
+    -- While the link takeover is armed, OUR view is both the zone source and
+    -- the scroll authority: Blizzard's buffer lacks the replayed session
+    -- history, so routing the wheel through ITS scroll methods pins the
+    -- offset at its (shorter) range and the history rows above are
+    -- unreachable (field report: "can't scroll up in history after /reload,
+    -- but the copy popup shows it"). Its zones are silenced while armed, so
+    -- lockstep no longer matters; SyncBlizzardScroll still nudges its view
+    -- as far as its clamp allows. Hidden smf (combat log host, passthrough)
+    -- and disarmed mode keep the Blizzard lane, where lockstep IS the zone
+    -- alignment.
+    local win = WINS[cf]
+    if win and _linkTakeover and win.smf:IsShown() then
+        local smf = win.smf
+        if IsShiftKeyDown() then
+            if up then smf:ScrollToTop() else smf:ScrollToBottom() end
+        elseif IsControlKeyDown() and smf.PageUp then
+            if up then smf:PageUp() else smf:PageDown() end
+        else
+            for _ = 1, 3 do
+                if up then smf:ScrollUp() else smf:ScrollDown() end
+            end
+        end
+        SyncBlizzardScroll(win)
+        return
+    end
     if IsShiftKeyDown() then
         if up then cf:ScrollToTop() else cf:ScrollToBottom() end
     elseif IsControlKeyDown() and cf.PageUp then
@@ -788,10 +1111,28 @@ local function RebuildWindowFromBuffer(cf)
     smf:Clear()
     win.extraLines = 0
     local n = cf:GetNumMessages()
+    -- Stamp-all rebuilds stamp with each line's true arrival time: the SMF
+    -- entry timestamp is GetTime()-domain (PackageEntry), converted here to
+    -- server time. Read-only buffer access; missing internals just skip the
+    -- stamp for that line.
+    local hb, nowT, nowG
+    if _stampAllOn and not _protActive then
+        hb = cf.historyBuffer
+        if not (hb and hb.GetEntryAtIndex and hb.GetNumElements) then hb = nil end
+        nowT, nowG = time(), GetTime()
+    end
     for i = 1, n do
         local msg, r, g, b, chatTypeID, accessID, typeID, event, eventArgs = cf:GetMessageInfo(i)
         if msg ~= nil then
-            smf:AddMessage(DisplayText(msg, event), r, g, b, chatTypeID, ExtractLineID(eventArgs), event)
+            local display = DisplayText(msg, event)
+            if hb then
+                local entry = hb:GetEntryAtIndex(hb:GetNumElements() - i + 1)
+                local ts = entry and entry.timestamp
+                if type(ts) == "number" then
+                    display = StampDisplay(display, nowT - (nowG - ts))
+                end
+            end
+            smf:AddMessage(display, r, g, b, chatTypeID, ExtractLineID(eventArgs), event)
         end
     end
     smf:ScrollToBottom()
@@ -874,7 +1215,11 @@ function ECHAT.EngineUpdateCombatLogHost()
             if bar.Track then bar.Track:SetAlpha(1) end
             SetBarMouse(bar, true)
         end
-        if win then win.smf:Hide() end
+        if win then
+            win.smf:Hide()
+            -- Blizzard renders the CL itself: its zones must serve links.
+            RestoreLinkSilence(win)
+        end
     else
         if fsc then fsc:SetAlpha(0) end
         if bar then
@@ -882,6 +1227,7 @@ function ECHAT.EngineUpdateCombatLogHost()
             SetBarMouse(bar, false)
         end
         if win then
+            ApplyLinkTakeover(win)
             win.smf:Show()
             -- Same extraLines allowance as IntegrateChatFrame: replayed
             -- lines on our side are not a cleared Blizzard buffer.
@@ -924,6 +1270,20 @@ end
 -- history backfill lines are shed by the rebuild, same as censor rebuilds).
 ECHAT.EngineQueueRebuildAll = QueueRebuildAll
 
+-- Protected-content master switch for the abbreviation feature. On a flip
+-- the takeover re-arms/disarms and every window rebuilds: entering
+-- protected content UNSHORTENS the scrollback (DisplayText stops
+-- abbreviating while _protActive) so Blizzard's restored secure zones line
+-- up again; leaving re-shortens. No-op while the state is unchanged, so
+-- the PEW edge and the per-message probe cost one comparison.
+EngineUpdateProtectedState = function()
+    local prot = (EUI.InProtectedInstance and EUI.InProtectedInstance()) and true or false
+    if prot == _protActive then return end
+    _protActive = prot
+    RecomputeTakeover()
+    QueueRebuildAll()
+end
+
 -- Single-window rebuild for the bridge tail's divergence check.
 local _divergedQueued = {}
 QueueDivergedRebuild = function(cf)
@@ -951,6 +1311,7 @@ local function RecolorOurWindows(chatType, r, g, b)
     end
 end
 
+mirrorFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 mirrorFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "UPDATE_CHAT_COLOR" then
         local chatType, r, g, b = ...
@@ -960,6 +1321,10 @@ mirrorFrame:SetScript("OnEvent", function(_, event, ...)
                 RecolorOurWindows("REPLY", r, g, b)
             end
         end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Protected-state boundary check only: rebuilds ONLY on a flip
+        -- (never a per-loading-screen pass).
+        EngineUpdateProtectedState()
     else
         QueueRebuildAll()
     end
@@ -1027,11 +1392,14 @@ function ECHAT.EngineSetPassthrough(on)
                 win.smf:Hide()
             end
             if win.track then win.track:Hide() end
+            if win.linkOverlay then win.linkOverlay:Hide() end
         else
             if win.pmWasShown then
                 win.pmWasShown = nil
                 win.smf:Show()
             end
+            -- Re-shows the link overlay when the takeover is armed.
+            ApplyLinkTakeover(win)
             UpdateScrollbar(win)
         end
     end

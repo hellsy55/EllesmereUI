@@ -7429,15 +7429,20 @@ function ns.NormalizeRacialAssignments()
     local p = ECME.db and ECME.db.profile
     if not (p and p.cdmBars and p.cdmBars.bars) then return end
 
-    -- Gather the non-buff bars' assigned lists once (in bar order).
-    local lists = {}
+    -- Gather the non-buff bars' assigned lists once (in bar order), keeping
+    -- each list's bar key so the keeper choice below can tell default bars
+    -- from explicit custom placements.
+    local lists, listBarKeys = {}, {}
     for _, b in ipairs(p.cdmBars.bars) do
         local isBuff = (b.barType == "custom_buff")
             or (ns.IsBarBuffFamily and ns.IsBarBuffFamily(b))
         -- b.key guard: a ghost bar (keyless skeleton from a stale override write) would index barSpells with nil and error.
         if not isBuff and b.key then
             local sd = ns.GetBarSpellData(b.key)
-            if sd and sd.assignedSpells then lists[#lists + 1] = sd.assignedSpells end
+            if sd and sd.assignedSpells then
+                lists[#lists + 1] = sd.assignedSpells
+                listBarKeys[#lists] = b.key
+            end
         end
     end
 
@@ -7450,14 +7455,36 @@ function ns.NormalizeRacialAssignments()
         if activePresent then break end
     end
 
+    -- Keeper choice: prefer the copy on a CUSTOM bar. Lists iterate in bar
+    -- order with the default bars first, so the old first-found-wins rule kept
+    -- the Essential/Utility copy of a dual-state and DELETED the user's custom
+    -- placement -- the 12.1 native-racial "reset to Essential/Utility" report
+    -- (Blizzard's CDM now tracks racials, so a materialized default-bar copy
+    -- can coexist with the user's). A custom-bar copy is always an explicit
+    -- act; a default-bar copy can be a materialized spillover.
+    local keeperList
+    if activePresent then
+        for li, list in ipairs(lists) do
+            local bk = listBarKeys[li]
+            if bk ~= "cooldowns" and bk ~= "utility" then
+                for _, sid in ipairs(list) do
+                    if sid == active then keeperList = list; break end
+                end
+            end
+            if keeperList then break end
+        end
+    end
+
     -- Single pass across every bar: keep exactly one racial slot total.
     local kept = false
     for _, list in ipairs(lists) do
         for i = #list, 1, -1 do
             local sid = list[i]
             if sid and sid > 0 and ALL_RACIAL_SPELLS[sid] then
-                if sid == active and activePresent and not kept then
-                    -- Keep the current character's own racial where it sits.
+                if sid == active and activePresent and not kept
+                   and (not keeperList or list == keeperList) then
+                    -- Keep the current character's own racial where it sits
+                    -- (the custom-bar copy when one exists, see keeperList).
                     kept = true
                 elseif not activePresent and not kept then
                     -- No active racial anywhere: promote this foreign one.
@@ -7656,6 +7683,13 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
 
     -- Spell -> owning bar (variant-aware), built once. A live icon whose stored owner is a DIFFERENT bar is a transient spillover we must not materialize.
     local ownerOf
+    -- One-racial-total invariant (see NormalizeRacialAssignments): while ANY
+    -- racial-family entry is placed on any bar, the racial slot is spoken for.
+    -- Materializing a second racial slot here (a live racial icon transiting a
+    -- default bar during the login route-not-ready window) creates the
+    -- dual-state the normalize dedupe then resolves -- which historically
+    -- deleted the user's custom placement.
+    local anyRacialOwned = false
     if aprof and aprof.barSpells and ns.StoreVariantValue then
         for k, bsd in pairs(aprof.barSpells) do
             if k ~= GHOST_CD_BAR_KEY
@@ -7664,6 +7698,7 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                     if type(csid) == "number" and csid > 0 then
                         ownerOf = ownerOf or {}
                         ns.StoreVariantValue(ownerOf, csid, k, false)
+                        if ALL_RACIAL_SPELLS[csid] then anyRacialOwned = true end
                     end
                 end
             end
@@ -7760,7 +7795,10 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                             local owner = ownerOf and ns.ResolveVariantValue
                                           and ns.ResolveVariantValue(ownerOf, sid)
                             local ghosted = ghostList and FindVar and FindVar(ghostList, sid)
-                            if not ghosted and not (owner and owner ~= barData.key) then
+                            -- Racial-family guard: never mint a second racial slot
+                            -- while one is placed anywhere (anyRacialOwned above).
+                            local racialBlocked = anyRacialOwned and ALL_RACIAL_SPELLS[sid]
+                            if not ghosted and not racialBlocked and not (owner and owner ~= barData.key) then
                                 -- Store the BASE form, matching what the options normalize pass writes -- otherwise this pass persists the talent-override form and the two writers diverge (exports could ship either).
                                 local nsid = sid
                                 if C_Spell and C_Spell.GetBaseSpell then
@@ -8615,6 +8653,12 @@ eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 eventFrame:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+-- Viewer data landing after our init: the injection phase keys on live
+-- Blizzard frames (frames as truth), so a build that ran before the viewer
+-- populated may have injected a custom racial frame the native viewer now
+-- covers. One debounced rebuild re-evaluates; fires rarely (login, and
+-- Blizzard-side data refreshes).
+eventFrame:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
 -- Cinematic/cutscene end: Blizzard restores hidden frames, so re-hide ours
 eventFrame:RegisterEvent("CINEMATIC_STOP")
 eventFrame:RegisterEvent("STOP_MOVIE")
@@ -8770,6 +8814,21 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             _keybindDebounceTimer = nil
             UpdateCDMKeybinds()
         end)
+        return
+    end
+    if event == "COOLDOWN_VIEWER_DATA_LOADED" then
+        -- Native viewer data arrived (usually after login init): re-evaluate the
+        -- frames-as-truth injection decisions against the now-live frame set.
+        -- Rides the same debounced rebuild as talent changes; the reanchor sweep
+        -- hides any injected racial frame the native viewer now covers. The spell
+        -- picker's learned-set cache refreshes too (category sets just changed),
+        -- and the reseed session stamps clear so base-bar materialization re-runs
+        -- against the COMPLETE icon set (an init-time reseed may have seen a
+        -- partial viewer; the racial-family guard keeps the re-run from minting
+        -- a second racial slot).
+        if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+        if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
+        ScheduleTalentRebuild()
         return
     end
     if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED"
