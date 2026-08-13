@@ -5975,3 +5975,6 @@ L["~%dx  Myth Crest\r\n|cff888888Scan at Upgrader for exact costs|r"] = "~%dx  W
 L["~%dx  Veteran Crest"]  = "~%dx  Wappen des Veterans"
 L["~%dx  Veteran Crest\r\n|cff888888Scan at Upgrader for exact costs|r"] = "~%dx  Wappen des Veterans\r\n|cff888888Beim Aufwerter scannen für exakte Kosten|r"
 L["Background (Class Resource)"] = "Hintergrund (Klassenressource)"
+L["Texture Settings"] = "Textureinstellungen"
+L["Blizzard Atlas Class Resource"] = "Blizzard Atlas Klassenressource"
+L["Out of Combat Opacity"] = "Deckkraft außerhalb des Kampfes"
