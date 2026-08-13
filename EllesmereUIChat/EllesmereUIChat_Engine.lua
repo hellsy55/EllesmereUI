@@ -346,8 +346,12 @@ end
 
 -- Byte-index link scan: |Hlink|hlabel|h spans in raw escaped text, the same
 -- byte semantics FindCharacterIndexAtCoordinate returns (Blizzard's own
--- selection copy slices these indexes with :sub). Returns link, label when
--- idx falls inside a span.
+-- selection copy slices these indexes with :sub). Returns the link data and
+-- the WHOLE clickable string (leading |cxxxxxxxx / trailing |r included when
+-- present) -- that second value is SetItemRef's "text" argument, and the
+-- bare label is NOT a valid value for it: Blizzard's GetFixedLink does
+-- strfind(text, "|H") and then arithmetic on the result, and several
+-- ItemRefHandlers re-parse the full hyperlink out of it.
 local function LinkAtIndex(text, idx)
     local pos = 1
     while true do
@@ -358,7 +362,12 @@ local function LinkAtIndex(text, idx)
         local ce = text:find("|h", le + 2, true)
         if not ce then return nil end
         if idx >= hs and idx <= ce + 1 then
-            return text:sub(hs + 2, le - 1), text:sub(le + 2, ce - 1)
+            local s, e = hs, ce + 1
+            if hs > 10 and text:sub(hs - 10, hs - 1):match("^|c%x%x%x%x%x%x%x%x$") then
+                s = hs - 10
+            end
+            if text:sub(ce + 2, ce + 3) == "|r" then e = ce + 3 end
+            return text:sub(hs + 2, le - 1), text:sub(s, e)
         end
         pos = ce + 2
     end
@@ -389,9 +398,9 @@ local function BuildLinkOverlay(win)
     ov:Hide()
     win.linkOverlay = ov
 
-    local curLink, curLabel
-    local function SetHover(link, label)
-        curLabel = label
+    local curLink, curText
+    local function SetHover(link, linkText)
+        curText = linkText
         if link == curLink then return end
         if curLink then WinLinkLeave(smf) end
         curLink = link
@@ -400,7 +409,7 @@ local function BuildLinkOverlay(win)
     end
     local function HoverTick()
         local x, y = smf:GetScaledCursorPosition()
-        local link, label
+        local link, linkText
         local lines = smf.visibleLines
         if lines then
             for i = 1, #lines do
@@ -418,14 +427,14 @@ local function BuildLinkOverlay(win)
                     if ci and inside then
                         local t = fs:GetText()
                         if type(t) == "string" and not (issecretL and issecretL(t)) then
-                            link, label = LinkAtIndex(t, ci)
+                            link, linkText = LinkAtIndex(t, ci)
                         end
                         break
                     end
                 end
             end
         end
-        SetHover(link, label)
+        SetHover(link, linkText)
     end
     ov:SetScript("OnEnter", function(self)
         self:SetScript("OnUpdate", HoverTick)
@@ -440,7 +449,7 @@ local function BuildLinkOverlay(win)
     end)
     ov:SetScript("OnMouseUp", function(_, btn)
         if curLink then
-            WinLinkClick(smf, curLink, curLabel, btn)
+            WinLinkClick(smf, curLink, curText, btn)
         end
     end)
 end
