@@ -1685,6 +1685,49 @@ initFrame:SetScript("OnEvent", function(self)
         return slots, math.max(0, #out - MAX_SLOTS)
     end
 
+    -- Every profession this character has, as the spells the profession book
+    -- itself offers: the window opener, and where a profession has one, its
+    -- second ability -- smelting, prospecting, milling, runeforging. Cooking,
+    -- fishing and archaeology arrive the same way, GetProfessions handing back
+    -- all five slots.
+    --
+    -- Read out of the spellbook rather than from a list of spell IDs. Those IDs
+    -- change with every expansion's skill lines, and a list would go stale
+    -- silently -- the preset would simply stop offering a profession. This is
+    -- the walk Blizzard's own profession book makes
+    -- (Blizzard_ProfessionsBook.lua:387 for the offsets, :313 for the item).
+    --
+    -- Passive entries are skipped: a profession's passive is a rank, not
+    -- something a menu entry can do.
+    local function ProfessionSlots()
+        local out, dropped = {}, 0
+        local function AddProfession(index)
+            if not index then return end
+            local _, _, _, _, numSpells, spellOffset = GetProfessionInfo(index)
+            for i = 1, (numSpells or 0) do
+                local info = C_SpellBook.GetSpellBookItemInfo(
+                    i + (spellOffset or 0), Enum.SpellBookSpellBank.Player)
+                if info and info.spellID and not info.isPassive then
+                    if #out < MAX_SLOTS then
+                        out[#out + 1] = { kind = "spell", id = info.spellID }
+                    else
+                        dropped = dropped + 1
+                    end
+                end
+            end
+        end
+        -- Passed one at a time rather than collected into a table: a character
+        -- missing a profession hands back a nil in the middle of those five
+        -- returns, and a table constructor holding one stops counting there.
+        local prof1, prof2, arch, fish, cook = GetProfessions()
+        AddProfession(prof1)
+        AddProfession(prof2)
+        AddProfession(arch)
+        AddProfession(fish)
+        AddProfession(cook)
+        return out, dropped
+    end
+
     local PALETTE_PRESETS = {
         { label = "Target Markers", build = TargetMarkerSlots },
         { label = "World Markers",  build = WorldMarkerSlots },
@@ -1694,6 +1737,7 @@ initFrame:SetScript("OnEvent", function(self)
         { label = "Druid Forms",    build = FormSlots },
         { label = "Stances",        build = StanceSlots },
         { label = "Specializations", build = SpecSlots },
+        { label = "Professions",    build = ProfessionSlots },
     }
 
     ---------------------------------------------------------------------------
