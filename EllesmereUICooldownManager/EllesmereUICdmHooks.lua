@@ -87,6 +87,26 @@ function ns.RefreshBuffGlows()
     end
 end
 
+-- Take a pandemic glow down when its icon hides. The buff tick only visits SHOWN
+-- frames, so a glow lit at the moment the icon hides -- which is how every
+-- pandemic ends, the aura runs out and Blizzard hides the buff icon -- can never
+-- reach the tick's stop branch. The textures keep animating on the hidden overlay
+-- and come back up WITH the icon on the buff's next application, flashing a
+-- pandemic glow over a freshly cast aura until the next tick takes it down.
+-- Blizzard's pandemic flag is dropped with it: ShowPandemicStateFrame is the only
+-- thing that sets it and it stops being called once the item goes inactive, so a
+-- stale true would just re-light the glow on the next tick. Both re-arm from
+-- Blizzard's next Show, within a tick of the icon coming back. Hooked lazily from
+-- the overlay build below, so a bar with no pandemic glow never pays for it.
+function ns._PandemicIconHide(self)
+    local fd = hookFrameData[self]
+    if fd and fd.pandemicGlowActive then
+        if fd.pandemicOverlay then ns.StopNativeGlow(fd.pandemicOverlay) end
+        fd.pandemicGlowActive = false
+    end
+    if ns._pandemicState then ns._pandemicState[self] = nil end
+end
+
 -- External frame cache from main file
 local _ecmeFC = ns._ecmeFC
 local FC = ns.FC
@@ -8792,6 +8812,10 @@ function ns.SetupViewerHooks()
                                         ov:SetAllPoints(frame)
                                         ov:EnableMouse(false)
                                         fd.pandemicOverlay = ov
+                                        -- Once per frame, and only for icons that
+                                        -- actually glow: the stop edge the tick
+                                        -- cannot see (see ns._PandemicIconHide).
+                                        frame:HookScript("OnHide", ns._PandemicIconHide)
                                     end
                                     -- Same base-level tracking as the buff glow, one
                                     -- level higher so pandemic sits above buff glow.
