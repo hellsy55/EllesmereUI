@@ -452,15 +452,28 @@ initFrame:SetScript("OnEvent", function(self)
             local _, name = ns.SlotDisplay(slot)
             local caption
             if slot.kind == "palette" then
-                -- Capped at what the palette being edited can seat: a lane
-                -- takes a nested palette whole, an arc or a halo its first
-                -- eight -- see NestChildCap.
-                local kids = ns.ChildSlots
-                    and ns.ChildSlots(ns.ChildIndex(slot),
-                                      ns.NestChildCap and ns.NestChildCap(editPalette))
+                -- Capped at what the palette being edited can seat, which is
+                -- the whole nested menu everywhere but the halo -- eight fixed
+                -- positions round a cell, and no ninth to put a child in. See
+                -- NestChildCap.
+                local cap = ns.NestChildCap and ns.NestChildCap(editPalette)
+                local child = ns.ChildIndex(slot)
+                local kids = ns.ChildSlots and ns.ChildSlots(child, cap)
                 caption = ("nested action menu, %d %s"):format(
                     kids and #kids or 0,
                     (kids and #kids == 1) and "entry" or "entries")
+                -- Said where the user meets it, rather than left to be
+                -- discovered by counting the entries that turned up: a menu
+                -- holding more than the halo can show looks broken otherwise.
+                local all = ns.ChildSlots and ns.ChildSlots(child, MAX_SLOTS)
+                if all and kids and #all > #kids then
+                    -- The literal stays on the Lf line: the locale extractor
+                    -- reads one line at a time, and a string wrapped onto the
+                    -- next one is a key it never learns about.
+                    caption = caption
+                        .. EllesmereUI.Lf(", %1$d not shown in this layout",
+                                          #all - #kids)
+                end
             else
                 -- The stored kind strings are one word each; only the marker
                 -- kinds read better with the space put back.
@@ -1512,20 +1525,30 @@ initFrame:SetScript("OnEvent", function(self)
         184353, 188952, 190196, 190237, 193588, 200630, 206195, 208704,
         209035, 212337, 228940,
     }
+    -- A builder returns what it found and, second, how many it had to leave
+    -- out. A preset that quietly stopped at the cap was the "it also seems to
+    -- limit hearthstones" half of the report: the toys share a cooldown, so
+    -- dropping the tail of THOSE costs nothing, but a hearthstone the player
+    -- owns and cannot see is a destination they have lost. Counted here and
+    -- said in the menu rather than fixed by raising a cap on its own -- some
+    -- collections are simply larger than any menu.
     local function HearthstoneSlots()
-        local out = {}
+        local out, dropped = {}, 0
         for _, itemID in ipairs(HEARTH_ITEMS) do
             if C_Item.GetItemCount(itemID) > 0 then
                 out[#out + 1] = { kind = "item", id = itemID }
             end
         end
         for _, toyID in ipairs(HEARTH_TOYS) do
-            if #out >= MAX_SLOTS then break end
             if PlayerHasToy(toyID) then
-                out[#out + 1] = { kind = "toy", id = toyID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "toy", id = toyID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
-        return out
+        return out, dropped
     end
 
     -- Self-teleports only, keyed by class. Mage portals are deliberately not
@@ -1545,15 +1568,18 @@ initFrame:SetScript("OnEvent", function(self)
         },
     }
     local function TeleportSlots()
-        local out = {}
+        local out, dropped = {}, 0
         local list = TELEPORT_SPELLS[select(2, UnitClass("player"))]
         for _, spellID in ipairs(list or {}) do
-            if #out >= MAX_SLOTS then break end
             if IsPlayerSpell(spellID) then
-                out[#out + 1] = { kind = "spell", id = spellID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "spell", id = spellID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
-        return out
+        return out, dropped
     end
 
     -- The same bag walk ItemEntries does, narrowed to drinkable consumables.
@@ -1596,11 +1622,14 @@ initFrame:SetScript("OnEvent", function(self)
         114282,  -- Treant Form
     }
     local function FormSlots()
-        local out = {}
+        local out, dropped = {}, 0
         for _, spellID in ipairs(FORM_SPELLS) do
-            if #out >= MAX_SLOTS then break end
             if IsPlayerSpell(spellID) then
-                out[#out + 1] = { kind = "spell", id = spellID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "spell", id = spellID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
         -- Getting OUT is the half of shapeshifting no form spell covers, and
@@ -1613,7 +1642,7 @@ initFrame:SetScript("OnEvent", function(self)
                               name = "Cancel Form",
                               icon = "Interface\\Buttons\\UI-GroupLoot-Pass-Up" }
         end
-        return out
+        return out, dropped
     end
 
     -- One-of-a-set toggles that are not forms: a warrior's stances and a
@@ -1624,14 +1653,17 @@ initFrame:SetScript("OnEvent", function(self)
         PALADIN = { 465, 32223, 183435, 317920 },  -- Devotion, Crusader, Retribution, Concentration
     }
     local function StanceSlots()
-        local out = {}
+        local out, dropped = {}, 0
         for _, spellID in ipairs(STANCE_SPELLS[select(2, UnitClass("player"))] or {}) do
-            if #out >= MAX_SLOTS then break end
             if IsPlayerSpell(spellID) then
-                out[#out + 1] = { kind = "spell", id = spellID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "spell", id = spellID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
-        return out
+        return out, dropped
     end
 
     -- Every spec this character has. One entry short of useful on a class with
@@ -1641,7 +1673,7 @@ initFrame:SetScript("OnEvent", function(self)
         if #out < 2 then return {} end
         local slots = {}
         for i = 1, math.min(MAX_SLOTS, #out) do slots[i] = out[i].slot end
-        return slots
+        return slots, math.max(0, #out - MAX_SLOTS)
     end
 
     local PALETTE_PRESETS = {
@@ -1745,12 +1777,20 @@ initFrame:SetScript("OnEvent", function(self)
         MenuRow(menu, 1, nil, EllesmereUI.L("Empty Action Menu"), function() AddPalette(nil) end)
         local n = 1
         for _, preset in ipairs(PALETTE_PRESETS) do
-            local slots = preset.build()
+            local slots, dropped = preset.build()
             if #slots > 0 then
                 n = n + 1
                 local icon = ns.SlotDisplay(slots[1])
+                -- The count, and what a full menu could not take. A preset that
+                -- stopped at the cap and said nothing looked like a preset that
+                -- had found everything there was.
+                local count = "  |cff808080(" .. #slots .. ")|r"
+                if dropped and dropped > 0 then
+                    count = count .. " |cffd08050"
+                        .. EllesmereUI.Lf("%1$d did not fit", dropped) .. "|r"
+                end
                 MenuRow(menu, n, icon or QUESTION_MARK,
-                    EllesmereUI.L(preset.label) .. "  |cff808080(" .. #slots .. ")|r",
+                    EllesmereUI.L(preset.label) .. count,
                     function() AddPalette(preset, slots) end)
             end
         end

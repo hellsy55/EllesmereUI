@@ -16,7 +16,10 @@
 -- running this again and re-deriving that number.
 local min, max, abs, floor, ceil, sqrt = math.min, math.max, math.abs,
     math.floor, math.ceil, math.sqrt
-local MAX_SLOTS, MAX_CHILDREN, MAX_CHILD_ROWS, REGION_MAX = 12, 8, 4, 9
+-- Mirrors the module's own constants. Keep them in step: the sweep is what
+-- REGION_MAX is derived FROM, so a harness left at a different value proves
+-- something about a build that does not exist.
+local MAX_SLOTS, MAX_CHILDREN, MAX_CHILD_ROWS, REGION_MAX = 16, 8, 4, 14
 local NEST_BAND_DEFAULT = 40
 local PaletteView = {}
 local DEFAULTS = { iconSize = 40, fanGap = 10, nestScale = 0.8,
@@ -104,25 +107,36 @@ local function Case(mode, style, horiz, shown, nesting, childN, pinned)
     if dropped then droppedCases = droppedCases + 1 end
 end
 
+-- Every arrangement of `pick` nesting entries among `shown`, thinned once the
+-- count runs away. Thinned DETERMINISTICALLY -- every Nth arrangement in
+-- lexicographic order -- so the sweep is the same sweep every time it is run
+-- and a value derived from it can be re-derived. The arrangements that decide
+-- the worst region count are the crowded ones, and thinning keeps those: they
+-- are spread evenly through the order rather than gathered at one end.
+local SUBSET_CAP = 120
 local function Subsets(shown, pick)
-    -- every arrangement of `pick` nesting entries among `shown`
-    local out = {}
+    local all = {}
     local function rec(start, acc)
-        if #acc == pick then out[#out + 1] = { unpack(acc) } return end
+        if #acc == pick then all[#all + 1] = { unpack(acc) } return end
         for i = start, shown do
             acc[#acc + 1] = i; rec(i + 1, acc); acc[#acc] = nil
         end
     end
     rec(1, {})
+    if #all <= SUBSET_CAP then return all end
+    local out, stride = {}, #all / SUBSET_CAP
+    for i = 1, SUBSET_CAP do out[i] = all[math.floor((i - 1) * stride) + 1] end
+    print(("  (thinned: shown=%d pick=%d, %d of %d arrangements)")
+        :format(shown, pick, #out, #all))
     return out
 end
 
 for _, style in ipairs({ "PERIMETER", "HALO" }) do
     for _, mode in ipairs({ "GRID", "FAN" }) do
-        for shown = 2, 12 do
+        for shown = 2, MAX_SLOTS do
             for pick = 1, min(shown, 4) do
                 for _, sub in ipairs(Subsets(shown, pick)) do
-                    for _, childN in ipairs({ 1, 2, 3, 5, 8, 12 }) do
+                    for _, childN in ipairs({ 1, 2, 3, 5, 8, 12, 16 }) do
                         for _, pinned in ipairs({ false, 3, 4, 6 }) do
                             Case(mode, style, true, shown, sub, childN,
                                  pinned or nil)
@@ -134,10 +148,10 @@ for _, style in ipairs({ "PERIMETER", "HALO" }) do
     end
 end
 -- every entry nesting, the case the REGION_MAX comment calls out
-for shown = 2, 12 do
+for shown = 2, MAX_SLOTS do
     local all = {}
     for i = 1, shown do all[i] = i end
-    for _, childN in ipairs({ 2, 8, 12 }) do
+    for _, childN in ipairs({ 2, 8, 16 }) do
         Case("GRID", "PERIMETER", true, shown, all, childN)
         Case("GRID", "HALO", true, shown, all, childN)
         Case("FAN", "PERIMETER", true, shown, all, childN)

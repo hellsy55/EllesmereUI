@@ -89,14 +89,26 @@ local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
 -- palette is ever reachable only by being nested inside another one. A key is
 -- what builds a palette's secure button, so the ones left unbound cost nothing.
 local MAX_PALETTES = 16
-local MAX_SLOTS = 12
 
--- Entries a nested palette contributes through a parent whose nest is bounded
--- by the PARENT'S own region -- a sector of the arc, a halo's ring of eight
--- fixed positions. Eight is where those stop being readable. Every other nest
--- runs along ground of its own -- a block's perimeter, a row across a strip --
--- and seats a nested palette's full MAX_SLOTS. See NestChildCap, which is
--- where the per-layout answer lives.
+-- Entries one menu may hold. Twelve was what a ring of the SETTING'S OWN
+-- radius could seat without its entries touching -- at the shipped 100 and a
+-- 50-unit pitch, the thirteenth overlaps its neighbour. That is no longer the
+-- constraint: Menu Radius is a minimum now and the ring grows with the count
+-- (see PaletteView:Geom), so the cap answers to how many entries a person can
+-- still aim at rather than to how many fit. Sixteen, which is where a full
+-- circle gives each entry 22.5 degrees.
+local MAX_SLOTS = 16
+
+-- Entries a nested palette contributes through a HALO, which is eight fixed
+-- positions around a cell (see HALO_DIRS) and so cannot seat a ninth child
+-- without a second ring it has no room for. This is a real limit of that one
+-- shape, not a readability judgement.
+--
+-- The arc used to share it and no longer does: an arc claim RINGS its children
+-- and spills into further rings as they crowd (see ChildGeom and
+-- MAX_CHILD_ROWS), so its ground grows with the count exactly as the palette's
+-- own ring does. It seats a nested palette whole, like every other layout.
+-- See NestChildCap, which is where the per-layout answer lives.
 local MAX_CHILDREN = 8
 
 -- How many concentric rings a nested arc's children may spill into before a
@@ -120,18 +132,25 @@ local MAX_CHILD_ROWS = 4
 -- box across the lot instead would swallow the block's own corner ground --
 -- see PerimeterNest, the "Arming gates" section and RunReach below.
 --
--- Nine is what a lane sharing the block with OTHER claims comes to. Each of
+-- Fourteen is what a lane sharing the block with OTHER claims comes to. Each of
 -- those has its own cell taken out of this claim's coverage (see ParentHoles),
 -- which splits the side it falls on into at most a slab clear of it and one
 -- interval reaching back to the parent -- the pieces past it are dropped, being
--- ground this claim cannot be armed on anyway. Three sides carrying a hole is
--- the worst that comes up: eight for any two claims and nine for any three,
--- swept over every arrangement of them on a 2x2, 6-, 9- and 12-slot block at
--- both child counts that change the answer and at every nest scale, and a block
--- with EVERY slot nesting stays inside it too. Past nine the tail is dropped,
--- child-bearing pieces being written first, so a palette that did overflow would
--- lose ground between its entries rather than a child.
-local REGION_MAX = 9
+-- ground this claim cannot be armed on anyway.
+--
+-- Derived by running .tools/quickdraw-nest over every block layout at
+-- MAX_SLOTS: 330,692 arrangements -- 2 to 16 entries, every arrangement of up
+-- to four nesting ones (thinned evenly past 120 per shape), 1 to 16 children
+-- each, auto and pinned columns, both nest styles. Fourteen covers all but 239
+-- of them; the worst single claim in the sweep comes to eighteen, and spending
+-- four more gates and eight more wrapped scripts on every claim to catch that
+-- last 0.07 per cent is not the trade. Past the budget the tail is dropped,
+-- child-bearing pieces being written first, so a claim that does overflow loses
+-- ground between its entries rather than a child.
+--
+-- Re-run that sweep if MAX_SLOTS, MAX_CHILDREN or any nest geometry moves --
+-- this number is an OUTPUT of the shapes below it, not a choice.
+local REGION_MAX = 14
 
 -- How many drawn positions the scroll strip's arming lattice may span each
 -- side of its centre: the widest each-side window the "Visible Icons" slider
@@ -763,16 +782,15 @@ ns.ChildSlots = ChildSlots
 -- How many entries a nested palette may contribute on palette `parentIndex`,
 -- read off the stored profile -- what the editor's tooltip answers with, and
 -- what the live views answer too, their layout following the same profile.
--- Eight is where a nest bounded by its PARENT'S own region stops being
--- readable, and the two nests bounded that way stay there: an arc's children
--- hold a sector of the parent's arc, and a halo is eight positions with
--- nothing to grow into. Everything else runs along ground of its own -- a
--- lane holds twenty cells and more at ordinary sizes, and a strip's row
--- spreads as wide as it needs to -- so it seats a nested palette whole.
+--
+-- Every layout but one seats a nested palette WHOLE. A lane runs along a
+-- block's perimeter, a strip's row spreads as wide as it needs to, and an arc
+-- claim rings its children and adds a ring as they crowd -- all three have
+-- ground of their own to grow into. The halo does not: it is eight fixed
+-- positions around one cell, and there is no ninth to put a child in.
 local function NestChildCap(parentIndex)
     local p = PA(parentIndex)
     local layout = (p and p.layout) or "ARC"
-    if layout == "ARC" then return MAX_CHILDREN end
     if layout == "GRID" and p and p.gridNestStyle == "HALO" then
         return MAX_CHILDREN
     end
@@ -2158,11 +2176,46 @@ local PaletteViewMeta = { __index = PaletteView }
 -- own palette -- radius and iconSize are per-menu appearance. The 24 is the
 -- dead zone, hardcoded: release inside it cancels, and near the centre the
 -- pointer's angle is too unstable to select by.
-function PaletteView:Geom()
+-- radius, icon size, dead zone. The radius is the ARC's, and it is worked out
+-- rather than read: Menu Radius is a MINIMUM, and a ring holding more entries
+-- than fit at that distance grows until they no longer touch. That is what
+-- lets a menu hold more than the twelve a fixed radius could seat, and it
+-- leaves every existing menu exactly where it was -- a count that fits at the
+-- setting's own value never reaches the floor.
+--
+-- shownOverride names the count to measure for, which a caller working out the
+-- geometry of a palette this view is not currently drawn as must pass: the
+-- view's own shownCount still describes whatever was laid out last. Same
+-- reason GridDims takes one.
+function PaletteView:Geom(shownOverride)
     if self.opts.geom then return self.opts.geom() end
     local p = self:P()
     if not p then return 100, 40, 24 end
-    return p.radius or 100, p.iconSize or 40, 24
+    local radius, iconSize = p.radius or 100, p.iconSize or 40
+    if self:LayoutMode() == "ARC" then
+        local shown = max(1, shownOverride or self.shownCount or 1)
+        if shown > 1 then
+            -- The chord between two neighbouring entries is 2R sin(step/2).
+            -- Holding that to the separation two entries need and solving for R
+            -- gives the smallest ring they do not overlap on. A half-step at or
+            -- past a quarter turn is left alone: entries that far apart cannot
+            -- crowd, and the sine is on its way back down.
+            --
+            -- The separation is not one pitch. Entries are SQUARES, and two
+            -- axis-aligned squares clear each other only once their centres are
+            -- a full icon apart along x or along y -- so a pair whose chord
+            -- runs diagonally needs iconSize * root 2 between centres, which is
+            -- more than a pitch at the shipped sizes. A ring sized on the pitch
+            -- alone therefore still touched at the four diagonals, and only
+            -- there, which is exactly what a sixteen-entry ring showed.
+            local half = self:ArcGeom(shown) * 0.5
+            if half > 0 and half < pi * 0.5 then
+                local need = max(iconSize + (p.fanGap or 10), iconSize * 2 ^ 0.5)
+                radius = max(radius, need / (2 * sin(half)))
+            end
+        end
+    end
+    return radius, iconSize, 24
 end
 
 -- The profile as THIS view's palette sees it: its own appearance overrides in
@@ -2643,15 +2696,13 @@ function PaletteView:ChildGeom(shown, slots)
     -- Claimants in entry order first: how much room each one may take depends
     -- on where the next one sits, so none of them can be sized on its own.
     --
-    -- The cap is NestChildCap's answer, asked of the view's own predicates
-    -- rather than of the stored profile so a preview that pinned its layout
-    -- seats what the layout it is showing can seat. The two agree everywhere
-    -- else: the predicates read the same profile.
-    local cap = MAX_SLOTS
-    if self:LayoutMode() == "ARC"
-       or (self:IsGrid() and p.gridNestStyle == "HALO") then
-        cap = MAX_CHILDREN
-    end
+    -- NestChildCap's rule, asked of the view's own predicates rather than of
+    -- the stored profile so a preview that pinned its layout seats what the
+    -- layout it is showing can seat. Keep the two in step: this is the copy the
+    -- LIVE menu uses, and it went on capping the arc at eight for a whole
+    -- release after the other one stopped.
+    local cap = (self:IsGrid() and p.gridNestStyle == "HALO")
+        and MAX_CHILDREN or MAX_SLOTS
     local claims
     for i = 1, shown do
         local kids = ChildSlots(ChildIndex(slots[i]), cap)
@@ -2673,7 +2724,7 @@ function PaletteView:ChildGeom(shown, slots)
     if self:LayoutMode() ~= "ARC" then return nil end
 
     local step, arcStart, full = self:ArcGeom(shown)
-    local radius, iconSize = self:Geom()
+    local radius, iconSize = self:Geom(shown)
     -- Scaled by whatever this view scaled its geometry by, recovered from the
     -- icon size Geom handed back -- the same recovery the hub logo makes. The
     -- radius already carries that factor; a band read at its literal profile
@@ -4765,7 +4816,7 @@ function PaletteView:Layout(paletteIndex)
     self.slotCount, self.shownCount = n, shown
 
     local step, arcStart = self:ArcGeom(shown)
-    local radius, iconSize = self:Geom()
+    local radius, iconSize = self:Geom(shown)
     local fan = self:IsFan()
 
     -- Worked out before the frame is sized, not with the entries it places: a
@@ -8884,6 +8935,7 @@ function SetEventsEnabled(on)
         EQD:UnregisterEvent("SPELLS_CHANGED")
         EQD:UnregisterEvent("UPDATE_MACROS")
         EQD:UnregisterEvent("RAID_TARGET_UPDATE")
+        EQD:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     end
 end
 
