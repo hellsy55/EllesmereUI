@@ -576,8 +576,11 @@ EllesmereUI._ELEMENT_SETTINGS_MAP = {
     ["EUI_BattleRes"]      = { module = "EllesmereUIQoL",             page = "QoL",   sectionName = "BATTLE RES",        highlightText = "Enable BattleRes Icon" },
     ["EUI_Bloodlust"]      = { module = "EllesmereUIQoL",             page = "QoL",   sectionName = "BLOODLUST TRACKER", highlightText = "Enable Bloodlust Icon" },
 
-    -- Mythic+ Timer
+    -- Mythic+ Tools
     ["EMT_MythicTimer"]    = { module = "EllesmereUIMythicTimer",     page = "Mythic+ Timer",     sectionName = "DISPLAY",           highlightText = "Scale" },
+    ["EMT_TargetedSpellBars"] = { module = "EllesmereUIMythicTimer",  page = "Targeted Spell Bars", sectionName = "TARGETED SPELL BARS", highlightText = "Enable Targeted Spell Bars" },
+    ["EMT_TargetCastBar"]  = { module = "EllesmereUIMythicTimer",     page = "Target/Focus Bars", sectionName = "TARGET CAST BAR",   highlightText = "Enable Target Cast Bar" },
+    ["EMT_FocusCastBar"]   = { module = "EllesmereUIMythicTimer",     page = "Target/Focus Bars", sectionName = "FOCUS CAST BAR",    highlightText = "Enable Focus Cast Bar" },
 
     -- Dragon Riding HUD (Blizz UI Enhanced > Dragon Riding page)
     ["EDR_Cluster"]        = { module = "EllesmereUIBlizzardSkin",    page = "Dragon Riding",     sectionName = "GENERAL",           highlightText = "Enable Dragon Riding Bar" },

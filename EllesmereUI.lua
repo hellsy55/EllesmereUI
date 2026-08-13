@@ -307,7 +307,7 @@ local ADDON_ROSTER = {
     { folder = "EllesmereUIQoL",               display = "Quality of Life",      search_name = "EllesmereUI Quality of Life"         },
     { folder = "EllesmereUIBlizzardSkin",      display = "Blizz UI Enhanced",    search_name = "EllesmereUI Blizz UI Enhanced",      syncFolder = "EllesmereUIDragonRiding", syncDisplay = "Dragon Riding" },
     { folder = "EllesmereUIFriends",           display = "Friends List",         search_name = "EllesmereUI Friends List"            },
-    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Timer",        search_name = "EllesmereUI Mythic+ Timer"           },
+    { folder = "EllesmereUIMythicTimer",       display = "Mythic+ Tools",        search_name = "EllesmereUI Mythic+ Tools Timer"     },
     { folder = "EllesmereUIQuestTracker",      display = "Quest Tracker",        search_name = "EllesmereUI Quest Tracker"           },
     { folder = "EllesmereUIMinimap",           display = "Minimap",              search_name = "EllesmereUI Minimap"                 },
     { folder = "EllesmereUIChat",              display = "Chat",                 search_name = "EllesmereUI Chat"                    },
@@ -2839,6 +2839,23 @@ do
     local _bdBorderData = setmetatable({}, { __mode = "k" })
     EllesmereUI._bdBorderData = _bdBorderData
 
+    --- Returns usable, width, height.
+    --- usable = false means EVERY widget call on this frame raises from our (always tainted)
+    --- code: Enum.ForbiddenAspect.UntrustedLayoutScriptExecution propagates to a forbidden
+    --- frame's children AND to anything ANCHORED to it, so a border we hung off a Blizzard
+    --- frame inherits it the moment that frame anchors to a forbidden one (Blizzard UI
+    --- widgets do exactly that to the tooltip they own, on hover). The size READ raises
+    --- too, so pcall is the only way to ask.
+    --- usable with no width = the size is SECRET: the frame is fine to touch, only the
+    --- backdrop's texcoord arithmetic is not (map-pin tooltips, menus with secret text, and
+    --- every frame anchored to secret aura geometry, which uses the solid path on purpose).
+    local function ReadBorderSize(frame)
+        local ok, w, h = pcall(frame.GetSize, frame)
+        if not ok then return false end
+        if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return true end
+        return true, w, h
+    end
+
     -- Per-addon border defaults registry, keyed by texture key. Each texture entry:
     --   defaultSize: size key auto-set when this texture is selected
     --   sizes: keyed by size key (addon-specific), each with offsetX, offsetY,
@@ -3032,6 +3049,10 @@ do
         local PP = EllesmereUI.PP
         if not PP or not borderFrame then return end
         a = a or 1
+        -- Probe before the first widget call: a restyle can land while the owner is anchored
+        -- to a forbidden frame (tooltips on UI-widget hover), and then anchoring, frame level
+        -- and color would each raise in turn. Skipping leaves the last-good border; the next apply, off that anchor, restyles normally.
+        if not ReadBorderSize(borderFrame) then return end
 
         local isSolid = not textureKey or textureKey == "" or textureKey == "solid"
 
@@ -3082,10 +3103,12 @@ do
                 -- Addon-born frame: its scripts always run tainted. When the owner rides a
                 -- Blizzard frame sized from secret content (map-pin tooltips, menus with secret
                 -- text), GetWidth() hands the template's resize recompute a SECRET number and its
-                -- texcoord math throws; skip the recompute on secret size (edges keep last-good texcoords and stretch, same as the throwing path left them, minus the per-resize error).
+                -- texcoord math throws; a forbidden layout aspect inherited from the owner's
+                -- anchor makes the read itself throw (see ReadBorderSize). Skip the recompute
+                -- either way (edges keep last-good texcoords and stretch, same as the throwing path left them, minus the per-resize error).
                 bdFrame:SetScript("OnSizeChanged", function(self)
-                    if issecretvalue and (issecretvalue(self:GetWidth())
-                        or issecretvalue(self:GetHeight())) then return end
+                    local usable, w = ReadBorderSize(self)
+                    if not usable or not w then return end
                     self:OnBackdropSizeChanged()
                 end)
                 _bdBorderData[borderFrame] = bdFrame
@@ -3138,8 +3161,8 @@ do
             -- real style change under a secret size keeps the last-good backdrop and retries next apply (the color write below is vertex-only and always safe).
             local bdKey = texPath .. "@" .. edgeSize
             if bdFrame._euiBdKey ~= bdKey then
-                if issecretvalue and (issecretvalue(bdFrame:GetWidth())
-                    or issecretvalue(bdFrame:GetHeight())) then
+                local bdUsable, bdW = ReadBorderSize(bdFrame)
+                if not bdUsable or not bdW then
                     bdFrame._euiBdKey = nil
                 else
                     bdFrame:SetBackdrop({
@@ -10868,7 +10891,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.4"
+EllesmereUI.VERSION = "8.8.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12218,7 +12241,11 @@ EllesmereUI.VIS_ORDER_CDM = { "never", "always", "in_combat", "out_of_combat", "
 EllesmereUI.VIS_OPT_ITEMS = {
     { key = "visOnlyInstances",    label = "Only Show in Instances" },
     { key = "visHideHousing",      label = "Hide in Housing" },
+    { key = "visOnlyHousing",      label = "Only Show in Housing",
+      tooltip = "This element will only show while you are inside a house or plot" },
     { key = "visHideMounted",      label = "Hide when Mounted" },
+    { key = "visOnlyMounted",      label = "Only Show when Mounted",
+      tooltip = "This element will only show while you are mounted" },
     { key = "visHideNoTarget",     label = "Hide without Target",
       tooltip = "*Blizzard's auto targeting (soft target) setting can cause brief flickering when your actual target dies but a soft-target is still active." },
     { key = "visHideNoEnemy",      label = "Hide without Enemy Target",
@@ -12325,9 +12352,23 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
         end
     end
 
+    -- Only Show in Housing (inverse of the above; same probe, same edges)
+    if opts.visOnlyHousing then
+        if not (C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot()) then
+            return true
+        end
+    end
+
     -- Hide when Mounted (includes druid travel/flight/aquatic forms)
     if opts.visHideMounted then
         if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
+    end
+
+    -- Only Show when Mounted (inverse; druid mount-like forms count as mounted
+    -- here too -- secure action bars carry a [nomounted] clause instead, which
+    -- cannot see forms, see BuildVisibilityString)
+    if opts.visOnlyMounted then
+        if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return true end
     end
 
     if opts.visHideDragonriding then

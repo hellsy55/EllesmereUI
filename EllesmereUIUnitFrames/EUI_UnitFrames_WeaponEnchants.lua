@@ -298,7 +298,7 @@ local function Paint()
                             elseif dir == "UP" then dy = 1 elseif dir == "DOWN" then dy = -1 end
                             b:ClearAllPoints()
                             local point = rec.point or rec.corner
-                            b:SetPoint(point, rec.parent, rec.relativePoint or rec.corner or point,
+                            b:SetPoint(point, rec.anchorTo or rec.parent, rec.relativePoint or rec.corner or point,
                                 (rec.x or 0) + dx * idx * cell,
                                 (rec.y or 0) + dy * idx * cell)
                             b._cell = idx
@@ -416,8 +416,15 @@ local function LayoutHost(key, rec)
     end
     host.rec = rec
     if not (host.secure and InCombatLockdown()) then
+        -- Parent from rec.parent ONLY -- rec.anchorTo can be an engine aura
+        -- container, which carries forbidden aspects
+        -- (UntrustedLayoutScriptExecution): SetParent into it hard-errors for
+        -- the secure host ("child object would inherit forbidden aspects").
+        -- Anchoring is legal, so the host RIDES the container's rect while
+        -- living in the plain bar frame's tree.
         host.frame:SetParent(rec.parent or rec.frame)
-        host.frame:SetAllPoints()
+        host.frame:ClearAllPoints()
+        host.frame:SetAllPoints(rec.anchorTo or rec.parent or rec.frame)
     end
 end
 

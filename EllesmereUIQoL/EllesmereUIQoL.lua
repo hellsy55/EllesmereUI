@@ -2677,18 +2677,21 @@ do
     end
     EllesmereUI.GetCrosshairValue = CrosshairGet
 
-    local _crosshairCutoffRange = 5
+    -- Holy-Paladin melee opt-in, cached: CrosshairGet is a DB read and the
+    -- cutoff getter runs at crosshair tick cadence. The engine caches the
+    -- spec-derived cutoff itself (invalidated on spec/talent churn) and keeps
+    -- the druid-form check live, so this flag is the only local state left.
+    local _chHpalMelee = false
 
     local function RefreshCrosshairCutoffRange()
-        _crosshairCutoffRange = EllesmereUI.Range_GetAttackCutoff(nil, CrosshairGet("crosshairHpalMelee"))
+        _chHpalMelee = CrosshairGet("crosshairHpalMelee") and true or false
     end
     RefreshCrosshairCutoffRange()
     -- Exposed so the crosshair options toggle can re-resolve the cutoff live.
     EllesmereUI._RefreshCrosshairCutoffRange = RefreshCrosshairCutoffRange
 
     EllesmereUI._getCrosshairCutoffRange = function()
-        return EllesmereUI.Range_GetAttackCutoff(nil, CrosshairGet("crosshairHpalMelee"))
-            or _crosshairCutoffRange
+        return EllesmereUI.Range_GetAttackCutoff(nil, _chHpalMelee)
     end
 
     -- True only when there is an attackable, living target out of range.

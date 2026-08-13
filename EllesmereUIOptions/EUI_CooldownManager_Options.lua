@@ -5804,7 +5804,8 @@ initFrame:SetScript("OnEvent", function(self)
                   local bd = SelectedTBB(); if not bd then return end
                   bd.stackThresholdMaxEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "Ticks at Stacks" }
+            { type = "label", text = "Ticks at Stacks",
+              tooltip = "Comma separated stack counts to put a tick mark at. Type all to mark every stack." }
         );  y = y - h
         -- Inline slider on Enable Max Stacks toggle (same as inline swatch positioning)
         do

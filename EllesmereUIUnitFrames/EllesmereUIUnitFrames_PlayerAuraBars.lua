@@ -681,7 +681,10 @@ local function PAB_ApplyExtraText(button, d, style)
     -- icon art cannot bleed over PP's one-pixel border. Edge-growing bars keep EUI's
     -- usual unsnapped rendering.
     d.pabCenteredSnap = style.centeredGrowth == true
-    if d.icon and not d.pabIconSnapHooked then
+    -- Lazy install on the first centered apply: bars that never use centered
+    -- growth never pay the closure. Once installed the hook reads the live
+    -- flag, so switching back to edge growth costs one boolean per SetTexture.
+    if d.pabCenteredSnap and d.icon and not d.pabIconSnapHooked then
         d.pabIconSnapHooked = true
         hooksecurefunc(d.icon, "SetTexture", function(texture)
             if d.pabCenteredSnap then SetTexturePixelSnap(texture, true) end
@@ -1179,9 +1182,15 @@ local function ComputeGrid(isBuff, cfg)
     -- modes: a "line" is a column, so lineExtent -> height -- see
     -- CornerFor/BuildContainerSpec for the matching growthH/growthV swap.
     local lineExtent = cols * iconSize + (cols - 1) * layoutPad
-    -- Maximum line size covers the configured icon limit and only the gaps between
-    -- them. Adding a trailing gap makes negative spacing wrap the final icon early.
-    local rowWidth = math.max(iconSize, lineExtent)
+    -- Wrap budget handed to the engine. At POSITIVE spacing the engine reserves a
+    -- TRAILING elementSpacing after every element (not only between), so a full
+    -- line needs cols * (icon + spacing) or the last icon of every row wraps --
+    -- field-confirmed twice, most recently 2026-08-14 (11-per-row wrapped at 10
+    -- without the trailing pad). At NEGATIVE spacing that same trailing reserve
+    -- makes the final icon wrap EARLY, so the budget adds nothing there.
+    -- lineExtent still sizes the bar's own frame either way, so the drag box
+    -- measures the icons, not the phantom trailing gap.
+    local rowWidth = math.max(iconSize, lineExtent) + math.max(0, layoutPad)
     local crossExtent = usedRows * iconSize + (usedRows - 1) * layoutRowGap
     local vertical = (cfg.growDirection == "UP" or cfg.growDirection == "DOWN" or cfg.growDirection == "CENTER_VERTICAL")
     local width = vertical and crossExtent or lineExtent
@@ -1476,9 +1485,21 @@ local lastUnlockBuffLabel
 local ReloadAllCustomBars -- forward-declared; defined after CreateBars (custom bars section), called from it
 local PAB_MaybeRefreshPreview -- forward-declared; assigned in the options-page preview section, called from every live-apply function so an open bar-detail preview box tracks slider drags without those functions knowing it exists
 
+-- Last-applied growDirection per live container (weak keys); written by
+-- ApplyContainerAnchorAndGrowth, read by the restricted-apply gate below.
+local containerDirections = setmetatable({}, { __mode = "k" })
+
 local restrictedApplies = {}
 local restrictionHooked = false
-local function DeferRestrictedApply(key, fn)
+-- Defers ONLY the direction-change reconfigure (Hide/SetUnit/UpdateAllAuras +
+-- resize) to the restriction lift. Ordinary container-level re-drives are
+-- restriction-legal (they ran mid-combat for weeks pre-centered-growth), and
+-- the cinematic/faction/vehicle recovery lane DEPENDS on them running inside
+-- instanced combat -- a blanket defer would leave restored bars showing
+-- degraded content until the combat edge.
+local function DeferRestrictedApply(key, fn, container, dir)
+    local applied = container and containerDirections[container]
+    if not (applied and applied ~= (dir or "LEFT")) then return false end
     AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
     if not (AK and AK.AurasRestricted and AK.AurasRestricted()) then return false end
     restrictedApplies[key] = fn
@@ -1569,8 +1590,6 @@ local function BuildContainerSpec(parent, cfg, grid)
         },
     }, vertical
 end
-
-local containerDirections = setmetatable({}, { __mode = "k" })
 
 -- Re-applies container anchor/axis/growth/padding/rowWidth for an already-created
 -- container against `parent`'s current grid. Shared by ApplyLiveConfig and the
@@ -1704,11 +1723,20 @@ local function ShiftBuffsForEnchants(container, parent, cfg, grid)
     local dir = cfg.growDirection or "LEFT"
     local cell = EllesmereUI.PP.Scale(cfg.iconSize or 32) + EllesmereUI.PP.Scale(cfg.padding or 5)
     container:ClearAllPoints()
+    -- Centered modes: the enchant cells must hug the RUN's moving edge, which
+    -- only the container's live rect knows. rec.parent must stay the PLAIN bar
+    -- frame -- the container carries forbidden aspects
+    -- (UntrustedLayoutScriptExecution), and the consumer's secure host frame
+    -- hard-errors on SetParent into that subtree ("child object would inherit
+    -- forbidden aspects"). rec.anchorTo carries the container for ANCHORING
+    -- only (SetPoint relative-to does not reparent), which is the same trust
+    -- shape as the buttons' existing anchors into insecurely-positioned frames.
     if dir == "CENTER_HORIZONTAL" then
         local span = n * cell
         container:SetPoint("CENTER", parent, "CENTER", span / 2, 0)
         if ns._weaponEnchPAB then
-            ns._weaponEnchPAB.parent = container
+            ns._weaponEnchPAB.parent = parent
+            ns._weaponEnchPAB.anchorTo = container
             ns._weaponEnchPAB.corner = nil
             ns._weaponEnchPAB.point = "LEFT"
             ns._weaponEnchPAB.relativePoint = "LEFT"
@@ -1722,7 +1750,8 @@ local function ShiftBuffsForEnchants(container, parent, cfg, grid)
         local span = n * cell
         container:SetPoint("CENTER", parent, "CENTER", 0, -span / 2)
         if ns._weaponEnchPAB then
-            ns._weaponEnchPAB.parent = container
+            ns._weaponEnchPAB.parent = parent
+            ns._weaponEnchPAB.anchorTo = container
             ns._weaponEnchPAB.corner = nil
             ns._weaponEnchPAB.point = "BOTTOM"
             ns._weaponEnchPAB.relativePoint = "TOP"
@@ -1739,6 +1768,7 @@ local function ShiftBuffsForEnchants(container, parent, cfg, grid)
     container:SetPoint(containerAnchor, parent, containerAnchor, dx * n * cell, dy * n * cell)
     if ns._weaponEnchPAB then
         ns._weaponEnchPAB.parent = parent
+        ns._weaponEnchPAB.anchorTo = nil
         ns._weaponEnchPAB.corner = containerAnchor
         ns._weaponEnchPAB.point = nil
         ns._weaponEnchPAB.relativePoint = nil
@@ -1781,6 +1811,11 @@ local function CreateBars()
         end
     end
     if s.enabled ~= true then return end
+
+    -- Enablement is confirmed from here down: arm the cinematic/faction/
+    -- vehicle recovery lane (defined at file bottom; the whole file has
+    -- loaded by the time anything calls CreateBars). Idempotent.
+    ns.PAB_ArmRecovery()
 
     -- Must run before DefaultBuffsCfg/DefaultDebuffsCfg are first called, so seeded
     -- values are what their first lazy-create populates. One-time-ever seed, not a
@@ -2064,7 +2099,9 @@ local function ApplyLiveConfig(isBuff)
     local s = PAB()
     if not (AK and s) then return end
     if DeferRestrictedApply(isBuff and "default-buffs" or "default-debuffs",
-        function() ApplyLiveConfig(isBuff) end) then return end
+        function() ApplyLiveConfig(isBuff) end,
+        isBuff and buffsContainer or debuffsContainer,
+        (isBuff and DefaultBuffsCfg(s) or DefaultDebuffsCfg(s)).growDirection) then return end
     local container = isBuff and buffsContainer or debuffsContainer
     local parent = isBuff and buffsParent or debuffsParent
     if not container or not parent then return end
@@ -2924,9 +2961,6 @@ ns.PAB_RegisterCustomUnlock = RegisterPABCustomUnlock
 local function ReloadCustomBuffBarImpl(barId)
     AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
     if not AK then return end
-    if DeferRestrictedApply("custom-buff-" .. barId,
-        function() ns.PAB_ReloadCustomBuffBar(barId) end) then return end
-
     local bar = ns.PAB_GetCustomBuffBar(barId)
     if not bar then
         -- Deleted: release the container (frees its slot-button tracking; engine
@@ -2936,6 +2970,9 @@ local function ReloadCustomBuffBarImpl(barId)
         customBuffContainers[barId], customBuffParents[barId], customBuffSig[barId], customBuffDeclared[barId] = nil, nil, nil, nil
         return
     end
+    if DeferRestrictedApply("custom-buff-" .. barId,
+        function() ns.PAB_ReloadCustomBuffBar(barId) end,
+        customBuffContainers[barId], bar.growDirection) then return end
 
     local styleKey = CustomBuffStyleKey(barId)
     AK.styles[styleKey] = BuildStyle(true, bar)
@@ -3043,9 +3080,6 @@ end
 local function ReloadCustomDebuffBarImpl(barId)
     AK = AK or (EllesmereUI and EllesmereUI.AuraKit)
     if not AK then return end
-    if DeferRestrictedApply("custom-debuff-" .. barId,
-        function() ns.PAB_ReloadCustomDebuffBar(barId) end) then return end
-
     local bar = ns.PAB_GetCustomDebuffBar(barId)
     if not bar then
         if customDebuffContainers[barId] then
@@ -3067,6 +3101,9 @@ local function ReloadCustomDebuffBarImpl(barId)
         customDebuffParents[barId], customDebuffContainers[barId], customDebuffDeclared[barId] = nil, nil, nil
         return
     end
+    if DeferRestrictedApply("custom-debuff-" .. barId,
+        function() ns.PAB_ReloadCustomDebuffBar(barId) end,
+        customDebuffContainers[barId], bar.growDirection) then return end
 
     local styleKey = CustomDebuffStyleKey(barId)
     AK.styles[styleKey] = BuildStyle(false, bar)
@@ -4340,14 +4377,42 @@ function ns.PAB_SetEnabled(v)
     if v then CreateBars() end
 end
 
--- Cinematic recovery. An addon-cancelled cinematic (CINEMATIC_STOP) puts the
--- engine aura containers through a hide/re-show whose re-parse can land while
--- the teardown's filter state is still degraded -- filtered bars then render
--- the FULL buff set, and with no aura event following, the wrong content
--- sticks. The one lever Lua holds over engine-owned content is config: re-run
--- the group config for every live container (candidate filters are the
--- live-changeable channel, so re-setting them forces a fresh parse), one tick
--- after the event so the teardown has finished. Coalesced; rare event.
+-- Cinematic / faction-flip recovery. Two triggers, one degradation class:
+-- an addon-cancelled cinematic (CINEMATIC_STOP) puts the engine aura
+-- containers through a hide/re-show whose re-parse can land while the
+-- teardown's filter state is still degraded, and EVERY cinematic
+-- (in-world cutscenes included) fires UNIT_FACTION for the player at start
+-- and end -- the unit briefly stops being assistable, which silently
+-- disables spell-ID candidate filters engine-side (authors-channel
+-- consensus 2026-08-13: same mechanism community-wide; UNIT_FLAGS does NOT
+-- fire, UNIT_FACTION is the only edge). Filtered bars then render the FULL
+-- buff set, and with no aura event following, the wrong content sticks.
+-- The one lever Lua holds over engine-owned content is config: re-run the
+-- group config for every live container (candidate filters are the
+-- live-changeable channel, so re-setting them forces a fresh parse), one
+-- tick after the event so the transition has finished. Coalesced; the
+-- start+end UNIT_FACTION burst collapses to one re-drive.
+-- Vehicle suppression: assistability stays down for the WHOLE ride, so the
+-- exit re-drive alone still left the ride itself showing the full buff set.
+-- Match the raid frames' gate by hiding the bar parents outright -- the
+-- vehicle has its own UI -- and restoring on exit, where the recovery
+-- re-drive repaints from clean filter state. Hidden containers fully
+-- unregister their engine events, so a suppressed ride costs nothing.
+local vehicleHidden = false
+-- Bare apply, no state guard: the recovery lane re-asserts the CURRENT
+-- state after its reload paths (which Show() the parents as a side effect).
+local function ApplyVehicleHidden(hidden)
+    if buffsParent then buffsParent:SetShown(not hidden) end
+    if debuffsParent then debuffsParent:SetShown(not hidden) end
+    for _, parent in pairs(customBuffParents) do parent:SetShown(not hidden) end
+    for _, parent in pairs(customDebuffParents) do parent:SetShown(not hidden) end
+end
+local function SetVehicleHidden(hidden)
+    if vehicleHidden == hidden then return end
+    vehicleHidden = hidden
+    ApplyVehicleHidden(hidden)
+end
+
 local cineFixPending = false
 local function ReapplyAllAfterCinematic()
     if cineFixPending then return end
@@ -4355,6 +4420,16 @@ local function ReapplyAllAfterCinematic()
     cineFixPending = true
     C_Timer.After(0, function()
         cineFixPending = false
+        -- Suppressed ride: a re-drive is pointless (the parents are hidden;
+        -- the exit edge re-drives for real) AND actively harmful -- the
+        -- reload paths Show() the parents, silently undoing the vehicle
+        -- suppression (field: bars reappeared with degraded content moments
+        -- after boarding, because UNIT_FACTION fires on the same transition
+        -- and funnels here). Re-assert the hide and stop.
+        if vehicleHidden then
+            ApplyVehicleHidden(true)
+            return
+        end
         ApplyLiveConfig(true)
         ApplyLiveConfig(false)
         local cb = ns.PAB_CustomBuffBars()
@@ -4374,13 +4449,57 @@ initFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         TryCreateBars()
-        -- Registered only for sessions where the feature runs at all; the
-        -- handler's container guard covers the module-disabled stand-down.
-        if ns.PAB_Enabled() then
-            self:RegisterEvent("CINEMATIC_STOP")
+        -- NOTE: recovery events are NOT registered here. ns.db is routinely
+        -- absent during this same PLAYER_LOGIN dispatch (that is what
+        -- TryCreateBars' retry loop exists for), so an enabled check taken
+        -- synchronously reads nil and skips registration for enabled users.
+        -- CreateBars calls ns.PAB_ArmRecovery() once it has confirmed the
+        -- module is enabled -- login retry path and live enable both.
+        return
+    end
+    if event == "PLAYER_ENTERING_WORLD" then
+        if vehicleHidden then
+            local probe = UnitUsingVehicle or UnitInVehicle
+            if not probe("player") then
+                SetVehicleHidden(false)
+                ReapplyAllAfterCinematic()
+            end
         end
         return
     end
+    if event == "UNIT_ENTERING_VEHICLE" or event == "UNIT_ENTERED_VEHICLE" then
+        SetVehicleHidden(true)
+        return
+    end
+    if event == "UNIT_EXITED_VEHICLE" then
+        SetVehicleHidden(false)
+    end
     ReapplyAllAfterCinematic()
 end)
+
+-- Called by CreateBars once it has passed its own enabled check -- the only
+-- point where "PAB is actually running" is known to be true (at PLAYER_LOGIN
+-- ns.db may not exist yet; see the login handler note above). Idempotent:
+-- CreateBars can run more than once per session (login retry, live enable).
+local recoveryArmed = false
+function ns.PAB_ArmRecovery()
+    if recoveryArmed then return end
+    recoveryArmed = true
+    initFrame:RegisterEvent("CINEMATIC_STOP")
+    -- Player-only registration: cinematics fire UNIT_FACTION for every unit;
+    -- the player edge is the one that degrades these containers' filters.
+    -- Also covers non-cinematic faction flips (Pandaren faction choice) --
+    -- rare, and the re-drive is cheap.
+    initFrame:RegisterUnitEvent("UNIT_FACTION", "player")
+    -- Vehicles are the third trigger of the same class: boarding drops the
+    -- player's assistability for the whole ride. The bars SUPPRESS for the
+    -- duration (SetVehicleHidden) and the exit edge re-drives -- same
+    -- trigger set as the RF assist gate and the UF player lane.
+    initFrame:RegisterUnitEvent("UNIT_ENTERING_VEHICLE", "player")
+    initFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+    initFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+    -- Safety net only: an exit that never fires EXITED (teleport out of a
+    -- vehicle). Zero work on ordinary loading screens.
+    initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+end
 

@@ -11913,7 +11913,9 @@ local function UnitFrame_OnLeave(self)
             local hasAnyHideOpt = s.visHideNoTarget
                                or s.visHideNoEnemy
                                or s.visHideMounted
+                               or s.visOnlyMounted
                                or s.visHideHousing
+                               or s.visOnlyHousing
                                or s.visOnlyInstances
             local keepShown = (not hiddenByOpts) and hasAnyHideOpt
             leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0
@@ -13325,7 +13327,9 @@ function InitializeFrames()
                     local hasAnyHideOpt = s.visHideNoTarget
                                        or s.visHideNoEnemy
                                        or s.visHideMounted
+                                       or s.visOnlyMounted
                                        or s.visHideHousing
+                                       or s.visOnlyHousing
                                        or s.visOnlyInstances
                     if hiddenByOpts then
                         bodyAlpha = 0
