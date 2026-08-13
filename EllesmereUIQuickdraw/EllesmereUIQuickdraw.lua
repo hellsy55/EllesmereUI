@@ -2468,7 +2468,35 @@ end
 -- claim's own children come first: PushPalette writes only REGION_MAX of them,
 -- so an overflow drops the tail, and a dropped piece with a child under it would
 -- take that child off the claim's ground entirely.
-local function AddRegion(c, box, axis, holes)
+local AddRegion
+do
+-- Do these two boxes share a stretch of EDGE, overlapping or merely abutting?
+-- BoxesMeet answers the other question -- is one box standing over the other --
+-- and a corridor never is: CorridorBox starts it at the parent cell's own outer
+-- edge, so the two touch along that whole edge and overlap by nothing at all.
+-- Read through BoxesMeet, a corridor therefore looked disconnected from the very
+-- cell it leads out of.
+--
+-- A shared edge and not a shared CORNER: contact at one point is not ground a
+-- cursor can cross, and a piece reachable only past a corner is exactly what the
+-- filter below is there to drop. So one axis must genuinely overlap while the
+-- other is allowed to touch.
+--
+-- The tolerance is for the touch itself. Two edges that meet by construction
+-- still arrive here through different arithmetic -- a centre and a half-extent
+-- recovered from a pair of edges -- and a boundary this rests on cannot be left
+-- to land on the exact same float twice.
+--
+-- Inside the block with its only caller, which is what keeps it off the main
+-- chunk: this file sits within a couple of Lua's ceiling of 200 locals.
+local function BoxesTouch(a, b)
+    local dx, dy = abs(a.x - b.x), abs(a.y - b.y)
+    local sx, sy = a.hw + b.hw, a.hh + b.hh
+    return (dx < sx and dy <= sy + 1e-4)
+        or (dy < sy and dx <= sx + 1e-4)
+end
+
+function AddRegion(c, box, axis, holes)
     if not holes then
         c.regions[#c.regions + 1] = box
         return
@@ -2490,13 +2518,21 @@ local function AddRegion(c, box, axis, holes)
             -- onto it is across that hole -- which hands the claim over before
             -- the cursor arrives. Keeping it would spend a gate on ground this
             -- claim can never be armed on.
+            --
+            -- Touching is the whole test, so it is asked with BoxesTouch. The
+            -- corridor is the piece that turns on this: it abuts the parent cell
+            -- along a full edge and overlaps it by nothing, so a strict test
+            -- dropped the one rect covering the ground between an entry and its
+            -- own nest -- and only ever where a second claim put a hole in play,
+            -- which is why one nesting entry behaved and two did not.
             if holds == (pass == 1)
-               and (holds or BoxesMeet(b, c.parentBox))
+               and (holds or BoxesTouch(b, c.parentBox))
                and not Covered(b, c.regions) then
                 c.regions[#c.regions + 1] = b
             end
         end
     end
+end
 end
 
 -- Nested geometry for one palette. Returns an array of CLAIMS -- one per slot
