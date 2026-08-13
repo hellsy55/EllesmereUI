@@ -637,6 +637,23 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The words a collection entry can be searched by besides its own name,
+    -- lowercase and space separated, matched by the same plain substring find
+    -- the name gets -- so "vend" finds a vendor mount the way "sea" finds a
+    -- seahorse.
+    --
+    -- The source label is the client's own BATTLE_PET_SOURCE_n string, which is
+    -- what the Mount Journal and the Toy Box label their own source filters
+    -- with, so a localized client searches in its own words. Nothing is
+    -- invented here: only what the collection API actually hands back is
+    -- indexed.
+    local function SourceKeywords(sourceType, isFavorite)
+        local out = isFavorite and (EllesmereUI.L("favorite"):lower() .. " ") or ""
+        local label = sourceType and _G["BATTLE_PET_SOURCE_" .. sourceType]
+        if label then out = out .. label:lower() end
+        return out ~= "" and out or nil
+    end
+
     local function MountEntries()
         local out = {}
         -- The roll the Mount Journal's own button makes, offered ahead of the
@@ -658,8 +675,8 @@ initFrame:SetScript("OnEvent", function(self)
                               slot = slot, pin = true }
         end
         for _, mountID in ipairs(C_MountJournal.GetMountIDs()) do
-            local name, spellID, icon, _, _, _, _, _, _, hideOnChar, isCollected =
-                C_MountJournal.GetMountInfoByID(mountID)
+            local name, spellID, icon, _, _, sourceType, isFavorite, _, _,
+                  hideOnChar, isCollected = C_MountJournal.GetMountInfoByID(mountID)
             -- isUsable is deliberately not read here. It moves with where the
             -- player stands -- the Mount Journal rebuilds its list on
             -- MOUNT_JOURNAL_USABILITY_CHANGED -- so filtering on it hides an
@@ -667,6 +684,9 @@ initFrame:SetScript("OnEvent", function(self)
             -- can be summoned is a run-time question, not a pick-time one.
             if name and isCollected and not hideOnChar then
                 out[#out + 1] = { icon = icon, name = name,
+                    -- Where it came from, and whether it is a favorite, so both
+                    -- are things the search box can be asked for.
+                    keywords = SourceKeywords(sourceType, isFavorite),
                     -- spellID is banked at pickup time because ResolveAction
                     -- needs the summon spell and it is already in hand here.
                     slot = { kind = "mount", id = mountID, spellID = spellID, name = name } }
@@ -766,9 +786,13 @@ initFrame:SetScript("OnEvent", function(self)
             for i = 1, (C_ToyBox.GetNumFilteredToys() or 0) do
                 local itemID = C_ToyBox.GetToyFromIndex(i)
                 if itemID and itemID > 0 and PlayerHasToy(itemID) then
-                    local _, name, icon = C_ToyBox.GetToyInfo(itemID)
+                    local _, name, icon, isFavorite = C_ToyBox.GetToyInfo(itemID)
                     if name then
+                        -- Favorite only: the toy API hands back no source for
+                        -- an individual toy, and a source guessed from anywhere
+                        -- else would be a made-up answer in a search box.
                         out[#out + 1] = { icon = icon, name = name,
+                            keywords = SourceKeywords(nil, isFavorite),
                             slot = { kind = "toy", id = itemID, name = name } }
                     end
                 end
@@ -917,9 +941,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- something the game owns.
         { key = "palette",   label = "Nest Another Action Menu", build = PaletteEntries },
         { key = "spell",     label = "Spells",       build = SpellEntries },
-        { key = "mount",     label = "Mounts",       build = MountEntries },
+        { key = "mount",     label = "Mounts",       build = MountEntries,
+          keywordHint = true },
         { key = "item",      label = "Items",        build = ItemEntries },
-        { key = "toy",       label = "Toys",         build = ToyEntries },
+        { key = "toy",       label = "Toys",         build = ToyEntries,
+          keywordHint = true },
         { key = "macro",     label = "Macros",       build = MacroEntries },
         { key = "battlepet", label = "Battle Pets",  build = PetEntries },
         -- keepOrder on both: the markers run star to skull, the order every
@@ -1387,6 +1413,11 @@ initFrame:SetScript("OnEvent", function(self)
             menu.search:Hide()
         else
             menu.search:Show()
+            -- The placeholder names what the box searches. A list that also
+            -- matches source and favorite is worth nothing if the only way to
+            -- find that out is to guess it.
+            menu.searchPH:SetText(EllesmereUI.L(
+                cat.keywordHint and "Search name, source, favorite..." or "Search..."))
             menu.searchPH:SetShown((menu.search:GetText() or "") == "")
         end
         menu.custom:Hide()
@@ -1418,7 +1449,15 @@ initFrame:SetScript("OnEvent", function(self)
             or (menu.search:GetText() or ""):lower()
         local n = 0
         for _, entry in ipairs(list) do
-            if filter == "" or entry.name:lower():find(filter, 1, true) then
+            -- The name first, then whatever else the entry knows about itself.
+            -- A picker holding several hundred rows that can only be searched
+            -- by name can only be searched by someone who already knows the
+            -- name of the thing they want, which is the opposite of what a
+            -- search is for. Keywords are built once with the list and are
+            -- already lowercase; this runs on every keystroke.
+            if filter == ""
+               or entry.name:lower():find(filter, 1, true)
+               or (entry.keywords and entry.keywords:find(filter, 1, true)) then
                 n = n + 1
                 local r = menu:GetRow(n)
                 r.icon:SetTexture(entry.icon or QUESTION_MARK)
