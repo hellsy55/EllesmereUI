@@ -1682,10 +1682,14 @@ function ns.RemoveTrackedSpell(barKey, idx)
 
         -- Route to the ghost CD bar so frames stay routed but hidden. Buff-family bars
         -- don't ghost (visibility managed by Blizzard's CDM settings); negative IDs and
-        -- non-viewer spells (customs, racials) skip ghost routing entirely.
+        -- non-viewer spells (customs) skip ghost routing entirely. Racials DO ghost-route
+        -- (fix: they used to be excluded here, which meant "Remove Spell" on a racial never
+        -- recorded a hide anywhere -- the spillover model just showed it again on the very
+        -- next rebuild/spec-swap/reload. NormalizeRacialAssignments and
+        -- ReseedAssignedSpellsFromLiveIcons's ghost-list check already treat the ghost bar's
+        -- racial entry correctly, so ghosting a racial is safe.
         local isNonViewer = removedID and removedID > 0
-            and ((sd.customSpellIDs and sd.customSpellIDs[removedID])
-              or (ns._myRacialsSet and ns._myRacialsSet[removedID]))
+            and (sd.customSpellIDs and sd.customSpellIDs[removedID])
         if removedID and removedID > 0 and not isNonViewer
            and not IsBarBuffFamily(barKey) then
             ns.AddSpellToBar(ns.GHOST_CD_BAR_KEY, removedID)
