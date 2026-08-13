@@ -531,6 +531,7 @@ for _, info in ipairs(BAR_CONFIG) do
         visHideNoTarget = false,
         visHideNoEnemy = false,
         hideKeybind = false,
+        showKeybindInVehicle = false,
         keybindFontSize = 12,
         keybindFontColor = { r = 1, g = 1, b = 1 },
         hideMacroText = false,
@@ -7407,6 +7408,13 @@ function EAB:ApplyFontsForBar(barKey)
     if not buttons then return end
     local fontPath = EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("actionBars") or FONT_PATH
     local hideKB = s.hideKeybind
+    -- "Show Keybind Text in Vehicle": while Hide Keybind Text is on, keep
+    -- keybinds visible anyway for as long as this bar is paged onto the
+    -- vehicle/possess bar (bar 1 becoming a vehicle bar).
+    if hideKB and s.showKeybindInVehicle and barKey == "MainBar"
+        and EAB_VTABLE.IsInVehicleBar and EAB_VTABLE.IsInVehicleBar() then
+        hideKB = false
+    end
     local kbSize = s.keybindFontSize or 12
     -- Stance/pet bar buttons are smaller (30px vs 45px) shrink keybind text
     -- by 2px so it doesn't overwhelm the icon.
@@ -8841,6 +8849,15 @@ do
     end
     EAB_VTABLE.IsSkyriding = IsSkyriding
 
+    -- Bar 1 pages onto the vehicle/possess actions (see BuildPagingConditions,
+    -- "[vehicleui][possessbar]") the same way it pages onto the skyriding
+    -- bonus bar. Reuse that as a second trigger for "Always Show While
+    -- Skyriding" and for the "Show Keybind Text in Vehicle" override below.
+    local function IsInVehicleBar()
+        return (HasVehicleActionBar and HasVehicleActionBar()) and true or false
+    end
+    EAB_VTABLE.IsInVehicleBar = IsInVehicleBar
+
     local skyEvt = CreateFrame("Frame")
     skyEvt:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
     if EllesmereUI._hasGlidingEvent then
@@ -8849,12 +8866,23 @@ do
     skyEvt:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
     skyEvt:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
     skyEvt:RegisterEvent("PLAYER_ENTERING_WORLD")
+    -- Vehicle enter/exit also flips both the skyriding-vis override (now that
+    -- it covers vehicles too) and the "Show Keybind Text in Vehicle" override,
+    -- so this frame refreshes fonts as well.
+    skyEvt:RegisterEvent("UNIT_ENTERED_VEHICLE")
+    skyEvt:RegisterEvent("UNIT_EXITED_VEHICLE")
+    skyEvt:RegisterEvent("UPDATE_VEHICLE_ACTIONBAR")
     local function SkyEvtRefresh()
         if EAB.RefreshMouseover then EAB:RefreshMouseover() end
         if EAB.UpdateSkyridingVisOverride then EAB:UpdateSkyridingVisOverride() end
         if EAB.RefreshAutoCompactLayouts then EAB:RefreshAutoCompactLayouts() end
+        if EAB.ApplyFonts then EAB:ApplyFonts() end
     end
-    skyEvt:SetScript("OnEvent", function(_, event)
+    skyEvt:SetScript("OnEvent", function(_, event, unit)
+        if (event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE")
+            and unit and unit ~= "player" then
+            return
+        end
         SkyEvtRefresh()
         if event == "PLAYER_ENTERING_WORLD" then
             C_Timer_After(0, SkyEvtRefresh)
@@ -8864,7 +8892,11 @@ end
 
 function EAB:UpdateSkyridingVisOverride()
     local s = self.db and self.db.profile and self.db.profile.bars["MainBar"]
-    local active = s and s.visShowSkyriding and GetBonusBarOffset() == 5
+    -- "Always Show While Skyriding" also keeps Bar 1 fully visible while it's
+    -- paged onto the vehicle/possess bar (bar 1 becoming a vehicle bar), not
+    -- just while airborne on a skyriding mount.
+    local active = s and s.visShowSkyriding
+        and (GetBonusBarOffset() == 5 or (EAB_VTABLE.IsInVehicleBar and EAB_VTABLE.IsInVehicleBar()))
     if active then
         EAB._skyridingVisForced = true
         EAB._visOverride = EAB._visOverride or {}
@@ -8921,9 +8953,11 @@ function EAB:RefreshMouseover()
                         AttachExtraBarHoverHooks(info)
                     end
                     StopFade(frame)
-                    if s.visShowSkyriding and EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding() then
-                        -- Skip the fade-to-0 while airborne on a skyriding mount:
-                        -- show at the bar's hovered alpha as if moused-over.
+                    if s.visShowSkyriding and ((EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding())
+                        or (key == "MainBar" and EAB_VTABLE.IsInVehicleBar and EAB_VTABLE.IsInVehicleBar())) then
+                        -- Skip the fade-to-0 while airborne on a skyriding mount, or
+                        -- while Bar 1 is paged onto the vehicle bar: show at the
+                        -- bar's hovered alpha as if moused-over.
                         local skyAlpha = s._savedBarAlpha or 1
                         frame:SetAlpha(skyAlpha)
                         local state = hoverStates[key]

@@ -1840,8 +1840,8 @@ initFrame:SetScript("OnEvent", function(self)
                 -- whole time the player is airborne on a skyriding mount
                 -- or in Druid Flight Form.
                 local function SkyridingRow()
-                    return { type="toggle", label="Always Show While Skyriding",
-                      tooltip="Keeps this bar fully visible while flying on a skyriding mount (or Druid Flight Form), regardless of the Visibility mode above.",
+                    return { type="toggle", label="Always Show While Skyriding /\nIn Vehicle",
+                      tooltip="Keeps this bar fully visible while flying on a skyriding mount (or Druid Flight Form), or while it's paged onto the vehicle bar (Action Bar 1 while the player is in a vehicle), regardless of the Visibility mode above.",
                       get=function() return SB().visShowSkyriding == true end,
                       set=function(v)
                           SB().visShowSkyriding = v
@@ -4476,6 +4476,19 @@ initFrame:SetScript("OnEvent", function(self)
                         end,
                     },
                 })
+                local _, kbVehicleCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Hide Keybind Text",
+                    rows = {
+                        { type="toggle", label="Show While in Vehicle",
+                          tooltip="Overrides Hide Keybind Text while this bar is paged onto the vehicle bar (Action Bar 1 while the player is in a vehicle), so the keybinds stay visible instead of hidden.",
+                          get=function() return SGet("showKeybindInVehicle") end,
+                          set=function(v)
+                              SSet("showKeybindInVehicle", v, function(k) EAB:ApplyFontsForBar(k) end)
+                              SUpdatePreview()
+                          end },
+                    },
+                })
+                MakeCogBtn(rgn, kbVehicleCogShow)
             end
             do
                 local rgn = keybindRow._rightRegion
