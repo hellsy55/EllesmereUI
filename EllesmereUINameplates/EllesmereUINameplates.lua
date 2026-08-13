@@ -7118,6 +7118,16 @@ function NameplateFrame:ApplyCastColor(uninterruptible)
         normalCastTint = sc
     end
     local cr, cg, cb = ComputeCastBarTint(kickReadyTint, normalCastTint)
+
+    -- Match the base cast fill to uninterruptible casts so plate opacity
+    -- doesn't reveal the interruptible color underneath the overlay.
+    if C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+        local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
+        local ev = C_CurveUtil.EvaluateColorValueFromBoolean
+        cr = ev(uninterruptible, unintColor.r, cr)
+        cg = ev(uninterruptible, unintColor.g, cg)
+        cb = ev(uninterruptible, unintColor.b, cb)
+    end
     self.cast:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
     -- Shield icon is opt-out: when disabled it never shows, even on uninterruptible casts. The
     -- setting is a clean boolean, so it gates the (possibly SECRET) flag without evaluating it.
