@@ -1465,6 +1465,10 @@ local function ClassColorSourceUnit(unitKey, unit)
     return unit or unitKey
 end
 
+-- Carrier for a resolved-but-secret class color. Reused: it is written and consumed inside one
+-- UpdateColor pass (SetStatusBarColor, then PostUpdateColor), and nothing stores it.
+local SECRET_CLASS_COLOR = CreateColor(1, 1, 1, 1)
+
 -- TEMPORARY oUF SHIM -- remove when upstream oUF ships secret-safe class coloring
 -- (check during the standing per-bump lib re-diff). 12.1 build 68914 made UnitClass return a SECRET token
 -- for identity-restricted units; the vendored health element's UpdateColor indexes
@@ -1494,9 +1498,15 @@ local function UF_SecretSafeHealthColor(self, event, unit)
             -- 12.1 (68914): UnitClass is SecretWhenUnitIdentityRestricted (focus/focus-target/ToT):
             -- token can't be read or used as a table key. C_ClassColor.GetClassColor and
             -- SetStatusBarColor are both SecretArguments="AllowedWhenTainted", so the real
-            -- color still reaches the bar without Lua inspecting it. Custom class colors
-            -- can't apply here -- that's an addon-side table lookup, which a secret key forbids.
-            if C_ClassColor and C_ClassColor.GetClassColor then
+            -- color still reaches the bar without Lua inspecting it -- but only ever in
+            -- Blizzard's shade. GetClassColorForRestrictedUnit recovers the user's custom
+            -- class color for group members with the compare done in C; its r/g/b are secret,
+            -- so they go into a scratch ColorMixin (plain field writes) and are never read.
+            local ok, r, g, b = EllesmereUI.GetClassColorForRestrictedUnit(unit, class)
+            if ok then
+                SECRET_CLASS_COLOR:SetRGB(r, g, b)
+                color = SECRET_CLASS_COLOR
+            elseif C_ClassColor and C_ClassColor.GetClassColor then
                 color = C_ClassColor.GetClassColor(class)
             end
         else
