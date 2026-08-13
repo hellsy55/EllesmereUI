@@ -6530,6 +6530,17 @@ local function CollectAndReanchor()
                     -- Hidden frames are collected for data (assignedSpells)
                     -- but left visually untouched so we don't override
                     -- Blizzard's "hide when inactive" state machine.
+                    -- Our own (unprotected) placeholder frames own their mouse state
+                    -- here, at the point they are injected: a freshly pooled one is
+                    -- born mouse-enabled and may never see a visibility pass before
+                    -- the cursor reaches it. Same rule ApplyCDMTooltipState uses, plus
+                    -- the alpha-0 exclusion, so flipping "Keep Buffs in Same Place"
+                    -- back off restores capture on the next collect instead of latching.
+                    if frame._isPlaceholderFrame and frame.EnableMouseMotion then
+                        frame:EnableMouseMotion((barData.showTooltip
+                            and not (container and container._mouseTrack)
+                            and not ns.IsPlaceholderRenderHidden(frame, barData)) and true or false)
+                    end
                     if frame:IsShown() and not isFocusKickBar then
                         local barHidden = container and container._visHidden
                         local fcH = _ecmeFC[frame]
@@ -6540,10 +6551,7 @@ local function CollectAndReanchor()
                             -- via frame alpha 0. The same check is mirrored in the two
                             -- other per-icon opacity passes (_CDMApplyVisibility and
                             -- ApplyBarOpacity) so none of them paint over it.
-                            -- The off-by-default bar flag is tested FIRST so anyone not
-                            -- using this feature short-circuits straight to the original
-                            -- branch below (identical code, no added work).
-                            if barData.hidePlaceholderIcon and frame._isPlaceholderFrame then
+                            if ns.IsPlaceholderRenderHidden(frame, barData) then
                                 frame:SetAlpha(0)
                             else
                                 frame:SetAlpha(barHidden and 0 or ns.EffectiveBarAlpha(barData))
