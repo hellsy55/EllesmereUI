@@ -677,22 +677,81 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The toy box has no ID-based enumeration, only a walk over the list the
+    -- Collections filters leave standing, so the picker used to show whatever
+    -- the player last set there -- with "Not Collected" ticked it came up
+    -- empty, which reads as a broken picker rather than as a filter. So the
+    -- filters are widened for the length of the walk and every one of them is
+    -- put back afterwards. Restoring is the whole cost of this: the scan runs
+    -- inside pcall so an error still hands the player their own filters back.
+    local function ScanToysUnfiltered(scan)
+        local saved = {
+            collected = C_ToyBox.GetCollectedShown(),
+            uncollected = C_ToyBox.GetUncollectedShown(),
+            unusable = C_ToyBox.GetUnusableShown(),
+            sources = {},
+            expansions = {},
+        }
+        local numSources = C_PetJournal.GetNumPetSources()
+        for i = 1, numSources do
+            saved.sources[i] = C_ToyBox.IsSourceTypeFilterChecked(i)
+        end
+        local numExpansions = GetNumExpansions()
+        for i = 1, numExpansions do
+            saved.expansions[i] = C_ToyBox.IsExpansionTypeFilterChecked(i)
+        end
+        -- There is no getter for the search string. It only ever comes from the
+        -- Toy Box's own box, which banks it here, and it does not survive a
+        -- reload -- so an empty string is the right restore when that is absent.
+        local searchString = (ToyBox and ToyBox.searchString) or ""
+
+        -- Uncollected toys are dropped rather than shown: PlayerHasToy rejects
+        -- them anyway, so widening that one would only lengthen the walk.
+        C_ToyBox.SetCollectedShown(true)
+        C_ToyBox.SetUncollectedShown(false)
+        C_ToyBox.SetUnusableShown(true)
+        C_ToyBox.SetAllSourceTypeFilters(true)
+        C_ToyBox.SetAllExpansionTypeFilters(true)
+        C_ToyBox.SetFilterString("")
+        C_ToyBox.ForceToyRefilter()
+
+        local ok, err = pcall(scan)
+
+        C_ToyBox.SetCollectedShown(saved.collected)
+        C_ToyBox.SetUncollectedShown(saved.uncollected)
+        C_ToyBox.SetUnusableShown(saved.unusable)
+        for i = 1, numSources do
+            C_ToyBox.SetSourceTypeFilter(i, saved.sources[i])
+        end
+        for i = 1, numExpansions do
+            C_ToyBox.SetExpansionTypeFilter(i, saved.expansions[i])
+        end
+        C_ToyBox.SetFilterString(searchString)
+        C_ToyBox.ForceToyRefilter()
+        -- An open Toy Box drew its page from the widened list, so it has to be
+        -- told to draw it again -- the same pair its own filter menu calls.
+        if ToyBox and ToyBox:IsVisible() then
+            if ToyBox_UpdatePages then ToyBox_UpdatePages() end
+            if ToyBox_UpdateButtons then ToyBox_UpdateButtons() end
+        end
+
+        if not ok then error(err, 0) end
+    end
+
     local function ToyEntries()
         local out = {}
-        -- The toy box has no ID-based enumeration, only this filtered walk, so
-        -- this one list does follow the user's Collections filters. Narrowing it
-        -- back out would mean calling C_ToyBox.SetFilterString/SetCollectedShown,
-        -- which changes what they see in Collections -- not worth it.
-        for i = 1, (C_ToyBox.GetNumFilteredToys() or 0) do
-            local itemID = C_ToyBox.GetToyFromIndex(i)
-            if itemID and itemID > 0 and PlayerHasToy(itemID) then
-                local _, name, icon = C_ToyBox.GetToyInfo(itemID)
-                if name then
-                    out[#out + 1] = { icon = icon, name = name,
-                        slot = { kind = "toy", id = itemID, name = name } }
+        ScanToysUnfiltered(function()
+            for i = 1, (C_ToyBox.GetNumFilteredToys() or 0) do
+                local itemID = C_ToyBox.GetToyFromIndex(i)
+                if itemID and itemID > 0 and PlayerHasToy(itemID) then
+                    local _, name, icon = C_ToyBox.GetToyInfo(itemID)
+                    if name then
+                        out[#out + 1] = { icon = icon, name = name,
+                            slot = { kind = "toy", id = itemID, name = name } }
+                    end
                 end
             end
-        end
+        end)
         return out
     end
 
