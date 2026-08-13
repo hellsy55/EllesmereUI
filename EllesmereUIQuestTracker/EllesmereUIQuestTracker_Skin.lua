@@ -865,6 +865,33 @@ local function SuppressPOI(block)
     end
 end
 
+-- Raise the block's right-edge buttons (quest item / group finder) above the
+-- block itself. Blizzard acquires both the block and its right-edge frames from
+-- the same module pool, so they are siblings on ContentsFrame at the *same*
+-- frame level; the block then wins hit-testing and swallows the button's clicks.
+--
+-- Only the quest item button is stored under a named field
+-- (block.ItemButton, Blizzard_QuestObjectiveTracker.lua). The group finder
+-- button has no named field at all -- block.rightEdgeFrame holds just the last
+-- one added, which is the item button whenever a quest has both. The complete
+-- set is block.addedRegions (ObjectiveTrackerBlockMixin:OnAddedRegion), so walk
+-- that and raise every Button in it. Objective lines, timer bars and progress
+-- bars are Frames and stay untouched.
+local function RaiseRightEdgeButtons(block)
+    local bl = block.GetFrameLevel and block:GetFrameLevel() or 0
+    if block.ItemButton and block.ItemButton.SetFrameLevel then
+        block.ItemButton:SetFrameLevel(bl + 5)
+    end
+    local regions = block.addedRegions
+    if type(regions) ~= "table" then return end
+    for region in pairs(regions) do
+        if type(region) == "table" and region.SetFrameLevel and region.GetObjectType
+           and region:GetObjectType() == "Button" then
+            region:SetFrameLevel(bl + 5)
+        end
+    end
+end
+
 local function SkinBlock(block)
     if not block then return end
     if ShouldSkipSkin() then return end
@@ -873,6 +900,11 @@ local function SkinBlock(block)
     -- Suppress POI on every entry -- Blizzard may assign a new pooled
     -- poiButton to the block between skin passes.
     SuppressPOI(block)
+
+    -- Also on every entry: a block can gain a right-edge button after it was
+    -- first skinned (a quest becomes groupable, an item is granted), and the
+    -- pooled Init/Reset paths reset the level back to the block's.
+    RaiseRightEdgeButtons(block)
 
     -- Skip blocks already fully skinned. The heavy work (strip textures,
     -- style fontstrings, walk children) only needs to happen once per block.
@@ -884,18 +916,6 @@ local function SkinBlock(block)
     end
 
     HookBlockLineMethods(block)
-
-    -- Raise ItemButton / GroupFinderButton frame levels above the block on EVERY skin
-    -- pass. Blizzard pools the block + Init/Reset paths can lower the level back to the
-    -- block's, after which clicks fall through to the block instead of the icon button.
-    -- Re-applying every pass is cheap and guarantees correct hit-testing.
-    local bl = block.GetFrameLevel and block:GetFrameLevel() or 0
-    if block.ItemButton and block.ItemButton.SetFrameLevel then
-        block.ItemButton:SetFrameLevel(bl + 5)
-    end
-    if block.GroupFinderButton and block.GroupFinderButton.SetFrameLevel then
-        block.GroupFinderButton:SetFrameLevel(bl + 5)
-    end
 
     -- Strip named decorative textures by key.
     for _, k in ipairs({
