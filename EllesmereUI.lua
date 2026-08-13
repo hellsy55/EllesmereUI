@@ -2839,6 +2839,23 @@ do
     local _bdBorderData = setmetatable({}, { __mode = "k" })
     EllesmereUI._bdBorderData = _bdBorderData
 
+    --- Returns usable, width, height.
+    --- usable = false means EVERY widget call on this frame raises from our (always tainted)
+    --- code: Enum.ForbiddenAspect.UntrustedLayoutScriptExecution propagates to a forbidden
+    --- frame's children AND to anything ANCHORED to it, so a border we hung off a Blizzard
+    --- frame inherits it the moment that frame anchors to a forbidden one (Blizzard UI
+    --- widgets do exactly that to the tooltip they own, on hover). The size READ raises
+    --- too, so pcall is the only way to ask.
+    --- usable with no width = the size is SECRET: the frame is fine to touch, only the
+    --- backdrop's texcoord arithmetic is not (map-pin tooltips, menus with secret text, and
+    --- every frame anchored to secret aura geometry, which uses the solid path on purpose).
+    local function ReadBorderSize(frame)
+        local ok, w, h = pcall(frame.GetSize, frame)
+        if not ok then return false end
+        if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return true end
+        return true, w, h
+    end
+
     -- Per-addon border defaults registry, keyed by texture key. Each texture entry:
     --   defaultSize: size key auto-set when this texture is selected
     --   sizes: keyed by size key (addon-specific), each with offsetX, offsetY,
@@ -3032,6 +3049,10 @@ do
         local PP = EllesmereUI.PP
         if not PP or not borderFrame then return end
         a = a or 1
+        -- Probe before the first widget call: a restyle can land while the owner is anchored
+        -- to a forbidden frame (tooltips on UI-widget hover), and then anchoring, frame level
+        -- and color would each raise in turn. Skipping leaves the last-good border; the next apply, off that anchor, restyles normally.
+        if not ReadBorderSize(borderFrame) then return end
 
         local isSolid = not textureKey or textureKey == "" or textureKey == "solid"
 
@@ -3082,10 +3103,12 @@ do
                 -- Addon-born frame: its scripts always run tainted. When the owner rides a
                 -- Blizzard frame sized from secret content (map-pin tooltips, menus with secret
                 -- text), GetWidth() hands the template's resize recompute a SECRET number and its
-                -- texcoord math throws; skip the recompute on secret size (edges keep last-good texcoords and stretch, same as the throwing path left them, minus the per-resize error).
+                -- texcoord math throws; a forbidden layout aspect inherited from the owner's
+                -- anchor makes the read itself throw (see ReadBorderSize). Skip the recompute
+                -- either way (edges keep last-good texcoords and stretch, same as the throwing path left them, minus the per-resize error).
                 bdFrame:SetScript("OnSizeChanged", function(self)
-                    if issecretvalue and (issecretvalue(self:GetWidth())
-                        or issecretvalue(self:GetHeight())) then return end
+                    local usable, w = ReadBorderSize(self)
+                    if not usable or not w then return end
                     self:OnBackdropSizeChanged()
                 end)
                 _bdBorderData[borderFrame] = bdFrame
@@ -3138,8 +3161,8 @@ do
             -- real style change under a secret size keeps the last-good backdrop and retries next apply (the color write below is vertex-only and always safe).
             local bdKey = texPath .. "@" .. edgeSize
             if bdFrame._euiBdKey ~= bdKey then
-                if issecretvalue and (issecretvalue(bdFrame:GetWidth())
-                    or issecretvalue(bdFrame:GetHeight())) then
+                local bdUsable, bdW = ReadBorderSize(bdFrame)
+                if not bdUsable or not bdW then
                     bdFrame._euiBdKey = nil
                 else
                     bdFrame:SetBackdrop({
