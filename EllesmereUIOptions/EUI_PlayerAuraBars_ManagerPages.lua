@@ -70,8 +70,8 @@ local FONT_OUTLINE_VALUES = {
 local FONT_OUTLINE_ORDER = { "default", "none", "outline", "thick" }
 local GROW_DIR_VALUES = { LEFT = "Left", RIGHT = "Right", CENTER_HORIZONTAL = "Centered Horizontal", CENTER_VERTICAL = "Centered Vertical", UP = "Up", DOWN = "Down" }
 local GROW_DIR_ORDER = { "LEFT", "RIGHT", "CENTER_HORIZONTAL", "CENTER_VERTICAL", "UP", "DOWN" }
-local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right" }
-local ICON_WRAP_ORDER = { "LEFT", "RIGHT" }
+local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right", UP = "Top", DOWN = "Bottom" }
+local ICON_WRAP_ORDER = { "LEFT", "RIGHT", "UP", "DOWN" }
 
 -- Native AuraContainerSortMethod/AuraContainerSortDirection enum names
 -- (in-game dump: AuraContainerSortMethod = {Default=0,
@@ -698,7 +698,20 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             type = "dropdown", text = "Growth Direction",
             values = GROW_DIR_VALUES, order = GROW_DIR_ORDER,
             getValue = function() return cfg.growDirection or "LEFT" end,
-            setValue = function(v) cfg.growDirection = v; apply() end
+            setValue = function(v)
+                -- Change the wrap direction to be a valid value from the new growth direction
+                if v == "UP" or v == "DOWN" then
+                    if cfg.iconWrapDirection ~= "LEFT" and cfg.iconWrapDirection ~= "RIGHT" then
+                        cfg.iconWrapDirection = "LEFT"
+                    end
+                elseif v == "LEFT" or v == "RIGHT" then
+                    if cfg.iconWrapDirection ~= "UP" and cfg.iconWrapDirection ~= "DOWN" then
+                        cfg.iconWrapDirection = "DOWN"
+                    end
+                end
+
+                cfg.growDirection = v; apply()
+            end
         }
     ); sy = sy - hh
 
@@ -729,9 +742,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         ns._PAMakeCogBtn(rgn, cogShow)
     end
     do
-        -- Icon Wrap: only meaningful for vertical growth (Up/Down) -- decides which
+        -- Icon Wrap: only meaningful for vertical growth (Up/Down) and horizontal growth (Left/Right) -- decides which
         -- side additional columns stack toward when Icons Per Row/Column > 1. Cog-only,
-        -- no separate dropdown row, and only shown while Growth Direction is Up/Down.
+        -- no separate dropdown row, and only shown while Growth Direction is Up/Down or Left/Right.
         local rgn = sizeRow._rightRegion
         local _, cogShow = EllesmereUI.BuildCogPopup({
             title = "Growth",
@@ -739,13 +752,22 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
                 { type = "dropdown", label = "Icon Wrap",
                   values = ICON_WRAP_VALUES, order = ICON_WRAP_ORDER,
                   get = function() return cfg.iconWrapDirection or "LEFT" end,
-                  set = function(v) cfg.iconWrapDirection = v; apply() end },
+                  set = function(v) cfg.iconWrapDirection = v; apply() end,
+                  itemDisabled = function(v)
+                      if cfg.growDirection == "LEFT" or cfg.growDirection == "RIGHT" then
+                        return v == "LEFT" or v == "RIGHT"
+                      elseif cfg.growDirection == "UP" or cfg.growDirection == "DOWN" then
+                        return v == "UP" or v == "DOWN"
+                      end
+                      return false
+                  end,
+                 },
             },
         })
         local cogBtn = ns._PAMakeCogBtn(rgn, cogShow)
         local function UpdateWrapCogVisibility()
             local dir = cfg.growDirection or "LEFT"
-            cogBtn:SetShown(dir == "UP" or dir == "DOWN")
+            cogBtn:SetShown(dir == "UP" or dir == "DOWN" or dir == "LEFT" or dir == "RIGHT")
         end
         EllesmereUI.RegisterWidgetRefresh(UpdateWrapCogVisibility)
         UpdateWrapCogVisibility()
