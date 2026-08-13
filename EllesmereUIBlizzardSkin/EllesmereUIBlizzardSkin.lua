@@ -187,8 +187,23 @@ end
         return not EllesmereUIDB or EllesmereUIDB.reskinPopupsMenus ~= false
     end
 
+    -- IsForbidden() reports only EXPLICIT marking. A forbidden LAYOUT aspect inherited from
+    -- the frame a tooltip or menu is anchored to (Blizzard UI widget owners hand one to the
+    -- tooltip they own, on hover) restricts every call on it and on everything anchored
+    -- below it without ever setting that flag, so the only legal probe is a pcall'd read.
+    -- Skip the pass instead of raising inside a Blizzard OnShow; the last-good skin stands and the next apply, off that anchor, runs normally.
+    local function _ttUsable(tt)
+        local ok, w = pcall(tt.GetWidth, tt)
+        if not ok then return false end
+        if _isSecret and _isSecret(w) then return false end
+        return true
+    end
+
     local function _applyConfiguredBorder(owner, prefix, legacySize)
         if not owner or not EllesmereUI.ApplyBorderStyle then return end
+        -- Read the level up front: it is the first widget call this makes, so it doubles as the restriction probe (see _ttUsable).
+        local okLvl, ownerLevel = pcall(owner.GetFrameLevel, owner)
+        if not okLvl then return end
         local db = EllesmereUIDB or {}
         local key = db[prefix .. "BorderThickness"]
         local sizes = { none=0, thin=1, normal=2, heavy=3, strong=4 }
@@ -217,7 +232,7 @@ end
         -- Recomputed every apply so Show Behind works live. +4 not +5: the resurrect-accept
         -- glow overlay sits at +5 on the same buttons and a tie goes to the later-created sibling, so the border must never bury it.
         data.configBorder:SetFrameLevel(db[prefix .. "BorderBehind"]
-            and math.max(0, owner:GetFrameLevel() - 1) or (owner:GetFrameLevel() + 4))
+            and math.max(0, ownerLevel - 1) or (ownerLevel + 4))
         EllesmereUI.ApplyBorderStyle(data.configBorder, size, color.r, color.g, color.b, alpha,
             db[prefix .. "BorderTexture"] or "solid", db[prefix .. "BorderOffsetX"],
             db[prefix .. "BorderOffsetY"], db[prefix .. "BorderShiftX"], db[prefix .. "BorderShiftY"],
@@ -258,7 +273,7 @@ end
         if not tt or tt:IsForbidden() or not _enabled() then return end
         -- Embedded tooltips (EmbeddedItemTooltip, reward block inside a world-quest tooltip) render INSIDE a parent; skip bg/border to avoid a nested-tooltip look.
         if isEmbedded or tt.IsEmbedded then return end
-        if _isSecret and _isSecret(tt:GetWidth()) then return end
+        if not _ttUsable(tt) then return end
         if not _PP then _PP = EllesmereUI and EllesmereUI.PP end
         if tt.NineSlice then tt.NineSlice:SetAlpha(0) end
         if not GetFFD(tt).bg then
@@ -280,8 +295,9 @@ end
         local scale = EllesmereUIDB and EllesmereUIDB.tooltipFontScale or 1.0
         local titleSize = math.floor(13 * scale + 0.5)
         local bodySize  = math.floor(11 * scale + 0.5)
-        local name = tt.GetName and tt:GetName()
-        if not name then return end
+        -- pcall'd for the same reason as _ttUsable, and this is the first widget call here.
+        local okName, name = pcall(tt.GetName, tt)
+        if not okName or not name then return end
         local nLines = tt.NumLines and tt:NumLines() or 30
         for i = (startFrom or 1), nLines do
             local left = _G[name .. "TextLeft" .. i]

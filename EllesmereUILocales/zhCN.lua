@@ -7210,3 +7210,79 @@ L["Select..."] = "选择……"
 L["Blacklisted spells never display."] = "黑名单中的法术永不显示。"
 L["Spell ID..."] = "法术 ID……"
 L["No blacklisted spells."] = "黑名单为空。"
+
+--------------------------------------------------------------------------------
+--  New in 8.8.5
+--------------------------------------------------------------------------------
+
+-- == Cooldown Manager ========================================================
+L["Always Show Cooldown Edge"] = "始终显示冷却边缘"
+L["Comma separated stack counts to put a tick mark at. Type all to mark every stack."] = "以逗号分隔要显示刻度标记的层数。输入 all 可标记所有层数。"
+L["Show the rotating cooldown edge on every cooldown in this bar, not just while a charge is recharging. Hide Recharge Edge still overrides this for individual charge spells."] = "为此条中的所有冷却显示旋转的冷却边缘，而不只在充能恢复期间显示。对于单个充能法术，“隐藏充能边缘”仍会覆盖此设置。"
+
+-- == Player Aura Bars ========================================================
+L["Centered Horizontal"] = "水平居中"
+L["Centered Vertical"] = "垂直居中"
+L["Grow Centered Horizontal"] = "水平居中增长"
+L["Grow Centered Vertical"] = "垂直居中增长"
+
+-- == Nameplates ==============================================================
+L["Attack-range cutoff used by Out of Range Opacity. Five-yard steps match the available fallback range checks."] = "「范围外不透明度」使用的攻击距离阈值。以 5 码为步长，与可用的备用距离检查档位一致。"
+L["Auto (Class/Spec)"] = "自动（职业/专精）"
+L["Custom Range"] = "自定义距离"
+L["Disabled runs no nameplate range checks. Auto uses your class and specialization's normal attack range. Custom uses the range set in the cog beside this option."] = "「禁用」不会进行姓名板距离检查。「自动」使用当前职业和专精的常规攻击距离。「自定义」使用此选项旁齿轮中设置的距离。"
+L["Hide Enemy Nameplates out of Combat"] = "脱离战斗时隐藏敌方姓名板"
+L["Hide enemy nameplates while you are out of combat; they return the moment combat starts. Drives the same game setting as the Show Enemy Name Plates keybind."] = "脱离战斗时隐藏敌方姓名板；进入战斗后立即重新显示。此选项与「显示敌方姓名板」快捷键控制的是同一项游戏设置。"
+L["Opacity used for enemy nameplates outside the selected attack range."] = "用于超出所选攻击距离的敌方姓名板的不透明度。"
+L["Out of Range Opacity"] = "范围外不透明度"
+L["Range Check: Auto or Custom"] = "距离检查：自动或自定义"
+L["Range Check: Custom"] = "距离检查：自定义"
+L["This feature runs continuous range checks against every visible enemy nameplate. It is one of the more expensive features in EllesmereUI and can measurably increase CPU usage in crowded areas."] = "此功能会持续检查每个可见敌方姓名板的距离，是 EllesmereUI 中开销较高的功能之一，在拥挤区域可能会明显增加 CPU 占用。"
+
+-- == QoL / Minimap / Visibility =============================================
+L["Attach to Secondary Stats"] = "附加到次要属性"
+L["Colored Values"] = "数值着色"
+L["Automatically zoom back out to maximum distance after this many seconds of no manual zoom change. 0 disables the reset."] = "在该秒数内未手动调整缩放时，自动恢复到最远视距。设为 0 可禁用重置。"
+L["Reset Zoom"] = "重置缩放"
+L["Only Show in Housing"] = "仅在家宅中显示"
+L["Only Show when Mounted"] = "仅在骑乘时显示"
+L["This element will only show while you are inside a house or plot"] = "仅当你位于家宅或地块内时显示此元素"
+L["This element will only show while you are mounted"] = "仅当你处于骑乘状态时显示此元素"
+L["Lock Position & Disable Click"] = "锁定位置并禁用点击"
+L["Lock the timer in place and make it click-through; no dragging and no mouse interaction until unlocked."] = "将计时器锁定在原位并启用点击穿透；解锁前无法拖动或进行任何鼠标交互。"
+
+-- == Blizzard UI Enhanced ====================================================
+L["Blizzard Windows"] = "暴雪窗口"
+L["Empty Socket"] = "空插槽"
+
+-- == Mythic+ Tools ===========================================================
+L["A standalone cast bar for this unit, placeable anywhere in Unlock Mode. Runs alongside the Unit Frames cast bars."] = "为该单位显示独立施法条，可在解锁模式中放置于任意位置。它会与单位框体的施法条同时显示。"
+L["a Target or Focus Cast Bar"] = "目标或焦点施法条"
+L["Enable Targeted Spell Bars"] = "启用点名施法条"
+L["Enable Focus Cast Bar"] = "启用焦点施法条"
+L["Enable Target Cast Bar"] = "启用目标施法条"
+L["Flash Color"] = "闪烁颜色"
+L["Flash the cast bar and show \"Interrupted\" for a moment when the cast is interrupted."] = "施法被打断时闪烁施法条，并短暂显示“被打断”。"
+L["FOCUS CAST BAR"] = "焦点施法条"
+L["Interrupted Flash"] = "打断闪烁"
+L["Mid-Cast Bar Color"] = "施法中进度条颜色"
+L["Mythic+ Tools"] = "大秘境工具"
+L["Mythic+ timer, targeted spell bars, and standalone cast bars."] = "大秘境计时器、点名施法条和独立施法条。"
+L["Preview the bars at their position"] = "在当前位置预览施法条"
+L["Show Cast Timer"] = "显示施法计时器"
+L["Show Spell Name"] = "显示法术名称"
+L["Show a shield icon on the cast bar when the cast cannot be interrupted."] = "施法不可打断时，在施法条上显示护盾图标。"
+L["Show one plain cast bar per enemy nameplate that is casting, gathered into a single movable group with the spell name, its target, and the cast timer."] = "为每个正在施法的敌方姓名板显示一条简洁的施法条，并集中到一个可移动组中，同时显示法术名称、施放目标和施法计时器。"
+L["Show who each spell is being cast on, exactly like the nameplate cast bars."] = "显示每个法术的施放目标，与姓名板施法条一致。"
+L["Show who the spell is being cast on, exactly like the nameplate cast bars."] = "显示该法术的施放目标，与姓名板施法条一致。"
+L["Shows where your interrupt will be ready during a cast. \"Tick\" marks the exact spot on the cast bar; \"Tick + Bar\" also colours the window during which your interrupt will be available."] = "显示施法期间你的打断何时就绪。“刻度”会在施法条上标记准确位置；“刻度 + 条”还会为打断可用的时间区间着色。"
+L["TARGET CAST BAR"] = "目标施法条"
+L["TARGETED SPELL BARS"] = "点名施法条"
+L["Target/Focus Bars"] = "目标/焦点施法条"
+L["Targeted Spell Bars"] = "点名施法条"
+L["Text Size (Focus)"] = "文本大小（焦点）"
+L["Text Size (Target)"] = "文本大小（目标）"
+L["The most cast bars shown at once. Extra casters take a bar as soon as one frees up."] = "同时显示的施法条上限。额外的施法者会在有空位时立即占用一条。"
+L["Tick Color"] = "刻度颜色"
+L["Tint the cast bar with the Important colour when the unit casts a spell the game flags as important. Your interrupt being on cooldown still takes priority."] = "当单位施放游戏标记为重要的法术时，用重要颜色为施法条着色。你的打断处于冷却状态时仍优先。"
+L["Which way new bars stack as more enemies start casting."] = "设置更多敌人开始施法时新施法条的堆叠方向。"

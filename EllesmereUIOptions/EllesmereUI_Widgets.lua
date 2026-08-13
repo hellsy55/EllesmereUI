@@ -7668,6 +7668,8 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         menu:SetScale(btnScale / uiScale)
         ApplyHover()
         menu:Show()
+        -- Track the open menu globally so popup outside-click watchers don't treat clicks on rows that extend below the popup as a dismissing outside click.
+        EllesmereUI._openDropdownMenu = menu
         menu:SetScript("OnUpdate", function(self)
             -- Close when left-clicking outside the menu and button
             if not self:IsMouseOver() and not ddBtn:IsMouseOver() and IsMouseButtonDown("LeftButton") then
@@ -7701,6 +7703,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         end)
         menu:SetScript("OnHide", function(self)
             self:SetScript("OnUpdate", nil)
+            if EllesmereUI._openDropdownMenu == self then EllesmereUI._openDropdownMenu = nil end
             if ddBtn:IsMouseOver() then
                 ApplyHover()
             else

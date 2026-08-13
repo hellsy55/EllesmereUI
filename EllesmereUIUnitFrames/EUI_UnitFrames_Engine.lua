@@ -639,8 +639,14 @@ end
 --- Spawns one secure unit button. The caller styles it and attaches engine
 --- channels afterward; RegisterUnitWatch owns show/hide from here on.
 function Engine.SpawnUnitFrame(unit, name)
+    -- Ping support DISABLED until Blizzard fixes contextual pings on secret
+    -- units (12.1: pinging an enemy's frame errors in PingManager's
+    -- securecopy -- their bug, reproduces with no addon code in the path;
+    -- oUF PR #765/#772 precedent: disable, wait, revert). To re-enable,
+    -- swap the template string for the commented line below.
     local frame = CreateFrame("Button", name, petBattleHider,
-        "SecureUnitButtonTemplate, PingableUnitFrameTemplate")
+        "SecureUnitButtonTemplate")
+        -- "SecureUnitButtonTemplate, PingableUnitFrameTemplate")
     frame._euiBaseUnit = unit
     frame.unit = unit
     frame.IsElementEnabled = Frame_IsElementEnabled

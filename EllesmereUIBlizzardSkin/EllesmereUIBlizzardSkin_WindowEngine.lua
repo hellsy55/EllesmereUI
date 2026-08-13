@@ -773,7 +773,12 @@ function WSkin.SquareIcon(icon, parent)
     -- masked icons fully native -- no crop, and no square border drawn
     -- around what the mask renders as a shape.
     if icon.GetNumMaskTextures and icon:GetNumMaskTextures() > 0 then return end
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    -- The count sees only AddMaskTexture masks; a legacy SetMask() mask is
+    -- invisible to it and still rejects SetTexCoord (field: fishing loot
+    -- toast on a build that already carried the count guard). The call
+    -- itself is the only reliable probe -- on rejection the icon stays
+    -- native, same as the counted case.
+    if not pcall(icon.SetTexCoord, icon, 0.08, 0.92, 0.08, 0.92) then return end
     if parent then WSkin.BorderRegion(parent, icon) end
 end
 

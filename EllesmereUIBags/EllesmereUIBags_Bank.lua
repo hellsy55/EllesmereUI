@@ -181,7 +181,7 @@ local function GetWarbandBankTabs()
                     local name = td.name or ("Tab " .. i)
                     local icon = td.icon
                     if not icon or icon == 134400 then icon = GetFallbackIcon(bagID) end
-                    tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = "Warbank " .. name, icon = icon, depositFlags = td.depositFlags or 0 }
+                    tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = EUI.L("Warbank") .. " " .. name, icon = icon, depositFlags = td.depositFlags or 0 }
                 end
             end
         end
@@ -189,7 +189,7 @@ local function GetWarbandBankTabs()
         for i, bagID in ipairs(WARBAND_BANK_BAGS) do
             local numSlots = C_Container.GetContainerNumSlots(bagID)
             if numSlots > 0 then
-                tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = "Warbank Tab " .. #tabs + 1, icon = GetFallbackIcon(bagID), depositFlags = 0 }
+                tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = EUI.L("Warbank") .. " Tab " .. #tabs + 1, icon = GetFallbackIcon(bagID), depositFlags = 0 }
             end
         end
     end
@@ -843,7 +843,7 @@ local function EnsureBankTabConfigFrame()
         local displayName = tabData.name
         if self.bankType == Enum.BankType.Account then
             -- Remove "Warbank " prefix as this is a prefix added by EUI and not the real tab name. This is necessary to edit the tab
-            local prefix = "Warbank "
+            local prefix = EUI.L("Warbank") .. " "
             local prefix_len = #prefix
             if strsub(tabData.name, 1, prefix_len) == prefix then
                 displayName = strsub(tabData.name, prefix_len + 1)
@@ -1765,12 +1765,12 @@ function EUI_Bank:RefreshBank()
     if _selectedView == -1 then
         -- OneBank: character bank only, flat with "Bank" header
         local slots, filled = BuildOneView(charTabs)
-        LayoutFlatSlots(slots, "Bank (" .. filled .. " / " .. #slots .. ")")
+        LayoutFlatSlots(slots, EllesmereUI.Lf("Bank (%1$d / %2$d)", filled, #slots))
 
     elseif _selectedView == -3 then
         -- OneWarbank: warband bank only, flat with "Warband Bank" header
         local slots, filled = BuildOneView(warbTabs)
-        LayoutFlatSlots(slots, "Warband Bank (" .. filled .. " / " .. #slots .. ")")
+        LayoutFlatSlots(slots, EllesmereUI.Lf("Warband Bank (%1$d / %2$d)", filled, #slots))
 
     elseif _selectedView == -2 then
         -- All Warbank Tabs: per-tab headers for warband only

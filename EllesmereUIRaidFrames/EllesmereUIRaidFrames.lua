@@ -302,7 +302,7 @@ local defaults = {
         cellSpacing      = -1,
         groupSpacing     = -1,
         groupGrowth      = "RIGHT",  -- "DOWN", "UP", "RIGHT", "LEFT"
-        unitGrowth       = "DOWN",   -- perpendicular to groupGrowth
+        unitGrowth       = "DOWN",   -- any direction; same-axis as groupGrowth = one continuous line
         sortMode         = "ROLE",   -- "INDEX" (by group) or "ROLE" (by assigned role)
         roleOrder        = { "TANK", "HEALER", "DAMAGER" },
         showSelfFirst    = true,
@@ -2930,7 +2930,8 @@ local function StyleButton(button)
     local powerH = PixelSnap(s.powerHeight or 4)
     local healthH = h
 
-    button:SetSize(w, h)
+    -- No SetSize here: sizing is window-phase work (combat-blocked), owned by
+    -- ns._StyleButtonSecure below plus the header's initialConfigFunction.
 
     -- Background (visible behind the health bar where HP is missing)
     local bg = button:CreateTexture(nil, "BACKGROUND")
@@ -3555,6 +3556,30 @@ local function StyleButton(button)
         end
     end)
 
+    -- 12.1 aura containers (container shell creation is combat-legal since
+    -- 68914, so this rides the deferred styling pass with the rest of the body)
+    if ns.RFC_SetupButton then
+        ns.RFC_SetupButton(button, health, d)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Window-phase secure styling: everything on a fresh unit button that is
+--  combat-blocked or writes secure state -- the size plus the click / ping /
+--  click-cast tail (92 WrapScripts across the fleet live in CC_RegisterFrame).
+--  Runs inside the login loading-screen window for every pre-spawned button;
+--  the insecure visual body (StyleButton) runs in its own deferred
+--  post-screen execution so the suite's shared login watchdog budget never
+--  pays for it. Idempotent via d.securestyled, mirroring d.styled.
+-------------------------------------------------------------------------------
+ns._StyleButtonSecure = function(button)
+    local d = GetFFD(button)
+    if d.securestyled then return end
+    d.securestyled = true
+    local s = db.profile
+    -- Raid sizes initially (party buttons get party sizing from ReloadPartyFrames).
+    button:SetSize(PixelSnap(s.frameWidth or 72), PixelSnap(s.frameHeight or 46))
+
     -- Secure click: left=target, right=menu
     button:RegisterForClicks("AnyUp")
     button:SetAttribute("type1", "target")
@@ -3574,7 +3599,7 @@ local function StyleButton(button)
     -- the secure "ping-receiver" attribute, and resolve the target GUID live from our "unit"
     -- attribute so it tracks the current occupant after sorts/roster changes; returning nil lets the
     -- ping fall through. The GUID can be SECRET: hand it over raw, never guard or stringify it.
-    -- Writes are safe -- our own spawned secure template, once per button (d.styled), out of combat.
+    -- Writes are safe -- our own spawned secure template, once per button, out of combat.
     if PingableType_UnitFrameMixin then
         Mixin(button, PingableType_UnitFrameMixin)
         button:SetAttribute("ping-receiver", true)
@@ -3591,11 +3616,6 @@ local function StyleButton(button)
         ns.CC_RegisterFrame(button)
     elseif ClickCastFrames then
         ClickCastFrames[button] = true
-    end
-
-    -- 12.1 aura containers (buttons are always created out of combat, so this is safe by construction)
-    if ns.RFC_SetupButton then
-        ns.RFC_SetupButton(button, health, d)
     end
 end
 
@@ -3710,6 +3730,10 @@ local function UpdateButton(button)
     end
 
     local d = GetFFD(button)
+    -- Login gap guard: events registered in the loading-screen window can
+    -- dispatch before the deferred styling pass builds this button's visual
+    -- body; the pass ends with a full repaint, so skipping here loses nothing.
+    if not d.styled then return end
     if not d.styled then return end
 
     local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
@@ -5526,6 +5550,7 @@ XF.EnsureBuilt = function(count)
         local b = CreateFrame("Button", "ERFExtraFrame" .. i, XF.container, "SecureUnitButtonTemplate")
         b:Hide()
         GetFFD(b)._isExtra = true
+        ns._StyleButtonSecure(b)
         StyleButton(b)
         allButtons[#allButtons + 1] = b
 
@@ -6084,11 +6109,12 @@ ns._BuildHeaderSet = function(merge)
             hdr:Show()
             hdr:SetAttribute("startingIndex", 1)
 
-            -- Style pre-created buttons
+            -- Window-phase secure styling only; the insecure visual bodies run
+            -- in the deferred login pass (or the restyle-loop fallback).
             for i = 1, 5 do
                 local btn = hdr[i]
                 if btn then
-                    StyleButton(btn)
+                    ns._StyleButtonSecure(btn)
                     allButtons[#allButtons + 1] = btn
                 end
             end
@@ -6140,11 +6166,11 @@ ns._BuildHeaderSet = function(merge)
         ns._flatHeader:SetAttribute("startingIndex", 1)
         ns._flatHeader:Hide()  -- start hidden; LayoutGroups shows the right headers
 
-        -- Style all flat-header buttons
+        -- Window-phase secure styling only; bodies run in the deferred pass.
         for i = 1, 40 do
             local btn = ns._flatHeader[i]
             if btn then
-                StyleButton(btn)
+                ns._StyleButtonSecure(btn)
                 allButtons[#allButtons + 1] = btn
                 ns._flatButtons[#ns._flatButtons + 1] = btn
             end
@@ -6540,7 +6566,11 @@ local RangeUpdate  -- forward declaration (defined in Range fading section below
 -------------------------------------------------------------------------------
 --  Reload: re-apply all settings to existing buttons
 -------------------------------------------------------------------------------
-local function ReloadFrames()
+-- skipButtons (login window only): run the layout/tier/proxy machinery but
+-- skip the per-button restyle loop -- the insecure styling bodies run in the
+-- deferred login pass, which then calls this again in full.
+ns._emptyList = ns._emptyList or {}
+local function ReloadFrames(skipButtons)
     local s = ns._scaledProfile
     -- Keep UNIT_FLAGS registration in lockstep with the combat-icon toggle so a
     -- disabled option listens for nothing (runs no event code).
@@ -6588,11 +6618,18 @@ local function ReloadFrames()
     local healthH = PixelSnap(bh - powerH)
     local texPath = ResolveHealthTexture()
 
-    for _, btn in ipairs(allButtons) do
+    for _, btn in ipairs(skipButtons and ns._emptyList or allButtons) do
         local d = GetFFD(btn)
-        if not d.styled then StyleButton(btn) end
+        if not d.styled then
+            ns._StyleButtonSecure(btn)
+            StyleButton(btn)
+        end
 
-        btn:SetSize(bw, bh)
+        -- Window/initialConfigFunction own sizes in combat; skipping here is
+        -- safe (out of combat the resize applies normally).
+        if not InCombatLockdown() then
+            btn:SetSize(bw, bh)
+        end
 
         -- Background
         if d.bg then
@@ -8500,12 +8537,12 @@ ns._CreatePartyHeader = function()
     hdr:Hide()
     ns._partyContainerFrame:Hide()
 
-    -- Style all 5 buttons with shared StyleButton (uses raid sizes initially;
-    -- ReloadPartyFrames applies party-specific sizing afterward)
+    -- Window-phase secure styling (raid sizes initially; ReloadPartyFrames
+    -- applies party-specific sizing); insecure bodies run in the deferred pass.
     for i = 1, 5 do
         local btn = hdr[i]
         if btn then
-            StyleButton(btn)
+            ns._StyleButtonSecure(btn)
             GetFFD(btn)._isParty = true
             ns._partyAllButtons[#ns._partyAllButtons + 1] = btn
         end
@@ -8518,7 +8555,7 @@ ns._CreatePartyHeader = function()
     -- player frame; when off, it is hidden and the header shows the player.
     local selfBtn = CreateFrame("Button", "ERFPartySelfButton", ns._partyContainerFrame, "SecureUnitButtonTemplate")
     selfBtn:SetAttribute("unit", "player")
-    StyleButton(selfBtn)
+    ns._StyleButtonSecure(selfBtn)
     local sd = GetFFD(selfBtn)
     sd._isParty = true
     sd._isSelf = true
@@ -8858,7 +8895,7 @@ end
 -- Uses ns._partyProxy for all reads so party overrides take effect.
 -- Anchor closures (captured db.profile at StyleButton time) need a temp-swap:
 -- we write party_ values onto db.profile, call the closures, then restore.
-ns.ReloadPartyFrames = function()
+ns.ReloadPartyFrames = function(skipButtons)
     if not ns._partyHeader then return end
     -- Re-evaluate UNIT_FLAGS registration before the temp-swap below (which
     -- overwrites db.profile), so a section sync/unsync that flips the party's
@@ -8901,14 +8938,23 @@ ns.ReloadPartyFrames = function()
     local healthH = PixelSnap(bh - powerH)
     local texPath = ResolveHealthTexture()
 
-    for _, btn in ipairs(ns._partyAllButtons) do
+    for _, btn in ipairs(skipButtons and ns._emptyList or ns._partyAllButtons) do
         local d = GetFFD(btn)
         if not d.styled then
-            StyleButton(btn)
+            -- _isParty BEFORE StyleButton: the container setup inside it
+            -- resolves the style key and settings proxy from this flag, and
+            -- the dispel slots BIND that key permanently. Styling first
+            -- registered party dispel slots under the RAID key -- party
+            -- dispel mode/icons/colors never applied (8.8.3 field reports).
             d._isParty = true
+            ns._StyleButtonSecure(btn)
+            StyleButton(btn)
         end
 
-        btn:SetSize(bw, bh)
+        -- Window/initialConfigFunction own sizes in combat (see raid loop).
+        if not InCombatLockdown() then
+            btn:SetSize(bw, bh)
+        end
 
         -- Background
         if d.bg then
@@ -14134,16 +14180,15 @@ function ERF:OnEnable()
     -- Initialize click-cast engine (before CreateHeaders so ClickCastFrames hook is active)
     if ns.CC_Init then ns.CC_Init() end
 
-    -- Create headers and style all buttons
+    -- Create headers; buttons get window-phase secure styling only
     CreateHeaders()
 
-    -- Initial full reload (sets _activeSizeW/H from group size + tier overrides)
-    ReloadFrames()
+    -- Initial reload minus the restyle loop (sets _activeSizeW/H from group
+    -- size + tier overrides, lays out headers) -- the insecure styling bodies
+    -- run in the deferred pass below
+    ReloadFrames(true)
 
-    -- Build buff manager spell lookup from saved assignments
-    if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
-
-    -- Create party header + style buttons (after CC_Init so click-cast registers)
+    -- Create party header (after CC_Init so click-cast registers)
     ns._CreatePartyHeader()
 
     -- Size + position party container from profile
@@ -14165,16 +14210,38 @@ function ERF:OnEnable()
         end
     end
 
-    -- Apply party-specific sizing to party buttons
-    ns.ReloadPartyFrames()
-
-    -- Register with unlock mode
-    RegisterWithUnlockMode()
+    -- Party layout minus the restyle loop (bodies deferred)
+    ns.ReloadPartyFrames(true)
 
     -- Friendly Boss Frames: initial activation (raid-only boss1-5 frames)
     if ns.FB_Apply then ns.FB_Apply() end
     -- Extra Frames: initial activation (raid-only member duplicates)
     if ns.XF_Apply then ns.XF_Apply() end
+
+    -- DEFERRED LOGIN PASS. Runs in its OWN C_Timer execution -- its own
+    -- script-watchdog budget -- on the first frame after the loading screen
+    -- (timers never fire during it), normally before that frame renders.
+    -- Everything here is combat-legal: the insecure styling bodies for every
+    -- pre-spawned button (~80% of this module's login CPU), then the full
+    -- reload passes, whose protected ops self-gate in combat and heal on the
+    -- regen dirty-flag path. Order is load-bearing: BM lookup before the
+    -- bodies (aura shell pools size from the indicator lists), bodies before
+    -- the restyle loops.
+    C_Timer.After(0, function()
+        -- Invalidate the login frame's paint stamps so the deferred repaint
+        -- can never be deduped away (mirrors _ERF_RefreshAll).
+        ns._paintGen = (ns._paintGen or 0) + 1
+        if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
+        for _, btn in ipairs(allButtons) do
+            StyleButton(btn)
+        end
+        for _, btn in ipairs(ns._partyAllButtons) do
+            StyleButton(btn)
+        end
+        ReloadFrames()
+        ns.ReloadPartyFrames()
+        RegisterWithUnlockMode()
+    end)
 
     -- Profile-swap refresh: EllesmereUI.RefreshAllAddons calls this on a profile
     -- change so raid + party frames re-read the (now-swapped) profile live,

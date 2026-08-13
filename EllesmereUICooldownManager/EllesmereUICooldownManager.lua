@@ -255,6 +255,22 @@ local function EffectiveBarAlpha(barData)
 end
 ns.EffectiveBarAlpha = EffectiveBarAlpha
 
+-- Placeholders rendered at alpha 0: "Keep Buffs in Same Place"
+-- (hidePlaceholderIcon) and a hosted "Visibility When Missing: Hidden" slot
+-- (_missingHidden) both keep the reserved layout slot but paint nothing. Alpha
+-- 0 stops the art, NOT hit-testing, so such a frame stays a live mouse target
+-- and must be excluded from every mouse pass too: it would answer tooltips for
+-- an inactive buff and swallow mouseover from whatever sits under the bar
+-- (Blizzard hides its own inactive items instead, so those slots hold no frame
+-- at all). Single predicate so the alpha passes and the mouse passes can never
+-- disagree. Off-by-default flags first: non-users stop at the first field.
+local function IsPlaceholderRenderHidden(icon, barData)
+    if not icon then return false end
+    return ((barData and barData.hidePlaceholderIcon) or icon._missingHidden)
+        and icon._isPlaceholderFrame and true or false
+end
+ns.IsPlaceholderRenderHidden = IsPlaceholderRenderHidden
+
 -- Vehicle/petbattle state proxy: created once in CDMFinishSetup; drives _CDMApplyVisibility so CDM bars hide while in vehicle UI.
 local _cdmVehicleProxy = nil
 local _cdmInVehicle    = false
@@ -4682,7 +4698,10 @@ local function ApplyCDMTooltipState(barKey)
             for i = 1, #icons do
                 local ic = icons[i]
                 if ic and ic.EnableMouseMotion then
-                    ic:EnableMouseMotion(wantHover)
+                    -- Invisible placeholders are excluded even with tooltips on: an
+                    -- alpha-0 slot has no art to hover, so capturing here would only
+                    -- take mouseover away from whatever the bar sits over.
+                    ic:EnableMouseMotion(wantHover and not IsPlaceholderRenderHidden(ic, bd))
                 end
             end
         end
@@ -6664,20 +6683,19 @@ _CDMApplyVisibility = function()
                     for ii = 1, #icons do
                         local ic = icons[ii]
                         if ic then
+                            local phHidden = IsPlaceholderRenderHidden(ic, barData)
                             -- EnableMouse/EnableMouseMotion are protected on Blizzard CDM frames; skip during combat to avoid ADDON_ACTION_BLOCKED when dismounting mid-combat.
                             if not icCombat2 then
                                 ic:EnableMouse(false)
                                 -- Same mouseover-stealing rule as the container above: icons may only
                                 -- capture mouse motion when this bar's tooltips are on, and never on cursor-tracked bars (those must stay fully click-AND-motion-through).
+                                -- An invisible placeholder never captures: there is nothing drawn to hover.
                                 if ic.EnableMouseMotion then
-                                    ic:EnableMouseMotion((barData.showTooltip and not frame._mouseTrack) and true or false)
+                                    ic:EnableMouseMotion((barData.showTooltip and not frame._mouseTrack and not phHidden) and true or false)
                                 end
                             end
                             local icfc = _ecmeFC[ic]
-                            -- Off-by-default flags tested first: non-users short-circuit straight to the
-                            -- original branch (identical code, no added work). _missingHidden = hosted
-                            -- "Visibility When Missing: Hidden" placeholder (slot reserved, rendered invisible).
-                            if (barData.hidePlaceholderIcon or ic._missingHidden) and ic._isPlaceholderFrame then
+                            if phHidden then
                                 -- Hide Icon: an Always-Show placeholder keeps its reserved layout slot but stays fully invisible (icon, border, bg).
                                 ic:SetAlpha(0)
                             elseif not (icfc and (icfc._cdStateHidden or icfc._missingActiveHidden)) then
@@ -6746,9 +6764,7 @@ local function ApplyBarOpacity(barKey)
             local ic = icons[i]
             if ic then
                 local icfc = _ecmeFC[ic]
-                -- Off-by-default flags tested first: non-users short-circuit straight to the original
-                -- branch (identical code, no added work). _missingHidden = hosted "Visibility When Missing: Hidden" placeholder (slot reserved, rendered invisible).
-                if (barData.hidePlaceholderIcon or ic._missingHidden) and ic._isPlaceholderFrame then
+                if IsPlaceholderRenderHidden(ic, barData) then
                     -- Hide Icon: an Always-Show placeholder keeps its reserved
                     -- layout slot but stays fully invisible (icon, border, bg).
                     ic:SetAlpha(0)
@@ -7417,15 +7433,20 @@ function ns.NormalizeRacialAssignments()
     local p = ECME.db and ECME.db.profile
     if not (p and p.cdmBars and p.cdmBars.bars) then return end
 
-    -- Gather the non-buff bars' assigned lists once (in bar order).
-    local lists = {}
+    -- Gather the non-buff bars' assigned lists once (in bar order), keeping
+    -- each list's bar key so the keeper choice below can tell default bars
+    -- from explicit custom placements.
+    local lists, listBarKeys = {}, {}
     for _, b in ipairs(p.cdmBars.bars) do
         local isBuff = (b.barType == "custom_buff")
             or (ns.IsBarBuffFamily and ns.IsBarBuffFamily(b))
         -- b.key guard: a ghost bar (keyless skeleton from a stale override write) would index barSpells with nil and error.
         if not isBuff and b.key then
             local sd = ns.GetBarSpellData(b.key)
-            if sd and sd.assignedSpells then lists[#lists + 1] = sd.assignedSpells end
+            if sd and sd.assignedSpells then
+                lists[#lists + 1] = sd.assignedSpells
+                listBarKeys[#lists] = b.key
+            end
         end
     end
 
@@ -7438,14 +7459,36 @@ function ns.NormalizeRacialAssignments()
         if activePresent then break end
     end
 
+    -- Keeper choice: prefer the copy on a CUSTOM bar. Lists iterate in bar
+    -- order with the default bars first, so the old first-found-wins rule kept
+    -- the Essential/Utility copy of a dual-state and DELETED the user's custom
+    -- placement -- the 12.1 native-racial "reset to Essential/Utility" report
+    -- (Blizzard's CDM now tracks racials, so a materialized default-bar copy
+    -- can coexist with the user's). A custom-bar copy is always an explicit
+    -- act; a default-bar copy can be a materialized spillover.
+    local keeperList
+    if activePresent then
+        for li, list in ipairs(lists) do
+            local bk = listBarKeys[li]
+            if bk ~= "cooldowns" and bk ~= "utility" then
+                for _, sid in ipairs(list) do
+                    if sid == active then keeperList = list; break end
+                end
+            end
+            if keeperList then break end
+        end
+    end
+
     -- Single pass across every bar: keep exactly one racial slot total.
     local kept = false
     for _, list in ipairs(lists) do
         for i = #list, 1, -1 do
             local sid = list[i]
             if sid and sid > 0 and ALL_RACIAL_SPELLS[sid] then
-                if sid == active and activePresent and not kept then
-                    -- Keep the current character's own racial where it sits.
+                if sid == active and activePresent and not kept
+                   and (not keeperList or list == keeperList) then
+                    -- Keep the current character's own racial where it sits
+                    -- (the custom-bar copy when one exists, see keeperList).
                     kept = true
                 elseif not activePresent and not kept then
                     -- No active racial anywhere: promote this foreign one.
@@ -7644,6 +7687,13 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
 
     -- Spell -> owning bar (variant-aware), built once. A live icon whose stored owner is a DIFFERENT bar is a transient spillover we must not materialize.
     local ownerOf
+    -- One-racial-total invariant (see NormalizeRacialAssignments): while ANY
+    -- racial-family entry is placed on any bar, the racial slot is spoken for.
+    -- Materializing a second racial slot here (a live racial icon transiting a
+    -- default bar during the login route-not-ready window) creates the
+    -- dual-state the normalize dedupe then resolves -- which historically
+    -- deleted the user's custom placement.
+    local anyRacialOwned = false
     if aprof and aprof.barSpells and ns.StoreVariantValue then
         for k, bsd in pairs(aprof.barSpells) do
             if k ~= GHOST_CD_BAR_KEY
@@ -7652,6 +7702,7 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                     if type(csid) == "number" and csid > 0 then
                         ownerOf = ownerOf or {}
                         ns.StoreVariantValue(ownerOf, csid, k, false)
+                        if ALL_RACIAL_SPELLS[csid] then anyRacialOwned = true end
                     end
                 end
             end
@@ -7748,7 +7799,10 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                             local owner = ownerOf and ns.ResolveVariantValue
                                           and ns.ResolveVariantValue(ownerOf, sid)
                             local ghosted = ghostList and FindVar and FindVar(ghostList, sid)
-                            if not ghosted and not (owner and owner ~= barData.key) then
+                            -- Racial-family guard: never mint a second racial slot
+                            -- while one is placed anywhere (anyRacialOwned above).
+                            local racialBlocked = anyRacialOwned and ALL_RACIAL_SPELLS[sid]
+                            if not ghosted and not racialBlocked and not (owner and owner ~= barData.key) then
                                 -- Store the BASE form, matching what the options normalize pass writes -- otherwise this pass persists the talent-override form and the two writers diverge (exports could ship either).
                                 local nsid = sid
                                 if C_Spell and C_Spell.GetBaseSpell then
@@ -8603,6 +8657,12 @@ eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 eventFrame:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 eventFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+-- Viewer data landing after our init: the injection phase keys on live
+-- Blizzard frames (frames as truth), so a build that ran before the viewer
+-- populated may have injected a custom racial frame the native viewer now
+-- covers. One debounced rebuild re-evaluates; fires rarely (login, and
+-- Blizzard-side data refreshes).
+eventFrame:RegisterEvent("COOLDOWN_VIEWER_DATA_LOADED")
 -- Cinematic/cutscene end: Blizzard restores hidden frames, so re-hide ours
 eventFrame:RegisterEvent("CINEMATIC_STOP")
 eventFrame:RegisterEvent("STOP_MOVIE")
@@ -8758,6 +8818,21 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             _keybindDebounceTimer = nil
             UpdateCDMKeybinds()
         end)
+        return
+    end
+    if event == "COOLDOWN_VIEWER_DATA_LOADED" then
+        -- Native viewer data arrived (usually after login init): re-evaluate the
+        -- frames-as-truth injection decisions against the now-live frame set.
+        -- Rides the same debounced rebuild as talent changes; the reanchor sweep
+        -- hides any injected racial frame the native viewer now covers. The spell
+        -- picker's learned-set cache refreshes too (category sets just changed),
+        -- and the reseed session stamps clear so base-bar materialization re-runs
+        -- against the COMPLETE icon set (an init-time reseed may have seen a
+        -- partial viewer; the racial-family guard keeps the re-run from minting
+        -- a second racial slot).
+        if ns.MarkCDMSpellCacheDirty then ns.MarkCDMSpellCacheDirty() end
+        if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
+        ScheduleTalentRebuild()
         return
     end
     if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE" or event == "ACTIVE_TALENT_GROUP_CHANGED"
