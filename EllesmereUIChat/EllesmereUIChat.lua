@@ -298,7 +298,7 @@ local function GetFrameFontSize(id)
     return 12
 end
 local function GetEditBoxHeight()
-    return min(60, max(18, ECHAT.DB().editBoxHeight or 23))
+    return min(60, max(10, ECHAT.DB().editBoxHeight or 23))
 end
 local function GetEditBoxFont()
     local key = ECHAT.DB().editBoxFont
@@ -769,7 +769,11 @@ function ECHAT.ApplyBorders()
         end
         if cf and CFD(cf).inputDiv then
             CFD(cf).inputDiv:SetColorTexture(r, g, b, a)
-            CFD(cf).inputDiv:SetShown(not hide)
+            -- Input-on-top: the divider marks the overlaid input's edge, so it
+            -- shares that input's shown state (ECHAT.ApplyInputTopStrip) --
+            -- otherwise it cuts across a message once the strip is released.
+            CFD(cf).inputDiv:SetShown(not hide
+                and (not cfg.inputOnTop or ECHAT.InputTopStripActive(cf)))
         end
     end
     local cf1 = _G.ChatFrame1
@@ -2435,6 +2439,44 @@ function ECHAT.TogglePortalFlyout(anchorBtn)
     end
 end
 
+-- Input-on-top overlays the top strip of the text area, and OUR message frame
+-- hands that strip back (_smfTopExtra) so no line renders under the input.
+-- Reserving it permanently costs a line of chat even while nothing is being
+-- typed -- the strip sits empty and the topmost message is clipped -- so the
+-- reservation follows the edit box's SHOWN state on the permanent frames 1-10,
+-- whose edit boxes may be script-hooked. Temp windows (11+) must never be
+-- hooked (see SkinEditBox's taint note) and keep the static reservation.
+function ECHAT.InputTopStripActive(cf)
+    if not ECHAT.DB().inputOnTop then return false end
+    local name = cf:GetName()
+    local eb = name and _G[name .. "EditBox"]
+    if not eb then return false end
+    local idx = tonumber(name:match("ChatFrame(%d+)"))
+    if idx and idx <= 10 then return eb:IsShown() end
+    return true
+end
+
+-- Re-derive one frame's reserved strip. Only the text area moves: the panel
+-- rect stays put (input-on-top never changed _bgIns), so nothing outside our
+-- message frame is touched. The divider marks the input's edge and would cut
+-- across a message once the strip is released, so it follows the same state.
+function ECHAT.ApplyInputTopStrip(cf)
+    local d = CFD(cf)
+    if not d.bg then return end
+    local active = ECHAT.InputTopStripActive(cf)
+    -- +5 matches the edit box's own top anchor offset (ApplyInputPosition):
+    -- the box sits 5px lower than cf's top edge, so the strip must reach
+    -- that much further to still fully cover it.
+    local want = active and (GetEditBoxHeight() + 4 + 5) or nil
+    local changed = d._smfTopExtra ~= want
+    d._smfTopExtra = want
+    if d.inputDiv then
+        local cfg = ECHAT.DB()
+        d.inputDiv:SetShown(not cfg.hideBorders and (not cfg.inputOnTop or active))
+    end
+    if changed and ECHAT.EngineLayoutWindow then ECHAT.EngineLayoutWindow(cf) end
+end
+
 -- Flip edit box between bottom (default) and top of chat panel
 function ECHAT.ApplyInputPosition()
     local cfg = ECHAT.DB()
@@ -2462,8 +2504,12 @@ function ECHAT.ApplyInputPosition()
                     -- unaffected because chat renders bottom-up from a
                     -- shared bottom edge, and the input covers the
                     -- hit-zones of the lines it hides.
-                    eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, 0)
-                    eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, 0)
+                    -- -5: keeps text (vertically centered in the box) off the
+                    -- tab band at small editBoxHeight values -- the box grows
+                    -- downward from this anchor, so shrinking it moves the
+                    -- centered text closer to a flush top edge otherwise.
+                    eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, -5)
+                    eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -5)
                     local bgLvl = CFD(cf).bg:GetFrameLevel() or 1
                     if eb:GetFrameLevel() < bgLvl + 5 then
                         eb:SetFrameLevel(bgLvl + 5)
@@ -2501,8 +2547,11 @@ function ECHAT.ApplyInputPosition()
                     b = onTop and -6 or (eb and -(12 + inputHeight) or -6),
                 }
                 -- Input-on-top: the panel keeps its normal rect; only OUR
-                -- message frame's text area shrinks under the overlaid input.
-                d._smfTopExtra = (onTop and eb) and (inputHeight + 4) or nil
+                -- message frame's text area shrinks under the overlaid input,
+                -- and only while that input is actually up (see
+                -- ECHAT.ApplyInputTopStrip). EngineLayoutWindows at the tail
+                -- of this function relayouts every window either way.
+                ECHAT.ApplyInputTopStrip(cf)
                 if ECHAT.PositionChatPanel then ECHAT.PositionChatPanel(cf) end
             end
 
@@ -3449,6 +3498,17 @@ local function SkinEditBox(cf)
     if idx <= 10 then
         eb:HookScript("OnEditFocusGained", function(self)
             ApplyEditBoxHeaderFont(self)
+        end)
+
+        -- Input-on-top: reclaim/release the reserved top strip of the text
+        -- area as the input comes and goes, so an idle chat uses its full
+        -- height. OnShow/OnHide are C-side script hooks -- no field write onto
+        -- the edit box, the hazard the block comment above describes.
+        eb:HookScript("OnShow", function()
+            ECHAT.ApplyInputTopStrip(cf)
+        end)
+        eb:HookScript("OnHide", function()
+            ECHAT.ApplyInputTopStrip(cf)
         end)
 
         -- Plain Up/Down input recall. The Midnight edit box performs no native recall
@@ -4452,7 +4512,15 @@ initFrame:SetScript("OnEvent", function(self)
             if cf and _skinned[cf] then
                 local curFont = cf:GetFont()
                 if curFont and curFont ~= wantFont then
-                    local _, sz = cf:GetFont()
+                    -- Size from Blizzard's stored per-window setting, NEVER read
+                    -- back off the widget: under a font family cf:GetFont()
+                    -- answers for the ACTIVE alphabet, so on a CJK client it
+                    -- returns the CJK member -- a file that never equals
+                    -- wantFont, at that member's own height. Feeding it back in
+                    -- re-seeded the family from its own output, and this pass
+                    -- runs on UPDATE_(FLOATING_)CHAT_WINDOWS, so chat text grew
+                    -- on every login, reload and tab switch.
+                    local sz = GetFrameFontSize(cf:GetID())
                     local fam = ECHAT.EngineFontFamily
                         and ECHAT.EngineFontFamily(cf:GetID(), wantFont, sz, wantOutline)
                     if fam then

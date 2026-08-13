@@ -150,6 +150,9 @@ end
 ECHAT.EngineLayoutWindows = function()
     for cf in pairs(WINS) do LayoutWindowSMF(cf) end
 end
+-- Single-window relayout: the input-on-top strip is released/reclaimed per
+-- frame as its edit box shows and hides, and only that frame's text area moves.
+ECHAT.EngineLayoutWindow = LayoutWindowSMF
 
 -- Thin scrollbar: visible only while scrolled back (offset > 0) or dragging.
 -- Track/thumb are our frames; drag runs a temporary OnUpdate on the track
@@ -346,8 +349,12 @@ end
 
 -- Byte-index link scan: |Hlink|hlabel|h spans in raw escaped text, the same
 -- byte semantics FindCharacterIndexAtCoordinate returns (Blizzard's own
--- selection copy slices these indexes with :sub). Returns link, label when
--- idx falls inside a span.
+-- selection copy slices these indexes with :sub). Returns the link data and
+-- the WHOLE clickable string (leading |cxxxxxxxx / trailing |r included when
+-- present) -- that second value is SetItemRef's "text" argument, and the
+-- bare label is NOT a valid value for it: Blizzard's GetFixedLink does
+-- strfind(text, "|H") and then arithmetic on the result, and several
+-- ItemRefHandlers re-parse the full hyperlink out of it.
 local function LinkAtIndex(text, idx)
     local pos = 1
     while true do
@@ -358,7 +365,12 @@ local function LinkAtIndex(text, idx)
         local ce = text:find("|h", le + 2, true)
         if not ce then return nil end
         if idx >= hs and idx <= ce + 1 then
-            return text:sub(hs + 2, le - 1), text:sub(le + 2, ce - 1)
+            local s, e = hs, ce + 1
+            if hs > 10 and text:sub(hs - 10, hs - 1):match("^|c%x%x%x%x%x%x%x%x$") then
+                s = hs - 10
+            end
+            if text:sub(ce + 2, ce + 3) == "|r" then e = ce + 3 end
+            return text:sub(hs + 2, le - 1), text:sub(s, e)
         end
         pos = ce + 2
     end
@@ -389,9 +401,9 @@ local function BuildLinkOverlay(win)
     ov:Hide()
     win.linkOverlay = ov
 
-    local curLink, curLabel
-    local function SetHover(link, label)
-        curLabel = label
+    local curLink, curText
+    local function SetHover(link, linkText)
+        curText = linkText
         if link == curLink then return end
         if curLink then WinLinkLeave(smf) end
         curLink = link
@@ -400,7 +412,7 @@ local function BuildLinkOverlay(win)
     end
     local function HoverTick()
         local x, y = smf:GetScaledCursorPosition()
-        local link, label
+        local link, linkText
         local lines = smf.visibleLines
         if lines then
             for i = 1, #lines do
@@ -418,14 +430,14 @@ local function BuildLinkOverlay(win)
                     if ci and inside then
                         local t = fs:GetText()
                         if type(t) == "string" and not (issecretL and issecretL(t)) then
-                            link, label = LinkAtIndex(t, ci)
+                            link, linkText = LinkAtIndex(t, ci)
                         end
                         break
                     end
                 end
             end
         end
-        SetHover(link, label)
+        SetHover(link, linkText)
     end
     ov:SetScript("OnEnter", function(self)
         self:SetScript("OnUpdate", HoverTick)
@@ -440,7 +452,7 @@ local function BuildLinkOverlay(win)
     end)
     ov:SetScript("OnMouseUp", function(_, btn)
         if curLink then
-            WinLinkClick(smf, curLink, curLabel, btn)
+            WinLinkClick(smf, curLink, curText, btn)
         end
     end)
 end
@@ -540,6 +552,27 @@ local CJK_FILES = {
     simplifiedchinese  = "Fonts\\ARKai_T.ttf",
     traditionalchinese = "Fonts\\blei00d.TTF",
 }
+-- The +2 below is a legibility nudge for CJK dropped INTO a western-locale
+-- chat. On a CJK client it is not a nudge, it is the whole window: every line
+-- is that alphabet, so a user asking for 17 read 19 and the glyphs outgrew the
+-- line box the roman height sizes (the "spacing got tighter" half of the same
+-- report). Blizzard's per-alphabet heights vary family by family, but their
+-- CHAT font is the one that matters here and it bumps nothing upward:
+-- ChatFontNormal inherits NumberFont_Shadow_Med, whose members are roman 14,
+-- simplifiedchinese 14, traditionalchinese 14, korean 13. Their tab-menu size
+-- control then bypasses the family entirely (FCF_SetChatWindowFontSize raw
+-- SetFonts the active alphabet's file at the chosen number), so a size the
+-- user picked renders literally. Ours does the same: the client's own
+-- alphabet takes the size unmodified.
+local CJK_CLIENT_ALPHABET = ({
+    koKR = "korean",
+    zhCN = "simplifiedchinese",
+    zhTW = "traditionalchinese",
+})[GetLocale()]
+local function CJKHeight(alphabet, size)
+    if alphabet == CJK_CLIENT_ALPHABET then return size end
+    return size + 2
+end
 function ECHAT.EngineFontFamily(id, font, size, flags)
     flags = flags or ""
     local fam = FAMS[id]
@@ -551,9 +584,10 @@ function ECHAT.EngineFontFamily(id, font, size, flags)
             { alphabet = "russian", file = font, height = size, flags = flags },
         }
         -- CJK renders +2px: ideographs at latin point sizes read visibly
-        -- smaller (dense glyphs, no ascender/descender whitespace).
+        -- smaller (dense glyphs, no ascender/descender whitespace). Not on the
+        -- client's own alphabet -- see CJKHeight.
         for alphabet, file in pairs(CJK_FILES) do
-            members[#members + 1] = { alphabet = alphabet, file = file, height = size + 2, flags = flags }
+            members[#members + 1] = { alphabet = alphabet, file = file, height = CJKHeight(alphabet, size), flags = flags }
         end
         local ok, created = pcall(CreateFontFamily, "EUIChatFontFamily" .. id, members)
         if not ok or not created then FAMS[id] = false; return nil end
@@ -564,7 +598,7 @@ function ECHAT.EngineFontFamily(id, font, size, flags)
         fam:GetFontObjectForAlphabet("roman"):SetFont(font, size, flags)
         fam:GetFontObjectForAlphabet("russian"):SetFont(font, size, flags)
         for alphabet, file in pairs(CJK_FILES) do
-            fam:GetFontObjectForAlphabet(alphabet):SetFont(file, size + 2, flags)
+            fam:GetFontObjectForAlphabet(alphabet):SetFont(file, CJKHeight(alphabet, size), flags)
         end
     end)
     if not ok then return nil end

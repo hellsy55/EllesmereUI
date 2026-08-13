@@ -1363,7 +1363,7 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("inputOnTop", v)
                   if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
               end },
-            { type="slider", text="Edit Box Height", min=18, max=60, step=1,
+            { type="slider", text="Edit Box Height", min=10, max=60, step=1,
               getValue=function() return Cfg("editBoxHeight") or 23 end,
               setValue=function(v)
                   Set("editBoxHeight", v)

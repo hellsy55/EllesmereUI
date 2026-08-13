@@ -1547,11 +1547,11 @@ local function ToGrowthH(dirStr, wrapStr)
     end
     return (dirStr == "RIGHT" or dirStr == "CENTER_HORIZONTAL") and FlowDir.Right or FlowDir.Left
 end
-local function ToGrowthV(dirStr)
+local function ToGrowthV(dirStr, wrapStr)
     local FlowDir = AnchorUtil and AnchorUtil.FlowDirection
     if not FlowDir then return nil end
-    if dirStr == "UP" then return FlowDir.Up end
-    if dirStr == "DOWN" then return FlowDir.Down end
+    if dirStr == "UP" or wrapStr == "UP" then return FlowDir.Up end
+    if dirStr == "DOWN" or wrapStr == "DOWN" then return FlowDir.Down end
     return FlowDir.Down -- horizontal growth: rows always wrap downward
 end
 -- Corner = the flow's fixed start point = (opposite of growthV side) + (opposite of
@@ -1564,7 +1564,12 @@ local function CornerFor(dirStr, wrapStr)
         local hSide = (wrapStr == "RIGHT") and "LEFT" or "RIGHT"
         return vSide .. hSide
     end
-    return (dirStr == "RIGHT" or dirStr == "CENTER_HORIZONTAL") and "TOPLEFT" or "TOPRIGHT"
+    if dirStr == "LEFT" or dirStr == "RIGHT" then
+        local vSide = (wrapStr == "UP") and "BOTTOM" or "TOP"
+        local hSide = (dirStr == "RIGHT") and "LEFT" or "RIGHT"
+        return vSide .. hSide
+    end
+    return (dirStr == "CENTER_HORIZONTAL") and "TOPLEFT" or "TOPRIGHT"
 end
 
 -- Shared by every container, default and custom alike: builds the AK.RequestContainer
@@ -1586,7 +1591,7 @@ local function BuildContainerSpec(parent, cfg, grid)
             padding = { 0, 0, 0, 0 },
             rowWidth = grid.rowWidth,
             growthH = ToGrowthH(dir, wrap),
-            growthV = ToGrowthV(dir),
+            growthV = ToGrowthV(dir, wrap),
         },
     }, vertical
 end
@@ -3998,6 +4003,7 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     local halfPrimary, halfCross = blockW / 2, blockH / 2
     local growUp = (growDir == "UP")
     local wrapRight = (wrapDir == "RIGHT")
+    local wrapUp = (wrapDir == "UP")
 
     for i = 1, math.max(total, #icons) do
         if i <= total then
@@ -4028,8 +4034,8 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
                 btnY = growUp and (-halfPrimary + withinLineStep) or (halfPrimary - withinLineStep)
                 btnX = wrapRight and (-halfCross + acrossLinesStep) or (halfCross - acrossLinesStep)
             else
-                btnX = (corner == "TOPRIGHT") and (halfPrimary - withinLineStep) or (-halfPrimary + withinLineStep)
-                btnY = halfCross - acrossLinesStep
+                btnY = wrapUp and (-halfCross + acrossLinesStep) or (halfCross - acrossLinesStep)
+                btnX = (corner == "TOPRIGHT" or corner =="BOTTOMRIGHT") and (halfPrimary - withinLineStep) or (-halfPrimary + withinLineStep)
             end
             btn:ClearAllPoints()
             btn:SetPoint(centeredVertical and "CENTER" or corner, box, "CENTER", btnX, btnY)
