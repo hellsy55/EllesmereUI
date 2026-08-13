@@ -1979,6 +1979,20 @@ local fontStrings = {}
 local function ApplyModuleFont(fs)
     local size = fs.eqdFontSize
     if not size or not EllesmereUI.GetFontPath then return end
+    -- Snapped to whole physical pixels. A font height is given in the string's
+    -- own units and drawn at that height TIMES its effective scale, so a
+    -- palette scaled to anything but 1 asks for a fractional pixel height --
+    -- and a glyph rasterised between two pixels reads soft and stair-stepped
+    -- while the icon art beside it, which is a texture and resamples cleanly,
+    -- does not. That is the whole of the pixelated-count report: the icons
+    -- were never the problem. PP.perfect is one physical pixel in WoW's
+    -- 768-based coordinates, which is what turns a height into pixels and
+    -- back. Whole pixels, and never rounded away to nothing.
+    local PP = EllesmereUI.PP
+    local eff = fs.GetEffectiveScale and fs:GetEffectiveScale()
+    if PP and PP.perfect and PP.perfect > 0 and eff and eff > 0 then
+        size = max(1, floor(size * eff / PP.perfect + 0.5)) * PP.perfect / eff
+    end
     local flags
     if fs.eqdIconText and EllesmereUI.GetIconTextOutlineFlag then
         flags = EllesmereUI.GetIconTextOutlineFlag(FONT_KEY)
@@ -2069,7 +2083,17 @@ local function CreateSlotWidget(view, index)
     -- leave the previous entry's number standing.
     w.count = w:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     w.count:SetPoint("BOTTOMRIGHT", w, "BOTTOMRIGHT", -1, 2)
+    -- Held on BOTH sides, which is the whole width clamp: anchored by one
+    -- corner alone a wide count grows until it runs off the icon it belongs
+    -- to, and a three-digit stack did. The text cannot be measured to shrink
+    -- it instead -- it may be a secret value, and a secret FontString refuses
+    -- text access to a tainted caller -- so the width is decided in advance
+    -- and the client fits the number into it.
+    w.count:SetPoint("BOTTOMLEFT", w, "BOTTOMLEFT", 1, 2)
     w.count:SetJustifyH("RIGHT")
+    -- One line whatever it holds: a count wide enough to need the clamp above
+    -- would otherwise wrap onto a second line and climb up the icon.
+    if w.count.SetWordWrap then w.count:SetWordWrap(false) end
     w.count:Hide()
     AdoptFontString(w.count, true)
 
@@ -4763,7 +4787,18 @@ function PaletteView:Layout(paletteIndex)
     local frame = self.frame
     -- p.scale is the user's live sizing; a fitted preview supplies its own
     -- geometry instead and must not be scaled a second time.
-    if not opts.interactive then frame:SetScale(p.scale or 1) end
+    if not opts.interactive then
+        local sc = p.scale or 1
+        frame:SetScale(sc)
+        -- Every string on this palette is sized against its own effective
+        -- scale (see ApplyModuleFont), so a scale change leaves all of them
+        -- rasterised for the old one. Re-applied only when the scale actually
+        -- moved, which is a settings change rather than an open.
+        if self.eqdFontScale ~= sc then
+            self.eqdFontScale = sc
+            RefreshFonts()
+        end
+    end
     if self:IsPointerLayout() then
         -- One sizing rule for the grid and both pointer-steered strips: a strip
         -- is just a grid one entry deep, so GridDims has already reduced it to
