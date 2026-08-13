@@ -6215,7 +6215,30 @@ local function CollectAndReanchor()
                                     -- a spell or lack spellCategoryID entirely.
                                     local catInfo = cdID and C_CooldownViewer
                                         and C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                                    if catInfo and catInfo.spellCategoryID then
+                                    -- An equipment-backed entry (trinkets and the rest
+                                    -- of the EQUIP_ACTIVE group) lands here the moment
+                                    -- it is dragged into Essential/Utility: it carries
+                                    -- an inventory slot instead of a spell OR a
+                                    -- category, so it fell to the transient branch
+                                    -- below and was parked invisible once the retry
+                                    -- budget ran out -- while every pass kept the
+                                    -- retry ladder re-firing against an id that can
+                                    -- never resolve. Claimed like a category entry.
+                                    -- Skipped when this bar already lists that slot:
+                                    -- our own slot frame draws the same equipped item,
+                                    -- and two icons for one trinket is worse than none.
+                                    local eqSlot = catInfo and catInfo.equipSlot
+                                    if eqSlot and ns.GetBarSpellData then
+                                        local sdEq = ns.GetBarSpellData(barKey)
+                                        local listEq = sdEq and sdEq.assignedSpells
+                                        for i = 1, (listEq and #listEq or 0) do
+                                            if ns.SlotIDFromKey(listEq[i]) == eqSlot then
+                                                eqSlot = nil
+                                                break
+                                            end
+                                        end
+                                    end
+                                    if catInfo and (catInfo.spellCategoryID or eqSlot) then
                                         if not cdFrames[barKey] then cdFrames[barKey] = {} end
                                         local frames = cdFrames[barKey]
                                         frames[#frames + 1] = frame
