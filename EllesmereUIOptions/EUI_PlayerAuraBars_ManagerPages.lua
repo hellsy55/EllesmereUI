@@ -70,7 +70,7 @@ local FONT_OUTLINE_VALUES = {
 local FONT_OUTLINE_ORDER = { "default", "none", "outline", "thick" }
 local GROW_DIR_VALUES = { LEFT = "Left", RIGHT = "Right", CENTER_HORIZONTAL = "Centered Horizontal", CENTER_VERTICAL = "Centered Vertical", UP = "Up", DOWN = "Down" }
 local GROW_DIR_ORDER = { "LEFT", "RIGHT", "CENTER_HORIZONTAL", "CENTER_VERTICAL", "UP", "DOWN" }
-local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right", UP = "Top", DOWN = "Bottom" }
+local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right", UP = "Up", DOWN = "Down" }
 local ICON_WRAP_ORDER = { "LEFT", "RIGHT", "UP", "DOWN" }
 
 -- Native AuraContainerSortMethod/AuraContainerSortDirection enum names
