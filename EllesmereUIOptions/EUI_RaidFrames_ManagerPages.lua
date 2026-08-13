@@ -1,4 +1,4 @@
-﻿if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -- EUI_RaidFrames_ManagerPages.lua
 -- 12.1 redesigned manager options: the Debuff Manager page (sidebar of
 -- tiles with the undeletable Base Icons tile first) and the Buff Manager page's Base
@@ -3017,7 +3017,7 @@ function ns.BMP_ShowFilterEditor()
         rl:SetPoint("RIGHT", frow, "RIGHT", f.preset and -8 or -42, 0)
         rl:SetJustifyH("LEFT")
         rl:SetWordWrap(false)
-        rl:SetText(f.name)
+        rl:SetText(L(f.name))
         if isSel then
             local accent = frow:CreateTexture(nil, "ARTWORK", nil, 2)
             accent:SetSize(2, 26)
@@ -3157,7 +3157,7 @@ function ns.BMP_ShowFilterEditor()
     local nm = EllesmereUI.MakeFont(left, 13, nil, 1, 1, 1)
     nm:SetAlpha(0.9)
     nm:SetPoint("TOPLEFT", left, "TOPLEFT", 2, -2)
-    nm:SetText(sel.name)
+    nm:SetText(L(sel.name))
     if not sel.preset then
         local ren = CreateFrame("Button", nil, left)
         ren:SetSize(54, 16)
