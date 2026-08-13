@@ -4587,6 +4587,13 @@ local function GetOrCreatePlaceholderFrame(barKey, spellID, iconID, identKey)
             local bd2 = ffc and ffc.barKey and barDataByKey[ffc.barKey]
             if not bd2 or not bd2.showTooltip then return end
             if not self._phSpellID then return end
+            -- A placeholder that renders at alpha 0 has nothing under the
+            -- cursor to describe: "Keep Buffs in Same Place"
+            -- (bd2.hidePlaceholderIcon) and hosted "Visibility When Missing:
+            -- Hidden" (_missingHidden) both reserve the slot invisibly, so the
+            -- buff is NOT active and its tooltip must stay down. Same pair of
+            -- flags the three opacity passes test before forcing alpha 0.
+            if bd2.hidePlaceholderIcon or self._missingHidden then return end
             -- Honor the global "Show Tooltips" visibility mode (Blizzard Skin).
             if EllesmereUI and EllesmereUI._tooltipSuppressedByMode
                and EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
