@@ -1685,6 +1685,59 @@ initFrame:SetScript("OnEvent", function(self)
         return slots, math.max(0, #out - MAX_SLOTS)
     end
 
+    -- Quest items the character is carrying that DO something: the bag walk
+    -- ItemEntries makes, narrowed to the quest item class and to items with a
+    -- use effect. An item with no effect is a quest object being carried, not
+    -- something an entry can fire.
+    --
+    -- The quest log's own special items are folded in as well. Those are the
+    -- ones the objective tracker draws a button for, and they are not always
+    -- in the quest item CLASS -- a trinket or a toy handed out for one quest
+    -- reads as its own class and would be missed by the bag walk alone.
+    -- GetQuestLogSpecialItemInfo is the same call the tracker makes
+    -- (Blizzard_ObjectiveTrackerShared.lua:53).
+    --
+    -- A snapshot, like every preset here: it holds what the character carries
+    -- at the moment the menu is built. See the note under QD-07a in the bug
+    -- report for the self-refilling version and why it is not this.
+    local function QuestItemSlots()
+        local out, seen, dropped = {}, {}, 0
+        local function Add(itemID)
+            if not itemID or seen[itemID] then return end
+            if not C_Item.GetItemSpell(itemID) then return end
+            seen[itemID] = true
+            if #out < MAX_SLOTS then
+                out[#out + 1] = { kind = "item", id = itemID }
+            else
+                dropped = dropped + 1
+            end
+        end
+        local function ScanBag(bag)
+            for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                local itemID = info and info.itemID
+                if itemID and not seen[itemID] then
+                    local classID = select(6, C_Item.GetItemInfoInstant(itemID))
+                    if classID == Enum.ItemClass.Questitem then Add(itemID) end
+                end
+            end
+        end
+        for bag = Enum.BagIndex.Backpack, NUM_BAG_SLOTS do ScanBag(bag) end
+        ScanBag(Enum.BagIndex.ReagentBag)
+
+        for i = 1, C_QuestLog.GetNumQuestLogEntries() do
+            local info = C_QuestLog.GetInfo(i)
+            if info and not info.isHeader then
+                -- The LINK, which is the first return; the second is the
+                -- button's texture, not an id. GetItemInfoInstant takes a link
+                -- and hands back the itemID first.
+                local link = GetQuestLogSpecialItemInfo(i)
+                if link then Add((C_Item.GetItemInfoInstant(link))) end
+            end
+        end
+        return out, dropped
+    end
+
     -- Every profession this character has, as the spells the profession book
     -- itself offers: the window opener, and where a profession has one, its
     -- second ability -- smelting, prospecting, milling, runeforging. Cooking,
@@ -1738,6 +1791,7 @@ initFrame:SetScript("OnEvent", function(self)
         { label = "Stances",        build = StanceSlots },
         { label = "Specializations", build = SpecSlots },
         { label = "Professions",    build = ProfessionSlots },
+        { label = "Quest Items",    build = QuestItemSlots },
     }
 
     ---------------------------------------------------------------------------
