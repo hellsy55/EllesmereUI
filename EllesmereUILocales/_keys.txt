@@ -10,6 +10,7 @@
  Enemy Forces
 %1$d Death  -%2$s
 %1$d Deaths  -%2$s
+%1$d did not fit
 %1$s (max %2$s)
 %1$s Font
 %1$s Module
@@ -53,6 +54,7 @@
 + Add New Utility Bar
 + Add Spell
 + Add Threshold
+, %1$d not shown in this layout
 A profile named \
 ADD NEW
 AFK
@@ -718,6 +720,7 @@ click to customise
 click to edit
 e.g. 12345
 e.g. 30
+favorite
 g
 no buff assigned
 s
