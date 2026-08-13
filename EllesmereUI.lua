@@ -6751,7 +6751,7 @@ function EllesmereUI:ShowInputPopup(opts)
 
     popup._title:SetText(EllesmereUI.L(opts.title or "Enter Name"))
     popup._msg:SetText(EllesmereUI.L(opts.message or ""))
-    popup._placeholder:SetText(opts.placeholder or "Enter name...")
+    popup._placeholder:SetText(EllesmereUI.L(opts.placeholder or "Enter name..."))
     popup._cancelBtn._lbl:SetText(EllesmereUI.L(opts.cancelText or "Cancel"))
     popup._confirmBtn._lbl:SetText(EllesmereUI.L(opts.confirmText or "Save"))
     popup._onCancel = opts.onDismiss or opts.onCancel or nil
