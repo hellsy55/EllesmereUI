@@ -255,6 +255,22 @@ local function EffectiveBarAlpha(barData)
 end
 ns.EffectiveBarAlpha = EffectiveBarAlpha
 
+-- Placeholders rendered at alpha 0: "Keep Buffs in Same Place"
+-- (hidePlaceholderIcon) and a hosted "Visibility When Missing: Hidden" slot
+-- (_missingHidden) both keep the reserved layout slot but paint nothing. Alpha
+-- 0 stops the art, NOT hit-testing, so such a frame stays a live mouse target
+-- and must be excluded from every mouse pass too: it would answer tooltips for
+-- an inactive buff and swallow mouseover from whatever sits under the bar
+-- (Blizzard hides its own inactive items instead, so those slots hold no frame
+-- at all). Single predicate so the alpha passes and the mouse passes can never
+-- disagree. Off-by-default flags first: non-users stop at the first field.
+local function IsPlaceholderRenderHidden(icon, barData)
+    if not icon then return false end
+    return ((barData and barData.hidePlaceholderIcon) or icon._missingHidden)
+        and icon._isPlaceholderFrame and true or false
+end
+ns.IsPlaceholderRenderHidden = IsPlaceholderRenderHidden
+
 -- Vehicle/petbattle state proxy: created once in CDMFinishSetup; drives _CDMApplyVisibility so CDM bars hide while in vehicle UI.
 local _cdmVehicleProxy = nil
 local _cdmInVehicle    = false
@@ -4678,7 +4694,10 @@ local function ApplyCDMTooltipState(barKey)
             for i = 1, #icons do
                 local ic = icons[i]
                 if ic and ic.EnableMouseMotion then
-                    ic:EnableMouseMotion(wantHover)
+                    -- Invisible placeholders are excluded even with tooltips on: an
+                    -- alpha-0 slot has no art to hover, so capturing here would only
+                    -- take mouseover away from whatever the bar sits over.
+                    ic:EnableMouseMotion(wantHover and not IsPlaceholderRenderHidden(ic, bd))
                 end
             end
         end
@@ -6660,20 +6679,19 @@ _CDMApplyVisibility = function()
                     for ii = 1, #icons do
                         local ic = icons[ii]
                         if ic then
+                            local phHidden = IsPlaceholderRenderHidden(ic, barData)
                             -- EnableMouse/EnableMouseMotion are protected on Blizzard CDM frames; skip during combat to avoid ADDON_ACTION_BLOCKED when dismounting mid-combat.
                             if not icCombat2 then
                                 ic:EnableMouse(false)
                                 -- Same mouseover-stealing rule as the container above: icons may only
                                 -- capture mouse motion when this bar's tooltips are on, and never on cursor-tracked bars (those must stay fully click-AND-motion-through).
+                                -- An invisible placeholder never captures: there is nothing drawn to hover.
                                 if ic.EnableMouseMotion then
-                                    ic:EnableMouseMotion((barData.showTooltip and not frame._mouseTrack) and true or false)
+                                    ic:EnableMouseMotion((barData.showTooltip and not frame._mouseTrack and not phHidden) and true or false)
                                 end
                             end
                             local icfc = _ecmeFC[ic]
-                            -- Off-by-default flags tested first: non-users short-circuit straight to the
-                            -- original branch (identical code, no added work). _missingHidden = hosted
-                            -- "Visibility When Missing: Hidden" placeholder (slot reserved, rendered invisible).
-                            if (barData.hidePlaceholderIcon or ic._missingHidden) and ic._isPlaceholderFrame then
+                            if phHidden then
                                 -- Hide Icon: an Always-Show placeholder keeps its reserved layout slot but stays fully invisible (icon, border, bg).
                                 ic:SetAlpha(0)
                             elseif not (icfc and (icfc._cdStateHidden or icfc._missingActiveHidden)) then
@@ -6742,9 +6760,7 @@ local function ApplyBarOpacity(barKey)
             local ic = icons[i]
             if ic then
                 local icfc = _ecmeFC[ic]
-                -- Off-by-default flags tested first: non-users short-circuit straight to the original
-                -- branch (identical code, no added work). _missingHidden = hosted "Visibility When Missing: Hidden" placeholder (slot reserved, rendered invisible).
-                if (barData.hidePlaceholderIcon or ic._missingHidden) and ic._isPlaceholderFrame then
+                if IsPlaceholderRenderHidden(ic, barData) then
                     -- Hide Icon: an Always-Show placeholder keeps its reserved
                     -- layout slot but stays fully invisible (icon, border, bg).
                     ic:SetAlpha(0)
