@@ -839,7 +839,12 @@ end
 -- healthcolor tints the health-fill overlay, bgcolor tints the bar background,
 -- border draws the full style set around the unit button (sweep renders fully lit,
 -- no ticker under secrecy). framealpha and missing/allPresent/anyMissing show-when
--- are NOT reproducible; simple mode stays on the legacy renderer.
+-- are NOT reproducible -- and the obvious workaround is FORBIDDEN BY THE ENGINE:
+-- OnShow/OnHide hooks on slot buttons (visibility-edge counting) make the engine's
+-- own secret-driven SetShown throw "Cannot be called with secrets due to existing
+-- script handlers", failing the whole container build under secrecy (field,
+-- 2026-08-14). Never install visibility scripts on engine aura buttons. Effect
+-- indicators render presence-driven only; simple mode stays on the legacy renderer.
 ------------------------------------------------------------------------------
 
 local BM_FRAMELVL = { behindBorders = 7, behindText = 11, medium = 13, high = 14, highest = 15 }
@@ -1609,9 +1614,7 @@ local function BuildBmSlots(inds, d, health, iscale, styleBase)
     end
     for i = 1, #inds do
         local ind = inds[i]
-        if ind.enabled and ind.type ~= "framealpha"
-            and (ind.type == "icon" or ind.type == "square" or ind.type == "bar"
-                 or ((ind.showWhen or "present") == "present")) then
+        if ind.enabled and ind.type ~= "framealpha" then
             local spells = {}
             for k = 1, #(ind.spells or {}) do
                 local sid = ind.spells[k]
@@ -1666,6 +1669,13 @@ local function BuildBmSlots(inds, d, health, iscale, styleBase)
                     meta[#meta + 1] = mm
                 end
             elseif kind == "healthcolor" or kind == "bgcolor" or kind == "border" then -- effect slots
+                -- showWhen is deliberately IGNORED here: only "When Any Present"
+                -- is reproducible on 12.1 (see the header note -- the counting
+                -- workaround is engine-forbidden), and the pre-heal behavior of
+                -- skipping the slot for other stored modes rendered NOTHING
+                -- silently (field report). A stale "allPresent"/"missing" config
+                -- now renders presence-driven; the options pane offers only the
+                -- supported mode.
                 local slotKey = "bm" .. tostring(ind.id or ("x" .. i)) .. "_fx"
                 local styleKey = styleBase .. ":" .. tostring(ind.id or ("x" .. i)) .. ":fx"
                 AK.styles[styleKey] = BuildBmStyleFor(kind, ind, iscale, 1)

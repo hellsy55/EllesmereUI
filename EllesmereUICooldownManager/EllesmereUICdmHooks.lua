@@ -121,7 +121,14 @@ function ns._PandemicIconHide(self)
             if fd.pandemicOverlay then ns.StopNativeGlow(fd.pandemicOverlay) end
             fd.pandemicGlowActive = false
         end
-        if self.auraInstanceID == nil then fd._panStale = true end
+        -- auraInstanceID can be SECRET in instanced combat; comparing a
+        -- secret against nil yields a secret boolean the `if` would error
+        -- testing. A secret ID means the aura state is unknowable: take the
+        -- conservative path (not stale), same bias as the visibility toggle.
+        local aid = self.auraInstanceID
+        if not (_G.issecretvalue and _G.issecretvalue(aid)) and aid == nil then
+            fd._panStale = true
+        end
     end
     if ns._pandemicState then ns._pandemicState[self] = nil end
 end
@@ -6992,20 +6999,23 @@ local function CollectAndReanchor()
                             if not hasClaim then
                                 local isRacial = ns._myRacialsSet and ns._myRacialsSet[sid]
                                 local isCustomSpell = sd and sd.customSpellIDs and sd.customSpellIDs[sid]
-                                -- Phase 3 injects custom frames only for spells NOT in
-                                -- Blizzard's CDM category (user-added racials/customs). If a
-                                -- spell IS in CDM, Blizzard's native frame is authoritative
-                                -- and injecting here would produce a ghost duplicate the user
-                                -- can't remove from the live bar (the picker only touches
-                                -- assignedSpells) -- e.g. a Dracthyr Evoker utility preset with
-                                -- Wing Buffet already tracked by Blizzard's CDM. So: skip
-                                -- injection only for racials Blizzard already tracks;
-                                -- user-added custom spells are always injected, even if CDM has
-                                -- its own native frame for them elsewhere.
-                                local isKnownInCDM = isRacial and ns.IsSpellKnownInCDM and ns.IsSpellKnownInCDM(sid)
-                                if isKnownInCDM then
-                                    -- Racial already in CDM; Blizzard's frame handles it.
-                                elseif not isRacial and not isCustomSpell then
+                                -- FRAMES AS TRUTH (native-first, injection-fallback): a racial
+                                -- with a LIVE Blizzard frame anywhere is a regular native
+                                -- cooldown -- hasClaim above already skipped it, and the route
+                                -- map delivers it to whichever bar lists it. Reaching here
+                                -- means NO live frame exists (untracked in Blizzard's CDM, or
+                                -- a client without native racial tracking), so our custom
+                                -- frame is the only way the racial renders at all. The old
+                                -- gate here keyed on IsSpellKnownInCDM, which reads the
+                                -- category set -- its second arg is allowUnlearned (docs), so
+                                -- "known" means LEARNED, not tracked: a racial the user
+                                -- untracked in Blizzard's CDM stayed "known", skipped
+                                -- injection, and vanished from every bar (field report).
+                                -- Login timing: viewer data can load after our first build
+                                -- (hasClaim transiently false -> we inject); the
+                                -- COOLDOWN_VIEWER_DATA_LOADED rebuild re-evaluates and the
+                                -- reanchor sweep hides the then-stale injected frame.
+                                if not isRacial and not isCustomSpell then
                                     -- Unknown spell, skip
                                 else
                                     local fkey = barKey .. ":" .. (isRacial and "racial" or "custom") .. ":" .. sid

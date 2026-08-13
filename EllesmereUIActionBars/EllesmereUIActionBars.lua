@@ -1962,8 +1962,20 @@ local function GetOrCreateButton(slot, parent, info, index, skipProtected)
         -- loses nothing: every event it needs is self-registered (BUTTON_EVENT_LISTS)
         -- or centrally dispatched.
         if ActionBarButtonEventsFrame and type(ActionBarButtonEventsFrame.frames) == "table" then
-            for k, f in pairs(ActionBarButtonEventsFrame.frames) do
-                if f == btn then ActionBarButtonEventsFrame.frames[k] = nil end
+            -- The entry to remove is the one this button's template OnLoad
+            -- just tinsert'd -- the array tail. Checking it directly keeps
+            -- the 120-button build O(n) instead of O(n^2) over Blizzard's
+            -- ~180-entry list (a real slice of the combat-reload watchdog
+            -- budget); the full scan stays as the fallback for any exotic
+            -- insertion order.
+            local fr = ActionBarButtonEventsFrame.frames
+            local tail = #fr
+            if fr[tail] == btn then
+                fr[tail] = nil
+            else
+                for k, f in pairs(fr) do
+                    if f == btn then fr[k] = nil end
+                end
             end
         end
         -- Desaturate-on-CD / on-CD alpha: re-evaluate the icon the moment the main
@@ -12869,7 +12881,14 @@ function EAB:FinishSetup()
         -- /reload taken in combat with no cooldown events at all for the rest
         -- of the session. It registers events and builds closures, nothing
         -- protected, so both paths get it here, after their buttons exist.
-        EAB:SetupEventDispatcher()
+        -- DEFERRED one tick: ~1,600 lines of closure construction + ~25 event
+        -- registrations, pure insecure and self-guarded (_dispatcherSetup).
+        -- C_Timer callbacks fire on the first frame AFTER the loading screen,
+        -- so this leaves the shared login watchdog budget (one combat-sized
+        -- budget for the whole suite's OnEnable chain) without losing the
+        -- combat-legal window: nothing here is combat-blocked. One tick with
+        -- no cooldown events is invisible during the loading screen.
+        C_Timer_After(0, function() EAB:SetupEventDispatcher() end)
 
         -- Visual styling: defer visuals to out-of-combat if needed.
         local function DoVisuals()
@@ -13127,10 +13146,16 @@ function EAB:FinishSetup()
         end)
     end
 
-    -- Attach hover hooks for mouseover
-    for _, info in ipairs(BAR_CONFIG) do
-        AttachHoverHooks(info.key)
-    end
+    -- Attach hover hooks for mouseover -- DEFERRED one tick: ~290 HookScript
+    -- calls + ~60 closures, the heaviest pure-insecure chunk in the login
+    -- window. HookScript is combat-legal; every hoverStates consumer nil-
+    -- guards, so one unpopulated tick is a silent no-op; and After(0) fires
+    -- before DoVisuals' +0.1s RefreshMouseover walk.
+    C_Timer_After(0, function()
+        for _, info in ipairs(BAR_CONFIG) do
+            AttachHoverHooks(info.key)
+        end
+    end)
 
     -- When a spell flyout closes, fade out any bars that were kept visible by it
     do

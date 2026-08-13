@@ -12011,6 +12011,16 @@ function InitializeFrames()
         -- left-click target) when click-cast is off.
         if type(ClickCastFrames) ~= "table" then ClickCastFrames = {} end
         ClickCastFrames[frame] = true
+        -- NO ping mixin here, deliberately (three field rounds, 2026-08-24):
+        -- an addon-installed PingableType mixin CANNOT serve secret-content
+        -- units. Reading our tainted GetIsPingable inside PingManager's
+        -- securecalled helper taints that execution, every unit value
+        -- Blizzard's own mixin then fetches comes back tainted-restricted,
+        -- and the secure caller's securecopy of the GetTargetInfo table
+        -- hard-errors ("inaccessible secret") -- even with our getter
+        -- returning nil. The reported enemy-target-frame ping error also
+        -- reproduces with NO EUI receiver in the path (pre-mixin trace, No
+        -- Lua Taint) and is upstream. Do not re-attempt.
     end
 
     -- Spawn each unit's EllesmereUI frame only when its source is "eui". A unit set to
