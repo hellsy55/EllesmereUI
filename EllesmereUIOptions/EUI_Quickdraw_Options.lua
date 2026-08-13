@@ -636,13 +636,14 @@ initFrame:SetScript("OnEvent", function(self)
             out[1] = { icon = icon, name = name, slot = slot, pin = true }
         end
         for _, mountID in ipairs(C_MountJournal.GetMountIDs()) do
-            local name, spellID, icon, _, isUsable, _, _, _, _, hideOnChar, isCollected =
+            local name, spellID, icon, _, _, _, _, _, _, hideOnChar, isCollected =
                 C_MountJournal.GetMountInfoByID(mountID)
-            -- isUsable here is a character capability (riding skill, faction,
-            -- class), not a "can you mount right now" -- that one is
-            -- GetMountUsabilityByID. So an unusable mount is one this character
-            -- can never summon, and offering it would be a dead slot.
-            if name and isCollected and isUsable and not hideOnChar then
+            -- isUsable is deliberately not read here. It moves with where the
+            -- player stands -- the Mount Journal rebuilds its list on
+            -- MOUNT_JOURNAL_USABILITY_CHANGED -- so filtering on it hides an
+            -- aquatic mount from anyone picking on dry ground. Whether a mount
+            -- can be summoned is a run-time question, not a pick-time one.
+            if name and isCollected and not hideOnChar then
                 out[#out + 1] = { icon = icon, name = name,
                     -- spellID is banked at pickup time because ResolveAction
                     -- needs the summon spell and it is already in hand here.
