@@ -8445,6 +8445,48 @@ do
     end
 end
 
+-- Health/power bar ping receivers. Blizzard's player-resource alert ("low mana",
+-- "low health") is a CONTEXTUAL ping sent when the cursor sits over PlayerFrame and
+-- not over its portrait: PingableType_PlayerUnitFrameMixin returns
+-- isPlayerResource = true and C_PingSecure.SendUnitPing picks health or mana itself.
+-- A player running these bars in place of the Blizzard player frame has nothing left
+-- to aim at, so the alert is simply unavailable. Mark our own bars instead.
+--
+-- WHICH resource gets called out is not ours and cannot be made ours: SendUnitPing
+-- takes (guid, type, isPlayerResource) and nothing else -- no position, no health/mana
+-- member on PingSubjectType -- and Blizzard's own player frame carries that same single
+-- boolean for its health bar and its mana bar alike. Field-checked 2026-08-13: at low
+-- mana the Blizzard player frame also calls out health, so this matches it exactly.
+--
+-- No option and no mouse change: the attribute and the three getters are inert until
+-- the ping system itself asks, so an unpinged bar costs nothing and behaves exactly as
+-- before. Mouse stays OFF -- verified sufficient in the field, and a mouse-enabled bar
+-- would steal mouseover focus from whatever sits behind it, which is why the
+-- hover-reveal poll drives plain proxy tables instead of the real bars.
+--
+-- Taint: PingManager reads these three through securecallfunction and securecopies the
+-- returned table, so our tainted execution stays contained. Safe HERE and not on the
+-- unit frames (see the "NO ping mixin here" note in EllesmereUIUnitFrames.lua): this
+-- receiver only ever names the player, whose GUID is never secret-content, so the
+-- securecopy that hard-errors on a restricted unit has nothing to choke on.
+local function ApplyPingReceivers()
+    for _, bar in ipairs({ healthBar, primaryBar }) do
+        if bar and not bar._erbPingOn then
+            bar._erbPingOn = true
+            bar:SetAttribute("ping-receiver", true)
+            -- Always pingable: a receiver that answers false is treated as BLOCKING UI
+            -- and kills the ping outright with PING_FAILED_GENERIC, which is strictly
+            -- worse than the fall-through this replaces.
+            bar.GetIsPingable = function() return true end
+            -- Contextual ping only, matching Blizzard over its own player resources.
+            bar.GetAllowRadialWheel = function() return false end
+            bar.GetTargetInfo = function()
+                return { guid = UnitGUID("player"), isPlayerResource = true }
+            end
+        end
+    end
+end
+
 function ERB:ApplyAll()
     -- Invalidate the per-event config caches. Everything that can change a
     -- resolved config -- profile switch, option edit, spec swap, form change --
@@ -8482,6 +8524,7 @@ function ERB:ApplyAll()
     if castBarFrame then castBarFrame:SetFrameStrata(cb and cb.frameStrata or "MEDIUM") end
     local gb = ERB.db.profile.gcdBar
     if gcdBarFrame then gcdBarFrame:SetFrameStrata(gb and gb.frameStrata or "MEDIUM") end
+    ApplyPingReceivers()
     UpdateHealthBar()
     UpdatePrimaryBar()
     UpdateSecondaryResource()
