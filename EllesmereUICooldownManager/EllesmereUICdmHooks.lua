@@ -7884,24 +7884,6 @@ local function CollectAndReanchor()
             if EllesmereUI.ScheduleSettleReapply then
                 EllesmereUI.ScheduleSettleReapply()
             end
-            -- Belt-and-braces re-pull for width/height-matched children (e.g. a
-            -- Resource Bar matched to a CDM bar's width): _spellsReadyForApply
-            -- signals SPELLS_CHANGED fired, but Blizzard's viewer pool can still
-            -- take an extra frame or two to settle on the FINAL icon count for
-            -- the new spec after this first pass already ran. Without a second,
-            -- later pull, a width-matched child can lock onto a transient
-            -- icon-count width from mid-settle and never self-correct until the
-            -- match is manually broken/relinked. This second pass is cheap
-            -- (early-exits per element if nothing actually changed) and fires
-            -- once per spec swap, not on every reanchor.
-            C_Timer.After(0.5, function()
-                if EllesmereUI.ApplyAllWidthHeightMatches then
-                    EllesmereUI.ApplyAllWidthHeightMatches()
-                end
-                if EllesmereUI._applySavedPositions then
-                    EllesmereUI._applySavedPositions()
-                end
-            end)
         end)
     else
         -- Routine reanchor (icon churn, mob death, etc.) -- still clear
@@ -9375,11 +9357,7 @@ end
 --  flashes a hexagon rather than the full square it sits in.
 --  Per-frame data lives in an external weak-keyed table.
 -------------------------------------------------------------------------------
--- Wrapped in an IIFE (instead of a plain do...end) so this block gets its own
--- 200-local budget instead of sharing the file's main-chunk budget -- avoids
--- "main function has more than 200 local variables" as more locals accumulate
--- elsewhere in this file over time.
-(function()
+do
     local AB_MEDIA      = "Interface\\AddOns\\EllesmereUIActionBars\\Media\\"
     local AB_HIGHLIGHT  = { AB_MEDIA .. "highlight-2.png", AB_MEDIA .. "highlight-3.png", AB_MEDIA .. "highlight-4.png" }
     local DEPRESS_TEX   = "Interface\\Buttons\\UI-Quickslot-Depress"
@@ -9768,4 +9746,4 @@ end
             end)
         end
     end)
-end)()
+end
