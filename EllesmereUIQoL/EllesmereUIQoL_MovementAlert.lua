@@ -1086,7 +1086,7 @@ end
 
 -- buffActive engine-lane handles (declared here so HideMovementDisplay -- the
 -- universal off-path -- can park the host; defined in the lane block below).
-local buffAlertHost, buffAlertBuilt, buffAlertRegenArm
+local buffAlertHost, buffAlertBuilt, buffAlertRegenArm, buffAlertLastCount
 
 local function HideMovementDisplay()
     wipe(readyAlertShown)
@@ -1440,13 +1440,13 @@ end
 -- counted stack height.
 local function RepositionBuffAlertHost(count)
     if not buffAlertHost then return end
-    ns._maLastSlotCount = count
+    buffAlertLastCount = count
     if InCombatLockdown() then
         if not buffAlertRegenArm then
             buffAlertRegenArm = CreateFrame("Frame")
             buffAlertRegenArm:SetScript("OnEvent", function(self)
                 self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                RepositionBuffAlertHost(ns._maLastSlotCount or 0)
+                RepositionBuffAlertHost(buffAlertLastCount or 0)
             end)
         end
         buffAlertRegenArm:RegisterEvent("PLAYER_REGEN_ENABLED")
