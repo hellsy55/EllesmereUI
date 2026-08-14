@@ -5978,3 +5978,90 @@ L["Background (Class Resource)"] = "Hintergrund (Klassenressource)"
 L["Texture Settings"] = "Textureinstellungen"
 L["Blizzard Atlas Class Resource"] = "Blizzard Atlas Klassenressource"
 L["Out of Combat Opacity"] = "Deckkraft außerhalb des Kampfes"
+
+-- Search Keywords: the haystack behind the sidebar "Search Features..." box,
+-- NOT display text -- nothing in the section below is ever drawn on screen.
+-- EllesmereUI.lua `_applySidebarSearch` -> addLocalized() indexes the English
+-- form AND the translated form of every module's `searchTerms`, so these
+-- entries ADD Chinese search words without taking the English ones away: both
+-- still match. The query is split on whitespace and every word must be a
+-- plain substring of the joined haystack.
+--
+-- Translate as SEARCH WORDS, not as prose: whatever a zhTW player would
+-- actually type. New keys come from the 7 `searchTerms =` sites in
+-- EllesmereUIOptions/ -- apply.py appends them after the last entry below, so
+-- move them into the right sub-block by hand.
+-- == Search Keywords =======================================================
+
+-- Whole-module keyword blobs. The English side is one long space-separated
+-- string per module (`searchTerms = "bags inventory items ..."`), so the
+-- translation is one too.
+L["bags inventory items slots reagent categories columns sidebar"] = "Taschen Inventar Gegenstände Plätze Reagenzien Kategorien Spalten Seitenleiste"
+L["blizzard skin character sheet tooltip menu popup dragon riding skyriding window skins lfg group finder premade queue pause game menu great vault inspect collections mounts pets toys spellbook talents adventure guide encounter journal professions guild communities calendar achievements mail catalyst gem socket item upgrade upgrades crest loot window loot toast you received popup micro menu modern delves companion brann loot roll need greed pass disenchant loot rolls pending rolls group invite invited to a group role"] = "Blizzard Skin Anpassen Charakterfenster Tooltip Menü Popup Drachenreiten Himmelsreiten Fenster-Skins Dungeongruppe Gruppensuche Dungeons Schlachtzüge Pause Spielmenü Schatzkammer Betrachten Sammlungen Reittiere Haustiere Spielzeuge Zauberbuch Talente Abenteuerführer Dungeons Schlachtzüge Berufe Gilde Communities Kalender Erfolge Post Katalysator Edelstein Sockel Gegenstandsaufwertung Aufwertungen Wappen Beutefenster Beute-Toast Du hast erhalten Mikromenü Tiefen Begleiter Brann Würfeln Bedarf Gier Passen Entzaubern Beutewürfe Ausstehende Würfe Einladung Gruppeneinladung Rolle"
+L["chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size"] = "Chat Reiter Tabs Rahmen Abstand Hintergrund Seitenleiste Freunde Sprache URL Link Kopieren Flüstern Kanal Kürzen Gekürzt Klassenfarbe Namen Zeitstempel Alle Nachrichten Schriftart Schriftgröße"
+L["damage meters dps hps healing interrupts dispels spell history"] = "Schadenmeter DPS HPS Heilung Unterbrechungen Bannen Zauberhistorie"
+L["fps"] = "FPS"
+L["group"] = "Gruppe"
+L["health"] = "Gesundheit"
+L["keybind"] = "Tastenbelegung"
+L["layout"] = "Layout"
+L["logging"] = "Protokollierung"
+L["mouseover"] = "Mouseover"
+L["power"] = "Ressource"
+L["range"] = "Reichweite"
+L["absorb"] = "Absorption"
+L["aura bars"] = "Aurenleisten"
+L["binding"] = "Tastenbelegung"
+L["blink"] = "Aufblitzen"
+L["border"] = "Rahmen"
+L["bres"] = "Kampfbelebung"
+L["brez"] = "Kampfbelebung"
+L["buff"] = "Stärkungszauber"
+L["buff bar"] = "Stärkungszauber-Leiste"
+L["cast"] = "Zauber"
+L["check"] = "Prüfung"
+L["click"] = "Klick"
+L["cooldown bars"] = "Abklingzeit Leisten"
+L["costume"] = "Kostüm"
+L["countdown"] = "Countdown"
+L["crest"] = "Wappen"
+L["cursor"] = "Mauszeiger"
+L["debuff"] = "Schwächungszauber"
+L["debuff bar"] = "Schwächungszauber Leiste"
+L["demodal"] = "Dialogzwang aufheben"
+L["disband"] = "Auflösen"
+L["disguise"] = "Verkleidung"
+L["dispel"] = "Bannen"
+L["dispel colors"] = "Bannfarben"
+L["drag"] = "Ziehen"
+L["drift"] = "Drift"
+L["externals"] = "Externe Schutzzauber"
+L["flare"] = "Leuchtsignal"
+L["frames"] = "Fenster"
+L["gateway"] = "Seelentor"
+L["grow direction"] = "Wachstumsrichtung"
+L["ilvl"] = "Gegenstandsstufe"
+L["macro"] = "Makro"
+L["manager"] = "Manager"
+L["marker"] = "Markierung"
+L["mobility"] = "Beweglichkeit"
+L["move"] = "Bewegen"
+L["movement"] = "Bewegung"
+L["noggenfogger"] = "Noggenfogger"
+L["player aura bars"] = "Spieler Aurenleisten"
+L["position"] = "Position"
+L["pull"] = "Pull"
+L["raid"] = "Schlachtzug"
+L["ready"] = "Bereit"
+L["role"] = "Rolle"
+L["shield"] = "Schild"
+L["shifter"] = "Shifter"
+L["spacing"] = "Abstand"
+L["spell"] = "Zauber"
+L["threat"] = "Bedrohung"
+L["tooltip"] = "Tooltip"
+L["transform"] = "Verwandlung"
+L["transforms"] = "Verwandlungen"
+L["upgrade"] = "Aufwertung"
+L["yard"] = "Meter"
+L["yards"] = "Meter"
