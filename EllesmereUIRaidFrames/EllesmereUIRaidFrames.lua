@@ -316,6 +316,7 @@ local defaults = {
         showWhenSolo     = false,
         showWhenGroup    = false,
         showWhenRaid     = true,
+        frameStrata      = "LOW",
 
         -- Friendly Boss Frames (boss1-5 healable NPC frames, raid only)
         friendlyBoss = {
@@ -6190,7 +6191,7 @@ local function CreateHeaders()
     containerFrame = CreateFrame("Frame", "EllesmereUIRaidFrameContainer", UIParent)
     containerFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     containerFrame:SetSize(1, 1)
-    containerFrame:SetFrameStrata("LOW")
+    containerFrame:SetFrameStrata(ns._ResolveFrameStrata(false))
     containerFrame:Show()
 
     -- Group-number labels (1-8) for the real raid frames. Own (non-secure)
@@ -7642,6 +7643,8 @@ local function OnEvent(self, event, arg1, ...)
         if ns._CombatIconEnabled() and ns._UpdateCombatIcons then ns._UpdateCombatIcons() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        local frameStrataDirty = ns._frameStrataDirty
+        if frameStrataDirty and ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
         -- Combat ended: restore any role/leader icons suppressed during combat.
         if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
         if ns._UpdateLeaderIcons then ns._UpdateLeaderIcons() end
@@ -7683,6 +7686,11 @@ local function OnEvent(self, event, arg1, ...)
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
             end
+        end
+        -- Restore child frame levels after a deferred strata change.
+        if frameStrataDirty then
+            if not (sizeTierDirty and framesVisible) then ReloadFrames() end
+            if ns.ReloadPartyFrames then ns.ReloadPartyFrames() end
         end
     elseif event == "ENCOUNTER_START" then
         -- Drives the raid/party frame "Out of Boss Combat" tooltip mode (read in
@@ -8214,7 +8222,7 @@ do
             "topNameBarTextOffsetX", "topNameBarTextOffsetY", "topNameBarTextAlign",
         },
         rangeTooltip = {
-            "oorAlpha", "showTooltip", "tooltipMode",
+            "oorAlpha", "showTooltip", "tooltipMode", "frameStrata",
         },
     }
     for section, keys in pairs(map) do
@@ -8229,6 +8237,47 @@ ns._IsPartySectionCustom = function(section)
     local ss = db.profile.partySyncSections
     if not ss then return false end
     return ss[section] == false
+end
+
+-- Party inherits raid strata unless its Extras section is unsynced.
+function ns._ResolveFrameStrata(isParty)
+    local strata
+    if isParty and ns._IsPartySectionCustom("rangeTooltip") then
+        strata = db.profile.party_frameStrata
+    end
+    strata = strata or db.profile.frameStrata or "LOW"
+    if strata ~= "BACKGROUND" and strata ~= "LOW" and strata ~= "MEDIUM"
+        and strata ~= "HIGH" and strata ~= "DIALOG" then
+        strata = "LOW"
+    end
+    return strata
+end
+
+function ns.ApplyFrameStrata()
+    if not db or not db.profile then return false end
+    if InCombatLockdown() then
+        ns._frameStrataDirty = true
+        return false
+    end
+
+    ns._frameStrataDirty = nil
+    local raidStrata = ns._ResolveFrameStrata(false)
+    local partyStrata = ns._ResolveFrameStrata(true)
+    local changed = false
+
+    if containerFrame and containerFrame:GetFrameStrata() ~= raidStrata then
+        containerFrame:SetFrameStrata(raidStrata)
+        changed = true
+    end
+    if ns._partyContainerFrame and ns._partyContainerFrame:GetFrameStrata() ~= partyStrata then
+        ns._partyContainerFrame:SetFrameStrata(partyStrata)
+        changed = true
+    end
+    if changed and ns._RefreshPreviewMouseBlockStrata then
+        ns._RefreshPreviewMouseBlockStrata()
+    end
+
+    return changed
 end
 
 -- The Absorbs section was split out of Health Bar: profiles saved before the
@@ -12992,19 +13041,21 @@ do
             if containerFrame then
                 if not rfMouseBlock then
                     rfMouseBlock = CreateFrame("Frame", nil, UIParent)
-                    rfMouseBlock:SetFrameStrata("MEDIUM")  -- above real buttons (LOW), below the options panel (DIALOG)
                     rfMouseBlock:EnableMouse(true)
                 end
                 rfMouseBlock:SetAllPoints(containerFrame)
+                rfMouseBlock:SetFrameStrata(containerFrame:GetFrameStrata())
+                rfMouseBlock:SetFrameLevel(containerFrame:GetFrameLevel() + 50)
                 rfMouseBlock:Show()
             end
             if ns._partyContainerFrame then
                 if not partyMouseBlock then
                     partyMouseBlock = CreateFrame("Frame", nil, UIParent)
-                    partyMouseBlock:SetFrameStrata("MEDIUM")
                     partyMouseBlock:EnableMouse(true)
                 end
                 partyMouseBlock:SetAllPoints(ns._partyContainerFrame)
+                partyMouseBlock:SetFrameStrata(ns._partyContainerFrame:GetFrameStrata())
+                partyMouseBlock:SetFrameLevel(ns._partyContainerFrame:GetFrameLevel() + 50)
                 partyMouseBlock:Show()
             end
         else
@@ -13013,6 +13064,16 @@ do
         end
     end
     ns._SetPreviewMouseBlock = setBlock
+    ns._RefreshPreviewMouseBlockStrata = function()
+        if rfMouseBlock and rfMouseBlock:IsShown() and containerFrame then
+            rfMouseBlock:SetFrameStrata(containerFrame:GetFrameStrata())
+            rfMouseBlock:SetFrameLevel(containerFrame:GetFrameLevel() + 50)
+        end
+        if partyMouseBlock and partyMouseBlock:IsShown() and ns._partyContainerFrame then
+            partyMouseBlock:SetFrameStrata(ns._partyContainerFrame:GetFrameStrata())
+            partyMouseBlock:SetFrameLevel(ns._partyContainerFrame:GetFrameLevel() + 50)
+        end
+    end
     function ns._SetRealFramesPreviewHidden(on)
         -- Overlay preview is a separate docked panel, so the real frames are NOT
         -- under it: leave them faintly visible (alpha 0.2) and DON'T mouse-block
@@ -14175,6 +14236,9 @@ function ERF:OnEnable()
     -- Initialize click-cast engine (before CreateHeaders so ClickCastFrames hook is active)
     if ns.CC_Init then ns.CC_Init() end
 
+    -- Set party strata before creating its secure header.
+    if ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
+
     -- Create headers; buttons get window-phase secure styling only
     CreateHeaders()
 
@@ -14256,6 +14320,8 @@ function ERF:OnEnable()
         -- Rebuild the buff-manager spell lookup for the new profile's per-spec
         -- indicators (and the Simple Setup whitelist) before frames re-render.
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(ns.db) end
+        -- Apply strata first; reload restores child frame levels.
+        if ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
         -- Raid frames: restyle + relayout + reposition from the new profile.
         if ns.ReloadFrames then ns.ReloadFrames() end
         -- Party container size + position, then the party buttons.
