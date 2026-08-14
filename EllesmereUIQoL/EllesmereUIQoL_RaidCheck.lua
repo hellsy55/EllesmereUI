@@ -64,6 +64,7 @@ local issecretvalue       = issecretvalue
 local GetAuraDataByIndex  = C_UnitAuras.GetAuraDataByIndex
 local GetUnitAuraBySpellID = C_UnitAuras.GetUnitAuraBySpellID
 local GetReadyCheckStatus = GetReadyCheckStatus
+local C_Timer             = C_Timer
 
 -- Two member columns of twenty: a 40-man roster in one screenful, without a
 -- scroll frame and without a window taller than the game. Sized to be legible
@@ -550,6 +551,8 @@ local win
 local rows      = {}   -- flat, member-column major
 local colHeader = {}   -- column key -> one frame per member column
 local sweeper
+local closeTimer   -- armed only when the window was opened BY a ready check
+local CLOSE_DELAY_AFTER_FINISH = 30   -- seconds to leave the grid up after READY_CHECK_FINISHED
 
 local function MakeRow(parent, index)
     local r = CreateFrame("Frame", nil, parent)
@@ -712,6 +715,9 @@ local function Build()
     -- can see, for the rest of the session.
     win:HookScript("OnHide", function()
         if sweeper then sweeper.Stop() end
+        -- Closed some other way (Escape, right-click, /euiraidcheck show
+        -- toggling it off): whatever countdown was armed no longer applies.
+        if closeTimer then closeTimer:Cancel(); closeTimer = nil end
     end)
 
     -- Right-click anywhere on the window closes it, so no dedicated close
@@ -1046,7 +1052,7 @@ end
 -------------------------------------------------------------------------------
 
 function ns.HideRaidCheck()
-    if win then win:Hide() end   -- OnHide stops the sweep
+    if win then win:Hide() end   -- OnHide stops the sweep and cancels closeTimer
 end
 
 -- `fromReadyCheck` suppresses the query: on that path every client has already
@@ -1133,6 +1139,9 @@ ev:SetScript("OnEvent", function(_, event)
         -- Any ready check, whoever started it: an assistant checking the raid
         -- and the leader should see the same thing.
         ns.ShowRaidCheck(true)
+        -- A fresh check cancels any close countdown left over from a
+        -- previous one -- that check is done, this one just started.
+        if closeTimer then closeTimer:Cancel(); closeTimer = nil end
         return
     end
     if event == "READY_CHECK_CONFIRM" then
@@ -1145,6 +1154,16 @@ ev:SetScript("OnEvent", function(_, event)
     if event == "READY_CHECK_FINISHED" then
         readyCheckActive = false
         Refresh()
+        -- Blizzard's own check just ended -- either everyone answered or its
+        -- own timeout hit. The grid is still worth reading right after
+        -- (that's the moment a raid leader is actually looking at it), so
+        -- give it CLOSE_DELAY_AFTER_FINISH more seconds before closing on
+        -- its own, rather than closing the instant the check ends.
+        if closeTimer then closeTimer:Cancel() end
+        closeTimer = C_Timer.NewTimer(CLOSE_DELAY_AFTER_FINISH, function()
+            closeTimer = nil
+            if win and win:IsShown() then ns.HideRaidCheck() end
+        end)
         return
     end
     -- Leaving the group, or losing rank without the option, closes it.
