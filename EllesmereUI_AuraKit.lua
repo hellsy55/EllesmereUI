@@ -288,10 +288,13 @@ local function ApplyStyleToRegions(button, style)
                         and math.max(0, button:GetFrameLevel() - 1)
                         or (d.cooldown:GetFrameLevel() + 1))
                 end
+                -- addonKey/sizeKey pick the per-module texture offset defaults a
+                -- style leaves nil; CDM passes its own so a textured border sits
+                -- where the module's other icons put theirs.
                 EllesmereUI.ApplySecretSafeBorderStyle(d.borderHost, d, b.size or 1,
                     b[1] or 0, b[2] or 0, b[3] or 0, b[4] or 1,
                     b.texture or "solid", b.offsetX, b.offsetY, b.shiftX, b.shiftY,
-                    "unitframes", b.size or 1)
+                    b.addonKey or "unitframes", b.sizeKey or b.size or 1)
                 d.borderMade = true
             elseif d.borderMade then
                 PP.UpdateBorder(d.borderHost, b.size or 1, b[1] or 0, b[2] or 0, b[3] or 0, b[4] or 1)
@@ -682,8 +685,11 @@ function AK.MakeInitializer(styleKey, extra)
         button:SetDurationCooldown(d.cooldown)
         button:SetApplicationCount(d.stack, {})
 
+        -- style.durationFormatter: a module whose countdown must agree with a
+        -- neighboring non-AuraKit display supplies its own rule formatter.
+        -- Omitted (every pre-existing style) keeps the shared one.
         local durationOpts = AK.BuildDurationTextOpts(
-            AK.GetDurationFormatter(style.durationShowSeconds),
+            style.durationFormatter or AK.GetDurationFormatter(style.durationShowSeconds),
             style.durationColorCurve, style.durationUpdateInterval)
         AK.SetDurationTextSafe(button, d.duration, durationOpts)
         -- Formatter-choice stamp for live rebinds (style.applyExtra reruns on

@@ -1799,7 +1799,7 @@ local function EvalChargeCdTextFrame(frame, fd)
         return
     end
     local bd = barDataByKey and barDataByKey[bkw]
-    local baseHide = not (bd and bd.showCooldownText)
+    local baseHide = not ns.CdmDurationTextOn(bd)
     local ssw = ResolveSpellSettings(frame, sidw, ns.GetBarSpellData(bkw))
     if not (ssw and ssw.chargeHideCdText) then
         -- Setting off: restore the bar's showCooldownText result and unwatch
@@ -2326,7 +2326,7 @@ local function ApplyOnlyNumbers(frame, fd, barData)
         local cd = fd.cooldown or frame.Cooldown or frame._cooldown
         if cd then
             if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
-            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(not barData.showCooldownText) end
+            if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(not ns.CdmDurationTextOn(barData)) end
         end
         -- Square border / shape ring re-apply on the next style pass
         -- (DecorateFrame / RefreshCDMIconAppearance via BuildAllCDMBars).
@@ -6558,7 +6558,7 @@ local function CollectAndReanchor()
 
                 -- Duration text follows the bar's Cooldown Text toggle even
                 -- under Only Show Numbers (hide duration = stacks only).
-                local hideCD = not barData.showCooldownText
+                local hideCD = not ns.CdmDurationTextOn(barData)
                 -- FocusKick icon alpha is owned exclusively by
                 -- SetFocusKickAlpha; skip the per-icon alpha override here
                 -- so CollectAndReanchor doesn't clobber the nameplate-driven
@@ -7400,7 +7400,7 @@ local function CollectAndReanchor()
                 local barHidden = container._visHidden
                 local isFKBar = (barKey == ns.FOCUSKICK_BAR_KEY)
 
-                local hideCDText = not barData.showCooldownText
+                local hideCDText = not ns.CdmDurationTextOn(barData)
                 for i, frame in ipairs(frames) do
                     usedFrames[frame] = true
                     DecorateFrame(frame, barData)
@@ -7923,52 +7923,357 @@ local function PlayPresetBuffLossSound(sd, sid, now)
 end
 
 -------------------------------------------------------------------------------
---  Aura-tracked custom buffs (12.1) -- own-frame proxies, engine-slot art.
---  Each no-duration custom id gets ONE proxy frame (ours) that the collect
---  passes inject EXACTLY like a cast-timer custom frame -- counted, sorted,
---  sized and positioned by the ONE bar layout as a peer icon -- plus ONE
---  per-spell AuraKit slot container PARENTED to the proxy with its button
---  SetAllPoints to it (the FakeActive pattern). The ENGINE owns all
---  secret-derived rendering (art visibility, icon, swipe, stacks,
---  countdown), bound inside the creation window; membership is gated on the
---  CLEAN presence check (GetPlayerAuraBySpellID on a KNOWN id returns
---  table-or-nil even in combat). A UNIT_AURA watcher -- registered only
---  while aura customs exist -- re-queues the native collect passes when the
---  presence set changes, so add/drop rides the same update path as every
---  other icon on the bar. Auras the engine could see but presence cannot
---  (the secret-flagged class) stay hidden: their proxy is never injected
---  and the engine subtree hides with it. ENTRIES WITH A STORED DURATION ARE
---  LEGACY CAST-TIMER CUSTOMS AND NEVER ENTER THIS PATH.
---  (_AC.bars itself is declared above the collect passes.)
+--  Aura-tracked custom buffs (12.1). ONE engine flow container per bar: the
+--  engine owns everything secret-derived, Lua declares only the id set and
+--  the style; why they cannot join the bar's icon row is on _AC above the
+--  collect passes. ENTRIES WITH A STORED DURATION ARE LEGACY CAST-TIMER
+--  CUSTOMS AND NEVER REACH HERE. Styling reads the bar's own settings; glows
+--  and per-spell overrides do not reach these icons.
 -------------------------------------------------------------------------------
+
+-- Appearance fingerprint: the settings a restyle can carry. Geometry the engine
+-- flow owns (size, shape, spacing, growth, ids) rebuilds instead, in _AC.Build.
+function _AC.StyleSig(bd)
+    if not bd then return "" end
+    return table.concat({
+        bd.iconShape or "none", bd.iconZoom or 0.08,
+        bd.borderSize or 1, bd.borderR or 0, bd.borderG or 0, bd.borderB or 0,
+        bd.borderA or 1, bd.borderTexture or "solid", bd.borderThickness or "thin",
+        bd.borderClassColor and 1 or 0, bd.borderBehind and 1 or 0,
+        bd.borderTextureOffset or 0, bd.borderTextureOffsetY or 0,
+        bd.borderTextureShiftX or 0, bd.borderTextureShiftY or 0,
+        bd.bgR or 0.08, bd.bgG or 0.08, bd.bgB or 0.08, bd.bgA or 0.6,
+        bd.swipeAlpha or 0.7, bd.onlyShowNumbers and 1 or 0,
+        ns.CdmDurationTextOn(bd) and 1 or 0, bd.cooldownFontSize or 12,
+        bd.cooldownTextPosition or "center",
+        bd.cooldownTextR or 1, bd.cooldownTextG or 1, bd.cooldownTextB or 1,
+        bd.cooldownTextX or 0, bd.cooldownTextY or 0,
+        bd.showChargeStackText ~= false and 1 or 0, bd.stackCountSize or 11,
+        bd.stackCountR or 1, bd.stackCountG or 1, bd.stackCountB or 1,
+        bd.stackCountX or 0, bd.stackCountY or 0,
+        bd.stackCountPosition or "bottomright",
+        bd.showTooltip and 1 or 0, bd.barStrata or "MEDIUM",
+    }, "|")
+end
+
+-- Countdown formatter for custom auras. Blizzard's own cooldown countdown --
+-- what every other icon on the bar draws -- FLOORS the remaining time, so it
+-- reads "0" through the last second; AuraKit's shared formatter rounds up and
+-- read one higher beside it. Floor every unit to match. Built once (immutable,
+-- shared by every bar); nil leaves AuraKit's formatter in place.
+function _AC.DurationFormatter()
+    if _AC.durFmtTried then return _AC.durFmt end
+    _AC.durFmtTried = true
+    if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter
+        and Enum.NumericRuleFormatRounding) then
+        return nil
+    end
+    local Down = Enum.NumericRuleFormatRounding.Down
+    local f = C_StringUtil.CreateNumericRuleFormatter()
+    -- Thresholds sit ON each unit boundary: a floored value never crosses one,
+    -- so none of the "just above the boundary" offsets the up-rounding
+    -- formatters need apply here.
+    local ok = pcall(f.SetBreakpoints, f, {
+        { threshold = 0,     format = "%d",  step = 1, rounding = Down },
+        { threshold = 60,    format = "%dm", step = 1, rounding = Down, components = { { div = 60 } } },
+        { threshold = 3600,  format = "%dh", step = 1, rounding = Down, components = { { div = 3600 } } },
+        { threshold = 86400, format = "%dd", step = 1, rounding = Down, components = { { div = 86400 } } },
+    })
+    if not ok then return nil end
+    _AC.durFmt = f
+    return f
+end
+
+-- Round to the nearest whole physical pixel -- the formula LayoutCDMBar uses for
+-- the bar's own icons. PP.Scale (what the other AuraKit consumers use) truncates
+-- instead, and lands a pixel short of the icon sitting next to this one.
+function _AC.SnapPx(v)
+    local onePx = EllesmereUI.PP and EllesmereUI.PP.mult
+    if not onePx or onePx <= 0 then return v end
+    return math.floor(v / onePx + 0.5) * onePx
+end
+
+-- The style a bar's custom auras render with. Read from the SAME bar settings
+-- the bar's own icons use (RefreshCDMIconAppearance / ApplyShapeToCDMIcon) so a
+-- custom aura and a Blizzard buff beside it look identical. AuraKit owns size,
+-- crop, swipe and border; style.cdm carries what _AC.ApplyExtra draws on our own
+-- regions (background, custom shape, text). PER-SPELL settings cannot reach here:
+-- one engine group renders every custom aura on the bar and, while auras are
+-- secret, Lua cannot tell which button holds which aura.
+function _AC.BuildStyle(bd)
+    -- Snapped to the physical pixel grid, as LayoutCDMBar does for the bar's own
+    -- icons: an unsnapped button renders a fraction off its neighbors at
+    -- non-integral UI scales.
+    local rawSZ = (bd and bd.iconSize) or 36
+    local SZ = _AC.SnapPx(rawSZ)
+    local zoom = (bd and bd.iconZoom) or 0.08
+    local shape = (bd and bd.iconShape) or "none"
+    local customShape = (shape ~= "none" and shape ~= "cropped")
+    local onlyNumbers = (bd and bd.onlyShowNumbers) and true or false
+    local brdSize = (bd and bd.borderSize) or 1
+    local brdR, brdG, brdB = (bd and bd.borderR) or 0, (bd and bd.borderG) or 0, (bd and bd.borderB) or 0
+    if bd and bd.borderClassColor then
+        local cc = _playerClass and RAID_CLASS_COLORS[_playerClass]
+        if cc then brdR, brdG, brdB = cc.r, cc.g, cc.b end
+    end
+    local brdA = (bd and bd.borderA) or 1
+    local cdFont = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("cdm"))
+        or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
+
+    -- Icon rect. A shaped icon samples OUTSIDE its texture to fill the mask, so
+    -- the coords come from the shape's inset, not the bar's zoom -- same math as
+    -- ApplyShapeToCDMIcon. Carried on the style (not written in ApplyExtra)
+    -- because AuraKit re-applies texture coords on every restyle pass.
+    local texCoord
+    local SH = ns.CDM_SHAPES
+    if shape == "cropped" then
+        texCoord = { zoom, 1 - zoom, zoom + 0.10, 1 - zoom - 0.10 }
+    elseif customShape and SH and SH.masks[shape] then
+        local visRatio = (128 - 2 * (SH.insets[shape] or 17)) / 128
+        local grow = ((1 / visRatio) - 1) * 0.5
+        texCoord = { -grow, 1 + grow, -grow, 1 + grow }
+    end
+
+    -- Square border only where the bar's own icons draw one: a custom shape
+    -- rings itself (_AC.ApplyExtra), Only Show Numbers strips the art entirely.
+    local border
+    if brdSize > 0 and not customShape and not onlyNumbers then
+        border = {
+            brdR, brdG, brdB, brdA, size = brdSize,
+            texture = (bd and bd.borderTexture) or "solid",
+            behind = (bd and bd.borderBehind) or nil,
+            offsetX = bd and bd.borderTextureOffset, offsetY = bd and bd.borderTextureOffsetY,
+            shiftX = bd and bd.borderTextureShiftX, shiftY = bd and bd.borderTextureShiftY,
+            addonKey = "cdm", sizeKey = (bd and bd.borderThickness) or "thin",
+        }
+    end
+
+    return {
+        width = SZ,
+        height = (shape == "cropped")
+            and _AC.SnapPx(math.floor(rawSZ * 0.80 + 0.5)) or SZ,
+        iconCrop = true, iconZoom = zoom,
+        texCoord = texCoord,
+        cooldownReverse = true,
+        hideSwipe = onlyNumbers or nil,
+        hideDurationText = (not ns.CdmDurationTextOn(bd)) or nil,
+        durationFormatter = _AC.DurationFormatter(),
+        -- Own text pipeline: the house icon-text rules (font, outline, slug) come
+        -- from ApplyIconTextFont in _AC.ApplyExtra, exactly as the bar's icons do.
+        noDefaultFonts = true,
+        noTooltips = (bd and bd.showTooltip) and nil or true,
+        border = border,
+        applyExtra = _AC.ApplyExtra,
+        cdm = {
+            font = cdFont, size = SZ, zoom = zoom,
+            shape = shape, customShape = customShape,
+            brdSize = brdSize, brdR = brdR, brdG = brdG, brdB = brdB, brdA = brdA,
+            onlyNumbers = onlyNumbers,
+            bgR = (bd and bd.bgR) or 0.08, bgG = (bd and bd.bgG) or 0.08,
+            bgB = (bd and bd.bgB) or 0.08, bgA = (bd and bd.bgA) or 0.6,
+            swipeAlpha = (bd and bd.swipeAlpha) or 0.7,
+            durSize = (bd and bd.cooldownFontSize) or 12,
+            durPos = (bd and bd.cooldownTextPosition) or "center",
+            durX = (bd and bd.cooldownTextX) or 0, durY = (bd and bd.cooldownTextY) or 0,
+            durR = (bd and bd.cooldownTextR) or 1, durG = (bd and bd.cooldownTextG) or 1,
+            durB = (bd and bd.cooldownTextB) or 1,
+            stackOn = (bd and bd.showChargeStackText) ~= false,
+            stackSize = (bd and bd.stackCountSize) or 11,
+            stackPos = (bd and bd.stackCountPosition) or "bottomright",
+            stackX = (bd and bd.stackCountX) or 0, stackY = (bd and bd.stackCountY) or 0,
+            stackR = (bd and bd.stackCountR) or 1, stackG = (bd and bd.stackCountG) or 1,
+            stackB = (bd and bd.stackCountB) or 1,
+        },
+    }
+end
+
+-- Regions the CDM look needs that AuraKit does not build. Runs in the button's
+-- creation window -- the only place a region may be parented to an engine aura
+-- button. Everything here is ours, so _AC.ApplyExtra can write it under secrecy.
+function _AC.InitExtra(button, d)
+    d.cdmBg = button:CreateTexture(nil, "BACKGROUND")
+    d.cdmBg:SetAllPoints(button)
+    d.cdmMask = button:CreateMaskTexture()
+    d.cdmMask:SetAllPoints(button)
+    d.cdmMask:Hide()
+    -- Shape ring draws over the swipe, below the dispel ring and text carrier.
+    -- Levelled off the cooldown (always the button's own level) rather than the
+    -- border host, whose level a "Show Behind" border drops below the button.
+    d.cdmRingHost = CreateFrame("Frame", nil, button)
+    d.cdmRingHost:SetAllPoints(button)
+    d.cdmRingHost:EnableMouse(false)
+    d.cdmRingHost:SetFrameLevel(d.cooldown:GetFrameLevel() + 2)
+    d.cdmRing = d.cdmRingHost:CreateTexture(nil, "OVERLAY", nil, 6)
+    d.cdmRing:SetAllPoints(d.cdmRingHost)
+    d.cdmRing:SetSnapToPixelGrid(false)
+    d.cdmRing:SetTexelSnappingBias(0)
+    d.cdmRing:Hide()
+    -- AuraKit runs applyExtra BEFORE this creation hook, so the pass that draws
+    -- these regions has to run once more now that they exist.
+    local AK = EllesmereUI.AuraKit
+    local style = AK and d.styleKey and AK.styles[d.styleKey]
+    if style then _AC.ApplyExtra(button, d, style) end
+end
+
+-- Re-seat a mask reference. AddMaskTexture is additive, so the drop always
+-- runs first or a re-apply stacks the same mask twice.
+function _AC.SetMask(region, mask, want)
+    if not region then return end
+    pcall(region.RemoveMaskTexture, region, mask)
+    if want then pcall(region.AddMaskTexture, region, mask) end
+end
+
+-- Background, custom shape and text, on our own regions. Anchors use
+-- d.borderHost (created SetAllPoints(button) in the creation window) rather than
+-- the button: a SetPoint whose relative frame is the button is denied while
+-- auras are secret, which is exactly when a settings change must still land.
+function _AC.ApplyExtra(button, d, style)
+    local c = style.cdm
+    if not c then return end
+    local PP = EllesmereUI.PP
+
+    -- Only Show Numbers strips the art down to the countdown. Shown-state as
+    -- well as alpha, the same pair ApplyOnlyNumbers uses on the bar's own icons:
+    -- a texture's alpha and its vertex color share one slot on this client.
+    if d.icon then
+        d.icon:SetAlpha(c.onlyNumbers and 0 or 1)
+        d.icon:SetShown(not c.onlyNumbers)
+        -- Cropped samples a heavy vertical slice, and a snapped image edge can
+        -- round to a different physical pixel than the unsnapped swipe (the 1px
+        -- split ApplyShapeToCDMIcon disables snapping for). Restored otherwise.
+        if d.icon.SetSnapToPixelGrid then
+            d.icon:SetSnapToPixelGrid(c.shape ~= "cropped")
+        end
+        if c.shape == "cropped" and d.icon.SetTexelSnappingBias then
+            d.icon:SetTexelSnappingBias(0)
+        end
+    end
+    if d.cdmBg then
+        if c.onlyNumbers then
+            d.cdmBg:Hide()
+        else
+            d.cdmBg:SetColorTexture(c.bgR, c.bgG, c.bgB, c.bgA)
+            d.cdmBg:Show()
+        end
+    end
+    if d.cooldown then d.cooldown:SetSwipeColor(0, 0, 0, c.swipeAlpha) end
+
+    -- Custom shape: mask on icon/background/swipe plus the shape's own ring,
+    -- mirroring ApplyShapeToCDMIcon so both renderers land on the same geometry.
+    local SH = ns.CDM_SHAPES
+    local mask, ring = d.cdmMask, d.cdmRing
+    local maskPath = (c.customShape and SH and not c.onlyNumbers) and SH.masks[c.shape] or nil
+    local shapeKey = maskPath
+        and (c.shape .. "|" .. c.zoom .. "|" .. c.brdSize .. "|" .. c.size) or ""
+    if d.cdmShapeKey ~= shapeKey and mask then
+        if maskPath then
+            mask:SetTexture(maskPath, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            mask:Show()
+            _AC.SetMask(d.icon, mask, true)
+            _AC.SetMask(d.cdmBg, mask, true)
+            _AC.SetMask(d.cooldown, mask, true)
+            local exp = SH.iconExpand + (SH.iconExpandOffsets[c.shape] or 0)
+                + ((c.zoom - (SH.zoomDefaults[c.shape] or 0.06)) * 200)
+            if exp < 0 then exp = 0 end
+            local half = exp / 2
+            if d.icon then
+                d.icon:ClearAllPoints()
+                PP.Point(d.icon, "TOPLEFT", d.borderHost, "TOPLEFT", -half, half)
+                PP.Point(d.icon, "BOTTOMRIGHT", d.borderHost, "BOTTOMRIGHT", half, -half)
+            end
+            mask:ClearAllPoints()
+            if c.brdSize >= 1 then
+                PP.Point(mask, "TOPLEFT", d.borderHost, "TOPLEFT", 1, -1)
+                PP.Point(mask, "BOTTOMRIGHT", d.borderHost, "BOTTOMRIGHT", -1, 1)
+            else
+                mask:SetAllPoints(d.borderHost)
+            end
+            if d.cooldown then
+                pcall(d.cooldown.SetSwipeTexture, d.cooldown, maskPath)
+                if d.cooldown.SetUseCircularEdge then
+                    pcall(d.cooldown.SetUseCircularEdge, d.cooldown,
+                        c.shape ~= "square" and c.shape ~= "csquare")
+                end
+                if d.cooldown.SetEdgeScale then
+                    pcall(d.cooldown.SetEdgeScale, d.cooldown, SH.edgeScales[c.shape] or 0.60)
+                end
+            end
+        else
+            _AC.SetMask(d.icon, mask)
+            _AC.SetMask(d.cdmBg, mask)
+            _AC.SetMask(d.cooldown, mask)
+            mask:SetTexture(nil); mask:ClearAllPoints()
+            mask:SetSize(0.001, 0.001); mask:Hide()
+            if d.icon then
+                d.icon:ClearAllPoints()
+                d.icon:SetAllPoints(d.borderHost)
+            end
+            if d.cooldown then
+                pcall(d.cooldown.SetSwipeTexture, d.cooldown, "Interface\\Buttons\\WHITE8x8")
+                if d.cooldown.SetUseCircularEdge then
+                    pcall(d.cooldown.SetUseCircularEdge, d.cooldown, false)
+                end
+            end
+        end
+        d.cdmShapeKey = shapeKey
+    end
+    -- Ring color follows the border color on every pass, so a color-only change
+    -- lands without re-running the geometry above. Border Size 0 drops the ring,
+    -- as it does on the bar's own shaped icons.
+    if ring then
+        local ringPath = (maskPath and c.brdSize > 0) and SH.borders[c.shape] or nil
+        if ringPath then
+            ring:SetTexture(ringPath)
+            ring:SetVertexColor(c.brdR, c.brdG, c.brdB, c.brdA)
+            ring:Show()
+        else
+            ring:Hide()
+        end
+    end
+
+    if d.duration then
+        local fKey = c.font .. "|" .. c.durSize
+        if d.cdmDurFont ~= fKey then
+            d.cdmDurFont = fKey
+            EllesmereUI.ApplyIconTextFont(d.duration, c.font, c.durSize, "cdm")
+        end
+        local aKey = c.durPos .. "|" .. c.durX .. "|" .. c.durY
+        if d.cdmDurAnchor ~= aKey then
+            d.cdmDurAnchor = aKey
+            ns.AnchorCooldownText(d.duration, d.borderHost, c.durPos, c.durX, c.durY)
+        end
+        d.duration:SetTextColor(c.durR, c.durG, c.durB)
+    end
+
+    if d.stack then
+        local fKey = c.font .. "|" .. c.stackSize
+        if d.cdmStackFont ~= fKey then
+            d.cdmStackFont = fKey
+            EllesmereUI.ApplyIconTextFont(d.stack, c.font, c.stackSize, "cdm")
+        end
+        local aKey = c.stackPos .. "|" .. c.stackX .. "|" .. c.stackY
+        if d.cdmStackAnchor ~= aKey then
+            d.cdmStackAnchor = aKey
+            local pt, y = ns.CdmStackAnchorPoint(c.stackPos, c.stackY)
+            d.stack:ClearAllPoints()
+            d.stack:SetPoint(pt, d.borderHost, pt, c.stackX, y)
+        end
+        d.stack:SetTextColor(c.stackR, c.stackG, c.stackB)
+        -- Alpha, not Hide: the engine re-shows this font string whenever the
+        -- slot's application count refreshes.
+        d.stack:SetAlpha(c.stackOn and 1 or 0)
+    end
+end
+
 function _AC.Build(rec, barKey, bd, sids, sig)
     local AK = EllesmereUI.AuraKit
     local barFrame = cdmBarFrames[barKey]
     -- Bar not built yet (login race): bail WITHOUT stamping the signature;
     -- the next tracking sync re-queues the build.
     if not (AK and AK.CreateContainerShell and AK.AddGroupToContainer and barFrame) then return end
-    -- Styling is AuraKit STANDARD (the Player Aura Bars path): AK builds and
-    -- engine-binds the icon, swipe, stack count and duration text itself.
-    local SZ = (bd and bd.iconSize) or 36
-    local cdFont = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("cdm"))
-        or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
     local styleKey = "cdm:aurabuff:" .. barKey
-    AK.styles[styleKey] = {
-        width = SZ, height = SZ,
-        iconCrop = true, iconZoom = (bd and bd.iconZoom) or 0.08,
-        cooldownReverse = true,
-        hideSwipe = (bd and bd.onlyShowNumbers) and true or nil,
-        hideDurationText = (bd and bd.showCooldownText) and nil or true,
-        durationFont = cdFont,
-        durationFontSize = (bd and bd.cooldownFontSize) or 12,
-        durationFontFlags = "OUTLINE",
-        durationPoint = "CENTER", durationRelPoint = "CENTER",
-        durationX = (bd and bd.cooldownTextX) or 0,
-        durationY = (bd and bd.cooldownTextY) or 0,
-        stackFont = cdFont,
-        stackFontSize = 11,
-        noTooltips = (bd and bd.showTooltip) and nil or true,
-    }
+    AK.styles[styleKey] = _AC.BuildStyle(bd)
+    rec.styleSig = _AC.StyleSig(bd)
     -- Retire the previous generation properly (the holder is reused).
     if rec.container and AK.ReleaseContainer then AK.ReleaseContainer(rec.container) end
     local holder = rec.holder
@@ -8014,15 +8319,23 @@ function _AC.Build(rec, barKey, bd, sids, sig)
         key = "spells",
         filter = { "HELPFUL" },
         style = styleKey,
+        extraInit = _AC.InitExtra,
         maxFrameCount = #sids,
         -- Helpful spellID includes on the player pass the identity gate
         -- regardless of the spell's secrecy flag.
         candidateFilters = { includeSpellIDs = includeMap },
     })
     if container.SetAuraGroupLayout then
+        -- elementWidth/Height feed the engine's flow math (the style sizes the
+        -- button itself). Without them the flow spaces icons at the engine
+        -- default, so any bar not at that size overlaps or gaps -- and a cropped
+        -- bar, whose buttons are 0.80 tall, is off on both axes.
+        local st = AK.styles[styleKey]
+        local gapPx = _AC.SnapPx(gap)
         container:SetAuraGroupLayout("spells", {
-            elementSpacing = gap, lineSpacing = gap,
-            groupSpacing = gap, groupLineSpacing = gap,
+            elementWidth = st and st.width, elementHeight = st and st.height,
+            elementSpacing = gapPx, lineSpacing = gapPx,
+            groupSpacing = gapPx, groupLineSpacing = gapPx,
         })
     end
     AK.FinishContainer(container, "player")
@@ -8102,7 +8415,7 @@ local function UpdateCustomBuffBars()
                                     f.Icon = tex; f._tex = tex
                                     local cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
                                     cd:SetAllPoints(); cd:SetDrawEdge(false); cd:SetDrawBling(false)
-                                    cd:SetHideCountdownNumbers(not barData.showCooldownText)
+                                    cd:SetHideCountdownNumbers(not ns.CdmDurationTextOn(barData))
                                     cd:SetReverse(true)
                                     f.Cooldown = cd; f._cooldown = cd
                                     f._isCustomSpellFrame = true
@@ -8229,17 +8542,14 @@ function ns.UpdateCustomBuffAuraTracking()
                     end
                     if sids then
                         seen[bd.key] = true
+                        -- Structural only: the id list plus the geometry the
+                        -- engine flow owns. Everything else is appearance and
+                        -- rides ns.RefreshAuraCustomStyle without a rebuild.
                         local sig = table.concat(sids, ":")
                             .. "|" .. tostring(bd.iconSize or 36)
-                            .. "|" .. (bd.showCooldownText and 1 or 0)
-                            .. "|" .. (bd.showTooltip and 1 or 0)
-                            .. "|" .. (bd.onlyShowNumbers and 1 or 0)
+                            .. "|" .. tostring(bd.iconShape or "none")
                             .. "|" .. tostring(bd.growDirection or "CENTER")
                             .. "|" .. (bd.verticalOrientation and 1 or 0)
-                            .. "|" .. tostring(bd.iconZoom or 0.08)
-                            .. "|" .. tostring(bd.cooldownFontSize or 12)
-                            .. "|" .. tostring(bd.cooldownTextX or 0)
-                            .. "|" .. tostring(bd.cooldownTextY or 0)
                             .. "|" .. tostring(bd.spacing or 2)
                         local rec = _AC.bars[bd.key]
                         if not rec then rec = {}; _AC.bars[bd.key] = rec end
@@ -8252,8 +8562,22 @@ function ns.UpdateCustomBuffAuraTracking()
                                 AK.QueueBuildJob(function()
                                     rec.queued = nil
                                     _AC.Build(rec, barKey, bdRef, sidsRef, sigRef)
+                                    -- The job captured the id list as it was when
+                                    -- it was queued. A change that landed while it
+                                    -- was in flight (two adds in a row) is not in
+                                    -- what it just built, and stamping rec.sig hides
+                                    -- it from every later compare -- so re-sync once
+                                    -- here instead of losing the spell until a reload.
+                                    if rec.resync then
+                                        rec.resync = nil
+                                        ns.UpdateCustomBuffAuraTracking()
+                                    end
                                 end, "cdm:aurabuff-shell")
                             end
+                        elseif rec.queued and rec.sig ~= sig then
+                            rec.resync = true
+                        else
+                            ns.RefreshAuraCustomStyle(bd.key)
                         end
                     end
                 end
@@ -8272,8 +8596,33 @@ function ns.UpdateCustomBuffAuraTracking()
             rec.container = nil
             rec.sig = nil
             rec.sids = nil
+            rec.styleSig = nil
         end
     end
+end
+
+-- Re-apply a bar's appearance to its custom-aura icons. Called from every CDM
+-- restyle path, so an options change lands on them the same frame it lands on
+-- the bar's own icons instead of waiting for a reload or a spec swap. Free for
+-- bars with no custom auras (one table lookup) and a no-op when nothing the
+-- style reads has changed.
+function ns.RefreshAuraCustomStyle(barKey)
+    local rec = barKey and _AC.bars[barKey]
+    if not (rec and rec.container) then return end
+    local bd = barDataByKey[barKey]
+    if not bd then return end
+    rec.bdRef = bd
+    local sig = _AC.StyleSig(bd)
+    if rec.styleSig == sig then return end
+    local AK = EllesmereUI.AuraKit
+    if not (AK and AK.styles) then return end
+    if rec.holder then rec.holder:SetFrameStrata(bd.barStrata or "MEDIUM") end
+    local styleKey = "cdm:aurabuff:" .. barKey
+    AK.styles[styleKey] = _AC.BuildStyle(bd)
+    if AK.RestyleSoon then AK.RestyleSoon(styleKey) end
+    -- Stamped only once the style is actually installed: recording a style that
+    -- never applied would make every later call with the same settings early-out.
+    rec.styleSig = sig
 end
 
 -------------------------------------------------------------------------------
