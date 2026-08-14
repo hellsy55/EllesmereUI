@@ -5719,3 +5719,6 @@ L["A beautiful visual refresh of Blizzard Bags with intuitive organization."] = 
 L["Hold a key to open a menu of actions; point or scroll to choose, release to fire."] = "Segure uma tecla para abrir um menu de ações; aponte ou role para escolher, solte para disparar."
 L["Go to Setting"] = "Ir para Config."
 L["Custom Cooldowns Bar %d"] = "Barra de Recargas Personalizada %d"
+L["Abbreviate Stat Labels"] = "Abreviar Rótulos de Estatística"
+L["Stats to Show"] = "Estatísticas a Mostrar"
+L["a tertiary stat in Stats to Show"] = "uma estatística terciária em Estatísticas a Mostrar"
