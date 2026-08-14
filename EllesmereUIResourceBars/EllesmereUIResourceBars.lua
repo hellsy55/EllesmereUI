@@ -434,6 +434,12 @@ local ICICLES_SPELL_ID = 205473
 -- ticks). One namespace table for the feature (200-local cap).
 local IP = {
     SPELL = 190456,
+    -- Violent Outburst consumption: Shield Slam with the proc up refreshes Ignore
+    -- Pain's duration WITHOUT an Ignore Pain cast event, so the hash line needs the
+    -- indirect edge too. IDs are game data, field-verify on change: Shield Slam
+    -- 23922 (stable since classic), Violent Outburst proc aura 386478.
+    SHIELD_SLAM = 23922,
+    VO_PROC = 386478,
     CAP = 0.30,
     DURATION = 12,
     hashEndTime = 0,
@@ -4213,9 +4219,26 @@ local _essenceTickDur = 0      -- seconds per pip recharge
 -- Cast handler for the Prot Ignore Pain bar's moving hash line: each cast
 -- refreshes the buff, so the line resets to the right edge and slides left.
 IP.HandleCast = function(spellID)
-    if spellID ~= IP.SPELL then return end
     if not (cachedSecondary and cachedSecondary.power == "IGNOREPAIN_BAR") then return end
-    IP.hashEndTime = GetTime() + IP.DURATION
+    if spellID == IP.SPELL then
+        IP.hashEndTime = GetTime() + IP.DURATION
+        return
+    end
+    -- Indirect refresh: Shield Slam consuming Violent Outburst. Layered probe --
+    -- GetPlayerAuraBySpellID is plain table-or-nil for unflagged ids (returns
+    -- NOTHING for restriction-flagged ids, today's law), so the viewer-active
+    -- fallback (frames-as-truth, works under restriction when the user tracks
+    -- the proc) backs it up. Called at SUCCEEDED: if the proc aura is already
+    -- consumed by then BOTH probes can miss -- field question; the escalation
+    -- is a SENT-time latch, not a wider guess. A miss degrades to the
+    -- pre-fix behavior (stale tick), never a false refresh.
+    if spellID == IP.SHIELD_SLAM then
+        local aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+            and C_UnitAuras.GetPlayerAuraBySpellID(IP.VO_PROC)
+        if aura or (IP.BuffActiveViaViewer and IP.BuffActiveViaViewer(IP.VO_PROC)) then
+            IP.hashEndTime = GetTime() + IP.DURATION
+        end
+    end
 end
 
 -- Cast handler for the Guardian Ironfur bar. Only tracks while the Ironfur
@@ -4281,6 +4304,9 @@ local function BuffActiveViaCooldownViewer(spellID, wantName)
     end
     return false
 end
+-- Published for IP.HandleCast (defined ABOVE this helper -- a direct upvalue
+-- reference there would compile as a nil global; the table field binds late).
+IP.BuffActiveViaViewer = BuffActiveViaCooldownViewer
 
 local function PlayerHasBuff(spellID)
     if not spellID or spellID == 0 or not C_UnitAuras then return false end
@@ -6739,21 +6765,24 @@ ShowChannelTicks = function(spellID)
         for i = 1, count do
             local isLastTick = (i == count)
 
-            if not showTickMarks and not isLastTick then
-                if castBarFrame._ticks[i] then castBarFrame._ticks[i]:Hide() end
-            else
-                local tick = castBarFrame._ticks[i]
-                if not tick then
-                    tick = bar:CreateTexture(nil, "OVERLAY", nil, 3)
-                    -- Exact-width 1px-class art: keep the engine's texel
-                    -- snapping out of it or it re-rounds our aligned edges.
-                    if tick.SetSnapToPixelGrid then
-                        tick:SetSnapToPixelGrid(false)
-                        tick:SetTexelSnappingBias(0)
-                    end
-                    castBarFrame._ticks[i] = tick
+            -- Every index is filled, including the ones this pass hides: _ticks
+            -- is walked with # (the stale-mark trims below, HideChannelTicks),
+            -- so a hole at [1] would make the length 0 and end every sweep.
+            local tick = castBarFrame._ticks[i]
+            if not tick then
+                tick = bar:CreateTexture(nil, "OVERLAY", nil, 3)
+                -- Exact-width 1px-class art: keep the engine's texel
+                -- snapping out of it or it re-rounds our aligned edges.
+                if tick.SetSnapToPixelGrid then
+                    tick:SetSnapToPixelGrid(false)
+                    tick:SetTexelSnappingBias(0)
                 end
+                castBarFrame._ticks[i] = tick
+            end
 
+            if not showTickMarks and not isLastTick then
+                tick:Hide()
+            else
                 local isGold = isLastTick and showLastTick
                 local w = isGold and highlightWidth or tickWidth
                 -- The bar drains, so a mark at time-fraction f draws at
@@ -6993,6 +7022,14 @@ UpdateCastBar = function(dt)
             ns.SetCastTimerText(castBarFrame, now, totalDurMode, totalSuffix, latSuffix)
         end
     elseif castBarFrame._channeling then
+        -- Same 1s overrun safety the cast branch has. CHANNEL_UPDATE keeps
+        -- _endTime current for every legitimate extension, so a channel still
+        -- running a second past its end has lost its stop event -- and without
+        -- this the bar has no way back to idle.
+        if castBarFrame._endTime and now > castBarFrame._endTime + 1 then
+            OnCastStop()
+            return
+        end
         if not (castBarFrame._nativeFill or castBarFrame._rawFill) then
             local chanDur = castBarFrame._endTime - castBarFrame._startTime
             -- Same lead as the cast branch, mirrored for the drain
@@ -7371,11 +7408,14 @@ local function OnCastFailed(eventCastID, externallyInterrupted)
     end
 end
 
--- Called for UNIT_SPELLCAST_CHANNEL_STOP.
-local function OnChannelStop(eventCastID)
+-- Called for UNIT_SPELLCAST_CHANNEL_STOP. Deliberately matches no ID: castBarID
+-- is documented Nilable on BOTH UnitChannelInfo and this event's payload, so an
+-- equality test rejects real stops. Blizzard's own CastingBarFrame matches a
+-- castID for plain casts only and accepts any channel/empower stop, which is
+-- what OnEmpowerStop below already does.
+local function OnChannelStop()
     if not castBarFrame then return end
     if not castBarFrame._channeling then return end
-    if not eventCastID or not castBarFrame._castID or eventCastID ~= castBarFrame._castID then return end
     castBarFrame._channeling = false
     castBarFrame._castID = nil
     ns.ShowIdleCastBar()
@@ -8540,6 +8580,48 @@ do
     end
 end
 
+-- Health/power bar ping receivers. Blizzard's player-resource alert ("low mana",
+-- "low health") is a CONTEXTUAL ping sent when the cursor sits over PlayerFrame and
+-- not over its portrait: PingableType_PlayerUnitFrameMixin returns
+-- isPlayerResource = true and C_PingSecure.SendUnitPing picks health or mana itself.
+-- A player running these bars in place of the Blizzard player frame has nothing left
+-- to aim at, so the alert is simply unavailable. Mark our own bars instead.
+--
+-- WHICH resource gets called out is not ours and cannot be made ours: SendUnitPing
+-- takes (guid, type, isPlayerResource) and nothing else -- no position, no health/mana
+-- member on PingSubjectType -- and Blizzard's own player frame carries that same single
+-- boolean for its health bar and its mana bar alike. Field-checked 2026-08-13: at low
+-- mana the Blizzard player frame also calls out health, so this matches it exactly.
+--
+-- No option and no mouse change: the attribute and the three getters are inert until
+-- the ping system itself asks, so an unpinged bar costs nothing and behaves exactly as
+-- before. Mouse stays OFF -- verified sufficient in the field, and a mouse-enabled bar
+-- would steal mouseover focus from whatever sits behind it, which is why the
+-- hover-reveal poll drives plain proxy tables instead of the real bars.
+--
+-- Taint: PingManager reads these three through securecallfunction and securecopies the
+-- returned table, so our tainted execution stays contained. Safe HERE and not on the
+-- unit frames (see the "NO ping mixin here" note in EllesmereUIUnitFrames.lua): this
+-- receiver only ever names the player, whose GUID is never secret-content, so the
+-- securecopy that hard-errors on a restricted unit has nothing to choke on.
+local function ApplyPingReceivers()
+    for _, bar in ipairs({ healthBar, primaryBar }) do
+        if bar and not bar._erbPingOn then
+            bar._erbPingOn = true
+            bar:SetAttribute("ping-receiver", true)
+            -- Always pingable: a receiver that answers false is treated as BLOCKING UI
+            -- and kills the ping outright with PING_FAILED_GENERIC, which is strictly
+            -- worse than the fall-through this replaces.
+            bar.GetIsPingable = function() return true end
+            -- Contextual ping only, matching Blizzard over its own player resources.
+            bar.GetAllowRadialWheel = function() return false end
+            bar.GetTargetInfo = function()
+                return { guid = UnitGUID("player"), isPlayerResource = true }
+            end
+        end
+    end
+end
+
 function ERB:ApplyAll()
     -- Invalidate the per-event config caches. Everything that can change a
     -- resolved config -- profile switch, option edit, spec swap, form change --
@@ -8577,6 +8659,7 @@ function ERB:ApplyAll()
     if castBarFrame then castBarFrame:SetFrameStrata(cb and cb.frameStrata or "MEDIUM") end
     local gb = ERB.db.profile.gcdBar
     if gcdBarFrame then gcdBarFrame:SetFrameStrata(gb and gb.frameStrata or "MEDIUM") end
+    ApplyPingReceivers()
     UpdateHealthBar()
     UpdatePrimaryBar()
     UpdateSecondaryResource()
@@ -8867,9 +8950,9 @@ local function OnEvent(self, event, ...)
         local unit = ...
         if unit == "player" then OnChannelUpdate() end
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
-        -- args: unit, castGUID, spellID, interruptedBy, castID
-        local unit, _, _, _, castID = ...
-        if unit == "player" then OnChannelStop(castID) end
+        -- args: unit, castGUID, spellID, interruptedBy, castBarID
+        local unit = ...
+        if unit == "player" then OnChannelStop() end
     elseif event == "UNIT_SPELLCAST_EMPOWER_START" then
         local unit = ...
         if unit == "player" then OnEmpowerStart() end

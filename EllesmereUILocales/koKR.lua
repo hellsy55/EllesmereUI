@@ -5779,6 +5779,8 @@ L["Shortened Channel Names"] = "채널 이름 축약"
 L["Abbreviates channel prefixes, like [Party] to [P] and [Guild] to [G]."] = "[파티]를 [파]로, [길드]를 [길]로 줄이는 것처럼 채널 접두를 축약합니다."
 L["Colors group and raid member names by their class when they appear in the text of Say, Yell, Party, and Raid messages."] = "일반 대화, 외침, 파티, 공격대 메시지 본문에 파티/공격대원의 이름이 나오면 직업 색상으로 칠합니다."
 L["For tabs outside the chat panel, uses the chat panel's border style and color instead of separate tab border settings."] = "채팅 패널 밖에 있는 탭에는 별도의 탭 테두리 설정 대신 채팅 패널의 테두리 모양과 색상을 사용합니다."
+L["Timestamp All Messages"] = "모든 메시지에 시간 표시"
+L["Adds timestamps to system messages, loot, achievements, and addon messages, not just player chat."] = "플레이어 대화뿐만 아니라 시스템 메시지, 전리품 획득, 업적 및 애드온 메시지에도 시간(타임스탬프)을 표시합니다."
 
 -- == add DamageMeters (데미지 미터기) ===========================================
 L[" Breakdown"] = " 내역"

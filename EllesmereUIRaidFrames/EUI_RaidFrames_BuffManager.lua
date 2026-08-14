@@ -302,6 +302,11 @@ local BORROW_SPECS = {
 -- never name: GetSpecializationInfo() returns the stable non-localized ID first,
 -- the LOCALIZED name second, so name-matching silently kills every indicator,
 -- the simple grid and secret tracking on non-English clients. nil = not tracked.
+-- LEGACY/simple-grid resolver ONLY: the borrow hop below is load-bearing for the
+-- simple grid and secret-aura identify, but the v2 indicator system must NEVER
+-- route through it -- v2's active bucket resolves borrow-free via BM2_SpecKey /
+-- BM_SpecKeyForSpecID (maintainer ruling 2026-08-13: Ret/Prot/Ele/Enh edit and
+-- render the shared All Non Healers/Aug bucket, not the borrowed healer's).
 local function CurrentSpecKey()
     local specIdx = GetSpecialization and GetSpecialization()
     if not specIdx then return nil end

@@ -609,7 +609,7 @@ end
                 -- the engine SetText()s every REGISTERED string, and a no-text config
                 -- should carry no binding at all. Fonted BEFORE registration (an
                 -- unfonted registered FS hard-errors inside the engine).
-                local showCD = bd and bd.showCooldownText
+                local showCD = ns.CdmDurationTextOn(bd)
                 if ss and ss.showCooldownText ~= nil then showCD = ss.showCooldownText end
                 if showCD then
                     -- ARMORED: an uncaught error inside initializeFrame aborts the

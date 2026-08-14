@@ -99,6 +99,10 @@ local function BuildBar(which)
     bar.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
     bar.sb = CreateFrame("StatusBar", nil, holder)
+    -- Placeholder fill: a StatusBar has NO texture object until one is set, and
+    -- the fill-edge riders below plus every GetStatusBarTexture() call on the
+    -- cast path would index nil on a bar that never reached StyleBar.
+    bar.sb:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     bar.sb:SetPoint("TOPLEFT", bar.iconFrame, "TOPRIGHT", 0, 0)
     bar.sb:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", 0, 0)
     bar.sb:SetMinMaxValues(0, 1)
@@ -712,6 +716,11 @@ end
 
 -- Mid-cast interruptibility flips: re-read protection once, store, refresh.
 local function KickProtectionChanged(bar)
+    -- The unit events cover both tokens whenever EITHER bar is enabled, and a
+    -- disabled bar can still exist (unlock getFrame builds it), so gate here --
+    -- UpdateCast's own gate runs too late for this one.
+    local cfg = BarCfg(bar.which)
+    if not (cfg and cfg.enabled == true) then return end
     local kickProtected
     local sName, _, _, _, _, _, _, kp = UnitCastingInfo(bar.unit)
     if type(sName) ~= "nil" then
@@ -731,6 +740,8 @@ end
 local function ShowInterruptedFlash(bar, interrupterGUID)
     local tf = TF()
     if not tf or tf.interruptedFlash == false then return end
+    local cfg = BarCfg(bar.which)
+    if not (cfg and cfg.enabled == true) then return end
     local protected = bar._kickProtected
     if type(interrupterGUID) == "nil" then return end
     if not ((issecretvalue and issecretvalue(protected)) or not protected) then return end
