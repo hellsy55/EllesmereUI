@@ -1014,6 +1014,114 @@ ns.RF_ApplyFillRotation = function(bar)
     bar:SetRotatesTexture((vert and not tiled) and true or false)
 end
 
+-------------------------------------------------------------------------------
+--  Health-fill tint overlays
+--
+--  "Health Bar Color" indicators paint over the health FILL. A flat
+--  SetColorTexture slab erases the bar's shading, so a tinted frame reads as a
+--  solid block beside untinted ones (#1339); the overlay borrows the bar's own
+--  fill texture instead and recolors it with a vertex color.
+--
+--  The overlay is anchored to the fill texture, so it inherits the bar's fill
+--  geometry for free: these fills clip by resizing rather than by moving their
+--  tex coords (measured -- identical coords at full and at half fill), so the
+--  overlay stretches exactly as the bar art does with nothing to update per tick.
+--  The coords are copied anyway so anything the orientation pass does to them
+--  comes along, which is also why the refresh runs after that pass.
+--
+--  Live BM/DM slots register on the bar, so a Health Bar Texture change can
+--  re-anchor them to the new fill object and repaint (ReanchorAbsorbToFill for
+--  frames built through StyleButton, FB.ApplyStyle for Focus/Boss). The options
+--  previews are rebuilt wholesale and need no refresh.
+-------------------------------------------------------------------------------
+
+-- host and owner are kept on the overlay rather than in the entry, so a cleared
+-- entry can be rebuilt by the next paint without losing either. host is stored only
+-- when it is NOT the overlay itself -- the Debuff Manager hangs its overlay off a
+-- wrapper frame, and that wrapper is what a fill swap has to re-anchor.
+ns.RF_RegisterBarTint = function(bar, tex, host, owner)
+    if not (bar and tex) then return end
+    if host and host ~= tex then tex._euiTintHost = host end
+    if owner then tex._euiTintOwner = owner end
+    local reg = bar._euiBarTints
+    if not reg then
+        reg = setmetatable({}, { __mode = "k" })
+        bar._euiBarTints = reg
+    end
+    if reg[tex] == nil then reg[tex] = {} end
+end
+
+-- Called when a container that owned overlays on this bar is released. Engine aura
+-- buttons are never freed, so their overlays would otherwise pile up one set per
+-- rebuild -- an indicator edit or a spec change is enough -- and every later layout
+-- pass would walk the dead ones. Entries are re-added by the next paint.
+--
+-- Scoped to the owner being released. Clearing the whole registry would also drop
+-- a live overlay belonging to another owner, and an overlay that is displayed but
+-- not repainted never re-registers -- so the next Health Bar Texture change would
+-- skip it and leave it on the old art, which is the bug this file is fixing.
+ns.RF_ClearBarTints = function(bar, owner)
+    local reg = bar and bar._euiBarTints
+    if not (reg and owner) then return end
+    for tex in pairs(reg) do
+        if tex._euiTintOwner == owner then reg[tex] = nil end
+    end
+end
+
+ns.RF_TintOverBarFill = function(tex, bar, r, g, b, a)
+    if not tex then return end
+    ns.RF_RegisterBarTint(bar, tex)
+    local reg = bar and bar._euiBarTints
+    local ent = reg and reg[tex]
+    -- Stored pre-multiply: the refresh path calls back in with these, so folding
+    -- the fill opacity in here would compound it on every pass.
+    if ent then ent.r, ent.g, ent.b, ent.a = r, g, b, a end
+    -- Inherit the bar's configured Fill Opacity, so a tinted frame is as
+    -- translucent as its untinted neighbours instead of the one solid bar in the
+    -- group. Read from the stamp the style pass leaves, NOT from the live fill
+    -- colour: _ApplyHealthBg drives that alpha down to 0.3 offline and 0.5 dead,
+    -- and nothing repaints tints when a unit reconnects, so a tint painted during
+    -- either would latch dimmed. Dark Mode is deliberately not inherited -- it
+    -- dims the fill texture, and a colour the user picked should not be
+    -- auto-dimmed.
+    if bar then a = a * (bar._euiFillOpacity or 1) end
+    local fill = bar and bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    local path = fill and fill.GetTexture and fill:GetTexture()
+    if not path then
+        -- Reset both: a texcoord from the textured branch survives the swap, and
+        -- SetColorTexture bakes the color into the texture rather than into the
+        -- vertex color, so a stale vertex color would multiply it.
+        tex:SetTexCoord(0, 1, 0, 1)
+        tex:SetColorTexture(r, g, b, a)
+        tex:SetVertexColor(1, 1, 1, 1)
+        return
+    end
+    tex:SetTexture(path)
+    if fill.GetTexCoord then tex:SetTexCoord(fill:GetTexCoord()) end
+    tex:SetVertexColor(r, g, b, a)
+end
+
+-- Repaint BEFORE re-anchoring, and re-anchor with a bare SetAllPoints: the caller
+-- isolates this, and a ClearAllPoints that succeeded ahead of a denied SetAllPoints
+-- would strand the overlay with no anchor at all for the rest of the session.
+ns.RF_RefreshOneBarTint = function(bar, tex, ent, fill)
+    if ent.r then ns.RF_TintOverBarFill(tex, bar, ent.r, ent.g, ent.b, ent.a) end
+    if fill then (tex._euiTintHost or tex):SetAllPoints(fill) end
+end
+
+-- Isolated per entry: the overlay can hang off an engine aura button, and this
+-- runs from bare ReloadFrames calls where a throw would abort the styling loop
+-- mid-iteration. RF_TintOverBarFill only ever rewrites an entry it was handed, so
+-- the walk cannot gain keys mid-iteration.
+ns.RF_RefreshBarTints = function(bar)
+    local reg = bar and bar._euiBarTints
+    if not reg then return end
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    for tex, ent in pairs(reg) do
+        pcall(ns.RF_RefreshOneBarTint, bar, tex, ent, fill)
+    end
+end
+
 ns.RF_ApplyHealthOrientation = function(bar, s)
     if not bar then return false end
     local vert = ns.RF_IsVerticalFill(s)
@@ -2031,6 +2139,13 @@ local function CreateAbsorbBar(button, healthBar)
             or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
         local isVert = ns.RF_ApplyHealthOrientation(healthBar, vs)
         backfillBar._axisVert = isVert  -- read by the blizzardModern spark block
+
+        -- Health Bar Color overlays track this bar's fill, so they follow the swap
+        -- for the same reason the absorb cluster below does. After the orientation
+        -- call, not before: the repaint copies the fill's tex coords, and that call
+        -- is what rotates them.
+        healthBar._euiFillOpacity = (vs.healthBarOpacity or 100) / 100
+        ns.RF_RefreshBarTints(healthBar)
         -- Indexed, not ipairs: the creation-time call runs before the heal/max bars exist, and ipairs stops at the first nil.
         local axisBars = { backfillBar, forwardBar, healAbsorbBar, healPredBar, reducedBar }
         for i = 1, 5 do
@@ -4940,6 +5055,11 @@ FB.ApplyStyle = function(owner)
         if ft then ft:SetHorizTile(false) end
         -- Fill axis follows the raid Health Bar setting. The bg is a full-button texture (not fill-tracking), so nothing else re-anchors.
         ns.RF_ApplyHealthOrientation(b._health, s)
+        -- These carry aura containers (RFC_SetupButton below) and so can carry
+        -- Health Bar Color overlays, but they have no absorb cluster and never
+        -- build ReanchorAbsorbToFill, where every other frame picks the swap up.
+        b._health._euiFillOpacity = (s.healthBarOpacity or 100) / 100
+        ns.RF_RefreshBarTints(b._health)
         -- No power bar / top name bar here: health fills the button.
         b._health:SetHeight(h)
 
