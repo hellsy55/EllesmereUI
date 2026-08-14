@@ -687,18 +687,20 @@ local function MakeMarkerButton(parent, index, kind)
     b._kind = kind
 
     if kind == "target" then
-        -- Left: toggle this marker on the target. Right: clear it. A leading
-        -- "/tar [noexists] player" line makes both no-ops into self-marks
-        -- instead: with no target selected there is nothing for /tm to mark,
-        -- so the macro targets you first -- only when you have no target of
-        -- your own, never stealing a target you already picked.
-        local TARGET_SELF_FALLBACK = "/tar [noexists] player\n"
+        -- Left: toggle this marker on the target. Right: clear it. With no
+        -- target selected there is nothing for /tm to mark, so the second
+        -- clause falls back to the "@player" macro unit tag -- this applies
+        -- the mark to you directly without ever changing your actual
+        -- selected target (unlike a "/tar player" fallback, which would).
         b:SetAttribute("type", "macro")
         if index == 0 then
-            b:SetAttribute("macrotext", TARGET_SELF_FALLBACK .. (SLASH_TARGET_MARKER1 or "/tm") .. " 0")
+            b:SetAttribute("macrotext",
+                (SLASH_TARGET_MARKER1 or "/tm") .. " [exists] 0; [@player] 0")
         else
-            b:SetAttribute("macrotext1", TARGET_SELF_FALLBACK .. (SLASH_TARGET_MARKER1 or "/tm") .. " !" .. index)
-            b:SetAttribute("macrotext2", TARGET_SELF_FALLBACK .. (SLASH_TARGET_MARKER1 or "/tm") .. " 0")
+            b:SetAttribute("macrotext1",
+                (SLASH_TARGET_MARKER1 or "/tm") .. " [exists] !" .. index .. "; [@player] !" .. index)
+            b:SetAttribute("macrotext2",
+                (SLASH_TARGET_MARKER1 or "/tm") .. " [exists] 0; [@player] 0")
         end
     elseif index == 0 then
         -- Clear-all is a macro, not a worldmarker action: the attribute form
@@ -1122,12 +1124,21 @@ end
 -- holders, so the shell owns only chrome (bg, border, title, collapse button)
 -- and the visibility state machine.
 local function MakeShell(key)
-    local f = CreateFrame("Frame", "EllesmereUIRaidTools" .. key, UIParent,
-                          "SecureHandlerStateTemplate")
+    -- A Button, not a plain Frame: RegisterForClicks/_onclick (the same
+    -- secure click path the collapse button and toggle use) only exist on
+    -- the Button widget. Content buttons (markers, group buttons, the
+    -- collapse corner) sit on top and claim their own clicks first, so this
+    -- only ever fires for a click that lands on bare background. Reuses
+    -- COLLAPSE_SNIPPET verbatim -- same minimize-to-icon behavior as the
+    -- corner button, just reachable from anywhere on the panel.
+    local f = CreateFrame("Button", "EllesmereUIRaidTools" .. key, UIParent,
+                          "SecureHandlerStateTemplate, SecureHandlerClickTemplate")
     f:SetWidth(PANEL_W)
     f:SetFrameStrata("MEDIUM")
     f:SetClampedToScreen(true)
     f:Hide()
+    f:RegisterForClicks("RightButtonUp")
+    f:SetAttribute("_onclick", COLLAPSE_SNIPPET)
 
     -- The Window Skins dress (see the block above).
     SkinPanelBg(f)
@@ -1563,6 +1574,10 @@ local function BuildAll()
         local shell = sections[key]
         toggleButton:SetFrameRef("s" .. i, shell)
         shell:SetFrameRef("icon", iconBtn)
+        shell:SetAttribute("count", #SECTION_KEYS)
+        for j, k2 in ipairs(SECTION_KEYS) do
+            shell:SetFrameRef("s" .. j, sections[k2])
+        end
         shell._collapseBtn:SetAttribute("count", #SECTION_KEYS)
         for j, k2 in ipairs(SECTION_KEYS) do
             shell._collapseBtn:SetFrameRef("s" .. j, sections[k2])

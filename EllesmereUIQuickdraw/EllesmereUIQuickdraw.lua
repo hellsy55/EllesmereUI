@@ -1316,7 +1316,11 @@ local function ResolveAction(slot, p)
         -- which was written on the opposite assumption and did not work.
         local id = tonumber(slot.id)
         if not id or id < 0 or id > 8 then return nil end
-        return "macro", "macrotext", "/tm " .. id, "macro"
+        -- /tm aceita "secure command options" como /cast: com [@target,exists]
+        -- ele marca o target quando existe um, e cai para [@player] quando não
+        -- há target selecionado, marcando o próprio jogador nesse caso.
+        return "macro", "macrotext",
+            "/tm [@target,exists] " .. id .. "; [@player] " .. id, "macro"
 
     elseif k == "clearmarkers" then
         -- SECURE_ACTIONS.raidtarget's own clear-all branch, which calls
