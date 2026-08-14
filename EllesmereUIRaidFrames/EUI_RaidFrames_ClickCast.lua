@@ -21,6 +21,9 @@ local floor        = math.floor
 local max          = math.max
 local CreateFrame  = CreateFrame
 local InCombatLockdown = InCombatLockdown
+local IsInGroup        = IsInGroup
+local IsInRaid         = IsInRaid
+local IsInInstance     = IsInInstance
 local IsShiftKeyDown   = IsShiftKeyDown
 local IsControlKeyDown = IsControlKeyDown
 local IsAltKeyDown     = IsAltKeyDown
@@ -168,6 +171,7 @@ local originalTargetAttrs = setmetatable({}, { __mode = "k" })
 local regQueue         = {}
 local unregQueue       = {}
 local pendingApply     = false
+local lastRosterCtx    = nil  -- content gate: last context a roster update saw
 local ccInitialized    = false
 local ccEventFrame     = nil
 local lastBindingCount = 0
@@ -236,6 +240,42 @@ local function GetGlobalBindings()
     return cc and cc.globals or {}
 end
 
+-- Content gate. binding.groupCtx is the set of contexts a binding is active in.
+-- In a context that is switched off the binding is never applied so the key falls
+-- through to whatever the player normally has bound.
+local CC_CTX_ORDER = { "solo", "party", "raid", "pvp" }
+
+local function CtxEnabled(binding, ctx)
+    local set = binding.groupCtx
+    if not set then return true end
+    return set[ctx] == true
+end
+
+-- The context the player is in right now.
+local function CurrentCtx()
+    local _, instType = IsInInstance()
+    if instType == "pvp" or instType == "arena" then return "pvp" end
+    if IsInRaid() then return "raid" end
+    if IsInGroup() then return "party" end
+    return "solo"
+end
+
+-- True when a binding's content gate matches the context the player is in now.
+local function MatchesGroupCtx(binding)
+    return CtxEnabled(binding, CurrentCtx())
+end
+
+-- Hovercast mode. binding.hovercast is:
+--   false / nil -> frame clicks only (attributes live on the unit frames)
+--   true        -> the global @mouseover override button only
+--   "both"      -> applied through BOTH paths
+local function IsHoverBinding(binding)
+    return binding.hovercast and true or false
+end
+local function IsFrameBinding(binding)
+    return (not binding.hovercast) or binding.hovercast == "both"
+end
+
 -- Merges globals + current spec (spec wins key conflicts); only enabled
 -- bindings; gated on the master enable toggle.
 local function GetActiveBindings()
@@ -243,13 +283,13 @@ local function GetActiveBindings()
     if not cc or not cc.enabled then return {} end
     local result, usedKeys = {}, {}
     for _, b in ipairs(GetSpecBindings()) do
-        if b.enabled ~= false and b.key then
+        if b.enabled ~= false and b.key and MatchesGroupCtx(b) then
             result[#result + 1] = b
             usedKeys[b.key] = true
         end
     end
     for _, b in ipairs(cc.globals) do
-        if b.enabled ~= false and b.key and not usedKeys[b.key] then
+        if b.enabled ~= false and b.key and not usedKeys[b.key] and MatchesGroupCtx(b) then
             result[#result + 1] = b
         end
     end
@@ -905,7 +945,7 @@ local function GenerateKeyBindSnippets(bindings)
     local enter, leave, selfClear = {}, {}, {}
     local kbBindings = {}
     for i, b in ipairs(bindings) do
-        if not b.hovercast then
+        if IsFrameBinding(b) then
             local parsed = ParseKeyString(b.key)
             if not parsed.isMouseButton or not parsed.buttonNum or parsed.buttonNum > 5 then
                 kbBindings[#kbBindings + 1] = { binding = b, index = i, parsed = parsed }
@@ -975,7 +1015,7 @@ end
 local function NeutralizeDefaultClicks(frame, bindings)
     local b1, b2 = false, false
     for _, b in ipairs(bindings) do
-        if not b.hovercast and b.key then
+        if IsFrameBinding(b) and b.key then
             local parsed = ParseKeyString(b.key)
             if parsed.isMouseButton and parsed.modifiers == "" then
                 if parsed.buttonNum == 1 then b1 = true
@@ -1039,7 +1079,7 @@ local function DoRegisterFrame(frame)
 
     local bindings = GetActiveBindings()
     for i, b in ipairs(bindings) do
-        if not b.hovercast and b.key then
+        if IsFrameBinding(b) and b.key then
             local parsed = ParseKeyString(b.key)
             local aType, spellName, macrotext = ResolveBinding(b)
             if aType then
@@ -1064,7 +1104,7 @@ local function DoUnregisterFrame(frame)
 
     local bindings = GetActiveBindings()
     for i, b in ipairs(bindings) do
-        if not b.hovercast and b.key then
+        if IsFrameBinding(b) and b.key then
             local parsed = ParseKeyString(b.key)
             if parsed.isMouseButton and parsed.buttonNum and parsed.buttonNum <= 5 then
                 ClearClickAttr(frame, parsed)
@@ -1219,10 +1259,13 @@ function ns.CC_ApplyBindings()
 
     local frameBindings = {}
     local hoverBindings = {}
+    -- A "both" binding lands in BOTH lists: frame attributes for clicks on the
+    -- frames, plus the hover override for nameplates / world units.
     for i, b in ipairs(bindings) do
-        if b.hovercast then
+        if IsHoverBinding(b) then
             hoverBindings[#hoverBindings + 1] = { b = b, idx = i }
-        else
+        end
+        if IsFrameBinding(b) then
             frameBindings[#frameBindings + 1] = { b = b, idx = i }
         end
     end
@@ -1232,7 +1275,7 @@ function ns.CC_ApplyBindings()
     ---------------------------------------------------------------
     for frame in pairs(registeredFrames) do
         for _, pb in ipairs(prevBindings) do
-            if not pb.b.hovercast then
+            if IsFrameBinding(pb.b) then
                 local parsed = ParseKeyString(pb.b.key)
                 if parsed.isMouseButton and parsed.buttonNum and parsed.buttonNum <= 5 then
                     ClearClickAttr(frame, parsed)
@@ -1612,6 +1655,15 @@ local function OnCCEvent(self, event)
         if pendingApply then pendingApply = false; ns.CC_ApplyBindings() end
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         if not InCombatLockdown() then ns.CC_ApplyBindings() else pendingApply = true end
+    elseif event == "GROUP_ROSTER_UPDATE" then
+        -- Solo <-> party <-> raid transitions change which bindings are active.
+        -- GROUP_ROSTER_UPDATE fires every join, leave, promote and zone-in, so
+        -- only act when the context changed.
+        local ctx = CurrentCtx()
+        if ctx ~= lastRosterCtx then
+            lastRosterCtx = ctx
+            if not InCombatLockdown() then ns.CC_ApplyBindings() else pendingApply = true end
+        end
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Reapplies after zone/loading (OnLeave may not fire during transitions,
         -- so stuck frame-bindings need clearing); waits for spec via
@@ -1664,6 +1716,7 @@ function ns.CC_Init()
     ccEventFrame = (ns.TakeShell and ns.TakeShell()) or CreateFrame("Frame")
     ccEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     ccEventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    ccEventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     ccEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     ccEventFrame:SetScript("OnEvent", OnCCEvent)
 
@@ -3300,61 +3353,128 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
             centerY = centerY - ROW_H
         end
 
+        -- Content gate row: which content this binding is active in.
+        -- Outside the chosen contexts the binding is simply not applied, so
+        -- its key keeps doing whatever the player normally has bound.
+        do
+            local row = MakeRow(centerY)
+            RowLabel(row, "Active In")
+            -- Same checkbox dropdown the buff manager's filter pickers use, so
+            -- any combination of Solo / Party / Raid can be ticked. It renders
+            -- the summary itself ("All" when everything is on, "None" when
+            -- nothing is). groupCtx stays nil while all three are on -- that is
+            -- the default, so untouched bindings store nothing.
+            local ctxItems = {
+                { key = "solo",  label = "Solo",
+                  tooltip = "Active while you are not in a group." },
+                { key = "party", label = "Party",
+                  tooltip = "Active in a PvE party." },
+                { key = "raid",  label = "Raid",
+                  tooltip = "Active in a PvE raid." },
+                { key = "pvp",   label = "PvP",
+                  tooltip = "Active in battlegrounds and arenas." },
+            }
+            local cbDD = EllesmereUI.BuildVisOptsCBDropdown(
+                row, 160, row:GetFrameLevel() + 2,
+                ctxItems,
+                function(key) return CtxEnabled(selectedBinding, key) end,
+                function(key, v)
+                    -- nil means all-on, so materialize the full set before the
+                    -- first tick turns one context off; collapse back to nil
+                    -- once everything is on again.
+                    local set = selectedBinding.groupCtx
+                    if not set then
+                        set = {}
+                        for _, c in ipairs(CC_CTX_ORDER) do set[c] = true end
+                        selectedBinding.groupCtx = set
+                    end
+                    set[key] = v and true or false
+                    local n = 0
+                    for _, c in ipairs(CC_CTX_ORDER) do
+                        if set[c] == true then n = n + 1 end
+                    end
+                    if n == #CC_CTX_ORDER then selectedBinding.groupCtx = nil end
+                    ns.CC_ApplyBindings()
+                end,
+                nil, #CC_CTX_ORDER)
+            PP.Point(cbDD, "RIGHT", row, "RIGHT", -SIDE_PAD, 0)
+            centerY = centerY - ROW_H
+        end
+
         if hasAdvancedOpts then
-            -- Hovercast row (disabled for bare left/right click)
+            -- Hovercast row: a dropdown rather than a third toggle so the row
+            -- count (and the page height) is unchanged -- the center column has
+            -- no spare row.
+            -- Hovercast is unavailable for bare left/right click, so those two
+            -- entries are shown disabled with the reason as a tooltip.
             do
                 local row = MakeRow(centerY)
                 local isBareMouseBtn = selectedBinding.key == "BUTTON1" or selectedBinding.key == "BUTTON2"
-                RowLabel(row, "Only Cast on Actual Units (Not Frames)")
-                if isBareMouseBtn then
-                    if selectedBinding.hovercast then
-                        selectedBinding.hovercast = false
-                        ns.CC_ApplyBindings()
-                    end
-                    local pill, _ = RowToggle(row,
-                        function() return false end,
-                        function() end)
-                    pill:SetAlpha(0.35)
-                    pill:EnableMouse(false)
-                    if EllesmereUI.ShowWidgetTooltip then
-                        row:SetScript("OnEnter", function(self)
-                            EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Hovercast is not available for unmodified left/right click"))
-                        end)
-                        row:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                    end
-                else
-                    RowToggle(row,
-                        function() return selectedBinding.hovercast end,
-                        function(v)
-                            selectedBinding.hovercast = v
-                            ns.CC_ApplyBindings()
-                            RebuildPage()
-                        end)
+                RowLabel(row, "Cast On")
+                if isBareMouseBtn and selectedBinding.hovercast then
+                    selectedBinding.hovercast = false
+                    ns.CC_ApplyBindings()
                 end
+                local hcValues = {
+                    frames = "Frames",
+                    units  = "Mouseover",
+                    both   = "Frames and Mouseover",
+                }
+                local hcOrder = { "frames", "units", "both" }
+                local ddCtrl = EllesmereUI.BuildDropdownControl(
+                    row, 160, row:GetFrameLevel() + 2,
+                    hcValues, hcOrder,
+                    function()
+                        if selectedBinding.hovercast == "both" then return "both" end
+                        return selectedBinding.hovercast and "units" or "frames"
+                    end,
+                    function(v)
+                        selectedBinding.hovercast = (v == "both" and "both")
+                            or (v == "units" and true) or false
+                        ns.CC_ApplyBindings()
+                        RebuildPage()
+                    end,
+                    function(key)
+                        if isBareMouseBtn and key ~= "frames" then
+                            return EllesmereUI.L("Hovercast is not available for unmodified left/right click")
+                        end
+                        return false
+                    end)
+                PP.Point(ddCtrl, "RIGHT", row, "RIGHT", -SIDE_PAD, 0)
                 centerY = centerY - ROW_H
             end
 
+            -- Hovercast targets (only when the mouseover path is involved)
             if selectedBinding.hovercast then
+                -- Friendly + Enemy share ONE row. They are a single "which units"
+                -- choice, and the center column is a fixed-height, non-scrolling
+                -- panel that was already close to full: a row each would push the
+                -- last row past the bottom of the scroll viewport, where it is
+                -- clipped and invisible.
                 do
                     local row = MakeRow(centerY)
-                    RowLabel(row, "    Friendly Units")
-                    RowToggle(row,
-                        function() return selectedBinding.hoverFriendly ~= false end,
-                        function(v)
-                            selectedBinding.hoverFriendly = v
-                            ns.CC_ApplyBindings()
-                        end)
-                    centerY = centerY - ROW_H
-                end
-                do
-                    local row = MakeRow(centerY)
-                    RowLabel(row, "    Enemy Units")
-                    RowToggle(row,
+                    RowLabel(row, "    Unit Types")
+                    local ePill = RowToggle(row,
                         function() return selectedBinding.hoverEnemy == true end,
                         function(v)
                             selectedBinding.hoverEnemy = v
                             ns.CC_ApplyBindings()
                         end)
+                    local eLbl = MakeFont(row, 13, 1, 1, 1, 0.8)
+                    eLbl:SetPoint("RIGHT", ePill, "LEFT", -8, 0)
+                    eLbl:SetText(EllesmereUI.L("Enemy"))
+
+                    local fPill = RowToggle(row,
+                        function() return selectedBinding.hoverFriendly ~= false end,
+                        function(v)
+                            selectedBinding.hoverFriendly = v
+                            ns.CC_ApplyBindings()
+                        end)
+                    fPill:ClearAllPoints()
+                    PP.Point(fPill, "RIGHT", eLbl, "LEFT", -18, 0)
+                    local fLbl = MakeFont(row, 13, 1, 1, 1, 0.8)
+                    fLbl:SetPoint("RIGHT", fPill, "LEFT", -8, 0)
+                    fLbl:SetText(EllesmereUI.L("Friendly"))
                     centerY = centerY - ROW_H
                 end
             end

@@ -267,6 +267,7 @@ Enable
 Enable hash lines first
 Enable/Disable Bar per Form
 Enable/Disable per Form
+Enemy
 Enemy Forces
 Enemy Name Text
 Enhance 5 Bar minimum is %d (if you want less just change 5 bar color)
@@ -308,6 +309,7 @@ Font changed. A UI reload is needed to apply the new font.
 Food
 For Icons: Left click to edit group, Right click to custom size individual
 For player frame, this provides a simple, mini castbar below player frame. To edit the main player cast bar, %sclick here|r
+Friendly
 From
 Full Preview
 GLOBAL
