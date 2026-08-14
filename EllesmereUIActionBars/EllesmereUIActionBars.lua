@@ -12689,8 +12689,33 @@ local function SyncEditModeIconCounts()
     if InCombatLockdown() then return end
     if not C_EditMode or not C_EditMode.GetLayouts or not C_EditMode.SaveLayouts then return end
 
+    -- Never write while Blizzard's Edit Mode is open. The manager keeps its OWN copy of
+    -- layoutInfo for the whole session and pushes that copy whole on Save, so a write from here
+    -- is either discarded by the next Save or discards the edit in progress. This runs again on
+    -- the next options close, so skipping costs nothing.
+    local emf = _G.EditModeManagerFrame
+    if emf and (emf.editModeActive or (emf.IsShown and emf:IsShown())) then return end
+
     local ok, layoutInfo = pcall(C_EditMode.GetLayouts)
     if not ok or type(layoutInfo) ~= "table" or type(layoutInfo.layouts) ~= "table" then return end
+
+    -- SaveLayouts replaces the character's ENTIRE layout set (the client holds it and writes it
+    -- at logout), so the payload has to have the shape Blizzard always passes: the preset layouts
+    -- first, then the saved ones, with activeLayout an index into that merged list.
+    -- C_EditMode.GetLayouts returns only the saved half, so writing it straight back hands the
+    -- client a list whose indices no longer line up with the activeLayout riding along with it.
+    -- Rebuild the list the way EditModeManagerFrame:UpdateLayoutInfo does before saving, and if
+    -- the presets cannot be resolved, skip the write entirely rather than send the short list.
+    local numPresets = 0
+    if EditModePresetLayoutManager and EditModePresetLayoutManager.GetCopyOfPresetLayouts then
+        local presets = EditModePresetLayoutManager:GetCopyOfPresetLayouts()
+        if type(presets) == "table" then
+            numPresets = #presets
+            tAppendAll(presets, layoutInfo.layouts)
+            layoutInfo.layouts = presets
+        end
+    end
+    if numPresets == 0 then return end
 
     -- Build desired icon counts keyed by systemIndex (all bars are system 0).
     -- MainMenuBar has no system; MainActionBar is system=0 systemIndex=1.
@@ -12722,9 +12747,10 @@ local function SyncEditModeIconCounts()
     local HIDE_BAR_ART_SETTING = Enum and Enum.EditModeActionBarSetting
         and Enum.EditModeActionBarSetting.HideBarArt
 
-    -- Check ALL layouts so switching never reverts to fewer icons.
-    for _, layout in ipairs(layoutInfo.layouts) do
-        if type(layout.systems) == "table" then
+    -- Check ALL saved layouts so switching never reverts to fewer icons. The merged-in presets
+    -- are read-only (SaveLayouts drops edits to them), so they are carried through untouched.
+    for layoutIndex, layout in ipairs(layoutInfo.layouts) do
+        if layoutIndex > numPresets and type(layout.systems) == "table" then
             for _, sysInfo in ipairs(layout.systems) do
                 if sysInfo.system == 0 and sysInfo.systemIndex and type(sysInfo.settings) == "table" then
                     local want = desired[sysInfo.systemIndex]

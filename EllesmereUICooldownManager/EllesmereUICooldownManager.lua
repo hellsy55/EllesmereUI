@@ -2928,6 +2928,10 @@ local function EnforceCooldownViewerEditModeSettings()
         end
     end
 
+    -- Presets unresolved: activeLayout counts them, so without the merge it picks the WRONG
+    -- layout below and the save hands the client a list its own index no longer fits.
+    if numPresets == 0 then return end
+
     local activeLayout = type(layoutInfo.activeLayout) == "number"
         and layoutInfo.layouts[layoutInfo.activeLayout]
     if not activeLayout or type(activeLayout.systems) ~= "table" then return end
