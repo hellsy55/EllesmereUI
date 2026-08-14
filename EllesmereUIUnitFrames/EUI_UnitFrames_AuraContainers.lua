@@ -772,7 +772,7 @@ end
 -- Fails toward KEEPING the reserve: no frame, no bounds yet (pre-layout) or a
 -- unit with no movable cast bar of its own (boss) all answer true, which is what
 -- the bottom-anchor path did before. The saved cast bar position lands on the
--- unlock system's deferred pass, so the settle hook further down re-runs this
+-- unlock system's deferred pass, so the settle timers further down re-run this
 -- once the bar is actually where the user put it.
 local CB_STRIP_SLACK = 8 -- physical pixels of tolerance on the strip's edges
 local CB_FRAME_NAMES = {
@@ -797,12 +797,16 @@ local function CastbarBelowFrame(unit, frame)
     cl, cr, ct, cbot = cl * cs, cr * cs, ct * cs, cbot * cs
     -- Beside the frame rather than under it: nothing to reserve.
     if cl >= fr or cr <= fl then return false end
-    -- The bar's top edge must land in the band from one bar height below the
-    -- frame's bottom to slightly above it: flush is 0, a hand-aligned bar is a
-    -- few pixels either way, a bar parked elsewhere is far outside.
+    -- How far the bar's top edge hangs below the frame's bottom: 0 is flush, a
+    -- hand-aligned bar is a few pixels either way. The reserve itself is a fixed
+    -- -castbarHeight, so it only ever clears a bar sitting AT the frame's edge;
+    -- once the drop reaches a full bar height the reserve would park the icons
+    -- on top of the bar rather than above it, so the stack docks to the frame
+    -- instead. Overlap into the frame stays allowed within the tolerance.
     local h = ct - cbot
     if h <= 0 then h = 14 end
-    return ct <= fb + CB_STRIP_SLACK and ct >= fb - h - CB_STRIP_SLACK
+    local drop = fb - ct
+    return drop < h and drop >= -CB_STRIP_SLACK
 end
 ns.UF_CastbarBelowFrame = CastbarBelowFrame
 -- Cross-addon: the options preview mirrors this decision so its layout matches
