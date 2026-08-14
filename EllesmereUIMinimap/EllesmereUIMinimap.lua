@@ -427,6 +427,27 @@ end
 local function LayoutFlyoutButtons()
     if not flyoutPanel then return end
     local buttons = CollectFlyoutButtons()
+    -- Same lockdown rule as HideMinimapChild: every per-button call in the loop below
+    -- (SetParent/SetFrameStrata/SetPoint/SetSize/Show/SetFrameLevel) is protected and
+    -- is blocked silently for a protected button, which would leave it half-moved with
+    -- a flyoutSavedParents entry claiming it was placed. Drop those buttons from THIS
+    -- pass -- before the saved-parent capture, so nothing is recorded for a move that
+    -- never happened -- and queue the re-apply. ApplyMinimap invalidates and closes the
+    -- flyout, so the next open rebuilds the full grid. The list is a fresh table per
+    -- call, so compacting it in place is safe.
+    if InCombatLockdown() then
+        local kept = 0
+        for i = 1, #buttons do
+            local btn = buttons[i]
+            if btn:IsProtected() then
+                QueueApplyAll()
+            else
+                kept = kept + 1
+                buttons[kept] = btn
+            end
+        end
+        for i = #buttons, kept + 1, -1 do buttons[i] = nil end
+    end
     local count = #buttons
     if count == 0 then
         flyoutPanel:SetSize(1, 1)
@@ -509,27 +530,6 @@ local function LayoutFlyoutButtons()
         end
         GetFFD(btn).flyoutRing:Show()
     end
-end
-
-local function RestoreFlyoutButtons()
-    for btn, saved in pairs(flyoutSavedParents) do
-        RestoreButtonDecorations(btn)
-        if GetFFD(btn).flyoutRing then GetFFD(btn).flyoutRing:Hide() end
-        if btn.SetFixedFrameStrata then btn:SetFixedFrameStrata(false) end
-        if btn.SetFixedFrameLevel then btn:SetFixedFrameLevel(false) end
-        btn:SetParent(saved.parent)
-        btn:SetFrameStrata(saved.strata)
-        btn:ClearAllPoints()
-        if saved.point and saved.relTo then
-            btn:SetPoint(saved.point, saved.relTo, saved.relPoint, saved.x, saved.y)
-        end
-        -- Re-hide on the minimap surface
-        _suppressVisTrack = true
-        btn:Hide()
-        btn:SetAlpha(0)
-        _suppressVisTrack = false
-    end
-    wipe(flyoutSavedParents)
 end
 
 -- Grow Tooltip/Popup: shared open-direction for all popups/tooltips off minimap

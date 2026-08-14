@@ -3504,7 +3504,7 @@ end
 -- lazily on first read after invalidation, reads are one lookup with zero allocation.
 -- Invalidation inputs: ApplyColorsToOUF (the universal "colours changed" chokepoint -- swatch
 -- edits, resets, mode toggles, profile switches) and RefreshDarkMode. READ-ONLY derived cache: worst failure is a stale colour.
-EllesmereUI._colorCache = { class = {}, power = {}, classResource = {}, resource = {} }
+EllesmereUI._colorCache = { class = {}, power = {}, classResource = {}, resource = {}, classCustomized = {} }
 EllesmereUI._colorCacheDirty = true
 EllesmereUI._COLOR_WHITE = { r = 1, g = 1, b = 1 }
 EllesmereUI._powerBgDarkenFactor = 1
@@ -3542,6 +3542,19 @@ function EllesmereUI._RebuildColorCache()
     -- BG Power Color Darken: extra blacken for power-COLORED bar backgrounds, kept as a multiplier (not a palette) so it stacks on whatever power color a consumer resolved.
     local bgd = (dm and dm.powerBgDarken) or 0
     EllesmereUI._powerBgDarkenFactor = bgd > 0 and math.max(0, 1 - bgd / 100) or 1
+    -- Classes whose effective colour no longer matches Blizzard's default (a swatch edit, or any
+    -- nonzero class darken). Only these need the restricted-unit recovery below; an untouched
+    -- palette leaves the table empty, so that path costs one next() and stops.
+    local customized = cache.classCustomized
+    wipe(customized)
+    for token, def in pairs(EllesmereUI.CLASS_COLOR_MAP) do
+        local col = cache.class[token]
+        if col and (math.abs(col.r - def.r) > 0.004 or math.abs(col.g - def.g) > 0.004
+                or math.abs(col.b - def.b) > 0.004) then
+            customized[token] = col
+        end
+    end
+    EllesmereUI._restrictedCandidatesDirty = true
     EllesmereUI._colorCacheDirty = false
 end
 
@@ -4131,6 +4144,99 @@ end
 function EllesmereUI.GetClassColor(classToken)
     if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
     return EllesmereUI._colorCache.class[classToken] or EllesmereUI._COLOR_WHITE
+end
+
+-- Custom class colour for a unit whose identity is RESTRICTED (target-of-target, focus-target):
+-- UnitClass hands back a SECRET token there, and a secret cannot be a table key, so the palette
+-- above is unreachable and callers fall back to C_ClassColor.GetClassColor(secretToken) -- right
+-- class, but Blizzard's default shade instead of the user's.
+-- Such a unit is nearly always someone in the group, whose own token IS readable, so the class
+-- can be recovered without ever naming the unit: UnitIsUnit does the identity compare in C (its
+-- answer is itself secret when the comparison is restricted) and C_CurveUtil picks between two
+-- colour components from that secret boolean, also in C. Lua only ever handles opaque values.
+-- Returns ok, r, g, b -- ok is a PLAIN boolean, r/g/b may be SECRET numbers: feed them straight
+-- to a setter, never inspect or do arithmetic on them.
+--
+-- SCOPE, measured in a 12.1 dungeon: under an identity restriction the client will answer "is
+-- this unit me?" (CanCompareUnitTokens true, UnitIsUnit a SECRET boolean) and REFUSES every
+-- other pairing (CanCompareUnitTokens false, UnitIsUnit returns nil, both argument orders).
+-- Refuses by returning nothing, not by erroring, which is why the loop below type-checks the
+-- answer instead of trusting it. So in practice this recovers the colour when the restricted
+-- unit is the player, and other group members keep Blizzard's shade -- knowing WHICH other
+-- player an enemy is on is the exact fact the restriction exists to hide. The roster loop is
+-- kept general rather than hardcoded to "player" so it starts working if that ever relaxes.
+--
+-- Which group members are worth comparing against only changes on a roster or palette edit, so
+-- the list is cached as a flat unit/colour array (no per-call allocation, no per-call UnitClass
+-- or token concat). Only the compares themselves have to run live.
+EllesmereUI._restrictedCandidates = {}
+EllesmereUI._restrictedCandidatesDirty = true
+
+-- Namespaced, not file-locals: this chunk sits at Lua's 200-local ceiling.
+function EllesmereUI._RebuildRestrictedCandidates()
+    local out = EllesmereUI._restrictedCandidates
+    wipe(out)
+    local customized = EllesmereUI._colorCache.classCustomized
+    if next(customized) then
+        local inRaid = IsInRaid()
+        local members = GetNumGroupMembers() or 0
+        -- Raid rosters run raid1..raidN (player included); party rosters are player + party1..N-1.
+        local first = inRaid and 1 or 0
+        local last  = inRaid and members or (members > 0 and members - 1 or 0)
+        for i = first, last do
+            local u = (i == 0) and "player" or ((inRaid and "raid" or "party") .. i)
+            local _, token = UnitClass(u)
+            local col = (type(token) == "string" and not issecretvalue(token)) and customized[token]
+            if col then
+                out[#out + 1] = u
+                out[#out + 1] = col
+            end
+        end
+    end
+    EllesmereUI._restrictedCandidatesDirty = false
+end
+
+-- Created on the first restricted lookup, so a profile that never needs one never registers it.
+function EllesmereUI._EnsureRestrictedRosterWatcher()
+    if EllesmereUI._restrictedRosterWatcher then return end
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("GROUP_ROSTER_UPDATE")
+    f:SetScript("OnEvent", function() EllesmereUI._restrictedCandidatesDirty = true end)
+    EllesmereUI._restrictedRosterWatcher = f
+end
+
+function EllesmereUI.GetClassColorForRestrictedUnit(unit, secretClassToken)
+    if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
+    if not next(EllesmereUI._colorCache.classCustomized) then return false end
+    local pick = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
+    if not (pick and C_ClassColor and C_ClassColor.GetClassColor) then return false end
+    EllesmereUI._EnsureRestrictedRosterWatcher()
+    if EllesmereUI._restrictedCandidatesDirty then EllesmereUI._RebuildRestrictedCandidates() end
+    local candidates = EllesmereUI._restrictedCandidates
+    local count = #candidates
+    -- Nobody around wears a customised colour: let the caller take Blizzard's shade unchanged.
+    if count == 0 then return false end
+    local base = C_ClassColor.GetClassColor(secretClassToken)
+    if not base then return false end
+    local r, g, b = base.r, base.g, base.b
+    local canCompare = C_Secrets and C_Secrets.CanCompareUnitTokens
+    for i = 1, count, 2 do
+        local u = candidates[i]
+        -- CanCompareUnitTokens false means UnitIsUnit answers nothing, not that it goes secret.
+        if (not canCompare) or canCompare(unit, u) then
+            local isSameUnit = UnitIsUnit(unit, u)
+            -- Belt and braces: the predicate above should have caught a refusal, and a nil
+            -- reaching pick() would throw. type() reports a secret's underlying type, so a
+            -- secret boolean -- the whole point of this fold -- passes here.
+            if type(isSameUnit) == "boolean" then
+                local col = candidates[i + 1]
+                r = pick(isSameUnit, col.r, r)
+                g = pick(isSameUnit, col.g, g)
+                b = pick(isSameUnit, col.b, b)
+            end
+        end
+    end
+    return true, r, g, b
 end
 
 -- Get power color (cached, darken baked in). Returns nil for unknown keys.
@@ -10933,7 +11039,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.6"
+EllesmereUI.VERSION = "8.8.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

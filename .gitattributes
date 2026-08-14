@@ -2,4 +2,11 @@
 # as UTF-8 with LF line endings. This is a deliberate exception to the repo's
 # ASCII-only convention for code; never edit these with a tool that rewrites
 # them as UTF-16 (e.g. PowerShell Out-File without -Encoding utf8).
-Locales/*.lua text working-tree-encoding=UTF-8 eol=LF
+#
+# The pattern must track the folder name: it contains a slash, so it is anchored
+# to this file's directory and matches NOTHING if the folder is renamed or moved.
+# It read "Locales/*.lua" until 2026-08-13 and had silently matched nothing since
+# the translations moved into the EllesmereUILocales child addon -- verify with
+# "git check-attr -a EllesmereUILocales/koKR.lua" after any move (empty output
+# means the guard is off).
+EllesmereUILocales/*.lua text working-tree-encoding=UTF-8 eol=LF

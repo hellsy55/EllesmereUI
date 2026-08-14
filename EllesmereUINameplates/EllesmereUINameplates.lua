@@ -3267,6 +3267,11 @@ function ns.RefreshAllSettings()
     if ns.ApplyClassPowerSetting then ns.ApplyClassPowerSetting() end
     -- Aura containers: fingerprint-guarded, near-free when no aura setting changed.
     if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+    -- Hide Enemy Nameplates OOC is CVar + event driven, and its options setter plus
+    -- PLAYER_LOGIN were its only callers: a value written straight into the profile
+    -- (override group, profile switch, import) flipped the checkbox while plates kept
+    -- the old behaviour. Self-guarded, so an unchanged key costs nothing.
+    if ns.ApplyOOCPlates then ns.ApplyOOCPlates() end
 end
 
 -------------------------------------------------------------------------------
@@ -7118,6 +7123,23 @@ function NameplateFrame:ApplyCastColor(uninterruptible)
         normalCastTint = sc
     end
     local cr, cg, cb = ComputeCastBarTint(kickReadyTint, normalCastTint)
+
+    -- Match the base cast fill to uninterruptible casts so plate opacity
+    -- doesn't reveal the interruptible color underneath the overlay.
+    if C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+        local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
+        -- The settings-refresh callers pass the stored _kickProtected stamp,
+        -- which is nil until the first cast event -- and a nil reaching the
+        -- fold throws. type() is the secret-legal nil test (a plain == nil
+        -- compare throws on a secret boolean), same idiom as the Important
+        -- Cast block above.
+        local isUnint = uninterruptible
+        if type(isUnint) == "nil" then isUnint = false end
+        local ev = C_CurveUtil.EvaluateColorValueFromBoolean
+        cr = ev(isUnint, unintColor.r, cr)
+        cg = ev(isUnint, unintColor.g, cg)
+        cb = ev(isUnint, unintColor.b, cb)
+    end
     self.cast:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
     -- Shield icon is opt-out: when disabled it never shows, even on uninterruptible casts. The
     -- setting is a clean boolean, so it gates the (possibly SECRET) flag without evaluating it.
@@ -8439,7 +8461,12 @@ ns.ApplyOOCPlates = function()
         ctl:RegisterEvent("PLAYER_REGEN_ENABLED")
         ctl:RegisterEvent("PLAYER_ENTERING_WORLD")
         ns._oocPlatesOwned = true
-        SetCVar("nameplateShowEnemies", InCombatLockdown() and "1" or "0")
+        -- Read-guarded: RefreshAllSettings calls this on every nameplate settings
+        -- change, and a redundant SetCVar broadcasts CVAR_UPDATE to the whole UI.
+        local want = InCombatLockdown() and "1" or "0"
+        if GetCVar("nameplateShowEnemies") ~= want then
+            SetCVar("nameplateShowEnemies", want)
+        end
     else
         ctl:UnregisterEvent("PLAYER_REGEN_DISABLED")
         ctl:UnregisterEvent("PLAYER_REGEN_ENABLED")

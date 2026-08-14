@@ -42,13 +42,12 @@ will make changes to it myself.
    architecture of reskinning Blizzards chat and the dangerous taint risks
    involved in that.
 
-5. **Both clients.** One codebase serves both live servers and the PTR,
-   with 12.1-specific paths gated behind `EllesmereUI.IS_121`. Your change
-   must work on retail and must not error on the PTR client. If it touches
-   aura rendering or anything else that diverges under `IS_121`, say so in
-   the PR so the gated path can be handled. Never "improve" code inside a
-   12.0-only else-branch: those branches are frozen and deleted at 12.1
-   launch.
+5. **Midnight only.** EllesmereUI targets WoW Midnight 12.1+ exclusively.
+   There is one codebase and one client, so do not add version gates or
+   compatibility branches for older builds, and do not reference APIs or
+   CVars that Midnight replaced. Aura displays go through
+   `EllesmereUI.AuraKit` and the container system rather than the pre-12.1
+   aura APIs.
 
 ## Code style
 

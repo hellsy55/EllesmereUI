@@ -486,6 +486,11 @@ initFrame:SetScript("OnEvent", function(self)
                         and "world marker, next on each press")
                     or (slot.kind == "randommount" and "mount")
                     or (slot.kind == "spec" and "specialization")
+                    -- Same icon and same name as a fixed spec entry on the
+                    -- character that made it, so the caption is the only place
+                    -- the difference between the two can be said.
+                    or (slot.kind == "dynamicspec"
+                        and "specialization, by position on this character")
                     -- The name above is already the spell this character would
                     -- cast, so the caption says what picked it rather than
                     -- repeating it.
@@ -857,6 +862,50 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The most specializations any class has -- four, the druid's alone.
+    -- Walked rather than written down so a class that gains a fourth is picked
+    -- up without a code change.
+    local function MaxSpecCount()
+        if not C_SpecializationInfo or not GetNumClasses then return 0 end
+        local most = 0
+        for classID = 1, GetNumClasses() do
+            local n = C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
+            if n > most then most = n end
+        end
+        return most
+    end
+
+    -- The same list by POSITION rather than by identity, offered beside the
+    -- fixed entries rather than instead of them: "go Restoration" is not "go
+    -- to the third one", and only the second survives being carried to
+    -- another class.
+    --
+    -- Every position ANY class has, not only this character's -- a paladin
+    -- offered three could not put a druid's fourth on a palette built FOR the
+    -- druid. The usability filter hides the extras until an alt has them.
+    local function DynamicSpecEntries()
+        local out = {}
+        -- Named by the module that also RESOLVES the kind, so an older
+        -- EllesmereUIQuickdraw beside a newer options page offers nothing
+        -- rather than a kind that module could not fire.
+        if not ns.SpecPositionName then return out end
+        for i = 1, MaxSpecCount() do
+            local slot = { kind = "dynamicspec", index = i }
+            local icon = ns.SlotDisplay(slot)
+            out[#out + 1] = { icon = icon, name = ns.SpecPositionName(i), slot = slot }
+        end
+        return out
+    end
+
+    -- Both lists, fixed first: naming a spec is what a player picking one on
+    -- their main usually means, and the by-position block reads as the
+    -- alternative to it rather than as the lead.
+    local function AllSpecEntries()
+        local out = SpecEntries()
+        for _, entry in ipairs(DynamicSpecEntries()) do out[#out + 1] = entry end
+        return out
+    end
+
     -- The markers need no enumeration at all: the slot kinds carry the icon
     -- and the name, so a candidate slot handed to SlotDisplay IS the entry.
     --
@@ -960,9 +1009,10 @@ initFrame:SetScript("OnEvent", function(self)
         } },
         -- keepOrder: the game lists a class's specs in one fixed order that
         -- every character sheet shows, and alphabetising them would be the
-        -- one place in the interface they are not in it. noSearch: at most
-        -- four rows.
-        { key = "spec",      label = "Specializations", build = SpecEntries,
+        -- one place in the interface they are not in it. It also keeps the
+        -- by-position block below the fixed one, which is the whole of how the
+        -- two tell themselves apart. noSearch: at most eight rows.
+        { key = "spec",      label = "Specializations", build = AllSpecEntries,
           keepOrder = true, noSearch = true },
         { key = "macrotext", label = "Custom Macro...", custom = true },
     }
@@ -1714,14 +1764,18 @@ initFrame:SetScript("OnEvent", function(self)
         return out, dropped
     end
 
-    -- Every spec this character has. One entry short of useful on a class with
-    -- one spec, so a single-spec character is not offered it.
+    -- By position rather than by identity. A preset is the palette a player
+    -- has not built by hand, so it is the one most likely to be copied to a
+    -- profile an alt shares -- and the only preset here whose slots would
+    -- otherwise all go dead on arrival.
+    --
+    -- No dropped count: four positions against a sixteen-slot menu, so unlike
+    -- the collection presets this one can never be the thing that does not
+    -- fit. Empty is the stale-module case, and leaves the preset unoffered.
     local function SpecSlots()
-        local out = SpecEntries()
-        if #out < 2 then return {} end
         local slots = {}
-        for i = 1, math.min(MAX_SLOTS, #out) do slots[i] = out[i].slot end
-        return slots, math.max(0, #out - MAX_SLOTS)
+        for _, entry in ipairs(DynamicSpecEntries()) do slots[#slots + 1] = entry.slot end
+        return slots
     end
 
     -- Quest items the character is carrying that DO something: the bag walk
@@ -3037,45 +3091,52 @@ initFrame:SetScript("OnEvent", function(self)
         -- cancel key. Escape already backs out of any menu and stays that way;
         -- this is a second key for the hand that is holding the menu open and
         -- is nowhere near Escape, which is the whole of the request behind it.
-        row, h = W:DualRow(parent, y,
-            { type="label", text="Menu Cancel Action" }, { type="label", text="" })
-        BuildKeybindButton(row._leftRegion, {
-            intro = "Closes an open menu without using anything. Escape always "
-                .. "does this as well. One key shared by every menu, claimed "
-                .. "only while a menu is up -- a mouse button keeps its normal "
-                .. "use the rest of the time.",
-            read = function()
-                local key = Cfg("cancelKey")
-                if type(key) ~= "string" or key == "" then return nil end
-                return key
-            end,
-            commit = function(chord)
-                -- A menu's own key would be taken over for as long as that menu
-                -- was up, which is exactly the moment its release has to reach
-                -- the menu -- so the menu could be opened and never closed. The
-                -- Select key is refused for the reason the module gives at the
-                -- binding itself: one chord, two meanings, and the wrong one
-                -- wins.
-                if chord then
-                    if chord == Cfg("confirmKey") then
-                        Complain("Quickdraw: that key is already the Toggled Menu Select Action.")
-                        return
-                    end
-                    for i = 1, (Cfg("paletteCount") or 1) do
-                        if GetBindingKey(BINDING_PREFIX .. i) == chord then
-                            Complain("Quickdraw: that key opens a menu, so it cannot also close one.")
+        -- Shown only once the Select key exists: cancelling is a gesture of
+        -- the kept-open flow that key unlocks, so before it the row is noise.
+        -- The Select commit above already RefreshPage()s on bind/unbind, which
+        -- is what brings this row in and out. A cancelKey bound earlier stays
+        -- stored while hidden and returns with the row.
+        if HasSelectKey() then
+            row, h = W:DualRow(parent, y,
+                { type="label", text="Menu Cancel Action" }, { type="label", text="" })
+            BuildKeybindButton(row._leftRegion, {
+                intro = "Closes an open menu without using anything. Escape always "
+                    .. "does this as well. One key shared by every menu, claimed "
+                    .. "only while a menu is up -- a mouse button keeps its normal "
+                    .. "use the rest of the time.",
+                read = function()
+                    local key = Cfg("cancelKey")
+                    if type(key) ~= "string" or key == "" then return nil end
+                    return key
+                end,
+                commit = function(chord)
+                    -- A menu's own key would be taken over for as long as that menu
+                    -- was up, which is exactly the moment its release has to reach
+                    -- the menu -- so the menu could be opened and never closed. The
+                    -- Select key is refused for the reason the module gives at the
+                    -- binding itself: one chord, two meanings, and the wrong one
+                    -- wins.
+                    if chord then
+                        if chord == Cfg("confirmKey") then
+                            Complain("Quickdraw: that key is already the Toggled Menu Select Action.")
                             return
                         end
+                        for i = 1, (Cfg("paletteCount") or 1) do
+                            if GetBindingKey(BINDING_PREFIX .. i) == chord then
+                                Complain("Quickdraw: that key opens a menu, so it cannot also close one.")
+                                return
+                            end
+                        end
                     end
-                end
-                Set("cancelKey", chord or "")
-                Refresh()
-            end,
-            -- The same reason as the Select key: a bare mouse button is what
-            -- this is for.
-            plainMouse = true,
-        })
-        y = y - h
+                    Set("cancelKey", chord or "")
+                    Refresh()
+                end,
+                -- The same reason as the Select key: a bare mouse button is what
+                -- this is for.
+                plainMouse = true,
+            })
+            y = y - h
+        end
 
         y = y - BuildPreview(parent, y)
 

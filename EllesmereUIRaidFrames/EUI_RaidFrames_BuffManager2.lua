@@ -399,11 +399,20 @@ end
 -------------------------------------------------------------------------------
 -- Spec indicators (seeding + access)
 -------------------------------------------------------------------------------
--- ACTIVE config key: the healer spec key on a tracked healer spec, else the
--- shared "nonhealer" bucket -- every spec outside the editor's healer list
--- shares ONE config (class-agnostic display; filters resolve it at runtime).
+-- ACTIVE config key: the healer/Aug spec key on a tracked spec, else the shared
+-- "nonhealer" bucket -- every spec outside the editor's healer list shares ONE
+-- config (class-agnostic display; filters resolve it at runtime).
+-- Resolved WITHOUT borrow (BM_SpecKeyForSpecID, never BM_CurrentSpecKey):
+-- BM_CurrentSpecKey routes Ret/Prot -> Holy and Ele/Enh -> Resto, which is the
+-- LEGACY simple-grid model where a castability strip then narrowed the borrowed
+-- set to the spec's own spells. v2 disabled that strip, so borrowing here handed
+-- Ret/Prot Holy's FULL healer config and kept them out of the All Non Healers/Aug
+-- bucket (field reports, maintainer ruling 2026-08-13: non-healer specs edit and
+-- render the shared bucket; the simple grid keeps its borrow separately).
 function ns.BM2_SpecKey()
-    return (ns.BM_CurrentSpecKey and ns.BM_CurrentSpecKey()) or "nonhealer"
+    local specIdx = GetSpecialization and GetSpecialization()
+    local specID = specIdx and GetSpecializationInfo and GetSpecializationInfo(specIdx)
+    return (specID and ns.BM_SpecKeyForSpecID and ns.BM_SpecKeyForSpecID(specID)) or "nonhealer"
 end
 
 local function PresetIdsByKey(b)
@@ -646,8 +655,9 @@ function ns.BM2_SpecIndicators()
     local inds, specKey = ns.BM2_SpecInds()
     -- Additive union buckets: "allspecs" renders for EVERY spec, and a spec
     -- outside the healer/Aug list also renders its own "spec<ID>" bucket on
-    -- top of its active one (borrow specs keep their borrowed set AND gain
-    -- their own bucket). Both are empty until the user fills them.
+    -- top of its active one (for those specs the active bucket IS "nonhealer"
+    -- -- BM2_SpecKey resolves borrow-free, so Ret/Prot/Ele/Enh land here like
+    -- every other non-healer). Both are empty until the user fills them.
     local ownInds, allInds
     local specIdx = GetSpecialization and GetSpecialization()
     local specID = specIdx and GetSpecializationInfo and GetSpecializationInfo(specIdx)
