@@ -6713,21 +6713,27 @@ ShowChannelTicks = function(spellID)
         for i = 1, count do
             local isLastTick = (i == count)
 
-            if not showTickMarks and not isLastTick then
-                if castBarFrame._ticks[i] then castBarFrame._ticks[i]:Hide() end
-            else
-                local tick = castBarFrame._ticks[i]
-                if not tick then
-                    tick = bar:CreateTexture(nil, "OVERLAY", nil, 3)
-                    -- Exact-width 1px-class art: keep the engine's texel
-                    -- snapping out of it or it re-rounds our aligned edges.
-                    if tick.SetSnapToPixelGrid then
-                        tick:SetSnapToPixelGrid(false)
-                        tick:SetTexelSnappingBias(0)
-                    end
-                    castBarFrame._ticks[i] = tick
+            -- Every index is filled, including the ones this pass hides: _ticks
+            -- is walked with #, and creating only the last mark (interior marks
+            -- off) leaves a hole at [1] that makes the length 0. Every later
+            -- sweep -- the stale-mark trims below and HideChannelTicks itself --
+            -- then iterates nothing, so the mark it did draw could never be
+            -- taken back off the bar.
+            local tick = castBarFrame._ticks[i]
+            if not tick then
+                tick = bar:CreateTexture(nil, "OVERLAY", nil, 3)
+                -- Exact-width 1px-class art: keep the engine's texel
+                -- snapping out of it or it re-rounds our aligned edges.
+                if tick.SetSnapToPixelGrid then
+                    tick:SetSnapToPixelGrid(false)
+                    tick:SetTexelSnappingBias(0)
                 end
+                castBarFrame._ticks[i] = tick
+            end
 
+            if not showTickMarks and not isLastTick then
+                tick:Hide()
+            else
                 local isGold = isLastTick and showLastTick
                 local w = isGold and highlightWidth or tickWidth
                 -- The bar drains, so a mark at time-fraction f draws at
@@ -6956,6 +6962,14 @@ UpdateCastBar = function(dt)
             ns.SetCastTimerText(castBarFrame, now, totalDurMode, totalSuffix, latSuffix)
         end
     elseif castBarFrame._channeling then
+        -- Same 1s overrun safety the cast branch has. CHANNEL_UPDATE keeps
+        -- _endTime current for every legitimate extension, so a channel still
+        -- running a second past its end has lost its stop event -- and without
+        -- this the bar has no way back to idle.
+        if castBarFrame._endTime and now > castBarFrame._endTime + 1 then
+            OnCastStop()
+            return
+        end
         if not (castBarFrame._nativeFill or castBarFrame._rawFill) then
             local chanDur = castBarFrame._endTime - castBarFrame._startTime
             -- Same lead as the cast branch, mirrored for the drain
@@ -7285,11 +7299,17 @@ local function OnCastFailed(eventCastID)
     ns.ShowIdleCastBar()
 end
 
--- Called for UNIT_SPELLCAST_CHANNEL_STOP.
-local function OnChannelStop(eventCastID)
+-- Called for UNIT_SPELLCAST_CHANNEL_STOP. Deliberately matches no ID: castBarID
+-- is documented Nilable on BOTH UnitChannelInfo and this event's payload, and the
+-- old equality test rejected the stop whenever either side came back nil. That
+-- left _channeling set with nothing to clear it -- the channel branch of
+-- UpdateCastBar had no overrun safety -- so the bar stayed parked on screen and
+-- its 20 Hz tick kept running for the rest of the session. Blizzard's own
+-- CastingBarFrame matches a castID for plain casts only and accepts any
+-- channel/empower stop, which is what OnEmpowerStop below already does.
+local function OnChannelStop()
     if not castBarFrame then return end
     if not castBarFrame._channeling then return end
-    if not eventCastID or not castBarFrame._castID or eventCastID ~= castBarFrame._castID then return end
     castBarFrame._channeling = false
     castBarFrame._castID = nil
     ns.ShowIdleCastBar()
@@ -8815,9 +8835,9 @@ local function OnEvent(self, event, ...)
         local unit = ...
         if unit == "player" then OnChannelUpdate() end
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
-        -- args: unit, castGUID, spellID, interruptedBy, castID
-        local unit, _, _, _, castID = ...
-        if unit == "player" then OnChannelStop(castID) end
+        -- args: unit, castGUID, spellID, interruptedBy, castBarID
+        local unit = ...
+        if unit == "player" then OnChannelStop() end
     elseif event == "UNIT_SPELLCAST_EMPOWER_START" then
         local unit = ...
         if unit == "player" then OnEmpowerStart() end
