@@ -228,13 +228,18 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
-        -- Row 5: Show Top Line| spacer
+        -- Row 5: Show Top Line | Frame Strata
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Top Line",
               tooltip="Draws a 1px accent line above the background at the top of the tracker.",
               getValue=function() return Cfg("showTopLine") ~= false end,
               setValue=function(v) Set("showTopLine", v); if EQT.ApplyBackground then EQT.ApplyBackground() end end },
-            { type="spacer" })
+            { type="dropdown", text="Tracker Strata",
+              tooltip="Raises or lowers the tracker's frame strata. Increase it if other UI elements are drawing on top of the tracker; decrease it if the tracker is drawing on top of something it shouldn't.",
+              values = { BACKGROUND = "Background", LOW = "Low", MEDIUM = "Medium", HIGH = "High", DIALOG = "Dialog" },
+              order  = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG" },
+              getValue=function() return Cfg("frameStrata") or "MEDIUM" end,
+              setValue=function(v) Set("frameStrata", v); if EQT.ApplyFrameStrata then EQT.ApplyFrameStrata() end end })
         y = y - h
 
         -- -- COLORS ----------------------------------------------------------

@@ -56,6 +56,11 @@ local QT_DEFAULTS = {
             bgAlpha              = 0.75,
             showTopLine          = true,
 
+            -- Frame strata for the tracker. Lets the user raise it above (or
+            -- lower it below) other UI elements it might otherwise clip
+            -- behind/in front of. Applied via EQT.ApplyFrameStrata().
+            frameStrata          = "MEDIUM",
+
             -- Text colors. All apply via SetTextColor on their respective
             -- FontStrings (titles, objective lines, focus override).
             titleR               = 1.000, titleG = 0.910, titleB = 0.471,  -- FFE878
@@ -160,6 +165,7 @@ _G._EQT_RefreshAll = function()
     if EQT.RestyleAll then EQT.RestyleAll() end
     if EQT.ApplyBackground then EQT.ApplyBackground() end
     if EQT.ApplyForceOnScreen then EQT.ApplyForceOnScreen() end
+    if EQT.ApplyFrameStrata then EQT.ApplyFrameStrata() end
     -- The hotkey is a per-profile setting backed by an override binding, so a
     -- profile or spec swap has to re-point it. Without this the outgoing
     -- profile's key stays overridden -- taken from whatever the player really
