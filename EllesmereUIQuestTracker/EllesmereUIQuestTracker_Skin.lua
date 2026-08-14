@@ -209,6 +209,17 @@ function EQT.RefreshFonts()
     end
 end
 
+-- Applies the user-chosen frame strata to the tracker (Options > Display >
+-- "Tracker Strata"). Called once at init below, again whenever the dropdown
+-- changes, and re-applied on profile swap via the loader's _EQT_RefreshAll.
+-- SetFrameStrata is not combat-protected on this frame, so no lockdown guard
+-- is needed here (mirrors ApplyBackground / ApplyForceOnScreen elsewhere).
+function EQT.ApplyFrameStrata()
+    local otf = _G.ObjectiveTrackerFrame
+    if not otf or not otf.SetFrameStrata then return end
+    otf:SetFrameStrata(EQT.Cfg("frameStrata") or "MEDIUM")
+end
+
 -- FORBIDDEN: calling ObjectiveTrackerFrame:Update() from addon execution,
 -- in ANY shape -- synchronous, deferred via C_Timer, or combat-gated with a
 -- regen retry. A forced Update() runs Blizzard's entire quest machinery in
@@ -1253,6 +1264,8 @@ function EQT.InitSkin()
         -- Strip the parchment / nine-slice background behind the whole tracker.
         if otf.NineSlice then otf.NineSlice:Hide() end
         StripTextures(otf)
+
+        EQT.ApplyFrameStrata()
     end
 
     EachTracker(HookTracker)
