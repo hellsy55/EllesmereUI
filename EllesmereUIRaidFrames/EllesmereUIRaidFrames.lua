@@ -311,6 +311,7 @@ local defaults = {
         visibleGroups    = { true, true, true, true, true, true, false, false },
         hideEmptyGroups  = true,     -- collapse subgroups with no members (raid only, real frames)
         excludeHiddenGroupsFromSize = true, -- hidden Show Groups don't count toward the raid-size breakpoint
+        sizeByActiveGroups = false, -- raid-size breakpoint driven by active subgroup count (x5) instead of headcount
 
         -- Visibility
         showWhenSolo     = false,
@@ -1102,6 +1103,38 @@ ns._GetEffectiveRaidSize = function()
     local n = GetNumGroupMembers() or 0
     if n == 0 then return n end
     local s = db.profile
+
+    -- "Size by Active Groups": breakpoint driven by how many subgroups have at
+    -- least one (counted) member, not by headcount. A raid spread thin across
+    -- all 8 groups (1 player each) resolves to 8 active groups, not an 8-man
+    -- tier -- each active group counts as a full group of 5 toward the tier
+    -- math, mirroring perGroup=5 used everywhere else in the size cascade.
+    if s.sizeByActiveGroups then
+        -- Party/solo has no subgroups to count; one active "group" is the party itself.
+        if not IsInRaid() then return n end
+        local vg = s.visibleGroups
+        local excludeHidden = s.excludeHiddenGroupsFromSize ~= false
+        local groupHasMember = {}
+        for ri = 1, n do
+            local _, _, sub = GetRaidRosterInfo(ri)
+            if sub then
+                -- Same fail-open rule as the headcount path: while hidden-group
+                -- exclusion is on, an unknown/streaming-in member's group is
+                -- treated as visible so the tier never undercounts mid-join.
+                if not excludeHidden or not vg or vg[sub] ~= false then
+                    groupHasMember[sub] = true
+                end
+            end
+        end
+        local activeGroups = 0
+        for g = 1, 8 do
+            if groupHasMember[g] then activeGroups = activeGroups + 1 end
+        end
+        -- Degenerate guard: every populated group excluded (e.g. all hidden) -> raw count.
+        if activeGroups == 0 then return n end
+        return activeGroups * 5
+    end
+
     if s.excludeHiddenGroupsFromSize == false then return n end
     -- Subgroups only exist in a raid; party/solo has nothing to exclude.
     if not IsInRaid() then return n end
@@ -6999,30 +7032,35 @@ ns._RFTierTopLeft = function(tw, th, unitGrowth, groupGrowth, ox, oy)
 end
 
 -- Resolve the active size tier bucket and its override table, cascading
--- toward 20 (10 falls back to 15; 30 falls back to 25; 40 falls back to 30,
--- then 25). The single copy of the cascade -- _GetRaidSizeFrameDimensions, ReloadFrames and
--- _ApplyTierOffset all route through here. Returns tier, override; the
--- override is nil for the base 20 tier or when none is defined.
+-- toward 20 (10 falls back to 15; 30 falls back to 25; 35 falls back to 30,
+-- then 25; 40 falls back to 35, then 30, then 25). The single copy of the
+-- cascade -- _GetRaidSizeFrameDimensions, ReloadFrames and _ApplyTierOffset
+-- all route through here. Returns tier, override; the override is nil for
+-- the base 20 tier or when none is defined.
 ns._RFResolveTierOverride = function(numMembers)
     local overrides = db.profile.raidSizeOverrides
     if not overrides or not numMembers or numMembers <= 0 then return 20, nil end
     -- User-tunable switch boundaries (per-tier cog sliders): the LOWER tiers
     -- store the highest count they COVER (sizeCap), the UPPER tiers the
     -- count they ENGAGE at (sizeMin). Absent keys reproduce the classic
-    -- cascade exactly (10/15/20, 25 engaging at 21, 30 at 26), so profiles
-    -- that never touch the sliders resolve byte-identically.
-    local o10, o15, o25, o30, o40 = overrides[10], overrides[15], overrides[25], overrides[30], overrides[40]
+    -- cascade exactly (10/15/20, 25 engaging at 21, 30 at 26, 35 at 31, 40 at
+    -- 36), so profiles that never touch the sliders resolve byte-identically
+    -- aside from the new 35 bucket sitting between 30 and 40.
+    local o10, o15, o25, o30, o35, o40 =
+        overrides[10], overrides[15], overrides[25], overrides[30], overrides[35], overrides[40]
     local b10 = (o10 and o10.sizeCap) or 10
     local b15 = (o15 and o15.sizeCap) or 15
     local b25 = (o25 and o25.sizeMin) or 21
     local b30 = (o30 and o30.sizeMin) or 26
-    local b40 = (o40 and o40.sizeMin) or 31
+    local b35 = (o35 and o35.sizeMin) or 31
+    local b40 = (o40 and o40.sizeMin) or 36
     local tier
     if numMembers <= b10 then    tier = 10
     elseif numMembers <= b15 then tier = 15
     elseif numMembers < b25 then tier = 20
     elseif numMembers < b30 then tier = 25
-    elseif numMembers < b40 then tier = 30
+    elseif numMembers < b35 then tier = 30
+    elseif numMembers < b40 then tier = 35
     else                         tier = 40
     end
     if tier == 20 then return 20, nil end
@@ -7030,10 +7068,11 @@ ns._RFResolveTierOverride = function(numMembers)
     if tier < 20 then
         ov = overrides[tier] or (tier == 10 and overrides[15]) or nil
     else
-        -- Cascade upward toward 20: 40 falls back to 30, which falls back to 25.
+        -- Cascade upward toward 20: 40 falls back to 35, then 30, then 25.
         ov = overrides[tier]
-        if not ov and tier == 40 then ov = overrides[30] end
-        if not ov and (tier == 40 or tier == 30) then ov = overrides[25] end
+        if not ov and tier == 40 then ov = overrides[35] end
+        if not ov and (tier == 40 or tier == 35) then ov = overrides[30] end
+        if not ov and (tier == 40 or tier == 35 or tier == 30) then ov = overrides[25] end
     end
     return tier, ov or nil
 end
