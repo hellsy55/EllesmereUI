@@ -486,6 +486,11 @@ initFrame:SetScript("OnEvent", function(self)
                         and "world marker, next on each press")
                     or (slot.kind == "randommount" and "mount")
                     or (slot.kind == "spec" and "specialization")
+                    -- Same icon and same name as a fixed spec entry on the
+                    -- character that made it, so the caption is the only place
+                    -- the difference between the two can be said.
+                    or (slot.kind == "dynamicspec"
+                        and "specialization, by position on this character")
                     -- The name above is already the spell this character would
                     -- cast, so the caption says what picked it rather than
                     -- repeating it.
@@ -857,6 +862,50 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The most specializations any class has -- four, the druid's alone.
+    -- Walked rather than written down so a class that gains a fourth is picked
+    -- up without a code change.
+    local function MaxSpecCount()
+        if not C_SpecializationInfo or not GetNumClasses then return 0 end
+        local most = 0
+        for classID = 1, GetNumClasses() do
+            local n = C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
+            if n > most then most = n end
+        end
+        return most
+    end
+
+    -- The same list by POSITION rather than by identity, offered beside the
+    -- fixed entries rather than instead of them: "go Restoration" is not "go
+    -- to the third one", and only the second survives being carried to
+    -- another class.
+    --
+    -- Every position ANY class has, not only this character's -- a paladin
+    -- offered three could not put a druid's fourth on a palette built FOR the
+    -- druid. The usability filter hides the extras until an alt has them.
+    local function DynamicSpecEntries()
+        local out = {}
+        -- Named by the module that also RESOLVES the kind, so an older
+        -- EllesmereUIQuickdraw beside a newer options page offers nothing
+        -- rather than a kind that module could not fire.
+        if not ns.SpecPositionName then return out end
+        for i = 1, MaxSpecCount() do
+            local slot = { kind = "dynamicspec", index = i }
+            local icon = ns.SlotDisplay(slot)
+            out[#out + 1] = { icon = icon, name = ns.SpecPositionName(i), slot = slot }
+        end
+        return out
+    end
+
+    -- Both lists, fixed first: naming a spec is what a player picking one on
+    -- their main usually means, and the by-position block reads as the
+    -- alternative to it rather than as the lead.
+    local function AllSpecEntries()
+        local out = SpecEntries()
+        for _, entry in ipairs(DynamicSpecEntries()) do out[#out + 1] = entry end
+        return out
+    end
+
     -- The markers need no enumeration at all: the slot kinds carry the icon
     -- and the name, so a candidate slot handed to SlotDisplay IS the entry.
     --
@@ -960,9 +1009,10 @@ initFrame:SetScript("OnEvent", function(self)
         } },
         -- keepOrder: the game lists a class's specs in one fixed order that
         -- every character sheet shows, and alphabetising them would be the
-        -- one place in the interface they are not in it. noSearch: at most
-        -- four rows.
-        { key = "spec",      label = "Specializations", build = SpecEntries,
+        -- one place in the interface they are not in it. It also keeps the
+        -- by-position block below the fixed one, which is the whole of how the
+        -- two tell themselves apart. noSearch: at most eight rows.
+        { key = "spec",      label = "Specializations", build = AllSpecEntries,
           keepOrder = true, noSearch = true },
         { key = "macrotext", label = "Custom Macro...", custom = true },
     }
@@ -1714,14 +1764,18 @@ initFrame:SetScript("OnEvent", function(self)
         return out, dropped
     end
 
-    -- Every spec this character has. One entry short of useful on a class with
-    -- one spec, so a single-spec character is not offered it.
+    -- By position rather than by identity. A preset is the palette a player
+    -- has not built by hand, so it is the one most likely to be copied to a
+    -- profile an alt shares -- and the only preset here whose slots would
+    -- otherwise all go dead on arrival.
+    --
+    -- No dropped count: four positions against a sixteen-slot menu, so unlike
+    -- the collection presets this one can never be the thing that does not
+    -- fit. Empty is the stale-module case, and leaves the preset unoffered.
     local function SpecSlots()
-        local out = SpecEntries()
-        if #out < 2 then return {} end
         local slots = {}
-        for i = 1, math.min(MAX_SLOTS, #out) do slots[i] = out[i].slot end
-        return slots, math.max(0, #out - MAX_SLOTS)
+        for _, entry in ipairs(DynamicSpecEntries()) do slots[#slots + 1] = entry.slot end
+        return slots
     end
 
     -- Quest items the character is carrying that DO something: the bag walk
