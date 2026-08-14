@@ -639,16 +639,37 @@ end
 --- Spawns one secure unit button. The caller styles it and attaches engine
 --- channels afterward; RegisterUnitWatch owns show/hide from here on.
 function Engine.SpawnUnitFrame(unit, name)
-    -- Ping support DISABLED until Blizzard fixes contextual pings on secret
-    -- units (12.1: pinging an enemy's frame errors in PingManager's
-    -- securecopy -- their bug, reproduces with no addon code in the path;
-    -- oUF PR #765/#772 precedent: disable, wait, revert). To re-enable,
-    -- swap the template string for the commented line below.
+    -- Contextual pings: the template rides EVERY frame; safety is the
+    -- DYNAMIC GetIsPingable gate below, never the template choice (the old
+    -- blanket disable killed player/focus pings too, which was scope creep
+    -- -- only SECRET-identity units are the hazard). Blizzard's 12.1 bug
+    -- stands: pinging a secret-identity unit hard-errors in PingManager's
+    -- securecopy (reproduces with no addon code in the path), so the gate
+    -- admits the player always and friendly units outside protected
+    -- instances, and answers false for hostiles and protected-instance
+    -- units -- the ping system shows a clean denied toast instead of
+    -- erroring. When Blizzard fixes the securecopy, relax the GATE; the
+    -- template needs no change.
     local frame = CreateFrame("Button", name, petBattleHider,
-        "SecureUnitButtonTemplate")
-        -- "SecureUnitButtonTemplate, PingableUnitFrameTemplate")
+        "SecureUnitButtonTemplate, PingableUnitFrameTemplate")
     frame._euiBaseUnit = unit
     frame.unit = unit
+    -- Evaluated at ping time on the LIVE unit (vehicle swaps rewrite
+    -- frame.unit). Order per secret doctrine: token compare first (unit
+    -- TOKENS are our own plain strings; unit DATA is what goes secret),
+    -- the content gate second, and the hostility read gated through
+    -- issecretvalue before any branch touches it.
+    frame.GetIsPingable = function(self)
+        local u = self.unit or self._euiBaseUnit
+        if u == "player" then return true end
+        if not u then return false end
+        if EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then
+            return false
+        end
+        local hostile = UnitIsEnemy("player", u)
+        if issecretvalue and issecretvalue(hostile) then return false end
+        return hostile ~= true
+    end
     frame.IsElementEnabled = Frame_IsElementEnabled
     frame.EnableElement = Frame_EnableElement
     frame.DisableElement = Frame_DisableElement

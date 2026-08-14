@@ -21,4 +21,4 @@
 - [ ] Zero cost while disabled: no events registered, no polling, no hooks doing work, no frames built
 - [ ] Cheap while enabled: event-driven (no polling, no timer-based logic, no per-frame allocations)
 - [ ] No writes onto Blizzard-owned frames (weak-table pattern used); `HookScript`/`hooksecurefunc` only, never `SetScript` on Blizzard frames
-- [ ] Tested in-game, works on live retail; no load errors on the 12.1 PTR client
+- [ ] Tested in-game on live; no version gates or pre-Midnight APIs added

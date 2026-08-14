@@ -362,9 +362,12 @@ local function _findSated()
     if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then return nil end
     for i = 1, #SATED_DEBUFFS do
         local sid = SATED_DEBUFFS[i]
-        -- Querying a KNOWN spellId returns the aura even when its fields would
-        -- be secret in combat, so detection works mid-fight. We never read the
-        -- (possibly secret) spellId back off the aura -- we already know it.
+        -- Known-spellId query works mid-fight ONLY because Sated-class ids are
+        -- field-proven unflagged: GetPlayerAuraBySpellID is RequiresNonSecretAura
+        -- and returns ZERO VALUES for a restriction-FLAGGED spell while its aura
+        -- is up (Burning Rush proved this 2026-08-13 -- do NOT copy this probe
+        -- as a general presence pattern; flagged ids need an engine container).
+        -- We never read the (possibly secret) spellId back off the aura.
         local aura = C_UnitAuras.GetPlayerAuraBySpellID(sid)
         if aura then return aura, sid end
     end

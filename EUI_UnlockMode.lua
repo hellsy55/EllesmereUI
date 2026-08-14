@@ -1466,6 +1466,25 @@ function EllesmereUI.ScheduleSettleReapply()
         if EllesmereUI._MigrateAnchorFollowBaselines then
             pcall(EllesmereUI._MigrateAnchorFollowBaselines)
         end
+        -- Re-pull every width/height MATCH before the anchor pass. A match child
+        -- is corrected only by a full pass or by its target's own resize notify,
+        -- and a spec swap ends with resizes that reach neither: the authoritative
+        -- passes (OnSpecSwitchComplete, CDM's reanchor pass) run before the CDM
+        -- retry ladder re-lays out the bar, and a size change landing inside the
+        -- 50ms notify throttle is dropped outright with nothing to re-run it. The
+        -- child then stays pinned to the size its target held mid-rebuild until a
+        -- reload -- the power bar <- Essential Cooldowns mismatch. Quiescence
+        -- means every target is at its final size, so this is the same correction
+        -- a reload performs. Gated on a non-empty store: no matches, no work.
+        local wdb = EllesmereUIDB and EllesmereUIDB.unlockWidthMatch
+        local hdb = EllesmereUIDB and EllesmereUIDB.unlockHeightMatch
+        if ((wdb and next(wdb)) or (hdb and next(hdb)))
+           and EllesmereUI.ApplyAllWidthHeightMatches then
+            EllesmereUI._settleReapplyInProgress = true
+            EllesmereUI._settleSuppressUntil = GetTime() + 0.75
+            pcall(EllesmereUI.ApplyAllWidthHeightMatches)
+            EllesmereUI._settleReapplyInProgress = false
+        end
         if EllesmereUI.ReapplyAllUnlockAnchorsForced then
             EllesmereUI._settleReapplyInProgress = true
             EllesmereUI._settleSuppressUntil = GetTime() + 0.75
@@ -1521,6 +1540,14 @@ end
 local _resizeNotifyThrottle = {}  -- [key] = GetTime() of last notify
 local _resizeLastSize = {}  -- [key] = { w = ..., h = ... }
 local RESIZE_THROTTLE_SEC = 0.05 -- ignore rapid-fire size changes within 50ms
+-- Trailing re-run bookkeeping (this file is at the 200-local cap, so it lives on
+-- EllesmereUI rather than in locals). pending[key] = a re-run is queued;
+-- at[key] = when the last one ran, floored to one per 0.5s. That floor is the
+-- hard spin guard: an element whose re-apply is not pixel-stable (1 physical px
+-- exceeds the 0.5 UI-unit epsilon at low UI scale) would otherwise re-arm a
+-- trailing run every 50ms forever. It costs no real correction, since the tail of
+-- a same-frame burst always lands within the first throttle window.
+EllesmereUI._resizeTrail = { pending = {}, at = {} }
 
 -- Set by LayoutBar (action bars) to suppress position re-application during
 -- SetSize; LayoutBar handles its own edge re-anchoring.
@@ -1543,9 +1570,28 @@ function EllesmereUI.NotifyElementResized(key)
     -- 1px on the new pip count) strands anchored children with no event to re-cascade them.
     local suppressMatchProp = EllesmereUI._specProfileSwitching
                            or EllesmereUI._zoneTransitionActive
-    -- Throttle: skip if we just processed this key
+    -- Throttle: skip if we just processed this key, but re-run once when the
+    -- window closes. Dropping outright loses the LAST size of a burst, and that
+    -- is exactly where a rebuild's final SetSize lands (BuildAllCDMBars then the
+    -- synchronous CollectAndReanchor, both inside one frame): the first pass
+    -- propagated a transient width to every matched child and the settled one
+    -- never propagated at all, so the child stayed wrong until a reload. The
+    -- deferred call takes the normal path below and converges, since a size that
+    -- no longer changes fires no further OnSizeChanged. One pending re-run per key.
     local now = GetTime()
-    if _resizeNotifyThrottle[key] and (now - _resizeNotifyThrottle[key]) < RESIZE_THROTTLE_SEC then
+    local lastNotify = _resizeNotifyThrottle[key]
+    if lastNotify and (now - lastNotify) < RESIZE_THROTTLE_SEC then
+        local trail = EllesmereUI._resizeTrail
+        local lastTrail = trail.at[key]
+        if not trail.pending[key]
+           and (not lastTrail or (now - lastTrail) >= 0.5) then
+            trail.pending[key] = true
+            C_Timer.After(RESIZE_THROTTLE_SEC - (now - lastNotify), function()
+                trail.pending[key] = nil
+                trail.at[key] = GetTime()
+                EllesmereUI.NotifyElementResized(key)
+            end)
+        end
         return
     end
     _resizeNotifyThrottle[key] = now

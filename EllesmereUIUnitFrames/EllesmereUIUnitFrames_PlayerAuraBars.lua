@@ -1515,6 +1515,29 @@ local function DeferRestrictedApply(key, fn, container, dir)
     return true
 end
 
+-- One-shot OOC reconciler for parent-geometry passes skipped inside lockdown. Every
+-- bar parent has the engine aura container ANCHORED to it, which makes the PARENT's
+-- own SetSize/ClearAllPoints/SetPoint ADDON_ACTION_BLOCKED in combat (a protected
+-- anchor-dependent poisons its anchor ancestor's geometry) -- while the cinematic/
+-- faction/vehicle recovery lane legitimately re-drives config mid-combat. Keyed and
+-- coalesced; the event is registered only while something is queued, so idle cost is
+-- zero.
+local pabRegenApplies = {}
+local pabRegenFrame
+local function QueuePABRegenApply(key, fn)
+    pabRegenApplies[key] = fn
+    if not pabRegenFrame then
+        pabRegenFrame = CreateFrame("Frame")
+        pabRegenFrame:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            local pending = pabRegenApplies
+            pabRegenApplies = {}
+            for _, apply in pairs(pending) do apply() end
+        end)
+    end
+    pabRegenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
 -- Grow direction. AK.ApplyContainerLayout only applies growth when BOTH growthH and
 -- growthV are set. Values are AnchorUtil.FlowDirection members, NOT strings
 -- (Blizzard_SharedXMLBase/AnchorUtil.lua: Left=-1, Right=1, Up=1, Down=-1); our
@@ -1547,12 +1570,21 @@ local function ToGrowthH(dirStr, wrapStr)
     end
     return (dirStr == "RIGHT" or dirStr == "CENTER_HORIZONTAL") and FlowDir.Right or FlowDir.Left
 end
-local function ToGrowthV(dirStr)
+-- Gated on the GROWTH direction, never on the wrap value itself (same shape as
+-- ToGrowthH above). iconWrapDirection is one shared field whose Up/Down values are
+-- only offered for LEFT/RIGHT growth, so a value left behind by a growth-direction
+-- change must stay inert everywhere else: reading it unconditionally flipped
+-- CENTER_VERTICAL's columns to grow Up out of its fixed "TOP" anchor, and stacked
+-- CENTER_HORIZONTAL's rows upward, from a setting whose cog those modes never show.
+local function ToGrowthV(dirStr, wrapStr)
     local FlowDir = AnchorUtil and AnchorUtil.FlowDirection
     if not FlowDir then return nil end
     if dirStr == "UP" then return FlowDir.Up end
     if dirStr == "DOWN" then return FlowDir.Down end
-    return FlowDir.Down -- horizontal growth: rows always wrap downward
+    if dirStr == "LEFT" or dirStr == "RIGHT" then
+        return wrapStr == "UP" and FlowDir.Up or FlowDir.Down
+    end
+    return FlowDir.Down -- centered growth: rows always wrap downward
 end
 -- Corner = the flow's fixed start point = (opposite of growthV side) + (opposite of
 -- growthH side), same rule horizontal or vertical (LEFT/RIGHT: growthV is always Down
@@ -1564,7 +1596,12 @@ local function CornerFor(dirStr, wrapStr)
         local hSide = (wrapStr == "RIGHT") and "LEFT" or "RIGHT"
         return vSide .. hSide
     end
-    return (dirStr == "RIGHT" or dirStr == "CENTER_HORIZONTAL") and "TOPLEFT" or "TOPRIGHT"
+    if dirStr == "LEFT" or dirStr == "RIGHT" then
+        local vSide = (wrapStr == "UP") and "BOTTOM" or "TOP"
+        local hSide = (dirStr == "RIGHT") and "LEFT" or "RIGHT"
+        return vSide .. hSide
+    end
+    return (dirStr == "CENTER_HORIZONTAL") and "TOPLEFT" or "TOPRIGHT"
 end
 
 -- Shared by every container, default and custom alike: builds the AK.RequestContainer
@@ -1586,7 +1623,7 @@ local function BuildContainerSpec(parent, cfg, grid)
             padding = { 0, 0, 0, 0 },
             rowWidth = grid.rowWidth,
             growthH = ToGrowthH(dir, wrap),
-            growthV = ToGrowthV(dir),
+            growthV = ToGrowthV(dir, wrap),
         },
     }, vertical
 end
@@ -2117,28 +2154,47 @@ local function ApplyLiveConfig(isBuff)
     -- geometry so rapid slider updates cannot read a stale prior size.
     local posKey = BarPositionKey(isBuff)
     local pos = s[posKey]
-    if cfg.growDirection == "CENTER_HORIZONTAL" or cfg.growDirection == "CENTER_VERTICAL" then
-        pos = RebaseBarPositionToCenter(parent, pos)
-        s[posKey] = pos
+    local centered = cfg.growDirection == "CENTER_HORIZONTAL" or cfg.growDirection == "CENTER_VERTICAL"
+    -- The engine aura container anchored to `parent` makes the PARENT's own geometry
+    -- protected in combat (anchor-ancestor rule): the SetSize/ClearAllPoints/SetPoint
+    -- below are ADDON_ACTION_BLOCKED inside lockdown -- and the cinematic/faction/
+    -- vehicle recovery lane runs this function in instanced combat BY DESIGN (see
+    -- DeferRestrictedApply). A recovery re-drive carries an UNCHANGED grid, so
+    -- skipping the geometry cluster drops nothing there; a genuinely changed grid
+    -- (options edited mid-combat) or a still-pending centered rebase reconciles once
+    -- at the regen edge. lastSize stays untouched on the skip so the deferred pass
+    -- still sees the real last-applied size (the fixed-corner compensation needs it),
+    -- and the stored pos is not mutated for a resize that never landed.
+    if InCombatLockdown() then
+        local sizeChanged = not (prev and prev.w == grid.width and prev.h == grid.height)
+        local rebasePending = centered
+            and not (pos and pos.point == "CENTER" and (pos.relPoint or pos.point) == "CENTER")
+        if sizeChanged or rebasePending then
+            QueuePABRegenApply(sizeKey, function() ApplyLiveConfig(isBuff) end)
+        end
+    else
+        if centered then
+            pos = RebaseBarPositionToCenter(parent, pos)
+            s[posKey] = pos
+        end
+        if not centered and pos and pos.point == "CENTER"
+            and prev and (prev.w ~= grid.width or prev.h ~= grid.height) then
+            pos.x = pos.x + (prev.w - grid.width) / 2
+            pos.y = pos.y + (prev.h - grid.height) / 2
+            -- Snap against the NEW grid.width/height (what parent:SetSize is about to
+            -- apply), not parent:GetWidth/GetHeight -- those still read the OLD size, the
+            -- resize hasn't run yet. The STORED pos keeps the raw accumulation; only the
+            -- SetPoint values are snapped.
+            local PP = EllesmereUI.PP
+            local es = parent:GetEffectiveScale()
+            local sx = PP.SnapCenterForDim(pos.x, grid.width, es)
+            local sy = PP.SnapCenterForDim(pos.y, grid.height, es)
+            parent:ClearAllPoints()
+            parent:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, sx, sy)
+        end
+        lastSize[sizeKey] = { w = grid.width, h = grid.height }
+        parent:SetSize(grid.width, grid.height)
     end
-    if cfg.growDirection ~= "CENTER_HORIZONTAL" and cfg.growDirection ~= "CENTER_VERTICAL" and pos and pos.point == "CENTER"
-        and prev and (prev.w ~= grid.width or prev.h ~= grid.height) then
-        pos.x = pos.x + (prev.w - grid.width) / 2
-        pos.y = pos.y + (prev.h - grid.height) / 2
-        -- Snap against the NEW grid.width/height (what parent:SetSize is about to
-        -- apply), not parent:GetWidth/GetHeight -- those still read the OLD size, the
-        -- resize hasn't run yet. The STORED pos keeps the raw accumulation; only the
-        -- SetPoint values are snapped.
-        local PP = EllesmereUI.PP
-        local es = parent:GetEffectiveScale()
-        local sx = PP.SnapCenterForDim(pos.x, grid.width, es)
-        local sy = PP.SnapCenterForDim(pos.y, grid.height, es)
-        parent:ClearAllPoints()
-        parent:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, sx, sy)
-    end
-    lastSize[sizeKey] = { w = grid.width, h = grid.height }
-
-    parent:SetSize(grid.width, grid.height)
 
     local pad = cfg.padding or 5
     ApplyContainerAnchorAndGrowth(container, parent, cfg, grid)
@@ -2988,16 +3044,31 @@ local function ReloadCustomBuffBarImpl(barId)
 
     local grid = ComputeGrid(true, bar)
     local parent = customBuffParents[barId]
+    local fresh = false
     if not parent then
         parent = CreateFrame("Frame", "EllesmereUIPlayerAuraBars_CustomBuff" .. barId, UIParent)
         customBuffParents[barId] = parent
         parent:SetSize(grid.width, grid.height)
+        fresh = true
     end
-    ApplyCustomBarPosition(parent, bar, barId)
+    -- Same anchor-ancestor rule as ApplyLiveConfig: an EXISTING parent has the engine
+    -- container anchored to it, so its position/size writes are blocked in lockdown --
+    -- skip them and reconcile with one full reload at the regen edge (position deltas
+    -- are not tracked per bar, so the queue is unconditional on the skip). A parent
+    -- created THIS pass has no container anchored yet and stays fully writable. The
+    -- config re-drive below still runs -- that is what the in-combat recovery needs.
+    local geomLocked = not fresh and InCombatLockdown()
+    if geomLocked then
+        QueuePABRegenApply("custom-buff-" .. barId, function() ns.PAB_ReloadCustomBuffBar(barId) end)
+    else
+        ApplyCustomBarPosition(parent, bar, barId)
+    end
     parent:SetShown(bar.enabled ~= false)
     if bar.enabled == false then return end
 
-    parent:SetSize(grid.width, grid.height)
+    if not geomLocked then
+        parent:SetSize(grid.width, grid.height)
+    end
 
     local spells = ns.PAB_ResolveSpells(bar)
     local sig = CustomBuffSpellSignature(spells)
@@ -3112,16 +3183,27 @@ local function ReloadCustomDebuffBarImpl(barId)
 
     local grid = ComputeGrid(false, bar)
     local parent = customDebuffParents[barId]
+    local fresh = false
     if not parent then
         parent = CreateFrame("Frame", "EllesmereUIPlayerAuraBars_CustomDebuff" .. barId, UIParent)
         customDebuffParents[barId] = parent
         parent:SetSize(grid.width, grid.height)
+        fresh = true
     end
-    ApplyCustomBarPosition(parent, bar, barId)
+    -- Same lockdown rule as the custom buff reload above (anchor-ancestor geometry
+    -- block; full-reload reconcile at regen; fresh parents stay writable).
+    local geomLocked = not fresh and InCombatLockdown()
+    if geomLocked then
+        QueuePABRegenApply("custom-debuff-" .. barId, function() ns.PAB_ReloadCustomDebuffBar(barId) end)
+    else
+        ApplyCustomBarPosition(parent, bar, barId)
+    end
     parent:SetShown(bar.enabled ~= false)
     if bar.enabled == false then return end
 
-    parent:SetSize(grid.width, grid.height)
+    if not geomLocked then
+        parent:SetSize(grid.width, grid.height)
+    end
 
     local chain = BuildChain("HARMFUL", function(class) return ClassEnabled(class, false, bar) or (PAB_FxSafeToForce(class) and PAB_FxWantsCategory(bar.fxList, class.key)) end, bar.showAllDebuffs ~= false, DebuffSubtractFn(bar))
     local _, spec = BuildContainerSpec(parent, bar, grid)
@@ -3998,6 +4080,10 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     local halfPrimary, halfCross = blockW / 2, blockH / 2
     local growUp = (growDir == "UP")
     local wrapRight = (wrapDir == "RIGHT")
+    -- Read the wrap-up state off the CORNER, not off wrapDir: CornerFor only emits a
+    -- BOTTOM component where an Up wrap is actually in effect, so the preview cannot
+    -- drift from the real bars or inherit a stale wrap in the centered modes.
+    local wrapUp = (corner == "BOTTOMLEFT" or corner == "BOTTOMRIGHT")
 
     for i = 1, math.max(total, #icons) do
         if i <= total then
@@ -4028,8 +4114,8 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
                 btnY = growUp and (-halfPrimary + withinLineStep) or (halfPrimary - withinLineStep)
                 btnX = wrapRight and (-halfCross + acrossLinesStep) or (halfCross - acrossLinesStep)
             else
-                btnX = (corner == "TOPRIGHT") and (halfPrimary - withinLineStep) or (-halfPrimary + withinLineStep)
-                btnY = halfCross - acrossLinesStep
+                btnY = wrapUp and (-halfCross + acrossLinesStep) or (halfCross - acrossLinesStep)
+                btnX = (corner == "TOPRIGHT" or corner == "BOTTOMRIGHT") and (halfPrimary - withinLineStep) or (-halfPrimary + withinLineStep)
             end
             btn:ClearAllPoints()
             btn:SetPoint(centeredVertical and "CENTER" or corner, box, "CENTER", btnX, btnY)

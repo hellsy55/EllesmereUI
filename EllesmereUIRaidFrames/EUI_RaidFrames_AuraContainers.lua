@@ -1346,6 +1346,17 @@ local function BmApplyBar(button, dd, style)
     local ind = style.ind
     local r, g, b = BmColor(ind.color, 12 / 255, 210 / 255, 157 / 255)
     dd.bar:GetStatusBarTexture():SetVertexColor(r, g, b, (ind.barColorOpacity or 100) / 100)
+    -- Fill AXIS, mirroring what the preview has always done in BM_PlaceBar.
+    -- Change-guarded like the frame-level write below: SetOrientation resets the
+    -- bar's fill, so calling it on every restyle would visibly stutter a running
+    -- bar. Orientation has to be in BmVisualKey for this to run at all -- it
+    -- otherwise lives only in the geometry fingerprint, which drives the anchor
+    -- pass and never reaches here.
+    local isVert = (ind.orientation or "HORIZONTAL") == "VERTICAL"
+    if dd.bmBarVert ~= isVert then
+        dd.bmBarVert = isVert
+        dd.bar:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+    end
     dd.bar:SetReverseFill(ind.reverseFill == true)
     local bgr, bgg, bgb = BmColor(ind.barBgColor, 0, 0, 0)
     dd.barBg:SetColorTexture(bgr, bgg, bgb, (ind.barBgOpacity or 50) / 100)
@@ -1437,6 +1448,14 @@ local function BmBarInit(button, dd, style, ind, health)
     dd.bar = bar
     dd.barBg = bar:CreateTexture(nil, "BACKGROUND")
     dd.barBg:SetAllPoints(bar)
+
+    -- Fill AXIS. A StatusBar defaults to HORIZONTAL, so a vertical bar rendered
+    -- tall and narrow (BmAnchorOneSlot) while still draining sideways until this
+    -- landed. Set BEFORE the engine registration below in case the axis is
+    -- snapshotted there; BmApplyBar re-drives it for live toggles.
+    local initVert = ((style.ind and style.ind.orientation) or "HORIZONTAL") == "VERTICAL"
+    bar:SetOrientation(initVert and "VERTICAL" or "HORIZONTAL")
+    dd.bmBarVert = initVert
 
     local opts = {}
     if Enum.StatusBarInterpolation then opts.interpolation = Enum.StatusBarInterpolation.Immediate end
@@ -1921,7 +1940,10 @@ local function BmVisualKey(kind, ind, size, font, spellID)
             ind.displayGlowR, ind.displayGlowG, ind.displayGlowB)
     end
     if kind == "bar" then
-        return FP(CK(ind.color), ind.barColorOpacity, ind.reverseFill,
+        -- orientation is the one geometry field that is ALSO a visual: it swaps
+        -- the bar's screen axis (BmGeoFP, anchor pass) and its fill axis
+        -- (BmApplyBar). The other bar geometry stays out on purpose.
+        return FP(CK(ind.color), ind.barColorOpacity, ind.reverseFill, ind.orientation,
             CK(ind.barBgColor), ind.barBgOpacity, ind.frameLevel, tostring(BmTipMode()))
     end
     return FP(ind.type, CK(ind.color), ind.opacity, ind.borderWidth, ind.borderOpacity,

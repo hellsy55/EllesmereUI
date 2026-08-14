@@ -138,6 +138,10 @@ local L = {
     NO_FRIENDS_ONLINE    = "No friends online",
     NOT_IN_GUILD         = "Not in a guild",
     TOGGLE_WORLD_MAP     = "Toggle World Map",
+    SWITCH_TO_REP        = "Switch to Reputation",
+    SWITCH_TO_XP         = "Switch to Experience",
+    PROGRESS             = "Progress",
+    RESTED               = "Rested",
 }
 ns.L = L
 
