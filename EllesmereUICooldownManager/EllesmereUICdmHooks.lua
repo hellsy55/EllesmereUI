@@ -6148,7 +6148,12 @@ local function CollectAndReanchor()
                                             -- opacity passes while the slot stays
                                             -- reserved. nil for everyone else.
                                             ph._missingHidden = (hostedMissingVis == "hidden") or nil
-                                            ph.layoutIndex = frame.layoutIndex or 0
+                                            -- Mirror the viewer slot's position, and
+                                            -- mirror "it has none" too: 0 is below every
+                                            -- real layoutIndex, so a placeholder standing
+                                            -- in for a not-yet-laid-out buff read as the
+                                            -- left-most icon on the bar.
+                                            ph.layoutIndex = frame.layoutIndex
                                             -- Carry the viewer slot's cooldownID so the
                                             -- drag-reorder sort can key this placeholder
                                             -- by the STABLE id (the canonical spellID
@@ -7168,9 +7173,14 @@ local function CollectAndReanchor()
                             -- Remember where this frame last sorted before the
                             -- marker overwrites it. The interpolation below needs
                             -- a fallback that holds position rather than guessing
-                            -- when Blizzard has not laid the viewer out yet.
+                            -- when Blizzard has not laid the viewer out yet. Stamp
+                            -- the cooldownID it belonged to: viewer frames are
+                            -- POOLED, so the same frame hosts a different spell
+                            -- after a preset switch and "where this frame sat"
+                            -- would otherwise hand the new spell the old one's slot.
                             if type(fc.sortOrder) == "number" then
                                 fc.lastSortOrder = fc.sortOrder
+                                fc.lastSortOrderCdID = frame.cooldownID
                             end
                             fc.sortOrder = false  -- spillover marker, resolved below
                             hasSpill = true
@@ -7181,15 +7191,22 @@ local function CollectAndReanchor()
                 -- Second pass (only when a spillover exists -- steady state skips this
                 -- entirely). Give each spillover a fractional key that lands it between
                 -- its neighbours by Blizzard layoutIndex. Anchors are the present,
-                -- assigned frames: a real viewer frame (cooldownID set) anchors at its
-                -- OWN layoutIndex; a preset we inject (trinket/pot/racial -- cooldownID
-                -- nil, no real layoutIndex) anchors at an INTERPOLATED layoutIndex
-                -- derived from its nearest present Blizzard neighbour in slot order.
+                -- assigned frames: a real viewer frame anchors at its OWN layoutIndex;
+                -- a frame we inject (trinket/pot/racial, or a hosted-buff placeholder --
+                -- no layoutIndex of its own in this viewer's space) anchors at an
+                -- INTERPOLATED layoutIndex derived from its nearest present Blizzard
+                -- neighbour in slot order.
                 -- Without preset anchors the sort can't see them, so a re-talented
                 -- cooldown parked to the LEFT of a preset could hop to its RIGHT (and
                 -- vice versa); with them, the spillover lands on the correct side.
                 if hasSpill then
-                    -- Blizzard viewer anchors: real layoutIndex, keyed by slot index.
+                    -- Blizzard viewer anchors: real layoutIndex, keyed by slot index,
+                    -- GROUPED BY SOURCE VIEWER. layoutIndex numbers a frame inside one
+                    -- viewer's pool, so indices from two viewers share a scale only by
+                    -- accident. A mixed bar (a hosted buff off the buff viewer sitting
+                    -- among cooldowns off the essential viewer) compared them anyway,
+                    -- and whichever way that comparison fell decided where an unplaced
+                    -- spell landed -- including in front of everything.
                     local blizzKeys, blizzLIs
                     for _, frame in ipairs(frames) do
                         local fc = _ecmeFC[frame]
@@ -7202,56 +7219,79 @@ local function CollectAndReanchor()
                         -- degenerates to "after whichever anchor came first". An
                         -- anchor we cannot place is not an anchor; dropping it just
                         -- narrows the anchor set, and an empty set already has a
-                        -- defined meaning (spillovers fall to the tail).
+                        -- defined meaning (spillovers fall to the tail). A frame with
+                        -- no viewer of its own (our injected placeholders, which carry
+                        -- the viewer slot's cooldownID) is dropped for the same reason:
+                        -- its layoutIndex is borrowed from another index space.
                         if type(k) == "number" and frame.cooldownID ~= nil
-                           and frame.layoutIndex then
+                           and frame.layoutIndex and frame.viewerFrame then
                             blizzKeys = blizzKeys or {}; blizzLIs = blizzLIs or {}
-                            blizzKeys[#blizzKeys + 1] = k
-                            blizzLIs[#blizzKeys] = frame.layoutIndex
+                            local vKeys = blizzKeys[frame.viewerFrame]
+                            if not vKeys then
+                                vKeys = {}
+                                blizzKeys[frame.viewerFrame] = vKeys
+                                blizzLIs[frame.viewerFrame] = {}
+                            end
+                            vKeys[#vKeys + 1] = k
+                            blizzLIs[frame.viewerFrame][#vKeys] = frame.layoutIndex
                         end
                     end
                     -- Full anchor set = Blizzard anchors + preset anchors (interpolated
-                    -- layoutIndex). minAnchorIdx (over ALL anchors) is where a spillover
-                    -- that sorts before everything lands. Skipped entirely when the bar
-                    -- has no present Blizzard spell to interpolate against (no anchors ->
-                    -- spillovers fall to the tail by layoutIndex, as before).
+                    -- layoutIndex), built once PER VIEWER: a preset we inject has no
+                    -- layoutIndex of its own, so it can only be placed inside the index
+                    -- space it is being measured against. minAnchorIdx (over that
+                    -- viewer's anchors) is where a spillover that sorts before
+                    -- everything lands. Skipped entirely when the bar has no present
+                    -- Blizzard spell to interpolate against (no anchors -> spillovers
+                    -- fall to the tail by layoutIndex, as before).
                     local anchorKeys, anchorLIs, minAnchorIdx
                     if blizzKeys then
-                        anchorKeys, anchorLIs = {}, {}
-                        for i = 1, #blizzKeys do
-                            anchorKeys[i] = blizzKeys[i]; anchorLIs[i] = blizzLIs[i]
-                            if not minAnchorIdx or blizzKeys[i] < minAnchorIdx then
-                                minAnchorIdx = blizzKeys[i]
+                        anchorKeys, anchorLIs, minAnchorIdx = {}, {}, {}
+                        for viewer, bKeys in pairs(blizzKeys) do
+                            local bLIs = blizzLIs[viewer]
+                            local aKeys, aLIs = {}, {}
+                            anchorKeys[viewer] = aKeys; anchorLIs[viewer] = aLIs
+                            for i = 1, #bKeys do
+                                aKeys[i] = bKeys[i]; aLIs[i] = bLIs[i]
+                                if not minAnchorIdx[viewer] or bKeys[i] < minAnchorIdx[viewer] then
+                                    minAnchorIdx[viewer] = bKeys[i]
+                                end
                             end
-                        end
-                        for _, frame in ipairs(frames) do
-                            local fc = _ecmeFC[frame]
-                            local k = fc and fc.sortOrder
-                            if type(k) == "number" and frame.cooldownID == nil then
-                                -- Nearest present Blizzard anchor on each side (slot order).
-                                local leftLI, leftSlot, rightLI, rightSlot
-                                for i = 1, #blizzKeys do
-                                    local bslot = blizzKeys[i]
-                                    if bslot < k then
-                                        if not leftSlot or bslot > leftSlot then leftSlot = bslot; leftLI = blizzLIs[i] end
-                                    elseif bslot > k then
-                                        if not rightSlot or bslot < rightSlot then rightSlot = bslot; rightLI = blizzLIs[i] end
+                            for _, frame in ipairs(frames) do
+                                local fc = _ecmeFC[frame]
+                                local k = fc and fc.sortOrder
+                                -- Ours, not the viewer's: trinkets, pots and racials
+                                -- (no cooldownID) and hosted-buff placeholders (which
+                                -- carry one). Neither owns a layoutIndex in THIS
+                                -- viewer's space, so both are interpolated into it.
+                                if type(k) == "number" and not frame.viewerFrame then
+                                    -- Nearest present Blizzard anchor on each side (slot order).
+                                    local leftLI, leftSlot, rightLI, rightSlot
+                                    for i = 1, #bKeys do
+                                        local bslot = bKeys[i]
+                                        if bslot < k then
+                                            if not leftSlot or bslot > leftSlot then leftSlot = bslot; leftLI = bLIs[i] end
+                                        elseif bslot > k then
+                                            if not rightSlot or bslot < rightSlot then rightSlot = bslot; rightLI = bLIs[i] end
+                                        end
                                     end
-                                end
-                                -- Ride just after the left neighbour (or just before the
-                                -- right when there is none). 0.001*distance keeps it
-                                -- inside the neighbour's integer-layoutIndex gap and
-                                -- monotonic for multiple presets in the same gap.
-                                local effLI
-                                if leftLI then
-                                    effLI = leftLI + 0.001 * (k - leftSlot)
-                                elseif rightLI then
-                                    effLI = rightLI - 0.001 * (rightSlot - k)
-                                end
-                                if effLI then
-                                    anchorKeys[#anchorKeys + 1] = k
-                                    anchorLIs[#anchorKeys] = effLI
-                                    if not minAnchorIdx or k < minAnchorIdx then minAnchorIdx = k end
+                                    -- Ride just after the left neighbour (or just before the
+                                    -- right when there is none). 0.001*distance keeps it
+                                    -- inside the neighbour's integer-layoutIndex gap and
+                                    -- monotonic for multiple presets in the same gap.
+                                    local effLI
+                                    if leftLI then
+                                        effLI = leftLI + 0.001 * (k - leftSlot)
+                                    elseif rightLI then
+                                        effLI = rightLI - 0.001 * (rightSlot - k)
+                                    end
+                                    if effLI then
+                                        aKeys[#aKeys + 1] = k
+                                        aLIs[#aKeys] = effLI
+                                        if not minAnchorIdx[viewer] or k < minAnchorIdx[viewer] then
+                                            minAnchorIdx[viewer] = k
+                                        end
+                                    end
                                 end
                             end
                         end
@@ -7259,21 +7299,26 @@ local function CollectAndReanchor()
                     for _, frame in ipairs(frames) do
                         local fc = _ecmeFC[frame]
                         if fc and fc.sortOrder == false then
-                            if anchorKeys and frame.cooldownID ~= nil
+                            -- Only this frame's OWN viewer can measure it.
+                            local aKeys = anchorKeys and frame.viewerFrame
+                                          and anchorKeys[frame.viewerFrame]
+                            if aKeys and frame.cooldownID ~= nil
                                and frame.layoutIndex then
+                                local aLIs = anchorLIs[frame.viewerFrame]
                                 local L = frame.layoutIndex
                                 local predIdx, predLI
-                                for i = 1, #anchorKeys do
-                                    local li = anchorLIs[i]
+                                for i = 1, #aKeys do
+                                    local li = aLIs[i]
                                     if li < L and (not predLI or li > predLI) then
-                                        predLI = li; predIdx = anchorKeys[i]
+                                        predLI = li; predIdx = aKeys[i]
                                     end
                                 end
                                 -- Insert after the predecessor slot (or before the first
                                 -- anchor when below all). (L+1)/1e6 < 1 keeps the
                                 -- spillover strictly between its neighbouring integer
                                 -- slots and never ties its predecessor.
-                                local baseIdx = predIdx or ((minAnchorIdx or 1) - 1)
+                                local baseIdx = predIdx
+                                    or ((minAnchorIdx[frame.viewerFrame] or 1) - 1)
                                 fc.sortOrder = baseIdx + ((L + 1) / 1e6)
                             elseif frame.cooldownID ~= nil and not frame.layoutIndex then
                                 -- Blizzard has not assigned this frame a layout
@@ -7287,7 +7332,13 @@ local function CollectAndReanchor()
                                 -- Blizzard's own order was never wrong.
                                 -- Hold the last known position instead; the next
                                 -- pass, once the layout exists, places it properly.
-                                fc.sortOrder = fc.lastSortOrder or 99999
+                                -- Only while the frame still hosts the SAME
+                                -- cooldown: a preset switch re-seats the pool, and
+                                -- the held position belongs to the spell that sat
+                                -- here before, not to this one.
+                                local held = (fc.lastSortOrderCdID == frame.cooldownID)
+                                             and fc.lastSortOrder or nil
+                                fc.sortOrder = held or 99999
                             else
                                 fc.sortOrder = 99999
                             end
