@@ -6276,27 +6276,13 @@ initFrame:SetScript("OnEvent", function(self)
     EllesmereUI:RegisterOnHide(function()
         if _spellPickerMenu and _spellPickerMenu:IsShown() then _spellPickerMenu:Hide() end
     end)
-    -- Normalize a spell ID to its base (undo talent overrides).
-    -- E.g. Voltaic Blaze (470057) -> Flame Shock (188389).
-    local function NormalizeToBase(sid)
-        if not sid or sid <= 0 then return sid end
-        if C_Spell and C_Spell.GetBaseSpell then
-            local base = C_Spell.GetBaseSpell(sid)
-            if base and base > 0 then return base end
-        end
-        return sid
-    end
-
-    -- Resolve a base spell ID to its current live version (talent overrides).
-    -- E.g. Flame Shock (188389) -> Voltaic Blaze (470057) when talented.
-    local function ResolveToLive(sid)
-        if not sid or sid <= 0 then return sid end
-        if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-            local ovr = C_SpellBook.FindSpellOverrideByID(sid)
-            if ovr and ovr > 0 then return ovr end
-        end
-        return sid
-    end
+    -- Normalize a spell ID to its base (undo talent overrides), and resolve
+    -- a base id to its current live version (talent overrides) -- both
+    -- delegate to the resident module (EllesmereUICdmSpellPicker.lua) so
+    -- every consumer, including the resident keep/drop reconcile pass,
+    -- shares one implementation instead of a second local copy drifting out of sync.
+    local NormalizeToBase = ns.NormalizeToBase
+    local ResolveToLive = ns.ResolveToLive
 
     -- Texture-only sibling: tracked-buff slots hold AURA ids, which carry no override
     -- when a talent replaces the spell, so the icon needs the shared resolver's spellbook
@@ -6500,13 +6486,25 @@ initFrame:SetScript("OnEvent", function(self)
             local catalog = migrated and ns.EnumerateCDMSettingsCatalog() or nil
             if catalog and #catalog > 0 and IsPlayerSpell then
                 local evc = Enum and Enum.CooldownViewerCategory
-                local wantCat
+                -- Per-bar category wantSet, not a single wantCat value: a
+                -- SpecAgnostic/EquipSlot cooldown entry (Midnight's category
+                -- expansion) has no single category that could ever match a
+                -- two-branch if/else, and would stay invisible to this
+                -- materializer forever while untalented/unequipped.
+                local wantSet
                 if evc then
-                    if barKeyE == "cooldowns" then wantCat = evc.Essential
-                    else wantCat = evc.Utility end
+                    if barKeyE == "cooldowns" then
+                        wantSet = {
+                            [evc.Essential or 0] = true,
+                            [evc.SpecAgnosticEssential or 5] = true,
+                            [evc.EquipSlotEssential or 7] = true,
+                        }
+                    else
+                        wantSet = { [evc.Utility or 1] = true }
+                    end
                 end
                 local FindVar = ns.FindVariantIndexInList
-                if wantCat ~= nil and FindVar then
+                if wantSet and FindVar then
                     if not sd.assignedSpells then sd.assignedSpells = {} end
                     local list = sd.assignedSpells
                     local removed = sd.removedSpells
@@ -6532,7 +6530,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     for ci = 1, #catalog do
                         local ce = catalog[ci]
-                        if ce.category == wantCat then
+                        if wantSet[ce.category] then
                             local nsid = NormalizeToBase(ce.sid)
                             local isKnownM = true
                             if type(nsid) == "number" and nsid > 0 then
@@ -6602,228 +6600,12 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
         end
-        -- Drop regular Blizzard spells the user CLEARED from Blizzard's CDM (no longer in
-        -- the live Essential/Utility viewer). The preview is built 1:1 from assignedSpells,
-        -- so without this it keeps showing spells the live bar no longer renders. Preserve
-        -- all user-added entries (trinkets/item presets = negatives, custom spell IDs,
-        -- racials, preset metadata). CD/utility bars only; skipped if the viewer set looks empty/unready so a transient gap never wipes assignments.
-        do
-            local bdE = ns.barDataByKey and ns.barDataByKey[barKeyE]
-            local btE = bdE and bdE.barType
-            if (btE == "cooldowns" or btE == "utility")
-               and sd.assignedSpells and #sd.assignedSpells > 0
-               and ns.EnumerateCDMViewerSpells then
-                local displayed
-                for _, e in ipairs(ns.EnumerateCDMViewerSpells(false)) do
-                    local sid = e.sid
-                    if type(sid) == "number" and sid > 0 then
-                        displayed = displayed or {}
-                        displayed[sid] = true
-                        displayed[NormalizeToBase(sid)] = true
-                        local ov = ResolveToLive(sid)
-                        if ov then displayed[ov] = true end
-                    end
-                end
-                if displayed and next(displayed) then
-                    -- Blizzard's tracked-cooldown catalog (talent-independent, arrangement-
-                    -- aware) is the source untalented spells were materialized from; lets the
-                    -- keep test below also drop an untalented spell the user removed from
-                    -- tracking (moved to Not Displayed), invisible to the `displayed` set since untalented spells never get a live frame. nil provider -> untalented entries kept (safe fallback).
-                    local catalogSet
-                    if ns.EnumerateCDMSettingsCatalog then
-                        local cat = ns.EnumerateCDMSettingsCatalog()
-                        if cat then
-                            catalogSet = {}
-                            local gciC = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-                            local function AddCatalogVariant(v)
-                                if type(v) == "number"
-                                   and not (issecretvalue and issecretvalue(v))
-                                   and v > 0 then
-                                    catalogSet[v] = true
-                                end
-                            end
-                            for _, ce in ipairs(cat) do
-                                local s = ce.sid
-                                if type(s) == "number" and s > 0 then
-                                    catalogSet[s] = true
-                                    catalogSet[NormalizeToBase(s)] = true
-                                    local ov = ResolveToLive(s)
-                                    if ov then catalogSet[ov] = true end
-                                end
-                                -- Also index every id the entry itself links
-                                -- (spellID/overrideSpellID/linkedSpellIDs) -- the
-                                -- same bridge the runtime router uses. A stored
-                                -- BASE id (e.g. Whirlwind saved for the Cleave
-                                -- entry) only matches the catalog through the
-                                -- entry's own linked set once the override talent
-                                -- is dropped and the spellbook link goes with it.
-                                local infoC = gciC and ce.cdID and gciC(ce.cdID)
-                                if infoC then
-                                    AddCatalogVariant(infoC.spellID)
-                                    AddCatalogVariant(infoC.overrideSpellID)
-                                    if infoC.linkedSpellIDs then
-                                        for _, lidC in ipairs(infoC.linkedSpellIDs) do
-                                            AddCatalogVariant(lidC)
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    local custom  = sd.customSpellIDs
-                    local racials = ns._myRacialsSet
-                    local cdurs   = sd.customSpellDurations
-                    local sdurs   = sd.spellDurations
-                    local groups  = sd.customSpellGroups
-                    local hosted  = sd.hostedBuffSpellIDs
-                    -- Marker-present set: when a hosted buff has its own MARKER
-                    -- entry, a PLAIN entry of the same id is the spell's COOLDOWN
-                    -- form and must not borrow the hosted exemption below --
-                    -- untracking the cooldown in Blizzard's CDM should drop it
-                    -- like any other cooldown while the hosted buff stays.
-                    local hostedMarkerFor
-                    if hosted then
-                        for _, mid in ipairs(sd.assignedSpells) do
-                            local mSid = ns.HostedBuffMarkerToSpell and ns.HostedBuffMarkerToSpell(mid)
-                            if mSid then
-                                hostedMarkerFor = hostedMarkerFor or {}
-                                hostedMarkerFor[mSid] = true
-                            end
-                        end
-                    end
-                    local writeIdx = 1
-                    for readIdx = 1, #sd.assignedSpells do
-                        local id = sd.assignedSpells[readIdx]
-                        local keep = true
-                        -- A HOSTED buff is a real buff (never in the Essential/Utility viewer),
-                        -- so the "owned but not displayed -> drop" test below would wrongly
-                        -- delete it; it is user-placed, always keep, like a custom spell ID/racial.
-                        if type(id) == "number" and id > 0
-                           and not (custom and custom[id])
-                           and not (racials and racials[id])
-                           and not (cdurs and cdurs[id])
-                           and not (sdurs and sdurs[id])
-                           and not (groups and groups[id])
-                           and not (hosted and hosted[id]
-                                    and not (hostedMarkerFor and hostedMarkerFor[id])) then
-                            -- Plain Blizzard cooldown. Keep if still displayed OR if the
-                            -- player no longer HAS the spell (talented out): a talented-out
-                            -- cooldown must hold its rank so it returns to the SAME slot when
-                            -- re-talented, not get deleted and re-appended at a Blizzard-layout
-                            -- position later. Only a spell still OWNED but removed from Blizzard's CDM tracking (gone from the catalog too) is genuinely user-cleared -> drop.
-                            local shown = displayed[id] or displayed[NormalizeToBase(id)]
-                                          or displayed[ResolveToLive(id)]
-                            -- IsPlayerSpell is guarded (nil in some contexts): if unavailable, `have`
-                            -- is falsy so the spell is treated as untalented (kept unless the catalog says otherwise).
-                            local have = IsPlayerSpell and (IsPlayerSpell(id)
-                                         or IsPlayerSpell(NormalizeToBase(id))
-                                         or IsPlayerSpell(ResolveToLive(id)))
-                            if shown then
-                                keep = true
-                            elseif catalogSet and not importPending
-                                   and (catalogSet[id] or catalogSet[NormalizeToBase(id)]
-                                        or catalogSet[ResolveToLive(id)]) then
-                                -- Still tracked in Blizzard's catalog, just not displayed:
-                                -- untalented, conditionally pooled, or a BASE id whose tracked
-                                -- cooldown is a talent override the player dropped (Whirlwind stored
-                                -- for Cleave -- IsPlayerSpell vouches for the base while the actual cooldown is untalented, so the owned->drop below would wrongly delete it). Hold rank.
-                                keep = true
-                            elseif have then
-                                -- Owned but no longer tracked: the user cleared it from Blizzard's CDM tracking -> drop.
-                                keep = false
-                            elseif catalogSet and not importPending then
-                                -- Untalented: it only reached the preview by being materialized from
-                                -- the settings catalog, so it must also LEAVE when removed from tracking (moved to Not Displayed = gone from the catalog) -> drop.
-                                keep = false
-                            else
-                                -- Untalented with no catalog signal (provider down, or mid-import):
-                                -- hold rank as the safe fallback, so a transient gap never wipes an untalented assignment and import ghosting keeps ownership of reconciliation.
-                                keep = true
-                            end
-                        end
-                        if keep then
-                            sd.assignedSpells[writeIdx] = id
-                            writeIdx = writeIdx + 1
-                        end
-                    end
-                    for i = writeIdx, #sd.assignedSpells do sd.assignedSpells[i] = nil end
-                    -- Normalize the hosted-buff representation: a hosted buff owns a MARKER
-                    -- entry, a plain entry of the same id means the COOLDOWN form. Pre-marker
-                    -- data stored it as a plain entry (ambiguous when also a cooldown) -- resolve each flagged id here, where displayed/catalog sets can tell the forms apart.
-                    if sd.hostedBuffSpellIDs and ns.HostedBuffMarker then
-                        local list = sd.assignedSpells
-                        local ghostSdN = ns.GetBarSpellData and ns.GetBarSpellData("__ghost_cd")
-                        local ghostListN = ghostSdN and ghostSdN.assignedSpells
-                        local FindVarN = ns.FindVariantIndexInList
-                        -- Plain entries claimed by OTHER visible bars (variant-aware): if the
-                        -- cooldown form lives elsewhere, a plain entry here is a resurrected artifact of the old shared-id model.
-                        local claimedN
-                        do
-                            local spN = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
-                            local skN = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
-                            local aprofN = spN and skN and spN[skN]
-                            local bsAllN = aprofN and aprofN.barSpells
-                            if bsAllN and ns.StoreVariantValue then
-                                for kN, bsdN in pairs(bsAllN) do
-                                    if kN ~= barKeyE and kN ~= "__ghost_cd"
-                                       and type(bsdN) == "table" and type(bsdN.assignedSpells) == "table" then
-                                        for _, sidN in ipairs(bsdN.assignedSpells) do
-                                            if type(sidN) == "number" and sidN > 0 then
-                                                claimedN = claimedN or {}
-                                                ns.StoreVariantValue(claimedN, sidN, true, false)
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                        for hsid in pairs(sd.hostedBuffSpellIDs) do
-                            if type(hsid) == "number" and hsid > 0 then
-                                local markerN = ns.HostedBuffMarker(hsid)
-                                local markerIdx, plainIdx
-                                for i = 1, #list do
-                                    local v = list[i]
-                                    if v == markerN then markerIdx = i
-                                    elseif v == hsid then plainIdx = i end
-                                end
-                                if plainIdx then
-                                    -- Is there a real COOLDOWN form for this id (displayed or in the
-                                    -- tracked catalog, not ghosted, not claimed by another bar)? Then the plain entry is a legitimate cooldown member of this bar.
-                                    local isCdForm = (displayed[hsid]
-                                        or displayed[NormalizeToBase(hsid)]
-                                        or displayed[ResolveToLive(hsid)]
-                                        or (catalogSet and (catalogSet[hsid]
-                                            or catalogSet[NormalizeToBase(hsid)]
-                                            or catalogSet[ResolveToLive(hsid)]))) and true or false
-                                    if isCdForm and ghostListN and FindVarN
-                                       and FindVarN(ghostListN, hsid) then
-                                        isCdForm = false
-                                    end
-                                    if isCdForm and claimedN and ns.ResolveVariantValue
-                                       and ns.ResolveVariantValue(claimedN, hsid) then
-                                        isCdForm = false
-                                    end
-                                    if markerIdx then
-                                        -- Marker already present: a plain twin is kept only when it's a real cooldown member; otherwise it's an artifact.
-                                        if not isCdForm then
-                                            table.remove(list, plainIdx)
-                                            ns._spellOrderDirty = true
-                                        end
-                                    elseif isCdForm then
-                                        -- Legit dual form: keep the cooldown entry and give the hosted buff its own slot right next to it.
-                                        table.insert(list, plainIdx + 1, markerN)
-                                        ns._spellOrderDirty = true
-                                    else
-                                        -- Buff-only: the plain entry IS the hosted buff -- convert in place (keeps its slot).
-                                        list[plainIdx] = markerN
-                                        ns._spellOrderDirty = true
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+        -- Keep/drop reconciliation now lives in the resident module (single
+        -- implementation shared with the automatic reseed/settings-close
+        -- triggers -- see ns.ReconcileAssignedSpellDrops in
+        -- EllesmereUICooldownManager.lua for the full decision ladder).
+        if ns.ReconcileAssignedSpellDrops then
+            sd = ns.ReconcileAssignedSpellDrops(barKeyE) or sd
         end
         -- Self-heal HOSTED buffs: a hosted buff must live in assignedSpells (Phase 3 sort
         -- keys off its MARKER entry), but a drop pass can strand one in hostedBuffSpellIDs
@@ -13706,7 +13488,9 @@ initFrame:SetScript("OnEvent", function(self)
             local gcs = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCategorySet
             local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
             if gcs and gci then
-                for cat = 0, 3 do
+                -- 0-8 covers every Midnight CooldownViewerCategory value; the
+                -- Hidden pseudo-categories are negative and excluded by the range.
+                for cat = 0, 8 do
                     local ids = gcs(cat, true)
                     if ids then
                         for _, cdID in ipairs(ids) do

@@ -617,10 +617,14 @@ local function ApplyQuestTypeIcon(block)
                      and block.ItemButton:IsShown())
                  or (block.itemButton and block.itemButton.IsShown
                      and block.itemButton:IsShown())
+    -- block.GroupFinderButton was probed here too until the /fstack evidence in the
+    -- group-finder click fix proved it never exists (that same nil field left the
+    -- button unraised and unclickable). rightEdgeFrame is what actually covers the
+    -- group finder: it holds the LAST right-edge frame added, which is the group
+    -- finder on a quest that has only that, and a quest with both is already caught
+    -- by ItemButton above.
     local hasLFG  = (block.groupFinderButton and block.groupFinderButton.IsShown
                      and block.groupFinderButton:IsShown())
-                 or (block.GroupFinderButton and block.GroupFinderButton.IsShown
-                     and block.GroupFinderButton:IsShown())
                  or (block.rightEdgeFrame and block.rightEdgeFrame.IsShown
                      and block.rightEdgeFrame:IsShown())
     if hasItem or hasLFG then

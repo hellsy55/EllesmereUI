@@ -279,21 +279,48 @@ local function ResolveFrameSpellID(frame)
     end
 
     local info = C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-    if not info then return nil, nil end
-    local displaySID = ResolveInfoSpellID(info)
+    local displaySID = info and ResolveInfoSpellID(info)
+    if not displaySID or displaySID <= 0 then
+        -- New-category rows (racials cat 5/6, equip-slot items cat 7/8) are
+        -- nil shells in BOTH the raw and merged data spaces (field-probed:
+        -- racial rows carry only spellCategoryID, item rows only equipSlot,
+        -- and linkedSpellIDs sits empty at rest) -- the resolved identity
+        -- exists ONLY on the live frame. GetSpellID() reads SECRET while an
+        -- aura is active: a plain read serves this paint and fills the memo
+        -- at the head of this function for later secret windows; a secret
+        -- read resolves nothing this pass (fail-open, the next inactive
+        -- read heals).
+        local live = frame.GetSpellID and frame:GetSpellID()
+        if issecretvalue and issecretvalue(live) then live = nil end
+        if type(live) == "number" and live > 0 then
+            displaySID = live
+        end
+    end
     if not displaySID or displaySID <= 0 then return nil, nil end
-    local baseSID = info.spellID
+    local baseSID = info and info.spellID
     if not baseSID or baseSID <= 0 then baseSID = displaySID end
 
     if not fc then fc = {}; _ecmeFC[frame] = fc end
     fc.resolvedSid = displaySID
     fc.baseSpellID = baseSID
-    fc.overrideSid = info.overrideSpellID
+    fc.overrideSid = info and info.overrideSpellID or nil
     fc.cachedCdID  = cdID
     fc.cachedAuraInstID = frame.auraInstanceID
+    -- Native item rows identify by equipment slot (13/14 trinkets etc.);
+    -- stashed for the slot-keyed settings/arbitration lane.
+    fc.equipSlot = info and info.equipSlot or nil
 
-    if info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+    if info and info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
         fc.linkedSpellIDs = info.linkedSpellIDs
+        -- Learn buff-family variant aliases here, not at DecorateFrame time: only the two
+        -- buff viewers host dual-tracked buff forms, and frame.viewerFrame (the raw
+        -- Blizzard field) is already readable at this point, before fd._isBuffViewerFrame
+        -- exists.
+        if ns.LearnBuffVariantAlias
+           and (frame.viewerFrame == _G.BuffIconCooldownViewer
+                or frame.viewerFrame == _G.BuffBarCooldownViewer) then
+            ns.LearnBuffVariantAlias(displaySID, info.linkedSpellIDs)
+        end
     else
         fc.linkedSpellIDs = nil
     end
@@ -7917,6 +7944,12 @@ local function CollectAndReanchor()
             if not ns._reseededSpecsSession[specKey] then
                 ns._reseededSpecsSession[specKey] = true
                 ns.ReseedAssignedSpellsFromLiveIcons(true)
+                -- Same once-per-spec edge as the reseed above: automatic
+                -- keep/drop reconciliation piggybacks here so a fresh spec's
+                -- stale-category entries clear without the user needing to
+                -- open the options panel (the interactive path calls
+                -- ns.ReconcileAssignedSpellDrops directly).
+                if ns.RequestCDMDropPass then ns.RequestCDMDropPass("reseed") end
             end
         end
     end
@@ -8839,19 +8872,25 @@ end
 --  Reanchor extra buff bars shortly after the Blizzard CDM settings panel
 --  closes, once Blizzard has finished rebuilding its viewer pools.
 --
---  Do NOT reintroduce frame-pool-based orphan pruning here (stripping any
---  positive assignedSpells entry whose spellID isn't found in the BuffIcon
---  pool/CDM category set): DUAL-TRACKED spells carrying more than one variant
---  spell ID cause data loss. E.g. Vengeance DH stores Metamorphosis as 191427,
---  but every live Vengeance frame reports 187827 -- 191427 surfaces ONLY via
---  the buff frame's linkedSpellIDs, and ONLY while the buff is active, so this
---  sync (running ~0.3s after the panel closes, when Meta is typically down)
---  would match neither the pool nor the category set and delete it -- which
---  also destroys the route-map diversion, spilling re-tracked Meta onto the
---  DEFAULT buffs bar. No state-independent check can recognize 191427 while
---  Meta is inactive, so the prune is unfixable for this class of spell; an
---  untracked buff instead lingers as a harmless non-rendering preview entry
---  (removable by hand), consistent with the CD/utility side.
+--  Buff-family removal happens ONLY inside ns.ReconcileAssignedSpellDrops's
+--  buff-family branch, gated on the persisted variant-alias ledger: a
+--  candidate id drops only once every learned-family member is absent from
+--  the buff-category catalog present-set AND not currently displayed. This
+--  function never prunes. Do NOT reintroduce frame-pool-based orphan pruning
+--  here (stripping any positive assignedSpells entry whose spellID isn't
+--  found in the BuffIcon pool/CDM category set): DUAL-TRACKED spells
+--  carrying more than one variant spell ID cause data loss. E.g. Vengeance
+--  DH stores Metamorphosis as 191427, but every live Vengeance frame reports
+--  187827 -- 191427 surfaces ONLY via the buff frame's linkedSpellIDs, and
+--  ONLY while the buff is active, so a presence-only prune running here
+--  (~0.3s after the panel closes, when Meta is typically down) would match
+--  neither the pool nor the category set and delete it -- which also
+--  destroys the route-map diversion, spilling re-tracked Meta onto the
+--  DEFAULT buffs bar. The ledger-gated pass survives this case once the
+--  191427<->187827 pairing has been learned, by keeping the whole family
+--  alive while any member (e.g. 187827) is present; a family never learned
+--  on this spec remains a harmless non-rendering preview entry (removable
+--  by hand), consistent with the CD/utility side.
 -------------------------------------------------------------------------------
 function ns.SyncExtraBuffBarsWithViewer()
     QueueReanchor()
@@ -9117,6 +9156,12 @@ function ns.SetupViewerHooks()
             -- Delay sync slightly longer so Blizzard finishes rebuilding pools
             C_Timer.After(0.3, function()
                 ns.SyncExtraBuffBarsWithViewer()
+            end)
+            -- Reconcile keep/drop after Blizzard's layout writes settle and
+            -- our own sync/reanchor above have run, so the pass sees the
+            -- post-close viewer state rather than a mid-close transient.
+            C_Timer.After(0.4, function()
+                if ns.RequestCDMDropPass then ns.RequestCDMDropPass("settings") end
             end)
         end, cdmSettingsOwner)
     end

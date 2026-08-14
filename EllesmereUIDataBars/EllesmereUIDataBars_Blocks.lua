@@ -2134,7 +2134,6 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
             inst:Refresh()
         end
     end)
-
     local nameText = content:CreateFontString(nil, "OVERLAY")
     AttachTextOffset(inst, nameText)
     local bar = CreateFrame("StatusBar", nil, content)
@@ -2149,11 +2148,24 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
     local function ComputeState()
         UpdateMode()
         if mode == "xp" then
-            -- At the level cap (or with XP gains off) there is no XP: collapse like rep mode
-            -- with no watched faction, even when the user forced Experience mode (otherwise "0% to level cap+1" junk).
+            -- At the level cap (or with XP gains off) there is no XP. AUTO mode
+            -- collapses (return nil) -- but an EXPLICIT d.mode must always render:
+            -- nil hides `content`, and barButton is a CHILD of content, so a
+            -- collapsed block has no hitbox and the right-click that toggles the
+            -- persisted mode back can never fire again -- the block stayed
+            -- cleared across reloads (field report 2026-08-13). The placeholder
+            -- keeps the block alive and names the way back.
             local atMax = XPAtMaxLevel()
             local xpOff = IsXPUserDisabled and IsXPUserDisabled()
-            if atMax or xpOff then return nil end
+            if atMax or xpOff then
+                if D().mode ~= "xp" then return nil end
+                return {
+                    label = xpOff and "XP Off (Right-Click: Rep)"
+                                   or "Max Level (Right-Click: Rep)",
+                    minV = 0, maxV = 1, curV = 0,
+                    r = 0.5, g = 0.5, b = 0.5, rested = 0,
+                }
+            end
             local curXP = UnitXP("player") or 0
             local maxXP = UnitXPMax("player") or 1
             if maxXP <= 0 then maxXP = 1 end
@@ -2169,7 +2181,18 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
             }
         end
         local name, reaction, minV, maxV, curV, factionID = GetWatchedFactionInfoCompat()
-        if not name then return nil end
+        if not name then
+            -- Same trap as the XP branch above: collapse only in AUTO mode. The
+            -- reported repro is exactly this arm -- right-click on the XP bar
+            -- forces d.mode="rep" with no watched faction, and the collapsed
+            -- block ate every later click.
+            if D().mode ~= "rep" then return nil end
+            return {
+                label = "No Rep Tracked",
+                minV = 0, maxV = 1, curV = 0,
+                r = 0.5, g = 0.5, b = 0.5, rested = 0,
+            }
+        end
         -- Major Factions (renown progress)
         if factionID and C_MajorFactions and C_MajorFactions.GetMajorFactionData then
             local mfd = C_MajorFactions.GetMajorFactionData(factionID)
@@ -2200,6 +2223,40 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
             r = cr, g = cg, b = cb, rested = 0,
         }
     end
+
+    -- Tooltip parity with every other block (clock/FPS/gold): info + the
+    -- action rows that document the mode toggle -- the toggle was invisible
+    -- without it. Built from the SAME ComputeState the bar renders from, so
+    -- the tip can never disagree with the bar (renown/paragon/placeholder
+    -- labels all inherit). Built on hover only -- zero idle cost. Wired HERE,
+    -- below ComputeState's declaration: at the barButton creation site above
+    -- the name would compile as a nil global inside the closure.
+    barButton:SetScript("OnEnter", function()
+        local state = ComputeState()
+        if not state then return end
+        local ar, ag, ab = ns.GetAccent()
+        ns.Tip_Begin(barButton)
+        ns.Tip_AddLine(state.label, 1, 1, 1)
+        if state.maxV and state.maxV > 1 then
+            local bl = BreakUpLargeNumbers
+            ns.Tip_AddDouble(L["PROGRESS"],
+                (bl and bl(state.curV) or state.curV) .. " / " .. (bl and bl(state.maxV) or state.maxV),
+                0.6, 0.6, 0.6, 1, 1, 1)
+        end
+        if state.rested and state.rested > 0 then
+            local bl = BreakUpLargeNumbers
+            ns.Tip_AddDouble(L["RESTED"], (bl and bl(state.rested) or state.rested),
+                0.6, 0.6, 0.6, 0.3, 0.3, 1)
+        end
+        ns.Tip_AddLine(" ")
+        ns.Tip_AddDouble(L["RIGHT_CLICK"],
+            mode == "xp" and L["SWITCH_TO_REP"] or L["SWITCH_TO_XP"],
+            1, 1, 1, ar, ag, ab)
+        ns.Tip_Show()
+    end)
+    barButton:SetScript("OnLeave", function()
+        ns.Tip_Hide(barButton)
+    end)
 
     function inst:Refresh()
         local barCfg = BC()

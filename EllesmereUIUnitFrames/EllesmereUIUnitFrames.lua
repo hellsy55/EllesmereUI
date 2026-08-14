@@ -2972,6 +2972,26 @@ function PortraitOverride(self, event, evtUnit)
                 element:SetPosition(0, 0, 0)
                 element:SetCamDistanceScale(camScale)
             end
+        elseif element.isClass then
+            -- Class sprite lane: the engine painter is the single portrait
+            -- dispatch, so class mode paints here too. SetPortraitTexture on
+            -- this element would stamp portrait art through the sprite
+            -- cell's texcoords (the field-reported weird-colored square);
+            -- ApplyClassIconTexture instead re-asserts file + coords, and
+            -- re-reading the style here lets art-style changes ride any
+            -- repaint. Unit swaps (target changes) land through the same
+            -- guid gate as every other portrait mode.
+            if isAvailable then
+                local _, ct = UnitClass(u)
+                if issecretvalue(ct) then ct = nil end
+                local uKeyC = UnitToSettingsKey(u)
+                local uSC = uKeyC and db.profile[uKeyC]
+                ApplyClassIconTexture(element, ct or "WARRIOR",
+                    (uSC and uSC.classThemeStyle) or "modern")
+            else
+                element:SetTexCoord(0.15, 0.85, 0.15, 0.85)
+                element:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]])
+            end
         else
             if isAvailable then
                 SetPortraitTexture(element, u)
@@ -5567,7 +5587,6 @@ local function CreatePortrait(frame, side, frameHeight, unit)
             local cs = ((us and us.portrait3dZoom) or 100) / 100
             self:SetCamDistanceScale(cs)
         end
-        model3D.Override = PortraitOverride
         model3D:Hide()
         backdrop._3d = model3D
         return model3D
@@ -5578,10 +5597,11 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     PP.Point(tex2D, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
     PP.Point(tex2D, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
     tex2D:SetTexCoord(0.15, 0.85, 0.15, 0.85)
-    tex2D.Override = PortraitOverride
     tex2D:Hide()
 
-    -- Class theme icon: a static texture, no oUF element needed.
+    -- Class theme icon: painted by the engine portrait painter's class lane
+    -- (element.isClass); this creation-time paint only seeds art before the
+    -- first dispatch.
     local texClass = backdrop:CreateTexture(nil, "ARTWORK")
     local classInset = math.floor(portraitHeight * 0.08)
     PP.Point(texClass, "TOPLEFT", backdrop, "TOPLEFT", classInset, -classInset)
@@ -5592,20 +5612,6 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
     ApplyClassIconTexture(texClass, classToken or "WARRIOR", classStyle)
     texClass:Hide()
-
-    texClass.Override = function(self, event, unit)
-        local f = self.__owner
-        if not f then return end
-        local evUnit = (event == "OnUpdate" and f.unit) or unit
-        if not evUnit or not UnitIsUnit(f.unit, evUnit) then return end
-        local targetUnit = f.unit
-        local _, ct = UnitClass(targetUnit)
-        if issecretvalue(ct) then ct = nil end
-        local uS = db.profile[UnitToSettingsKey(targetUnit)] or db.profile.player
-        local cStyle = (uS and uS.classThemeStyle) or "modern"
-        ApplyClassIconTexture(self, ct or "WARRIOR", cStyle)
-        self:Show()
-    end
 
     backdrop._3d = model3D
     backdrop._2d = tex2D
@@ -13141,11 +13147,6 @@ function InitializeFrames()
                 if frame:IsElementEnabled("Portrait") then
                     frame:DisableElement("Portrait")
                 end
-            elseif settings.portraitMode == "class" and unit == "player" then
-                -- Class theme is a static texture -- disable oUF Portrait element (player only)
-                if frame:IsElementEnabled("Portrait") then
-                    frame:DisableElement("Portrait")
-                end
             end
         end
     end
@@ -13827,6 +13828,45 @@ end
 function SetupOptionsPanel()
     ns.db = db
     ns.frames = frames
+
+    -- Live Enable Boss Frames for the EUI source. The boss frames spawn at login
+    -- only, so the enable toggle used to be a silent no-op in the ON->OFF
+    -- direction: PromptReloadIfUnspawned only prompts when frames are MISSING,
+    -- and nothing hid the live frames -- they kept showing on every boss for the
+    -- rest of the session (field report 2026-08-13; Blizzard source toggled live,
+    -- hence "only works on Blizzard default"). The unit watch is the show/hide
+    -- authority (RegisterUnitWatch at spawn), so toggling it IS the live enable/
+    -- disable; frames never spawned this session still fall through to the
+    -- reload prompt in the options setter. Watch/Hide writes on these secure
+    -- frames are lockdown-blocked: in combat, park a one-shot that re-applies
+    -- the CURRENT setting at regen (reads the profile at fire time, so the last
+    -- click wins and stacked toggles collapse to one apply).
+    function ns.UF_SetBossFramesActive(on)
+        if InCombatLockdown() then
+            local w = ns._bossToggleRegen
+            if not w then
+                w = CreateFrame("Frame")
+                w:SetScript("OnEvent", function(self)
+                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    ns.UF_SetBossFramesActive(db.profile.enabledFrames.boss ~= false)
+                end)
+                ns._bossToggleRegen = w
+            end
+            w:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
+        for i = 1, 5 do
+            local f = frames["boss" .. i]
+            if f then
+                if on then
+                    RegisterUnitWatch(f)
+                else
+                    UnregisterUnitWatch(f)
+                    f:Hide()
+                end
+            end
+        end
+    end
     ns.ApplyFramePosition = ApplyFramePosition
     ns.GetFrameDimensions = GetFrameDimensions
     local reloadPending = false

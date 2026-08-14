@@ -281,9 +281,15 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                     -- %f is the built-in chat substitution for the focus unit's
                     -- name. The marker icon is only advertised when Auto Mark is
                     -- on -- otherwise the message would name a marker nothing set.
+                    -- The one player-visible word: localized at bake time so the
+                    -- party message reads in the user's language (macro text is
+                    -- baked when written, so a later game-language switch keeps
+                    -- the old wording until a toggle is touched -- inherent to
+                    -- macros).
+                    local focusWord = (EllesmereUI.L and EllesmereUI.L("Focus")) or "Focus"
                     lines[#lines + 1] = db.autoMark
-                        and ("/p Focus: {rt" .. mark .. "} %f")
-                        or "/p Focus: %f"
+                        and ("/p " .. focusWord .. ": {rt" .. mark .. "} %f")
+                        or ("/p " .. focusWord .. ": %f")
                 end
                 return table.concat(lines, "\n")
             end,

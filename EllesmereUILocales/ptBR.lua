@@ -1008,7 +1008,6 @@ L["Action Menu Keybind"] = "Atalho do menu de ações"
 L["Toggled Menu Select Action"] = "Ação de seleção do menu alternável"
 L["Toggle Menu Open"] = "Manter menu aberto"
 L["a Toggled Menu Select Action keybind"] = "um atalho de ação de seleção do menu alternável"
-L["Keep this menu open when you let go of its keybind.\nPoint at an entry and press the Select Action key to use it.\nPress the menu's own keybind again, or Escape, to close it."] = "Mantém este menu aberto quando você solta seu atalho.\nAponte para uma entrada e pressione a tecla de ação de seleção para usá-la.\nPressione o próprio atalho do menu novamente, ou Esc, para fechá-lo."
 L["Uses the entry you are pointing at while a menu is kept open with Toggle Menu Open. One key shared by every menu, claimed only while a menu is up -- a mouse button keeps its normal use the rest of the time."] = "Usa a entrada que você está apontando enquanto um menu é mantido aberto com Manter Menu Aberto. Uma tecla compartilhada por todos os menus, reivindicada apenas enquanto um menu está aberto -- um botão do mouse mantém seu uso normal no restante do tempo."
 -- The Select Action picker localizes the COMPOSED intro + how-to-bind string
 -- (one key); the two fragments above/below stay for pickers without an intro.

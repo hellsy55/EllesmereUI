@@ -434,6 +434,12 @@ local ICICLES_SPELL_ID = 205473
 -- ticks). One namespace table for the feature (200-local cap).
 local IP = {
     SPELL = 190456,
+    -- Violent Outburst consumption: Shield Slam with the proc up refreshes Ignore
+    -- Pain's duration WITHOUT an Ignore Pain cast event, so the hash line needs the
+    -- indirect edge too. IDs are game data, field-verify on change: Shield Slam
+    -- 23922 (stable since classic), Violent Outburst proc aura 386478.
+    SHIELD_SLAM = 23922,
+    VO_PROC = 386478,
     CAP = 0.30,
     DURATION = 12,
     hashEndTime = 0,
@@ -4206,9 +4212,26 @@ local _essenceTickDur = 0      -- seconds per pip recharge
 -- Cast handler for the Prot Ignore Pain bar's moving hash line: each cast
 -- refreshes the buff, so the line resets to the right edge and slides left.
 IP.HandleCast = function(spellID)
-    if spellID ~= IP.SPELL then return end
     if not (cachedSecondary and cachedSecondary.power == "IGNOREPAIN_BAR") then return end
-    IP.hashEndTime = GetTime() + IP.DURATION
+    if spellID == IP.SPELL then
+        IP.hashEndTime = GetTime() + IP.DURATION
+        return
+    end
+    -- Indirect refresh: Shield Slam consuming Violent Outburst. Layered probe --
+    -- GetPlayerAuraBySpellID is plain table-or-nil for unflagged ids (returns
+    -- NOTHING for restriction-flagged ids, today's law), so the viewer-active
+    -- fallback (frames-as-truth, works under restriction when the user tracks
+    -- the proc) backs it up. Called at SUCCEEDED: if the proc aura is already
+    -- consumed by then BOTH probes can miss -- field question; the escalation
+    -- is a SENT-time latch, not a wider guess. A miss degrades to the
+    -- pre-fix behavior (stale tick), never a false refresh.
+    if spellID == IP.SHIELD_SLAM then
+        local aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+            and C_UnitAuras.GetPlayerAuraBySpellID(IP.VO_PROC)
+        if aura or (IP.BuffActiveViaViewer and IP.BuffActiveViaViewer(IP.VO_PROC)) then
+            IP.hashEndTime = GetTime() + IP.DURATION
+        end
+    end
 end
 
 -- Cast handler for the Guardian Ironfur bar. Only tracks while the Ironfur
@@ -4274,6 +4297,9 @@ local function BuffActiveViaCooldownViewer(spellID, wantName)
     end
     return false
 end
+-- Published for IP.HandleCast (defined ABOVE this helper -- a direct upvalue
+-- reference there would compile as a nil global; the table field binds late).
+IP.BuffActiveViaViewer = BuffActiveViaCooldownViewer
 
 local function PlayerHasBuff(spellID)
     if not spellID or spellID == 0 or not C_UnitAuras then return false end
@@ -6714,11 +6740,8 @@ ShowChannelTicks = function(spellID)
             local isLastTick = (i == count)
 
             -- Every index is filled, including the ones this pass hides: _ticks
-            -- is walked with #, and creating only the last mark (interior marks
-            -- off) leaves a hole at [1] that makes the length 0. Every later
-            -- sweep -- the stale-mark trims below and HideChannelTicks itself --
-            -- then iterates nothing, so the mark it did draw could never be
-            -- taken back off the bar.
+            -- is walked with # (the stale-mark trims below, HideChannelTicks),
+            -- so a hole at [1] would make the length 0 and end every sweep.
             local tick = castBarFrame._ticks[i]
             if not tick then
                 tick = bar:CreateTexture(nil, "OVERLAY", nil, 3)
@@ -7300,13 +7323,10 @@ local function OnCastFailed(eventCastID)
 end
 
 -- Called for UNIT_SPELLCAST_CHANNEL_STOP. Deliberately matches no ID: castBarID
--- is documented Nilable on BOTH UnitChannelInfo and this event's payload, and the
--- old equality test rejected the stop whenever either side came back nil. That
--- left _channeling set with nothing to clear it -- the channel branch of
--- UpdateCastBar had no overrun safety -- so the bar stayed parked on screen and
--- its 20 Hz tick kept running for the rest of the session. Blizzard's own
--- CastingBarFrame matches a castID for plain casts only and accepts any
--- channel/empower stop, which is what OnEmpowerStop below already does.
+-- is documented Nilable on BOTH UnitChannelInfo and this event's payload, so an
+-- equality test rejects real stops. Blizzard's own CastingBarFrame matches a
+-- castID for plain casts only and accepts any channel/empower stop, which is
+-- what OnEmpowerStop below already does.
 local function OnChannelStop()
     if not castBarFrame then return end
     if not castBarFrame._channeling then return end

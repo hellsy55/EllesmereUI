@@ -7128,10 +7128,17 @@ function NameplateFrame:ApplyCastColor(uninterruptible)
     -- doesn't reveal the interruptible color underneath the overlay.
     if C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
         local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
+        -- The settings-refresh callers pass the stored _kickProtected stamp,
+        -- which is nil until the first cast event -- and a nil reaching the
+        -- fold throws. type() is the secret-legal nil test (a plain == nil
+        -- compare throws on a secret boolean), same idiom as the Important
+        -- Cast block above.
+        local isUnint = uninterruptible
+        if type(isUnint) == "nil" then isUnint = false end
         local ev = C_CurveUtil.EvaluateColorValueFromBoolean
-        cr = ev(uninterruptible, unintColor.r, cr)
-        cg = ev(uninterruptible, unintColor.g, cg)
-        cb = ev(uninterruptible, unintColor.b, cb)
+        cr = ev(isUnint, unintColor.r, cr)
+        cg = ev(isUnint, unintColor.g, cg)
+        cb = ev(isUnint, unintColor.b, cb)
     end
     self.cast:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
     -- Shield icon is opt-out: when disabled it never shows, even on uninterruptible casts. The

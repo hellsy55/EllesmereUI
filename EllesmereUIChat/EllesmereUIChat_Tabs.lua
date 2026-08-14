@@ -130,13 +130,28 @@ ns._chatTabStrip = strip
 
 local ghosts = {}      -- pooled ghost frames, index = dock display order
 local floatGhosts = {} -- per-window-id ghosts for undocked windows
+
+-- LibChatAnims compat (DBM embeds it, among others): the lib REPLACES
+-- Blizzard's tab-flash machinery to sidestep the UIFrameFlash shared-registry
+-- taint, keeps alert state in its OWN table, and never writes tab.alerting --
+-- IsAlerting(tab) is its published accessor for exactly this integration.
+-- Lazily fetched: nil until some addon loads the lib (LibStub registry entry
+-- is identity-stable across minor upgrades, so caching the ref is safe).
+local lcaLib
+local function TabAlerting(tab)
+    if tab.alerting then return true end
+    lcaLib = lcaLib or (LibStub and LibStub("LibChatAnims", true))
+    return lcaLib and lcaLib:IsAlerting(tab) and true or false
+end
 local floatSeen = {}   -- wiped scratch set for the float surplus sweep
 
--- Dynamic (whisper) tabs live inside the dock's scroll window: on overflow
+-- Scroll-region tabs live inside the dock's scroll window: on overflow
 -- Blizzard SCROLLS them left and the scroll frame clips them at its left
--- edge (which sits at the last static tab's right edge). Their ghosts must
+-- edge (which sits at the last pinned tab's right edge). That region holds
+-- EVERY docked tab except the pinned static pair (General, Combat Log) --
+-- whisper tabs AND user-created persistent windows alike. Their ghosts must
 -- clip at exactly the same edge, or a scrolled-out ghost renders on top of
--- the static tabs. This sub-container mirrors the scroll frame's horizontal
+-- the pinned tabs. This sub-container mirrors the scroll frame's horizontal
 -- bounds with the strip's vertical bounds, live-anchored, so ghost clipping
 -- tracks Blizzard's -- including partial clips during the scroll animation.
 local dynClip = CreateFrame("Frame", nil, strip)
@@ -504,6 +519,15 @@ local function RefreshNow()
         end
     end
 
+    -- The dock's scroll child parents every SCROLLING tab (all docked tabs
+    -- except pinned General/Combat Log). Real parentage is the clip
+    -- discriminator below -- read fresh each pass, tabs redock and reorder.
+    local scrollChild
+    do
+        local sf = GENERAL_CHAT_DOCK and GENERAL_CHAT_DOCK.scrollFrame
+        scrollChild = sf and sf.GetScrollChild and sf:GetScrollChild() or nil
+    end
+
     local dockList = GENERAL_CHAT_DOCK and GENERAL_CHAT_DOCK.DOCKED_CHAT_FRAMES
     local count = 0
     if type(dockList) == "table" then
@@ -519,9 +543,17 @@ local function RefreshNow()
                 if not st then st = {}; g.state = st end
                 st.cf, st.id, st.isTemp, st.bn = cf, cf:GetID(), isTemp, nil
 
-                -- Whisper-tab ghosts clip at the dock scroll window's edges,
-                -- like their tabs; static-tab ghosts clip at the strip's.
-                local wantParent = (isTemp and EnsureDynClip()) and dynClip or strip
+                -- Ghosts of scroll-region tabs clip at the dock scroll
+                -- window's edges, like their tabs; only the pinned static
+                -- pair's ghosts clip at the strip's. User-created persistent
+                -- windows scroll exactly like whisper tabs, so the
+                -- discriminator is the tab's REAL parent (the scroll
+                -- child), never the temporary flag.
+                local wantParent = strip
+                if scrollChild and tab:GetParent() == scrollChild
+                    and EnsureDynClip() then
+                    wantParent = dynClip
+                end
                 if g:GetParent() ~= wantParent then g:SetParent(wantParent) end
 
                 g:ClearAllPoints()
@@ -581,10 +613,14 @@ local function RefreshNow()
                 -- message hits a hidden window (including the message that
                 -- CREATES a conversation window -- our ghost is born one
                 -- pass later and would miss the observer's flash), and
-                -- clears it on select.
+                -- clears it on select. Read through TabAlerting, never
+                -- tab.alerting directly: under a LibChatAnims embedder the
+                -- field stays nil forever, and this mirror then STOPPED the
+                -- flash the observer lane had just started -- whisper alerts
+                -- died within one tab pass whenever such an addon was loaded.
                 if isActive then
                     g:StopFlash()
-                elseif tab.alerting then
+                elseif TabAlerting(tab) then
                     g:StartFlash()
                 else
                     g:StopFlash()
@@ -653,10 +689,16 @@ ECHAT.TabsRefreshNow = RefreshNow
 --  while either mode is engaged; the sweep re-asserts on late joiners.
 -------------------------------------------------------------------------------
 local function SetTabClickable(tab, on)
-    if tab.SetMouseClickEnabled then
+    if not tab.SetMouseClickEnabled then return end
+    -- Temporary whisper tabs are PROTECTED in lockdown; a refused write is
+    -- left for a later sweep (the tracker records only what actually
+    -- landed, so the next TabsSweepBlizzard still sees the drift).
+    if InCombatLockdown() then
+        if not pcall(tab.SetMouseClickEnabled, tab, on) then return end
+    else
         tab:SetMouseClickEnabled(on)
-        if CFD then CFD(tab).clickOff = (not on) or nil end
     end
+    if CFD then CFD(tab).clickOff = (not on) or nil end
 end
 
 function ECHAT.TabsSweepBlizzard()
@@ -665,7 +707,11 @@ function ECHAT.TabsSweepBlizzard()
         -- Full hide owns the dock's shown state (SetChatStackShown hides it
         -- with a remember); the sweep only heals a wrongly-hidden dock when
         -- no full hide is engaged.
-        if not gdm:IsShown() and not ns._chatStackHidden then gdm:Show() end
+        if not gdm:IsShown() and not ns._chatStackHidden then
+            -- Ancestor Show with a protected docked whisper tab is blocked
+            -- in lockdown; a refused heal retries on the next sweep.
+            if InCombatLockdown() then pcall(gdm.Show, gdm) else gdm:Show() end
+        end
         if gdm:GetAlpha() ~= 0 then gdm:SetAlpha(0) end
         local ob = gdm.overflowButton
         if ob then

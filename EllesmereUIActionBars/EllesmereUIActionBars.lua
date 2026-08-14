@@ -12994,7 +12994,12 @@ function EAB:FinishSetup()
     local _gridRestorePending = false
     local function RestoreGridSurfacedBars()
         _gridRestorePending = false
-        if InCombatLockdown() then return end
+        if InCombatLockdown() then
+            -- Restore swallowed by combat (drag ended after combat began):
+            -- flag the regen ApplyAll so the stomped drivers still re-derive.
+            ns._eabApplyDeferred = true
+            return
+        end
         -- If something is still on the cursor (spell swap), don't restore yet
         if GetCursorInfo() then return end
         for key in pairs(_gridSurfacedBars) do
@@ -13002,10 +13007,6 @@ function EAB:FinishSetup()
             local s = EAB.db.profile.bars[key]
             local frame = barFrames[key]
             if info and s and frame then
-                local vis = s.barVisibility or "always"
-                if vis ~= "always" and vis ~= "never" then
-                    RegisterAttributeDriver(frame, "state-visibility", BuildVisibilityString(info, s))
-                end
                 if s.mouseoverEnabled then
                     -- The drag has fully ended (cursor cleared, checked above). If
                     -- the cursor is still over this bar, the spell was dropped here
@@ -13026,6 +13027,14 @@ function EAB:FinishSetup()
             end
         end
         wipe(_gridSurfacedBars)
+        -- Re-derive every driver through the single recompute site instead of
+        -- a local predicate: the surface condition above admits option-driven
+        -- bars (visHideMounted etc.) whose barVisibility is "always", and a
+        -- restore predicate maintained separately drifted and left exactly
+        -- those bars stuck on "show" until a settings toggle or /reload. The
+        -- surface stomp syncs _eabLastVisStr, so this compare-and-register
+        -- pass re-registers precisely the stomped bars.
+        EAB:RefreshRuntimeVisibility()
     end
     -- Registering events on a frame stamps it with the EventRegistrations forbidden
     -- aspect, and the restricted environment refuses frames carrying any aspect. The
@@ -13082,6 +13091,13 @@ function EAB:FinishSetup()
                             if hasCondition then
                                 _gridSurfacedBars[info.key] = true
                                 RegisterAttributeDriver(frame, "state-visibility", "show")
+                                -- Keep the cache in sync with the stomp (same
+                                -- class as the QuickKeybind surface fix): a
+                                -- stale cache holding the real string makes
+                                -- every later refresh compare equal and skip
+                                -- re-registering, leaving the bar stuck on
+                                -- "show" until a settings toggle or /reload.
+                                frame._eabLastVisStr = "show"
                                 frame:Show()
                             end
                             -- Mouseover bars: force alpha to 1 during drag

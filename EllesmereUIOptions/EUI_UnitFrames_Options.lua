@@ -13870,6 +13870,10 @@ initFrame:SetScript("OnEvent", function(self)
                     if not v and ns._bossPreviewActive and ns.SetBossPreview then
                         ns.SetBossPreview(false)
                     end
+                    -- Live apply on the spawned EUI frames (unit-watch register/
+                    -- unregister). Frames never spawned this session no-op here
+                    -- and hit the reload prompt below instead.
+                    if ns.UF_SetBossFramesActive then ns.UF_SetBossFramesActive(v) end
                     ReloadAndUpdate()
                     EllesmereUI:RefreshPage(true)
                     PromptReloadIfUnspawned({ "boss" })

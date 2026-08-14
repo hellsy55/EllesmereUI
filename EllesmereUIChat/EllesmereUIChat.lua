@@ -1397,8 +1397,14 @@ local function ApplyChatPosition()
     -- (a synchronous SetSize dispatch would run the dock relayout tainted),
     -- the engine layout pass dispatches its OnSizeChanged SECURE, and any
     -- Blizzard SetSize is overridden by the anchors.
+    -- Second-corner enforcement serves only while the Edit Mode store
+    -- disagrees with the saved size (pre-migration, fresh imports, declined
+    -- reloads); once the store carries it, Blizzard's own apply owns the
+    -- size and this stands down. Late-bound ns field: the EM helpers are
+    -- defined below this function.
     local size = cfg.chatSize
-    if size and size.w and size.h then
+    if size and size.w and size.h
+        and (not ns._EMChatSizeDelta or ns._EMChatSizeDelta()) then
         local composed = false
         if pos.point == "BOTTOMLEFT" and (pos.relPoint or "BOTTOMLEFT") == "BOTTOMLEFT" then
             cf1:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT",
@@ -1446,6 +1452,175 @@ local function ApplyChatPosition()
     end
 end
 ECHAT.ApplyChatPosition = ApplyChatPosition
+
+-------------------------------------------------------------------------------
+--  Edit Mode size ownership. Blizzard's saved-dimensions restore skips the
+--  main window ("controlled via edit mode"), so the EM layout is the native
+--  store for ChatFrame1's size -- and every loading screen re-applies it.
+--  Writing the user's size INTO the active layout makes that apply land the
+--  RIGHT size (no default-size flash on load screens, no post-load heal),
+--  after which the second-corner anchor enforcement in ApplyChatPosition
+--  goes dormant (EMChatSizeDelta reads false). All access goes through the
+--  C_EditMode data API only -- never EditModeManagerFrame methods (secure
+--  manager chains) -- and only ever saves a blob that came out of
+--  GetLayouts with integer setting edits, so a malformed save cannot be
+--  constructed here. Field-confirmed shape: the blob carries user layouts
+--  only, while activeLayout counts the two presets first (see the resolver
+--  comment); preset-active users skip cleanly to the legacy anchor lane,
+--  and any unexpected shape aborts the write the same way, exactly as
+--  before this system.
+-------------------------------------------------------------------------------
+local function EMChatEnums()
+    local sysEnum = Enum and Enum.EditModeSystem
+    local setEnum = Enum and Enum.EditModeChatFrameSetting
+    local layEnum = Enum and Enum.EditModeLayoutType
+    if not (sysEnum and sysEnum.ChatFrame and setEnum
+        and setEnum.WidthHundreds and setEnum.WidthTensAndOnes
+        and setEnum.HeightHundreds and setEnum.HeightTensAndOnes
+        and layEnum and layEnum.Preset ~= nil) then
+        return nil
+    end
+    return sysEnum.ChatFrame, setEnum, layEnum
+end
+
+local function EMChatFindSystem(layout, sysChat)
+    local systems = layout and layout.systems
+    if type(systems) ~= "table" then return nil end
+    for i = 1, #systems do
+        local s = systems[i]
+        if type(s) == "table" and s.system == sysChat then return s end
+    end
+end
+
+local function EMChatSettingRow(sys, settingID)
+    local st = sys and sys.settings
+    if type(st) ~= "table" then return nil end
+    for i = 1, #st do
+        local row = st[i]
+        if type(row) == "table" and row.setting == settingID then return row end
+    end
+end
+
+-- Resolve the blob and the ACTIVE layout entry under the proof rule.
+-- Returns blob, entry, sysChat, setEnum (nil on any unexpected shape).
+local function EMChatResolve()
+    if not (C_EditMode and C_EditMode.GetLayouts and C_EditMode.SaveLayouts) then return nil end
+    local sysChat, setEnum, layEnum = EMChatEnums()
+    if not sysChat then return nil end
+    -- Never touch the store while Blizzard's Edit Mode is live: the manager
+    -- keeps its OWN session copy of layoutInfo and pushes it WHOLE on Save,
+    -- so a write from here is either discarded by the next Save or discards
+    -- the edit in progress.
+    local emf = _G.EditModeManagerFrame
+    if emf and (emf.editModeActive or (emf.IsShown and emf:IsShown())) then return nil end
+    local ok, blob = pcall(C_EditMode.GetLayouts)
+    if not ok or type(blob) ~= "table" or type(blob.layouts) ~= "table" then return nil end
+    local active = blob.activeLayout
+    if type(active) ~= "number" then return nil end
+    -- SaveLayouts replaces the character's ENTIRE layout set and expects the
+    -- shape Blizzard always passes it: PRESET layouts first, then the saved
+    -- ones, with activeLayout indexing that merged list. GetLayouts returns
+    -- only the saved half (field-dumped: 3 saved entries riding
+    -- activeLayout 5), so the merged list is rebuilt here the way
+    -- EditModeManagerFrame:UpdateLayoutInfo builds it; when the presets
+    -- cannot be resolved this fails CLOSED rather than ever handing
+    -- SaveLayouts the short list. Preset entries are read-only and are
+    -- carried through untouched purely for index alignment.
+    if not (EditModePresetLayoutManager
+        and EditModePresetLayoutManager.GetCopyOfPresetLayouts) then return nil end
+    local presets = EditModePresetLayoutManager:GetCopyOfPresetLayouts()
+    if type(presets) ~= "table" or #presets == 0 then return nil end
+    local numPresets = #presets
+    if tAppendAll then
+        tAppendAll(presets, blob.layouts)
+    else
+        for i = 1, #blob.layouts do presets[numPresets + i] = blob.layouts[i] end
+    end
+    blob.layouts = presets
+    -- A preset is active: read-only, nothing safe to write (the preset-copy
+    -- flow stays the open follow-up; the legacy anchor lane serves).
+    if active <= numPresets then return nil end
+    local entry = blob.layouts[active]
+    if type(entry) ~= "table" or entry.layoutType == layEnum.Preset then return nil end
+    return blob, entry, sysChat, setEnum
+end
+
+-- Stored chat size of a layout entry (EM encodes each dimension as
+-- hundreds + tens-and-ones setting pairs). nil when unreadable.
+local function EMChatReadSize(entry, sysChat, setEnum)
+    local sys = EMChatFindSystem(entry, sysChat)
+    if not sys then return nil end
+    local wH = EMChatSettingRow(sys, setEnum.WidthHundreds)
+    local wT = EMChatSettingRow(sys, setEnum.WidthTensAndOnes)
+    local hH = EMChatSettingRow(sys, setEnum.HeightHundreds)
+    local hT = EMChatSettingRow(sys, setEnum.HeightTensAndOnes)
+    if not (wH and wT and hH and hT
+        and type(wH.value) == "number" and type(wT.value) == "number"
+        and type(hH.value) == "number" and type(hT.value) == "number") then
+        return nil
+    end
+    return wH.value * 100 + wT.value, hH.value * 100 + hT.value
+end
+
+-- True while the saved size still needs the legacy second-corner anchor:
+-- cfg.chatSize exists and the EM store disagrees (or cannot be read). Once
+-- the store carries the size, this reads false and enforcement stands down.
+local function EMChatSizeDelta()
+    local cfg = ECHAT.DB()
+    local size = cfg and cfg.chatSize
+    if not (size and size.w and size.h) then return false end
+    -- Belt: after a store write this session, keep the anchor enforcement
+    -- standing anyway. Field-tested that SaveLayouts coheres EM's cached
+    -- tables immediately, so this should never matter -- it guards the
+    -- untested edges (event timing on other clients) at the cost of one
+    -- boolean.
+    if ns._emChatWrote then return true end
+    local blob, entry, sysChat, setEnum = EMChatResolve()
+    if not blob then return true end
+    local w, h = EMChatReadSize(entry, sysChat, setEnum)
+    if not w then return true end
+    return math.abs(w - size.w) > 1 or math.abs(h - size.h) > 1
+end
+
+-- Write w/h into the active layout (copying a preset to a new account
+-- layout first when needed). Returns true only when the save landed.
+local function EMChatWriteSize(w, h)
+    if InCombatLockdown() then return false end
+    local blob, entry, sysChat, setEnum = EMChatResolve()
+    if not blob then return false end
+    local sys = EMChatFindSystem(entry, sysChat)
+    if not sys then return false end
+    local wH = EMChatSettingRow(sys, setEnum.WidthHundreds)
+    local wT = EMChatSettingRow(sys, setEnum.WidthTensAndOnes)
+    local hH = EMChatSettingRow(sys, setEnum.HeightHundreds)
+    local hT = EMChatSettingRow(sys, setEnum.HeightTensAndOnes)
+    if not (wH and wT and hH and hT) then return false end
+    w = math.max(0, math.floor(w + 0.5))
+    h = math.max(0, math.floor(h + 0.5))
+    wH.value = math.floor(w / 100)
+    wT.value = w % 100
+    hH.value = math.floor(h / 100)
+    hT.value = h % 100
+    local okSave = pcall(C_EditMode.SaveLayouts, blob)
+    if not okSave then return false end
+    ns._emChatWrote = true
+    return true
+end
+
+-- Grip release and login migration both land here: write the store when it
+-- disagrees. Fully silent -- field-tested that SaveLayouts coheres Edit
+-- Mode's cached tables immediately (opening EM after an un-reloaded write
+-- shows the new size and does not revert it), so no reload is needed and
+-- no prompt exists. Quiet no-op for everyone whose store already agrees.
+function ns.EMChatSyncSize()
+    if InCombatLockdown() then return end
+    local cfg = ECHAT.DB()
+    local size = cfg and cfg.chatSize
+    if not (size and size.w and size.h) then return end
+    if not EMChatSizeDelta() then return end
+    EMChatWriteSize(size.w, size.h)
+end
+ns._EMChatSizeDelta = EMChatSizeDelta
 
 -- Edit Mode's layout apply (login server-data arrival, layout switches) can
 -- re-rect the main window through paths the ApplySystemAnchor guard never
@@ -1635,6 +1810,9 @@ local function BuildMainChatResizeGrip(cf)
 
     grip:SetScript("OnMouseDown", function(_, button)
         if button ~= "LeftButton" then return end
+        -- Belt behind the combat hide: no drag may start in lockdown even
+        -- if a hide edge races the click.
+        if InCombatLockdown() then return end
         local issecret = _G.issecretvalue
         local left, top = cf:GetLeft(), cf:GetTop()
         local w, h = cf:GetWidth(), cf:GetHeight()
@@ -1681,6 +1859,9 @@ local function BuildMainChatResizeGrip(cf)
         end
         if ECHAT.ApplyChatPosition then ECHAT.ApplyChatPosition() end
         if ECHAT.TabsRefreshNow then ECHAT.TabsRefreshNow() end
+        -- Hand the size to the Edit Mode store (the native owner) and offer
+        -- the finalizing reload; quiet no-op when the store already agrees.
+        if ns.EMChatSyncSize then ns.EMChatSyncSize() end
     end)
     -- Lock toggled or panel hidden mid-drag: end the drag and release the
     -- position hold, or the guard would stay suspended forever.
@@ -1703,6 +1884,16 @@ local function BuildMainChatResizeGrip(cf)
         self:SetAlpha(0.2)
         if ECHAT.FollowRelease then ECHAT.FollowRelease() end
     end)
+    -- Combat gate: resizing is disabled in combat, matching Edit Mode's own
+    -- posture. Both edges recompute through the lock applier (the single
+    -- shown-state authority), so the combat hide can never fight the lock
+    -- setting; built once with the grip (idempotency guard above).
+    local combatGate = CreateFrame("Frame")
+    combatGate:RegisterEvent("PLAYER_REGEN_DISABLED")
+    combatGate:RegisterEvent("PLAYER_REGEN_ENABLED")
+    combatGate:SetScript("OnEvent", function()
+        if ECHAT.ApplyLockChatSize then ECHAT.ApplyLockChatSize() end
+    end)
 end
 ns._BuildMainChatResizeGrip = BuildMainChatResizeGrip
 
@@ -1720,7 +1911,12 @@ function ECHAT.ApplyLockChatSize()
     local cf1 = _G.ChatFrame1
     local grip = cf1 and CFD(cf1).resizeGrip
     if grip then
-        grip:SetShown(not locked)
+        -- Hidden in combat too: Edit Mode itself is combat-disabled, and a
+        -- mid-combat resize could hit protected chat frames (the whisper-
+        -- window lockdown class). The grip's OnHide ends any drag that was
+        -- live when combat started; the regen listener in the grip build
+        -- recomputes this on both combat edges.
+        grip:SetShown(not locked and not InCombatLockdown())
     end
 end
 
@@ -2439,6 +2635,14 @@ function ECHAT.TogglePortalFlyout(anchorBtn)
     end
 end
 
+-- How far below the chat frame's top edge the overlaid input sits. Keeps the
+-- box's vertically-centered text off the tab band at small editBoxHeight
+-- values (the box grows downward from a fixed top anchor, so shrinking it
+-- otherwise walks the text up toward a flush top edge). THREE places consume
+-- it and must agree or the parts separate: the edit box anchor, the reserved
+-- strip height, and the divider that marks the box's lower edge.
+local INPUT_TOP_DROP = 5
+
 -- Input-on-top overlays the top strip of the text area, and OUR message frame
 -- hands that strip back (_smfTopExtra) so no line renders under the input.
 -- Reserving it permanently costs a line of chat even while nothing is being
@@ -2463,15 +2667,17 @@ end
 function ECHAT.ApplyInputTopStrip(cf)
     local d = CFD(cf)
     if not d.bg then return end
+    local cfg = ECHAT.DB()
     local active = ECHAT.InputTopStripActive(cf)
-    -- +5 matches the edit box's own top anchor offset (ApplyInputPosition):
-    -- the box sits 5px lower than cf's top edge, so the strip must reach
-    -- that much further to still fully cover it.
-    local want = active and (GetEditBoxHeight() + 4 + 5) or nil
+    -- The strip reaches INPUT_TOP_DROP further than the box is tall, since the
+    -- box starts that far down from cf's top edge.
+    local want = active and (GetEditBoxHeight() + 4 + INPUT_TOP_DROP) or nil
     local changed = d._smfTopExtra ~= want
     d._smfTopExtra = want
+    -- The `not cfg.inputOnTop` arm is load-bearing, not redundant: bottom mode
+    -- leaves the divider to ApplyBorders, and the toggle-off pass reaches here
+    -- without ever calling it -- dropping the arm strands the divider hidden.
     if d.inputDiv then
-        local cfg = ECHAT.DB()
         d.inputDiv:SetShown(not cfg.hideBorders and (not cfg.inputOnTop or active))
     end
     if changed and ECHAT.EngineLayoutWindow then ECHAT.EngineLayoutWindow(cf) end
@@ -2504,12 +2710,8 @@ function ECHAT.ApplyInputPosition()
                     -- unaffected because chat renders bottom-up from a
                     -- shared bottom edge, and the input covers the
                     -- hit-zones of the lines it hides.
-                    -- -5: keeps text (vertically centered in the box) off the
-                    -- tab band at small editBoxHeight values -- the box grows
-                    -- downward from this anchor, so shrinking it moves the
-                    -- centered text closer to a flush top edge otherwise.
-                    eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, -5)
-                    eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -5)
+                    eb:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, -INPUT_TOP_DROP)
+                    eb:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 5, -INPUT_TOP_DROP)
                     local bgLvl = CFD(cf).bg:GetFrameLevel() or 1
                     if eb:GetFrameLevel() < bgLvl + 5 then
                         eb:SetFrameLevel(bgLvl + 5)
@@ -2524,8 +2726,12 @@ function ECHAT.ApplyInputPosition()
             if div then
                 div:ClearAllPoints()
                 if onTop then
-                    div:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, -inputHeight)
-                    div:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 10, -inputHeight)
+                    -- Flush with the box's LOWER edge, which starts
+                    -- INPUT_TOP_DROP down from cf's top and runs inputHeight
+                    -- tall -- miss the drop and the line cuts through the box.
+                    local divY = -(inputHeight + INPUT_TOP_DROP)
+                    div:SetPoint("TOPLEFT", cf, "TOPLEFT", -10, divY)
+                    div:SetPoint("TOPRIGHT", cf, "TOPRIGHT", 10, divY)
                 else
                     div:SetPoint("BOTTOMLEFT", cf, "BOTTOMLEFT", -10, -8)
                     div:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 10, -8)
@@ -2622,12 +2828,46 @@ local function GetMouseChannels(f)
     local motion = f.IsMouseMotionEnabled and f:IsMouseMotionEnabled()
     return click and true or false, motion and true or false
 end
+-- Forward declaration: the write helpers below arm it when a lockdown-
+-- blocked write is skipped; defined after SetChatStackShown.
+local ArmChatPMRegen
+
+-- Delta-gated and lockdown-contained. Reads first and writes only real
+-- changes, so the assert-every-sweep passes cost no protected calls while
+-- the state already matches (a REAL drift -- Blizzard re-arming click on
+-- its widgets -- is still a delta and still writes). Chat frames turn
+-- PROTECTED while a temporary whisper window exists, and a blocked mouse
+-- write used to throw out of the middle of a passthrough transition,
+-- stranding the state machine half-engaged (field: chat frozen / tabs dead
+-- after combat with Out of Combat visibility). Protection is not reliably
+-- queryable up front, so under lockdown each remaining write runs through
+-- pcall -- the refusal itself is the detection -- and the function returns
+-- false so the caller arms the regen re-apply. Out of combat every write
+-- is direct, exactly as before.
 local function SetMouseChannels(f, click, motion)
-    if f.SetMouseClickEnabled then f:SetMouseClickEnabled(click)
-    elseif not click then f:EnableMouse(false)
-    else f:EnableMouse(true) end
-    if f.SetMouseMotionEnabled then f:SetMouseMotionEnabled(motion)
-    elseif f.EnableMouseMotion then f:EnableMouseMotion(motion) end
+    click = click and true or false
+    motion = motion and true or false
+    local curClick, curMotion = GetMouseChannels(f)
+    local ok = true
+    if curClick ~= click then
+        local fn = f.SetMouseClickEnabled or f.EnableMouse
+        if InCombatLockdown() then
+            if not pcall(fn, f, click) then ok = false end
+        else
+            fn(f, click)
+        end
+    end
+    if curMotion ~= motion then
+        local fn = f.SetMouseMotionEnabled or f.EnableMouseMotion
+        if fn then
+            if InCombatLockdown() then
+                if not pcall(fn, f, motion) then ok = false end
+            else
+                fn(f, motion)
+            end
+        end
+    end
+    return ok
 end
 
 local function PMOff(d, key, f)
@@ -2640,11 +2880,15 @@ local function PMOff(d, key, f)
         d[key] = click
         d[key .. "M"] = motion
     end
-    SetMouseChannels(f, false, false)
+    if not SetMouseChannels(f, false, false) then ArmChatPMRegen() end
 end
 local function PMOn(d, key, f)
     if f and d[key] ~= nil then
-        SetMouseChannels(f, d[key], d[key .. "M"])
+        if not SetMouseChannels(f, d[key], d[key .. "M"]) then
+            -- Keep the capture: the regen re-apply restores from it.
+            ArmChatPMRegen()
+            return
+        end
     end
     d[key] = nil
     d[key .. "M"] = nil
@@ -2669,7 +2913,7 @@ local function PMOffChildren(d, key, parent)
             local click, motion = GetMouseChannels(c)
             store[c] = { click, motion }
         end
-        SetMouseChannels(c, false, false)
+        if not SetMouseChannels(c, false, false) then ArmChatPMRegen() end
     end
 end
 local function PMOnChildren(d, key, parent)
@@ -2680,8 +2924,12 @@ local function PMOnChildren(d, key, parent)
         local c = kids[i]
         local st = store[c]
         if st then
-            SetMouseChannels(c, st[1], st[2])
-            store[c] = nil
+            if SetMouseChannels(c, st[1], st[2]) then
+                store[c] = nil
+            else
+                -- Keep the capture for the regen re-apply.
+                ArmChatPMRegen()
+            end
         end
     end
 end
@@ -2778,11 +3026,30 @@ local function SetChatStackShown(shown)
     end
     local gdm = _G.GeneralDockManager
     if gdm then
+        -- Show/Hide of an ancestor of a PROTECTED child (a docked temporary
+        -- whisper tab in lockdown) is blocked: contain the write and let the
+        -- regen re-apply land it. The remember records only what actually
+        -- happened.
         if not shown then
-            if gdm:IsShown() then ns._gdmWasShown = true; gdm:Hide() end
+            if gdm:IsShown() then
+                if not InCombatLockdown() then
+                    ns._gdmWasShown = true
+                    gdm:Hide()
+                elseif pcall(gdm.Hide, gdm) then
+                    ns._gdmWasShown = true
+                else
+                    ArmChatPMRegen()
+                end
+            end
         elseif ns._gdmWasShown then
-            ns._gdmWasShown = nil
-            gdm:Show()
+            if not InCombatLockdown() then
+                ns._gdmWasShown = nil
+                gdm:Show()
+            elseif pcall(gdm.Show, gdm) then
+                ns._gdmWasShown = nil
+            else
+                ArmChatPMRegen()
+            end
         end
     end
     -- Our own chrome hides outright too; the per-frame remember preserves each
@@ -2808,10 +3075,40 @@ local function SetChatStackShown(shown)
     end
 end
 
+-- One-shot regen re-apply for lockdown-blocked writes. Re-asserts the
+-- CURRENT intended passthrough state whole; the delta gate makes the pass
+-- idempotent (everything that already landed is skipped, only the refused
+-- writes replay). Fires before the visibility dispatcher's deferred
+-- refresh, so a post-combat reveal starts from a clean slate. The event is
+-- registered only while armed: zero idle cost.
+local _chatPMRegenFrame
+ArmChatPMRegen = function()
+    if not _chatPMRegenFrame then
+        _chatPMRegenFrame = CreateFrame("Frame")
+        _chatPMRegenFrame:SetScript("OnEvent", function(self)
+            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+            PassthroughFrames(_chatPassthrough)
+            if _chatPassthrough and not _visChatVisible then
+                SetChatStackShown(false)
+            end
+        end)
+    end
+    _chatPMRegenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+end
+
 local function SetChatMousePassthrough(on)
     if _chatPassthrough == on then return end
     _chatPassthrough = on
     ns._chatPassthrough = on
+    -- Reveal BEFORE the restore pass: TabsSweepBlizzard (run by the tab
+    -- restore inside PassthroughFrames) derives its click state from
+    -- ns._chatPassthrough OR ns._chatStackHidden. With the stack still
+    -- remembered hidden, the restore sweep re-disables the very tabs it is
+    -- meant to re-enable, and nothing later re-runs it (field: tabs dead
+    -- after combat with in-combat hide once the engage completes cleanly).
+    -- The engage direction keeps the reverse order: sweep first (its
+    -- passthrough flag alone forces click-off), stack-hide after.
+    if not on then SetChatStackShown(true) end
     PassthroughFrames(on)
     if on then
         if not _visChatVisible then SetChatStackShown(false) end
@@ -2830,7 +3127,6 @@ local function SetChatMousePassthrough(on)
         end
     else
         StopPTWake()
-        SetChatStackShown(true)
         -- Our sidebar always runs with motion on (hover fade/reveal); the
         -- mode-specific click state is re-derived by ApplySidebarVisibility.
         local cf1 = _G.ChatFrame1
@@ -3393,11 +3689,6 @@ local function OnHyperlinkLeave(self)
         GameTooltip:Hide()
     end
 end
-
--- The engine's link takeover (armed while Shortened Channel Names is on)
--- serves hover tooltips from OUR windows through these same handlers.
-ECHAT.LinkTooltipEnter = OnHyperlinkEnter
-ECHAT.LinkTooltipLeave = OnHyperlinkLeave
 
 -- Open the copy popup when a wrapped URL link is clicked.
 hooksecurefunc("SetItemRef", function(link)
@@ -4172,13 +4463,12 @@ local function SkinChatFrame(cf)
     -- clicking several characters off from where the name is drawn.
     cf:SetIndentedWordWrap(true)
 
-    -- 3. Hyperlink handlers: hover tooltip only. While Shortened Channel
-    --    Names is OFF, Blizzard's invisible text layer owns hyperlink
-    --    hit-testing (its clicks run SetItemRef from ITS secure scripts; the
-    --    global SetItemRef hook catches our URL links) and these hooks fire.
-    --    While it is ON, the engine's link takeover mouse-blocks that layer
-    --    and serves links from OUR windows instead -- same tooltip handlers,
-    --    exposed as ECHAT.LinkTooltip*.
+    -- 3. Hyperlink handlers: hover tooltip only. Blizzard's invisible text
+    --    layer owns hyperlink hit-testing (its clicks run SetItemRef from
+    --    ITS secure scripts; the global SetItemRef hook catches our URL
+    --    links) and these hooks fire on hover. The engine's buffer
+    --    write-back keeps that layer's zones laid out under our rendered
+    --    text even for width-transformed lines.
     if not CFD(cf).hyperlinkHooked then
         CFD(cf).hyperlinkHooked = true
         cf:HookScript("OnHyperlinkEnter", function(...)
@@ -5299,6 +5589,25 @@ initFrame:SetScript("OnEvent", function(self)
     ECHAT.RefreshVisibility()
     if EUI.RegisterVisibilityUpdater then
         EUI.RegisterVisibilityUpdater(ECHAT.RefreshVisibility)
+    end
+
+    ---------------------------------------------------------------------------
+    --  13b. Edit Mode chat-size migration: one-shot after login. On-delta
+    --  only -- users who never resized (no cfg.chatSize) or whose store
+    --  already matches see nothing. A too-early pass (layouts not yet pushed
+    --  from the server) fails the writer's proof rule harmlessly and simply
+    --  retries next login.
+    ---------------------------------------------------------------------------
+    do
+        local mig = CreateFrame("Frame")
+        mig:RegisterEvent("PLAYER_ENTERING_WORLD")
+        mig:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            self:SetScript("OnEvent", nil)
+            C_Timer.After(2, function()
+                if ns.EMChatSyncSize then ns.EMChatSyncSize() end
+            end)
+        end)
     end
 
     ---------------------------------------------------------------------------
