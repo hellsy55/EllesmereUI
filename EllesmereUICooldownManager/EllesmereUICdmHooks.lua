@@ -9357,7 +9357,11 @@ end
 --  flashes a hexagon rather than the full square it sits in.
 --  Per-frame data lives in an external weak-keyed table.
 -------------------------------------------------------------------------------
-do
+-- Wrapped in an IIFE (instead of a plain do...end) so this block gets its own
+-- 200-local budget instead of sharing the file's main-chunk budget -- avoids
+-- "main function has more than 200 local variables" as more locals accumulate
+-- elsewhere in this file over time.
+(function()
     local AB_MEDIA      = "Interface\\AddOns\\EllesmereUIActionBars\\Media\\"
     local AB_HIGHLIGHT  = { AB_MEDIA .. "highlight-2.png", AB_MEDIA .. "highlight-3.png", AB_MEDIA .. "highlight-4.png" }
     local DEPRESS_TEX   = "Interface\\Buttons\\UI-Quickslot-Depress"
@@ -9746,4 +9750,4 @@ do
             end)
         end
     end)
-end
+end)()
