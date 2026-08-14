@@ -376,7 +376,17 @@ local function SweepBody(unit, out)
                     -- Each column resolves its own prefix; the lookup is
                     -- memoised, so this is a table read per aura.
                     local p = def.prefix()
-                    if p and aura.name:find(p, 1, true) == 1 then out[def.key] = true end
+                    if p and aura.name:find(p, 1, true) == 1 then
+                        out[def.key] = true
+                        -- The full buff name -- "<prefix>: <boss>" -- rides
+                        -- along with the boolean verdict, so a tooltip can
+                        -- show which boss's rune this actually is. New raids
+                        -- need nothing added here: any name carrying the
+                        -- resolved prefix already qualifies, current tier or
+                        -- future.
+                        out.names = out.names or {}
+                        out.names[def.key] = aura.name
+                    end
                 end
             end
         end
@@ -622,6 +632,22 @@ local function MakeRow(parent, index)
             tex:SetSize(ICON_SZ, ICON_SZ)
             tex:SetAlpha(0.9)
             r._cells[c] = tex
+
+            -- Name-prefix columns (Vantus) carry the actual buff name
+            -- alongside the checkmark -- see SweepBody -- so the icon itself
+            -- can answer "which boss" on hover instead of just "present".
+            -- Every other column already says what it is from its header;
+            -- only a prefix match hides that detail behind a boolean.
+            if def.prefix then
+                tex:EnableMouse(true)
+                tex:SetScript("OnEnter", function(self)
+                    if not self._tipName then return end
+                    GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+                    GameTooltip:AddLine(self._tipName)
+                    GameTooltip:Show()
+                end)
+                tex:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            end
         end
     end
 
@@ -962,6 +988,14 @@ local function Refresh()
                     else
                         -- Unanswerable, or the client would not say.
                         cell:Hide()
+                    end
+                    -- Refreshed every paint, present or not: a stale name
+                    -- from a prior boss must not survive into a row that no
+                    -- longer has one, or a swap between two Vantus runes
+                    -- would go on showing the first.
+                    if def.prefix then
+                        cell._tipName = (v == true) and e.checks.names
+                            and e.checks.names[def.key] or nil
                     end
                 end
             end
