@@ -663,6 +663,12 @@ local _divertedSpellsCD   = {}
 -- canonical spellID) is tracked on a custom bar by cooldownID (cd-claim marker in
 -- assignedSpells, ns.CdClaimMarker); checked BEFORE the sid map, so it outranks a pair claim.
 local _divertedBuffCdIDs  = {}
+--- Equipment-slot diversions, inventory slot -> barKey. Blizzard's own equipment
+--- cooldown entry carries an equipSlot and NO spell of its own, so the slot is its
+--- only routing key; a bar listing that slot (-13/-14 et al) claims the frame the
+--- same way listing a spellID claims a spell. On ns, not a local: this file is at
+--- the 200-local cap.
+ns._divertedSlotCD = {}
 -- EXACT assigned ids, split from the maps above (which also hold variant-family
 -- derived keys). One cooldown slot can carry several family members on different
 -- bars (Divine Toll/override Holy Bulwark share cooldownID 29342, base 375576);
@@ -815,6 +821,7 @@ function ns.RebuildSpellRouteMap()
     wipe(_divertedVarBaseBuff)
     wipe(_divertedVarBaseCD)
     wipe(_divertedBuffCdIDs)
+    wipe(ns._divertedSlotCD)
     _routeMapBuilt = false
 
     local p = ECME.db and ECME.db.profile
@@ -863,6 +870,13 @@ function ns.RebuildSpellRouteMap()
         for _, sid in ipairs(sd.assignedSpells) do
             if type(sid) == "number" and sid > 0 then
                 StoreDirect(targetMap, sid, bd.key)
+            else
+                -- Equipment slot entry: routes Blizzard's own equipment cooldown
+                -- for that slot, which has no spellID to key on. Same overwrite
+                -- order as the sid maps above, so a custom bar outranks the
+                -- default (pass 3) and a ghost bar hides it (pass 4).
+                local slot = ns.SlotIDFromKey and ns.SlotIDFromKey(sid)
+                if slot then ns._divertedSlotCD[slot] = bd.key end
             end
         end
     end
@@ -1009,6 +1023,17 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
     if CdidIDReadable(info.spellID) and CdidIDReadable(info.overrideSpellID)
        and info.overrideSpellID ~= info.spellID then
         _learnVariantBase(info.overrideSpellID, info.spellID)
+    end
+
+    -- Equipment-backed entry: the slot is the only identity it has, so it routes
+    -- before every sid probe below (all of which would miss). Memoized like any
+    -- other resolve; the slot map is rebuilt with the rest.
+    if CdidIDReadable(info.equipSlot) then
+        local slotBar = ns._divertedSlotCD[info.equipSlot]
+        if slotBar then
+            _cdidRouteMap[cdID] = slotBar
+            return slotBar
+        end
     end
 
     local routedBar = nil
@@ -6215,7 +6240,29 @@ local function CollectAndReanchor()
                                     -- a spell or lack spellCategoryID entirely.
                                     local catInfo = cdID and C_CooldownViewer
                                         and C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-                                    if catInfo and catInfo.spellCategoryID then
+                                    -- An equipment-backed entry (trinkets and the rest
+                                    -- of the EQUIP_ACTIVE group) lands here the moment
+                                    -- it is dragged into Essential/Utility: it carries
+                                    -- an inventory slot instead of a spell OR a
+                                    -- category, so it fell to the transient branch
+                                    -- below and was parked invisible once the retry
+                                    -- budget ran out -- while every pass kept the
+                                    -- retry ladder re-firing against an id that can
+                                    -- never resolve. Claimed under OUR OWN slot key
+                                    -- (-13/-14 et al) rather than the inert band: that
+                                    -- is the id the picker lists, the route map routes
+                                    -- and the sort ranks, so a Blizzard equipment
+                                    -- cooldown becomes orderable, movable to another
+                                    -- bar and hideable like any other icon, and the
+                                    -- trinket-slot injection below stands down instead
+                                    -- of drawing the same physical item twice. Only for
+                                    -- slots we have a key for; anything else keeps the
+                                    -- inert identity and merely renders.
+                                    local eqSlot = catInfo and catInfo.equipSlot
+                                    if eqSlot and not (ns.SlotIDFromKey and ns.SlotIDFromKey(-eqSlot)) then
+                                        eqSlot = nil
+                                    end
+                                    if catInfo and (catInfo.spellCategoryID or eqSlot) then
                                         if not cdFrames[barKey] then cdFrames[barKey] = {} end
                                         local frames = cdFrames[barKey]
                                         frames[#frames + 1] = frame
@@ -6230,7 +6277,8 @@ local function CollectAndReanchor()
                                         -- and outside every other marker band
                                         -- (item presets are small negatives, hosted
                                         -- markers start at -2000000000).
-                                        fc.spellID = -(1000000000 + cdID)
+                                        fc.spellID = eqSlot and -eqSlot
+                                            or -(1000000000 + cdID)
                                         fc.isHostedBuff = nil
                                     else
                                         -- Routed to one of our bars, but the spell
@@ -6897,6 +6945,14 @@ local function CollectAndReanchor()
                             -- <= -100, so -sid would otherwise be taken as an itemID and
                             -- fed to GetItemCooldown, which errors outside int32 range
                             -- (cd-claim markers are -(CD_CLAIM_MARKER_BASE + cooldownID)).
+                        elseif sid and ns.SlotIDFromKey(sid) and _globalClaimSet[sid] then
+                            -- Native-first, injection-fallback (the racial rule
+                            -- below, applied to equipment): Blizzard's own cooldown
+                            -- for this slot is live and claimed under this same slot
+                            -- key, so it renders the slot and our frame stands down.
+                            -- One physical trinket, one icon.
+                            local tfN = _trinketFrames[ns.SlotIDFromKey(sid)]
+                            if tfN then tfN:Hide() end
                         elseif sid and ns.SlotIDFromKey(sid) then
                             -- Equipment slot (trinkets -13/-14, user-added slots)
                             local slot = ns.SlotIDFromKey(sid)
