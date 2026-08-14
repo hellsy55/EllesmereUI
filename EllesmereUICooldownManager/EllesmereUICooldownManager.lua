@@ -5325,24 +5325,11 @@ local function RefreshCDMIconAppearance(barKey)
                     or (rfFc and rfFc.isHostedBuff)
                     or (fd and fd._isBuffViewerFrame)
                     or icon._isPlaceholderFrame) and true or false
+                -- Shared with the decoration + claim re-asserts (ns.EffectiveReverseSwipe),
+                -- so every writer of this widget pushes the same value.
                 local rfReverse = rfBuff
-                local rfSid = rfFc and rfFc.spellID
-                if rfSid then
-                    -- Regular per-spell setting (per-bar spellSettings).
-                    local rev
-                    if ns.ResolveSpellSettings then
-                        -- Pass barKey explicitly: the resolver picks the FAMILY
-                        -- store from the bar identity, and leaving it to be
-                        -- inferred resolves a hosted buff against the CD store.
-                        local rfSs = ns.ResolveSpellSettings(icon, rfSid, ns.GetBarSpellData(barKey), barKey)
-                        rev = rfSs and rfSs.reverseSwipe
-                    end
-                    -- Preset/custom cd-utility spell setting (profile customActiveStates; trinket slots resolve item-over-slot via the effective view).
-                    if not rev and ns.GetEffectiveCustomActiveState then
-                        local cas = ns.GetEffectiveCustomActiveState(rfSid)
-                        rev = cas and cas.reverseSwipe
-                    end
-                    if rev then rfReverse = not rfBuff end
+                if ns.EffectiveReverseSwipe then
+                    rfReverse = ns.EffectiveReverseSwipe(icon, barKey, rfBuff)
                 end
                 cd:SetReverse(rfReverse)
                 -- Keep the kind memo equal to what is RENDERED, so the

@@ -524,6 +524,40 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
 end
 ns.ResolveSpellSettings = ResolveSpellSettings
 
+-- Effective swipe direction for a CDM frame: the frame-KIND baseline (buffs fill
+-- up, cooldowns deplete) flipped by per-spell / preset "Reverse Swipe". Every
+-- writer of the widget goes through this, so they all push the SAME value: the
+-- decoration + claim re-asserts used to write the bare kind baseline, which
+-- stomped the per-spell reverse on the next reanchor and left it off, because
+-- only an icon-set CHANGE runs the appearance pass that re-applies it (preset
+-- icons escaped that -- the Fake-Active engine re-asserts their direction on its
+-- own updates, so the setting looked broken for regular spells only).
+-- Gated on the session flag: returns the baseline with no lookups at all unless
+-- someone has the toggle on. On ns, not a file local: this file sits at Lua's
+-- 200-local cap.
+function ns.EffectiveReverseSwipe(frame, barKey, kindBaseline)
+    if not ns._cdmAnyReverseSwipe then return kindBaseline end
+    local fc = frame and _ecmeFC[frame]
+    local sid = fc and fc.spellID
+    -- Bar identity: explicit key wins, else the frame context. Never resolve
+    -- without one (the store lookup indexes by it).
+    local bk = barKey or (fc and fc.barKey)
+    if not (sid and bk and ns.GetBarSpellData) then return kindBaseline end
+    -- Pass the key explicitly: the resolver picks the FAMILY store from the bar
+    -- identity, and leaving it to be inferred resolves a hosted buff against the
+    -- CD store.
+    local ss = ResolveSpellSettings(frame, sid, ns.GetBarSpellData(bk), bk)
+    local rev = ss and ss.reverseSwipe
+    -- Preset / custom cd-utility spell setting (profile customActiveStates;
+    -- trinket slots resolve item-over-slot via the effective view).
+    if not rev and ns.GetEffectiveCustomActiveState then
+        local cas = ns.GetEffectiveCustomActiveState(sid)
+        rev = cas and cas.reverseSwipe
+    end
+    if rev then return not kindBaseline end
+    return kindBaseline
+end
+
 -- True when any assigned entry on this CD/utility bar resolves to a Shift Icons
 -- cooldown-state effect. Frame-less pass over assignedSpells, called at reanchor
 -- and from options disabled-state (never per-frame). Advisory only: Pass B also
@@ -3440,8 +3474,11 @@ local function DecorateFrame(frame, barData)
         local isBuff = (barData.barType == "buffs" or barData.key == "buffs"
             or barData.barType == "custom_buff"
             or fd._isBuffViewerFrame or frame._isPlaceholderFrame) and true or false
-        fd.cooldown:SetReverse(isBuff)
-        fd._revKind = isBuff
+        -- Per-spell Reverse Swipe flips the baseline (see EffectiveReverseSwipe):
+        -- writing the bare kind here undid the setting on every reanchor.
+        local revEff = ns.EffectiveReverseSwipe(frame, barData.key, isBuff)
+        fd.cooldown:SetReverse(revEff)
+        fd._revKind = revEff
 
         -- Clear IS hooked above (_swipeColorHooked block) to restore the recharge swipe
         -- on charge spells, and SetCooldown too (ReArmChargeRecharge) so an off-GCD
@@ -6629,12 +6666,15 @@ local function CollectAndReanchor()
                         -- fill direction when the frame's recorded kind differs
                         -- (once-per-frame decoration + pooled frames can leave a
                         -- CD-direction stamp from a previous life on another bar).
-                        -- Kind-gated so the per-spell Reverse Swipe pass, which
-                        -- runs after, is never stomped on unchanged passes.
+                        -- Kind-gated so unchanged passes touch nothing; the value
+                        -- is the EFFECTIVE direction (kind baseline flipped by
+                        -- per-spell Reverse Swipe), never the bare kind, or this
+                        -- re-assert undoes the setting.
                         local efdR = hookFrameData[frame]
-                        if efdR and efdR._revKind ~= true then
-                            efdR._revKind = true
-                            frame.Cooldown:SetReverse(true)
+                        local revB = ns.EffectiveReverseSwipe(frame, barKey, true)
+                        if efdR and efdR._revKind ~= revB then
+                            efdR._revKind = revB
+                            frame.Cooldown:SetReverse(revB)
                         end
                         frame.Cooldown:SetHideCountdownNumbers(hideCD)
                     end
@@ -7428,13 +7468,16 @@ local function CollectAndReanchor()
                         -- kind differs: hosted buffs / placeholders fill like buffs,
                         -- everything else depletes. Once-per-frame decoration +
                         -- pooled frames can leave the other family's stamp from a
-                        -- previous life. Kind-gated so the per-spell Reverse Swipe
-                        -- pass (runs after) is never stomped on unchanged passes.
+                        -- previous life. Kind-gated so unchanged passes touch
+                        -- nothing; the value is the EFFECTIVE direction (kind
+                        -- baseline flipped by per-spell Reverse Swipe), never the
+                        -- bare kind, or this re-assert undoes the setting.
                         local fdRv = hookFrameData[frame]
                         local fcRv = _ecmeFC[frame]
                         local wantRev = ((fcRv and fcRv.isHostedBuff)
                             or (fdRv and fdRv._isBuffViewerFrame)
                             or frame._isPlaceholderFrame) and true or false
+                        wantRev = ns.EffectiveReverseSwipe(frame, barKey, wantRev)
                         if fdRv and fdRv._revKind ~= wantRev then
                             fdRv._revKind = wantRev
                             frame.Cooldown:SetReverse(wantRev)
