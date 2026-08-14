@@ -224,6 +224,7 @@ local CDM_SHAPES = {
         hexagon = 0.65, portrait = 0.70, shield = 0.65, square = 0.75,
     },
 }
+ns.CDM_SHAPES        = CDM_SHAPES
 ns.CDM_SHAPE_MASKS   = CDM_SHAPES.masks
 ns.CDM_SHAPE_BORDERS = CDM_SHAPES.borders
 ns.CDM_SHAPE_ZOOM_DEFAULTS = CDM_SHAPES.zoomDefaults
@@ -4998,6 +4999,30 @@ function ns.AnchorCooldownText(text, owner, position, x, y)
     text:SetJustifyH(points[3])
 end
 
+-- Does this bar show Duration Text? The options row treats the key as ON
+-- unless it is explicitly false, so every renderer must too: read bare, a bar
+-- whose key was never written (imported profile, RPT sync, a strip the login
+-- merge did not refill) shows the toggle ON and draws no numbers.
+function ns.CdmDurationTextOn(bd)
+    return bd ~= nil and bd.showCooldownText ~= false
+end
+
+-- Stack/charge/item-count text anchor. Bottom-anchored positions keep the
+-- historical +2 nudge so existing bars stay pixel-identical. Shared with the
+-- custom-aura renderer (EllesmereUICdmHooks) so both land on the same anchor.
+function ns.CdmStackAnchorPoint(position, y)
+    y = y or 0
+    if position == "bottomleft" then return "BOTTOMLEFT", y + 2 end
+    if position == "bottom" then return "BOTTOM", y + 2 end
+    if position == "topright" then return "TOPRIGHT", y end
+    if position == "top" then return "TOP", y end
+    if position == "topleft" then return "TOPLEFT", y end
+    if position == "center" then return "CENTER", y end
+    if position == "left" then return "LEFT", y end
+    if position == "right" then return "RIGHT", y end
+    return "BOTTOMRIGHT", y + 2
+end
+
 -- The overlay (EllesmereUICdmFakeActive.lua) runs its own Cooldown widget whose
 -- number would otherwise use Blizzard's default font. Mirrors the Duration Text
 -- styling the real icon gets in RefreshCDMIconAppearance: font, size
@@ -5009,7 +5034,7 @@ function ns.StyleOverlayCooldownText(oCd, barData, ssb, iconScale)
     iconScale = iconScale or 1
     if iconScale < 0.01 then iconScale = 1 end
     local fontScale = 1 / iconScale
-    local showCD = barData and barData.showCooldownText
+    local showCD = ns.CdmDurationTextOn(barData)
     if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
     oCd:SetHideCountdownNumbers(not showCD)
     if not showCD then return end
@@ -5196,6 +5221,10 @@ end
 
 -- Refresh visual properties of existing icons (called when settings change)
 local function RefreshCDMIconAppearance(barKey)
+    -- Custom auras render in their own engine container, so their style is
+    -- re-applied here rather than in the icon loop -- and before the early-outs
+    -- below, since a bar can hold custom auras and no icons of its own.
+    if ns.RefreshAuraCustomStyle then ns.RefreshAuraCustomStyle(barKey) end
     local icons = cdmBarIcons[barKey]
     if not icons then return end
 
@@ -5307,7 +5336,7 @@ local function RefreshCDMIconAppearance(barKey)
             pcall(cd.SetFrameLevel, cd, icon:GetFrameLevel() + 14)
             -- Per-icon Duration Text override (ssb) falls back to the bar's values. Only Show
             -- Numbers no longer forces this on: hiding the duration (bar toggle or per-icon) under it leaves just the stack count.
-            local showCD = barData.showCooldownText
+            local showCD = ns.CdmDurationTextOn(barData)
             if ssb and ssb.showCooldownText ~= nil then showCD = ssb.showCooldownText end
             cd:SetSwipeColor(0, 0, 0, barData.swipeAlpha or 0.7)
             -- Per-spell Reverse Swipe: flips this icon's swipe direction away from the bar default
@@ -5442,16 +5471,9 @@ local function RefreshCDMIconAppearance(barKey)
         local scX = ((ssb and ssb.stackCountX) or barData.stackCountX or 0) * fontScale
         local scY = ((ssb and ssb.stackCountY) or barData.stackCountY or 0) * fontScale
         -- Stack/charge/item-count text anchor. Default bottom-right keeps the historical +2 vertical nudge so existing bars stay pixel-identical; top and center positions sit flush with no baseline nudge.
-        local scPoint = (ssb and ssb.stackCountPosition) or barData.stackCountPosition or "bottomright"
-        if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
-        elseif scPoint == "bottom" then scPoint = "BOTTOM"; scY = scY + 2
-        elseif scPoint == "topright" then scPoint = "TOPRIGHT"
-        elseif scPoint == "top" then scPoint = "TOP"
-        elseif scPoint == "topleft" then scPoint = "TOPLEFT"
-        elseif scPoint == "center" then scPoint = "CENTER"
-        elseif scPoint == "left" then scPoint = "LEFT"
-        elseif scPoint == "right" then scPoint = "RIGHT"
-        else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
+        local scPoint
+        scPoint, scY = ns.CdmStackAnchorPoint(
+            (ssb and ssb.stackCountPosition) or barData.stackCountPosition or "bottomright", scY)
         local showItemCount = barData.showItemCount ~= false
         if ssb and ssb.showItemCount ~= nil then showItemCount = ssb.showItemCount end
         -- Show Item Count "Out of Combat" mode: bar-level combat gate applied on top of the
@@ -7320,6 +7342,10 @@ BuildAllCDMBars = function()
     end
     -- Resync the key-press-mirror fast enable-flag with the rebuilt bar list, so OnPress O(1)-gates instead of looping every bar per press (covers profile and spec swaps, not just the options toggle).
     if ns.RefreshCdmPressMirrorFlag then ns.RefreshCdmPressMirrorFlag() end
+    -- Custom-aura containers re-evaluate here: icon size, shape, spacing and
+    -- growth change the engine flow, which needs a rebuild rather than a
+    -- restyle, and a hooked default bar skips RefreshCDMIconAppearance above.
+    if ns.UpdateCustomBuffAuraTracking then ns.UpdateCustomBuffAuraTracking() end
     -- When hooks are active, queue a reanchor to repopulate default bars. The queued
     -- CollectAndReanchor will lift _cdmRebuilding when it finishes; if no reanchor is queued (hooks not yet installed) we must clear the flag here ourselves so width matching can run again.
     if hookActive and ns.QueueReanchor then
