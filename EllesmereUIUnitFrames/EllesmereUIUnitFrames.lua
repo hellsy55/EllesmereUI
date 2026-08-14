@@ -1465,6 +1465,10 @@ local function ClassColorSourceUnit(unitKey, unit)
     return unit or unitKey
 end
 
+-- Carrier for a resolved-but-secret class color. Reused: it is written and consumed inside one
+-- UpdateColor pass (SetStatusBarColor, then PostUpdateColor), and nothing stores it.
+local SECRET_CLASS_COLOR = CreateColor(1, 1, 1, 1)
+
 -- TEMPORARY oUF SHIM -- remove when upstream oUF ships secret-safe class coloring
 -- (check during the standing per-bump lib re-diff). 12.1 build 68914 made UnitClass return a SECRET token
 -- for identity-restricted units; the vendored health element's UpdateColor indexes
@@ -1494,9 +1498,15 @@ local function UF_SecretSafeHealthColor(self, event, unit)
             -- 12.1 (68914): UnitClass is SecretWhenUnitIdentityRestricted (focus/focus-target/ToT):
             -- token can't be read or used as a table key. C_ClassColor.GetClassColor and
             -- SetStatusBarColor are both SecretArguments="AllowedWhenTainted", so the real
-            -- color still reaches the bar without Lua inspecting it. Custom class colors
-            -- can't apply here -- that's an addon-side table lookup, which a secret key forbids.
-            if C_ClassColor and C_ClassColor.GetClassColor then
+            -- color still reaches the bar without Lua inspecting it -- but only ever in
+            -- Blizzard's shade. GetClassColorForRestrictedUnit recovers the user's custom
+            -- class color for group members with the compare done in C; its r/g/b are secret,
+            -- so they go into a scratch ColorMixin (plain field writes) and are never read.
+            local ok, r, g, b = EllesmereUI.GetClassColorForRestrictedUnit(unit, class)
+            if ok then
+                SECRET_CLASS_COLOR:SetRGB(r, g, b)
+                color = SECRET_CLASS_COLOR
+            elseif C_ClassColor and C_ClassColor.GetClassColor then
                 color = C_ClassColor.GetClassColor(class)
             end
         else
@@ -1606,17 +1616,27 @@ local function ApplyDarkTheme(health)
             local bgClassColored = uSettings and uSettings.bgClassColored
             -- Base fill color (custom, or oUF's class/reaction color); gradient
             -- applies additively when enabled, otherwise flat.
+            -- haveBase/baseSecret are PLAIN booleans standing in for bR: on an
+            -- identity-restricted unit bR is a secret number, and truthiness-testing one
+            -- errors, so it may only ever be handed to a setter.
             local bR, bG, bB
+            local haveBase, baseSecret = false, false
             if cFill and not classColored then
                 bR, bG, bB = cFill.r, cFill.g, cFill.b
+                haveBase = true
             elseif classColored and uKey == "pet" then
                 local _, ct = UnitClass("player")
                 local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
-                if cc then bR, bG, bB = cc.r, cc.g, cc.b end
+                if cc then bR, bG, bB = cc.r, cc.g, cc.b; haveBase = true end
             elseif color and color.GetRGB then
                 bR, bG, bB = color:GetRGB()
+                haveBase = true
+                baseSecret = issecretvalue(bR)
             end
-            if uSettings and uSettings.gradientEnabled and bR then
+            -- Texture:SetGradient is SecretArguments="AllowedWhenUntainted", so a secret
+            -- color cannot go through it from here at all. The flat color the health
+            -- element already applied is correct, so a restricted unit keeps a flat bar.
+            if uSettings and uSettings.gradientEnabled and haveBase and not baseSecret then
                 local gc = uSettings.gradientColor
                 -- A gradient overrides region alpha, so Bar Opacity is baked into
                 -- the gradient endpoint alphas instead of SetAlpha.
@@ -1625,7 +1645,7 @@ local function ApplyDarkTheme(health)
                 ApplyBarGradient(self:GetStatusBarTexture(), uSettings.gradientDir or "HORIZONTAL",
                     bR, bG, bB, ga,
                     gc and gc.r or 0.20, gc and gc.g or 0.20, gc and gc.b or 0.80, ga)
-            elseif classColored and uKey == "pet" and bR then
+            elseif classColored and uKey == "pet" and haveBase then
                 self:SetStatusBarColor(bR, bG, bB)
             elseif cFill and not classColored then
                 self:SetStatusBarColor(cFill.r, cFill.g, cFill.b)
@@ -1652,7 +1672,14 @@ local function ApplyDarkTheme(health)
                     self.bg:SetColorTexture(cFill.r * 0.2, cFill.g * 0.2, cFill.b * 0.2, 1)
                 elseif color and color.GetRGB then
                     local r, g, b = color:GetRGB()
-                    self.bg:SetColorTexture(r * 0.2, g * 0.2, b * 0.2, 1)
+                    -- SetColorTexture takes secrets; the multiply does not, and there is no
+                    -- C-side blend to darken one with. So a restricted unit's background
+                    -- degrades to the default dark rather than throwing on the tint.
+                    if issecretvalue(r) then
+                        self.bg:SetColorTexture(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B, 1)
+                    else
+                        self.bg:SetColorTexture(r * 0.2, g * 0.2, b * 0.2, 1)
+                    end
                 else
                     -- No color source (e.g. no target): default bg.
                     self.bg:SetColorTexture(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B, 1)
