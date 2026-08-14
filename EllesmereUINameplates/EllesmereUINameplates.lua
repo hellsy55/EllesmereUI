@@ -4956,6 +4956,7 @@ local function GetReactionColor(unit)
 end
 local hookedUFs = {}
 local hookedHighlights = {}
+local hookedSoftTargetIcons = {}
 local npOffscreenParent = CreateFrame("Frame")
 npOffscreenParent:Hide()
 local storedParents = {}
@@ -5004,10 +5005,11 @@ local function HideBlizzardFrame(nameplate, unit)
     -- The UnitFrame ITSELF must stay on the nameplate where Blizzard placed it (alpha 0 above)
     -- -- parking the whole frame under a hidden holder flips every plate's content to
     -- IsVisible()==false and breaks click target selection between overlapping plates in packs.
-    -- Exclusions: the two kept-live frames, plus protected/forbidden children (alpha 0 hides them).
+    -- Exclusions: kept-live frames, plus protected/forbidden children (alpha 0 hides them).
     for i = 1, uf:GetNumChildren() do
         local child = select(i, uf:GetChildren())
         if child and child ~= uf.WidgetContainer and child ~= uf.AurasFrame
+        and child ~= uf.SoftTargetFrame
            and not child:IsForbidden() and not child:IsProtected() then
             if not storedParents[child] then storedParents[child] = uf end
             child:SetParent(npOffscreenParent)
@@ -5022,6 +5024,26 @@ local function HideBlizzardFrame(nameplate, unit)
     -- doesn't affect the UnitFrame's bounds.
     if uf.WidgetContainer then
         uf.WidgetContainer:SetParent(nameplate)
+    end
+    -- Keep the soft-target cursor icon working: reparent it live instead of sweeping it
+    -- offscreen or leaving it under uf's forced alpha-0.
+    if uf.SoftTargetFrame then
+        uf.SoftTargetFrame:SetParent(nameplate)
+        uf.SoftTargetFrame:SetAlpha(1)
+        -- Same icon is reused for enemy/friend/interact soft-targets; only allow the
+        -- interact case through.
+        local icon = uf.SoftTargetFrame.Icon
+        if icon and not hookedSoftTargetIcons[icon] then
+            hookedSoftTargetIcons[icon] = true
+            hooksecurefunc(icon, "Show", function(self)
+                local softTargetFrame = self:GetParent()
+                local ownerUF = softTargetFrame and softTargetFrame:GetParent()
+                local ufUnit = ownerUF and (ownerUF.unit or (ownerUF.GetUnit and ownerUF:GetUnit()))
+                if not ufUnit or not UnitIsUnit(ufUnit, "softinteract") then
+                    self:Hide()
+                end
+            end)
+        end
     end
     if not hookedUFs[uf] then
         hookedUFs[uf] = true
@@ -5095,6 +5117,9 @@ local function RestoreBlizzardFrame(nameplate)
     end
     if uf.WidgetContainer then
         uf.WidgetContainer:SetParent(uf)
+    end
+    if uf.SoftTargetFrame then
+        uf.SoftTargetFrame:SetParent(uf)
     end
 end
 ns.HideBlizzardFrame = HideBlizzardFrame
