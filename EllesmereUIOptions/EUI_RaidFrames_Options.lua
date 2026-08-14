@@ -4214,8 +4214,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- One row per defined custom raid size.
         do
-            local CUSTOM_TIERS = { 10, 15, 25, 30, 40 }
-            local TIER_LABELS = { [10] = "10 Man", [15] = "15 Man", [25] = "25 Man", [30] = "30 Man", [40] = "40 Man" }
+            local CUSTOM_TIERS = { 10, 15, 25, 30, 35, 40 }
+            local TIER_LABELS = { [10] = "10 Man", [15] = "15 Man", [25] = "25 Man", [30] = "30 Man", [35] = "35 Man", [40] = "40 Man" }
             local overrides = db.profile.raidSizeOverrides
             local EYE_VISIBLE   = EllesmereUI.EYE_VISIBLE_ICON
             local EYE_INVISIBLE = EllesmereUI.EYE_INVISIBLE_ICON
@@ -4400,8 +4400,10 @@ initFrame:SetScript("OnEvent", function(self)
                                      tip = "Group size at which this layout takes over from the 20 Man layout." },
                             [30] = { key = "sizeMin", label = "Switch At", def = 26, min = 22, max = 40,
                                      tip = "Group size at which this layout takes over from the 25 Man layout." },
-                            [40] = { key = "sizeMin", label = "Switch At", def = 31, min = 27, max = 40,
+                            [35] = { key = "sizeMin", label = "Switch At", def = 31, min = 27, max = 40,
                                      tip = "Group size at which this layout takes over from the 30 Man layout." },
+                            [40] = { key = "sizeMin", label = "Switch At", def = 36, min = 32, max = 40,
+                                     tip = "Group size at which this layout takes over from the 35 Man layout." },
                         }
                         local tb = TIER_BOUNDS[tier]
                         local _, cogShow = EllesmereUI.BuildCogPopup({
@@ -4550,6 +4552,13 @@ initFrame:SetScript("OnEvent", function(self)
                 rightRgn._control = cbDD
             end
         end
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Size by Active Groups",
+              tooltip="Determine the raid-size breakpoint from the number of active subgroups (each active group counts as 5) instead of total headcount. For example, spreading 8 players one per group across all 8 raid groups resolves to a 40-man breakpoint instead of an 8-man one. Off by default: the breakpoint uses raw headcount.",
+              getValue=function() return SVal("sizeByActiveGroups", false) end,
+              setValue=function(v) SSet("sizeByActiveGroups", v); ReloadAndUpdate() end },
+            { type="label", text="" });  y = y - h
 
         -------------------------------------------------------------------
         --  FRAME DISPLAY

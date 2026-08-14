@@ -523,6 +523,7 @@ for _, info in ipairs(BAR_CONFIG) do
         combatHideEnabled = false,
         housingHideEnabled = false,
         barVisibility = "always",
+        frameStrata = "MEDIUM",
         dragShow = false,
         visHideHousing = false,
         visOnlyInstances = false,
@@ -2748,6 +2749,11 @@ local function CreateBarFrame(info)
     end
 
     barFrames[key] = frame
+
+    do
+        local s = EAB and EAB.db and EAB.db.profile and EAB.db.profile.bars[key]
+        frame:SetFrameStrata(s and s.frameStrata or "MEDIUM")
+    end
 
     -- Empower re-check: setting "state-eabempower" dispatches ChildUpdate to
     -- re-evaluate pressAndHoldAction on all children. MUST be an _onstate-
@@ -7346,6 +7352,23 @@ function EAB:ApplyBarOpacity(barKey)
         frame:SetAlpha(s.mouseoverAlpha or 1)
         if barKey == "MainBar" then SyncPagingAlpha(s.mouseoverAlpha or 1) end
     end
+end
+
+-- User-configurable strata for this bar's frame. SetFrameStrata is protected
+-- on these secure frames during combat, so skip until combat ends (ApplyAll
+-- re-runs everything on PLAYER_REGEN_ENABLED). Also skip while a temporary
+-- raise (drag-show / Quick Keybind) is active on this frame: those cache the
+-- pre-raise strata and restore it verbatim, so stomping it mid-raise would
+-- have the restore land on the wrong value instead of the user's chosen one.
+function EAB:ApplyStrataForBar(barKey)
+    if InCombatLockdown() then return end
+    local s = self.db.profile.bars[barKey]
+    if not s then return end
+    local frame = barFrames[barKey]
+    if not frame then return end
+    if _dragState.strataCache[frame] ~= nil then return end
+    if _quickKeybindState.strataCache and _quickKeybindState.strataCache[frame] ~= nil then return end
+    frame:SetFrameStrata(s.frameStrata or "MEDIUM")
 end
 
 function EAB:BarSupportsOrientation(barKey)
@@ -12156,6 +12179,7 @@ local function ApplyAll()
         EAB:ApplyIconBackgroundForBar(key)
         if not inCombat then EAB:ApplyAlwaysShowButtons(key) end
         if not inCombat then EAB:ApplyClickThroughForBar(key) end
+        if not inCombat then EAB:ApplyStrataForBar(key) end
     end
 
     EAB:ApplyPushedTextures()

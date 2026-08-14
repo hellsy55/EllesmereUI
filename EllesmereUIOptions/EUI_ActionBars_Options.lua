@@ -2113,6 +2113,68 @@ initFrame:SetScript("OnEvent", function(self)
                     },
                 })
             end
+
+            -- Strata Level: last row of the Visibility section. Controls which frame
+            -- strata this bar renders on (useful when another window is covering it,
+            -- or when it should render behind other UI).
+            local STRATA_VALUES = {
+                BACKGROUND        = "Background",
+                LOW               = "Low",
+                MEDIUM            = "Medium",
+                HIGH              = "High",
+                DIALOG            = "Dialog",
+                FULLSCREEN        = "Fullscreen",
+                FULLSCREEN_DIALOG = "Fullscreen Dialog",
+                TOOLTIP           = "Tooltip",
+            }
+            local STRATA_ORDER = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
+
+            local strataRow
+            strataRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Strata Level",
+                  tooltip="Controls the frame layering (strata) this bar renders on. Raise it if the bar is being covered by another window; lower it if it should render behind other UI.",
+                  values=STRATA_VALUES, order=STRATA_ORDER,
+                  getValue=function() return SGet("frameStrata") or "MEDIUM" end,
+                  setValue=function(v)
+                      SSet("frameStrata", v, function(k) EAB:ApplyStrataForBar(k) end)
+                  end },
+                { type="spacer" });  y = y - h
+            do
+                local rgn = strataRow._leftRegion
+                EllesmereUI.BuildSyncIcon({
+                    region  = rgn,
+                    tooltip = "Apply Strata Level to all Bars",
+                    onClick = function()
+                        local v = SB().frameStrata or "MEDIUM"
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            EAB.db.profile.bars[key].frameStrata = v
+                            EAB:ApplyStrataForBar(key)
+                        end
+                        EllesmereUI:RefreshPage()
+                    end,
+                    isSynced = function()
+                        local v = SB().frameStrata or "MEDIUM"
+                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                            if (EAB.db.profile.bars[key].frameStrata or "MEDIUM") ~= v then return false end
+                        end
+                        return true
+                    end,
+                    flashTargets = function() return { rgn } end,
+                    multiApply = {
+                        elementKeys   = GROUP_BAR_ORDER,
+                        elementLabels = SHORT_LABELS,
+                        getCurrentKey = function() return SelectedKey() end,
+                        onApply       = function(checkedKeys)
+                            local v = SB().frameStrata or "MEDIUM"
+                            for _, key in ipairs(checkedKeys) do
+                                EAB.db.profile.bars[key].frameStrata = v
+                                EAB:ApplyStrataForBar(key)
+                            end
+                            EllesmereUI:RefreshPage()
+                        end,
+                    },
+                })
+            end
         end
 
         -----------------------------------------------------------------------
