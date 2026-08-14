@@ -1019,7 +1019,7 @@ local BUILD_BUDGET_MS = 8
 -- fire only AFTER the loading screen drops, so their build jobs cannot be caught by
 -- the behind-the-screen burst -- they drain through the worker on low,
 -- streaming-world fps. At the mid-session 8ms budget that read as seconds of missing
--- auras. Inside the window the worker runs a near-burst budget instead: the whole
+-- auras. Outside raids, the window runs a near-burst budget instead: the whole
 -- post-login queue lands in a handful of frames during the world fade-in (the
 -- user-stated contract: "spread over a few frames on reload/login"), and the gentle
 -- budget resumes for everything mid-session.
@@ -1058,13 +1058,13 @@ local buildWorker = CreateFrame("Frame")
 buildWorker:Hide()
 buildWorker:SetScript("OnUpdate", function(self)
     local inCombat = InCombatLockdown()
-    -- The turbo budget is OOC-ONLY: combat frames run under the client's combat script
-    -- watchdog (a 250ms drain tick after an in-combat /reload tripped "script ran too
-    -- long"), and a quarter-second hitch is unacceptable while fighting anyway. In
-    -- combat the backlog drains at the gentle budget; the regen wake re-arms the turbo
-    -- (loginStamp) so whatever remains snaps in at regen.
+    -- The turbo budget is OOC and non-raid only: raid-instance login can use the lower
+    -- script watchdog before combat lockdown reflects the new world, so a 250ms drain
+    -- can abort this outer loop beyond the per-job pcall. Restricted frames drain at
+    -- the gentle budget; the regen wake re-arms the turbo for safe worlds.
     local budget = BUILD_BUDGET_MS
-    if not inCombat and GetTime() - loginStamp < LOGIN_WINDOW_S then
+    if not inCombat and select(2, IsInInstance()) ~= "raid"
+        and GetTime() - loginStamp < LOGIN_WINDOW_S then
         budget = BUILD_BUDGET_LOGIN_MS
     end
     local t0 = debugprofilestop()
@@ -1090,8 +1090,8 @@ buildWorker:SetScript("OnUpdate", function(self)
     self:Hide()
 end)
 
--- Regen wake: a backlog that accrued under the combat-clamped budget
--- snaps in at the turbo budget instead of trickling.
+-- Regen wake: a backlog that accrued under the gentle budget snaps in at the turbo
+-- budget instead of trickling when the current world allows it.
 buildWorker:RegisterEvent("PLAYER_REGEN_ENABLED")
 buildWorker:SetScript("OnEvent", function(self)
     if buildHead <= buildTail then
@@ -1116,9 +1116,9 @@ end
 -- every other addon's login work in ONE script execution and trips the client watchdog
 -- ("script ran too long") -- field-hit at 1500ms. It also cannot reach the RF/UF jobs,
 -- which are enqueued by timer-deferred module setup AFTER the screen drops. PEW only
--- opens the worker's login-window turbo budget: the whole demand- architecture queue
--- drains in a handful of 250ms frames DURING the world fade-in (per-frame executions
--- never approach the watchdog).
+-- opens the worker's login window: outside raids the whole demand-architecture queue
+-- drains in a handful of 250ms frames during the world fade-in; raids retain the safe
+-- 8ms budget.
 local burstFrame = CreateFrame("Frame")
 burstFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 burstFrame:SetScript("OnEvent", function()
