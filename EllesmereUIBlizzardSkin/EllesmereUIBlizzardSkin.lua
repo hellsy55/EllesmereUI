@@ -2494,6 +2494,8 @@ do
     -- combat when alwaysCompareItems is enabled.  Keep the cleanup in this global
     -- tooltip controller rather than in ActionBars: bags, world items, and every
     -- other default-anchored item tooltip use the same comparison manager.
+    -- Use Blizzard's existing comparison-suppression flag; addon-owned state
+    -- stays in locals so no custom state is stored on Blizzard frames.
     local _comparisonTooltips = { ShoppingTooltip1, ShoppingTooltip2 }
     local _comparisonClearPending = false
     local _comparisonFlagOwned = false
@@ -2577,16 +2579,17 @@ do
         end
     end
 
+    local function RunSuppressedComparisonClear()
+        _comparisonClearPending = false
+        ClearSuppressedComparisons()
+    end
     local function QueueSuppressedComparisonClear()
         if _comparisonClearPending then return end
         _comparisonClearPending = true
         -- This hook can run from Blizzard's protected tooltip/action-button path.
         -- Defer all Hide/Clear calls out of that stack, matching the existing EUI
         -- tooltip-skin deferral rules.
-        C_Timer.After(0, function()
-            _comparisonClearPending = false
-            ClearSuppressedComparisons()
-        end)
+        C_Timer.After(0, RunSuppressedComparisonClear)
     end
 
     -- Catch both the normal comparison-manager path and a direct Show/SetShown
