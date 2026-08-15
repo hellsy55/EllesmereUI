@@ -1386,10 +1386,12 @@ local function BuildBuffAlertStyle(entry)
     }
 end
 
--- Identity gate (Blizzard_AuraContainerUtil.CanApplyIdentityCandidateFilters):
--- includeSpellIDs is applied to a HELPFUL aura only while UnitCanAssist("player",
--- unit) holds, and it FAILS OPEN -- when the gate fails the spell-ID filter is
--- skipped entirely and the aura passes on its filter string alone. Boarding a
+-- Identity gate (Blizzard_AuraContainer/Blizzard_AuraContainerUtil.lua,
+-- AuraContainerUtil.CanApplyIdentityCandidateFilters + DoesAuraPassCandidateFilters,
+-- verified 12.1.0.69299): includeSpellIDs is applied to a HELPFUL aura only while
+-- UnitCanAssist("player", unit) holds, and it FAILS OPEN -- when the gate fails the
+-- spell-ID filter is skipped entirely and the aura passes on its filter string
+-- alone, so a group asking for one spell renders every buff. Boarding a
 -- vehicle drops the player's own assistability, so this one-button HELPFUL group
 -- stops meaning "Burning Rush" and renders whatever buff it finds first, wearing
 -- the Burning Rush label. Membership is cached per aura instance and UNIT_AURA
@@ -1444,10 +1446,16 @@ local function EnsureBuffAlertLane()
         buffAlertHost:Show()
         -- Whatever was parsed during the degraded window is wrong, and leaving a
         -- vehicle produces no aura edge for buffs that were already up, so the
-        -- engine would keep serving the stale membership. The Show() above
-        -- re-parses on its own (OnShow_Intrinsic), and this is the same lever
-        -- stated outright, so the recovery does not silently depend on the host
-        -- being hidden rather than faded. Bounded to the real denied->allowed flip.
+        -- engine would keep serving the stale membership (it is cached per aura
+        -- instance; UNIT_AURA re-parses only what changed). The Show() above
+        -- re-parses on its own -- AuraContainerPrivateMixin:OnShow_Intrinsic in
+        -- Blizzard_AuraContainer/Blizzard_AuraContainer.lua calls UpdateAllAuras --
+        -- and this is that same lever stated outright, so the recovery does not
+        -- silently depend on the host being hidden rather than faded. NOTE the
+        -- method is a no-op on AuraContainerSharedMixin; the real
+        -- MarkDirty(FullAuraRebuild) is ManagedAuraContainerSharedMixin's
+        -- override, which reaches the addon-callable partition through
+        -- ManagedAuraContainerInboundMixin. Bounded to the real denied->allowed flip.
         if wasDenied and buffAlertContainer and buffAlertContainer.UpdateAllAuras then
             buffAlertContainer:UpdateAllAuras()
         end
