@@ -6107,16 +6107,75 @@ ns.EnsureFocusCastProxy = EnsureFocusCastProxy
 -- clean canonical id via GetCanonicalSpellIDForFrame (the same id the options menu writes the
 -- setting under) -- never index a table with the live secret id. Hooked-frame + throttle state
 -- live in a do-block, off the Blizzard frame table per the no-custom-props rule. Reuses the
--- FocusKick sound table (option list identical to Focus Cast Sound); the two edges use separate throttle tables so they never suppress each other.
+-- FocusKick sound table (option list identical to Focus Cast Sound). Edges are COALESCED to
+-- the end of the frame rather than played on the spot: some auras are reapplied by REPLACING
+-- the instance instead of refreshing it, and Blizzard checks its removed-alert triggers before
+-- the item frames adopt the new instance, so the drop edge fires while the buff is still up.
+-- Death and Decay does this on every entry into the circle, cueing a loss at the moment the
+-- buff was GAINED. One frame is the whole window -- both alerts fire inside a single
+-- ProcessUnitAuraEvent -- so both edges on one spell in one frame is that replacement.
 do
     local _soundHooked = setmetatable({}, { __mode = "k" })
-    local _soundThrottle = {}            -- [spellID] = last GetTime() (gain dedupe)
-    local _soundThrottleLost = {}        -- [spellID] = last GetTime() (loss dedupe)
+    -- Edges seen this frame: [spellID] = sound key, or false for "edge happened,
+    -- configured silent". A silent edge MUST still be recorded or a replacement
+    -- whose gain has no sound (the usual setup -- loss cue only) never pairs.
+    local _pendGain = {}
+    local _pendLoss = {}
+    local _flushQueued = false
+    local _pendStamp = 0                 -- GetTime() of the frame the pending edges belong to
+    -- Overlap guard, NOT an edge filter: two cues for the same spell and edge closer
+    -- together than this would talk over each other. Replacements are cancelled by the
+    -- pairing above, so this no longer hides them.
+    local _soundThrottle = {}            -- [spellID] = last GetTime() (gain)
+    local _soundThrottleLost = {}        -- [spellID] = last GetTime() (loss)
     local SOUND_MIN_GAP = 0.3
-    -- Resolve the per-icon sound for one edge and play it (throttled). `field` is
-    -- the spell-setting key ("buffActiveSoundKey" gain / "buffLostSoundKey" loss);
-    -- `throttle` is the matching dedupe table. Identical resolution for both edges.
-    local function PlayBuffEdgeSound(f, field, throttle)
+
+    -- Per-spell tier then bar tier, for one setting key. nil = silent.
+    local function PickBuffSoundKey(ss, sid, field)
+        local k = ss and ss[field]
+        if not k then k = ns.FindBuffSoundKey and ns.FindBuffSoundKey(sid, field) end
+        if not k or k == "none" then return nil end
+        return k
+    end
+
+    local function PlayThrottled(key, sid, throttle)
+        if not key then return end
+        local now = GetTime()
+        local last = throttle[sid]
+        if last and (now - last) < SOUND_MIN_GAP then return end
+        throttle[sid] = now
+        local path = FOCUSKICK_SOUND_PATHS[key]
+        if path then PlaySoundFile(path, "Master") end
+    end
+
+    local function FlushBuffEdges()
+        _flushQueued = false
+        -- Still inside the frame these edges were recorded in (the timer can tick
+        -- after some of the frame's aura events but before the rest): a later edge
+        -- could still pair with them, so decide next frame instead.
+        if GetTime() == _pendStamp then
+            _flushQueued = true
+            C_Timer.After(0, FlushBuffEdges)
+            return
+        end
+        -- Entries are cleared BEFORE playing so a throw inside PlaySoundFile cannot
+        -- strand one and have it cancel an unrelated edge on a later flush.
+        for sid, key in pairs(_pendLoss) do
+            -- Paired with a gain this frame = replacement: the buff never left, so
+            -- NEITHER cue is real. A true gain fires in its own, earlier frame.
+            local paired = _pendGain[sid] ~= nil
+            _pendGain[sid] = nil
+            _pendLoss[sid] = nil
+            if not paired then PlayThrottled(key, sid, _soundThrottleLost) end
+        end
+        for sid, key in pairs(_pendGain) do
+            _pendGain[sid] = nil
+            PlayThrottled(key, sid, _soundThrottle)
+        end
+    end
+
+    -- Record one edge for the end-of-frame flush. gainEdge picks the side.
+    local function RecordBuffEdge(f, gainEdge)
         -- Loading screen / login settle: buffs re-apply and viewer frames re-show
         -- across a zone/login, firing phantom apply/remove alerts. Drop them.
         if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then return end
@@ -6126,23 +6185,37 @@ do
         -- handles variant/override spells). Falls back to an id-only lookup for the
         -- FIRST gain after login, whose alert fires before DecorateFrame populates
         -- _ecmeFC -- keying off that context dropped the very first cue.
-        local key
+        local ss
         local fc = _ecmeFC[f]
         local barKey = fc and fc.barKey
         if barKey then
             local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
-            local ss = ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd, barKey)
-            key = ss and ss[field]
+            ss = ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, sid, sd, barKey)
         end
-        if not key then key = ns.FindBuffSoundKey and ns.FindBuffSoundKey(sid, field) end
-        if not key or key == "none" then return end
+        -- A silent edge still has to be recorded so it can cancel its partner, but only
+        -- when the OTHER edge has a cue -- so the second lookup runs only on that path.
+        local key = PickBuffSoundKey(ss, sid, gainEdge and "buffActiveSoundKey" or "buffLostSoundKey")
+        if not key and not PickBuffSoundKey(ss, sid, gainEdge and "buffLostSoundKey" or "buffActiveSoundKey") then
+            return
+        end
+        -- A new frame closes the previous batch: pairing must never reach across the
+        -- boundary, or a real drop and an unrelated real gain a frame later cancel out.
         local now = GetTime()
-        local last = throttle[sid]
-        if last and (now - last) < SOUND_MIN_GAP then return end
-        throttle[sid] = now
-        local path = FOCUSKICK_SOUND_PATHS[key]
-        if path then PlaySoundFile(path, "Master") end
+        if now ~= _pendStamp then
+            FlushBuffEdges()
+            _pendStamp = now
+        end
+        if gainEdge then
+            _pendGain[sid] = key or false
+        else
+            _pendLoss[sid] = key or false
+        end
+        if not _flushQueued then
+            _flushQueued = true
+            C_Timer.After(0, FlushBuffEdges)
+        end
     end
+
     function ns.EnsureBuffSoundHook(frame)
         if not frame or _soundHooked[frame] then return end
         -- Own placeholder/custom frames (and anything that isn't a Blizzard buff
@@ -6153,12 +6226,12 @@ do
         end
         _soundHooked[frame] = true
         hooksecurefunc(frame, "TriggerAuraAppliedAlert", function(f)
-            PlayBuffEdgeSound(f, "buffActiveSoundKey", _soundThrottle)
+            RecordBuffEdge(f, true)
         end)
         -- Loss edge: Blizzard fires TriggerAuraRemovedAlert when the buff drops.
         if type(frame.TriggerAuraRemovedAlert) == "function" then
             hooksecurefunc(frame, "TriggerAuraRemovedAlert", function(f)
-                PlayBuffEdgeSound(f, "buffLostSoundKey", _soundThrottleLost)
+                RecordBuffEdge(f, false)
             end)
         end
     end
