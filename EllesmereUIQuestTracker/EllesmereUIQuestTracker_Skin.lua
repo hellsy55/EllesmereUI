@@ -443,7 +443,12 @@ local function SkinHeader(header, knownCollapsed)
     -- threw combat errors of its own. The plain-Click() form shipped here is the
     -- field-tested-clean one -- do not "fix" it back to a secure redirect without
     -- fresh taint-log evidence.
-    if not _headerClickOverlays[header] and header.MinimizeButton then
+    -- Never install the click-forward on ScenarioObjectiveTracker/
+    -- UIWidgetObjectiveTracker headers: their MinimizeButton:Click() runs
+    -- Blizzard's SetCollapsed() on a shares-widget-pool tracker, the same
+    -- taint surface SharesWidgetPool() guards everywhere else in this file.
+    if not _headerClickOverlays[header] and header.MinimizeButton
+       and not SharesWidgetPool(header:GetParent()) then
         local minBtn = header.MinimizeButton
         local overlay = CreateFrame("Button", nil, header)
         overlay:SetFrameLevel(header:GetFrameLevel() + 1)
