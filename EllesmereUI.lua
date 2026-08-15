@@ -1436,6 +1436,9 @@ _G.EllesmereUI = EllesmereUI
 EllesmereUI.GLOBAL_KEY = "_EUIGlobal"
 EllesmereUI.ADDON_ROSTER = ADDON_ROSTER
 EllesmereUI.LOCALE_FONT_FALLBACK = LOCALE_FONT_FALLBACK
+-- Script the fallback stands in for: "cyrillic" | "cjk" | nil. Table field, not a
+-- file-scope local: this file sits on the Lua 5.1 200-local cap.
+EllesmereUI.LOCALE_SCRIPT = EllesmereUI._localeScript
 EllesmereUI.EXPRESSWAY = LOCALE_FONT_FALLBACK or EXPRESSWAY
 
 -- Taint-safe print: AddMessage, never global print() (its C-side handler taints the chat
@@ -3644,6 +3647,28 @@ EllesmereUI.FONT_FILES = {
     ["Morpheus"]            = nil,  -- Blizzard font
     ["Skurri"]              = nil,  -- Blizzard font
 }
+-- Bundled faces whose cmap covers the FULL Russian alphabet (U+0410-U+044F plus U+0401
+-- and U+0451, i.e. the Yo pair): these stay
+-- usable in ruRU instead of being swapped for the system glyph font. Verified per file
+-- against its cmap table -- everything omitted here (Poppins, Exo, Gotham, Changa, Cinzel,
+-- Future X Black, Homespun, KMT Ninja Naruto, Barlow Condensed) has ZERO Cyrillic and would
+-- render boxes. Re-check coverage before adding a face; a wrong entry ships unreadable text.
+-- Deliberately NOT extended to FONT_BLIZZARD: the Cyrillic-capable Blizzard face is
+-- FRIZQT___CYR (already the fallback), and the plain ones vary by installed client locale.
+EllesmereUI.FONT_CYRILLIC = {
+    ["Expressway"]       = true,
+    ["Expressway Bold"]  = true,
+    ["Avant Garde"]      = true,
+    ["Arial Bold"]       = true,
+    ["Arial Narrow"]     = true,
+    ["Fira Sans Medium"] = true,
+    ["Fira Sans Bold"]   = true,
+    ["Fira Sans Light"]  = true,
+    ["KMT Kimberley"]    = true,
+    ["Russo One"]        = true,
+    ["Ubuntu"]           = true,
+}
+
 -- Blizzard built-in font paths (not in our media folder)
 EllesmereUI.FONT_BLIZZARD = {
     ["Friz Quadrata"] = "Fonts\\FRIZQT__.TTF",
@@ -3745,7 +3770,12 @@ function EllesmereUI.GetFontsDB()
     if not EllesmereUIDB then EllesmereUIDB = {} end
     if not EllesmereUIDB.fonts then
         EllesmereUIDB.fonts = {
-            global      = "Expressway",
+            -- Cyrillic locales seed the system glyph font, not Expressway: the FONT_CYRILLIC
+            -- faces do render ruRU correctly, but they stay an explicit opt-in so a fresh
+            -- install looks exactly like every prior version. Existing installs are pinned
+            -- by the ru_cyrillic_font_optin_v1 migration.
+            global      = (EllesmereUI.LOCALE_SCRIPT == "cyrillic")
+                          and EllesmereUI.SYSTEM_FONT_KEY or "Expressway",
             outlineMode = "shadow",
         }
     end
@@ -3759,11 +3789,20 @@ local function ResolveFontName(fontName)
     if fontName == EllesmereUI.EXPRESSWAY_FORCED_KEY then
         return MEDIA_PATH .. "fonts\\Expressway.TTF"
     end
-    -- Glyph-restricted locales (CJK, Cyrillic): bundled fonts are Latin-only, so they
-    -- and the System Default sentinel map to the system glyph font. Only an external
-    -- SharedMedia font may override. Bundled names are excluded first (they are also
-    -- LSM-registered and would resolve Latin).
+    -- Glyph-restricted locales (CJK, Cyrillic): bundled fonts without coverage for the
+    -- script, and the System Default sentinel, map to the system glyph font. Only an
+    -- external SharedMedia font (or a FONT_CYRILLIC face in ruRU, handled first) may
+    -- override. Bundled names are excluded below because they are LSM-registered too and
+    -- would otherwise resolve to their Latin file.
     if LOCALE_FONT_FALLBACK then
+        -- Cyrillic locales: a bundled face with verified Cyrillic coverage renders ruRU
+        -- text correctly, so honour the pick instead of forcing the system glyph font.
+        -- Gated on LOCALE_SCRIPT, not on the fallback alone: CJK has no bundled coverage.
+        if EllesmereUI.LOCALE_SCRIPT == "cyrillic" and fontName
+           and EllesmereUI.FONT_CYRILLIC[fontName] then
+            local cyrFile = EllesmereUI.FONT_FILES[fontName]
+            if cyrFile then return MEDIA_PATH .. "fonts\\" .. cyrFile end
+        end
         if fontName
            and not EllesmereUI.FONT_FILES[fontName]
            and not EllesmereUI.FONT_BLIZZARD[fontName] then
