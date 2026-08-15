@@ -1655,13 +1655,7 @@ local function ApplyDarkTheme(health)
                 local bgClassR, bgClassG, bgClassB
                 if bgClassColored then
                     local classUnit = ClassColorSourceUnit(uKey, unit or self.unit or uKey)
-                    if classUnit then
-                        local _, ct = UnitClass(classUnit)
-                        -- ct can be secret (out-of-range/uninspectable units).
-                        -- issecretvalue FIRST: truthiness-testing a secret errors.
-                        local cc = not issecretvalue(ct) and ct and EllesmereUI.GetClassColor(ct)
-                        if cc then bgClassR, bgClassG, bgClassB = cc.r, cc.g, cc.b end
-                    end
+                    bgClassR, bgClassG, bgClassB = ns.ResolveBgClassColor(classUnit)
                 end
                 if bgClassR then
                     -- Full class color; opacity comes from customBgAlpha (SetAlpha).
@@ -1693,13 +1687,7 @@ local function ApplyDarkTheme(health)
             local bgClassR, bgClassG, bgClassB
             if bgClassColored then
                 local classUnit = ClassColorSourceUnit(unitKey, unitKey or (health.__owner and health.__owner.unit))
-                if classUnit then
-                    local _, ct = UnitClass(classUnit)
-                    -- ct can be secret (out-of-range/uninspectable units).
-                    -- issecretvalue FIRST: truthiness-testing a secret errors.
-                    local cc = not issecretvalue(ct) and ct and EllesmereUI.GetClassColor(ct)
-                    if cc then bgClassR, bgClassG, bgClassB = cc.r, cc.g, cc.b end
-                end
+                bgClassR, bgClassG, bgClassB = ns.ResolveBgClassColor(classUnit)
             end
             if bgClassR then
                 -- Full class color; PostUpdateColor keeps it correct on updates.
@@ -2035,6 +2023,24 @@ ns.ResolveUnitNameColor = function(unit)
         end
     end
     return nil
+end
+
+-- Background class-color source, enemy-aware. UnitClass() reports WARRIOR for NPCs
+-- rather than nil, so a bare lookup paints every mob Warrior tan. Players (and AI
+-- party members) keep EllesmereUI.GetClassColor (custom colors + Class Color Darken
+-- baked in); NPCs fall through to the reaction color, matching the unit name, the
+-- border and the custom Enemy Colors override. On ns for the local cap.
+ns.ResolveBgClassColor = function(classUnit)
+    if not classUnit then return nil end
+    if UnitIsPlayer(classUnit) or (UnitInPartyIsAI and UnitInPartyIsAI(classUnit)) then
+        local _, ct = UnitClass(classUnit)
+        -- ct can be secret (out-of-range/uninspectable units).
+        -- issecretvalue FIRST: truthiness-testing a secret errors.
+        local cc = not issecretvalue(ct) and ct and EllesmereUI.GetClassColor(ct)
+        if cc then return cc.r, cc.g, cc.b end
+        return nil
+    end
+    return ns.ResolveUnitNameColor(classUnit)
 end
 
 -- External nickname providers key us by this addon name. Suite = "EllesmereUI" (the
