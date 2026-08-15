@@ -108,13 +108,21 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Merge Duplicate Items
+            -- Merge Duplicate Items | Desaturate Junk Items (display effect; moved
+            -- up from EXTRAS so no row sits half-empty)
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Merge Duplicate Items",
                   tooltip="Show copies of the same item that sit in separate bag slots as one icon with their counts added together. Turn this off to keep every slot separate, for example when you deliberately split stacks. Merging is always paused while the mail, trade, auction house, bank or guild bank window is open, since those take one bag slot at a time.",
                   getValue=function() return db.profile.bagMergeDuplicates ~= false end,
                   setValue=function(v)
                       db.profile.bagMergeDuplicates = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                { type="toggle", text="Desaturate Junk Items",
+                  tooltip="Display junk items in a greyed-out style.",
+                  getValue=function() return db.profile.bagDesaturateJunkItems == true end,
+                  setValue=function(v)
+                      db.profile.bagDesaturateJunkItems = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -824,18 +832,6 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagHideRandomize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
-            ); y = y - h
-
-            -- Desaturate Junk Items
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Desaturate Junk Items",
-                  tooltip="Display junk items in a greyed-out style.",
-                  getValue=function() return db.profile.bagDesaturateJunkItems == true end,
-                  setValue=function(v)
-                      db.profile.bagDesaturateJunkItems = v
-                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end },
-                { type="label", text="" }
             ); y = y - h
 
             _, h = W:Spacer(parent, y, 20); y = y - h

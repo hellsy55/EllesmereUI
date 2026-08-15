@@ -351,8 +351,12 @@ local function BuildSetGearLookup()
     wipe(_setNames)
     local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
     if not setIDs then return end
+    -- Names only feed the on-item label; skip the API calls when it's off
+    local wantNames = BP().bagShowSetGearName ~= false
     for _, setID in ipairs(setIDs) do
-        _setNames[setID] = C_EquipmentSet.GetEquipmentSetInfo(setID)
+        if wantNames then
+            _setNames[setID] = C_EquipmentSet.GetEquipmentSetInfo(setID)
+        end
         local locs = C_EquipmentSet.GetItemLocations(setID)
         if locs then
             for _, loc in pairs(locs) do
