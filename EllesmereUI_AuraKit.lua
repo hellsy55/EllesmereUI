@@ -315,20 +315,16 @@ local function ApplyStyleToRegions(button, style)
     -- registered purely as a tint target, and the user's dispel palette rides in via
     -- customDispelColorMap (68824).
     --
-    -- FOUR SOLID STRIPS, not one ring-shaped texture. Blizzard iterates every registered
-    -- texture ("for _index, dispelTypeTexture in ipairs(self.dispelTypeTextures)" in
-    -- Blizzard_CustomAuraButton.lua), each with its own options, its own visibility test
-    -- and its own SetVertexColor, so a four-texture ring is as legal as a one-texture
-    -- one. It buys three things. Thickness becomes GEOMETRY: the ring used to be one
-    -- band texture cropped per icon size, which went sub-texel above a certain drawn
-    -- size, and the bilinear filter then rendered it at alpha < 1 so the static border
-    -- underneath bled through and mixed with the dispel tint (field-reported 2026-08-14
-    -- on Player Aura Bars debuffs above Icon Size 34). Solid strips do no texel sampling
-    -- at all and hold at any size. It also keeps us off SetTexCoord, which
-    -- AddDispelTypeTexture stamps as a secret aspect on every texture it takes (along
-    -- with Alpha, VertexColor and Shown). And it drops the dependency on style.width
-    -- being accurate: the strips hang off the holder, which SetAllPoints the button, so
-    -- the button rect drives the ring without ever being read (button rects are
+    -- FOUR SOLID STRIPS, not one ring-shaped texture: the engine applies options,
+    -- visibility and SetVertexColor per registered texture (Blizzard_CustomAuraButton
+    -- iterates the whole list), so a four-texture ring is as legal as a one-texture
+    -- one. Thickness is GEOMETRY -- a cropped band texture goes sub-texel at large
+    -- icon sizes and bilinear-fades to alpha < 1, letting the static border bleed
+    -- into the dispel tint; solid strips never sample. Strips also stay off
+    -- SetTexCoord, which AddDispelTypeTexture stamps as a secret aspect on every
+    -- texture it takes (along with Alpha, VertexColor and Shown), and off
+    -- style.width: they hang from the holder, which SetAllPoints the button, so the
+    -- button rect drives the ring without ever being read (button rects are
     -- restricted).
     --
     -- The strips live on a dedicated holder one frame level over the static border host

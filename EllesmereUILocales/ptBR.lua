@@ -542,7 +542,7 @@ L["Lower Alpha (On CD)"] = "Reduzir opacidade (em recarga)"
 L["Macro Created"] = "Macro criada"
 -- adding a `| ` makes it look better for ptBR names, 
 -- but if Macro Factory is reused somewhere else this will need to be reviewed
-L["Macro Factory"] = "| Fábrica de macros"
+L["Macro Factory"] = "Fábrica de macros"
 L["Macros"] = "Macros"
 L["Main Bags (%d / %d)"] = "Bolsas principais (%d / %d)"
 L["Mastery"] = "Maestria"

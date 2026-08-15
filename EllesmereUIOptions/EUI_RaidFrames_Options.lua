@@ -35,13 +35,6 @@ initFrame:SetScript("OnEvent", function(self)
     local ReloadFrames = ns.ReloadFrames
     local floor = math.floor
 
-    -- Keep shared labels unchanged while marking this dropdown's default.
-    local rfStrataValues = {}
-    for key, label in pairs(EllesmereUI.FRAME_STRATA_LABELS) do
-        rfStrataValues[key] = label
-    end
-    rfStrataValues.LOW = rfStrataValues.LOW .. " (Default)"
-
     local function GetOutline()
         return (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("raidFrames")) or ""
     end
@@ -4189,7 +4182,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) SSet("freeRightClickCamera", v); if ns.FRCM_Refresh then ns.FRCM_Refresh() end end },
             { type="dropdown", text="Frame Strata",
               tooltip="Controls the display order of raid and party frames. Set higher to show above other elements.",
-              values=rfStrataValues,
+              values=EllesmereUI.FRAME_STRATA_LABELS,
               order=EllesmereUI.FRAME_STRATA_ORDER_BASE,
               getValue=function() return SVal("frameStrata", "LOW") end,
               setValue=function(v)

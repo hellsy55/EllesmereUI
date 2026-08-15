@@ -5031,17 +5031,29 @@ local function HideBlizzardFrame(nameplate, unit)
         uf.SoftTargetFrame:SetParent(nameplate)
         uf.SoftTargetFrame:SetAlpha(1)
         -- Same icon is reused for enemy/friend/interact soft-targets; only allow the
-        -- interact case through.
+        -- interact case through. The hook cannot be uninstalled, so it gates on the
+        -- reparented state: while WE hold the frame its grandparent is the plate BASE,
+        -- which carries namePlateUnitToken (the field this file already uses for
+        -- base->unit resolution); after RestoreBlizzardFrame the grandparent is the
+        -- UnitFrame, the token read misses, and Blizzard's stock behavior stands.
         local icon = uf.SoftTargetFrame.Icon
         if icon and not hookedSoftTargetIcons[icon] then
             hookedSoftTargetIcons[icon] = true
             hooksecurefunc(icon, "Show", function(self)
-                local softTargetFrame = self:GetParent()
-                local ownerUF = softTargetFrame and softTargetFrame:GetParent()
-                local ufUnit = ownerUF and (ownerUF.unit or (ownerUF.GetUnit and ownerUF:GetUnit()))
-                if not ufUnit or not UnitIsUnit(ufUnit, "softinteract") then
-                    self:Hide()
-                end
+                local stf = self:GetParent()
+                local base = stf and stf:GetParent()
+                local ufUnit = base and base.namePlateUnitToken
+                if not ufUnit then return end
+                -- Non-self unit comparison: secret boolean whenever the unit is
+                -- identity-restricted -- which is NORMAL for enemies, and hostile
+                -- interactables (skinnable corpses, quest objects) are legitimate
+                -- soft-interact targets. Secret = cannot judge = leave the icon
+                -- alone (stock shows every soft-target icon; fail toward stock,
+                -- never toward hiding -- collapsing secret to hidden killed
+                -- enemy interact icons in the field).
+                local same = UnitIsUnit(ufUnit, "softinteract")
+                if issecretvalue and issecretvalue(same) then return end
+                if same ~= true then self:Hide() end
             end)
         end
     end

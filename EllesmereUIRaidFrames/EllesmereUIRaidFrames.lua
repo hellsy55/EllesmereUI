@@ -1020,8 +1020,8 @@ end
 --
 --  "Health Bar Color" indicators paint over the health FILL. A flat
 --  SetColorTexture slab erases the bar's shading, so a tinted frame reads as a
---  solid block beside untinted ones (#1339); the overlay borrows the bar's own
---  fill texture instead and recolors it with a vertex color.
+--  solid block beside untinted ones; the overlay borrows the bar's own fill
+--  texture instead and recolors it with a vertex color.
 --
 --  The overlay is anchored to the fill texture, so it inherits the bar's fill
 --  geometry for free: these fills clip by resizing rather than by moving their
@@ -1059,8 +1059,8 @@ end
 --
 -- Scoped to the owner being released. Clearing the whole registry would also drop
 -- a live overlay belonging to another owner, and an overlay that is displayed but
--- not repainted never re-registers -- so the next Health Bar Texture change would
--- skip it and leave it on the old art, which is the bug this file is fixing.
+-- not repainted never re-registers -- the next Health Bar Texture change would
+-- then skip it and leave it on the old art.
 ns.RF_ClearBarTints = function(bar, owner)
     local reg = bar and bar._euiBarTints
     if not (reg and owner) then return end
@@ -2552,15 +2552,20 @@ local function UpdateAbsorb(button, unit)
     -- One heal-absorb fetch serves both the strip bar AND the overlay below.
     local healAbsorbAmt = (UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(unit)) or 0
 
-	-- Incoming heals, fetched here so the short-circuit below sees it too. Calculator is
-    -- refreshed above; fall back to the legacy global only when the calculator is unavailable.
+    -- Incoming heals, fetched here so the short-circuit below sees it too.
+    -- predOn-GATED: with prediction off this stays a constant 0, so the fetch
+    -- never runs and the memo's _mPred compares 0==0 forever -- heal traffic
+    -- must not break the short-circuit for users without the feature.
+    -- Calculator is refreshed above; legacy global only as its fallback.
     local incomingHeals = 0
-    if calc and calc.GetIncomingHeals then
-        incomingHeals = calc:GetIncomingHeals() or 0
-    elseif UnitGetIncomingHeals then
-        incomingHeals = UnitGetIncomingHeals(unit) or 0
+    if predOn then
+        if calc and calc.GetIncomingHeals then
+            incomingHeals = calc:GetIncomingHeals() or 0
+        elseif UnitGetIncomingHeals then
+            incomingHeals = UnitGetIncomingHeals(unit) or 0
+        end
     end
-	
+
     -- Identical-state short-circuit: absorbs re-flush far more often than values change and every
     -- paint below is idempotent. Skip when values, health-bar size and the settings generation all
     -- match the last paint. SECRET-SAFE: secrets cannot be compared, so any secret input fails
@@ -2573,13 +2578,13 @@ local function UpdateAbsorb(button, unit)
     elseif ab._mAbs == absorbAmt and ab._mHeal == healAbsorbAmt
        and ab._mMax == maxHealth and ab._mClamp == isClamped
        and ab._mW == hpW and ab._mH == hpH
-	   and ab._mPred == incomingHeals
+       and ab._mPred == incomingHeals
        and ab._mGen == ns._absorbGen then
         return
     else
         ab._mAbs, ab._mHeal, ab._mMax = absorbAmt, healAbsorbAmt, maxHealth
         ab._mClamp, ab._mW, ab._mH = isClamped, hpW, hpH
-		ab._mPred = incomingHeals
+        ab._mPred = incomingHeals
         ab._mGen = ns._absorbGen
     end
 
@@ -2698,6 +2703,7 @@ local function UpdateAbsorb(button, unit)
     -- Shield style off: hide the in-frame shield bars. Heal absorb paints earlier in this
     -- function so it's untouched either way; heal prediction paints later, so only stop
     -- here if that's off too, or its block below never runs.
+    if not styleOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
@@ -8242,6 +8248,8 @@ end
 -- Party container frame (placeholder for unlock mode positioning)
 ns._partyContainerFrame = CreateFrame("Frame", nil, UIParent)
 ns._partyContainerFrame:SetSize(125, 308)
+-- File-scope creation: ns._ResolveFrameStrata is not defined yet here. The
+-- saved strata lands via OnEnable's ApplyFrameStrata call every login.
 ns._partyContainerFrame:SetFrameStrata("LOW")
 ns._partyContainerFrame:Hide()
 
