@@ -5044,16 +5044,11 @@ local function HideBlizzardFrame(nameplate, unit)
                 local base = stf and stf:GetParent()
                 local ufUnit = base and base.namePlateUnitToken
                 if not ufUnit then return end
-                -- Non-self unit comparison: secret boolean whenever the unit is
-                -- identity-restricted -- which is NORMAL for enemies, and hostile
-                -- interactables (skinnable corpses, quest objects) are legitimate
-                -- soft-interact targets. Secret = cannot judge = leave the icon
-                -- alone (stock shows every soft-target icon; fail toward stock,
-                -- never toward hiding -- collapsing secret to hidden killed
-                -- enemy interact icons in the field).
-                local same = UnitIsUnit(ufUnit, "softinteract")
-                if issecretvalue and issecretvalue(same) then return end
-                if same ~= true then self:Hide() end
+                -- Hide only for attackable enemies. NPCs and non-attackable
+                -- objects, even hostile ones, keep the icon.
+                local canAttack = UnitCanAttack("player", ufUnit)
+                if issecretvalue and issecretvalue(canAttack) then return end
+                if canAttack then self:Hide() end
             end)
         end
     end
