@@ -457,6 +457,23 @@ local function SkinHeader(header, knownCollapsed)
         overlay:SetPoint("BOTTOMRIGHT", minBtn, "BOTTOMLEFT", -2, 0)
         overlay:SetScript("OnClick", function()
             if InCombatLockdown() then return end
+            -- Forwarding Click() taints ObjectiveTrackerContainer's dispatch
+            -- loop for whichever module owns this header. Outside an instance
+            -- that's harmless (confirmed by in-game repro, 2026-08-15): click
+            -- Quests' header, then a dungeon/scenario module's own +/- button,
+            -- then Quests again -- only inside the instance does the shared
+            -- Container update loop later carry that taint into
+            -- ScenarioObjectiveTracker/UIWidgetObjectiveTracker's LayoutContents
+            -- (GetAuraDataByIndex secret-value error via ShouldShowMawBuffs).
+            -- The native +/- button alone never reproduces it. So the
+            -- click-forward is disabled for every header while in a party/
+            -- raid/scenario instance; the native +/- button keeps working
+            -- everywhere since we never touch its own OnClick.
+            local inInstance, instanceType = IsInInstance()
+            if inInstance and (instanceType == "party" or instanceType == "raid"
+                                or instanceType == "scenario") then
+                return
+            end
             if minBtn and minBtn:IsShown() then
                 minBtn:Click()
             end
