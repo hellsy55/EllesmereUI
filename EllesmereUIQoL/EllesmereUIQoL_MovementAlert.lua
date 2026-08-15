@@ -1408,6 +1408,16 @@ local function BuffAlertAssistable()
     return true
 end
 
+-- Reconcile the latch against the live flag. Needed wherever the EXITED edge
+-- could have been missed: while the tracker's events are unregistered nothing
+-- clears the latch, so a tracker switched off mid-ride (or a profile swap, or
+-- being teleported out of a vehicle) would otherwise come back with the lane
+-- suppressed for the rest of the session.
+local function SyncBuffAlertVehicleLatch()
+    local probe = UnitUsingVehicle or UnitInVehicle
+    buffAlertVehicle = (probe and probe("player")) and true or false
+end
+
 -- Build once per session on first eligible pass (warlock + Movement Alerts on
 -- + Burning Rush checked); later passes only refresh the style (mode/size/
 -- color edits ride RestyleSoon) and the host's shown state. Engine frames are
@@ -1424,21 +1434,20 @@ local function EnsureBuffAlertLane()
         if buffAlertHost then buffAlertHost:Hide() end
         return
     end
-    -- Ahead of the Show() below, not beside it: every pass runs through here,
-    -- so a gate applied anywhere else would be undone by the next tick.
-    if not BuffAlertAssistable() then
-        buffAlertAssist = false
-        if buffAlertHost then buffAlertHost:Hide() end
-        return
-    end
+    -- Resolved ahead of the Show() below, not beside it: every pass runs through
+    -- here, so a gate applied anywhere else would be undone by the next tick.
+    local assist = BuffAlertAssistable()
     local wasDenied = (buffAlertAssist == false)
-    buffAlertAssist = true
+    buffAlertAssist = assist
     if buffAlertBuilt then
+        if not assist then buffAlertHost:Hide(); return end
         buffAlertHost:Show()
         -- Whatever was parsed during the degraded window is wrong, and leaving a
         -- vehicle produces no aura edge for buffs that were already up, so the
-        -- engine would keep serving the stale membership. One full re-parse
-        -- clears it; bounded to the actual denied->allowed flip.
+        -- engine would keep serving the stale membership. The Show() above
+        -- re-parses on its own (OnShow_Intrinsic), and this is the same lever
+        -- stated outright, so the recovery does not silently depend on the host
+        -- being hidden rather than faded. Bounded to the real denied->allowed flip.
         if wasDenied and buffAlertContainer and buffAlertContainer.UpdateAllAuras then
             buffAlertContainer:UpdateAllAuras()
         end
@@ -1446,6 +1455,12 @@ local function EnsureBuffAlertLane()
         AK.RestyleSoon(BUFF_ALERT_STYLE)
         return
     end
+    -- Denial must not postpone the BUILD, only the display: logging in inside a
+    -- vehicle (or behind an intro cinematic) would otherwise defer creation to
+    -- the first allowed pass, and if that landed in combat AK.RequestContainer
+    -- queues it to PLAYER_REGEN_ENABLED -- no alert for the whole fight. Build
+    -- unconditionally and park at the end; the container is created and hidden
+    -- inside one call, so nothing renders in between.
     buffAlertBuilt = true
     buffAlertHost = CreateFrame("Frame", nil, UIParent)
     buffAlertHost:SetSize(2, 2)
@@ -1474,6 +1489,7 @@ local function EnsureBuffAlertLane()
             layout = { anchorPoint = "CENTER", padding = { 0, 0, 0, 0 }, rowWidth = 400 },
         })
     end)
+    if not assist then buffAlertHost:Hide() end
 end
 
 -- Numeric follow of the alert stack's top (slots grow UP from movementFrame's
@@ -2062,11 +2078,17 @@ local function UpdateEventRegistration()
         -- buffActive lane's identity gate (see BuffAlertAssistable): the
         -- occupancy latch plus the faction edge cinematics flip. Player-only,
         -- and only while the tracker is on. ENTERING as well as ENTERED --
-        -- the filters degrade from the boarding transition.
+        -- the filters degrade from the boarding transition. CINEMATIC_STOP
+        -- covers the addon-cancelled skip, whose faction restore can order
+        -- ahead of the edge above (the RF gate carries it for the same reason);
+        -- the lane runs no ticker, so a missed restore leaves it hidden.
         loader:RegisterUnitEvent("UNIT_ENTERING_VEHICLE", "player")
         loader:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
         loader:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
         loader:RegisterUnitEvent("UNIT_FACTION", "player")
+        loader:RegisterEvent("CINEMATIC_STOP")
+        -- The EXITED edge cannot reach a lane whose events are unregistered.
+        SyncBuffAlertVehicleLatch()
         movementEventsRegistered = true
     elseif not moveOn and movementEventsRegistered then
         loader:UnregisterEvent("SPELL_UPDATE_USABLE")
@@ -2078,6 +2100,7 @@ local function UpdateEventRegistration()
         loader:UnregisterEvent("UNIT_EXITED_VEHICLE")
         loader:UnregisterEvent("UNIT_ENTERED_VEHICLE")
         loader:UnregisterEvent("UNIT_FACTION")
+        loader:UnregisterEvent("CINEMATIC_STOP")
         movementEventsRegistered = false
         CancelMovementCountdown()
     end
@@ -2194,10 +2217,8 @@ loader:SetScript("OnEvent", function(self, event, ...)
     elseif event == "PLAYER_ENTERING_WORLD" then
         inCombat = UnitAffectingCombat("player")
         -- Safety net for an exit that never fires UNIT_EXITED_VEHICLE (being
-        -- teleported out of one): reconcile the latch against the live flag
-        -- rather than leaving the lane suppressed for the session.
-        local probe = UnitUsingVehicle or UnitInVehicle
-        buffAlertVehicle = (probe and probe("player")) and true or false
+        -- teleported out of one).
+        SyncBuffAlertVehicleLatch()
         wipe(timeSpiralActiveSpells)
         timeSpiralActiveTime = nil
         CacheMovementSpells(true)
@@ -2240,10 +2261,10 @@ loader:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_EXITED_VEHICLE" then
         buffAlertVehicle = false
         CheckMovementCooldown()
-    elseif event == "UNIT_FACTION" then
+    elseif event == "UNIT_FACTION" or event == "CINEMATIC_STOP" then
         -- Re-drive ONLY: a cinematic flips assistability with no vehicle
-        -- involved, and BuffAlertAssistable's own probe reads that. This must
-        -- not touch the latch -- UNIT_FACTION also fires on the BOARDING
+        -- involved, and BuffAlertAssistable's own probe reads that. Neither
+        -- may touch the latch -- UNIT_FACTION also fires on the BOARDING
         -- transition, where clearing it would undo the suppression we just set.
         CheckMovementCooldown()
     elseif event == "PLAYER_DEAD" then
