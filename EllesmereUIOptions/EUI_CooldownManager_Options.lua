@@ -5066,7 +5066,7 @@ initFrame:SetScript("OnEvent", function(self)
                           bd.timerDecimals = v or nil; RefreshTBB()
                       end })
                 table.insert(durationRows, 3,
-                    { type = "slider", label = "Decimal Threshold", min = 3, max = 120, step = 1,
+                    { type = "slider", label = "Decimal Threshold", min = 1, max = 120, step = 1,
                       disabled = function()
                           local bd = SelectedTBB()
                           return not (bd and bd.timerDecimals)
