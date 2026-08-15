@@ -352,7 +352,7 @@ local function BuildSetGearLookup()
     local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
     if not setIDs then return end
     -- Names only feed the on-item label; skip the API calls when it's off
-    local wantNames = BP().bagShowSetGearName ~= false
+    local wantNames = BP().bagShowSetGearName == true
     for _, setID in ipairs(setIDs) do
         if wantNames then
             _setNames[setID] = C_EquipmentSet.GetEquipmentSetInfo(setID)
@@ -501,10 +501,13 @@ function CategoryManager:ClassifyAll(items)
     local cats = self:GetCategories()
     -- Rebuild setID -> index every pass: drag-reorder and custom-category
     -- add/remove mutate cats in place without InitCategories, shifting indices.
+    -- Refill gated on split mode (no children exist when it's off).
     local setCatIdx = self._setCatIdxBySetID or {}
     wipe(setCatIdx)
-    for i, cat in ipairs(cats) do
-        if cat.equipSetID then setCatIdx[cat.equipSetID] = i end
+    if BP().bagSplitSetGearBySet then
+        for i, cat in ipairs(cats) do
+            if cat.equipSetID then setCatIdx[cat.equipSetID] = i end
+        end
     end
     self._setCatIdxBySetID = setCatIdx
     wipe(_claCounts)
@@ -532,12 +535,16 @@ function CategoryManager:ClassifyAll(items)
         end
     end
 
+    -- On-item label stamping gated on its toggle (recycled tables are wiped on
+    -- acquire, so no stale _setName survives while it's off)
+    local stampNames = BP().bagShowSetGearName == true
     for _, data in ipairs(items) do
         if data.info and data.itemLink then
             local idx = self:ClassifyItem(data.itemLink, data.info.itemID, data.bag, data.slot)
-            -- Set name for the on-item label; explicit nil clears recycled tables
-            local sid = _setGearLookup[data.bag * 1000 + data.slot]
-            data._setName = sid and _setNames[sid] or nil
+            if stampNames then
+                local sid = _setGearLookup[data.bag * 1000 + data.slot]
+                data._setName = sid and _setNames[sid] or nil
+            end
             -- Reroute disabled categories to catch-all
             if disabledIdxSet and idx and disabledIdxSet[idx] and catchAllIdx then
                 idx = catchAllIdx

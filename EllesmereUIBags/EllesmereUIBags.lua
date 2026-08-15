@@ -2127,18 +2127,8 @@ local function GetOrCreateSlot(idx)
     btn.BindTypeText:SetFont(fontPath, bindTypeFontSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     btn.BindTypeText:SetText("")
 
-    -- Equipment set name (bottom center; only for gear that is in a set)
-    if not btn.SetNameText then
-        btn.SetNameText = textOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
-        btn.SetNameText:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
-        btn.SetNameText:SetTextColor(1, 1, 1, 1)
-        btn.SetNameText:SetJustifyH("CENTER")
-        btn.SetNameText:SetWordWrap(false)
-        btn.SetNameText:SetMaxLines(1)
-        btn.SetNameText:SetWidth(SLOT_SIZE - 4)
-    end
-    btn.SetNameText:SetFont(fontPath, BP().bagSetNameFontSize or 9, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
-    btn.SetNameText:SetText("")
+    -- Equipment set name FontString is lazy-created in RenderButton: never
+    -- built while Show Set Name on Gear is off (zero cost disabled).
 
     itemSlots[idx] = btn
     return btn
@@ -2455,18 +2445,34 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
             end
         end
 
-        -- Equipment set name bottom-center (stamped by ClassifyAll for set gear).
-        -- Yields when the upgrade-track rank occupies Count in the same row
-        -- (mirrors the rank-display condition in the ItemLevelText block above).
-        if btn.SetNameText then
+        -- Equipment set name bottom-center (stamped by ClassifyAll for set gear;
+        -- stamping is gated on the toggle, so _setName is nil while it's off).
+        -- FontString is lazy: never built while off; once built it is cleared on
+        -- every render because buttons are pooled.
+        if data._setName then
+            -- Yields when the upgrade-track rank occupies Count in the same row
+            -- (mirrors the rank-display condition in the ItemLevelText block above)
             local rankShown = data._isGear and BP().bagShowTrackRank
                 and BP().showItemlevelInBags ~= false
                 and (data._giTrackRank or "") ~= ""
-            if data._setName and not rankShown and BP().bagShowSetGearName ~= false then
+            if not rankShown then
+                if not btn.SetNameText then
+                    local overlay = btn._textOverlay or btn
+                    btn.SetNameText = overlay:CreateFontString(nil, "OVERLAY", nil, 7)
+                    btn.SetNameText:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
+                    btn.SetNameText:SetTextColor(1, 1, 1, 1)
+                    btn.SetNameText:SetJustifyH("CENTER")
+                    btn.SetNameText:SetWordWrap(false)
+                    btn.SetNameText:SetMaxLines(1)
+                    btn.SetNameText:SetWidth(SLOT_SIZE - 4)
+                    btn.SetNameText:SetFont(GetFont(), BP().bagSetNameFontSize or 9, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
+                end
                 btn.SetNameText:SetText(data._setName)
-            else
+            elseif btn.SetNameText then
                 btn.SetNameText:SetText("")
             end
+        elseif btn.SetNameText then
+            btn.SetNameText:SetText("")
         end
 
         -- Profession quality overlay: let SetItemButtonQuality decide so every item type is covered, not just guessed "profession" ones.
@@ -3939,12 +3945,15 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
 
     -- Split-mode set children: rendered nested under the "Item Set Gear" anchor
     -- wherever it sits (plain or inside a group), skipped by the main loop.
+    -- Scan gated on split mode: zero extra work while it's off.
     local setChildren, setChildTotal = nil, 0
-    for i, c in ipairs(cats) do
-        if c.isEquipSet then
-            setChildren = setChildren or {}
-            setChildren[#setChildren + 1] = i
-            setChildTotal = setChildTotal + (categoryCounts and categoryCounts[i] or 0)
+    if BP().bagSplitSetGearBySet then
+        for i, c in ipairs(cats) do
+            if c.isEquipSet then
+                setChildren = setChildren or {}
+                setChildren[#setChildren + 1] = i
+                setChildTotal = setChildTotal + (categoryCounts and categoryCounts[i] or 0)
+            end
         end
     end
     local function EmitSetChildren(level)
@@ -4964,6 +4973,7 @@ function EUI_Bags:RefreshInventory()
         -- The "Item Set Gear" anchor view (and any group holding it) folds in the
         -- split-mode set children, which hold the actual items.
         local function AddSetChildren(anchorIdx)
+            if not BP().bagSplitSetGearBySet then return end
             if not (cats[anchorIdx] and cats[anchorIdx].isSetGear and not cats[anchorIdx].isEquipSet) then return end
             for i, c in ipairs(cats) do
                 if c.isEquipSet then filterSet[i] = true end
@@ -5069,7 +5079,7 @@ function EUI_Bags:RefreshInventory()
         if selectedCategoryIndex > 0 and not selectedGroupName then
             n = (categoryCounts and categoryCounts[selectedCategoryIndex]) or #tempItems
             -- The anchor view folds in its set children's items; count them too
-            do
+            if BP().bagSplitSetGearBySet then
                 local szCats = EUI_CategoryManager:GetCategories()
                 local selCat = szCats[selectedCategoryIndex]
                 if selCat and selCat.isSetGear and not selCat.isEquipSet and categoryCounts then
@@ -5085,11 +5095,11 @@ function EUI_Bags:RefreshInventory()
             S = 0
             if categoryCounts then
                 -- Set children fold into their anchor's section: count them as one
-                local sizeCats = EUI_CategoryManager:GetCategories()
+                local sizeCats = BP().bagSplitSetGearBySet and EUI_CategoryManager:GetCategories() or nil
                 local hasSetChild = false
                 for i, c in pairs(categoryCounts) do
                     if c and c > 0 then
-                        if sizeCats[i] and sizeCats[i].isEquipSet then hasSetChild = true
+                        if sizeCats and sizeCats[i] and sizeCats[i].isEquipSet then hasSetChild = true
                         else S = S + 1 end
                     end
                 end
@@ -5777,7 +5787,7 @@ function EUI_Bags:RefreshInventory()
                                 end
                             end
                             -- The Item Set Gear anchor folds in its set children's items
-                            if cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then
+                            if BP().bagSplitSetGearBySet and cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then
                                 for i, c in ipairs(cats) do
                                     if c.isEquipSet and itemsByCat[i] then
                                         for _, data in ipairs(itemsByCat[i]) do
@@ -5799,7 +5809,7 @@ function EUI_Bags:RefreshInventory()
                 if not hiddenSet[cat._defaultName] then
                     local catItems = itemsByCat[ci] or {}
                     -- The Item Set Gear anchor folds in its set children's items
-                    if cat.isSetGear then
+                    if cat.isSetGear and BP().bagSplitSetGearBySet then
                         local folded = nil
                         for i, c in ipairs(cats) do
                             if c.isEquipSet and itemsByCat[i] then
@@ -5828,12 +5838,14 @@ function EUI_Bags:RefreshInventory()
             for _, mi in ipairs(members) do itemsByMember[mi] = {} end
             -- Split-mode set children fold into their anchor member's section
             local anchorMi, childSet
-            for _, mi in ipairs(members) do
-                if cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then anchorMi = mi; break end
-            end
-            if anchorMi then
-                childSet = {}
-                for i, c in ipairs(cats) do if c.isEquipSet then childSet[i] = true end end
+            if BP().bagSplitSetGearBySet then
+                for _, mi in ipairs(members) do
+                    if cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then anchorMi = mi; break end
+                end
+                if anchorMi then
+                    childSet = {}
+                    for i, c in ipairs(cats) do if c.isEquipSet then childSet[i] = true end end
+                end
             end
             for _, data in ipairs(displayItems) do
                 local ci = data.categoryIndex
@@ -6609,8 +6621,18 @@ local function StartAddon()
     EUI_Bags:RegisterEvent("PLAYER_MONEY")
     EUI_Bags:RegisterEvent("ITEM_LOCK_CHANGED")
     EUI_Bags:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
-    -- Set created/renamed/deleted: rebuild categories (split mode) + re-classify
-    EUI_Bags:RegisterEvent("EQUIPMENT_SETS_CHANGED")
+    -- Set created/renamed/deleted: rebuild split categories / refresh name labels.
+    -- Registered only while a set feature is on: zero event cost when disabled
+    -- (merged-mode routing stays correct without it -- the lookup rebuilds per
+    -- classify pass; the event only serves the split children and name labels).
+    function EUI_Bags.UpdateSetEventRegistration()
+        if BP().bagSplitSetGearBySet or BP().bagShowSetGearName == true then
+            EUI_Bags:RegisterEvent("EQUIPMENT_SETS_CHANGED")
+        else
+            EUI_Bags:UnregisterEvent("EQUIPMENT_SETS_CHANGED")
+        end
+    end
+    EUI_Bags.UpdateSetEventRegistration()
     -- Replays a refresh that was deferred during combat (secure-button taint guard).
     EUI_Bags:RegisterEvent("PLAYER_REGEN_ENABLED")
 

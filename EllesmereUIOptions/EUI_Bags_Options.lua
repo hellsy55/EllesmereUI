@@ -141,13 +141,15 @@ initFrame:SetScript("OnEvent", function(self)
                       elseif _G.EUI_CategoryManager then
                           _G.EUI_CategoryManager:OnEquipmentSetsChanged()
                       end
+                      if _G.EUI_Bags and _G.EUI_Bags.UpdateSetEventRegistration then _G.EUI_Bags.UpdateSetEventRegistration() end
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
                 { type="toggle", text="Show Set Name on Gear",
                   tooltip="Display the equipment set's name at the bottom of bag items that belong to one of your equipment sets.",
-                  getValue=function() return db.profile.bagShowSetGearName ~= false end,
+                  getValue=function() return db.profile.bagShowSetGearName == true end,
                   setValue=function(v)
                       db.profile.bagShowSetGearName = v
+                      if _G.EUI_Bags and _G.EUI_Bags.UpdateSetEventRegistration then _G.EUI_Bags.UpdateSetEventRegistration() end
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                       EllesmereUI:RefreshPage()  -- refresh the cog's disabled state
                   end }
@@ -174,7 +176,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local snCogTex = snCog:CreateTexture(nil, "OVERLAY")
                 snCogTex:SetAllPoints()
                 snCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
-                local function snCogOff() return db.profile.bagShowSetGearName == false end
+                local function snCogOff() return db.profile.bagShowSetGearName ~= true end
                 snCog:SetAlpha(snCogOff() and 0.15 or 0.4)
                 snCog:SetScript("OnEnter", function(self)
                     if snCogOff() then
