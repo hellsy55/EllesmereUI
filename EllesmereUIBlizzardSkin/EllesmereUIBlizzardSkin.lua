@@ -44,6 +44,7 @@ local WINDOW_ENABLE_KEYS = {
     lootroll        = "reskinLootRoll",
     loothistory     = "reskinLootHistory",
     groupinvite     = "reskinGroupInvite",
+    readycheck      = "reskinReadyCheck",
     micromenu       = "reskinMicroMenu",
     housing         = "reskinHousing",
     professions     = "reskinProfessions",
@@ -75,25 +76,27 @@ function EllesmereUI.BlizzWindowSkinsKilled()
 end
 
 -------------------------------------------------------------------------------
---  One-time style seed for loot-roll/loot-history/group-invite: each adopts
+--  One-time style seed for window keys added after the fact: each adopts
 --  whichever style (EUI/Modern/off) the user already runs MOST windows with,
 --  instead of defaulting ON in EUI. Counts RAW stored state (not GetBlizzWindowStyle)
 --  so the kill switch cannot skew the vote; touched keys are left alone; ties fall to
 --  EUI. Marker-gated to once per account, at ADDON_LOADED (parent SVs are in by then, before PLAYER_LOGIN apply).
+--
+--  One BATCH per shipment, each with its OWN marker: a spent marker is never
+--  revisited, so a later batch riding the older one would silently skip every
+--  account that already ran it.
 -------------------------------------------------------------------------------
 do
-    local NEW_KEYS = { "lootroll", "loothistory", "groupinvite" }
-    local seedFrame = CreateFrame("Frame")
-    seedFrame:RegisterEvent("ADDON_LOADED")
-    seedFrame:SetScript("OnEvent", function(self, _, name)
-        if name ~= ADDON_NAME then return end
-        self:UnregisterEvent("ADDON_LOADED")
-        if not EllesmereUIDB then EllesmereUIDB = {} end
-        if EllesmereUIDB.lootSkinStyleSeeded then return end
-        EllesmereUIDB.lootSkinStyleSeeded = true
+    local BATCHES = {
+        { marker = "lootSkinStyleSeeded",  keys = { "lootroll", "loothistory", "groupinvite" } },
+        { marker = "readyCheckStyleSeeded", keys = { "readycheck" } },
+    }
+    local function SeedBatch(marker, newKeys)
+        if EllesmereUIDB[marker] then return end
+        EllesmereUIDB[marker] = true
         local styles = EllesmereUIDB.blizzWindowSkinStyles
         local isNew = {}
-        for _, k in ipairs(NEW_KEYS) do isNew[k] = true end
+        for _, k in ipairs(newKeys) do isNew[k] = true end
         local off, modern, eui = 0, 0, 0
         for winKey, ek in pairs(WINDOW_ENABLE_KEYS) do
             if not isNew[winKey] then
@@ -106,7 +109,7 @@ do
                 end
             end
         end
-        for _, winKey in ipairs(NEW_KEYS) do
+        for _, winKey in ipairs(newKeys) do
             local ek = WINDOW_ENABLE_KEYS[winKey]
             local touched = EllesmereUIDB[ek] ~= nil
                 or (styles and styles[winKey] ~= nil)
@@ -123,6 +126,14 @@ do
                 -- EUI majority (or tie): nil already means EUI-on.
             end
         end
+    end
+    local seedFrame = CreateFrame("Frame")
+    seedFrame:RegisterEvent("ADDON_LOADED")
+    seedFrame:SetScript("OnEvent", function(self, _, name)
+        if name ~= ADDON_NAME then return end
+        self:UnregisterEvent("ADDON_LOADED")
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        for _, batch in ipairs(BATCHES) do SeedBatch(batch.marker, batch.keys) end
     end)
 end
 
