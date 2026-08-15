@@ -2137,7 +2137,7 @@ local function GetOrCreateSlot(idx)
         btn.SetNameText:SetMaxLines(1)
         btn.SetNameText:SetWidth(SLOT_SIZE - 4)
     end
-    btn.SetNameText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
+    btn.SetNameText:SetFont(fontPath, BP().bagSetNameFontSize or 9, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     btn.SetNameText:SetText("")
 
     itemSlots[idx] = btn
@@ -2278,7 +2278,7 @@ local function RefreshTextSizes()
         if btn.KeystoneText then btn.KeystoneText:SetFont(fontPath, countSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
         if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
         if btn.BindTypeText then btn.BindTypeText:SetFont(fontPath, bindTypeSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
-        if btn.SetNameText then btn.SetNameText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
+        if btn.SetNameText then btn.SetNameText:SetFont(fontPath, BP().bagSetNameFontSize or 9, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
     end
     for _, btn in pairs(reagentSlots) do
         if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, fontPath, countSize, "bags") end

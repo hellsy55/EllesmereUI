@@ -23,6 +23,7 @@ local BAGS_DEFAULTS = {
         bagHideEmptyCategories = true,
         bagSplitSetGearBySet  = false,
         bagShowSetGearName    = true,
+        bagSetNameFontSize    = 9,
         bagMergeDuplicates    = true,
         bagSidebarCollapsed   = false,
         bankSidebarCollapsed  = false,

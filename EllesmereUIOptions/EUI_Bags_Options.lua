@@ -108,7 +108,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Merge Duplicate Items | Split Set Gear by Set
+            -- Merge Duplicate Items
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Merge Duplicate Items",
                   tooltip="Show copies of the same item that sit in separate bag slots as one icon with their counts added together. Turn this off to keep every slot separate, for example when you deliberately split stacks. Merging is always paused while the mail, trade, auction house, bank or guild bank window is open, since those take one bag slot at a time.",
@@ -116,7 +116,12 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       db.profile.bagMergeDuplicates = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end },
+                  end }
+            ); y = y - h
+
+            -- Split Set Gear by Set | Show Set Name on Gear (+ inline cog: Text Size)
+            local setNameRow
+            setNameRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Split Set Gear by Set",
                   tooltip="Show one sub-category per equipment set (named after the set) nested under Item Set Gear. Gear in several sets goes to the first one.",
                   getValue=function() return db.profile.bagSplitSetGearBySet == true end,
@@ -129,19 +134,64 @@ initFrame:SetScript("OnEvent", function(self)
                           _G.EUI_CategoryManager:OnEquipmentSetsChanged()
                       end
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end }
-            ); y = y - h
-
-            -- Show Set Name on Gear
-            _, h = W:DualRow(parent, y,
+                  end },
                 { type="toggle", text="Show Set Name on Gear",
                   tooltip="Display the equipment set's name at the bottom of bag items that belong to one of your equipment sets.",
                   getValue=function() return db.profile.bagShowSetGearName ~= false end,
                   setValue=function(v)
                       db.profile.bagShowSetGearName = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                      EllesmereUI:RefreshPage()  -- refresh the cog's disabled state
                   end }
             ); y = y - h
+
+            -- Inline cog (RESIZE) on Show Set Name on Gear: text size
+            if not EllesmereUI._prebuilding then
+                local _, snCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Set Name Text Options",
+                    rows = {
+                        { type="slider", label="Text Size", min=7, max=14, step=1,
+                          get=function() return db.profile.bagSetNameFontSize or 9 end,
+                          set=function(v)
+                              db.profile.bagSetNameFontSize = v
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshTextSizes then _G.EUI_Bags:RefreshTextSizes() end
+                          end },
+                    },
+                })
+                local rightRgn = setNameRow._rightRegion
+                local snCog = CreateFrame("Button", nil, rightRgn)
+                snCog:SetSize(26, 26)
+                snCog:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
+                snCog:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+                local snCogTex = snCog:CreateTexture(nil, "OVERLAY")
+                snCogTex:SetAllPoints()
+                snCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+                local function snCogOff() return db.profile.bagShowSetGearName == false end
+                snCog:SetAlpha(snCogOff() and 0.15 or 0.4)
+                snCog:SetScript("OnEnter", function(self)
+                    if snCogOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip("Show Set Name on Gear"))
+                    else self:SetAlpha(0.7) end
+                end)
+                snCog:SetScript("OnLeave", function(self)
+                    self:SetAlpha(snCogOff() and 0.15 or 0.4)
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+                snCog:SetScript("OnClick", function(self)
+                    if not snCogOff() then snCogShow(self) end
+                end)
+                local snBlock = CreateFrame("Frame", nil, snCog)
+                snBlock:SetAllPoints(); snBlock:SetFrameLevel(snCog:GetFrameLevel() + 10); snBlock:EnableMouse(true)
+                snBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(snCog, EllesmereUI.DisabledTooltip("Show Set Name on Gear"))
+                end)
+                snBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                if snCogOff() then snBlock:Show() else snBlock:Hide() end
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    if snCogOff() then snCog:SetAlpha(0.15); snBlock:Show()
+                    else snCog:SetAlpha(0.4); snBlock:Hide() end
+                end)
+            end
 
             -- Default Bag Type | Show BoE / Warbound Text (+ inline cog: Text Size)
             local bindRow
