@@ -2657,6 +2657,7 @@ do
     GameTooltip:HookScript("OnHide", function(tt)
         -- Only fires for unparked hides (a parked tooltip is never visible); clears the default-anchored flag promptly.
         _defaultAnchored = false
+        if not (_comparisonSupportActive or _comparisonStateWatcherRegistered) then return end
         if EllesmereUI._tooltipSuppressedByMode(tt) then
             QueueSuppressedComparisonClear()
         end
