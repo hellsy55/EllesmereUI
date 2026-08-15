@@ -1087,6 +1087,7 @@ end
 -- buffActive engine-lane handles (declared here so HideMovementDisplay -- the
 -- universal off-path -- can park the host; defined in the lane block below).
 local buffAlertHost, buffAlertBuilt, buffAlertRegenArm, buffAlertLastCount
+local buffAlertContainer, buffAlertAssist, buffAlertVehicle
 
 -- keepBuffLane: the cooldown display is going away but the buffActive lane is
 -- not. A buffActive spell takes no slot, so an empty cooldown stack is its
@@ -1385,6 +1386,28 @@ local function BuildBuffAlertStyle(entry)
     }
 end
 
+-- Identity gate (Blizzard_AuraContainerUtil.CanApplyIdentityCandidateFilters):
+-- includeSpellIDs is applied to a HELPFUL aura only while UnitCanAssist("player",
+-- unit) holds, and it FAILS OPEN -- when the gate fails the spell-ID filter is
+-- skipped entirely and the aura passes on its filter string alone. Boarding a
+-- vehicle drops the player's own assistability, so this one-button HELPFUL group
+-- stops meaning "Burning Rush" and renders whatever buff it finds first, wearing
+-- the Burning Rush label. Membership is cached per aura instance and UNIT_AURA
+-- only re-parses what changed, so the degraded parse outlived the ride: the alert
+-- stayed up after dismounting until a reload rebuilt the container.
+-- Latched from the vehicle events rather than probed here, because
+-- UnitUsingVehicle is still true across the EXIT transition (see the RF assist
+-- gate's AssistProbe, which guards the same engine gate one unit over).
+local function BuffAlertAssistable()
+    if buffAlertVehicle then return false end
+    -- Cinematics flip the same flag without a vehicle (UNIT_FACTION edge). A
+    -- CLEANLY-false answer denies; unreadable ones stay fail-open, since a
+    -- transient nil must not blank a working alert.
+    local ok, canAssist = pcall(UnitCanAssist, "player", "player")
+    if ok and not IsSecret(canAssist) and canAssist == false then return false end
+    return true
+end
+
 -- Build once per session on first eligible pass (warlock + Movement Alerts on
 -- + Burning Rush checked); later passes only refresh the style (mode/size/
 -- color edits ride RestyleSoon) and the host's shown state. Engine frames are
@@ -1401,8 +1424,24 @@ local function EnsureBuffAlertLane()
         if buffAlertHost then buffAlertHost:Hide() end
         return
     end
+    -- Ahead of the Show() below, not beside it: every pass runs through here,
+    -- so a gate applied anywhere else would be undone by the next tick.
+    if not BuffAlertAssistable() then
+        buffAlertAssist = false
+        if buffAlertHost then buffAlertHost:Hide() end
+        return
+    end
+    local wasDenied = (buffAlertAssist == false)
+    buffAlertAssist = true
     if buffAlertBuilt then
         buffAlertHost:Show()
+        -- Whatever was parsed during the degraded window is wrong, and leaving a
+        -- vehicle produces no aura edge for buffs that were already up, so the
+        -- engine would keep serving the stale membership. One full re-parse
+        -- clears it; bounded to the actual denied->allowed flip.
+        if wasDenied and buffAlertContainer and buffAlertContainer.UpdateAllAuras then
+            buffAlertContainer:UpdateAllAuras()
+        end
         AK.styles[BUFF_ALERT_STYLE] = BuildBuffAlertStyle(entry)
         AK.RestyleSoon(BUFF_ALERT_STYLE)
         return
@@ -1425,6 +1464,7 @@ local function EnsureBuffAlertLane()
         point = { "CENTER", buffAlertHost, "CENTER", 0, 0 },
         layout = { anchorPoint = "CENTER", padding = { 0, 0, 0, 0 }, rowWidth = 400 },
     }, function(container)
+        buffAlertContainer = container
         AK.AddGroupToContainer(container, {
             key = "buffalert",
             filter = { "HELPFUL" },
@@ -2019,6 +2059,14 @@ local function UpdateEventRegistration()
         loader:RegisterEvent("SPELL_UPDATE_CHARGES")
         loader:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         loader:RegisterUnitEvent("UNIT_AURA", "player")
+        -- buffActive lane's identity gate (see BuffAlertAssistable): the
+        -- occupancy latch plus the faction edge cinematics flip. Player-only,
+        -- and only while the tracker is on. ENTERING as well as ENTERED --
+        -- the filters degrade from the boarding transition.
+        loader:RegisterUnitEvent("UNIT_ENTERING_VEHICLE", "player")
+        loader:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+        loader:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+        loader:RegisterUnitEvent("UNIT_FACTION", "player")
         movementEventsRegistered = true
     elseif not moveOn and movementEventsRegistered then
         loader:UnregisterEvent("SPELL_UPDATE_USABLE")
@@ -2026,6 +2074,10 @@ local function UpdateEventRegistration()
         loader:UnregisterEvent("SPELL_UPDATE_CHARGES")
         loader:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
         loader:UnregisterEvent("UNIT_AURA")
+        loader:UnregisterEvent("UNIT_ENTERING_VEHICLE")
+        loader:UnregisterEvent("UNIT_EXITED_VEHICLE")
+        loader:UnregisterEvent("UNIT_ENTERED_VEHICLE")
+        loader:UnregisterEvent("UNIT_FACTION")
         movementEventsRegistered = false
         CancelMovementCountdown()
     end
@@ -2141,6 +2193,11 @@ loader:SetScript("OnEvent", function(self, event, ...)
         CheckMovementCooldown()
     elseif event == "PLAYER_ENTERING_WORLD" then
         inCombat = UnitAffectingCombat("player")
+        -- Safety net for an exit that never fires UNIT_EXITED_VEHICLE (being
+        -- teleported out of one): reconcile the latch against the live flag
+        -- rather than leaving the lane suppressed for the session.
+        local probe = UnitUsingVehicle or UnitInVehicle
+        buffAlertVehicle = (probe and probe("player")) and true or false
         wipe(timeSpiralActiveSpells)
         timeSpiralActiveTime = nil
         CacheMovementSpells(true)
@@ -2176,6 +2233,18 @@ loader:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_AURA" then
         local unit, updateInfo = ...
         UpdateCachedCharges()
+        CheckMovementCooldown()
+    elseif event == "UNIT_ENTERING_VEHICLE" or event == "UNIT_ENTERED_VEHICLE" then
+        buffAlertVehicle = true
+        CheckMovementCooldown()
+    elseif event == "UNIT_EXITED_VEHICLE" then
+        buffAlertVehicle = false
+        CheckMovementCooldown()
+    elseif event == "UNIT_FACTION" then
+        -- Re-drive ONLY: a cinematic flips assistability with no vehicle
+        -- involved, and BuffAlertAssistable's own probe reads that. This must
+        -- not touch the latch -- UNIT_FACTION also fires on the BOARDING
+        -- transition, where clearing it would undo the suppression we just set.
         CheckMovementCooldown()
     elseif event == "PLAYER_DEAD" then
         CheckMovementCooldown()
