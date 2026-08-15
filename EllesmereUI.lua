@@ -2739,6 +2739,62 @@ do
         if bd then bd.container:Show() end
     end
 
+    -- Variable-thickness border ring drawn from a single pre-shaped texture (natively
+    -- 7px thick), scaled by (7 - rawBorderSize) and clipped by `mask`. Called with `:`
+    -- so self.Point resolves to whichever PP module owns host's frame hierarchy
+    -- (world PP vs PanelPP) -- calling with `.` shifts every argument left by one.
+    function PP:ApplyMaskedShapeBorder(host, mask, texPath, rawBorderSize, r, g, b, a)
+        if not host then return end
+        rawBorderSize = rawBorderSize or 0
+        if rawBorderSize <= 0 or not texPath then
+            if host._shapeBorderShown then
+                host._shapeBorderTex:Hide()
+                host._shapeBorderShown = nil
+            end
+            return
+        end
+        r, g, b, a = r or 0, g or 0, b or 0, a or 1
+        -- Every field guarded: callers invoke this on every restyle pass regardless
+        -- of whether the border changed, and Remove/AddMaskTexture aren't cheap.
+        if host._shapeBorderShown and host._sbTex == texPath and host._sbSize == rawBorderSize
+            and host._sbMask == mask and host._sbR == r and host._sbG == g
+            and host._sbB == b and host._sbA == a then
+            return
+        end
+        if not host._shapeBorderTex then
+            host._shapeBorderTex = host:CreateTexture(nil, "OVERLAY")
+            local t = host._shapeBorderTex
+            if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
+        end
+        local tex = host._shapeBorderTex
+        local bExp = 7 - math.min(rawBorderSize, 7)
+        tex:ClearAllPoints()
+        self.Point(tex, "TOPLEFT", host, "TOPLEFT", -bExp, bExp)
+        self.Point(tex, "BOTTOMRIGHT", host, "BOTTOMRIGHT", bExp, -bExp)
+        if mask then
+            pcall(tex.RemoveMaskTexture, tex, mask)
+            pcall(tex.AddMaskTexture, tex, mask)
+        end
+        tex:SetTexture(texPath)
+        tex:SetVertexColor(r, g, b, a)
+        tex:Show()
+        host._sbTex, host._sbSize, host._sbMask, host._sbR, host._sbG, host._sbB, host._sbA =
+            texPath, rawBorderSize, mask, r, g, b, a
+        host._shapeBorderShown = true
+    end
+
+    -- Callers switching away from a shaped border (to the plain-line border, or off
+    -- entirely) must hide _shapeBorderTex through this, not a raw :Hide() -- the guard
+    -- above trusts _shapeBorderShown, so an external hide it doesn't know about leaves
+    -- a later ApplyMaskedShapeBorder call with the exact same args wrongly skipping
+    -- its own Show().
+    function PP:HideMaskedShapeBorder(host)
+        if host and host._shapeBorderShown then
+            host._shapeBorderTex:Hide()
+            host._shapeBorderShown = nil
+        end
+    end
+
     ---------------------------------------------------------------------------
     --  Scale change watcher
     ---------------------------------------------------------------------------
@@ -2861,6 +2917,8 @@ do
     PanelPP.UpdateBorder  = PP.UpdateBorder
     PanelPP.HideBorder    = PP.HideBorder
     PanelPP.ShowBorder    = PP.ShowBorder
+    PanelPP.ApplyMaskedShapeBorder = PP.ApplyMaskedShapeBorder
+    PanelPP.HideMaskedShapeBorder = PP.HideMaskedShapeBorder
 end
 
 -- File-level PanelPP reference for panel layout code outside the do block

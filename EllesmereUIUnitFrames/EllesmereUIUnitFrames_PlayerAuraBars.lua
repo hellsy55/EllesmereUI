@@ -242,6 +242,25 @@ end
 -- cost (same trade-off as EllesmereUI_AuraKit.lua's dispelHolder) so a later Icon
 -- Effects change never needs a /reload.
 
+-- Icon-size expansion for a masked shape's overhang beyond its logical iconSize
+-- (mirrors EllesmereUIActionBars.lua's SHAPE_BTN_EXPAND).
+local PAB_SHAPE_EXPAND = 8
+local function PabShapeActive(shape)
+    return shape ~= nil and shape ~= "none"
+end
+
+-- Shape borders only render two visually distinct states at aura-icon sizes, same as
+-- Action Bars' own ns.BORDER_THICKNESS table: thin/normal/heavy all carry shape=0,
+-- only strong carries shape=7. Border Size's 0-4 levels mirror that table 1:1 (see
+-- EUI_PlayerAuraBars_ManagerPages.lua's BORDER_SIZE_LEVELS).
+local function PabShapeBorderSize(v)
+    return ((v or 0) >= 4) and 7 or 0
+end
+local function PabShapedSize(rawSize, shape)
+    if PabShapeActive(shape) then return rawSize + PAB_SHAPE_EXPAND end
+    return rawSize
+end
+
 local function PAB_ApplyDmFx(button, d, style)
     local cat = d.dmCat
     local e = style.fxList and PAB_FxBlockFor(style.fxList, cat) or nil
@@ -299,7 +318,9 @@ local function PAB_ApplyDmFx(button, d, style)
         gov:Hide()
     end
 
-    -- Border override: same creation-window pre-make as the glow.
+    -- Border override: same creation-window pre-make as the glow. PP.CreateBorder's
+    -- container is created lazily below (non-shaped branch only) -- a shaped bar
+    -- uses PP.ApplyMaskedShapeBorder instead, which owns its own child texture.
     local bSize = (e and e.borderSize) or 0
     local host = d.pabFxBdr
     if not host and PP then
@@ -309,13 +330,18 @@ local function PAB_ApplyDmFx(button, d, style)
             or (button:GetFrameLevel() + 1)
         host:SetFrameLevel(base + 1)
         host:EnableMouse(false)
-        PP.CreateBorder(host, 0, 0, 0, 1, 1)
         host:Hide()
         d.pabFxBdr = host
     end
     if bSize > 0 and host and PP then
         local bc = e.borderColor or { r = 0, g = 0, b = 0 }
-        PP.UpdateBorder(host, bSize, bc.r or 0, bc.g or 0, bc.b or 0, 1)
+        if style.iconShape and style.iconShape ~= "none" and style.shapeBorderPath and d.shapeMask then
+            PP:ApplyMaskedShapeBorder(host, d.shapeMask, style.shapeBorderPath, PabShapeBorderSize(bSize), bc.r or 0, bc.g or 0, bc.b or 0, 1)
+        else
+            PP:HideMaskedShapeBorder(host)
+            PP.CreateBorder(host, 0, 0, 0, 1, 1)
+            PP.UpdateBorder(host, bSize, bc.r or 0, bc.g or 0, bc.b or 0, 1)
+        end
         host:Show()
     elseif host then
         host:Hide()
@@ -743,7 +769,7 @@ local function BuildStyle(isBuff, cfg)
     -- gap snap) so the rendered size agrees with the container's cross-axis extent
     -- math at any UIParent scale.
     local PP = EllesmereUI.PP
-    local iconSize = PP.Scale(cfg.iconSize or 32)
+    local iconSize = PP.Scale(PabShapedSize(cfg.iconSize or 32, cfg.iconShape))
 
     local style = {
         width = iconSize,
@@ -824,6 +850,19 @@ local function BuildStyle(isBuff, cfg)
 
         border = border,
     }
+
+    -- Custom icon shape (Square/Circle/Hexagon/etc, same media set as Action Bars
+    -- and Unit Frames' detached portraits). ns.PORTRAIT_MASKS/BORDERS/MASK_INSETS are
+    -- exposed by EllesmereUIUnitFrames.lua (same addon/ns); AuraKit itself lives in a
+    -- separate TOC and never touches ns, so resolved paths travel through style.*.
+    local shape = cfg.iconShape
+    if PabShapeActive(shape) then
+        style.iconShape       = shape
+        style.shapeMaskPath   = ns.PORTRAIT_MASKS and ns.PORTRAIT_MASKS[shape]
+        style.shapeBorderPath = ns.PORTRAIT_BORDERS and ns.PORTRAIT_BORDERS[shape]
+        style.shapeInsetPx    = ns.MASK_INSETS and ns.MASK_INSETS[shape]
+        style.shapeBorderSize = cfg.shapeBorderSizeOverride or PabShapeBorderSize(borderSize)
+    end
 
     -- Engine dispel-type border, debuffs only (buffs have no dispel type). AK's gate
     -- (ApplyStyleToRegions) only activates it when `border` above is ALSO non-nil, so
@@ -976,7 +1015,7 @@ end
 -- same size share one variant, everything else riding along via the shallow copy.
 -- Rebuilt unconditionally every pass (settings-apply frequency) rather than
 -- fingerprint-cached.
-local function EnsurePabSizedStyle(baseKey, size)
+local function EnsurePabSizedStyle(baseKey, size, shape)
     local base = AK.styles[baseKey]
     if not base then return baseKey end
     local variantKey = baseKey .. ":sz" .. tostring(size)
@@ -984,10 +1023,12 @@ local function EnsurePabSizedStyle(baseKey, size)
     for k, val in pairs(base) do v[k] = val end
     -- Snapped like BuildStyle's own width/height (same button SetSize path, so a raw
     -- value reintroduces the 1px border/icon disagreement); the variant KEY stays
-    -- keyed by the raw size.
+    -- keyed by the raw size. Shape-expand applies the same as BuildStyle's own
+    -- iconSize -- base already carries iconShape/shapeMaskPath/etc via the shallow
+    -- copy above, only width/height need recomputing for this variant's own size.
     local PP = EllesmereUI.PP
-    v.width = PP.Scale(size)
-    v.height = PP.Scale(size)
+    v.width = PP.Scale(PabShapedSize(size, shape))
+    v.height = PP.Scale(PabShapedSize(size, shape))
     AK.styles[variantKey] = v
     AK.RestyleSoon(variantKey)
     return variantKey
@@ -996,7 +1037,7 @@ end
 local function BuildGroupLayout(cfg, gap, rowGap, size)
     local PP = EllesmereUI.PP
     rowGap = rowGap or gap
-    size = PP.Scale(size or cfg.iconSize or 32)
+    size = PP.Scale(PabShapedSize(size or cfg.iconSize or 32, cfg.iconShape))
     gap = PP.Scale(gap)
     rowGap = PP.Scale(rowGap)
     return {
@@ -1032,7 +1073,7 @@ local function ApplyGroupConfig(container, chain, declaredSet, styleKey, effecti
         -- link.key alone stays the fx CATEGORY identity (d.dmCat / PAB_FxSizeFor).
         local effKey = link.key .. "|" .. table.concat(link.tokens, "")
         if szOv then effKey = effKey .. "|sz" end
-        local linkStyleKey = szOv and EnsurePabSizedStyle(styleKey, szOv) or styleKey
+        local linkStyleKey = szOv and EnsurePabSizedStyle(styleKey, szOv, cfg.iconShape) or styleKey
         local candidateFilters
         if link.cand then
             -- link.cand is from the shared class vocabulary -- copy it so the merges
@@ -1163,9 +1204,10 @@ local function MaxIconSizeFor(isBuff, cfg)
     end
     -- Snap to the physical pixel grid (same reasoning as ApplyGroupConfig's gap/rowGap
     -- snap): a raw iconSize also feeds the container's cross-axis extent math
-    -- (ComputeGrid) at a non-pixel-perfect UIParent scale.
+    -- (ComputeGrid) at a non-pixel-perfect UIParent scale. Shape-expand applied last so
+    -- the bar frame's footprint (ComputeGrid) always matches the buttons' real size.
     local PP = EllesmereUI.PP
-    return PP.Scale(size)
+    return PP.Scale(PabShapedSize(size, cfg.iconShape))
 end
 
 local function ComputeGrid(isBuff, cfg)
@@ -3589,6 +3631,9 @@ local function CreatePreviewIcon(box)
     btn.cooldown:SetHideCountdownNumbers(true)
     btn.cooldown:Hide()
     btn.border = CreateFrame("Frame", nil, btn)
+    -- Plain preview region, not a real AuraKit button -- masking is unguarded here.
+    btn.shapeMask = btn:CreateMaskTexture()
+    btn.shapeMask:Hide()
     btn.textHost = CreateFrame("Frame", nil, btn)
     btn.duration = btn.textHost:CreateFontString(nil, "OVERLAY")
     btn.stack = btn.textHost:CreateFontString(nil, "OVERLAY")
@@ -3639,6 +3684,11 @@ local function ApplyPreviewScale(cfg, comp)
     out.padding = (cfg.padding or 5) * comp
     out.rowSpacing = cfg.rowSpacing and (cfg.rowSpacing * comp) or nil
     out.borderSize = (cfg.borderSize or 1) * comp
+    -- PabShapeBorderSize is keyed by the raw 0-4 level, so it must run BEFORE scaling
+    -- (unlike out.borderSize above) -- resolve the level, then scale the result,
+    -- mirroring iconSize's own scale-after-resolve treatment. BuildStyle prefers this
+    -- over recomputing from the already-scaled out.borderSize when present.
+    out.shapeBorderSizeOverride = PabShapeBorderSize(cfg.borderSize or 1) * comp
     out.durationTextSize = (cfg.durationTextSize or 11) * comp
     out.durationOffsetX = (cfg.durationOffsetX or 0) * comp
     out.durationOffsetY = (cfg.durationOffsetY or 0) * comp
@@ -4035,12 +4085,14 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
     -- override, or the bar's base iconSize) drives its own footprint directly, so
     -- spacing between normal icons stays tight and only an oversized icon's immediate
     -- neighbors get pushed out -- true flow-layout behavior rather than a uniform
-    -- worst-case cell grid (which left too much gap around every normal icon).
+    -- worst-case cell grid (which left too much gap around every normal icon). Shape-
+    -- expanded the same as the live bar's own button SetSize (BuildStyle/
+    -- EnsurePabSizedStyle), so preview spacing/footprint matches the real bar.
     local slotSize = {}
     for i = 1, total do
         local e = fxBySlot and fxBySlot[i]
         local sz = e and tonumber(e.size)
-        slotSize[i] = (sz and sz > 0) and sz or iconSize
+        slotSize[i] = PabShapedSize((sz and sz > 0) and sz or iconSize, cfg.iconShape)
     end
 
     local rowWidth, rowHeight, colOffset, rowYOffset = {}, {}, {}, {}
@@ -4166,7 +4218,39 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
                 btn.icon:SetTexCoord(z, 1 - z, z, 1 - z)
             end
 
-            btn.border:SetAllPoints(btn.icon)
+            -- Mirrors EllesmereUI_AuraKit.lua's ApplyStyleToRegions, unguarded (plain regions).
+            local shapeActive = style.iconShape and style.iconShape ~= "none" and style.shapeMaskPath
+            if shapeActive then
+                btn.shapeMask:SetTexture(style.shapeMaskPath, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+                btn.shapeMask:SetAllPoints(btn)
+                btn.shapeMask:Show()
+                local sz = slotSize[i]
+                local zoom = style.iconZoom or 0.055
+                local shapeKey = style.iconShape .. "|" .. sz .. "|" .. zoom
+                if btn._shapeApplied ~= shapeKey then
+                    pcall(btn.icon.RemoveMaskTexture, btn.icon, btn.shapeMask)
+                    btn.icon:AddMaskTexture(btn.shapeMask)
+                    local insetPx = style.shapeInsetPx or 17
+                    local visRatio = (128 - 2 * insetPx) / 128
+                    local fullExpand = ((1 / visRatio) - 1) * 0.5
+                    -- Coupled to Icon Zoom, same as the live bar (EllesmereUI_AuraKit.lua).
+                    local expand = math.max(fullExpand * (zoom / 0.055), 0)
+                    btn.icon:ClearAllPoints()
+                    btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", -expand * sz, expand * sz)
+                    btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", expand * sz, -expand * sz)
+                    btn._shapeApplied = shapeKey
+                end
+            else
+                if btn._shapeApplied then
+                    pcall(btn.icon.RemoveMaskTexture, btn.icon, btn.shapeMask)
+                    btn.icon:ClearAllPoints()
+                    btn.icon:SetAllPoints()
+                    btn._shapeApplied = nil
+                end
+                btn.shapeMask:Hide()
+            end
+
+            btn.border:SetAllPoints(shapeActive and btn or btn.icon)
             btn.border:SetFrameLevel(btn:GetFrameLevel() + 1)
             local PP = EllesmereUI and EllesmereUI.PanelPP
             if PP and style.border then
@@ -4176,22 +4260,41 @@ local function RenderPreviewIcons(box, icons, isBuff, cfg, fontPath, pool)
                     br, bg, bb, ba = c.r, c.g, c.b, 1
                 end
                 local size = style.border.size or 1
-                -- PP.CreateBorder is create-ONCE-only -- a second call with a different
-                -- size/color on an already-created host is a silent no-op
-                -- (EllesmereUI.lua's PP.CreateBorder early-returns the cached container
-                -- without touching bd.borderSize/borderColor). Live border-size/color
-                -- changes on an already-created host must go through PP.UpdateBorder
-                -- instead -- the same borderMade branch EllesmereUI_AuraKit.lua's own
-                -- ApplyStyleToRegions uses for the real bar's borders.
-                if btn.borderMade then
-                    PP.UpdateBorder(btn.border, size, br, bg, bb, ba)
-                elseif PP.CreateBorder then
-                    PP.CreateBorder(btn.border, br, bg, bb, ba, size, "OVERLAY", 7)
-                    btn.borderMade = true
+                if shapeActive and style.shapeBorderPath and PP.ApplyMaskedShapeBorder then
+                    PP:ApplyMaskedShapeBorder(btn.border, btn.shapeMask, style.shapeBorderPath, style.shapeBorderSize or size, br, bg, bb, ba)
+                    if PP.ShowBorder then PP.ShowBorder(btn.border) end
+                    btn.border:Show()
+                else
+                    if PP.HideMaskedShapeBorder then PP:HideMaskedShapeBorder(btn.border)
+                    elseif btn.border._shapeBorderTex then btn.border._shapeBorderTex:Hide() end
+                    -- PP.CreateBorder is create-once-only; live size/color changes on an
+                    -- already-created host go through PP.UpdateBorder instead.
+                    if btn.borderMade then
+                        PP.UpdateBorder(btn.border, size, br, bg, bb, ba)
+                    elseif PP.CreateBorder then
+                        PP.CreateBorder(btn.border, br, bg, bb, ba, size, "OVERLAY", 7)
+                        btn.borderMade = true
+                    end
+                    if PP.ShowBorder then PP.ShowBorder(btn.border) else btn.border:Show() end
                 end
-                if PP.ShowBorder then PP.ShowBorder(btn.border) else btn.border:Show() end
             else
                 if PP and PP.HideBorder then PP.HideBorder(btn.border) else btn.border:Hide() end
+                if PP and PP.HideMaskedShapeBorder then PP:HideMaskedShapeBorder(btn.border)
+                elseif btn.border._shapeBorderTex then btn.border._shapeBorderTex:Hide() end
+            end
+
+            local cdMaskKey = shapeActive and style.iconShape or nil
+            if btn._cdShapeApplied ~= cdMaskKey then
+                if cdMaskKey then
+                    pcall(btn.cooldown.AddMaskTexture, btn.cooldown, btn.shapeMask)
+                    if btn.cooldown.SetSwipeTexture then
+                        pcall(btn.cooldown.SetSwipeTexture, btn.cooldown, style.shapeMaskPath)
+                    end
+                else
+                    pcall(btn.cooldown.RemoveMaskTexture, btn.cooldown, btn.shapeMask)
+                    if btn.cooldown.SetSwipeTexture then pcall(btn.cooldown.SetSwipeTexture, btn.cooldown, "") end
+                end
+                btn._cdShapeApplied = cdMaskKey
             end
 
             if slot.kind ~= "placeholder" then
