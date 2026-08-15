@@ -1487,11 +1487,13 @@ end
 -- live frames (via ResolveDisplayName) and every preview surface. Skips secret
 -- strings entirely (#, string.byte and string.sub all throw on secrets), so a
 -- secret name shows verbatim and uncapped. nameMaxLength 0 = off. On ns (local cap).
-function ns.CapName(display)
+-- Takes the caller's settings table `s` so a party override applies correctly.
+function ns.CapName(display, s)
     if type(display) ~= "string" then return display end
     if issecretvalue and issecretvalue(display) then return display end
     if display == "" then return display end
-    local maxLen = db and db.profile and db.profile.nameMaxLength or 15
+    s = s or (db and db.profile)
+    local maxLen = s and s.nameMaxLength or 15
     if not maxLen or maxLen <= 0 then return display end
     local bytes = #display
     local i, chars, endByte = 1, 0, nil
@@ -1520,7 +1522,7 @@ ns.RF_NAME_WIDTH_FRACTION = 1.0
 -- NSAPI:GetName self-gates on its global nicknames toggle AND that checkbox and returns the short
 -- name when unset, falling through to the next source. Every source gates itself entirely (no
 -- EUI-side toggle); pcall keeps a misbehaving external API from breaking name rendering.
-local function ResolveDisplayName(unit, applyCap)
+local function ResolveDisplayName(unit, applyCap, s)
     local name = UnitName(unit) or ""
     local display
     if NSAPI and NSAPI.GetName then
@@ -1582,7 +1584,7 @@ local function ResolveDisplayName(unit, applyCap)
         display = name
     end
     -- Cap only the in-frame name (applyCap), not the top name bar banner.
-    if applyCap then display = ns.CapName(display) end
+    if applyCap then display = ns.CapName(display, s) end
     return display
 end
 
@@ -1692,14 +1694,16 @@ function ns.RefreshAllNames()
     if not s then return end
     local function refresh(unit, btn)
         local d = GetFFD(btn)
+		-- Party buttons read through the party proxy so a per-party cap applies.
+        local bs = (d and d._isParty) and (ns._scaledPartyProxy or s) or s
         if d and d.nameText then
-            d.nameText:SetText(ResolveDisplayName(unit, true))
-            local nr, ng, nb = GetNameColor(unit, s)
+            d.nameText:SetText(ResolveDisplayName(unit, true, bs))
+            local nr, ng, nb = GetNameColor(unit, bs)
             d.nameText:SetTextColor(nr, ng, nb)
         end
-        if d and d.topNameBarText and s.topNameBarEnabled then
-            d.topNameBarText:SetText(ResolveDisplayName(unit))
-            local tr, tg, tb = GetTopNameBarColor(unit, s)
+        if d and d.topNameBarText and bs.topNameBarEnabled then
+            d.topNameBarText:SetText(ResolveDisplayName(unit, false, bs))
+            local tr, tg, tb = GetTopNameBarColor(unit, bs)
             d.topNameBarText:SetTextColor(tr, tg, tb)
         end
     end
@@ -3978,14 +3982,14 @@ local function UpdateButton(button)
 
     -- Name (visibility owned by AnchorNameText, which hides it when the Top Name Bar is enabled)
     if d.nameText then
-        d.nameText:SetText(ResolveDisplayName(unit, true))
+        d.nameText:SetText(ResolveDisplayName(unit, true, s))
         local nr, ng, nb = GetNameColor(unit, s)
         d.nameText:SetTextColor(nr, ng, nb)
     end
 
     -- Top Name Bar text (unit name + class/custom color); size/anchor/visibility are LayoutTopNameBar's.
     if d.topNameBarText and s.topNameBarEnabled then
-        d.topNameBarText:SetText(ResolveDisplayName(unit))
+        d.topNameBarText:SetText(ResolveDisplayName(unit, false, s))
         local tr, tg, tb = GetTopNameBarColor(unit, s)
         d.topNameBarText:SetTextColor(tr, tg, tb)
     end
@@ -4795,7 +4799,7 @@ FB.Update = function(b)
         fbc and fbc.b or 49/255, (s.healthBarOpacity or 100) / 100)
 
     if b._nameText then
-        b._nameText:SetText(ResolveDisplayName(unit, true))
+        b._nameText:SetText(ResolveDisplayName(unit, true, s))
         local nr, ng, nb = GetNameColor(unit, s)
         b._nameText:SetTextColor(nr, ng, nb)
     end
@@ -8317,7 +8321,7 @@ do
             "powerUniformAnchors", "extendHealthBehindPower",
         },
         textDisplay = {
-            "nameSize", "nameColorMode", "nameCustomColor",
+            "nameSize", "nameMaxLength", "nameColorMode", "nameCustomColor",
             "namePosition", "nameOffsetX", "nameOffsetY",
             "healthTextMode", "healthTextColorMode", "healthTextCustomColor",
             "healthTextSize", "healthTextPosition", "healthTextOffsetX", "healthTextOffsetY",
@@ -12512,7 +12516,7 @@ local function ApplyPreviewData(f, index)
         end
         -- Force text re-render (WoW doesn't visually re-layout on JustifyH change alone)
         f._nameText:SetText("")
-        f._nameText:SetText(ns.CapName(name))
+        f._nameText:SetText(ns.CapName(name, s))
         ApplyFont(f._nameText, s.nameSize or 10)
         local nameMode = s.nameColorMode or "class"
         if nameMode == "accent" then
