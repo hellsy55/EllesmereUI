@@ -843,30 +843,66 @@ local function ProcessBlockChildren(frame, depth)
     end
 end
 
-local _hookedPOIs = setmetatable({}, { __mode = "k" })
+local _suppressedPOIs = setmetatable({}, { __mode = "k" })
+
+-- NEVER call :Hide() on a quest POI button, and never post-hook its :Show().
+-- POIButtonTemplate wires <OnShow>/<OnHide> to POIButtonMixin, and those two
+-- handlers do nothing but EventRegistry:RegisterCallback / UnregisterCallback
+-- on "Supertracking.OnChanged". Running either from our (tainted) execution
+-- writes into EventRegistry's shared callback table for that event, so every
+-- other subscriber -- SuperTrackablePinMixin, VignetteDataProvider,
+-- QuestDataProvider, WorldQuestDataProvider, DungeonEntranceDataProvider --
+-- is then dispatched tainted on the next TriggerEvent. Observed fallout:
+-- a blocked Frame:SetPropagateMouseClicks() while the world map acquires pins,
+-- and secret-value errors when GameTooltip lays out a vignette widget set.
+--
+-- Alpha runs no script handler, so suppress with alpha + EnableMouse instead.
+-- Blizzard's own UpdateButtonAlpha only touches NormalTexture/PushedTexture,
+-- never the button frame, so it cannot undo this -- which is also why the old
+-- Show hook is gone: Show() no longer un-suppresses anything.
+local function ApplyPOISuppression(pb)
+    pb:SetAlpha(0)
+    pb:EnableMouse(false)
+end
+
+-- ObjectiveTrackerPOIButtonTemplate's AddAnim ends on alpha 1 (setToFinalAlpha),
+-- and it is the only thing in Blizzard's code that writes the button frame's
+-- alpha at all -- Pool_HideAndClearAnchors and POIButtonMixin:Reset() leave both
+-- alpha and mouse state alone, so a pooled button is handed back out still
+-- suppressed. That means current alpha says nothing about whether a fanfare is
+-- about to un-hide the button, so queue the re-apply unconditionally and dedupe
+-- on a pending timer instead. Re-arms itself if the animation is still running.
+local _poiRepair = setmetatable({}, { __mode = "k" })
+
+local function QueuePOIRepair(pb)
+    if _poiRepair[pb] then return end
+    _poiRepair[pb] = true
+    C_Timer.After(0.35, function()
+        _poiRepair[pb] = nil
+        if EQT.Cfg("showQuestIcons") then return end
+        ApplyPOISuppression(pb)
+        if pb.AddAnim and pb.AddAnim:IsPlaying() then QueuePOIRepair(pb) end
+    end)
+end
 
 local function SuppressPOI(block)
-    if EQT.Cfg("showQuestIcons") then return end
     local pb = block and block.poiButton
     if not pb then return end
-    if pb:IsShown() then pb:Hide() end
-    pb:EnableMouse(false)
 
-    -- Config-gated Show hook: without it, Blizzard re-shows the pooled button
-    -- for a frame when the user tracks a quest via the context menu (visible
-    -- blink) before the next SkinBlock suppress pass runs. Hooked once per
-    -- pooled button (weak-keyed cache); no-op while Show Quest Icons is on,
-    -- so enabling the setting restores default behavior without a reload.
-    -- Taint-verified clean with the tracker's field-write injector removed.
-    if not _hookedPOIs[pb] then
-        _hookedPOIs[pb] = true
-
-        hooksecurefunc(pb, "Show", function(self)
-            if not EQT.Cfg("showQuestIcons") then
-                self:Hide()
-            end
-        end)
+    if EQT.Cfg("showQuestIcons") then
+        -- Restore buttons we suppressed earlier in this session so flipping the
+        -- setting on takes effect without waiting for the reload prompt.
+        if _suppressedPOIs[pb] then
+            _suppressedPOIs[pb] = nil
+            pb:SetAlpha(1)
+            pb:EnableMouse(true)
+        end
+        return
     end
+
+    _suppressedPOIs[pb] = true
+    ApplyPOISuppression(pb)
+    QueuePOIRepair(pb)
 end
 
 -- Raise the block's right-edge buttons (quest item / group finder) above the
