@@ -2472,6 +2472,7 @@ do
 
     local EnsureComparisonSupport
     local UpdateStateWatcher
+    local _comparisonSupportActive = false
     local _comparisonStateWatcherRegistered = false
 
     local function ComparisonSuppressionModeEnabled()
@@ -2492,14 +2493,14 @@ do
         if tooltip.IsForbidden and tooltip:IsForbidden() then return false end
         -- Gated by the "Reskin Tooltip" master (matches the grayed-out "Show Tooltips" option), so disabling the reskin never leaves tooltips stuck suppressed at, e.g., "Never".
         if EllesmereUIDB and EllesmereUIDB.customTooltips == false then
-            if UpdateStateWatcher and _comparisonStateWatcherRegistered then
+            if UpdateStateWatcher and (_comparisonSupportActive or _comparisonStateWatcherRegistered) then
                 UpdateStateWatcher()
             end
             return false
         end
         local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
         if mode == "always" then
-            if UpdateStateWatcher and _comparisonStateWatcherRegistered then
+            if UpdateStateWatcher and (_comparisonSupportActive or _comparisonStateWatcherRegistered) then
                 UpdateStateWatcher()
             end
             return false
@@ -2555,7 +2556,7 @@ do
     end
 
     local function ReleaseComparisonSuppression(tooltip)
-        if tooltip ~= GameTooltip then return end
+        if not _comparisonSupportActive or tooltip ~= GameTooltip then return end
         local state = GetComparisonState(tooltip, false)
         if not state or not state.comparisonFlagOwned then return end
         if not SetComparisonSuppressionFlag(tooltip, state.comparisonFlagPrevious) then return end
@@ -2589,7 +2590,7 @@ do
     -- cleanup runs.
     local _comparisonPreCallInstalled = false
     local function OnItemTooltipPreCall(tooltip)
-        if tooltip ~= GameTooltip then return end
+        if not _comparisonSupportActive or tooltip ~= GameTooltip then return end
         if not ComparisonSuppressionModeEnabled() then
             ReleaseComparisonSuppression(tooltip)
             return
@@ -2652,6 +2653,7 @@ do
         ClearSuppressedComparisons()
     end
     local function QueueSuppressedComparisonClear()
+        if not _comparisonSupportActive then return end
         if not ComparisonSuppressionModeEnabled()
             or not EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
         if _comparisonClearPending then return end
@@ -2669,6 +2671,7 @@ do
             for _, comparisonTooltip in ipairs(GetComparisonTooltips()) do
                 if comparisonTooltip and comparisonTooltip.HookScript then
                     comparisonTooltip:HookScript("OnShow", function()
+                        if not _comparisonSupportActive then return end
                         if EllesmereUI._tooltipSuppressedByMode(GameTooltip) then
                             QueueSuppressedComparisonClear()
                         end
@@ -2688,6 +2691,7 @@ do
 
     EnsureComparisonSupport = function()
         if not ComparisonSuppressionModeEnabled() then return false end
+        _comparisonSupportActive = true
         EnsureComparisonPreCall()
         InstallComparisonHooks()
         return true
@@ -2787,6 +2791,8 @@ do
     end
     UpdateStateWatcher = function()
         if not ComparisonSuppressionModeEnabled() then
+            ReleaseComparisonSuppression(GameTooltip)
+            _comparisonSupportActive = false
             UnregisterStateWatcher()
             return
         end
