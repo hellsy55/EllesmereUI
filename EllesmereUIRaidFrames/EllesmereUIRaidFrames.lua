@@ -2520,9 +2520,11 @@ local function UpdateAbsorb(button, unit)
     local healBarPos = ns.GetHealAbsorbBarPosition(s)
     local healBarOn = healTopBar and healBarPos ~= "none"
     local styleOn = s.absorbStyle and s.absorbStyle ~= "none"
-    -- Heal absorb is INDEPENDENT of the shield absorb (matches Unit Frames): keep going whenever its style is on.
+    -- Heal absorb is independent of the shield absorb: keep going whenever its style is on.
     local healOn = (s.healAbsorbStyle or "clean") ~= "none"
-    if not styleOn and not barOn and not healOn and not healBarOn then
+    -- Heal prediction is also independent, and shares this frame, so it must keep the frame alive too.
+    local predOn = s.healPrediction and true or false
+    if not styleOn and not barOn and not healOn and not healBarOn and not predOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
@@ -2550,6 +2552,15 @@ local function UpdateAbsorb(button, unit)
     -- One heal-absorb fetch serves both the strip bar AND the overlay below.
     local healAbsorbAmt = (UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(unit)) or 0
 
+	-- Incoming heals, fetched here so the short-circuit below sees it too. Calculator is
+    -- refreshed above; fall back to the legacy global only when the calculator is unavailable.
+    local incomingHeals = 0
+    if calc and calc.GetIncomingHeals then
+        incomingHeals = calc:GetIncomingHeals() or 0
+    elseif UnitGetIncomingHeals then
+        incomingHeals = UnitGetIncomingHeals(unit) or 0
+    end
+	
     -- Identical-state short-circuit: absorbs re-flush far more often than values change and every
     -- paint below is idempotent. Skip when values, health-bar size and the settings generation all
     -- match the last paint. SECRET-SAFE: secrets cannot be compared, so any secret input fails
@@ -2557,16 +2568,18 @@ local function UpdateAbsorb(button, unit)
     local hpW, hpH = hp:GetWidth(), hp:GetHeight()
     local isSec = issecretvalue
     if isSec and (isSec(absorbAmt) or isSec(maxHealth)
-       or isSec(healAbsorbAmt) or isSec(isClamped)) then
+       or isSec(healAbsorbAmt) or isSec(isClamped) or isSec(incomingHeals)) then
         ab._mAbs = nil
     elseif ab._mAbs == absorbAmt and ab._mHeal == healAbsorbAmt
        and ab._mMax == maxHealth and ab._mClamp == isClamped
        and ab._mW == hpW and ab._mH == hpH
+	   and ab._mPred == incomingHeals
        and ab._mGen == ns._absorbGen then
         return
     else
         ab._mAbs, ab._mHeal, ab._mMax = absorbAmt, healAbsorbAmt, maxHealth
         ab._mClamp, ab._mW, ab._mH = isClamped, hpW, hpH
+		ab._mPred = incomingHeals
         ab._mGen = ns._absorbGen
     end
 
@@ -2682,13 +2695,14 @@ local function UpdateAbsorb(button, unit)
         end
     end
 
-    -- Shield style off: hide the in-frame shield bars and stop. Heal absorb is rendered above (independent), so this gate never hides it.
-    if not styleOn then
+    -- Shield style off: hide the in-frame shield bars. Heal absorb paints earlier in this
+    -- function so it's untouched either way; heal prediction paints later, so only stop
+    -- here if that's off too, or its block below never runs.
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
         if fw and fw._bfSpark then fw._bfSpark:Hide() end
-        return
+        if not predOn then return end
     end
 
     -- Bars track the health-bar size; size-gated (frame sizes are never secret, so it holds in combat).
@@ -2814,7 +2828,6 @@ local function UpdateAbsorb(button, unit)
         if not hpd._on then
             hpd:Hide()
         else
-            local incomingHeals = UnitGetIncomingHeals and UnitGetIncomingHeals(unit) or 0
             if hpd._szW ~= hpW or hpd._szH ~= hpH then
                 hpd._szW = hpW; hpd._szH = hpH
                 hpd:SetWidth(hpW); hpd:SetHeight(hpH)
