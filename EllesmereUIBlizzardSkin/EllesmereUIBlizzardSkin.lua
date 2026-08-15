@@ -2447,9 +2447,10 @@ end
 --    outOfCombat     -> hidden while in combat lockdown
 --    outOfBossCombat -> hidden while a boss encounter is in progress
 --    never           -> hidden always
---  IsEncounterInProgress() is queried inline (outOfBossCombat only), so no ENCOUNTER
---  event bookkeeping. Installed once at load; a no-op for the default mode, costing
---  one table read per tooltip when unused. An optional "peek" modifier
+--  IsEncounterInProgress() is queried inline (outOfBossCombat only) for the visibility
+--  decision. Comparison cleanup support is installed lazily only when a non-default
+--  mode is active; the default mode adds no comparison hooks or state events. An optional
+--  "peek" modifier
 --  (tooltipShowModifier) lifts suppression while held, so a suppressed tip can be
 --  read on hover mid-combat. Suppression keeps the tooltip SHOWN but parked in a
 --  hidden host frame (never Hide, never alpha) so peek is a pure reparent flip:
@@ -2469,15 +2470,42 @@ do
         return ShowModifierHeld()
     end
 
+    local EnsureComparisonSupport
+    local UpdateStateWatcher
+    local _comparisonStateWatcherRegistered = false
+
+    local function ComparisonSuppressionModeEnabled()
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return false end
+        return ((EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always") ~= "always"
+    end
+
+    local function ComparisonStateWatcherNeeded()
+        local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
+        return ComparisonSuppressionModeEnabled()
+            and (mode == "outOfCombat" or mode == "outOfBossCombat")
+    end
+
     -- Shared decision: should GameTooltip be suppressed right now given the user's "Show
     -- Tooltips" mode + combat state? Exposed on EllesmereUI so the cursor-anchor hook can honor it too (else cursor re-anchor would re-show a tooltip this hook just hid).
     function EllesmereUI._tooltipSuppressedByMode(tooltip)
         if tooltip ~= GameTooltip then return false end
         if tooltip.IsForbidden and tooltip:IsForbidden() then return false end
         -- Gated by the "Reskin Tooltip" master (matches the grayed-out "Show Tooltips" option), so disabling the reskin never leaves tooltips stuck suppressed at, e.g., "Never".
-        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then return false end
+        if EllesmereUIDB and EllesmereUIDB.customTooltips == false then
+            if UpdateStateWatcher and _comparisonStateWatcherRegistered then
+                UpdateStateWatcher()
+            end
+            return false
+        end
         local mode = (EllesmereUIDB and EllesmereUIDB.tooltipShowMode) or "always"
-        if mode == "always" then return false end
+        if mode == "always" then
+            if UpdateStateWatcher and _comparisonStateWatcherRegistered then
+                UpdateStateWatcher()
+            end
+            return false
+        end
+        if EnsureComparisonSupport then EnsureComparisonSupport() end
+        if UpdateStateWatcher then UpdateStateWatcher() end
         if ShowModifierHeld() then return false end
         if mode == "never" then
             return true
@@ -2494,32 +2522,63 @@ do
     -- combat when alwaysCompareItems is enabled.  Keep the cleanup in this global
     -- tooltip controller rather than in ActionBars: bags, world items, and every
     -- other default-anchored item tooltip use the same comparison manager.
-    -- Use Blizzard's existing comparison-suppression flag; addon-owned state
-    -- stays in locals so no custom state is stored on Blizzard frames.
-    local _comparisonTooltips = { ShoppingTooltip1, ShoppingTooltip2 }
+    -- Use Blizzard's existing comparison-suppression control field; addon-owned
+    -- state stays in the shared weak-keyed FFD table so no custom state is stored
+    -- on Blizzard frames.
+    local _comparisonTooltips
     local _comparisonClearPending = false
-    local _comparisonFlagOwned = false
-    local _comparisonFlagPrevious
+
+    local function GetComparisonTooltips()
+        if not _comparisonTooltips then
+            _comparisonTooltips = { ShoppingTooltip1, ShoppingTooltip2 }
+        end
+        return _comparisonTooltips
+    end
+
+    local function GetComparisonState(tooltip, create)
+        local state = FFD[tooltip]
+        if not state and create then
+            state = {}
+            FFD[tooltip] = state
+        end
+        return state
+    end
+
+    local function WriteComparisonSuppressionFlag(tooltip, value)
+        -- Blizzard exposes this field as the per-tooltip opt-out for automatic
+        -- comparisons. It is a Blizzard control input, not addon-owned state.
+        tooltip.suppressAutomaticCompareItem = value
+    end
+
+    local function SetComparisonSuppressionFlag(tooltip, value)
+        return pcall(WriteComparisonSuppressionFlag, tooltip, value)
+    end
 
     local function ReleaseComparisonSuppression(tooltip)
-        if tooltip ~= GameTooltip or not _comparisonFlagOwned then return end
-        local previous = _comparisonFlagPrevious
-        _comparisonFlagPrevious = nil
-        _comparisonFlagOwned = false
-        tooltip.suppressAutomaticCompareItem = previous
+        if tooltip ~= GameTooltip then return end
+        local state = GetComparisonState(tooltip, false)
+        if not state or not state.comparisonFlagOwned then return end
+        if not SetComparisonSuppressionFlag(tooltip, state.comparisonFlagPrevious) then return end
+        state.comparisonFlagPrevious = nil
+        state.comparisonFlagOwned = nil
     end
 
     local function ArmComparisonSuppression(tooltip)
         if tooltip ~= GameTooltip then return end
-        if not _comparisonFlagOwned then
-            _comparisonFlagPrevious = tooltip.suppressAutomaticCompareItem
-            _comparisonFlagOwned = true
+        local state = GetComparisonState(tooltip, true)
+        local owned = state.comparisonFlagOwned
+        if not owned then
+            state.comparisonFlagPrevious = tooltip.suppressAutomaticCompareItem
+            state.comparisonFlagOwned = true
         end
         -- GameTooltip_SetDefaultAnchor runs before ActionButton_SetTooltip calls
         -- SetAction, so this prevents the comparison from being created in the
         -- first place.  The deferred cleanup below still handles comparisons that
         -- were already shown or are refreshed by Blizzard after this hook.
-        tooltip.suppressAutomaticCompareItem = true
+        if not SetComparisonSuppressionFlag(tooltip, true) and not owned then
+            state.comparisonFlagPrevious = nil
+            state.comparisonFlagOwned = nil
+        end
     end
 
     -- Anchor suppression normally arms the flag before ActionButton:SetAction,
@@ -2531,6 +2590,10 @@ do
     local _comparisonPreCallInstalled = false
     local function OnItemTooltipPreCall(tooltip)
         if tooltip ~= GameTooltip then return end
+        if not ComparisonSuppressionModeEnabled() then
+            ReleaseComparisonSuppression(tooltip)
+            return
+        end
         if EllesmereUI._tooltipSuppressedByMode(tooltip) then
             ArmComparisonSuppression(tooltip)
         else
@@ -2547,16 +2610,21 @@ do
         _comparisonPreCallInstalled = true
         return true
     end
-    InstallComparisonPreCall()
-    if not _comparisonPreCallInstalled then
+
+    local _comparisonPreCallRetry
+    local function EnsureComparisonPreCall()
+        if InstallComparisonPreCall() or _comparisonPreCallRetry then return end
         -- The normal client has these APIs before addon Lua loads, but retry at
         -- PLAYER_LOGIN so a load-order change does not silently remove the
         -- primary no-comparison guard for the whole session.
-        local preCallRetry = CreateFrame("Frame")
-        preCallRetry:RegisterEvent("PLAYER_LOGIN")
-        preCallRetry:SetScript("OnEvent", function(self)
+        _comparisonPreCallRetry = CreateFrame("Frame")
+        _comparisonPreCallRetry:RegisterEvent("PLAYER_LOGIN")
+        _comparisonPreCallRetry:SetScript("OnEvent", function(self)
             self:UnregisterAllEvents()
-            InstallComparisonPreCall()
+            _comparisonPreCallRetry = nil
+            if ComparisonSuppressionModeEnabled() then
+                InstallComparisonPreCall()
+            end
         end)
     end
 
@@ -2584,6 +2652,8 @@ do
         ClearSuppressedComparisons()
     end
     local function QueueSuppressedComparisonClear()
+        if not ComparisonSuppressionModeEnabled()
+            or not EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
         if _comparisonClearPending then return end
         _comparisonClearPending = true
         -- This hook can run from Blizzard's protected tooltip/action-button path.
@@ -2592,20 +2662,35 @@ do
         C_Timer.After(0, RunSuppressedComparisonClear)
     end
 
-    -- Catch both the normal comparison-manager path and a direct Show/SetShown
-    -- from Blizzard.  OnShow only queues a deferred cleanup; it never mutates a
-    -- Blizzard frame from the protected call stack.
-    for _, comparisonTooltip in ipairs(_comparisonTooltips) do
-        if comparisonTooltip and comparisonTooltip.HookScript then
-            comparisonTooltip:HookScript("OnShow", function()
-                if EllesmereUI._tooltipSuppressedByMode(GameTooltip) then
-                    QueueSuppressedComparisonClear()
+    local _comparisonTooltipHooksInstalled = false
+    local _comparisonManagerHookInstalled = false
+    local function InstallComparisonHooks()
+        if not _comparisonTooltipHooksInstalled then
+            for _, comparisonTooltip in ipairs(GetComparisonTooltips()) do
+                if comparisonTooltip and comparisonTooltip.HookScript then
+                    comparisonTooltip:HookScript("OnShow", function()
+                        if EllesmereUI._tooltipSuppressedByMode(GameTooltip) then
+                            QueueSuppressedComparisonClear()
+                        end
+                    end)
                 end
-            end)
+            end
+            _comparisonTooltipHooksInstalled = true
+        end
+
+        if not _comparisonManagerHookInstalled
+            and TooltipComparisonManager
+            and type(TooltipComparisonManager.AnchorShoppingTooltips) == "function" then
+            hooksecurefunc(TooltipComparisonManager, "AnchorShoppingTooltips", QueueSuppressedComparisonClear)
+            _comparisonManagerHookInstalled = true
         end
     end
-    if TooltipComparisonManager and type(TooltipComparisonManager.AnchorShoppingTooltips) == "function" then
-        hooksecurefunc(TooltipComparisonManager, "AnchorShoppingTooltips", QueueSuppressedComparisonClear)
+
+    EnsureComparisonSupport = function()
+        if not ComparisonSuppressionModeEnabled() then return false end
+        EnsureComparisonPreCall()
+        InstallComparisonHooks()
+        return true
     end
 
     -- Suppression parks the tooltip in a hidden host frame -- NOT Hide(), NOT alpha.
@@ -2677,14 +2762,19 @@ do
     end)
 
     -- Re-apply the mode when combat/encounter state changes while a tooltip is
-    -- already alive.  Without this, a tooltip opened just before combat could
-    -- keep its shopping comparison until the next hover rebuild.
-    local stateWatcher = CreateFrame("Frame")
-    stateWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
-    stateWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
-    stateWatcher:RegisterEvent("ENCOUNTER_START")
-    stateWatcher:RegisterEvent("ENCOUNTER_END")
-    stateWatcher:SetScript("OnEvent", function()
+    -- already alive.  Install these events only for the two modes that need
+    -- transition handling; "Never" is handled by the tooltip hooks alone.
+    local stateWatcher
+    local function UnregisterStateWatcher()
+        if not _comparisonStateWatcherRegistered then return end
+        stateWatcher:UnregisterAllEvents()
+        _comparisonStateWatcherRegistered = false
+    end
+    local function StateWatcherOnEvent()
+        if not ComparisonStateWatcherNeeded() then
+            UpdateStateWatcher()
+            return
+        end
         -- Only act when the new state requires suppression.  Do not unpark on
         -- combat/encounter end: the cursor may have left the owner while the
         -- parked tooltip remained logically shown, and unpark would resurrect
@@ -2694,7 +2784,30 @@ do
             ApplySuppression(GameTooltip)
         end
         QueueSuppressedComparisonClear()
-    end)
+    end
+    UpdateStateWatcher = function()
+        if not ComparisonSuppressionModeEnabled() then
+            UnregisterStateWatcher()
+            return
+        end
+        EnsureComparisonSupport()
+        if not ComparisonStateWatcherNeeded() then
+            UnregisterStateWatcher()
+            return
+        end
+        if not stateWatcher then
+            stateWatcher = CreateFrame("Frame")
+            stateWatcher:SetScript("OnEvent", StateWatcherOnEvent)
+        end
+        if not _comparisonStateWatcherRegistered then
+            stateWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+            stateWatcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+            stateWatcher:RegisterEvent("ENCOUNTER_START")
+            stateWatcher:RegisterEvent("ENCOUNTER_END")
+            _comparisonStateWatcherRegistered = true
+        end
+    end
+    UpdateStateWatcher()
 
     -- Live peek: pressing the modifier while already hovering reveals the tip
     -- for the current frame; releasing hides it again. Moving onto other frames
