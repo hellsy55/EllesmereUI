@@ -21,6 +21,7 @@ local BAGS_DEFAULTS = {
         bagShowTrackRank      = false,
         itemlevelUseCustomColor = false,
         bagHideEmptyCategories = true,
+        bagSplitSetGearBySet  = false,
         bagMergeDuplicates    = true,
         bagSidebarCollapsed   = false,
         bankSidebarCollapsed  = false,

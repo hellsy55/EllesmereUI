@@ -3777,6 +3777,8 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
                 EUI_Bags:RefreshInventory()
             end)
         else
+            -- Equip-set categories are named by the set; renames would not persist
+            if not cat.isEquipSet then
             rootDescription:CreateButton(EllesmereUI.L("Rename"), function()
                 if not EUI.ShowInputPopup then return end
                 EUI:ShowInputPopup({
@@ -3793,6 +3795,7 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
                     end,
                 })
             end)
+            end
 
             if not cat.noGroup then
                 local groupSub = rootDescription:CreateButton(EllesmereUI.L("Create Group With"))
@@ -3820,7 +3823,9 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
             end
 
             if not cat.noMove then
-                local catKey = cat._defaultName
+                -- Equip-set cats collapse to the anchor key: setIDs are per-character,
+                -- the profile is shared, so "EquipSet:N" must never be persisted.
+                local catKey = cat.isEquipSet and "Item Set Gear" or cat._defaultName
                 local catHidden = hiddenSet[catKey]
                 rootDescription:CreateButton(catHidden and EllesmereUI.L("Show in All Items") or EllesmereUI.L("Hide in All Items"), function()
                     hiddenSet[catKey] = not catHidden or nil
@@ -3906,7 +3911,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
             elseif cat.isRecent and BP().bagShowRecentItems == false then
                 -- skip
             else
-                displayList[#displayList + 1] = { catIdx = ci, name = cat.name, icon = cat.icon or 134400, isAtlas = cat.isAtlas, count = count, noMove = cat.noMove, isPinned = cat.isPinned, isRecent = cat.isRecent, isUserCreated = cat.isUserCreated }
+                displayList[#displayList + 1] = { catIdx = ci, name = cat.name, icon = cat.icon or 134400, isAtlas = cat.isAtlas, count = count, noMove = cat.noMove, isPinned = cat.isPinned, isRecent = cat.isRecent, isUserCreated = cat.isUserCreated, isEquipSet = cat.isEquipSet }
             end
         end
     end
@@ -4016,7 +4021,8 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
             end)
             btn:SetScript("OnMouseDown", function(self, button)
                 if button ~= "LeftButton" then return end
-                if self._catIdx <= 0 or self._noMove then return end
+                -- Equip-set cats: ReorderCategory rejects them; don't start the drag either
+                if self._catIdx <= 0 or self._noMove or self._isEquipSet then return end
                 self._didDrag = false
                 local _, startY = GetCursorPosition()
                 self._dragStartY = startY
@@ -4073,6 +4079,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
         btn._isGroupMember = entry.isGroupMember or false
         btn._groupName = entry.groupName
         btn._noMove = entry.noMove or false
+        btn._isEquipSet = entry.isEquipSet or false
         btn._isPinned = entry.isPinned or false
 
         btn:SetParent(sidebarChild or sidebar)
@@ -4696,6 +4703,10 @@ function EUI_Bags:RefreshInventory()
     -- buttons taints nothing; only CREATING a secure ContainerFrameItemButtonTemplate in lockdown
     -- poisons it (UseContainerItem() -> ADDON_ACTION_FORBIDDEN). GetOrCreateSlot returns nil in combat (pre-warmed pool makes this rare); PLAYER_REGEN_ENABLED replays a full refresh for anything skipped.
     if InCombatLockdown() then EUI_Bags._refreshPendingCombat = true end
+
+    -- Category indices shift when the list rebuilds (split-mode set categories
+    -- come and go); rebuilt below on first IsGearCategory call, so never stale.
+    _gearCatSet = nil
 
     C_NewItems.ClearAll()
 
@@ -5633,7 +5644,9 @@ function EUI_Bags:RefreshInventory()
                     end
                 end
             else
-                if not hiddenSet[cat._defaultName] then
+                -- Equip-set cats read the anchor key (see ShowCategoryContextMenu)
+                local hideKey = cat.isEquipSet and "Item Set Gear" or cat._defaultName
+                if not hiddenSet[hideKey] then
                     local catItems = itemsByCat[ci] or {}
                     local isUserCreated = cat.isUserCreated
                     RenderSection(cat.name, catItems, isUserCreated, cat.isPinned, cat.isRecent, ci, true)
@@ -6421,6 +6434,8 @@ local function StartAddon()
     EUI_Bags:RegisterEvent("PLAYER_MONEY")
     EUI_Bags:RegisterEvent("ITEM_LOCK_CHANGED")
     EUI_Bags:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+    -- Set created/renamed/deleted: rebuild categories (split mode) + re-classify
+    EUI_Bags:RegisterEvent("EQUIPMENT_SETS_CHANGED")
     -- Replays a refresh that was deferred during combat (secure-button taint guard).
     EUI_Bags:RegisterEvent("PLAYER_REGEN_ENABLED")
 
@@ -6567,6 +6582,30 @@ local function StartAddon()
             if SetItemPanelOpen(panel[1], panel[2]) and EUI_Bags:IsVisible() then
                 EUI_Bags:RefreshInventory()
             end
+            return
+        end
+        if event == "EQUIPMENT_SETS_CHANGED" then
+            -- Invalidate even while hidden: the next open must not classify with
+            -- categories built from the old set list. Re-resolve the selected
+            -- category by its stable key ("EquipSet:"..setID survives renames)
+            -- since the rebuild shifts indices; a deleted set falls back to All Items.
+            local mgr = _G.EUI_CategoryManager
+            if mgr then
+                local selKey
+                if selectedCategoryIndex > 0 then
+                    local cat = mgr:GetCategories()[selectedCategoryIndex]
+                    selKey = cat and cat._defaultName
+                end
+                mgr:OnEquipmentSetsChanged()
+                if selKey then
+                    local found = 0
+                    for i, cat in ipairs(mgr:GetCategories()) do
+                        if cat._defaultName == selKey then found = i; break end
+                    end
+                    selectedCategoryIndex = found
+                end
+            end
+            if EUI_Bags:IsVisible() then ScheduleRefresh() end
             return
         end
         if event == "BAG_UPDATE" and EUI_Bags.refreshEnabled ~= false then

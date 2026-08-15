@@ -108,13 +108,21 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Merge Duplicate Items
+            -- Merge Duplicate Items | Split Set Gear by Set
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Merge Duplicate Items",
                   tooltip="Show copies of the same item that sit in separate bag slots as one icon with their counts added together. Turn this off to keep every slot separate, for example when you deliberately split stacks. Merging is always paused while the mail, trade, auction house, bank or guild bank window is open, since those take one bag slot at a time.",
                   getValue=function() return db.profile.bagMergeDuplicates ~= false end,
                   setValue=function(v)
                       db.profile.bagMergeDuplicates = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                { type="toggle", text="Split Set Gear by Set",
+                  tooltip="Replace the single Item Set Gear category with one category per equipment set, named after the set. Gear in several sets goes to the first one.",
+                  getValue=function() return db.profile.bagSplitSetGearBySet == true end,
+                  setValue=function(v)
+                      db.profile.bagSplitSetGearBySet = v
+                      if _G.EUI_CategoryManager then _G.EUI_CategoryManager:OnEquipmentSetsChanged() end
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
@@ -284,21 +292,27 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Enabled Categories dropdown (left side)
             if not EllesmereUI._prebuilding then
-                local catItems = {}
-                if _G.EUI_CategoryManager then
-                    local cats = _G.EUI_CategoryManager:GetCategories()
-                    for ci, cat in ipairs(cats) do
-                        if not cat.isCatchAll and not cat.isPinned and not cat.isRecent and not cat.isReagentBag then
-                            catItems[#catItems + 1] = { key = cat._defaultName, label = cat.name }
+                -- Function, not a static table: re-evaluated on every menu open, so the
+                -- list follows split-mode toggles and set changes without a page rebuild.
+                local function BuildCatItems()
+                    local catItems = {}
+                    if _G.EUI_CategoryManager then
+                        local cats = _G.EUI_CategoryManager:GetCategories()
+                        for ci, cat in ipairs(cats) do
+                            -- isEquipSet excluded: per-character keys, governed by the split toggle instead
+                            if not cat.isCatchAll and not cat.isPinned and not cat.isRecent and not cat.isReagentBag and not cat.isEquipSet then
+                                catItems[#catItems + 1] = { key = cat._defaultName, label = cat.name }
+                            end
                         end
                     end
+                    return catItems
                 end
 
-                if #catItems > 0 then
+                if #BuildCatItems() > 0 then
                     local leftRgn = catCurrRow._leftRegion
                     local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                         leftRgn, 210, leftRgn:GetFrameLevel() + 2,
-                        catItems,
+                        BuildCatItems,
                         function(defName)
                             local dc = db.profile.bagDisabledCategories
                             return not (dc and dc[defName])
