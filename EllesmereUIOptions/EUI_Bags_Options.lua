@@ -118,11 +118,22 @@ initFrame:SetScript("OnEvent", function(self)
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
                 { type="toggle", text="Split Set Gear by Set",
-                  tooltip="Replace the single Item Set Gear category with one category per equipment set, named after the set. Gear in several sets goes to the first one.",
+                  tooltip="Show one sub-category per equipment set (named after the set) nested under Item Set Gear. Gear in several sets goes to the first one.",
                   getValue=function() return db.profile.bagSplitSetGearBySet == true end,
                   setValue=function(v)
                       db.profile.bagSplitSetGearBySet = v
                       if _G.EUI_CategoryManager then _G.EUI_CategoryManager:OnEquipmentSetsChanged() end
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end }
+            ); y = y - h
+
+            -- Show Set Name on Gear
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Show Set Name on Gear",
+                  tooltip="Display the equipment set's name at the bottom of bag items that belong to one of your equipment sets.",
+                  getValue=function() return db.profile.bagShowSetGearName ~= false end,
+                  setValue=function(v)
+                      db.profile.bagShowSetGearName = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h

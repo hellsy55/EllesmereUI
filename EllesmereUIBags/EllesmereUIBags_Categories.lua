@@ -184,6 +184,10 @@ function CategoryManager:InitCategories()
             end
             if splitSets then
                 table.sort(splitSets, function(a, b) return a.name < b.name end)
+                -- Nested under the anchor's display name via the group system:
+                -- sidebar shows an "Item Set Gear" header with the sets indented.
+                local astate = userState[def.name]
+                local anchorName = (astate and astate.rename) or EllesmereUI.L(def.name)
                 for _, s in ipairs(splitSets) do
                     cats[#cats + 1] = {
                         _defaultName = "EquipSet:" .. s.id,
@@ -194,6 +198,7 @@ function CategoryManager:InitCategories()
                         isEquipSet   = true,
                         equipSetID   = s.id,
                         noGroup      = true,
+                        groupName    = anchorName,
                     }
                 end
             else
@@ -361,12 +366,16 @@ end
 -- Maps "bag*1000+slot" -> setID. A slot in several sets keeps the first
 -- (enumeration order), matching split-mode classification's first-set-wins.
 local _setGearLookup = {}
+-- setID -> set name, for the on-item set name label (no API call at stamp time)
+local _setNames = {}
 
 local function BuildSetGearLookup()
     wipe(_setGearLookup)
+    wipe(_setNames)
     local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
     if not setIDs then return end
     for _, setID in ipairs(setIDs) do
+        _setNames[setID] = C_EquipmentSet.GetEquipmentSetInfo(setID)
         local locs = C_EquipmentSet.GetItemLocations(setID)
         if locs then
             for _, loc in pairs(locs) do
@@ -538,6 +547,9 @@ function CategoryManager:ClassifyAll(items)
     for _, data in ipairs(items) do
         if data.info and data.itemLink then
             local idx = self:ClassifyItem(data.itemLink, data.info.itemID, data.bag, data.slot)
+            -- Set name for the on-item label; explicit nil clears recycled tables
+            local sid = _setGearLookup[data.bag * 1000 + data.slot]
+            data._setName = sid and _setNames[sid] or nil
             -- Reroute disabled categories to catch-all
             if disabledIdxSet and idx and disabledIdxSet[idx] and catchAllIdx then
                 idx = catchAllIdx
@@ -621,6 +633,11 @@ end
 function CategoryManager:AddToGroup(catIndex, groupName)
     local cats = self:GetCategories()
     if not cats[catIndex] or not groupName then return end
+    -- The runtime equip-set group only holds set categories; a normal category
+    -- added to it would persist while the group itself rebuilds around it.
+    for _, cat in ipairs(cats) do
+        if cat.groupName == groupName and cat.isEquipSet then return end
+    end
     cats[catIndex].groupName = groupName
     self:RegenerateGroupName(groupName)
     self:SaveState()
@@ -661,6 +678,11 @@ end
 function CategoryManager:RenameGroup(oldName, newName)
     if not newName or newName == "" then return end
     local cats = self:GetCategories()
+    -- Refuse names in use by the runtime equip-set group: sharing its raw
+    -- groupName string would merge the two groups in every keyed lookup.
+    for _, cat in ipairs(cats) do
+        if cat.isEquipSet and cat.groupName == newName then return end
+    end
     for _, cat in ipairs(cats) do
         if cat.groupName == oldName then cat.groupName = newName end
     end
@@ -692,6 +714,8 @@ function CategoryManager:RegenerateGroupName(groupName)
     local cats = self:GetCategories()
     local names = {}
     for _, cat in ipairs(cats) do
+        -- The runtime equip-set group keeps its anchor-derived name
+        if cat.groupName == groupName and cat.isEquipSet then return end
         if cat.groupName == groupName then names[#names + 1] = cat.name end
     end
     local newName
@@ -709,13 +733,14 @@ function CategoryManager:RegenerateGroupName(groupName)
     end
 end
 
--- Get all unique group names.
+-- Get all unique group names. The runtime equip-set group is excluded: it is
+-- not a valid "Add to Group" target (see AddToGroup).
 function CategoryManager:GetGroupNames()
     local cats = self:GetCategories()
     local seen = {}
     local groups = {}
     for _, cat in ipairs(cats) do
-        if cat.groupName and not seen[cat.groupName] then
+        if cat.groupName and not seen[cat.groupName] and not cat.isEquipSet then
             seen[cat.groupName] = true
             groups[#groups + 1] = cat.groupName
         end

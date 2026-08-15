@@ -2098,6 +2098,19 @@ local function GetOrCreateSlot(idx)
     btn.BindTypeText:SetFont(fontPath, bindTypeFontSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
     btn.BindTypeText:SetText("")
 
+    -- Equipment set name (bottom center; only for gear that is in a set)
+    if not btn.SetNameText then
+        btn.SetNameText = textOverlay:CreateFontString(nil, "OVERLAY", nil, 7)
+        btn.SetNameText:SetPoint("BOTTOM", btn, "BOTTOM", 0, 2)
+        btn.SetNameText:SetTextColor(1, 1, 1, 1)
+        btn.SetNameText:SetJustifyH("CENTER")
+        btn.SetNameText:SetWordWrap(false)
+        btn.SetNameText:SetMaxLines(1)
+        btn.SetNameText:SetWidth(SLOT_SIZE - 4)
+    end
+    btn.SetNameText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG")
+    btn.SetNameText:SetText("")
+
     itemSlots[idx] = btn
     return btn
 end
@@ -2236,6 +2249,7 @@ local function RefreshTextSizes()
         if btn.KeystoneText then btn.KeystoneText:SetFont(fontPath, countSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
         if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
         if btn.BindTypeText then btn.BindTypeText:SetFont(fontPath, bindTypeSize, (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
+        if btn.SetNameText then btn.SetNameText:SetFont(fontPath, math.max(countSize - 2, 7), (EllesmereUI and EllesmereUI.SlugFlag and EllesmereUI.SlugFlag("OUTLINE, SLUG")) or "OUTLINE, SLUG") end
     end
     for _, btn in pairs(reagentSlots) do
         if btn.Count then EllesmereUI.ApplyIconTextFont(btn.Count, fontPath, countSize, "bags") end
@@ -2330,6 +2344,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         if btn.KeystoneText then btn.KeystoneText:SetText("") end
         if btn.KeystoneDungeonText then btn.KeystoneDungeonText:SetText("") end
         if btn.BindTypeText then btn.BindTypeText:SetText("") end
+        if btn.SetNameText then btn.SetNameText:SetText("") end
         if btn.ProfessionQualityOverlay then btn.ProfessionQualityOverlay:Hide() end
         if btn.IconBorder then btn.IconBorder:Hide() end
         if btn.NormalTexture then btn.NormalTexture:SetAlpha(0) end
@@ -2408,6 +2423,20 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
                 EUI_Bags.SetBindTypeText(btn.BindTypeText, data._isWuE, data._giBindType, quality)
             else
                 btn.BindTypeText:SetText("")
+            end
+        end
+
+        -- Equipment set name bottom-center (stamped by ClassifyAll for set gear).
+        -- Yields when the upgrade-track rank occupies Count in the same row
+        -- (mirrors the rank-display condition in the ItemLevelText block above).
+        if btn.SetNameText then
+            local rankShown = data._isGear and BP().bagShowTrackRank
+                and BP().showItemlevelInBags ~= false
+                and (data._giTrackRank or "") ~= ""
+            if data._setName and not rankShown and BP().bagShowSetGearName ~= false then
+                btn.SetNameText:SetText(data._setName)
+            else
+                btn.SetNameText:SetText("")
             end
         end
 
@@ -3278,8 +3307,9 @@ _dragUpdateFrame:SetScript("OnUpdate", function()
             local posInGroup = targetBtn and targetCat and targetCat.groupName
                 and (targetBtn._isGroupMember or (targetBtn._isGroupHeader and mode == "below"))
             if posInGroup then
-                if fromNoGroup then
-                    -- noGroup categories can't enter groups; suppress line entirely
+                -- noGroup categories can't enter groups, and the runtime equip-set
+                -- group takes no joiners; suppress the line entirely
+                if fromNoGroup or targetCat.isEquipSet then
                     if line then line:Hide() end
                     _dragDropTarget = nil
                     _dragInsertGroup = nil
@@ -3466,6 +3496,9 @@ local function StopSidebarDrag()
                     for b = #ordered, 1, -1 do
                         table.insert(cats, insertAt, ordered[b])
                     end
+                    -- Persist the block move; without this it reverts on the next
+                    -- rebuild (equip-set groups rebuild on every set change).
+                    EUI_CategoryManager:SaveState()
                 end
             elseif fromGroup then
                 -- Grouped member dragged to insert position
@@ -3725,6 +3758,10 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
         local hiddenSet = BP().bagHiddenInAllItems
 
         if isGroupHeader and myGroup then
+            -- Equip-set group: rebuilt from the sets each InitCategories, so
+            -- rename/disband would silently revert -- offer only hide/show,
+            -- persisted under the stable anchor key.
+            if not cat.isEquipSet then
             rootDescription:CreateButton(EllesmereUI.L("Rename"), function()
                 if not EUI.ShowInputPopup then return end
                 EUI:ShowInputPopup({
@@ -3749,12 +3786,17 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
                 if selectedGroupName == myGroup then selectedGroupName = nil; selectedCategoryIndex = 0 end
                 EUI_Bags:RefreshInventory()
             end)
-            local groupHidden = hiddenSet[myGroup]
+            end
+            local ghKey = cat.isEquipSet and "Item Set Gear" or myGroup
+            local groupHidden = hiddenSet[ghKey]
             rootDescription:CreateButton(groupHidden and EllesmereUI.L("Show in All Items") or EllesmereUI.L("Hide in All Items"), function()
-                hiddenSet[myGroup] = not groupHidden or nil
+                hiddenSet[ghKey] = not groupHidden or nil
                 EUI_Bags:RefreshInventory()
             end)
         elseif isGroupMember and myGroup then
+            -- Equip-set members are named by their set and live in the runtime
+            -- group; rename/ungroup would silently revert on the next rebuild.
+            if not cat.isEquipSet then
             rootDescription:CreateButton(EllesmereUI.L("Rename"), function()
                 if not EUI.ShowInputPopup then return end
                 EUI:ShowInputPopup({
@@ -3776,6 +3818,7 @@ local function ShowCategoryContextMenu(btn, catIdx, isGroupHeader, isGroupMember
                 EUI_CategoryManager:UngroupCategory(catIdx)
                 EUI_Bags:RefreshInventory()
             end)
+            end
         else
             -- Equip-set categories are named by the set; renames would not persist
             if not cat.isEquipSet then
@@ -3875,10 +3918,11 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
                 for _, mi in ipairs(members) do
                     groupCount = groupCount + (categoryCounts and categoryCounts[mi] or 0)
                 end
-                -- Use first member's icon for group
+                -- Use first member's icon for group; the equip-set group keeps
+                -- the Item Set Gear anchor icon rather than the first set's
                 local firstCat = cats[members[1]]
-                local groupIcon = firstCat and firstCat.icon or 134400
-                local groupIsAtlas = firstCat and firstCat.isAtlas
+                local groupIcon = firstCat and (firstCat.isEquipSet and 4871338 or firstCat.icon) or 134400
+                local groupIsAtlas = firstCat and not firstCat.isEquipSet and firstCat.isAtlas
                 -- Check if any member is user-created (keep group visible if so)
                 local groupHasUserCreated = false
                 for _, mi in ipairs(members) do
@@ -3897,7 +3941,7 @@ local function BuildSidebarButtons(categoryCounts, totalCount)
                             catIdx = mi, name = mc.name, icon = mc.icon or 134400, isAtlas = mc.isAtlas,
                             count = categoryCounts and categoryCounts[mi] or 0,
                             indent = true, groupName = cat.groupName, isGroupMember = true,
-                            isUserCreated = mc.isUserCreated,
+                            isUserCreated = mc.isUserCreated, isEquipSet = mc.isEquipSet,
                         }
                     end
                 end
@@ -5627,7 +5671,9 @@ function EUI_Bags:RefreshInventory()
             elseif cat.groupName then
                 if not renderedGroups[cat.groupName] then
                     renderedGroups[cat.groupName] = true
-                    if not hiddenSet[cat.groupName] then
+                    -- Equip-set group persists hide state under the anchor key
+                    local ghKey = cat.isEquipSet and "Item Set Gear" or cat.groupName
+                    if not hiddenSet[ghKey] then
                         local members = EUI_CategoryManager:GetGroupMembers(cat.groupName)
                         local merged = {}
                         for _, mi in ipairs(members) do
@@ -6603,6 +6649,14 @@ local function StartAddon()
                         if cat._defaultName == selKey then found = i; break end
                     end
                     selectedCategoryIndex = found
+                end
+                -- A selected group view can vanish too (last set deleted)
+                if selectedGroupName then
+                    local alive = false
+                    for _, cat in ipairs(mgr:GetCategories()) do
+                        if cat.groupName == selectedGroupName then alive = true; break end
+                    end
+                    if not alive then selectedGroupName = nil; selectedCategoryIndex = 0 end
                 end
             end
             if EUI_Bags:IsVisible() then ScheduleRefresh() end
