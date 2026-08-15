@@ -452,15 +452,28 @@ initFrame:SetScript("OnEvent", function(self)
             local _, name = ns.SlotDisplay(slot)
             local caption
             if slot.kind == "palette" then
-                -- Capped at what the palette being edited can seat: a lane
-                -- takes a nested palette whole, an arc or a halo its first
-                -- eight -- see NestChildCap.
-                local kids = ns.ChildSlots
-                    and ns.ChildSlots(ns.ChildIndex(slot),
-                                      ns.NestChildCap and ns.NestChildCap(editPalette))
+                -- Capped at what the palette being edited can seat, which is
+                -- the whole nested menu everywhere but the halo -- eight fixed
+                -- positions round a cell, and no ninth to put a child in. See
+                -- NestChildCap.
+                local cap = ns.NestChildCap and ns.NestChildCap(editPalette)
+                local child = ns.ChildIndex(slot)
+                local kids = ns.ChildSlots and ns.ChildSlots(child, cap)
                 caption = ("nested action menu, %d %s"):format(
                     kids and #kids or 0,
                     (kids and #kids == 1) and "entry" or "entries")
+                -- Said where the user meets it, rather than left to be
+                -- discovered by counting the entries that turned up: a menu
+                -- holding more than the halo can show looks broken otherwise.
+                local all = ns.ChildSlots and ns.ChildSlots(child, MAX_SLOTS)
+                if all and kids and #all > #kids then
+                    -- The literal stays on the Lf line: the locale extractor
+                    -- reads one line at a time, and a string wrapped onto the
+                    -- next one is a key it never learns about.
+                    caption = caption
+                        .. EllesmereUI.Lf(", %1$d not shown in this layout",
+                                          #all - #kids)
+                end
             else
                 -- The stored kind strings are one word each; only the marker
                 -- kinds read better with the space put back.
@@ -473,6 +486,11 @@ initFrame:SetScript("OnEvent", function(self)
                         and "world marker, next on each press")
                     or (slot.kind == "randommount" and "mount")
                     or (slot.kind == "spec" and "specialization")
+                    -- Same icon and same name as a fixed spec entry on the
+                    -- character that made it, so the caption is the only place
+                    -- the difference between the two can be said.
+                    or (slot.kind == "dynamicspec"
+                        and "specialization, by position on this character")
                     -- The name above is already the spell this character would
                     -- cast, so the caption says what picked it rather than
                     -- repeating it.
@@ -624,6 +642,23 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The words a collection entry can be searched by besides its own name,
+    -- lowercase and space separated, matched by the same plain substring find
+    -- the name gets -- so "vend" finds a vendor mount the way "sea" finds a
+    -- seahorse.
+    --
+    -- The source label is the client's own BATTLE_PET_SOURCE_n string, which is
+    -- what the Mount Journal and the Toy Box label their own source filters
+    -- with, so a localized client searches in its own words. Nothing is
+    -- invented here: only what the collection API actually hands back is
+    -- indexed.
+    local function SourceKeywords(sourceType, isFavorite)
+        local out = isFavorite and (EllesmereUI.L("favorite"):lower() .. " ") or ""
+        local label = sourceType and _G["BATTLE_PET_SOURCE_" .. sourceType]
+        if label then out = out .. label:lower() end
+        return out ~= "" and out or nil
+    end
+
     local function MountEntries()
         local out = {}
         -- The roll the Mount Journal's own button makes, offered ahead of the
@@ -635,15 +670,28 @@ initFrame:SetScript("OnEvent", function(self)
             local icon, name = ns.SlotDisplay(slot)
             out[1] = { icon = icon, name = name, slot = slot, pin = true }
         end
+        -- Beside it, and pinned for the same reason: an entry that summons
+        -- whatever the player rode last. Its target changes on its own, so it
+        -- is a kind rather than a mount -- there is nothing here to pick.
+        do
+            local slot = { kind = "lastmount" }
+            local icon = ns.SlotDisplay(slot)
+            out[#out + 1] = { icon = icon, name = "Last Used Mount",
+                              slot = slot, pin = true }
+        end
         for _, mountID in ipairs(C_MountJournal.GetMountIDs()) do
-            local name, spellID, icon, _, isUsable, _, _, _, _, hideOnChar, isCollected =
-                C_MountJournal.GetMountInfoByID(mountID)
-            -- isUsable here is a character capability (riding skill, faction,
-            -- class), not a "can you mount right now" -- that one is
-            -- GetMountUsabilityByID. So an unusable mount is one this character
-            -- can never summon, and offering it would be a dead slot.
-            if name and isCollected and isUsable and not hideOnChar then
+            local name, spellID, icon, _, _, sourceType, isFavorite, _, _,
+                  hideOnChar, isCollected = C_MountJournal.GetMountInfoByID(mountID)
+            -- isUsable is deliberately not read here. It moves with where the
+            -- player stands -- the Mount Journal rebuilds its list on
+            -- MOUNT_JOURNAL_USABILITY_CHANGED -- so filtering on it hides an
+            -- aquatic mount from anyone picking on dry ground. Whether a mount
+            -- can be summoned is a run-time question, not a pick-time one.
+            if name and isCollected and not hideOnChar then
                 out[#out + 1] = { icon = icon, name = name,
+                    -- Where it came from, and whether it is a favorite, so both
+                    -- are things the search box can be asked for.
+                    keywords = SourceKeywords(sourceType, isFavorite),
                     -- spellID is banked at pickup time because ResolveAction
                     -- needs the summon spell and it is already in hand here.
                     slot = { kind = "mount", id = mountID, spellID = spellID, name = name } }
@@ -676,22 +724,85 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The toy box has no ID-based enumeration, only a walk over the list the
+    -- Collections filters leave standing, so the picker used to show whatever
+    -- the player last set there -- with "Not Collected" ticked it came up
+    -- empty, which reads as a broken picker rather than as a filter. So the
+    -- filters are widened for the length of the walk and every one of them is
+    -- put back afterwards. Restoring is the whole cost of this: the scan runs
+    -- inside pcall so an error still hands the player their own filters back.
+    local function ScanToysUnfiltered(scan)
+        local saved = {
+            collected = C_ToyBox.GetCollectedShown(),
+            uncollected = C_ToyBox.GetUncollectedShown(),
+            unusable = C_ToyBox.GetUnusableShown(),
+            sources = {},
+            expansions = {},
+        }
+        local numSources = C_PetJournal.GetNumPetSources()
+        for i = 1, numSources do
+            saved.sources[i] = C_ToyBox.IsSourceTypeFilterChecked(i)
+        end
+        local numExpansions = GetNumExpansions()
+        for i = 1, numExpansions do
+            saved.expansions[i] = C_ToyBox.IsExpansionTypeFilterChecked(i)
+        end
+        -- There is no getter for the search string. It only ever comes from the
+        -- Toy Box's own box, which banks it here, and it does not survive a
+        -- reload -- so an empty string is the right restore when that is absent.
+        local searchString = (ToyBox and ToyBox.searchString) or ""
+
+        -- Uncollected toys are dropped rather than shown: PlayerHasToy rejects
+        -- them anyway, so widening that one would only lengthen the walk.
+        C_ToyBox.SetCollectedShown(true)
+        C_ToyBox.SetUncollectedShown(false)
+        C_ToyBox.SetUnusableShown(true)
+        C_ToyBox.SetAllSourceTypeFilters(true)
+        C_ToyBox.SetAllExpansionTypeFilters(true)
+        C_ToyBox.SetFilterString("")
+        C_ToyBox.ForceToyRefilter()
+
+        local ok, err = pcall(scan)
+
+        C_ToyBox.SetCollectedShown(saved.collected)
+        C_ToyBox.SetUncollectedShown(saved.uncollected)
+        C_ToyBox.SetUnusableShown(saved.unusable)
+        for i = 1, numSources do
+            C_ToyBox.SetSourceTypeFilter(i, saved.sources[i])
+        end
+        for i = 1, numExpansions do
+            C_ToyBox.SetExpansionTypeFilter(i, saved.expansions[i])
+        end
+        C_ToyBox.SetFilterString(searchString)
+        C_ToyBox.ForceToyRefilter()
+        -- An open Toy Box drew its page from the widened list, so it has to be
+        -- told to draw it again -- the same pair its own filter menu calls.
+        if ToyBox and ToyBox:IsVisible() then
+            if ToyBox_UpdatePages then ToyBox_UpdatePages() end
+            if ToyBox_UpdateButtons then ToyBox_UpdateButtons() end
+        end
+
+        if not ok then error(err, 0) end
+    end
+
     local function ToyEntries()
         local out = {}
-        -- The toy box has no ID-based enumeration, only this filtered walk, so
-        -- this one list does follow the user's Collections filters. Narrowing it
-        -- back out would mean calling C_ToyBox.SetFilterString/SetCollectedShown,
-        -- which changes what they see in Collections -- not worth it.
-        for i = 1, (C_ToyBox.GetNumFilteredToys() or 0) do
-            local itemID = C_ToyBox.GetToyFromIndex(i)
-            if itemID and itemID > 0 and PlayerHasToy(itemID) then
-                local _, name, icon = C_ToyBox.GetToyInfo(itemID)
-                if name then
-                    out[#out + 1] = { icon = icon, name = name,
-                        slot = { kind = "toy", id = itemID, name = name } }
+        ScanToysUnfiltered(function()
+            for i = 1, (C_ToyBox.GetNumFilteredToys() or 0) do
+                local itemID = C_ToyBox.GetToyFromIndex(i)
+                if itemID and itemID > 0 and PlayerHasToy(itemID) then
+                    local _, name, icon, isFavorite = C_ToyBox.GetToyInfo(itemID)
+                    if name then
+                        -- Favorite only: the toy API hands back no source for
+                        -- an individual toy, and a source guessed from anywhere
+                        -- else would be a made-up answer in a search box.
+                        out[#out + 1] = { icon = icon, name = name,
+                            keywords = SourceKeywords(nil, isFavorite),
+                            slot = { kind = "toy", id = itemID, name = name } }
+                    end
                 end
             end
-        end
+        end)
         return out
     end
 
@@ -748,6 +859,50 @@ initFrame:SetScript("OnEvent", function(self)
                     slot = { kind = "spec", specID = specID, name = name } }
             end
         end
+        return out
+    end
+
+    -- The most specializations any class has -- four, the druid's alone.
+    -- Walked rather than written down so a class that gains a fourth is picked
+    -- up without a code change.
+    local function MaxSpecCount()
+        if not C_SpecializationInfo or not GetNumClasses then return 0 end
+        local most = 0
+        for classID = 1, GetNumClasses() do
+            local n = C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
+            if n > most then most = n end
+        end
+        return most
+    end
+
+    -- The same list by POSITION rather than by identity, offered beside the
+    -- fixed entries rather than instead of them: "go Restoration" is not "go
+    -- to the third one", and only the second survives being carried to
+    -- another class.
+    --
+    -- Every position ANY class has, not only this character's -- a paladin
+    -- offered three could not put a druid's fourth on a palette built FOR the
+    -- druid. The usability filter hides the extras until an alt has them.
+    local function DynamicSpecEntries()
+        local out = {}
+        -- Named by the module that also RESOLVES the kind, so an older
+        -- EllesmereUIQuickdraw beside a newer options page offers nothing
+        -- rather than a kind that module could not fire.
+        if not ns.SpecPositionName then return out end
+        for i = 1, MaxSpecCount() do
+            local slot = { kind = "dynamicspec", index = i }
+            local icon = ns.SlotDisplay(slot)
+            out[#out + 1] = { icon = icon, name = ns.SpecPositionName(i), slot = slot }
+        end
+        return out
+    end
+
+    -- Both lists, fixed first: naming a spec is what a player picking one on
+    -- their main usually means, and the by-position block reads as the
+    -- alternative to it rather than as the lead.
+    local function AllSpecEntries()
+        local out = SpecEntries()
+        for _, entry in ipairs(DynamicSpecEntries()) do out[#out + 1] = entry end
         return out
     end
 
@@ -835,9 +990,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- something the game owns.
         { key = "palette",   label = "Nest Another Action Menu", build = PaletteEntries },
         { key = "spell",     label = "Spells",       build = SpellEntries },
-        { key = "mount",     label = "Mounts",       build = MountEntries },
+        { key = "mount",     label = "Mounts",       build = MountEntries,
+          keywordHint = true },
         { key = "item",      label = "Items",        build = ItemEntries },
-        { key = "toy",       label = "Toys",         build = ToyEntries },
+        { key = "toy",       label = "Toys",         build = ToyEntries,
+          keywordHint = true },
         { key = "macro",     label = "Macros",       build = MacroEntries },
         { key = "battlepet", label = "Battle Pets",  build = PetEntries },
         -- keepOrder on both: the markers run star to skull, the order every
@@ -852,9 +1009,10 @@ initFrame:SetScript("OnEvent", function(self)
         } },
         -- keepOrder: the game lists a class's specs in one fixed order that
         -- every character sheet shows, and alphabetising them would be the
-        -- one place in the interface they are not in it. noSearch: at most
-        -- four rows.
-        { key = "spec",      label = "Specializations", build = SpecEntries,
+        -- one place in the interface they are not in it. It also keeps the
+        -- by-position block below the fixed one, which is the whole of how the
+        -- two tell themselves apart. noSearch: at most eight rows.
+        { key = "spec",      label = "Specializations", build = AllSpecEntries,
           keepOrder = true, noSearch = true },
         { key = "macrotext", label = "Custom Macro...", custom = true },
     }
@@ -1305,6 +1463,11 @@ initFrame:SetScript("OnEvent", function(self)
             menu.search:Hide()
         else
             menu.search:Show()
+            -- The placeholder names what the box searches. A list that also
+            -- matches source and favorite is worth nothing if the only way to
+            -- find that out is to guess it.
+            menu.searchPH:SetText(EllesmereUI.L(
+                cat.keywordHint and "Search name, source, favorite..." or "Search..."))
             menu.searchPH:SetShown((menu.search:GetText() or "") == "")
         end
         menu.custom:Hide()
@@ -1336,7 +1499,15 @@ initFrame:SetScript("OnEvent", function(self)
             or (menu.search:GetText() or ""):lower()
         local n = 0
         for _, entry in ipairs(list) do
-            if filter == "" or entry.name:lower():find(filter, 1, true) then
+            -- The name first, then whatever else the entry knows about itself.
+            -- A picker holding several hundred rows that can only be searched
+            -- by name can only be searched by someone who already knows the
+            -- name of the thing they want, which is the opposite of what a
+            -- search is for. Keywords are built once with the list and are
+            -- already lowercase; this runs on every keystroke.
+            if filter == ""
+               or entry.name:lower():find(filter, 1, true)
+               or (entry.keywords and entry.keywords:find(filter, 1, true)) then
                 n = n + 1
                 local r = menu:GetRow(n)
                 r.icon:SetTexture(entry.icon or QUESTION_MARK)
@@ -1452,20 +1623,30 @@ initFrame:SetScript("OnEvent", function(self)
         184353, 188952, 190196, 190237, 193588, 200630, 206195, 208704,
         209035, 212337, 228940,
     }
+    -- A builder returns what it found and, second, how many it had to leave
+    -- out. A preset that quietly stopped at the cap was the "it also seems to
+    -- limit hearthstones" half of the report: the toys share a cooldown, so
+    -- dropping the tail of THOSE costs nothing, but a hearthstone the player
+    -- owns and cannot see is a destination they have lost. Counted here and
+    -- said in the menu rather than fixed by raising a cap on its own -- some
+    -- collections are simply larger than any menu.
     local function HearthstoneSlots()
-        local out = {}
+        local out, dropped = {}, 0
         for _, itemID in ipairs(HEARTH_ITEMS) do
             if C_Item.GetItemCount(itemID) > 0 then
                 out[#out + 1] = { kind = "item", id = itemID }
             end
         end
         for _, toyID in ipairs(HEARTH_TOYS) do
-            if #out >= MAX_SLOTS then break end
             if PlayerHasToy(toyID) then
-                out[#out + 1] = { kind = "toy", id = toyID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "toy", id = toyID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
-        return out
+        return out, dropped
     end
 
     -- Self-teleports only, keyed by class. Mage portals are deliberately not
@@ -1485,15 +1666,18 @@ initFrame:SetScript("OnEvent", function(self)
         },
     }
     local function TeleportSlots()
-        local out = {}
+        local out, dropped = {}, 0
         local list = TELEPORT_SPELLS[select(2, UnitClass("player"))]
         for _, spellID in ipairs(list or {}) do
-            if #out >= MAX_SLOTS then break end
             if IsPlayerSpell(spellID) then
-                out[#out + 1] = { kind = "spell", id = spellID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "spell", id = spellID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
-        return out
+        return out, dropped
     end
 
     -- The same bag walk ItemEntries does, narrowed to drinkable consumables.
@@ -1536,11 +1720,14 @@ initFrame:SetScript("OnEvent", function(self)
         114282,  -- Treant Form
     }
     local function FormSlots()
-        local out = {}
+        local out, dropped = {}, 0
         for _, spellID in ipairs(FORM_SPELLS) do
-            if #out >= MAX_SLOTS then break end
             if IsPlayerSpell(spellID) then
-                out[#out + 1] = { kind = "spell", id = spellID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "spell", id = spellID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
         -- Getting OUT is the half of shapeshifting no form spell covers, and
@@ -1553,7 +1740,7 @@ initFrame:SetScript("OnEvent", function(self)
                               name = "Cancel Form",
                               icon = "Interface\\Buttons\\UI-GroupLoot-Pass-Up" }
         end
-        return out
+        return out, dropped
     end
 
     -- One-of-a-set toggles that are not forms: a warrior's stances and a
@@ -1564,24 +1751,127 @@ initFrame:SetScript("OnEvent", function(self)
         PALADIN = { 465, 32223, 183435, 317920 },  -- Devotion, Crusader, Retribution, Concentration
     }
     local function StanceSlots()
-        local out = {}
+        local out, dropped = {}, 0
         for _, spellID in ipairs(STANCE_SPELLS[select(2, UnitClass("player"))] or {}) do
-            if #out >= MAX_SLOTS then break end
             if IsPlayerSpell(spellID) then
-                out[#out + 1] = { kind = "spell", id = spellID }
+                if #out < MAX_SLOTS then
+                    out[#out + 1] = { kind = "spell", id = spellID }
+                else
+                    dropped = dropped + 1
+                end
             end
         end
-        return out
+        return out, dropped
     end
 
-    -- Every spec this character has. One entry short of useful on a class with
-    -- one spec, so a single-spec character is not offered it.
+    -- By position rather than by identity. A preset is the palette a player
+    -- has not built by hand, so it is the one most likely to be copied to a
+    -- profile an alt shares -- and the only preset here whose slots would
+    -- otherwise all go dead on arrival.
+    --
+    -- No dropped count: four positions against a sixteen-slot menu, so unlike
+    -- the collection presets this one can never be the thing that does not
+    -- fit. Empty is the stale-module case, and leaves the preset unoffered.
     local function SpecSlots()
-        local out = SpecEntries()
-        if #out < 2 then return {} end
         local slots = {}
-        for i = 1, math.min(MAX_SLOTS, #out) do slots[i] = out[i].slot end
+        for _, entry in ipairs(DynamicSpecEntries()) do slots[#slots + 1] = entry.slot end
         return slots
+    end
+
+    -- Quest items the character is carrying that DO something: the bag walk
+    -- ItemEntries makes, narrowed to the quest item class and to items with a
+    -- use effect. An item with no effect is a quest object being carried, not
+    -- something an entry can fire.
+    --
+    -- The quest log's own special items are folded in as well. Those are the
+    -- ones the objective tracker draws a button for, and they are not always
+    -- in the quest item CLASS -- a trinket or a toy handed out for one quest
+    -- reads as its own class and would be missed by the bag walk alone.
+    -- GetQuestLogSpecialItemInfo is the same call the tracker makes
+    -- (Blizzard_ObjectiveTrackerShared.lua:53).
+    --
+    -- A snapshot, like every preset here: it holds what the character carries
+    -- at the moment the menu is built. See the note under QD-07a in the bug
+    -- report for the self-refilling version and why it is not this.
+    local function QuestItemSlots()
+        local out, seen, dropped = {}, {}, 0
+        local function Add(itemID)
+            if not itemID or seen[itemID] then return end
+            if not C_Item.GetItemSpell(itemID) then return end
+            seen[itemID] = true
+            if #out < MAX_SLOTS then
+                out[#out + 1] = { kind = "item", id = itemID }
+            else
+                dropped = dropped + 1
+            end
+        end
+        local function ScanBag(bag)
+            for slot = 1, C_Container.GetContainerNumSlots(bag) do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                local itemID = info and info.itemID
+                if itemID and not seen[itemID] then
+                    local classID = select(6, C_Item.GetItemInfoInstant(itemID))
+                    if classID == Enum.ItemClass.Questitem then Add(itemID) end
+                end
+            end
+        end
+        for bag = Enum.BagIndex.Backpack, NUM_BAG_SLOTS do ScanBag(bag) end
+        ScanBag(Enum.BagIndex.ReagentBag)
+
+        for i = 1, C_QuestLog.GetNumQuestLogEntries() do
+            local info = C_QuestLog.GetInfo(i)
+            if info and not info.isHeader then
+                -- The LINK, which is the first return; the second is the
+                -- button's texture, not an id. GetItemInfoInstant takes a link
+                -- and hands back the itemID first.
+                local link = GetQuestLogSpecialItemInfo(i)
+                if link then Add((C_Item.GetItemInfoInstant(link))) end
+            end
+        end
+        return out, dropped
+    end
+
+    -- Every profession this character has, as the spells the profession book
+    -- itself offers: the window opener, and where a profession has one, its
+    -- second ability -- smelting, prospecting, milling, runeforging. Cooking,
+    -- fishing and archaeology arrive the same way, GetProfessions handing back
+    -- all five slots.
+    --
+    -- Read out of the spellbook rather than from a list of spell IDs. Those IDs
+    -- change with every expansion's skill lines, and a list would go stale
+    -- silently -- the preset would simply stop offering a profession. This is
+    -- the walk Blizzard's own profession book makes
+    -- (Blizzard_ProfessionsBook.lua:387 for the offsets, :313 for the item).
+    --
+    -- Passive entries are skipped: a profession's passive is a rank, not
+    -- something a menu entry can do.
+    local function ProfessionSlots()
+        local out, dropped = {}, 0
+        local function AddProfession(index)
+            if not index then return end
+            local _, _, _, _, numSpells, spellOffset = GetProfessionInfo(index)
+            for i = 1, (numSpells or 0) do
+                local info = C_SpellBook.GetSpellBookItemInfo(
+                    i + (spellOffset or 0), Enum.SpellBookSpellBank.Player)
+                if info and info.spellID and not info.isPassive then
+                    if #out < MAX_SLOTS then
+                        out[#out + 1] = { kind = "spell", id = info.spellID }
+                    else
+                        dropped = dropped + 1
+                    end
+                end
+            end
+        end
+        -- Passed one at a time rather than collected into a table: a character
+        -- missing a profession hands back a nil in the middle of those five
+        -- returns, and a table constructor holding one stops counting there.
+        local prof1, prof2, arch, fish, cook = GetProfessions()
+        AddProfession(prof1)
+        AddProfession(prof2)
+        AddProfession(arch)
+        AddProfession(fish)
+        AddProfession(cook)
+        return out, dropped
     end
 
     local PALETTE_PRESETS = {
@@ -1593,6 +1883,8 @@ initFrame:SetScript("OnEvent", function(self)
         { label = "Druid Forms",    build = FormSlots },
         { label = "Stances",        build = StanceSlots },
         { label = "Specializations", build = SpecSlots },
+        { label = "Professions",    build = ProfessionSlots },
+        { label = "Quest Items",    build = QuestItemSlots },
     }
 
     ---------------------------------------------------------------------------
@@ -1685,12 +1977,20 @@ initFrame:SetScript("OnEvent", function(self)
         MenuRow(menu, 1, nil, EllesmereUI.L("Empty Action Menu"), function() AddPalette(nil) end)
         local n = 1
         for _, preset in ipairs(PALETTE_PRESETS) do
-            local slots = preset.build()
+            local slots, dropped = preset.build()
             if #slots > 0 then
                 n = n + 1
                 local icon = ns.SlotDisplay(slots[1])
+                -- The count, and what a full menu could not take. A preset that
+                -- stopped at the cap and said nothing looked like a preset that
+                -- had found everything there was.
+                local count = "  |cff808080(" .. #slots .. ")|r"
+                if dropped and dropped > 0 then
+                    count = count .. " |cffd08050"
+                        .. EllesmereUI.Lf("%1$d did not fit", dropped) .. "|r"
+                end
                 MenuRow(menu, n, icon or QUESTION_MARK,
-                    EllesmereUI.L(preset.label) .. "  |cff808080(" .. #slots .. ")|r",
+                    EllesmereUI.L(preset.label) .. count,
                     function() AddPalette(preset, slots) end)
             end
         end
@@ -2786,6 +3086,57 @@ initFrame:SetScript("OnEvent", function(self)
             plainMouse = true,
         })
         y = y - h
+
+        -- Its opposite, and on a row of its own: nothing else belongs beside a
+        -- cancel key. Escape already backs out of any menu and stays that way;
+        -- this is a second key for the hand that is holding the menu open and
+        -- is nowhere near Escape, which is the whole of the request behind it.
+        -- Shown only once the Select key exists: cancelling is a gesture of
+        -- the kept-open flow that key unlocks, so before it the row is noise.
+        -- The Select commit above already RefreshPage()s on bind/unbind, which
+        -- is what brings this row in and out. A cancelKey bound earlier stays
+        -- stored while hidden and returns with the row.
+        if HasSelectKey() then
+            row, h = W:DualRow(parent, y,
+                { type="label", text="Menu Cancel Action" }, { type="label", text="" })
+            BuildKeybindButton(row._leftRegion, {
+                intro = "Closes an open menu without using anything. Escape always "
+                    .. "does this as well. One key shared by every menu, claimed "
+                    .. "only while a menu is up -- a mouse button keeps its normal "
+                    .. "use the rest of the time.",
+                read = function()
+                    local key = Cfg("cancelKey")
+                    if type(key) ~= "string" or key == "" then return nil end
+                    return key
+                end,
+                commit = function(chord)
+                    -- A menu's own key would be taken over for as long as that menu
+                    -- was up, which is exactly the moment its release has to reach
+                    -- the menu -- so the menu could be opened and never closed. The
+                    -- Select key is refused for the reason the module gives at the
+                    -- binding itself: one chord, two meanings, and the wrong one
+                    -- wins.
+                    if chord then
+                        if chord == Cfg("confirmKey") then
+                            Complain("Quickdraw: that key is already the Toggled Menu Select Action.")
+                            return
+                        end
+                        for i = 1, (Cfg("paletteCount") or 1) do
+                            if GetBindingKey(BINDING_PREFIX .. i) == chord then
+                                Complain("Quickdraw: that key opens a menu, so it cannot also close one.")
+                                return
+                            end
+                        end
+                    end
+                    Set("cancelKey", chord or "")
+                    Refresh()
+                end,
+                -- The same reason as the Select key: a bare mouse button is what
+                -- this is for.
+                plainMouse = true,
+            })
+            y = y - h
+        end
 
         y = y - BuildPreview(parent, y)
 

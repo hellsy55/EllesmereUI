@@ -114,6 +114,16 @@ local ORIENT_ORDER = { "HORIZONTAL", "VERTICAL" }
 -- Show when mode (for frame effects)
 local SHOW_WHEN_VALUES = { present = "When Any Present", allPresent = "When All Present", anyMissing = "When Any Missing", missing = "When All Missing" }
 local SHOW_WHEN_ORDER = { "present", "allPresent", "anyMissing", "missing" }
+-- Effect indicators (healthcolor/bgcolor/border) on 12.1 support ONLY the
+-- presence-driven mode. The engine renders present auras; absence logic would
+-- need visibility hooks on its buttons, which it forbids (secret SetShown
+-- throws on scripted buttons -- field, 2026-08-14). The full four-mode list
+-- previously offered here made the other modes silently render NOTHING.
+-- Stale saved modes render presence-driven via the runtime heal in
+-- EUI_RaidFrames_AuraContainers.lua's effect branch.
+local SHOW_WHEN_VALUES_EFFECT = { present = "When Any Present" }
+local SHOW_WHEN_ORDER_EFFECT = { "present" }
+local SHOW_WHEN_EFFECT_TIP = "Effect indicators show while a tracked buff is present. Absence-based modes are not available in 12.1."
 
 -- Indicator frame level, relative to the unit button. Icon/Square: own border at base+1, count/duration text carrier pinned at +18 regardless of mode; bars use the base only (no sub-frames).
 local FRAMELVL_VALUES = {
@@ -292,6 +302,11 @@ local BORROW_SPECS = {
 -- never name: GetSpecializationInfo() returns the stable non-localized ID first,
 -- the LOCALIZED name second, so name-matching silently kills every indicator,
 -- the simple grid and secret tracking on non-English clients. nil = not tracked.
+-- LEGACY/simple-grid resolver ONLY: the borrow hop below is load-bearing for the
+-- simple grid and secret-aura identify, but the v2 indicator system must NEVER
+-- route through it -- v2's active bucket resolves borrow-free via BM2_SpecKey /
+-- BM_SpecKeyForSpecID (maintainer ruling 2026-08-13: Ret/Prot/Ele/Enh edit and
+-- render the shared All Non Healers/Aug bucket, not the borrowed healer's).
 local function CurrentSpecKey()
     local specIdx = GetSpecialization and GetSpecialization()
     if not specIdx then return nil end
@@ -1171,6 +1186,7 @@ function ns.BM_CreatePreviewIndicators(f, health, PP)
     f._bmIconPool      = iconPool
     f._bmBarPool       = barPool
     f._bmHCOverlay     = hcOverlay
+    f._bmHCBar         = health
     f._bmBGOverlay     = bgOverlay
     f._bmEffectBorder  = effectBorder
 end
@@ -1369,7 +1385,8 @@ function ns.BM_ApplyPreviewIndicators(f, index, s)
                         if wantShow then
                             if indType == "healthcolor" and f._bmHCOverlay then
                                 local c = ind.color or { r=0, g=1, b=0 }
-                                f._bmHCOverlay:SetColorTexture(c.r, c.g, c.b, (ind.opacity or 100) / 100)
+                                ns.RF_TintOverBarFill(f._bmHCOverlay, f._bmHCBar,
+                                    c.r, c.g, c.b, (ind.opacity or 100) / 100)
                                 f._bmHCOverlay:Show()
                             elseif indType == "bgcolor" and f._bmBGOverlay then
                                 local c = ind.color or { r=0, g=1, b=0 }
@@ -4581,9 +4598,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 _, h = W:SectionHeader(leftFrame, "CORE", sy); sy = sy - h
 
                 local swRow = SettingsRow(
-                    { type="dropdown", text="Show When", values=SHOW_WHEN_VALUES, order=SHOW_WHEN_ORDER,
-                      getValue=function() return ind.showWhen or "present" end,
-                      setValue=function(v) ind.showWhen = v; ReloadAndUpdate() end },
+                    { type="dropdown", text="Show When", values=SHOW_WHEN_VALUES_EFFECT, order=SHOW_WHEN_ORDER_EFFECT,
+                      tooltip=SHOW_WHEN_EFFECT_TIP,
+                      getValue=function() return "present" end,
+                      setValue=function(v) ind.showWhen = "present"; ReloadAndUpdate() end },
                     { type="toggle", text="Own Only",
                       tooltip="Only show buffs cast by you.",
                       getValue=function() return ind.ownOnly == true end,
@@ -4666,9 +4684,10 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 _, h = W:SectionHeader(leftFrame, "CORE", sy); sy = sy - h
 
                 local hcSwRow = SettingsRow(
-                    { type="dropdown", text="Show When", values=SHOW_WHEN_VALUES, order=SHOW_WHEN_ORDER,
-                      getValue=function() return ind.showWhen or "present" end,
-                      setValue=function(v) ind.showWhen = v; ReloadAndUpdate() end },
+                    { type="dropdown", text="Show When", values=SHOW_WHEN_VALUES_EFFECT, order=SHOW_WHEN_ORDER_EFFECT,
+                      tooltip=SHOW_WHEN_EFFECT_TIP,
+                      getValue=function() return "present" end,
+                      setValue=function(v) ind.showWhen = "present"; ReloadAndUpdate() end },
                     { type="toggle", text="Own Only",
                       tooltip="Only show buffs cast by you.",
                       getValue=function() return ind.ownOnly == true end,

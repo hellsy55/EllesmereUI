@@ -3956,42 +3956,38 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetAlpha(questObjOff() and 0.15 or 0.4)
         end
 
-        -- Row 4: disabled, automatic class/spec cutoff, or profile-level custom cutoff.
-        _, h = W:DualRow(parent, y,
+        -- Row 4: Range Check (custom cutoff in the inline cog) | Out of Range Opacity
+        local rangeCheckRow
+        rangeCheckRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Range Check",
               values={ disabled="Disabled", auto="Auto (Class/Spec)", custom="Custom" },
               order={ "disabled", "auto", "custom" },
-              tooltip="Disabled runs no nameplate range checks. Auto uses your class and specialization's normal attack range. Custom uses the range selected beside this option.",
+              tooltip="Disabled runs no nameplate range checks. Auto uses your class and specialization's normal attack range. Custom uses the range set in the cog beside this option.",
               getValue=function() return DBVal("outOfRangeMode") or defaults.outOfRangeMode end,
               setValue=function(v)
-                DB().outOfRangeMode = v
-                if v == "custom" and DB().outOfRangeCustomRange == nil then
-                    DB().outOfRangeCustomRange = EllesmereUI.Range_GetAttackCutoff()
+                local prev = DBVal("outOfRangeMode") or defaults.outOfRangeMode
+                local function ApplyMode(mode)
+                    DB().outOfRangeMode = mode
+                    if mode == "custom" and DB().outOfRangeCustomRange == nil then
+                        DB().outOfRangeCustomRange = EllesmereUI.Range_GetAttackCutoff()
+                    end
+                    if ns.RangeText_Apply then ns.RangeText_Apply() end
+                    EllesmereUI:RefreshPage()
                 end
-                if ns.RangeText_Apply then ns.RangeText_Apply() end
-                EllesmereUI:RefreshPage()
-              end },
-            { type="slider", text="Custom Range",
-              tooltip="Attack-range cutoff used by Out of Range Opacity. Five-yard steps match the available fallback range checks.",
-              min=5, max=50, step=5,
-              disabled=function() return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) ~= "custom" end,
-              disabledTooltip="Range Check: Custom",
-              getValue=function()
-                  return DBVal("outOfRangeCustomRange") or EllesmereUI.Range_GetAttackCutoff()
-              end,
-              setValue=function(v)
-                DB().outOfRangeCustomRange = v
-                if ns.RangeText_Apply then ns.RangeText_Apply() end
-              end });  y = y - h
-
-        -- Row 5: Execute Pulse Glow | Out of Range Opacity
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Execute Pulse Glow",
-              tooltip="Pulses a red glow on enemy nameplates below 30% health.",
-              getValue=function() return DBVal("lowHpGlow") == true end,
-              setValue=function(v)
-                DB().lowHpGlow = v
-                ns.RefreshAllSettings()
+                -- Performance confirm on the disabled -> enabled edge only:
+                -- the sweep range-checks every visible nameplate continuously.
+                if prev == "disabled" and v ~= "disabled" then
+                    EllesmereUI:ShowConfirmPopup({
+                        title = "Out of Range Opacity",
+                        message = "This feature runs continuous range checks against every visible enemy nameplate. It is one of the more expensive features in EllesmereUI and can measurably increase CPU usage in crowded areas.",
+                        confirmText = "Enable",
+                        cancelText = "Cancel",
+                        onConfirm = function() ApplyMode(v) end,
+                        onCancel = function() EllesmereUI:RefreshPage() end,
+                    })
+                    return
+                end
+                ApplyMode(v)
               end },
             { type="slider", text="Out of Range Opacity",
               tooltip="Opacity used for enemy nameplates outside the selected attack range.",
@@ -4002,6 +3998,67 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 DB().outOfRangeAlpha = v
                 if ns.RangeText_Apply then ns.RangeText_Apply() end
+              end });  y = y - h
+
+        -- Inline cog on Range Check: the custom cutoff lives here.
+        if not EllesmereUI._prebuilding then
+            local function customOff()
+                return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) ~= "custom"
+            end
+            local rgn = rangeCheckRow._leftRegion
+            local _, rangeCogShow = EllesmereUI.BuildCogPopup({
+                title = "Range Check",
+                rows = {
+                    { type="slider", label="Custom Range", min=5, max=50, step=5,
+                      tooltip="Attack-range cutoff used by Out of Range Opacity. Five-yard steps match the available fallback range checks.",
+                      disabled=customOff,
+                      disabledTooltip="Range Check: Custom",
+                      get=function()
+                          return DBVal("outOfRangeCustomRange") or EllesmereUI.Range_GetAttackCutoff()
+                      end,
+                      set=function(v)
+                        DB().outOfRangeCustomRange = v
+                        if ns.RangeText_Apply then ns.RangeText_Apply() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            local function UpdateRangeCogAlpha()
+                cogBtn:SetAlpha(customOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateRangeCogAlpha)
+            UpdateRangeCogAlpha()
+            cogBtn:SetScript("OnEnter", function(self)
+                if not customOff() then self:SetAlpha(0.7) end
+            end)
+            cogBtn:SetScript("OnLeave", function() UpdateRangeCogAlpha() end)
+            cogBtn:SetScript("OnClick", function(self)
+                if not customOff() then rangeCogShow(self) end
+            end)
+        end
+
+        -- Row 5: Execute Pulse Glow | Hide Enemy Nameplates out of Combat
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Execute Pulse Glow",
+              tooltip="Pulses a red glow on enemy nameplates below 30% health.",
+              getValue=function() return DBVal("lowHpGlow") == true end,
+              setValue=function(v)
+                DB().lowHpGlow = v
+                ns.RefreshAllSettings()
+              end },
+            { type="toggle", text="Hide Enemy Nameplates out of Combat",
+              tooltip="Hide enemy nameplates while you are out of combat; they return the moment combat starts. Drives the same game setting as the Show Enemy Name Plates keybind.",
+              getValue=function() return DBVal("hideEnemyPlatesOOC") == true end,
+              setValue=function(v)
+                DB().hideEnemyPlatesOOC = v
+                if ns.ApplyOOCPlates then ns.ApplyOOCPlates() end
               end });  y = y - h
 
         return math.abs(y)

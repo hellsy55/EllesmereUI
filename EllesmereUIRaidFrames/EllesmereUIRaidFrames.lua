@@ -302,7 +302,7 @@ local defaults = {
         cellSpacing      = -1,
         groupSpacing     = -1,
         groupGrowth      = "RIGHT",  -- "DOWN", "UP", "RIGHT", "LEFT"
-        unitGrowth       = "DOWN",   -- perpendicular to groupGrowth
+        unitGrowth       = "DOWN",   -- any direction; same-axis as groupGrowth = one continuous line
         sortMode         = "ROLE",   -- "INDEX" (by group) or "ROLE" (by assigned role)
         roleOrder        = { "TANK", "HEALER", "DAMAGER" },
         showSelfFirst    = true,
@@ -316,6 +316,7 @@ local defaults = {
         showWhenSolo     = false,
         showWhenGroup    = false,
         showWhenRaid     = true,
+        frameStrata      = "LOW",
 
         -- Friendly Boss Frames (boss1-5 healable NPC frames, raid only)
         friendlyBoss = {
@@ -1012,6 +1013,114 @@ ns.RF_ApplyFillRotation = function(bar)
     local tiled = fill and ((fill.GetHorizTile and fill:GetHorizTile())
                          or (fill.GetVertTile and fill:GetVertTile()))
     bar:SetRotatesTexture((vert and not tiled) and true or false)
+end
+
+-------------------------------------------------------------------------------
+--  Health-fill tint overlays
+--
+--  "Health Bar Color" indicators paint over the health FILL. A flat
+--  SetColorTexture slab erases the bar's shading, so a tinted frame reads as a
+--  solid block beside untinted ones; the overlay borrows the bar's own fill
+--  texture instead and recolors it with a vertex color.
+--
+--  The overlay is anchored to the fill texture, so it inherits the bar's fill
+--  geometry for free: these fills clip by resizing rather than by moving their
+--  tex coords (measured -- identical coords at full and at half fill), so the
+--  overlay stretches exactly as the bar art does with nothing to update per tick.
+--  The coords are copied anyway so anything the orientation pass does to them
+--  comes along, which is also why the refresh runs after that pass.
+--
+--  Live BM/DM slots register on the bar, so a Health Bar Texture change can
+--  re-anchor them to the new fill object and repaint (ReanchorAbsorbToFill for
+--  frames built through StyleButton, FB.ApplyStyle for Focus/Boss). The options
+--  previews are rebuilt wholesale and need no refresh.
+-------------------------------------------------------------------------------
+
+-- host and owner are kept on the overlay rather than in the entry, so a cleared
+-- entry can be rebuilt by the next paint without losing either. host is stored only
+-- when it is NOT the overlay itself -- the Debuff Manager hangs its overlay off a
+-- wrapper frame, and that wrapper is what a fill swap has to re-anchor.
+ns.RF_RegisterBarTint = function(bar, tex, host, owner)
+    if not (bar and tex) then return end
+    if host and host ~= tex then tex._euiTintHost = host end
+    if owner then tex._euiTintOwner = owner end
+    local reg = bar._euiBarTints
+    if not reg then
+        reg = setmetatable({}, { __mode = "k" })
+        bar._euiBarTints = reg
+    end
+    if reg[tex] == nil then reg[tex] = {} end
+end
+
+-- Called when a container that owned overlays on this bar is released. Engine aura
+-- buttons are never freed, so their overlays would otherwise pile up one set per
+-- rebuild -- an indicator edit or a spec change is enough -- and every later layout
+-- pass would walk the dead ones. Entries are re-added by the next paint.
+--
+-- Scoped to the owner being released. Clearing the whole registry would also drop
+-- a live overlay belonging to another owner, and an overlay that is displayed but
+-- not repainted never re-registers -- the next Health Bar Texture change would
+-- then skip it and leave it on the old art.
+ns.RF_ClearBarTints = function(bar, owner)
+    local reg = bar and bar._euiBarTints
+    if not (reg and owner) then return end
+    for tex in pairs(reg) do
+        if tex._euiTintOwner == owner then reg[tex] = nil end
+    end
+end
+
+ns.RF_TintOverBarFill = function(tex, bar, r, g, b, a)
+    if not tex then return end
+    ns.RF_RegisterBarTint(bar, tex)
+    local reg = bar and bar._euiBarTints
+    local ent = reg and reg[tex]
+    -- Stored pre-multiply: the refresh path calls back in with these, so folding
+    -- the fill opacity in here would compound it on every pass.
+    if ent then ent.r, ent.g, ent.b, ent.a = r, g, b, a end
+    -- Inherit the bar's configured Fill Opacity, so a tinted frame is as
+    -- translucent as its untinted neighbours instead of the one solid bar in the
+    -- group. Read from the stamp the style pass leaves, NOT from the live fill
+    -- colour: _ApplyHealthBg drives that alpha down to 0.3 offline and 0.5 dead,
+    -- and nothing repaints tints when a unit reconnects, so a tint painted during
+    -- either would latch dimmed. Dark Mode is deliberately not inherited -- it
+    -- dims the fill texture, and a colour the user picked should not be
+    -- auto-dimmed.
+    if bar then a = a * (bar._euiFillOpacity or 1) end
+    local fill = bar and bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    local path = fill and fill.GetTexture and fill:GetTexture()
+    if not path then
+        -- Reset both: a texcoord from the textured branch survives the swap, and
+        -- SetColorTexture bakes the color into the texture rather than into the
+        -- vertex color, so a stale vertex color would multiply it.
+        tex:SetTexCoord(0, 1, 0, 1)
+        tex:SetColorTexture(r, g, b, a)
+        tex:SetVertexColor(1, 1, 1, 1)
+        return
+    end
+    tex:SetTexture(path)
+    if fill.GetTexCoord then tex:SetTexCoord(fill:GetTexCoord()) end
+    tex:SetVertexColor(r, g, b, a)
+end
+
+-- Repaint BEFORE re-anchoring, and re-anchor with a bare SetAllPoints: the caller
+-- isolates this, and a ClearAllPoints that succeeded ahead of a denied SetAllPoints
+-- would strand the overlay with no anchor at all for the rest of the session.
+ns.RF_RefreshOneBarTint = function(bar, tex, ent, fill)
+    if ent.r then ns.RF_TintOverBarFill(tex, bar, ent.r, ent.g, ent.b, ent.a) end
+    if fill then (tex._euiTintHost or tex):SetAllPoints(fill) end
+end
+
+-- Isolated per entry: the overlay can hang off an engine aura button, and this
+-- runs from bare ReloadFrames calls where a throw would abort the styling loop
+-- mid-iteration. RF_TintOverBarFill only ever rewrites an entry it was handed, so
+-- the walk cannot gain keys mid-iteration.
+ns.RF_RefreshBarTints = function(bar)
+    local reg = bar and bar._euiBarTints
+    if not reg then return end
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    for tex, ent in pairs(reg) do
+        pcall(ns.RF_RefreshOneBarTint, bar, tex, ent, fill)
+    end
 end
 
 ns.RF_ApplyHealthOrientation = function(bar, s)
@@ -2031,6 +2140,13 @@ local function CreateAbsorbBar(button, healthBar)
             or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
         local isVert = ns.RF_ApplyHealthOrientation(healthBar, vs)
         backfillBar._axisVert = isVert  -- read by the blizzardModern spark block
+
+        -- Health Bar Color overlays track this bar's fill, so they follow the swap
+        -- for the same reason the absorb cluster below does. After the orientation
+        -- call, not before: the repaint copies the fill's tex coords, and that call
+        -- is what rotates them.
+        healthBar._euiFillOpacity = (vs.healthBarOpacity or 100) / 100
+        ns.RF_RefreshBarTints(healthBar)
         -- Indexed, not ipairs: the creation-time call runs before the heal/max bars exist, and ipairs stops at the first nil.
         local axisBars = { backfillBar, forwardBar, healAbsorbBar, healPredBar, reducedBar }
         for i = 1, 5 do
@@ -2404,9 +2520,11 @@ local function UpdateAbsorb(button, unit)
     local healBarPos = ns.GetHealAbsorbBarPosition(s)
     local healBarOn = healTopBar and healBarPos ~= "none"
     local styleOn = s.absorbStyle and s.absorbStyle ~= "none"
-    -- Heal absorb is INDEPENDENT of the shield absorb (matches Unit Frames): keep going whenever its style is on.
+    -- Heal absorb is independent of the shield absorb: keep going whenever its style is on.
     local healOn = (s.healAbsorbStyle or "clean") ~= "none"
-    if not styleOn and not barOn and not healOn and not healBarOn then
+    -- Heal prediction is also independent, and shares this frame, so it must keep the frame alive too.
+    local predOn = s.healPrediction and true or false
+    if not styleOn and not barOn and not healOn and not healBarOn and not predOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
@@ -2434,6 +2552,20 @@ local function UpdateAbsorb(button, unit)
     -- One heal-absorb fetch serves both the strip bar AND the overlay below.
     local healAbsorbAmt = (UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(unit)) or 0
 
+    -- Incoming heals, fetched here so the short-circuit below sees it too.
+    -- predOn-GATED: with prediction off this stays a constant 0, so the fetch
+    -- never runs and the memo's _mPred compares 0==0 forever -- heal traffic
+    -- must not break the short-circuit for users without the feature.
+    -- Calculator is refreshed above; legacy global only as its fallback.
+    local incomingHeals = 0
+    if predOn then
+        if calc and calc.GetIncomingHeals then
+            incomingHeals = calc:GetIncomingHeals() or 0
+        elseif UnitGetIncomingHeals then
+            incomingHeals = UnitGetIncomingHeals(unit) or 0
+        end
+    end
+
     -- Identical-state short-circuit: absorbs re-flush far more often than values change and every
     -- paint below is idempotent. Skip when values, health-bar size and the settings generation all
     -- match the last paint. SECRET-SAFE: secrets cannot be compared, so any secret input fails
@@ -2441,16 +2573,18 @@ local function UpdateAbsorb(button, unit)
     local hpW, hpH = hp:GetWidth(), hp:GetHeight()
     local isSec = issecretvalue
     if isSec and (isSec(absorbAmt) or isSec(maxHealth)
-       or isSec(healAbsorbAmt) or isSec(isClamped)) then
+       or isSec(healAbsorbAmt) or isSec(isClamped) or isSec(incomingHeals)) then
         ab._mAbs = nil
     elseif ab._mAbs == absorbAmt and ab._mHeal == healAbsorbAmt
        and ab._mMax == maxHealth and ab._mClamp == isClamped
        and ab._mW == hpW and ab._mH == hpH
+       and ab._mPred == incomingHeals
        and ab._mGen == ns._absorbGen then
         return
     else
         ab._mAbs, ab._mHeal, ab._mMax = absorbAmt, healAbsorbAmt, maxHealth
         ab._mClamp, ab._mW, ab._mH = isClamped, hpW, hpH
+        ab._mPred = incomingHeals
         ab._mGen = ns._absorbGen
     end
 
@@ -2566,13 +2700,15 @@ local function UpdateAbsorb(button, unit)
         end
     end
 
-    -- Shield style off: hide the in-frame shield bars and stop. Heal absorb is rendered above (independent), so this gate never hides it.
+    -- Shield style off: hide the in-frame shield bars. Heal absorb paints earlier in this
+    -- function so it's untouched either way; heal prediction paints later, so only stop
+    -- here if that's off too, or its block below never runs.
     if not styleOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
         if fw and fw._bfSpark then fw._bfSpark:Hide() end
-        return
+        if not predOn then return end
     end
 
     -- Bars track the health-bar size; size-gated (frame sizes are never secret, so it holds in combat).
@@ -2698,7 +2834,6 @@ local function UpdateAbsorb(button, unit)
         if not hpd._on then
             hpd:Hide()
         else
-            local incomingHeals = UnitGetIncomingHeals and UnitGetIncomingHeals(unit) or 0
             if hpd._szW ~= hpW or hpd._szH ~= hpH then
                 hpd._szW = hpW; hpd._szH = hpH
                 hpd:SetWidth(hpW); hpd:SetHeight(hpH)
@@ -2930,7 +3065,8 @@ local function StyleButton(button)
     local powerH = PixelSnap(s.powerHeight or 4)
     local healthH = h
 
-    button:SetSize(w, h)
+    -- No SetSize here: sizing is window-phase work (combat-blocked), owned by
+    -- ns._StyleButtonSecure below plus the header's initialConfigFunction.
 
     -- Background (visible behind the health bar where HP is missing)
     local bg = button:CreateTexture(nil, "BACKGROUND")
@@ -3555,6 +3691,30 @@ local function StyleButton(button)
         end
     end)
 
+    -- 12.1 aura containers (container shell creation is combat-legal since
+    -- 68914, so this rides the deferred styling pass with the rest of the body)
+    if ns.RFC_SetupButton then
+        ns.RFC_SetupButton(button, health, d)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Window-phase secure styling: everything on a fresh unit button that is
+--  combat-blocked or writes secure state -- the size plus the click / ping /
+--  click-cast tail (92 WrapScripts across the fleet live in CC_RegisterFrame).
+--  Runs inside the login loading-screen window for every pre-spawned button;
+--  the insecure visual body (StyleButton) runs in its own deferred
+--  post-screen execution so the suite's shared login watchdog budget never
+--  pays for it. Idempotent via d.securestyled, mirroring d.styled.
+-------------------------------------------------------------------------------
+ns._StyleButtonSecure = function(button)
+    local d = GetFFD(button)
+    if d.securestyled then return end
+    d.securestyled = true
+    local s = db.profile
+    -- Raid sizes initially (party buttons get party sizing from ReloadPartyFrames).
+    button:SetSize(PixelSnap(s.frameWidth or 72), PixelSnap(s.frameHeight or 46))
+
     -- Secure click: left=target, right=menu
     button:RegisterForClicks("AnyUp")
     button:SetAttribute("type1", "target")
@@ -3574,7 +3734,7 @@ local function StyleButton(button)
     -- the secure "ping-receiver" attribute, and resolve the target GUID live from our "unit"
     -- attribute so it tracks the current occupant after sorts/roster changes; returning nil lets the
     -- ping fall through. The GUID can be SECRET: hand it over raw, never guard or stringify it.
-    -- Writes are safe -- our own spawned secure template, once per button (d.styled), out of combat.
+    -- Writes are safe -- our own spawned secure template, once per button, out of combat.
     if PingableType_UnitFrameMixin then
         Mixin(button, PingableType_UnitFrameMixin)
         button:SetAttribute("ping-receiver", true)
@@ -3591,11 +3751,6 @@ local function StyleButton(button)
         ns.CC_RegisterFrame(button)
     elseif ClickCastFrames then
         ClickCastFrames[button] = true
-    end
-
-    -- 12.1 aura containers (buttons are always created out of combat, so this is safe by construction)
-    if ns.RFC_SetupButton then
-        ns.RFC_SetupButton(button, health, d)
     end
 end
 
@@ -3710,6 +3865,10 @@ local function UpdateButton(button)
     end
 
     local d = GetFFD(button)
+    -- Login gap guard: events registered in the loading-screen window can
+    -- dispatch before the deferred styling pass builds this button's visual
+    -- body; the pass ends with a full repaint, so skipping here loses nothing.
+    if not d.styled then return end
     if not d.styled then return end
 
     local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
@@ -4916,6 +5075,11 @@ FB.ApplyStyle = function(owner)
         if ft then ft:SetHorizTile(false) end
         -- Fill axis follows the raid Health Bar setting. The bg is a full-button texture (not fill-tracking), so nothing else re-anchors.
         ns.RF_ApplyHealthOrientation(b._health, s)
+        -- These carry aura containers (RFC_SetupButton below) and so can carry
+        -- Health Bar Color overlays, but they have no absorb cluster and never
+        -- build ReanchorAbsorbToFill, where every other frame picks the swap up.
+        b._health._euiFillOpacity = (s.healthBarOpacity or 100) / 100
+        ns.RF_RefreshBarTints(b._health)
         -- No power bar / top name bar here: health fills the button.
         b._health:SetHeight(h)
 
@@ -5526,6 +5690,7 @@ XF.EnsureBuilt = function(count)
         local b = CreateFrame("Button", "ERFExtraFrame" .. i, XF.container, "SecureUnitButtonTemplate")
         b:Hide()
         GetFFD(b)._isExtra = true
+        ns._StyleButtonSecure(b)
         StyleButton(b)
         allButtons[#allButtons + 1] = b
 
@@ -6084,11 +6249,12 @@ ns._BuildHeaderSet = function(merge)
             hdr:Show()
             hdr:SetAttribute("startingIndex", 1)
 
-            -- Style pre-created buttons
+            -- Window-phase secure styling only; the insecure visual bodies run
+            -- in the deferred login pass (or the restyle-loop fallback).
             for i = 1, 5 do
                 local btn = hdr[i]
                 if btn then
-                    StyleButton(btn)
+                    ns._StyleButtonSecure(btn)
                     allButtons[#allButtons + 1] = btn
                 end
             end
@@ -6140,11 +6306,11 @@ ns._BuildHeaderSet = function(merge)
         ns._flatHeader:SetAttribute("startingIndex", 1)
         ns._flatHeader:Hide()  -- start hidden; LayoutGroups shows the right headers
 
-        -- Style all flat-header buttons
+        -- Window-phase secure styling only; bodies run in the deferred pass.
         for i = 1, 40 do
             local btn = ns._flatHeader[i]
             if btn then
-                StyleButton(btn)
+                ns._StyleButtonSecure(btn)
                 allButtons[#allButtons + 1] = btn
                 ns._flatButtons[#ns._flatButtons + 1] = btn
             end
@@ -6164,7 +6330,7 @@ local function CreateHeaders()
     containerFrame = CreateFrame("Frame", "EllesmereUIRaidFrameContainer", UIParent)
     containerFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     containerFrame:SetSize(1, 1)
-    containerFrame:SetFrameStrata("LOW")
+    containerFrame:SetFrameStrata(ns._ResolveFrameStrata(false))
     containerFrame:Show()
 
     -- Group-number labels (1-8) for the real raid frames. Own (non-secure)
@@ -6540,7 +6706,11 @@ local RangeUpdate  -- forward declaration (defined in Range fading section below
 -------------------------------------------------------------------------------
 --  Reload: re-apply all settings to existing buttons
 -------------------------------------------------------------------------------
-local function ReloadFrames()
+-- skipButtons (login window only): run the layout/tier/proxy machinery but
+-- skip the per-button restyle loop -- the insecure styling bodies run in the
+-- deferred login pass, which then calls this again in full.
+ns._emptyList = ns._emptyList or {}
+local function ReloadFrames(skipButtons)
     local s = ns._scaledProfile
     -- Keep UNIT_FLAGS registration in lockstep with the combat-icon toggle so a
     -- disabled option listens for nothing (runs no event code).
@@ -6588,11 +6758,18 @@ local function ReloadFrames()
     local healthH = PixelSnap(bh - powerH)
     local texPath = ResolveHealthTexture()
 
-    for _, btn in ipairs(allButtons) do
+    for _, btn in ipairs(skipButtons and ns._emptyList or allButtons) do
         local d = GetFFD(btn)
-        if not d.styled then StyleButton(btn) end
+        if not d.styled then
+            ns._StyleButtonSecure(btn)
+            StyleButton(btn)
+        end
 
-        btn:SetSize(bw, bh)
+        -- Window/initialConfigFunction own sizes in combat; skipping here is
+        -- safe (out of combat the resize applies normally).
+        if not InCombatLockdown() then
+            btn:SetSize(bw, bh)
+        end
 
         -- Background
         if d.bg then
@@ -7605,6 +7782,8 @@ local function OnEvent(self, event, arg1, ...)
         if ns._CombatIconEnabled() and ns._UpdateCombatIcons then ns._UpdateCombatIcons() end
     elseif event == "PLAYER_REGEN_ENABLED" then
         inCombat = false
+        local frameStrataDirty = ns._frameStrataDirty
+        if frameStrataDirty and ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
         -- Combat ended: restore any role/leader icons suppressed during combat.
         if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
         if ns._UpdateLeaderIcons then ns._UpdateLeaderIcons() end
@@ -7646,6 +7825,11 @@ local function OnEvent(self, event, arg1, ...)
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
             end
+        end
+        -- Restore child frame levels after a deferred strata change.
+        if frameStrataDirty then
+            if not (sizeTierDirty and framesVisible) then ReloadFrames() end
+            if ns.ReloadPartyFrames then ns.ReloadPartyFrames() end
         end
     elseif event == "ENCOUNTER_START" then
         -- Drives the raid/party frame "Out of Boss Combat" tooltip mode (read in
@@ -7794,6 +7978,15 @@ local function OnEvent(self, event, arg1, ...)
             if ns._ApplyTierOffset then ns._ApplyTierOffset() end
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
+            end
+            -- Healer Mana Display: its rebuild normally rides the raid/party
+            -- frame paths above (UpdatePowerEventRegistration tails). A roster
+            -- change that lands with BOTH frame sets hidden -- leaving a raid
+            -- to solo, or to a party while EUI party frames are disabled --
+            -- skipped every rebuild, so the display kept its last group's
+            -- content (raid-mode names included) indefinitely.
+            if not framesVisible and not ns._partyFramesVisible then
+                if ns.HM_Rebuild then ns.HM_Rebuild() end
             end
         end)
     elseif not framesVisible and not ns._partyFramesVisible then
@@ -8055,6 +8248,8 @@ end
 -- Party container frame (placeholder for unlock mode positioning)
 ns._partyContainerFrame = CreateFrame("Frame", nil, UIParent)
 ns._partyContainerFrame:SetSize(125, 308)
+-- File-scope creation: ns._ResolveFrameStrata is not defined yet here. The
+-- saved strata lands via OnEnable's ApplyFrameStrata call every login.
 ns._partyContainerFrame:SetFrameStrata("LOW")
 ns._partyContainerFrame:Hide()
 
@@ -8168,7 +8363,7 @@ do
             "topNameBarTextOffsetX", "topNameBarTextOffsetY", "topNameBarTextAlign",
         },
         rangeTooltip = {
-            "oorAlpha", "showTooltip", "tooltipMode",
+            "oorAlpha", "showTooltip", "tooltipMode", "frameStrata",
         },
     }
     for section, keys in pairs(map) do
@@ -8183,6 +8378,47 @@ ns._IsPartySectionCustom = function(section)
     local ss = db.profile.partySyncSections
     if not ss then return false end
     return ss[section] == false
+end
+
+-- Party inherits raid strata unless its Extras section is unsynced.
+function ns._ResolveFrameStrata(isParty)
+    local strata
+    if isParty and ns._IsPartySectionCustom("rangeTooltip") then
+        strata = db.profile.party_frameStrata
+    end
+    strata = strata or db.profile.frameStrata or "LOW"
+    if strata ~= "BACKGROUND" and strata ~= "LOW" and strata ~= "MEDIUM"
+        and strata ~= "HIGH" and strata ~= "DIALOG" then
+        strata = "LOW"
+    end
+    return strata
+end
+
+function ns.ApplyFrameStrata()
+    if not db or not db.profile then return false end
+    if InCombatLockdown() then
+        ns._frameStrataDirty = true
+        return false
+    end
+
+    ns._frameStrataDirty = nil
+    local raidStrata = ns._ResolveFrameStrata(false)
+    local partyStrata = ns._ResolveFrameStrata(true)
+    local changed = false
+
+    if containerFrame and containerFrame:GetFrameStrata() ~= raidStrata then
+        containerFrame:SetFrameStrata(raidStrata)
+        changed = true
+    end
+    if ns._partyContainerFrame and ns._partyContainerFrame:GetFrameStrata() ~= partyStrata then
+        ns._partyContainerFrame:SetFrameStrata(partyStrata)
+        changed = true
+    end
+    if changed and ns._RefreshPreviewMouseBlockStrata then
+        ns._RefreshPreviewMouseBlockStrata()
+    end
+
+    return changed
 end
 
 -- The Absorbs section was split out of Health Bar: profiles saved before the
@@ -8486,12 +8722,12 @@ ns._CreatePartyHeader = function()
     hdr:Hide()
     ns._partyContainerFrame:Hide()
 
-    -- Style all 5 buttons with shared StyleButton (uses raid sizes initially;
-    -- ReloadPartyFrames applies party-specific sizing afterward)
+    -- Window-phase secure styling (raid sizes initially; ReloadPartyFrames
+    -- applies party-specific sizing); insecure bodies run in the deferred pass.
     for i = 1, 5 do
         local btn = hdr[i]
         if btn then
-            StyleButton(btn)
+            ns._StyleButtonSecure(btn)
             GetFFD(btn)._isParty = true
             ns._partyAllButtons[#ns._partyAllButtons + 1] = btn
         end
@@ -8504,7 +8740,7 @@ ns._CreatePartyHeader = function()
     -- player frame; when off, it is hidden and the header shows the player.
     local selfBtn = CreateFrame("Button", "ERFPartySelfButton", ns._partyContainerFrame, "SecureUnitButtonTemplate")
     selfBtn:SetAttribute("unit", "player")
-    StyleButton(selfBtn)
+    ns._StyleButtonSecure(selfBtn)
     local sd = GetFFD(selfBtn)
     sd._isParty = true
     sd._isSelf = true
@@ -8844,7 +9080,7 @@ end
 -- Uses ns._partyProxy for all reads so party overrides take effect.
 -- Anchor closures (captured db.profile at StyleButton time) need a temp-swap:
 -- we write party_ values onto db.profile, call the closures, then restore.
-ns.ReloadPartyFrames = function()
+ns.ReloadPartyFrames = function(skipButtons)
     if not ns._partyHeader then return end
     -- Re-evaluate UNIT_FLAGS registration before the temp-swap below (which
     -- overwrites db.profile), so a section sync/unsync that flips the party's
@@ -8887,14 +9123,23 @@ ns.ReloadPartyFrames = function()
     local healthH = PixelSnap(bh - powerH)
     local texPath = ResolveHealthTexture()
 
-    for _, btn in ipairs(ns._partyAllButtons) do
+    for _, btn in ipairs(skipButtons and ns._emptyList or ns._partyAllButtons) do
         local d = GetFFD(btn)
         if not d.styled then
-            StyleButton(btn)
+            -- _isParty BEFORE StyleButton: the container setup inside it
+            -- resolves the style key and settings proxy from this flag, and
+            -- the dispel slots BIND that key permanently. Styling first
+            -- registered party dispel slots under the RAID key -- party
+            -- dispel mode/icons/colors never applied (8.8.3 field reports).
             d._isParty = true
+            ns._StyleButtonSecure(btn)
+            StyleButton(btn)
         end
 
-        btn:SetSize(bw, bh)
+        -- Window/initialConfigFunction own sizes in combat (see raid loop).
+        if not InCombatLockdown() then
+            btn:SetSize(bw, bh)
+        end
 
         -- Background
         if d.bg then
@@ -12937,19 +13182,21 @@ do
             if containerFrame then
                 if not rfMouseBlock then
                     rfMouseBlock = CreateFrame("Frame", nil, UIParent)
-                    rfMouseBlock:SetFrameStrata("MEDIUM")  -- above real buttons (LOW), below the options panel (DIALOG)
                     rfMouseBlock:EnableMouse(true)
                 end
                 rfMouseBlock:SetAllPoints(containerFrame)
+                rfMouseBlock:SetFrameStrata(containerFrame:GetFrameStrata())
+                rfMouseBlock:SetFrameLevel(containerFrame:GetFrameLevel() + 50)
                 rfMouseBlock:Show()
             end
             if ns._partyContainerFrame then
                 if not partyMouseBlock then
                     partyMouseBlock = CreateFrame("Frame", nil, UIParent)
-                    partyMouseBlock:SetFrameStrata("MEDIUM")
                     partyMouseBlock:EnableMouse(true)
                 end
                 partyMouseBlock:SetAllPoints(ns._partyContainerFrame)
+                partyMouseBlock:SetFrameStrata(ns._partyContainerFrame:GetFrameStrata())
+                partyMouseBlock:SetFrameLevel(ns._partyContainerFrame:GetFrameLevel() + 50)
                 partyMouseBlock:Show()
             end
         else
@@ -12958,6 +13205,16 @@ do
         end
     end
     ns._SetPreviewMouseBlock = setBlock
+    ns._RefreshPreviewMouseBlockStrata = function()
+        if rfMouseBlock and rfMouseBlock:IsShown() and containerFrame then
+            rfMouseBlock:SetFrameStrata(containerFrame:GetFrameStrata())
+            rfMouseBlock:SetFrameLevel(containerFrame:GetFrameLevel() + 50)
+        end
+        if partyMouseBlock and partyMouseBlock:IsShown() and ns._partyContainerFrame then
+            partyMouseBlock:SetFrameStrata(ns._partyContainerFrame:GetFrameStrata())
+            partyMouseBlock:SetFrameLevel(ns._partyContainerFrame:GetFrameLevel() + 50)
+        end
+    end
     function ns._SetRealFramesPreviewHidden(on)
         -- Overlay preview is a separate docked panel, so the real frames are NOT
         -- under it: leave them faintly visible (alpha 0.2) and DON'T mouse-block
@@ -14120,16 +14377,18 @@ function ERF:OnEnable()
     -- Initialize click-cast engine (before CreateHeaders so ClickCastFrames hook is active)
     if ns.CC_Init then ns.CC_Init() end
 
-    -- Create headers and style all buttons
+    -- Set party strata before creating its secure header.
+    if ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
+
+    -- Create headers; buttons get window-phase secure styling only
     CreateHeaders()
 
-    -- Initial full reload (sets _activeSizeW/H from group size + tier overrides)
-    ReloadFrames()
+    -- Initial reload minus the restyle loop (sets _activeSizeW/H from group
+    -- size + tier overrides, lays out headers) -- the insecure styling bodies
+    -- run in the deferred pass below
+    ReloadFrames(true)
 
-    -- Build buff manager spell lookup from saved assignments
-    if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
-
-    -- Create party header + style buttons (after CC_Init so click-cast registers)
+    -- Create party header (after CC_Init so click-cast registers)
     ns._CreatePartyHeader()
 
     -- Size + position party container from profile
@@ -14151,16 +14410,38 @@ function ERF:OnEnable()
         end
     end
 
-    -- Apply party-specific sizing to party buttons
-    ns.ReloadPartyFrames()
-
-    -- Register with unlock mode
-    RegisterWithUnlockMode()
+    -- Party layout minus the restyle loop (bodies deferred)
+    ns.ReloadPartyFrames(true)
 
     -- Friendly Boss Frames: initial activation (raid-only boss1-5 frames)
     if ns.FB_Apply then ns.FB_Apply() end
     -- Extra Frames: initial activation (raid-only member duplicates)
     if ns.XF_Apply then ns.XF_Apply() end
+
+    -- DEFERRED LOGIN PASS. Runs in its OWN C_Timer execution -- its own
+    -- script-watchdog budget -- on the first frame after the loading screen
+    -- (timers never fire during it), normally before that frame renders.
+    -- Everything here is combat-legal: the insecure styling bodies for every
+    -- pre-spawned button (~80% of this module's login CPU), then the full
+    -- reload passes, whose protected ops self-gate in combat and heal on the
+    -- regen dirty-flag path. Order is load-bearing: BM lookup before the
+    -- bodies (aura shell pools size from the indicator lists), bodies before
+    -- the restyle loops.
+    C_Timer.After(0, function()
+        -- Invalidate the login frame's paint stamps so the deferred repaint
+        -- can never be deduped away (mirrors _ERF_RefreshAll).
+        ns._paintGen = (ns._paintGen or 0) + 1
+        if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
+        for _, btn in ipairs(allButtons) do
+            StyleButton(btn)
+        end
+        for _, btn in ipairs(ns._partyAllButtons) do
+            StyleButton(btn)
+        end
+        ReloadFrames()
+        ns.ReloadPartyFrames()
+        RegisterWithUnlockMode()
+    end)
 
     -- Profile-swap refresh: EllesmereUI.RefreshAllAddons calls this on a profile
     -- change so raid + party frames re-read the (now-swapped) profile live,
@@ -14180,6 +14461,8 @@ function ERF:OnEnable()
         -- Rebuild the buff-manager spell lookup for the new profile's per-spec
         -- indicators (and the Simple Setup whitelist) before frames re-render.
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(ns.db) end
+        -- Apply strata first; reload restores child frame levels.
+        if ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
         -- Raid frames: restyle + relayout + reposition from the new profile.
         if ns.ReloadFrames then ns.ReloadFrames() end
         -- Party container size + position, then the party buttons.

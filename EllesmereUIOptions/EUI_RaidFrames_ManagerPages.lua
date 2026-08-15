@@ -2067,8 +2067,8 @@ function ns.DMP_RefreshPreview()
                         pv._dmHC = hc
                     end
                     local c = t.color or { r = 1, g = 0.25, b = 0.25 }
-                    hc:SetColorTexture(c.r or 1, c.g or 0.25, c.b or 0.25,
-                        (t.opacity or 45) / 100)
+                    ns.RF_TintOverBarFill(hc, health, c.r or 1, c.g or 0.25,
+                        c.b or 0.25, (t.opacity or 45) / 100)
                     hc:Show()
                 end
             elseif t.type == "glow" then
@@ -3017,7 +3017,7 @@ function ns.BMP_ShowFilterEditor()
         rl:SetPoint("RIGHT", frow, "RIGHT", f.preset and -8 or -42, 0)
         rl:SetJustifyH("LEFT")
         rl:SetWordWrap(false)
-        rl:SetText(f.name)
+        rl:SetText(L(f.name))
         if isSel then
             local accent = frow:CreateTexture(nil, "ARTWORK", nil, 2)
             accent:SetSize(2, 26)
@@ -3157,7 +3157,7 @@ function ns.BMP_ShowFilterEditor()
     local nm = EllesmereUI.MakeFont(left, 13, nil, 1, 1, 1)
     nm:SetAlpha(0.9)
     nm:SetPoint("TOPLEFT", left, "TOPLEFT", 2, -2)
-    nm:SetText(sel.name)
+    nm:SetText(L(sel.name))
     if not sel.preset then
         local ren = CreateFrame("Button", nil, left)
         ren:SetSize(54, 16)

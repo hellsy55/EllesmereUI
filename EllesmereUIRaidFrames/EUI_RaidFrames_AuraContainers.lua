@@ -839,7 +839,12 @@ end
 -- healthcolor tints the health-fill overlay, bgcolor tints the bar background,
 -- border draws the full style set around the unit button (sweep renders fully lit,
 -- no ticker under secrecy). framealpha and missing/allPresent/anyMissing show-when
--- are NOT reproducible; simple mode stays on the legacy renderer.
+-- are NOT reproducible -- and the obvious workaround is FORBIDDEN BY THE ENGINE:
+-- OnShow/OnHide hooks on slot buttons (visibility-edge counting) make the engine's
+-- own secret-driven SetShown throw "Cannot be called with secrets due to existing
+-- script handlers", failing the whole container build under secrecy (field,
+-- 2026-08-14). Never install visibility scripts on engine aura buttons. Effect
+-- indicators render presence-driven only; simple mode stays on the legacy renderer.
 ------------------------------------------------------------------------------
 
 local BM_FRAMELVL = { behindBorders = 7, behindText = 11, medium = 13, high = 14, highest = 15 }
@@ -1166,7 +1171,28 @@ end
 -- duration text and stacks unaffected).
 local function ApplyBmIconExtra(button, dd, style)
     ApplyRFDebuffText(button, dd, style)
-    if dd.icon then dd.icon:SetShown(not style.hideIcon) end
+    -- "Hide Icons" gate: like the hidden swipe (see AuraKit's style pass), a
+    -- one-shot SetShown is undone by aura content churn -- the engine's display
+    -- update re-shows the registered icon texture when the slot's aura data
+    -- refreshes. Same two-layer defense reading a LIVE flag (a hook cannot
+    -- uninstall): Show post-hook re-hides, alpha 0 covers engine paths that
+    -- re-show outside the hooked Lua method. Hook installs lazily on first hide.
+    if dd.icon then
+        dd.bmHideIcon = style.hideIcon == true
+        dd.icon:SetShown(not dd.bmHideIcon)
+        if dd.bmHideIcon and not dd.bmIconHooked then
+            dd.bmIconHooked = true
+            local icon = dd.icon
+            hooksecurefunc(icon, "Show", function()
+                if dd.bmHideIcon then icon:Hide() end
+            end)
+        end
+        local iconA = dd.bmHideIcon and 0 or 1
+        if dd.bmIconAlpha ~= iconA then
+            dd.icon:SetAlpha(iconA)
+            dd.bmIconAlpha = iconA
+        end
+    end
     -- Button-object calls are denied while auras are secret: base level is read ONCE
     -- inside the creation window and cached; alpha/level writes are change-guarded
     -- with the stamp written AFTER the call (a denied write throws, deferring the key
@@ -1275,7 +1301,19 @@ local function BmApplySquare(button, dd, style)
     local ind = style.ind
     local r, g, b = BmColor(style.sqColor, 12 / 255, 210 / 255, 157 / 255)
     dd.tex:SetColorTexture(r, g, b, 1)
-    if dd.cooldown then dd.cooldown:SetShown(ind.showDuration ~= false) end
+    -- Same hidden-swipe gate as AuraKit's style pass (engine SetCooldown re-shows
+    -- a hidden swipe on aura churn; SetDrawSwipe is the persistent style knob
+    -- that survives it), needed here too because square cooldowns are created
+    -- AFTER the bare-mode style pass runs -- creation would otherwise ship
+    -- ungated. Shares the akHideSwipe stamp so the two drivers never fight.
+    if dd.cooldown then
+        local hideSwipe = ind.showDuration == false
+        dd.cooldown:SetShown(not hideSwipe)
+        if dd.akHideSwipe ~= hideSwipe then
+            dd.akHideSwipe = hideSwipe
+            if dd.cooldown.SetDrawSwipe then dd.cooldown:SetDrawSwipe(not hideSwipe) end
+        end
+    end
     local br, bg2, bb = BmColor(ind.indBorderColor, 0, 0, 0)
     BmUpdateBorder(dd, dd.borderHost, ind.indBorderSize or 1, br, bg2, bb, 1)
     ApplyRFDebuffText(button, dd, style)
@@ -1308,6 +1346,17 @@ local function BmApplyBar(button, dd, style)
     local ind = style.ind
     local r, g, b = BmColor(ind.color, 12 / 255, 210 / 255, 157 / 255)
     dd.bar:GetStatusBarTexture():SetVertexColor(r, g, b, (ind.barColorOpacity or 100) / 100)
+    -- Fill AXIS, mirroring what the preview has always done in BM_PlaceBar.
+    -- Change-guarded like the frame-level write below: SetOrientation resets the
+    -- bar's fill, so calling it on every restyle would visibly stutter a running
+    -- bar. Orientation has to be in BmVisualKey for this to run at all -- it
+    -- otherwise lives only in the geometry fingerprint, which drives the anchor
+    -- pass and never reaches here.
+    local isVert = (ind.orientation or "HORIZONTAL") == "VERTICAL"
+    if dd.bmBarVert ~= isVert then
+        dd.bmBarVert = isVert
+        dd.bar:SetOrientation(isVert and "VERTICAL" or "HORIZONTAL")
+    end
     dd.bar:SetReverseFill(ind.reverseFill == true)
     local bgr, bgg, bgb = BmColor(ind.barBgColor, 0, 0, 0)
     dd.barBg:SetColorTexture(bgr, bgg, bgb, (ind.barBgOpacity or 50) / 100)
@@ -1329,7 +1378,14 @@ local function BmApplyEffect(button, dd, style)
     if ind.type == "healthcolor" or ind.type == "bgcolor" then
         if dd.tex then
             local r, g, b = BmColor(ind.color, 0, 1, 0)
-            dd.tex:SetColorTexture(r, g, b, (ind.opacity or 100) / 100)
+            local a = (ind.opacity or 100) / 100
+            -- healthcolor rides the fill and borrows its texture; bgcolor covers
+            -- the bar's background, which is a flat color fill, so it stays flat.
+            if ind.type == "healthcolor" then
+                ns.RF_TintOverBarFill(dd.tex, dd.bmHealthBar, r, g, b, a)
+            else
+                dd.tex:SetColorTexture(r, g, b, a)
+            end
         end
     elseif ind.type == "border" then
         -- Full legacy renderer (solid/dashed/textured/sweep) on the border host --
@@ -1400,6 +1456,14 @@ local function BmBarInit(button, dd, style, ind, health)
     dd.barBg = bar:CreateTexture(nil, "BACKGROUND")
     dd.barBg:SetAllPoints(bar)
 
+    -- Fill AXIS. A StatusBar defaults to HORIZONTAL, so a vertical bar rendered
+    -- tall and narrow (BmAnchorOneSlot) while still draining sideways until this
+    -- landed. Set BEFORE the engine registration below in case the axis is
+    -- snapshotted there; BmApplyBar re-drives it for live toggles.
+    local initVert = ((style.ind and style.ind.orientation) or "HORIZONTAL") == "VERTICAL"
+    bar:SetOrientation(initVert and "VERTICAL" or "HORIZONTAL")
+    dd.bmBarVert = initVert
+
     local opts = {}
     if Enum.StatusBarInterpolation then opts.interpolation = Enum.StatusBarInterpolation.Immediate end
     if Enum.StatusBarTimerDirection then opts.direction = Enum.StatusBarTimerDirection.RemainingTime end
@@ -1418,6 +1482,7 @@ local function BmEffectInit(button, dd, style, ind, health)
         -- opaque heal absorb. Anchored to the fill texture so only the filled portion
         -- tints, not empty/missing health.
         button:SetFrameLevel(health:GetFrameLevel())
+        dd.bmHealthBar = health  -- apply pass borrows this bar's fill texture
         dd.tex = button:CreateTexture(nil, "ARTWORK", nil, 2)
         local fillTex = health.GetStatusBarTexture and health:GetStatusBarTexture()
         if fillTex then
@@ -1425,6 +1490,7 @@ local function BmEffectInit(button, dd, style, ind, health)
         else
             dd.tex:SetAllPoints(health)
         end
+        ns.RF_RegisterBarTint(health, dd.tex, nil, "bm")
     elseif ind.type == "bgcolor" then
         -- Background Color: whole health area, ARTWORK -2 = below fill (sublevel 0)
         -- and healthcolor tint (+2), above the bar's own backdrop -- reads as bg.
@@ -1576,9 +1642,7 @@ local function BuildBmSlots(inds, d, health, iscale, styleBase)
     end
     for i = 1, #inds do
         local ind = inds[i]
-        if ind.enabled and ind.type ~= "framealpha"
-            and (ind.type == "icon" or ind.type == "square" or ind.type == "bar"
-                 or ((ind.showWhen or "present") == "present")) then
+        if ind.enabled and ind.type ~= "framealpha" then
             local spells = {}
             for k = 1, #(ind.spells or {}) do
                 local sid = ind.spells[k]
@@ -1633,6 +1697,13 @@ local function BuildBmSlots(inds, d, health, iscale, styleBase)
                     meta[#meta + 1] = mm
                 end
             elseif kind == "healthcolor" or kind == "bgcolor" or kind == "border" then -- effect slots
+                -- showWhen is deliberately IGNORED here: only "When Any Present"
+                -- is reproducible on 12.1 (see the header note -- the counting
+                -- workaround is engine-forbidden), and the pre-heal behavior of
+                -- skipping the slot for other stored modes rendered NOTHING
+                -- silently (field report). A stale "allPresent"/"missing" config
+                -- now renders presence-driven; the options pane offers only the
+                -- supported mode.
                 local slotKey = "bm" .. tostring(ind.id or ("x" .. i)) .. "_fx"
                 local styleKey = styleBase .. ":" .. tostring(ind.id or ("x" .. i)) .. ":fx"
                 AK.styles[styleKey] = BuildBmStyleFor(kind, ind, iscale, 1)
@@ -1878,7 +1949,10 @@ local function BmVisualKey(kind, ind, size, font, spellID)
             ind.displayGlowR, ind.displayGlowG, ind.displayGlowB)
     end
     if kind == "bar" then
-        return FP(CK(ind.color), ind.barColorOpacity, ind.reverseFill,
+        -- orientation is the one geometry field that is ALSO a visual: it swaps
+        -- the bar's screen axis (BmGeoFP, anchor pass) and its fill axis
+        -- (BmApplyBar). The other bar geometry stays out on purpose.
+        return FP(CK(ind.color), ind.barColorOpacity, ind.reverseFill, ind.orientation,
             CK(ind.barBgColor), ind.barBgOpacity, ind.frameLevel, tostring(BmTipMode()))
     end
     return FP(ind.type, CK(ind.color), ind.opacity, ind.borderWidth, ind.borderOpacity,
@@ -2640,6 +2714,11 @@ local function ReloadBm(button, d, s, cls)
         if d.rfcBm then AK.ReleaseContainer(d.rfcBm) end
         d.rfcBm, d.rfcBmFrames, d.rfcBmMeta, d.rfcBmChain = nil, nil, nil, nil
         d.rfcBmSig = nil
+        -- Those slot buttons own this bar's Health Bar Color overlays, and engine
+        -- frames are never freed (see above), so their registry entries would pile
+        -- up one set per rebuild and every later layout pass would walk the dead
+        -- ones. The registry is pure cache: the next paint re-adds what is live.
+        ns.RF_ClearBarTints(d.rfcHealth, "bm")
         -- Rebuild through the shared scheduler; the job reads live settings
         -- at run time, so rapid consecutive changes converge.
         AK.QueueBuildJob(function()
@@ -2994,7 +3073,18 @@ local function AssistProbe(unit)
         -- exiting TRANSITIONS, and the filters already degrade while boarding
         -- (field: a second of "any buff" before the seated state landed).
         local probe = UnitUsingVehicle or UnitInVehicle
-        return not probe("player")
+        if probe("player") then return false end
+        -- Cinematics fire UNIT_FACTION for every unit and briefly make even
+        -- the LOCAL PLAYER non-assistable (authors-channel consensus
+        -- 2026-08-13) -- the engine drops spell-ID filters for self exactly
+        -- like the vehicle case. A CLEANLY-false self-assist hides the
+        -- filtered displays for the transition; unreadable answers stay
+        -- fail-open (the historical self-exemption).
+        local okSelf, canSelf = pcall(UnitCanAssist, "player", "player")
+        if okSelf and not (issecretvalue and issecretvalue(canSelf)) and canSelf == false then
+            return false
+        end
+        return true
     end
     if not (UnitIsConnected(unit)
         and not UnitIsDeadOrGhost(unit)
@@ -3028,6 +3118,10 @@ local function ApplyAssistGate(button, d, unit)
     -- is redundant (settings changes re-drive via reload paths); keeps event-sweep
     -- watchers near-free.
     if d.rfcAssist == assist then return end
+    -- Explicit-false only: the login initialization is nil->true and must NOT
+    -- take the regain refresh below (a full-group UpdateAllAuras storm on the
+    -- login hot path -- the normal build owns first content).
+    local wasDenied = d.rfcAssist == false
     d.rfcAssist = assist
     local s = ProxyFor(d)
     if d.rfcDispel and s then
@@ -3052,6 +3146,22 @@ local function ApplyAssistGate(button, d, unit)
     -- Debuff Manager: its identity-gated (candidate-boolean) records hide
     -- for untrusted units; token records stay on like the legacy row.
     if ns.DM_OnAssistChanged then ns.DM_OnAssistChanged(d) end
+    -- Regain refresh: content parsed during the degraded window is WRONG
+    -- ("any buff"), and no aura edge is guaranteed to follow the transition
+    -- back (cinematic end, vehicle exit) -- the display would show stale
+    -- degraded content until the unit's next real aura change. Force one
+    -- reparse of the filtered containers on the explicit false->true flip
+    -- (wasDenied: never the login nil->true initialization). Bounded: runs
+    -- only on actual transitions, so a cinematic end costs one pass across
+    -- the group and a vehicle exit one button.
+    if assist and wasDenied then
+        if d.rfcDispel then d.rfcDispel:UpdateAllAuras() end
+        if d.rfcBm then d.rfcBm:UpdateAllAuras() end
+        if d.rfcBmChain then
+            for _, cc in pairs(d.rfcBmChain) do cc:UpdateAllAuras() end
+        end
+        if d.rfcBmSimple then d.rfcBmSimple:UpdateAllAuras() end
+    end
 end
 ns.RFC_ApplyAssistGate = ApplyAssistGate
 
@@ -3315,6 +3425,16 @@ assistWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
 assistWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
 assistWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
 assistWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
+-- Cinematics (in-world cutscenes included) fire UNIT_FACTION for EVERY unit
+-- at start and end while assistability flips -- and UNIT_FLAGS does NOT fire
+-- for that transition, so without this edge the gate misses it entirely
+-- (authors-channel etrace, 2026-08-13). The coalescer below flattens the
+-- all-units burst into one sweep. CINEMATIC_STOP joins it for the
+-- addon-cancelled skip path (same trigger set as the PAB and UF player
+-- lanes); its faction restore usually fires UNIT_FACTION too, this just
+-- closes any ordering gap.
+assistWatch:RegisterEvent("UNIT_FACTION")
+assistWatch:RegisterEvent("CINEMATIC_STOP")
 -- Death/release/resurrection transitions (the alive requirement of the probe)
 -- signal through UNIT_FLAGS; chatty in combat, but the coalescer below reduces any
 -- burst to one deferred sweep.
@@ -3329,12 +3449,13 @@ local function AssistSweepDrain()
     AssistSweep()
 end
 assistWatch:SetScript("OnEvent", function(_, event)
-    -- Vehicle edges sweep IMMEDIATELY: they are rare (no storm to coalesce)
-    -- and the quarter-second defer reads as a visible flash of degraded
-    -- "any buff" content on the player's own frame while boarding.
+    -- Vehicle and cinematic-skip edges sweep IMMEDIATELY: they are rare (no
+    -- storm to coalesce) and the quarter-second defer reads as a visible
+    -- flash of degraded "any buff" content on the player's own frame.
     if event == "UNIT_ENTERING_VEHICLE"
         or event == "UNIT_ENTERED_VEHICLE"
-        or event == "UNIT_EXITED_VEHICLE" then
+        or event == "UNIT_EXITED_VEHICLE"
+        or event == "CINEMATIC_STOP" then
         AssistSweep()
         return
     end

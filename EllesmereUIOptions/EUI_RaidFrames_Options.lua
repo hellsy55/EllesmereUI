@@ -544,17 +544,7 @@ initFrame:SetScript("OnEvent", function(self)
         RIGHT = "Right",
         LEFT  = "Left",
     }
-    local verticalGrowthOrder   = { "DOWN", "UP" }
-    local horizontalGrowthOrder = { "RIGHT", "LEFT" }
     local allGrowthOrder        = { "DOWN", "UP", "RIGHT", "LEFT" }
-
-    local function GetValidUnitGrowths(groupGrowth)
-        if groupGrowth == "DOWN" or groupGrowth == "UP" then
-            return { RIGHT = "Right", LEFT = "Left" }, horizontalGrowthOrder
-        else
-            return { DOWN = "Down", UP = "Up" }, verticalGrowthOrder
-        end
-    end
 
     -- Every preview mode dropdown across tabs; all refresh when one changes.
     local pvModeDropdowns = {}
@@ -4190,7 +4180,17 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip="Allows free camera movement while holding and dragging right mouse button over raid frames. Right-click tap still opens the unit menu.",
               getValue=function() return SVal("freeRightClickCamera", false) end,
               setValue=function(v) SSet("freeRightClickCamera", v); if ns.FRCM_Refresh then ns.FRCM_Refresh() end end },
-            { type="label", text="" });  y = y - h
+            { type="dropdown", text="Frame Strata",
+              tooltip="Controls the display order of raid and party frames. Set higher to show above other elements.",
+              values=EllesmereUI.FRAME_STRATA_LABELS,
+              order=EllesmereUI.FRAME_STRATA_ORDER_BASE,
+              getValue=function() return SVal("frameStrata", "LOW") end,
+              setValue=function(v)
+                  -- Reload after changing strata to restore child frame levels.
+                  SWrite("frameStrata", v)
+                  if ns.ApplyFrameStrata then ns.ApplyFrameStrata() end
+                  ReloadAndUpdate()
+              end });  y = y - h
 
         if onSection then onSection("rangeTooltip", _secY, y) end
         return y
@@ -4433,14 +4433,10 @@ initFrame:SetScript("OnEvent", function(self)
                                       return ov and ov[tier] and ov[tier].groupGrowth or db.profile.groupGrowth or "RIGHT"
                                   end,
                                   set=function(v)
-                                      local ov = EnsureTierOv()
-                                      ov.groupGrowth = v
-                                      -- Unit growth must stay perpendicular.
-                                      local ug = ov.unitGrowth or db.profile.unitGrowth or "DOWN"
-                                      local valid = GetValidUnitGrowths(v)
-                                      if not valid[ug] then
-                                          ov.unitGrowth = (v == "DOWN" or v == "UP") and "RIGHT" or "DOWN"
-                                      end
+                                      -- Every growth combination is allowed (see the
+                                      -- main LAYOUT dropdowns): same-axis = one
+                                      -- continuous line per tier.
+                                      EnsureTierOv().groupGrowth = v
                                       TierGrowthChanged()
                                   end },
                                 { type="dropdown", label="Unit Growth",
@@ -4453,15 +4449,6 @@ initFrame:SetScript("OnEvent", function(self)
                                       local ov = EnsureTierOv()
                                       ov.unitGrowth = v
                                       TierGrowthChanged()
-                                  end,
-                                  itemDisabled=function(v)
-                                      local ov = db.profile.raidSizeOverrides
-                                      local gg = ov and ov[tier] and ov[tier].groupGrowth or db.profile.groupGrowth or "RIGHT"
-                                      if gg == "DOWN" or gg == "UP" then
-                                          return v == "DOWN" or v == "UP"
-                                      else
-                                          return v == "RIGHT" or v == "LEFT"
-                                      end
                                   end },
                                 { type="slider", label="X Offset", min=-1000, max=1000, step=1,
                                   get=function()
@@ -4764,37 +4751,20 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
 
-        -- Group Growth | Unit Growth both list all 4 directions; same-axis options are disabled to enforce perpendicularity.
+        -- Group Growth | Unit Growth both list all 4 directions, every combination
+        -- allowed. Same-axis (e.g. Up + Up) lays the groups end-to-end into one
+        -- continuous line -- the layout math derives the group stride from the
+        -- unit-growth bounding box, so all 16 combinations are geometrically
+        -- valid (the old perpendicular-only gate was a UI-side assumption; the
+        -- runtime never needed it, and users were hand-editing SavedVariables
+        -- to get single-line layouts).
         _, h = W:DualRow(parent, y,
             { type="dropdown", text="Group Growth", values=growthValues, order=allGrowthOrder,
               getValue=function() return SVal("groupGrowth", "RIGHT") end,
-              setValue=function(v)
-                  SSet("groupGrowth", v)
-                  -- Fix unitGrowth if it now shares the axis.
-                  local ug = SVal("unitGrowth", "DOWN")
-                  local valid = GetValidUnitGrowths(v)
-                  if not valid[ug] then
-                      if v == "DOWN" or v == "UP" then
-                          SSet("unitGrowth", "RIGHT")
-                      else
-                          SSet("unitGrowth", "DOWN")
-                      end
-                  end
-              end },
+              setValue=function(v) SSet("groupGrowth", v) end },
             { type="dropdown", text="Unit Growth", values=growthValues, order=allGrowthOrder,
               getValue=function() return SVal("unitGrowth", "DOWN") end,
-              setValue=function(v) SSet("unitGrowth", v) end,
-              itemDisabled=function(v)
-                  local gg = SVal("groupGrowth", "RIGHT")
-                  if gg == "DOWN" or gg == "UP" then
-                      return v == "DOWN" or v == "UP"
-                  else
-                      return v == "RIGHT" or v == "LEFT"
-                  end
-              end,
-              itemDisabledTooltip=function()
-                  return "This option requires a perpendicular Group Growth"
-              end });  y = y - h
+              setValue=function(v) SSet("unitGrowth", v) end });  y = y - h
 
         -- Row 4: Sort By (custom dropdown with drag-to-reorder roles) | Self Position
         local sortRow
@@ -5810,6 +5780,7 @@ initFrame:SetScript("OnEvent", function(self)
         "raid", "frames", "group", "health", "power", "absorb", "shield",
         "debuff", "dispel", "threat", "role", "marker", "ready", "check",
         "border", "range", "tooltip", "layout", "spacing", "buff", "manager",
+        "strata", "layer", "overlap",
         "click", "cast", "binding", "keybind", "spell", "macro", "mouseover",
     }
 

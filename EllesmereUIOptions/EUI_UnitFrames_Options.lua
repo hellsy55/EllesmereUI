@@ -896,6 +896,13 @@ initFrame:SetScript("OnEvent", function(self)
         else
             castbarH = (settings.showCastbar ~= false) and (settings.castbarHeight or 14) or 0
         end
+        -- A cast bar moved out of the strip below the frame reserves no space in
+        -- the live layout, so the preview must not draw it there either (same
+        -- decision, one helper: EllesmereUIUnitFrames/EUI_UnitFrames_AuraContainers.lua).
+        if castbarH > 0 and EllesmereUI.UF_CastbarBelowFrame
+           and not EllesmereUI.UF_CastbarBelowFrame(unitKey) then
+            castbarH = 0
+        end
         local barH = healthH + initPpExtra
         local isAttachedInit = (settings.portraitStyle or db.profile.portraitStyle or "attached") == "attached"
         local portraitW = (showPortrait and isAttachedInit) and barH or 0
@@ -2310,6 +2317,11 @@ initFrame:SetScript("OnEvent", function(self)
             local pvPpIsAtt = (pvPpPos == "below" or pvPpPos == "above")
             local pvPpExtra = pvPpIsAtt and ph or 0
             local ch = (unitKey == "player") and (s.showPlayerCastbar and (s.playerCastbarHeight and s.playerCastbarHeight > 0 and s.playerCastbarHeight or 14) or 0) or ((s.showCastbar ~= false) and (s.castbarHeight or 14) or 0)
+            -- Mirrors the live reserve decision (see the build path above).
+            if ch > 0 and EllesmereUI.UF_CastbarBelowFrame
+               and not EllesmereUI.UF_CastbarBelowFrame(unitKey) then
+                ch = 0
+            end
             local bh = hh + pvPpExtra
             -- Class power "above" position adds height above health bar ("top" floats outside)
             local cpStyle = (unitKey == "player") and (s.classPowerStyle or "none") or "none"
@@ -13870,6 +13882,10 @@ initFrame:SetScript("OnEvent", function(self)
                     if not v and ns._bossPreviewActive and ns.SetBossPreview then
                         ns.SetBossPreview(false)
                     end
+                    -- Live apply on the spawned EUI frames (unit-watch register/
+                    -- unregister). Frames never spawned this session no-op here
+                    -- and hit the reload prompt below instead.
+                    if ns.UF_SetBossFramesActive then ns.UF_SetBossFramesActive(v) end
                     ReloadAndUpdate()
                     EllesmereUI:RefreshPage(true)
                     PromptReloadIfUnspawned({ "boss" })

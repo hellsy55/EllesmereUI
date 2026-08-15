@@ -1363,7 +1363,7 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("inputOnTop", v)
                   if ECHAT.ApplyInputPosition then ECHAT.ApplyInputPosition() end
               end },
-            { type="slider", text="Edit Box Height", min=18, max=60, step=1,
+            { type="slider", text="Edit Box Height", min=10, max=60, step=1,
               getValue=function() return Cfg("editBoxHeight") or 23 end,
               setValue=function(v)
                   Set("editBoxHeight", v)
@@ -1577,6 +1577,7 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       Set("timestampFormat", v)
                       if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
+                      EllesmereUI:RefreshPage()
                   end })
         end
         y = y - h
@@ -1601,6 +1602,21 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
+        -- Row 5: Timestamp All Messages | (blank)
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Timestamp All Messages",
+              tooltip="Adds timestamps to system messages, loot, achievements, and addon messages, not just player chat.",
+              disabled=function() return (Cfg("timestampFormat") or "%I:%M ") == "none" end,
+              disabledTooltip="Set a Timestamps format first",
+              getValue=function() return Cfg("timestampAll") == true end,
+              setValue=function(v)
+                  Set("timestampAll", v)
+                  if ECHAT.ApplyTimestampCVar then ECHAT.ApplyTimestampCVar() end
+                  if ECHAT.EngineQueueRebuildAll then ECHAT.EngineQueueRebuildAll() end
+              end },
+            { type="label", text="" })
+        y = y - h
+
         end -- isChat
 
         return math.abs(y)
@@ -1613,7 +1629,7 @@ initFrame:SetScript("OnEvent", function(self)
         description = "Chat frame reskin, clickable URLs, copy chat, sidebar icons.",
         pages       = { "Chat", "Tabs", "Sidebar" },
         buildPage   = function(pageName, p, yOffset) return BuildPage(pageName, p, yOffset) end,
-        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps font size",
+        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size",
         onReset = function()
             local d = _G._ECHAT_DB
             if d and d.ResetProfile then d:ResetProfile() end

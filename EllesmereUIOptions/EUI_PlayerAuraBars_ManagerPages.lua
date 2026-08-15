@@ -68,10 +68,10 @@ local FONT_OUTLINE_VALUES = {
     outline = "Outline", thick = "Thick Outline",
 }
 local FONT_OUTLINE_ORDER = { "default", "none", "outline", "thick" }
-local GROW_DIR_VALUES = { LEFT = "Left", RIGHT = "Right", UP = "Up", DOWN = "Down" }
-local GROW_DIR_ORDER = { "LEFT", "RIGHT", "UP", "DOWN" }
-local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right" }
-local ICON_WRAP_ORDER = { "LEFT", "RIGHT" }
+local GROW_DIR_VALUES = { LEFT = "Left", RIGHT = "Right", CENTER_HORIZONTAL = "Centered Horizontal", CENTER_VERTICAL = "Centered Vertical", UP = "Up", DOWN = "Down" }
+local GROW_DIR_ORDER = { "LEFT", "RIGHT", "CENTER_HORIZONTAL", "CENTER_VERTICAL", "UP", "DOWN" }
+local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right", UP = "Up", DOWN = "Down" }
+local ICON_WRAP_ORDER = { "LEFT", "RIGHT", "UP", "DOWN" }
 
 -- Native AuraContainerSortMethod/AuraContainerSortDirection enum names
 -- (in-game dump: AuraContainerSortMethod = {Default=0,
@@ -690,7 +690,7 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     local sizeRow
     sizeRow, hh = W:DualRow(frame, sy,
         {
-            type = "slider", text = "Icon Size", min = 16, max = 60, step = 1, trackWidth = 120,
+            type = "slider", text = "Icon Size", min = 16, max = 400, step = 1, trackWidth = 120,
             getValue = function() return cfg.iconSize or 32 end,
             setValue = function(v) cfg.iconSize = v; apply() end
         },
@@ -698,7 +698,20 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             type = "dropdown", text = "Growth Direction",
             values = GROW_DIR_VALUES, order = GROW_DIR_ORDER,
             getValue = function() return cfg.growDirection or "LEFT" end,
-            setValue = function(v) cfg.growDirection = v; apply() end
+            setValue = function(v)
+                -- Change the wrap direction to be a valid value from the new growth direction
+                if v == "UP" or v == "DOWN" then
+                    if cfg.iconWrapDirection ~= "LEFT" and cfg.iconWrapDirection ~= "RIGHT" then
+                        cfg.iconWrapDirection = "LEFT"
+                    end
+                elseif v == "LEFT" or v == "RIGHT" then
+                    if cfg.iconWrapDirection ~= "UP" and cfg.iconWrapDirection ~= "DOWN" then
+                        cfg.iconWrapDirection = "DOWN"
+                    end
+                end
+
+                cfg.growDirection = v; apply()
+            end
         }
     ); sy = sy - hh
 
@@ -729,9 +742,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         ns._PAMakeCogBtn(rgn, cogShow)
     end
     do
-        -- Icon Wrap: only meaningful for vertical growth (Up/Down) -- decides which
+        -- Icon Wrap: only meaningful for vertical growth (Up/Down) and horizontal growth (Left/Right) -- decides which
         -- side additional columns stack toward when Icons Per Row/Column > 1. Cog-only,
-        -- no separate dropdown row, and only shown while Growth Direction is Up/Down.
+        -- no separate dropdown row, and only shown while Growth Direction is Up/Down or Left/Right.
         local rgn = sizeRow._rightRegion
         local _, cogShow = EllesmereUI.BuildCogPopup({
             title = "Growth",
@@ -739,13 +752,22 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
                 { type = "dropdown", label = "Icon Wrap",
                   values = ICON_WRAP_VALUES, order = ICON_WRAP_ORDER,
                   get = function() return cfg.iconWrapDirection or "LEFT" end,
-                  set = function(v) cfg.iconWrapDirection = v; apply() end },
+                  set = function(v) cfg.iconWrapDirection = v; apply() end,
+                  itemDisabled = function(v)
+                      if cfg.growDirection == "LEFT" or cfg.growDirection == "RIGHT" then
+                        return v == "LEFT" or v == "RIGHT"
+                      elseif cfg.growDirection == "UP" or cfg.growDirection == "DOWN" then
+                        return v == "UP" or v == "DOWN"
+                      end
+                      return false
+                  end,
+                 },
             },
         })
         local cogBtn = ns._PAMakeCogBtn(rgn, cogShow)
         local function UpdateWrapCogVisibility()
             local dir = cfg.growDirection or "LEFT"
-            cogBtn:SetShown(dir == "UP" or dir == "DOWN")
+            cogBtn:SetShown(dir == "UP" or dir == "DOWN" or dir == "LEFT" or dir == "RIGHT")
         end
         EllesmereUI.RegisterWidgetRefresh(UpdateWrapCogVisibility)
         UpdateWrapCogVisibility()
@@ -790,7 +812,7 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         rgn._lastInline = swatch
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
         AttachCog(rgn, "Duration Text", {
-            { type = "slider", label = "Text Size", min = 6, max = 24, step = 1,
+            { type = "slider", label = "Text Size", min = 6, max = 60, step = 1,
               get = function() return cfg.durationTextSize or 11 end,
               set = function(v) cfg.durationTextSize = v; apply() end },
             { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -819,7 +841,7 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         rgn._lastInline = swatch
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
         AttachCog(rgn, "Stacks Text", {
-            { type = "slider", label = "Text Size", min = 6, max = 24, step = 1,
+            { type = "slider", label = "Text Size", min = 6, max = 60, step = 1,
               get = function() return cfg.stackTextSize or 11 end,
               set = function(v) cfg.stackTextSize = v; apply() end },
             { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -855,7 +877,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             setValue = function(v) cfg.borderSize = v; apply() end
         },
         {
-            type = "slider", text = "Spacing", min = 0, max = 20, step = 1, trackWidth = 120,
+            type = "slider", text = "Spacing", min = -5, max = 20, step = 1, trackWidth = 120,
             getValue = function() return cfg.padding or 5 end,
             setValue = function(v) cfg.padding = v; apply() end
         }
@@ -886,7 +908,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             rows = {
                 -- nil = 12px default -- deliberately
                 -- decoupled from Spacing/padding, no longer mirrors it.
-                { type = "slider", label = "Row Spacing", min = 0, max = 20, step = 1,
+                { type = "slider", label = "Row Spacing", min = -5, max = 20, step = 1,
                   get = function() return cfg.rowSpacing or 12 end,
                   set = function(v) cfg.rowSpacing = v; apply() end },
             },
@@ -1187,7 +1209,7 @@ local function BuildFxEffects(frame, sy, cfg, apply)
             { type = "slider", text = "Border", min = 0, max = 4, step = 1, trackWidth = 120,
               getValue = function() return e.borderSize or 0 end,
               setValue = function(v) e.borderSize = v; apply() end },
-            { type = "slider", text = "Size", min = 0, max = 60, step = 1, trackWidth = 120,
+            { type = "slider", text = "Size", min = 0, max = 400, step = 1, trackWidth = 120,
               getValue = function() return e.size or 0 end,
               setValue = function(v)
                   e.size = (v and v > 0) and v or nil
@@ -1878,7 +1900,7 @@ function ns.PABMP_ShowFilterEditor()
         rl:SetPoint("LEFT", frow, "LEFT", 10, 0)
         rl:SetPoint("RIGHT", frow, "RIGHT", f.preset and -8 or -42, 0)
         rl:SetJustifyH("LEFT"); rl:SetWordWrap(false)
-        rl:SetText(f.name)
+        rl:SetText(L(f.name))
         if isSel then
             local accent = frow:CreateTexture(nil, "ARTWORK", nil, 2)
             accent:SetSize(2, 26)
@@ -1994,7 +2016,7 @@ function ns.PABMP_ShowFilterEditor()
     local nm = EllesmereUI.MakeFont(left, 13, nil, 1, 1, 1)
     nm:SetAlpha(0.9)
     nm:SetPoint("TOPLEFT", left, "TOPLEFT", 2, -2)
-    nm:SetText(sel.name)
+    nm:SetText(L(sel.name))
     if not sel.preset then
         local ren = CreateFrame("Button", nil, left)
         ren:SetSize(54, 16)

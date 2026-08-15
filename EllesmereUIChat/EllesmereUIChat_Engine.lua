@@ -11,8 +11,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --    - render suppression of Blizzard's text (FontStringContainer alpha 0,
 --      one-time -- nothing in Blizzard code writes that alpha back)
 --    - lockstep scrolling, so Blizzard's INVISIBLE hyperlink hit-zones stay
---      aligned under OUR visible text and keep serving link clicks from
---      their secure scripts, exactly as before this engine existed
+--      aligned under OUR visible text and serve every link click from their
+--      secure scripts; width transforms (abbreviation/stamps) keep that
+--      alignment by writing the display form back into Blizzard's stored
+--      entries (see the zone-alignment section)
 --    - combat log hosting (the one window Blizzard still renders, on demand)
 --    - config mirrors (chat color changes, censor/report rebuilds)
 --
@@ -79,7 +81,8 @@ ns._chatWins = WINS
 --      never intercepts input meant for our thin bar in the same gutter
 --  Their FontStringContainer keeps its hyperlink hit-zones ARMED on purpose:
 --  invisible under our identical, lockstep-scrolled text they serve link
---  clicks from Blizzard's own secure scripts.
+--  clicks from Blizzard's own secure scripts (the buffer write-back keeps
+--  their layout identical to ours even for width-transformed lines).
 -------------------------------------------------------------------------------
 local function SetBarMouse(bar, on)
     local function Apply(f)
@@ -147,6 +150,9 @@ end
 ECHAT.EngineLayoutWindows = function()
     for cf in pairs(WINS) do LayoutWindowSMF(cf) end
 end
+-- Single-window relayout: the input-on-top strip is released/reclaimed per
+-- frame as its edit box shows and hides, and only that frame's text area moves.
+ECHAT.EngineLayoutWindow = LayoutWindowSMF
 
 -- Thin scrollbar: visible only while scrolled back (offset > 0) or dragging.
 -- Track/thumb are our frames; drag runs a temporary OnUpdate on the track
@@ -245,6 +251,29 @@ local function BuildScrollbar(win)
     end)
 end
 
+-------------------------------------------------------------------------------
+--  Width-transform zone alignment. Channel abbreviation and stamp-all change
+--  glyph widths, so a display copy that differed from Blizzard's stored line
+--  would desync its invisible hyperlink hit-zones from our rendered text.
+--  The engine therefore writes the FINAL display form of every transformed
+--  line back into the frame's historyBuffer entry (EngineTail live, the
+--  rebuild pass retroactively): both surfaces lay out identical text,
+--  Blizzard's native secure zones land exactly on what the user sees, and
+--  link interaction -- clicks, tooltips, protected-content handling, secret
+--  links -- is Blizzard's own end to end. Secret lines are never compared or
+--  rewritten; they stay untransformed on BOTH surfaces and remain aligned by
+--  construction (class-colored names insert only zero-width color codes, so
+--  they ride the same write-back without affecting zone geometry).
+--  The write is a plain value into Blizzard's stored entry, so the secure
+--  readers of that storage (censored-line re-format, history machinery)
+--  read an addon-written string; if secure-reader taint ever surfaces, the
+--  two write-back sites (tail + rebuild) are the single mechanism to pull.
+-------------------------------------------------------------------------------
+local _abbrevOn = false     -- Shortened Channel Names user setting
+local _stampAllOn = false   -- Timestamp All Messages user setting (resolved)
+local _stampFmt = nil       -- its resolved format string
+local _protActive = false   -- protected content / dev mode: transforms dormant
+
 local function CreateWindowSMF(cf)
     local d = CFD(cf)
     if not d.bg then return nil end
@@ -256,22 +285,23 @@ local function CreateWindowSMF(cf)
     -- A bare intrinsic starts with scrolling disallowed; without this the
     -- mixin's ScrollUp/ScrollDown are no-ops.
     smf:SetScrollAllowed(true)
-    -- No mouse at all -- not even wheel. The bare intrinsic never
-    -- dispatches OnMouseWheel (field-measured: topmost, wheel-enabled,
-    -- IsMouseOver true, script never fires), so claiming the wheel here
-    -- SWALLOWS it. Blizzard's chat frame underneath receives the wheel
-    -- natively (modifier semantics, chat CVars, keybinds included) and the
-    -- scroll-method mirrors installed with the bridge copy its offset into
-    -- this view. Link interaction stays on Blizzard's invisible hit-zones.
+    -- No mouse at all -- ever. A bare SMF intrinsic dispatches NO mouse
+    -- scripts (not the wheel, not OnMouseDown, not the hyperlink scripts;
+    -- field-measured across all of them -- the engine simply does not route
+    -- mouse to Lua-created instances of this widget). Blizzard's chat frame
+    -- underneath receives the wheel natively and serves every hyperlink from
+    -- its own zones (the buffer write-back keeps them under our rendered
+    -- lines); the scroll-method mirrors installed with the bridge copy its
+    -- offset into this view.
     smf:EnableMouse(false)
     smf:EnableMouseWheel(false)
 
     local win = { cf = cf, smf = smf }
 
-    -- One level above the chat frame (panel sits one below it), so the wheel
-    -- deterministically reaches OUR view; the sync handler then drives
-    -- Blizzard's view to the same offset.
-    smf:SetFrameLevel(d.bg:GetFrameLevel() + 2)
+    -- +4: renders above every Blizzard frame in the panel stack (cf at
+    -- bg+1, its FontStringContainer at bg+2). Mouse-transparent, so the
+    -- altitude never affects input routing.
+    smf:SetFrameLevel(d.bg:GetFrameLevel() + 4)
 
     win.extraLines = 0
     WINS[cf] = win
@@ -306,6 +336,27 @@ local CJK_FILES = {
     simplifiedchinese  = "Fonts\\ARKai_T.ttf",
     traditionalchinese = "Fonts\\blei00d.TTF",
 }
+-- The +2 below is a legibility nudge for CJK dropped INTO a western-locale
+-- chat. On a CJK client it is not a nudge, it is the whole window: every line
+-- is that alphabet, so a user asking for 17 read 19 and the glyphs outgrew the
+-- line box the roman height sizes (the "spacing got tighter" half of the same
+-- report). Blizzard's per-alphabet heights vary family by family, but their
+-- CHAT font is the one that matters here and it bumps nothing upward:
+-- ChatFontNormal inherits NumberFont_Shadow_Med, whose members are roman 14,
+-- simplifiedchinese 14, traditionalchinese 14, korean 13. Their tab-menu size
+-- control then bypasses the family entirely (FCF_SetChatWindowFontSize raw
+-- SetFonts the active alphabet's file at the chosen number), so a size the
+-- user picked renders literally. Ours does the same: the client's own
+-- alphabet takes the size unmodified.
+local CJK_CLIENT_ALPHABET = ({
+    koKR = "korean",
+    zhCN = "simplifiedchinese",
+    zhTW = "traditionalchinese",
+})[GetLocale()]
+local function CJKHeight(alphabet, size)
+    if alphabet == CJK_CLIENT_ALPHABET then return size end
+    return size + 2
+end
 function ECHAT.EngineFontFamily(id, font, size, flags)
     flags = flags or ""
     local fam = FAMS[id]
@@ -317,9 +368,10 @@ function ECHAT.EngineFontFamily(id, font, size, flags)
             { alphabet = "russian", file = font, height = size, flags = flags },
         }
         -- CJK renders +2px: ideographs at latin point sizes read visibly
-        -- smaller (dense glyphs, no ascender/descender whitespace).
+        -- smaller (dense glyphs, no ascender/descender whitespace). Not on the
+        -- client's own alphabet -- see CJKHeight.
         for alphabet, file in pairs(CJK_FILES) do
-            members[#members + 1] = { alphabet = alphabet, file = file, height = size + 2, flags = flags }
+            members[#members + 1] = { alphabet = alphabet, file = file, height = CJKHeight(alphabet, size), flags = flags }
         end
         local ok, created = pcall(CreateFontFamily, "EUIChatFontFamily" .. id, members)
         if not ok or not created then FAMS[id] = false; return nil end
@@ -330,7 +382,7 @@ function ECHAT.EngineFontFamily(id, font, size, flags)
         fam:GetFontObjectForAlphabet("roman"):SetFont(font, size, flags)
         fam:GetFontObjectForAlphabet("russian"):SetFont(font, size, flags)
         for alphabet, file in pairs(CJK_FILES) do
-            fam:GetFontObjectForAlphabet(alphabet):SetFont(file, size + 2, flags)
+            fam:GetFontObjectForAlphabet(alphabet):SetFont(file, CJKHeight(alphabet, size), flags)
         end
     end)
     if not ok then return nil end
@@ -380,17 +432,19 @@ end
 local EngineTailObserver -- optional (session history); set via ECHAT below
 local EngineTabObserver -- optional (tab strip flash/unread); set via ECHAT below
 local QueueDivergedRebuild -- forward declaration (defined with the mirrors)
+local EngineUpdateProtectedState -- forward declaration (defined with the mirrors)
 
 -------------------------------------------------------------------------------
---  Shortened channel names (opt-in). The transform runs on OUR display copy
---  only -- Blizzard's stored line is never touched (the live-tree wrapper
---  that replaced cf.AddMessage is the field-replace taint class this engine
---  exists to eliminate, and rewriting the CHAT_*_GET globals is the other
---  field-proven poison). Matching is on the channel hyperlink KEYWORD
---  (|Hchannel:party|h[...]|h), locale-independent, plain substring scanning.
---  Secret lines pass through whole. Known cosmetic cost: shortened lines can
---  wrap differently than Blizzard's invisible hit-zone text, so link zones
---  in scrolled-back content may sit a row off for such lines.
+--  Shortened channel names (opt-in). The transform composes OUR display
+--  copy; the zone-alignment write-back then lands the identical form in
+--  Blizzard's stored entry, so its invisible hit-zones lay out the same
+--  shortened text within lines and across wraps. (A field-replaced
+--  cf.AddMessage remains the taint class this engine exists to eliminate --
+--  the write-back rewrites a stored VALUE after the secure handler has
+--  fully run, never the handler chain itself; rewriting the CHAT_*_GET
+--  globals stays field-proven poison.) Matching is on the channel hyperlink
+--  KEYWORD (|Hchannel:party|h[...]|h), locale-independent, plain substring
+--  scanning. Secret lines pass through whole.
 -------------------------------------------------------------------------------
 local issecretvalue = _G.issecretvalue
 
@@ -460,7 +514,6 @@ local function AbbreviateChannelText(text)
     return table.concat(pieces)
 end
 
-local _abbrevOn = false
 function ECHAT.EngineSetChannelAbbrev(on)
     _abbrevOn = on == true
 end
@@ -665,13 +718,61 @@ local function DisplayText(msg, event)
     if not _abbrevOn and not _ccnOn then return msg end
     if issecretvalue and issecretvalue(msg) then return msg end
     if type(msg) ~= "string" then return msg end
-    if _abbrevOn and msg:find("|Hchannel:", 1, true) then
+    if _abbrevOn and not _protActive and msg:find("|Hchannel:", 1, true) then
         msg = AbbreviateChannelText(msg)
     end
     if _ccnOn and event ~= nil
         and not (issecretvalue and issecretvalue(event))
         and CCN_EVENTS[event] then
         msg = ColorRosterNames(msg)
+    end
+    return msg
+end
+
+-------------------------------------------------------------------------------
+--  Timestamp All Messages (opt-in). Blizzard's formatter stamps ONLY ordinary
+--  player chat and pings (verified against its MessageEventHandler source);
+--  system/loot/achievement/BG/BN-toast branches and direct AddMessage calls
+--  (addon prints) are never stamped. This transform stamps OUR display copy
+--  of any line that arrives without one -- same lane as the channel
+--  abbreviations; the zone-alignment write-back then lands the identical
+--  form in Blizzard's stored entry.
+--  Secret lines pass through whole (concat on secrets errors; those are
+--  player messages, which Blizzard already stamps). Session history composes
+--  cleanly: its capture stripper removes ANY leading stamp (ours or baked)
+--  and replay re-derives the prefix from the stored serverTime.
+-------------------------------------------------------------------------------
+function ECHAT.EngineSetStampAll(on, fmt)
+    if on == true and type(fmt) == "string" and fmt ~= "" then
+        _stampAllOn, _stampFmt = true, fmt
+    else
+        _stampAllOn, _stampFmt = false, nil
+    end
+end
+
+-- Same prefix patterns as the session-history stripper (keep in sync): any
+-- line already starting with a rendered stamp is left alone, so Blizzard's
+-- baked stamps never double up.
+local function HasTimestampPrefix(msg)
+    return msg:find("^%d%d?:%d%d:%d%d%s*[AP]M%s") ~= nil
+        or msg:find("^%d%d?:%d%d:%d%d%s") ~= nil
+        or msg:find("^%d%d?:%d%d%s*[AP]M%s") ~= nil
+        or msg:find("^%d%d?:%d%d%s") ~= nil
+end
+
+-- when: server time for the stamp; nil = now. date() (not BetterDate) to
+-- match the session-history replay prefix exactly.
+local function StampDisplay(msg, when)
+    -- Dormant in protected content, same as the abbreviations: secret lines
+    -- can never be rewritten into the buffer, so the transforms stand down
+    -- whole and both surfaces stay raw-aligned.
+    if not _stampAllOn or _protActive then return msg end
+    if type(msg) ~= "string" then return msg end
+    if issecretvalue and issecretvalue(msg) then return msg end
+    if HasTimestampPrefix(msg) then return msg end
+    local ok, ts = pcall(date, _stampFmt, when and math.floor(when) or nil)
+    if ok and type(ts) == "string" and ts ~= "" then
+        return ts .. msg
     end
     return msg
 end
@@ -684,8 +785,27 @@ local function ExtractLineID(eventArgs)
 end
 
 local function EngineTail(cf, msg, r, g, b, chatTypeID, accessID, typeID, event, eventArgs)
+    -- Cheap per-message probe: catches protected-state flips that have no
+    -- zone-in edge (dev mode toggles) before the next line renders.
+    if EngineUpdateProtectedState then EngineUpdateProtectedState() end
     local win = WINS[cf]
-    local display = DisplayText(msg, event)
+    local display = StampDisplay(DisplayText(msg, event))
+    -- Zone-alignment write-back (doctrine block above the transform section).
+    -- Secrecy gate FIRST: comparing two secret strings throws, so display~=msg
+    -- may only run once msg is known plain. The e.message==msg identity check
+    -- skips entries another addon already rewrote, and skipping display==msg
+    -- keeps this a true no-op (zero writes) when every transform is off or
+    -- dormant (_protActive), preserving the zero-cost-disabled posture.
+    if not (issecretvalue and issecretvalue(msg))
+        and type(display) == "string" and display ~= msg then
+        local hb = cf.historyBuffer
+        local e = hb and hb.GetEntryAtIndex and hb:GetEntryAtIndex(1)
+        if e and type(e.message) == "string"
+            and not (issecretvalue and issecretvalue(e.message))
+            and e.message == msg then
+            e.message = display
+        end
+    end
     if win then
         win.smf:AddMessage(display, r, g, b, chatTypeID, ExtractLineID(eventArgs), event)
         -- Divergence check: if Blizzard's buffer was cleared behind our back
@@ -743,6 +863,10 @@ end
 -- our view. Semantics: plain = 3 lines, Shift = top/bottom, Ctrl = page.
 local function ChatFrameWheel(cf, delta)
     local up = delta > 0
+    -- Blizzard's scroll methods are the single wheel authority: lockstep
+    -- with its view IS the zone alignment. Replayed session-history rows sit
+    -- above its range, so the wheel stops at its clamp -- the thin scrollbar
+    -- (which drives our view directly) is the lane that reaches them.
     if IsShiftKeyDown() then
         if up then cf:ScrollToTop() else cf:ScrollToBottom() end
     elseif IsControlKeyDown() and cf.PageUp then
@@ -788,10 +912,40 @@ local function RebuildWindowFromBuffer(cf)
     smf:Clear()
     win.extraLines = 0
     local n = cf:GetNumMessages()
+    -- Stamp-all rebuilds stamp with each line's true arrival time: the SMF
+    -- entry timestamp is GetTime()-domain (PackageEntry), converted here to
+    -- server time; missing internals just skip the stamp for that line. The
+    -- buffer handle is fetched regardless of stamping because the rebuild is
+    -- also the CONVERGENCE pass: any line this loop transforms must land
+    -- identically in Blizzard's stored entry or its native zones would drift
+    -- from our text (lines received while transforms were dormant in
+    -- protected content converge here on the first rebuild after the flip
+    -- out). Same gate order as the live tail: secrecy before any compare.
+    local hb = cf.historyBuffer
+    if not (hb and hb.GetEntryAtIndex and hb.GetNumElements) then hb = nil end
+    local nowT, nowG
+    if _stampAllOn and not _protActive then
+        nowT, nowG = time(), GetTime()
+    end
     for i = 1, n do
         local msg, r, g, b, chatTypeID, accessID, typeID, event, eventArgs = cf:GetMessageInfo(i)
         if msg ~= nil then
-            smf:AddMessage(DisplayText(msg, event), r, g, b, chatTypeID, ExtractLineID(eventArgs), event)
+            local display = DisplayText(msg, event)
+            local entry = hb and hb:GetEntryAtIndex(hb:GetNumElements() - i + 1)
+            if nowT then
+                local ts = entry and entry.timestamp
+                if type(ts) == "number" then
+                    display = StampDisplay(display, nowT - (nowG - ts))
+                end
+            end
+            if entry and not (issecretvalue and issecretvalue(msg))
+                and type(display) == "string" and display ~= msg
+                and type(entry.message) == "string"
+                and not (issecretvalue and issecretvalue(entry.message))
+                and entry.message == msg then
+                entry.message = display
+            end
+            smf:AddMessage(display, r, g, b, chatTypeID, ExtractLineID(eventArgs), event)
         end
     end
     smf:ScrollToBottom()
@@ -874,7 +1028,9 @@ function ECHAT.EngineUpdateCombatLogHost()
             if bar.Track then bar.Track:SetAlpha(1) end
             SetBarMouse(bar, true)
         end
-        if win then win.smf:Hide() end
+        if win then
+            win.smf:Hide()
+        end
     else
         if fsc then fsc:SetAlpha(0) end
         if bar then
@@ -924,6 +1080,21 @@ end
 -- history backfill lines are shed by the rebuild, same as censor rebuilds).
 ECHAT.EngineQueueRebuildAll = QueueRebuildAll
 
+-- Protected-content master switch for the width transforms. While
+-- _protActive, DisplayText/StampDisplay go dormant, so new lines land raw
+-- on BOTH surfaces (secret lines could never be rewritten anyway) and stay
+-- aligned by construction; already-transformed scrollback keeps its display
+-- form on both sides because rebuilds read the converged buffer back. The
+-- flip-out rebuild is the convergence pass that retroactively transforms
+-- lines received while dormant. No-op while the state is unchanged, so the
+-- PEW edge and the per-message probe cost one comparison.
+EngineUpdateProtectedState = function()
+    local prot = (EUI.InProtectedInstance and EUI.InProtectedInstance()) and true or false
+    if prot == _protActive then return end
+    _protActive = prot
+    QueueRebuildAll()
+end
+
 -- Single-window rebuild for the bridge tail's divergence check.
 local _divergedQueued = {}
 QueueDivergedRebuild = function(cf)
@@ -951,6 +1122,7 @@ local function RecolorOurWindows(chatType, r, g, b)
     end
 end
 
+mirrorFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 mirrorFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "UPDATE_CHAT_COLOR" then
         local chatType, r, g, b = ...
@@ -960,6 +1132,10 @@ mirrorFrame:SetScript("OnEvent", function(_, event, ...)
                 RecolorOurWindows("REPLY", r, g, b)
             end
         end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Protected-state boundary check only: rebuilds ONLY on a flip
+        -- (never a per-loading-screen pass).
+        EngineUpdateProtectedState()
     else
         QueueRebuildAll()
     end
@@ -996,6 +1172,14 @@ function ECHAT.EngineGetMessageLines(cf, out)
     return n
 end
 
+-- Backfilled lines have no matching entry in the real chat frame, so a
+-- click on one can't resolve to a real hyperlink target. Strip link escape
+-- codes down to plain text to avoid handing a bad link to the click handler.
+local function StripHyperlinks(text)
+    if type(text) ~= "string" then return text end
+    return text:gsub("|H.-|h(.-)|h", "%1")
+end
+
 -- Session history replay: push one restored line into a window's display.
 -- The extraLines allowance keeps the divergence check from reading replayed
 -- lines (which exist only on our side) as a cleared Blizzard buffer.
@@ -1005,7 +1189,8 @@ function ECHAT.EngineBackfillLine(cf, text, r, g, b, id)
     -- DisplayText keeps replayed history consistent with the current
     -- abbreviation setting; the scanner is idempotent on stored lines that
     -- were captured already shortened.
-    win.smf:BackFillMessage(DisplayText(text), r, g, b, id)
+    local display = StripHyperlinks(DisplayText(text))
+    win.smf:BackFillMessage(display, r, g, b, id)
     win.extraLines = (win.extraLines or 0) + 1
     return true
 end

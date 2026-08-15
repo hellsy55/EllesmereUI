@@ -155,11 +155,32 @@ end
 -------------------------------------------------------------------------------
 local _cachedIType, _cachedDiffID, _cachedMapID
 
+-- "Pre-pull" state for the elevated Mythic-0 / keystone-lobby threshold
+-- (EABR.GetShowUnderMinutes' showUnderMPlus). True from the moment you zone
+-- into a dungeon until you first engage combat there; false for the rest of
+-- that dungeon visit so the wide top-up window doesn't keep re-triggering
+-- between pulls (it would otherwise use the pre-key threshold, up to 40 min
+-- by default, for the entire run instead of just the lobby). Reset whenever
+-- the map changes (new dungeon / left the instance). Covers both real
+-- Mythic 0 (diff 23) and the pre-key Mythic Keystone lobby (diff 8, before
+-- the timer starts) -- see InPreKeyDungeon() below.
+local _dungeonPrePull = true
+
 local function CacheInstanceInfo()
     local _, iType, diffID = GetInstanceInfo()
     _cachedIType = iType
     _cachedDiffID = tonumber(diffID) or 0
-    _cachedMapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or nil
+    local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or nil
+    if mapID ~= _cachedMapID then
+        _dungeonPrePull = true
+    end
+    _cachedMapID = mapID
+end
+
+-- Called from PLAYER_REGEN_DISABLED: once you've actually pulled, the
+-- pre-key top-up window is over for the rest of this dungeon visit.
+local function MarkDungeonPullStarted()
+    _dungeonPrePull = false
 end
 
 local function InRealInstancedContent()
@@ -193,6 +214,15 @@ end
 function EABR.InMythicZeroDungeon()
     if InMythicPlusKey() then return false end
     return _cachedIType == "party" and _cachedDiffID == 23
+end
+
+-- True in a Mythic Keystone party (difficulty 8) before the key timer has
+-- started -- the keystone lobby. Once InMythicPlusKey() flips true (key
+-- inserted and started) this goes false; that run is governed by
+-- ShowUnderThresholdApplies() instead (thresholds ignored, buff-gone only).
+local function InPreKeyDungeon()
+    if InMythicPlusKey() then return false end
+    return _cachedIType == "party" and _cachedDiffID == 8
 end
 
 -- Mythic 0 dungeon or Mythic raid (fixed or flex)
@@ -271,7 +301,7 @@ end
 function EABR.GetShowUnderMinutes()
     if not (db and db.profile) then return 0 end
     local disp = db.profile.display or {}
-    if EABR.InMythicZeroDungeon() then
+    if (EABR.InMythicZeroDungeon() or InPreKeyDungeon()) and _dungeonPrePull then
         return disp.showUnderMPlus or 40
     end
     return disp.showUnder or 5
@@ -985,8 +1015,12 @@ local AURAS = {
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
       check="player", specs={258}, combatOk=false, shapeshiftIndex=1 },
     -- Paladin Aura: only Devotion satisfies in dungeons/raids, any aura elsewhere; noPvP because Devotion Aura is ContextuallySecret in PvP even OOC.
+    -- nameFallback: with a second Paladin's aura also active, the source is
+    -- ambiguous and GetPlayerAuraBySpellID(465) can come back nil (fully
+    -- withheld, not just secret) even though the buff is up -- a name scan
+    -- catches it before the reminder false-fires.
     { key="devo_aura",  class="PALADIN", name="Devotion Aura",     castSpell=465,
-      buffIDs={465, 32223, 317920}, instanceBuffIDs={465},
+      buffIDs={465, 32223, 317920}, instanceBuffIDs={465}, nameFallback="Devotion Aura",
       check="player", combatOk=false, noPvP=true },
     -- Beacon of Light: standalone IsSpellOverlayed system (not checked by CollectAuras)
     { key="bol",        class="PALADIN", name="Beacon of Light",   castSpell=53563,  buffIDs={53563},
@@ -1794,7 +1828,7 @@ local defaults = {
                 deadly=true, instant=true, wound=true, amplifying=true,
                 crippling=true, numbing=true, atrophic=true,
                 rite_adj=true, rite_sanc=true,
-                flametongue=true, windfury=true, earthliving=true, tstrike=true,
+                flametongue=true, windfury=true, earthliving=true, tidecaller=true, tstrike=true,
                 ls=true, ws=true, es=true,
                 augment_rune=true,
                 weapon_enchant=true,
@@ -3052,7 +3086,17 @@ do
                         if aura.shapeshiftIndex and (inCombat or InPvPInstance()) then
                             isMissing = (GetShapeshiftForm() ~= aura.shapeshiftIndex)
                         else
-                            isMissing = not PlayerHasAuraByID(checkIDs, "aura")
+                            local hasIt = PlayerHasAuraByID(checkIDs, "aura")
+                            -- Some auras (e.g. Devotion Aura) go fully secret
+                            -- rather than merely duration/expiration-secret
+                            -- when their source is ambiguous (another
+                            -- provider of the same aura in the party); the ID
+                            -- lookup then can't see it at all. Fall back to a
+                            -- name scan before declaring it missing.
+                            if not hasIt and aura.nameFallback then
+                                hasIt = PlayerHasBuffByName(aura.nameFallback)
+                            end
+                            isMissing = not hasIt
                         end
                     end
                     if isMissing then
@@ -3231,7 +3275,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                     end
                 end
 
-                -- Shaman Shields: talent-gated entries. Earth Shield self-buff (383648) is combat-safe and handled separately below; other shields' IDs are not whitelisted, so they stay OOC-only.
+                -- Shaman Shields: talent-gated entries. Earth Shield self-buff (383648) is handled separately below (also OOC-only despite being whitelisted -- see that block); other shields' IDs are not whitelisted either, so they stay OOC-only.
                 for _, shield in ipairs(SHAMAN_SHIELDS) do
                     local castID = shield.castSpellFn and shield.castSpellFn() or shield.castSpell
                     if co.enabled[shield.key] ~= false and Known(castID) then
@@ -3364,8 +3408,15 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
         end
     end -- consumables block
 
-    -- Earth Shield self-buff (383648): combat-safe, only with Elemental Orbit.
-    if specialsActive and playerClass == "SHAMAN" then
+    -- Earth Shield self-buff (383648), only with Elemental Orbit. NOT
+    -- actually combat-safe despite being whitelisted in NON_SECRET_SPELL_IDS:
+    -- confirmed in-game that GetPlayerAuraBySpellID(383648) returns nothing
+    -- readable in combat even while the buff is genuinely active, so a
+    -- reminder already up when combat starts would get stuck (neither the
+    -- live read nor the pre-combat snapshot can clear it) until combat ends.
+    -- Suppress in combat/keystone instead, same as its ls_ws_orbit/
+    -- shield_basic siblings just above.
+    if specialsActive and playerClass == "SHAMAN" and not (inCombat or inKeystone) then
         local esOrbit = SHAMAN_SHIELDS[1]  -- es_orbit entry
         if co.enabled[esOrbit.key] ~= false and Known(esOrbit.castSpell)
            and esOrbit.requireTalent and Known(esOrbit.requireTalent) then
@@ -3586,7 +3637,10 @@ local function Refresh()
                 petLabel = "Water Elemental"
                 if specID ~= 64 or not Known(31687) then suppress = true end
             end
-            if not suppress and not (UnitExists("pet") and not UnitIsDead("pet")) then
+            -- Skipped while mounted, and for a beat after dismounting: mounting auto-dismisses the pet and the server resummons it on dismount a moment after the mount display drops, so the reminder is never actionable there (summoning would dismount you anyway). IsMounted()/GetTime() are combat-safe.
+            if not suppress and not IsMounted()
+               and not (EABR._petRemountGrace and GetTime() < EABR._petRemountGrace)
+               and not (UnitExists("pet") and not UnitIsDead("pet")) then
                 local e = AcquireEntry()
                 e.mode = "texture"
                 e.texture = petIcon
@@ -4644,6 +4698,9 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
     end
 
     if e == "PLAYER_REGEN_DISABLED" then
+        -- First pull of this dungeon visit: the elevated pre-key/pre-pull
+        -- threshold (EABR.GetShowUnderMinutes' showUnderMPlus) is over.
+        MarkDungeonPullStarted()
         -- Drops broad UNIT_AURA in combat unless group tracking is needed: Evoker keeps broad for ownOnRaid cache updates; the provider view ("others missing") keeps it for timely group coverage refreshes.
         local rbSW = db and db.profile.raidBuffs and db.profile.raidBuffs.showWhen
         local keepBroad = _isEvokerOwnOnRaid or (rbSW and rbSW.othersMissing ~= false)
@@ -4774,6 +4831,12 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         if GetWeaponCategory(16) ~= R.we[16].cat or GetWeaponCategory(17) ~= R.we[17].cat then
             R.dirty = true
         end
+    end
+
+    -- Dismount: the pet comes back a moment AFTER the mount display drops, so the "Pet" reminder would flash in that gap. Grace-window it, and schedule the refresh that closes the window (nothing else fires when the pet is genuinely absent, which would latch the reminder off).
+    if e == "PLAYER_MOUNT_DISPLAY_CHANGED" and not IsMounted() then
+        EABR._petRemountGrace = GetTime() + 2
+        C_Timer.After(2.1, RequestRefresh)
     end
 
     -- All other events: just refresh

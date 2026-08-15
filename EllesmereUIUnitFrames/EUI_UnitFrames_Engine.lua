@@ -589,6 +589,17 @@ local function EvalActiveUnit(frame)
     if not frame then return end
     local resolved = ResolveActiveUnit(frame)
     if resolved and resolved ~= frame.unit then
+        -- Never adopt a unit that does not exist yet. Vehicle entry resolves
+        -- "vehicle" at transition START, before the unit is queryable: adopting
+        -- then paints empty text (UnitName nil renders ""), and every later
+        -- vehicle edge no-ops on resolved == frame.unit, so an idle vehicle
+        -- stays blank for the whole ride. Holding the OLD unit keeps this
+        -- re-firing on each transition edge until the resolved unit is real,
+        -- and THAT swap's RepaintAll paints with live data -- the same guard
+        -- the oUF-era swap had. The base unit is exempt: it must always be
+        -- adoptable (nonexistent target/focus frames hide via unit-watch, and
+        -- refusing the base would strand a stale token instead).
+        if resolved ~= frame._euiBaseUnit and not UnitExists(resolved) then return end
         frame.unit = resolved
         Engine.RepaintAll(frame, "UnitChanged")
     end
@@ -639,10 +650,37 @@ end
 --- Spawns one secure unit button. The caller styles it and attaches engine
 --- channels afterward; RegisterUnitWatch owns show/hide from here on.
 function Engine.SpawnUnitFrame(unit, name)
+    -- Contextual pings: the template rides EVERY frame; safety is the
+    -- DYNAMIC GetIsPingable gate below, never the template choice (the old
+    -- blanket disable killed player/focus pings too, which was scope creep
+    -- -- only SECRET-identity units are the hazard). Blizzard's 12.1 bug
+    -- stands: pinging a secret-identity unit hard-errors in PingManager's
+    -- securecopy (reproduces with no addon code in the path), so the gate
+    -- admits the player always and friendly units outside protected
+    -- instances, and answers false for hostiles and protected-instance
+    -- units -- the ping system shows a clean denied toast instead of
+    -- erroring. When Blizzard fixes the securecopy, relax the GATE; the
+    -- template needs no change.
     local frame = CreateFrame("Button", name, petBattleHider,
         "SecureUnitButtonTemplate, PingableUnitFrameTemplate")
     frame._euiBaseUnit = unit
     frame.unit = unit
+    -- Evaluated at ping time on the LIVE unit (vehicle swaps rewrite
+    -- frame.unit). Order per secret doctrine: token compare first (unit
+    -- TOKENS are our own plain strings; unit DATA is what goes secret),
+    -- the content gate second, and the hostility read gated through
+    -- issecretvalue before any branch touches it.
+    frame.GetIsPingable = function(self)
+        local u = self.unit or self._euiBaseUnit
+        if u == "player" then return true end
+        if not u then return false end
+        if EllesmereUI.InProtectedInstance and EllesmereUI.InProtectedInstance() then
+            return false
+        end
+        local hostile = UnitIsEnemy("player", u)
+        if issecretvalue and issecretvalue(hostile) then return false end
+        return hostile ~= true
+    end
     frame.IsElementEnabled = Frame_IsElementEnabled
     frame.EnableElement = Frame_EnableElement
     frame.DisableElement = Frame_DisableElement

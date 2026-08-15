@@ -89,14 +89,26 @@ local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
 -- palette is ever reachable only by being nested inside another one. A key is
 -- what builds a palette's secure button, so the ones left unbound cost nothing.
 local MAX_PALETTES = 16
-local MAX_SLOTS = 12
 
--- Entries a nested palette contributes through a parent whose nest is bounded
--- by the PARENT'S own region -- a sector of the arc, a halo's ring of eight
--- fixed positions. Eight is where those stop being readable. Every other nest
--- runs along ground of its own -- a block's perimeter, a row across a strip --
--- and seats a nested palette's full MAX_SLOTS. See NestChildCap, which is
--- where the per-layout answer lives.
+-- Entries one menu may hold. Twelve was what a ring of the SETTING'S OWN
+-- radius could seat without its entries touching -- at the shipped 100 and a
+-- 50-unit pitch, the thirteenth overlaps its neighbour. That is no longer the
+-- constraint: Menu Radius is a minimum now and the ring grows with the count
+-- (see PaletteView:Geom), so the cap answers to how many entries a person can
+-- still aim at rather than to how many fit. Sixteen, which is where a full
+-- circle gives each entry 22.5 degrees.
+local MAX_SLOTS = 16
+
+-- Entries a nested palette contributes through a HALO, which is eight fixed
+-- positions around a cell (see HALO_DIRS) and so cannot seat a ninth child
+-- without a second ring it has no room for. This is a real limit of that one
+-- shape, not a readability judgement.
+--
+-- The arc used to share it and no longer does: an arc claim RINGS its children
+-- and spills into further rings as they crowd (see ChildGeom and
+-- MAX_CHILD_ROWS), so its ground grows with the count exactly as the palette's
+-- own ring does. It seats a nested palette whole, like every other layout.
+-- See NestChildCap, which is where the per-layout answer lives.
 local MAX_CHILDREN = 8
 
 -- How many concentric rings a nested arc's children may spill into before a
@@ -120,18 +132,25 @@ local MAX_CHILD_ROWS = 4
 -- box across the lot instead would swallow the block's own corner ground --
 -- see PerimeterNest, the "Arming gates" section and RunReach below.
 --
--- Nine is what a lane sharing the block with OTHER claims comes to. Each of
+-- Fourteen is what a lane sharing the block with OTHER claims comes to. Each of
 -- those has its own cell taken out of this claim's coverage (see ParentHoles),
 -- which splits the side it falls on into at most a slab clear of it and one
 -- interval reaching back to the parent -- the pieces past it are dropped, being
--- ground this claim cannot be armed on anyway. Three sides carrying a hole is
--- the worst that comes up: eight for any two claims and nine for any three,
--- swept over every arrangement of them on a 2x2, 6-, 9- and 12-slot block at
--- both child counts that change the answer and at every nest scale, and a block
--- with EVERY slot nesting stays inside it too. Past nine the tail is dropped,
--- child-bearing pieces being written first, so a palette that did overflow would
--- lose ground between its entries rather than a child.
-local REGION_MAX = 9
+-- ground this claim cannot be armed on anyway.
+--
+-- Derived by running .tools/quickdraw-nest over every block layout at
+-- MAX_SLOTS: 330,692 arrangements -- 2 to 16 entries, every arrangement of up
+-- to four nesting ones (thinned evenly past 120 per shape), 1 to 16 children
+-- each, auto and pinned columns, both nest styles. Fourteen covers all but 239
+-- of them; the worst single claim in the sweep comes to eighteen, and spending
+-- four more gates and eight more wrapped scripts on every claim to catch that
+-- last 0.07 per cent is not the trade. Past the budget the tail is dropped,
+-- child-bearing pieces being written first, so a claim that does overflow loses
+-- ground between its entries rather than a child.
+--
+-- Re-run that sweep if MAX_SLOTS, MAX_CHILDREN or any nest geometry moves --
+-- this number is an OUTPUT of the shapes below it, not a choice.
+local REGION_MAX = 14
 
 -- How many drawn positions the scroll strip's arming lattice may span each
 -- side of its centre: the widest each-side window the "Visible Icons" slider
@@ -353,6 +372,15 @@ local DB_DEFAULTS = {
         -- Empty rather than nil: a nil in a defaults table is not merged, so
         -- there would be no key to write to.
         confirmKey = "",
+
+        -- The key that backs OUT of an open menu without firing anything.
+        -- ESCAPE always does this and is not configurable; this is a second
+        -- key for it, and the reason it exists is that the hand holding the
+        -- menu key is nowhere near ESCAPE. A plain mouse button is the point
+        -- -- right-click is the one people reach for -- and, like the Select
+        -- key, it is claimed only for as long as a menu is up. Empty for the
+        -- same reason as confirmKey.
+        cancelKey = "",
 
         paletteCount   = 1,
         -- palette.slots is a DENSE, ORDERED array: the palette auto-sizes to what the
@@ -754,16 +782,15 @@ ns.ChildSlots = ChildSlots
 -- How many entries a nested palette may contribute on palette `parentIndex`,
 -- read off the stored profile -- what the editor's tooltip answers with, and
 -- what the live views answer too, their layout following the same profile.
--- Eight is where a nest bounded by its PARENT'S own region stops being
--- readable, and the two nests bounded that way stay there: an arc's children
--- hold a sector of the parent's arc, and a halo is eight positions with
--- nothing to grow into. Everything else runs along ground of its own -- a
--- lane holds twenty cells and more at ordinary sizes, and a strip's row
--- spreads as wide as it needs to -- so it seats a nested palette whole.
+--
+-- Every layout but one seats a nested palette WHOLE. A lane runs along a
+-- block's perimeter, a strip's row spreads as wide as it needs to, and an arc
+-- claim rings its children and adds a ring as they crowd -- all three have
+-- ground of their own to grow into. The halo does not: it is eight fixed
+-- positions around one cell, and there is no ninth to put a child in.
 local function NestChildCap(parentIndex)
     local p = PA(parentIndex)
     local layout = (p and p.layout) or "ARC"
-    if layout == "ARC" then return MAX_CHILDREN end
     if layout == "GRID" and p and p.gridNestStyle == "HALO" then
         return MAX_CHILDREN
     end
@@ -915,21 +942,43 @@ local function MarkerIcon(id)
     return "Interface\\TargetingFrame\\UI-RaidTargetingIcon_" .. id
 end
 
--- The CURRENT index of the specialization a slot names. A spec slot stores the
--- specID, which is the same number on every character that has that spec, and
--- resolves it here -- the index is only a position in one character's list, so
--- a palette carried to an alt would otherwise point at somebody else's spec.
--- A spec this character does not have answers nil, and the slot then does
--- nothing rather than switching to whatever sits at that position.
+-- The CURRENT index of the specialization a slot names, for both kinds that
+-- name one. Either way, nil leaves the slot doing nothing.
+--
+-- A spec slot banks the specID, the same number on every character that has
+-- that spec: the index is only a position in one character's list, so a
+-- palette carried to an alt would otherwise point at somebody else's spec. A
+-- dynamicspec slot banks the position instead, and means it -- the second on a
+-- druid and the second on a warrior are both simply "the second one".
 local function SpecIndexFor(slot)
-    local want = tonumber(slot and slot.specID)
-    if not want or not C_SpecializationInfo then return nil end
+    if not slot or not C_SpecializationInfo then return nil end
     local classID = select(3, UnitClass("player"))
     if not classID then return nil end
-    for i = 1, (C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0) do
+    local count = C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
+
+    if slot.kind == "dynamicspec" then
+        local i = tonumber(slot.index)
+        if i and i >= 1 and i <= count then return i end
+        return nil
+    end
+
+    local want = tonumber(slot.specID)
+    if not want then return nil end
+    for i = 1, count do
         if C_SpecializationInfo.GetSpecializationInfo(i) == want then return i end
     end
     return nil
+end
+
+-- What a dynamicspec entry is CALLED when it is being picked, and on the
+-- character that cannot resolve it. Kept here rather than in the options page
+-- so the picker row and the placeholder cannot drift apart.
+--
+-- On ns with no local alias, and called back through ns below: this file's
+-- main chunk is at Lua's ceiling of 200 locals (see UsableSlots), and a local
+-- here spends the last one.
+ns.SpecPositionName = function(index)
+    return EllesmereUI.Lf("Specialization %1$d", index or 0)
 end
 
 -------------------------------------------------------------------------------
@@ -1140,7 +1189,7 @@ end
 -- self-resolving and stays.
 local function SlotUsable(slot)
     local k = slot and slot.kind
-    if k == "spec" then
+    if k == "spec" or k == "dynamicspec" then
         return SpecIndexFor(slot) ~= nil
     elseif k == "spell" then
         return SpellKnownHere(tonumber(slot.id))
@@ -1188,7 +1237,7 @@ end
 -- kind -> attribute triple for the secure button, plus an optional 4th value:
 -- a sibling attribute key that must be cleared because the same action type
 -- would otherwise read it in preference. Returns nil for the kinds with no
--- secure action type at all (battlepet, spec, randommount), which
+-- secure action type at all (battlepet, the two spec kinds, the mounts), which
 -- FireInsecure handles instead.
 --
 -- p is the palette's appearance view, for the one kind whose action depends on
@@ -1375,7 +1424,18 @@ local function FireInsecure(slot)
         -- summoned anyway.
         C_MountJournal.SummonByID(0)
 
-    elseif slot.kind == "spec" then
+    elseif slot.kind == "lastmount" and C_MountJournal then
+        -- The same call with the mount the player last rode, tracked rather
+        -- than stored on the slot -- the whole point of the entry is that it
+        -- changes on its own. Nothing tracked yet (a fresh profile, or a
+        -- session where the player has not mounted) falls back to the random
+        -- favorite rather than doing nothing: an entry that answers a press
+        -- with silence reads as broken.
+        local pf = P()
+        local id = pf and pf.lastMountID
+        C_MountJournal.SummonByID(type(id) == "number" and id or 0)
+
+    elseif slot.kind == "spec" or slot.kind == "dynamicspec" then
         local index = SpecIndexFor(slot)
         -- Refused in combat by the game itself, with its own error message.
         -- Nothing to defer to PLAYER_REGEN_ENABLED: a spec change the user
@@ -1495,6 +1555,21 @@ local function SlotDisplay(slot)
         local name, _, icon = C_MountJournal.GetMountInfoByID(slot.id)
         return icon or QUESTION_MARK, name or slot.name
 
+    elseif k == "lastmount" then
+        -- Whatever is tracked right now, so the entry shows the mount it would
+        -- actually summon. Before anything is tracked it shows what it would
+        -- fall back to, which is the random favorite (see FireInsecure), under
+        -- a name that says what the entry IS rather than what it is standing
+        -- in for.
+        local pf = P()
+        local id = pf and pf.lastMountID
+        if type(id) == "number" then
+            local name, _, icon = C_MountJournal.GetMountInfoByID(id)
+            if name then return icon or QUESTION_MARK, name end
+        end
+        local info = C_Spell.GetSpellInfo(RANDOM_FAVORITE_MOUNT)
+        return (info and info.iconID) or QUESTION_MARK, "Last Used Mount"
+
     elseif k == "randommount" then
         local info = C_Spell.GetSpellInfo(RANDOM_FAVORITE_MOUNT)
         -- The client's own caption for the Mount Journal button, so the entry
@@ -1503,11 +1578,21 @@ local function SlotDisplay(slot)
                MOUNT_JOURNAL_SUMMON_RANDOM_FAVORITE_MOUNT
                    or (info and info.name) or "Random Favorite Mount"
 
-    elseif k == "spec" then
+    elseif k == "spec" or k == "dynamicspec" then
         local index = SpecIndexFor(slot)
         if index then
+            -- Both kinds draw the specialization they would switch to, which
+            -- is the whole point of the dynamic one: the icon and the name are
+            -- this character's, so a palette carried to another class arrives
+            -- showing that class's specs rather than the owner's.
             local _, name, _, icon = C_SpecializationInfo.GetSpecializationInfo(index)
             return icon or QUESTION_MARK, name or slot.name
+        end
+        if k == "dynamicspec" then
+            -- A position this class has not got: four on anything but a
+            -- druid, three on a demon hunter. The entry names a seat rather
+            -- than an occupant, so with no occupant to draw it says the seat.
+            return QUESTION_MARK, ns.SpecPositionName(tonumber(slot.index))
         end
         -- A spec this character's class does not have. Its identity is still
         -- global -- the specID answers by itself -- so the editor and an
@@ -1979,6 +2064,20 @@ local fontStrings = {}
 local function ApplyModuleFont(fs)
     local size = fs.eqdFontSize
     if not size or not EllesmereUI.GetFontPath then return end
+    -- Snapped to whole physical pixels. A font height is given in the string's
+    -- own units and drawn at that height TIMES its effective scale, so a
+    -- palette scaled to anything but 1 asks for a fractional pixel height --
+    -- and a glyph rasterised between two pixels reads soft and stair-stepped
+    -- while the icon art beside it, which is a texture and resamples cleanly,
+    -- does not. That is the whole of the pixelated-count report: the icons
+    -- were never the problem. PP.perfect is one physical pixel in WoW's
+    -- 768-based coordinates, which is what turns a height into pixels and
+    -- back. Whole pixels, and never rounded away to nothing.
+    local PP = EllesmereUI.PP
+    local eff = fs.GetEffectiveScale and fs:GetEffectiveScale()
+    if PP and PP.perfect and PP.perfect > 0 and eff and eff > 0 then
+        size = max(1, floor(size * eff / PP.perfect + 0.5)) * PP.perfect / eff
+    end
     local flags
     if fs.eqdIconText and EllesmereUI.GetIconTextOutlineFlag then
         flags = EllesmereUI.GetIconTextOutlineFlag(FONT_KEY)
@@ -2069,7 +2168,17 @@ local function CreateSlotWidget(view, index)
     -- leave the previous entry's number standing.
     w.count = w:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     w.count:SetPoint("BOTTOMRIGHT", w, "BOTTOMRIGHT", -1, 2)
+    -- Held on BOTH sides, which is the whole width clamp: anchored by one
+    -- corner alone a wide count grows until it runs off the icon it belongs
+    -- to, and a three-digit stack did. The text cannot be measured to shrink
+    -- it instead -- it may be a secret value, and a secret FontString refuses
+    -- text access to a tainted caller -- so the width is decided in advance
+    -- and the client fits the number into it.
+    w.count:SetPoint("BOTTOMLEFT", w, "BOTTOMLEFT", 1, 2)
     w.count:SetJustifyH("RIGHT")
+    -- One line whatever it holds: a count wide enough to need the clamp above
+    -- would otherwise wrap onto a second line and climb up the icon.
+    if w.count.SetWordWrap then w.count:SetWordWrap(false) end
     w.count:Hide()
     AdoptFontString(w.count, true)
 
@@ -2082,6 +2191,18 @@ local function CreateSlotWidget(view, index)
     w.markerPip:SetTexture("Interface\\Buttons\\WHITE8X8")
     w.markerPip:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
     w.markerPip:Hide()
+
+    -- "This entry opens a menu", in the corner nothing else uses. Without it a
+    -- nested entry is drawn exactly like a plain one until it arms, which is
+    -- why the nest used to be previewed faintly instead -- and a preview drawn
+    -- over the open nest's own children is what that cost.
+    w.nestDots = {}
+    for d = 1, 3 do
+        local t = w:CreateTexture(nil, "OVERLAY", nil, 7)
+        t:SetTexture("Interface\\Buttons\\WHITE8X8")
+        t:Hide()
+        w.nestDots[d] = t
+    end
 
     w.label = w:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     AdoptFontString(w.label)
@@ -2113,11 +2234,46 @@ local PaletteViewMeta = { __index = PaletteView }
 -- own palette -- radius and iconSize are per-menu appearance. The 24 is the
 -- dead zone, hardcoded: release inside it cancels, and near the centre the
 -- pointer's angle is too unstable to select by.
-function PaletteView:Geom()
+-- radius, icon size, dead zone. The radius is the ARC's, and it is worked out
+-- rather than read: Menu Radius is a MINIMUM, and a ring holding more entries
+-- than fit at that distance grows until they no longer touch. That is what
+-- lets a menu hold more than the twelve a fixed radius could seat, and it
+-- leaves every existing menu exactly where it was -- a count that fits at the
+-- setting's own value never reaches the floor.
+--
+-- shownOverride names the count to measure for, which a caller working out the
+-- geometry of a palette this view is not currently drawn as must pass: the
+-- view's own shownCount still describes whatever was laid out last. Same
+-- reason GridDims takes one.
+function PaletteView:Geom(shownOverride)
     if self.opts.geom then return self.opts.geom() end
     local p = self:P()
     if not p then return 100, 40, 24 end
-    return p.radius or 100, p.iconSize or 40, 24
+    local radius, iconSize = p.radius or 100, p.iconSize or 40
+    if self:LayoutMode() == "ARC" then
+        local shown = max(1, shownOverride or self.shownCount or 1)
+        if shown > 1 then
+            -- The chord between two neighbouring entries is 2R sin(step/2).
+            -- Holding that to the separation two entries need and solving for R
+            -- gives the smallest ring they do not overlap on. A half-step at or
+            -- past a quarter turn is left alone: entries that far apart cannot
+            -- crowd, and the sine is on its way back down.
+            --
+            -- The separation is not one pitch. Entries are SQUARES, and two
+            -- axis-aligned squares clear each other only once their centres are
+            -- a full icon apart along x or along y -- so a pair whose chord
+            -- runs diagonally needs iconSize * root 2 between centres, which is
+            -- more than a pitch at the shipped sizes. A ring sized on the pitch
+            -- alone therefore still touched at the four diagonals, and only
+            -- there, which is exactly what a sixteen-entry ring showed.
+            local half = self:ArcGeom(shown) * 0.5
+            if half > 0 and half < pi * 0.5 then
+                local need = max(iconSize + (p.fanGap or 10), iconSize * 2 ^ 0.5)
+                radius = max(radius, need / (2 * sin(half)))
+            end
+        end
+    end
+    return radius, iconSize, 24
 end
 
 -- The profile as THIS view's palette sees it: its own appearance overrides in
@@ -2468,7 +2624,35 @@ end
 -- claim's own children come first: PushPalette writes only REGION_MAX of them,
 -- so an overflow drops the tail, and a dropped piece with a child under it would
 -- take that child off the claim's ground entirely.
-local function AddRegion(c, box, axis, holes)
+local AddRegion
+do
+-- Do these two boxes share a stretch of EDGE, overlapping or merely abutting?
+-- BoxesMeet answers the other question -- is one box standing over the other --
+-- and a corridor never is: CorridorBox starts it at the parent cell's own outer
+-- edge, so the two touch along that whole edge and overlap by nothing at all.
+-- Read through BoxesMeet, a corridor therefore looked disconnected from the very
+-- cell it leads out of.
+--
+-- A shared edge and not a shared CORNER: contact at one point is not ground a
+-- cursor can cross, and a piece reachable only past a corner is exactly what the
+-- filter below is there to drop. So one axis must genuinely overlap while the
+-- other is allowed to touch.
+--
+-- The tolerance is for the touch itself. Two edges that meet by construction
+-- still arrive here through different arithmetic -- a centre and a half-extent
+-- recovered from a pair of edges -- and a boundary this rests on cannot be left
+-- to land on the exact same float twice.
+--
+-- Inside the block with its only caller, which is what keeps it off the main
+-- chunk: this file sits within a couple of Lua's ceiling of 200 locals.
+local function BoxesTouch(a, b)
+    local dx, dy = abs(a.x - b.x), abs(a.y - b.y)
+    local sx, sy = a.hw + b.hw, a.hh + b.hh
+    return (dx < sx and dy <= sy + 1e-4)
+        or (dy < sy and dx <= sx + 1e-4)
+end
+
+function AddRegion(c, box, axis, holes)
     if not holes then
         c.regions[#c.regions + 1] = box
         return
@@ -2490,13 +2674,21 @@ local function AddRegion(c, box, axis, holes)
             -- onto it is across that hole -- which hands the claim over before
             -- the cursor arrives. Keeping it would spend a gate on ground this
             -- claim can never be armed on.
+            --
+            -- Touching is the whole test, so it is asked with BoxesTouch. The
+            -- corridor is the piece that turns on this: it abuts the parent cell
+            -- along a full edge and overlaps it by nothing, so a strict test
+            -- dropped the one rect covering the ground between an entry and its
+            -- own nest -- and only ever where a second claim put a hole in play,
+            -- which is why one nesting entry behaved and two did not.
             if holds == (pass == 1)
-               and (holds or BoxesMeet(b, c.parentBox))
+               and (holds or BoxesTouch(b, c.parentBox))
                and not Covered(b, c.regions) then
                 c.regions[#c.regions + 1] = b
             end
         end
     end
+end
 end
 
 -- Nested geometry for one palette. Returns an array of CLAIMS -- one per slot
@@ -2562,15 +2754,13 @@ function PaletteView:ChildGeom(shown, slots)
     -- Claimants in entry order first: how much room each one may take depends
     -- on where the next one sits, so none of them can be sized on its own.
     --
-    -- The cap is NestChildCap's answer, asked of the view's own predicates
-    -- rather than of the stored profile so a preview that pinned its layout
-    -- seats what the layout it is showing can seat. The two agree everywhere
-    -- else: the predicates read the same profile.
-    local cap = MAX_SLOTS
-    if self:LayoutMode() == "ARC"
-       or (self:IsGrid() and p.gridNestStyle == "HALO") then
-        cap = MAX_CHILDREN
-    end
+    -- NestChildCap's rule, asked of the view's own predicates rather than of
+    -- the stored profile so a preview that pinned its layout seats what the
+    -- layout it is showing can seat. Keep the two in step: this is the copy the
+    -- LIVE menu uses, and it went on capping the arc at eight for a whole
+    -- release after the other one stopped.
+    local cap = (self:IsGrid() and p.gridNestStyle == "HALO")
+        and MAX_CHILDREN or MAX_SLOTS
     local claims
     for i = 1, shown do
         local kids = ChildSlots(ChildIndex(slots[i]), cap)
@@ -2592,7 +2782,7 @@ function PaletteView:ChildGeom(shown, slots)
     if self:LayoutMode() ~= "ARC" then return nil end
 
     local step, arcStart, full = self:ArcGeom(shown)
-    local radius, iconSize = self:Geom()
+    local radius, iconSize = self:Geom(shown)
     -- Scaled by whatever this view scaled its geometry by, recovered from the
     -- icon size Geom handed back -- the same recovery the hub logo makes. The
     -- radius already carries that factor; a band read at its literal profile
@@ -3084,16 +3274,6 @@ local NEST_DIM_SCALE = 0.7
 -- happened yet. Drawn at full strength they promised a live nest and then
 -- answered nothing, which read as the sub-palette being broken.
 --
--- The block behind a preview keeps its own alpha and its own size: the dim and
--- the parent's draw-back belong to a nest you are IN, and spending them on a
--- nest that is only being previewed leaves nothing left to say when it opens.
---
--- Block layouts only. The arc draws its preview at full strength (see
--- UpdateNestShown): its nest sits clear of the entry ring on ground of its
--- own, so full alpha buries nothing there -- and the dim read as the group
--- fading in and out with the cursor's distance from the parent icon.
-local NEST_PREVIEW_ALPHA = 0.35
-
 -- The margin, in pitches, around a scroll-steered strip that the pointer may
 -- travel inside before it deselects. This is that layout's cancel, and it is
 -- the same gesture the grid cancels with -- throw the pointer clear of the
@@ -3982,7 +4162,6 @@ function PaletteView:AdvanceGrid(noPointer)
     -- frame later. SetSelection's own call then finds nothing left to do.
     self:UpdateNestShown(best)
     local open = self._openClaim
-    local preview = self._previewClaim
     local dim = (open and open.dim) and NEST_DIM_ALPHA or 1
     local shrink = (open and open.dim) and NEST_DIM_SCALE or 1
 
@@ -4028,10 +4207,6 @@ function PaletteView:AdvanceGrid(noPointer)
     -- Nested cells are drawn at a flat size. They live inside boxes rather than
     -- on a falloff, and a child shrinking as the pointer crossed its own box
     -- would suggest a nearness that decides nothing here.
-    --
-    -- The preview's alpha is applied here as well as in UpdateNestShown, for the
-    -- same reason the zoom below is: this pass rewrites every cell's alpha every
-    -- frame, so one set only where the state changed would last a single frame.
     local claims = self.claims
     for ck = 1, (claims and #claims or 0) do
         local c = claims[ck]
@@ -4039,7 +4214,7 @@ function PaletteView:AdvanceGrid(noPointer)
             local cell = c.cells and c.cells[j]
             local w = c.base and self.widgets[c.base + j]
             if cell and w then
-                w:SetAlpha((c == preview) and NEST_PREVIEW_ALPHA or 1)
+                w:SetAlpha(1)
                 w.baseSize = c.icon
                 w:SetSize(c.icon, c.icon)
                 w:ClearAllPoints()
@@ -4619,6 +4794,24 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     end
     w.count:SetShown(hasCount)
 
+    -- Sized and placed per paint: an entry's icon size is a setting, and these
+    -- have to stay legible at the small end without swallowing the icon at the
+    -- large one. Physical pixels, like the borders.
+    local nests = (not placeholder) and slot and slot.kind == "palette"
+    if w.nestDots then
+        local px = EllesmereUI.PP and EllesmereUI.PP.mult or 1
+        local dot = max(px, floor((iconSize or 40) * 0.055 / px + 0.5) * px)
+        for d = 1, 3 do
+            local t = w.nestDots[d]
+            t:SetSize(dot, dot)
+            t:ClearAllPoints()
+            t:SetPoint("BOTTOMLEFT", w, "BOTTOMLEFT",
+                       dot + (d - 1) * dot * 2, dot)
+            t:SetVertexColor(1, 1, 1, 0.85)
+            t:SetShown(nests and true or false)
+        end
+    end
+
     -- Through the view because PaintCell is not a method and the pip needs one
     -- (see MarkerPip). Every open repaints every cell, so this is the reading
     -- that matters; the event below only keeps a menu left open honest.
@@ -4681,7 +4874,7 @@ function PaletteView:Layout(paletteIndex)
     self.slotCount, self.shownCount = n, shown
 
     local step, arcStart = self:ArcGeom(shown)
-    local radius, iconSize = self:Geom()
+    local radius, iconSize = self:Geom(shown)
     local fan = self:IsFan()
 
     -- Worked out before the frame is sized, not with the entries it places: a
@@ -4712,7 +4905,18 @@ function PaletteView:Layout(paletteIndex)
     local frame = self.frame
     -- p.scale is the user's live sizing; a fitted preview supplies its own
     -- geometry instead and must not be scaled a second time.
-    if not opts.interactive then frame:SetScale(p.scale or 1) end
+    if not opts.interactive then
+        local sc = p.scale or 1
+        frame:SetScale(sc)
+        -- Every string on this palette is sized against its own effective
+        -- scale (see ApplyModuleFont), so a scale change leaves all of them
+        -- rasterised for the old one. Re-applied only when the scale actually
+        -- moved, which is a settings change rather than an open.
+        if self.eqdFontScale ~= sc then
+            self.eqdFontScale = sc
+            RefreshFonts()
+        end
+    end
     if self:IsPointerLayout() then
         -- One sizing rule for the grid and both pointer-steered strips: a strip
         -- is just a grid one entry deep, so GridDims has already reduced it to
@@ -4814,8 +5018,7 @@ function PaletteView:Layout(paletteIndex)
                 if HasLiveIcon(c.slots[j]) then
                     liveCells[#liveCells + 1] = cells
                 end
-                -- Hidden until its own claim is previewed or opened -- see
-                -- UpdateNestShown.
+                -- Hidden until its own claim is opened -- see UpdateNestShown.
                 w:Hide()
             end
         end
@@ -4828,7 +5031,7 @@ function PaletteView:Layout(paletteIndex)
     self._liveState = IconState()
     -- Every cell was just hidden and every entry repainted plain, so all three
     -- of these describe a drawing that no longer exists.
-    self._openClaim, self._previewClaim, self._armedParent = nil, nil, nil
+    self._openClaim, self._armedParent = nil, nil
 
     -- Which way the nests went, so the caption can hang on the other side. Taken
     -- from the first claim that placed: with several nests on different sides
@@ -5164,8 +5367,8 @@ function PaletteView:RepaintEntry(index)
     end
 end
 
--- Which nest is open, and which is only being previewed. One at a time either
--- way -- every nest drawn at once would bury the palette it hangs off.
+-- Which nest is open. One at a time -- every nest drawn at once would bury the
+-- palette it hangs off.
 --
 -- A nest is OPEN when its claim is ARMED, which means the cursor has actually
 -- passed through the entry that opens it -- see ArmedClaim and the gate frames
@@ -5175,11 +5378,11 @@ end
 -- and the release branch of SNIPPET_PRE answer for, so what is drawn and what a
 -- release fires cannot disagree about which nest is live.
 --
--- Selection landing on a claim's parent is NOT that: drawn like an armed nest
--- -- children at full strength, the block behind them faded -- every one of
--- those children would be dead. Such a claim is drawn as a PREVIEW instead:
--- placed and visible, but plainly not somewhere you are yet. See
--- NEST_PREVIEW_ALPHA.
+-- Selection landing on a claim's parent is NOT that, and draws nothing: those
+-- children would every one of them be dead. It used to draw them faintly, as a
+-- preview, which put a second set of icons over the open nest's own -- worst on
+-- the arc, where the two sit in the same ring. What an entry does is said on
+-- the ENTRY now, by the corner dots every nesting entry carries (see PaintCell).
 --
 -- On a view with no arming of its own the selection is still the whole of the
 -- answer -- see NestsFollowSelection.
@@ -5197,7 +5400,7 @@ function PaletteView:UpdateNestShown(index)
         end
     end
 
-    local open, preview
+    local open
     if self:NestsFollowSelection() then
         open = touched
     else
@@ -5205,15 +5408,8 @@ function PaletteView:UpdateNestShown(index)
         open = armed and claims[armed] or nil
         if self:IsFan() and not self:IsPointerLayout() then
             -- The hover strip. A parent the window has culled has no drawn
-            -- nest to hold open, and there is no preview state: hovering a
-            -- parent ARMS its claim in the same breath it selects it, so a
-            -- nest is either open or absent.
+            -- nest to hold open.
             if open and not self:FanSlotOffset(open.parent) then open = nil end
-        elseif touched and touched ~= open then
-            -- Only ever the one the selection touches: a claim nobody is
-            -- pointing at has nothing to preview, and previewing every nest
-            -- at once is the burial this draws one at a time to avoid.
-            preview = touched
         end
     end
 
@@ -5228,23 +5424,17 @@ function PaletteView:UpdateNestShown(index)
         self:RepaintEntry(armedParent)
     end
 
-    -- Armed and previewed are two states of the SAME claim, so the open claim
-    -- staying put is not on its own a reason to draw nothing: a nest that arms
-    -- under a stationary cursor has to stop being a preview the frame it does.
-    if self._openClaim == open and self._previewClaim == preview then return end
-    self._openClaim, self._previewClaim = open, preview
+    if self._openClaim == open then return end
+    self._openClaim = open
 
-    -- The arc's preview is not dimmed -- see NEST_PREVIEW_ALPHA for why the
-    -- block layouts' is.
-    local previewAlpha = (self:LayoutMode() == "ARC") and 1 or NEST_PREVIEW_ALPHA
     for k = 1, #claims do
         local c = claims[k]
-        local a = (c == open) and 1 or (c == preview) and previewAlpha or nil
+        local shownNest = (c == open)
         for j = 1, c.n do
             local w = c.base and self.widgets[c.base + j]
             if w then
-                if a then w:SetAlpha(a) end
-                w:SetShown(a ~= nil)
+                if shownNest then w:SetAlpha(1) end
+                w:SetShown(shownNest)
             end
         end
     end
@@ -6375,7 +6565,9 @@ local SNIPPET_PRE = [==[
             -- no Select key set would otherwise open a menu with nothing able
             -- to answer it, so it keeps the hold-to-fire model instead.
             local confirm = self:GetAttribute("eqdConfirm")
+            local latched
             if confirm and self:GetAttribute("eqdToggle") then
+                latched = true
                 self:SetAttribute("eqdLatched", 1)
                 cancel:SetBindingClick(true, confirm, self, "__CONFIRM_BUTTON__")
                 -- ESCAPE onto THIS button rather than the cancel button, which
@@ -6384,6 +6576,25 @@ local SNIPPET_PRE = [==[
                 cancel:SetBindingClick(true, "ESCAPE", self, "__CANCEL_BUTTON__")
             else
                 cancel:SetBindingClick(true, "ESCAPE", cancel, "LeftButton")
+            end
+            -- The user's own cancel key, on whichever of those two routes this
+            -- open is using: a latched menu has no release to read a flag on,
+            -- so its cancel has to close the menu itself (see CANCEL_BUTTON),
+            -- while a held one only raises the flag its own release reads.
+            -- Bound through the SAME owner as everything above, so the one
+            -- ClearBindings on close hands it back with the rest -- which is
+            -- what lets a plain mouse button keep its ordinary use.
+            --
+            -- Never over the Select key. The two would be bound to one chord
+            -- and the last binding written would decide, which is a menu that
+            -- cancels when the user meant to fire.
+            local cancelKey = self:GetAttribute("eqdCancelKey")
+            if cancelKey and cancelKey ~= confirm then
+                if latched then
+                    cancel:SetBindingClick(true, cancelKey, self, "__CANCEL_BUTTON__")
+                else
+                    cancel:SetBindingClick(true, cancelKey, cancel, "LeftButton")
+                end
             end
         end
         -- Kept on the button, not in a snippet global: every palette shares one
@@ -6462,7 +6673,20 @@ local SNIPPET_PRE = [==[
                                 ox + (rox - rhw) * s, oy + (roy - rhh) * s)
                             rgate:SetWidth(rhw * 2 * s)
                             rgate:SetHeight(rhh * 2 * s)
-                            rgate:Hide()
+                            -- Shown from the open on the ARC, where entering
+                            -- one is how a claim is armed at all -- a nest
+                            -- whose only way in was its parent's own icon
+                            -- could not be reached by heading straight at the
+                            -- child. Every other layout leaves them down until
+                            -- the claim is armed: there the parent gate is the
+                            -- way in, and a region gate alight before that
+                            -- would answer for ground the claim does not hold
+                            -- yet.
+                            if mode == "ANGULAR" then
+                                rgate:Show()
+                            else
+                                rgate:Hide()
+                            end
                         elseif rgate then
                             -- Same hygiene as the parent gate above: this
                             -- claim has fewer regions this open than it once
@@ -7252,7 +7476,169 @@ end
 --
 -- Wrapped in parentheses for the same reason LeaveSnippet's return is; see
 -- the note there.
-local function EnterSnippet(k)
+-- Wrapped in a block so the two shared FRAGMENTS below cost no main-chunk
+-- local: this file sits within a couple of Lua's ceiling of 200.
+local EnterSnippet, LeaveSnippet
+do
+
+-- Where the cursor is in the palette's own space, as cdx/cdy -- nil when there
+-- was no reading to take. The maths mirrors the release branch of SNIPPET_PRE:
+-- same origin, same scale, same units, because every one of these answers the
+-- identical question from a different place and they must not drift apart. One
+-- fragment is how they are kept from drifting.
+local CURSOR_OFFSET = [==[
+        local cdx, cdy
+        do
+            local ui = self:GetFrameRef("ui")
+            if ui then
+                local x, y = ui:GetMousePosition()
+                if x then
+                    local w, h = ui:GetWidth(), ui:GetHeight()
+                    local cx, cy = x * w, y * h
+                    local s = tonumber(btn:GetAttribute("eqdScale")) or 1
+                    if s <= 0 then s = 1 end
+                    local ox, oy
+                    if btn:GetAttribute("eqdFixed") then
+                        ox = w * 0.5 + (tonumber(btn:GetAttribute("eqdPosX")) or 0)
+                        oy = h * 0.5 + (tonumber(btn:GetAttribute("eqdPosY")) or 0)
+                    else
+                        ox = tonumber(btn:GetAttribute("eqdGX"))
+                        oy = tonumber(btn:GetAttribute("eqdGY"))
+                    end
+                    if ox then cdx, cdy = (cx - ox) / s, (cy - oy) / s end
+                end
+            end
+        end
+]==]
+
+-- An ARC claim's true ground, measured polar: does the offset dx/dy stand on
+-- claim gk's own ground? Sets `inside`, which both callers declare.
+--
+-- The rects the gate frames use are event surfaces only and generous on purpose
+-- (see CorridorBox); this is what actually decides the ground. Two pieces, both
+-- sized by ChildGeom -- a BEAM out of the parent entry, and a WEDGE past the
+-- entry ring's outer edge -- and nothing at all inward of the icon's inner face,
+-- where a retreat toward the centre has to disarm so the other claims get their
+-- parent gates back.
+--
+-- Neither piece is the release's own ring resolution, and both are supersets of
+-- it. The beam is what the reach for a child actually travels through: a
+-- straight line from the parent passes BESIDE its icon before it clears the
+-- entry ring, and while that ground belonged to nothing the pgate's own OnLeave
+-- -- fired a few units into every reach -- disarmed the claim and left its
+-- children dead for the rest of the hold.
+--
+-- Asked at BOTH edges. The disarm has always asked it. The arm asks it too now:
+-- a claim whose only way in was its parent's own icon could not be reached by
+-- the one move a user actually makes, which is to head straight at the child
+-- they can see. The icon is 40 units across at a radius of 100 -- about eleven
+-- degrees -- while a claim's children spread up to forty-five degrees either
+-- side of it, so most of a nest's children sit at angles whose straight reach
+-- never crosses the icon at all.
+local ARC_GROUND = [==[
+                        local lo = tonumber(btn:GetAttribute("eqdCLo" .. gk))
+                        -- Along the parent's own axis, and across it. The axis
+                        -- is pushed as a vector because the sandbox has no
+                        -- sin/cos to rebuild it from the angle.
+                        local u = lo and (dx * (tonumber(btn:GetAttribute("eqdCAX" .. gk)) or 0)
+                                        + dy * (tonumber(btn:GetAttribute("eqdCAY" .. gk)) or 0))
+                        if u and u >= lo then
+                            local v = dx * (tonumber(btn:GetAttribute("eqdCAY" .. gk)) or 0)
+                                    - dy * (tonumber(btn:GetAttribute("eqdCAX" .. gk)) or 0)
+                            if v < 0 then v = -v end
+                            if v <= (tonumber(btn:GetAttribute("eqdCBeam" .. gk)) or 0)
+                                    + u * (tonumber(btn:GetAttribute("eqdCSlope" .. gk)) or 0) then
+                                inside = true
+                            elseif (dx * dx + dy * dy) ^ 0.5
+                                   >= (tonumber(btn:GetAttribute("eqdCEdge" .. gk)) or 0) then
+                                local ad = (atan2(dx, dy)
+                                    - (tonumber(btn:GetAttribute("eqdCAngle" .. gk)) or 0)) % 360
+                                if ad > 180 then ad = 360 - ad end
+                                inside = ad <= (tonumber(btn:GetAttribute("eqdCWedge" .. gk)) or 0)
+                            end
+                        end
+]==]
+
+-- self:GetFrameRef("btn") is the palette's own secure button; every gate
+-- carries that one reference back, however many palettes and claims exist,
+-- because the header they are all wrapped through is shared. k is baked into
+-- the snippet text rather than read off an attribute: each gate only ever
+-- needs to know its OWN claim index, never anyone else's, so there is nothing
+-- for a shared body to look up. It goes into a LOCAL of that name, which is
+-- what ARM_CLAIM reads -- the sites that arm geometrically only know their
+-- claim at run time, and one fragment serving all of them is one definition of
+-- what arming does.
+--
+-- `region` asks for the REGION gates' variant. A parent gate arms outright:
+-- its rect IS the claim's own cell, so standing on it is standing on the claim.
+-- A region gate's rects are not that -- they are generous event surfaces, and
+-- on the arc they reach over ground belonging to other entries -- so that
+-- variant arms only where the claim's true ground says so, which on the arc is
+-- the polar test above and off it is nothing at all. The block layouts keep
+-- their region gates dark until the claim is armed and reach their nests across
+-- a corridor, so an arming edge there would only ever fire where the claim is
+-- armed already.
+--
+-- Wrapped in parentheses for the same reason LeaveSnippet's return is; see
+-- the note there.
+function EnterSnippet(k, region)
+    if region then
+        return (([==[
+        local btn = self:GetFrameRef("btn")
+        if btn and btn:GetAttribute("eqdMode") == "ANGULAR" then
+            local inside = false
+__CURSOR_OFFSET__
+            if cdx then
+                local dx, dy = cdx, cdy
+                -- WHOSE ground is this, rather than "is it mine". The gate that
+                -- wins the cursor is not necessarily the gate of the claim
+                -- whose ground it is on: the arc's region rects are generous,
+                -- several claims' rects overlap around the ring, and mouse
+                -- focus is topmost-wins among frames on one level.
+                local armedNow = tonumber(btn:GetAttribute("eqdArmed"))
+                -- The armed claim keeps the cursor while it still holds it.
+                -- Claim grounds OVERLAP -- a wedge widens as it goes out, and
+                -- one claim's beam crosses its neighbour's wedge near the ring
+                -- -- so a rule that just picked a holder would hand a reach for
+                -- a child over to whichever neighbour also covered that point.
+                -- Reaching past a nest's own icons pulled the neighbouring nest
+                -- open on top of it.
+                local hold
+                if armedNow then
+                    local gk = armedNow
+__ARC_GROUND__
+                    hold = inside
+                end
+                if not hold then
+                    -- Otherwise the claim whose own axis the cursor is nearest,
+                    -- not the first one found: the claims are walked in index
+                    -- order, and lowest-index-wins put 12 o'clock in front of
+                    -- everything its wedge reached over.
+                    local found, bestAd
+                    local gm = tonumber(btn:GetAttribute("eqdGateMax")) or 0
+                    for gk = 1, gm do
+                        inside = false
+__ARC_GROUND__
+                        if inside then
+                            local ad = (atan2(dx, dy)
+                                - (tonumber(btn:GetAttribute("eqdCAngle" .. gk)) or 0)) % 360
+                            if ad > 180 then ad = 360 - ad end
+                            if not bestAd or ad < bestAd then
+                                found, bestAd = gk, ad
+                            end
+                        end
+                    end
+                    if found and found ~= armedNow then
+                        local k = found
+                        __ARM_CLAIM__
+                    end
+                end
+            end
+        end
+    ]==]):gsub("__CURSOR_OFFSET__", function() return CURSOR_OFFSET end)
+          :gsub("__ARC_GROUND__", function() return ARC_GROUND end)
+          :gsub("__ARM_CLAIM__", function() return ARM_CLAIM end))
+    end
     return (([==[
         local btn = self:GetFrameRef("btn")
         if btn then
@@ -7267,10 +7653,6 @@ end
 -- "I lost focus" to mean "the claim is left" -- a claim can own several of
 -- these rects, and moving between two of its own fires this too -- so it
 -- re-measures the cursor against the claim's WHOLE region before deciding.
--- The maths mirrors the release branch of SNIPPET_PRE: same origin, same
--- scale, same units, because this and that answer the identical question
--- ("where is the cursor in the palette's own space") from two different
--- places and must not drift apart.
 -- Built with plain substitution rather than string.format: the body below
 -- has a real modulo operator in it (`% 360`), which format would choke on
 -- as an invalid conversion.
@@ -7290,11 +7672,17 @@ end
 -- this gate still the armed claim's" prologue differs, and the rest of the
 -- body already reads `armed` at run time rather than through the baked-in
 -- literal, so both variants measure the identical ground the identical way.
-local function LeaveSnippet(k)
+--
+-- `region` again marks the REGION gates' variant, and changes one thing: a
+-- stale gate is put away, EXCEPT on the arc, where the region gates are up from
+-- the open precisely so that entering one can arm the claim. Hiding those the
+-- first time the cursor crossed one unarmed would take that way in away again.
+function LeaveSnippet(k, region)
     return (([==[
         local btn = self:GetFrameRef("btn")
         local armed = btn and tonumber(btn:GetAttribute("eqdArmed"))
         if __STALE_TEST__ then
+            __STALE_KEEP__
             self:Hide()
             return
         end
@@ -7308,26 +7696,9 @@ local function LeaveSnippet(k)
         -- works it out: the disarm path at the bottom re-uses it to ask
         -- whether the cursor has landed on ANOTHER claim's entry, and it is
         -- the same reading either way. nil when there was no reading to take.
-        local cdx, cdy
-        local ui = self:GetFrameRef("ui")
-        if ui then
-            local x, y = ui:GetMousePosition()
-            if x then
-                local w, h = ui:GetWidth(), ui:GetHeight()
-                local cx, cy = x * w, y * h
-                local s = tonumber(btn:GetAttribute("eqdScale")) or 1
-                if s <= 0 then s = 1 end
-                local ox, oy
-                if btn:GetAttribute("eqdFixed") then
-                    ox = w * 0.5 + (tonumber(btn:GetAttribute("eqdPosX")) or 0)
-                    oy = h * 0.5 + (tonumber(btn:GetAttribute("eqdPosY")) or 0)
-                else
-                    ox = tonumber(btn:GetAttribute("eqdGX"))
-                    oy = tonumber(btn:GetAttribute("eqdGY"))
-                end
-                if ox then
-                    local dx, dy = (cx - ox) / s, (cy - oy) / s
-                    cdx, cdy = dx, dy
+__CURSOR_OFFSET__
+        if cdx then
+            local dx, dy = cdx, cdy
 
                     -- No inflation HERE, and none needed: the overshoot grace
                     -- a fast reach wants is built into the eqdRO* rects
@@ -7354,45 +7725,9 @@ local function LeaveSnippet(k)
                         end
                     end
 
-                    -- An ARC claim's true ground is polar, not the rects the
-                    -- gate frames use for event coverage -- those are
-                    -- generous on purpose (see CorridorBox). Two pieces, both
-                    -- sized by ChildGeom -- a BEAM out of the parent entry,
-                    -- and a WEDGE past the entry ring's outer edge -- and
-                    -- nothing at all inward of the icon's inner face, where a
-                    -- retreat toward the centre has to disarm so the other
-                    -- claims get their parent gates back.
-                    --
-                    -- Neither piece is the release's own ring resolution, and
-                    -- both are supersets of it. The beam is what the reach for
-                    -- a child actually travels through: a straight line from
-                    -- the parent passes BESIDE its icon before it clears the
-                    -- entry ring, and while that ground belonged to nothing the
-                    -- pgate's own OnLeave -- fired a few units into every reach
-                    -- -- disarmed the claim and left its children dead for the
-                    -- rest of the hold.
                     if not inside and btn:GetAttribute("eqdMode") == "ANGULAR" then
-                        local lo = tonumber(btn:GetAttribute("eqdCLo" .. armed))
-                        -- Along the parent's own axis, and across it. The axis
-                        -- is pushed as a vector because the sandbox has no
-                        -- sin/cos to rebuild it from the angle.
-                        local u = lo and (dx * (tonumber(btn:GetAttribute("eqdCAX" .. armed)) or 0)
-                                        + dy * (tonumber(btn:GetAttribute("eqdCAY" .. armed)) or 0))
-                        if u and u >= lo then
-                            local v = dx * (tonumber(btn:GetAttribute("eqdCAY" .. armed)) or 0)
-                                    - dy * (tonumber(btn:GetAttribute("eqdCAX" .. armed)) or 0)
-                            if v < 0 then v = -v end
-                            if v <= (tonumber(btn:GetAttribute("eqdCBeam" .. armed)) or 0)
-                                    + u * (tonumber(btn:GetAttribute("eqdCSlope" .. armed)) or 0) then
-                                inside = true
-                            elseif (dx * dx + dy * dy) ^ 0.5
-                                   >= (tonumber(btn:GetAttribute("eqdCEdge" .. armed)) or 0) then
-                                local ad = (atan2(dx, dy)
-                                    - (tonumber(btn:GetAttribute("eqdCAngle" .. armed)) or 0)) % 360
-                                if ad > 180 then ad = 360 - ad end
-                                inside = ad <= (tonumber(btn:GetAttribute("eqdCWedge" .. armed)) or 0)
-                            end
-                        end
+                        local gk = armed
+__ARC_GROUND__
                     elseif not inside then
                         for r = 1, __REGION_MAX__ do
                             local rhw = tonumber(btn:GetAttribute("eqdROHW" .. armed .. "_" .. r))
@@ -7407,8 +7742,6 @@ local function LeaveSnippet(k)
                             end
                         end
                     end
-                end
-            end
         end
 
         if not inside then
@@ -7420,9 +7753,16 @@ local function LeaveSnippet(k)
                 -- matching note in EnterSnippet's own Show() loop.
                 if other and btn:GetAttribute("eqdPOHW" .. i) then other:Show() end
             end
-            for r = 1, __REGION_MAX__ do
-                local region = btn:GetFrameRef("rgate" .. armed .. "_" .. r)
-                if region then region:Hide() end
+            -- The arc's region gates stay up: they are this layout's way IN,
+            -- and a disarmed claim has to be armable again without the cursor
+            -- going back to the parent icon it did not touch in the first
+            -- place. Every other layout puts them away, arming there being the
+            -- parent gate's own business.
+            if btn:GetAttribute("eqdMode") ~= "ANGULAR" then
+                for r = 1, __REGION_MAX__ do
+                    local region = btn:GetFrameRef("rgate" .. armed .. "_" .. r)
+                    if region then region:Hide() end
+                end
             end
 
             -- Those parent gates went back up under wherever the cursor
@@ -7458,8 +7798,18 @@ local function LeaveSnippet(k)
             end
         end
     ]==]):gsub("__STALE_TEST__", k and ("armed ~= " .. k) or "not armed")
+         -- Nothing at all for the gates that have no reason to ask: the
+         -- substitution leaves the line out rather than baking in a test that
+         -- is always false.
+         :gsub("__STALE_KEEP__", region
+               and 'if btn and btn:GetAttribute("eqdMode") == "ANGULAR" then return end'
+               or "")
+         :gsub("__CURSOR_OFFSET__", function() return CURSOR_OFFSET end)
+         :gsub("__ARC_GROUND__", function() return ARC_GROUND end)
          :gsub("__REGION_MAX__", tostring(REGION_MAX))
          :gsub("__ARM_CLAIM__", function() return ARM_CLAIM end))
+end
+
 end
 
 -- One parent gate and up to REGION_MAX region gates per possible claim,
@@ -7628,17 +7978,17 @@ function EnsureGates(index, btn, need)
 
             SecureHandlerSetFrameRef(rgate, "btn", btn)
             SecureHandlerSetFrameRef(rgate, "ui", UIParent)
-            -- OnEnter carries no test of its own -- LeaveSnippet is the whole
-            -- story for a region gate -- but it still has to be wrapped here,
-            -- empty body and all. SecureHandlers.lua's own OnEnter/OnLeave
-            -- wrapper only ever raises "_wrapentered" from INSIDE the OnEnter
-            -- wrap (Wrapped_OnEnter), and Wrapped_OnLeave refuses to run
-            -- LeaveSnippet at all unless that flag is already up. Left
-            -- unwrapped, the flag stays permanently down and the disarm test
-            -- never runs -- a claim that ever armed stays armed for the rest
-            -- of the hold, nest stuck open and block stuck dim.
-            SecureHandlerWrapScript(rgate, "OnEnter", EnsureSecureHeader(), "")
-            SecureHandlerWrapScript(rgate, "OnLeave", EnsureSecureHeader(), LeaveSnippet(k))
+            -- OnEnter carries the ARC's way in, and nothing at all off it --
+            -- see EnterSnippet's `region` variant. It would still have to be
+            -- wrapped here even when it carried nothing: SecureHandlers.lua's
+            -- own OnEnter/OnLeave wrapper only ever raises "_wrapentered" from
+            -- INSIDE the OnEnter wrap (Wrapped_OnEnter), and Wrapped_OnLeave
+            -- refuses to run LeaveSnippet at all unless that flag is already
+            -- up. Left unwrapped, the flag stays permanently down and the
+            -- disarm test never runs -- a claim that ever armed stays armed for
+            -- the rest of the hold, nest stuck open and block stuck dim.
+            SecureHandlerWrapScript(rgate, "OnEnter", EnsureSecureHeader(), EnterSnippet(k, true))
+            SecureHandlerWrapScript(rgate, "OnLeave", EnsureSecureHeader(), LeaveSnippet(k, true))
 
             SecureHandlerSetFrameRef(btn, "rgate" .. k .. "_" .. r, rgate)
             pool.rgate[k][r] = rgate
@@ -8027,6 +8377,10 @@ local function PushPalette(index)
     local confirmKey = p.confirmKey
     btn:SetAttribute("eqdConfirm",
         (type(confirmKey) == "string" and confirmKey ~= "") and confirmKey or nil)
+    -- Same story for the cancel key, and from the same place in the profile.
+    local cancelKey = p.cancelKey
+    btn:SetAttribute("eqdCancelKey",
+        (type(cancelKey) == "string" and cancelKey ~= "") and cancelKey or nil)
 
     -- Pointer layouts: the cell centres, worked out here rather than in the
     -- snippet. GridDims and GridBase already encode the auto-column rule and the
@@ -8632,6 +8986,45 @@ function SetEventsEnabled(on)
                 liveView:RefreshMarkerPips()
             end
         end)
+        -- What the "Last Used Mount" entry summons. Blizzard records no such
+        -- thing -- the whole C_MountJournal surface answers only what is
+        -- summoned RIGHT NOW -- so it is observed. Every successful player cast
+        -- is offered to GetMountFromSpell, which answers with a mountID for a
+        -- mount summon and nil for everything else, so the filter and the
+        -- answer are one call; Blizzard's own mount UI watches this same event
+        -- (Blizzard_MountCollection.lua:1022). Documented
+        -- SecretArguments = "AllowedWhenTainted", so a tainted addon may call
+        -- it (MountJournalDocumentation.lua:249-262).
+        --
+        -- Ignored outright in combat. This fires for every cast the player
+        -- makes, and a payload read there may be a secret value; nothing is
+        -- missed by skipping it, because no mount can be summoned in combat
+        -- anyway.
+        --
+        -- Stored on the profile, so the entry is not blank at the start of a
+        -- session. A profile shared between characters shares the memory too,
+        -- and the game refuses a summon the character cannot make, with its own
+        -- message -- the same answer a mount entry picked on another character
+        -- already gives.
+        --
+        -- Inline for the reason the registration above it is: the main chunk is
+        -- at Lua's ceiling of 200 locals.
+        EQD:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED", function(_, _, unit, _, spellID)
+            if unit ~= "player" or InCombatLockdown() then return end
+            if type(spellID) ~= "number" or not C_MountJournal.GetMountFromSpell then
+                return
+            end
+            local mountID = C_MountJournal.GetMountFromSpell(spellID)
+            local pf = P()
+            if mountID and pf and pf.lastMountID ~= mountID then
+                pf.lastMountID = mountID
+                -- Only a palette actually holding one of these has anything to
+                -- redraw, and RequestPush coalesces and defers like every other
+                -- push, so the cost of a mount cast is one comparison for
+                -- everyone else.
+                RequestPush()
+            end
+        end)
     else
         EQD:UnregisterEvent("UPDATE_BINDINGS")
         EQD:UnregisterEvent("PLAYER_REGEN_ENABLED")
@@ -8639,6 +9032,7 @@ function SetEventsEnabled(on)
         EQD:UnregisterEvent("SPELLS_CHANGED")
         EQD:UnregisterEvent("UPDATE_MACROS")
         EQD:UnregisterEvent("RAID_TARGET_UPDATE")
+        EQD:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     end
 end
 

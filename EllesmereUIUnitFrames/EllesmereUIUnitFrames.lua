@@ -1465,6 +1465,10 @@ local function ClassColorSourceUnit(unitKey, unit)
     return unit or unitKey
 end
 
+-- Carrier for a resolved-but-secret class color. Reused: it is written and consumed inside one
+-- UpdateColor pass (SetStatusBarColor, then PostUpdateColor), and nothing stores it.
+local SECRET_CLASS_COLOR = CreateColor(1, 1, 1, 1)
+
 -- TEMPORARY oUF SHIM -- remove when upstream oUF ships secret-safe class coloring
 -- (check during the standing per-bump lib re-diff). 12.1 build 68914 made UnitClass return a SECRET token
 -- for identity-restricted units; the vendored health element's UpdateColor indexes
@@ -1494,9 +1498,15 @@ local function UF_SecretSafeHealthColor(self, event, unit)
             -- 12.1 (68914): UnitClass is SecretWhenUnitIdentityRestricted (focus/focus-target/ToT):
             -- token can't be read or used as a table key. C_ClassColor.GetClassColor and
             -- SetStatusBarColor are both SecretArguments="AllowedWhenTainted", so the real
-            -- color still reaches the bar without Lua inspecting it. Custom class colors
-            -- can't apply here -- that's an addon-side table lookup, which a secret key forbids.
-            if C_ClassColor and C_ClassColor.GetClassColor then
+            -- color still reaches the bar without Lua inspecting it -- but only ever in
+            -- Blizzard's shade. GetClassColorForRestrictedUnit recovers the user's custom
+            -- class color for group members with the compare done in C; its r/g/b are secret,
+            -- so they go into a scratch ColorMixin (plain field writes) and are never read.
+            local ok, r, g, b = EllesmereUI.GetClassColorForRestrictedUnit(unit, class)
+            if ok then
+                SECRET_CLASS_COLOR:SetRGB(r, g, b)
+                color = SECRET_CLASS_COLOR
+            elseif C_ClassColor and C_ClassColor.GetClassColor then
                 color = C_ClassColor.GetClassColor(class)
             end
         else
@@ -1606,17 +1616,27 @@ local function ApplyDarkTheme(health)
             local bgClassColored = uSettings and uSettings.bgClassColored
             -- Base fill color (custom, or oUF's class/reaction color); gradient
             -- applies additively when enabled, otherwise flat.
+            -- haveBase/baseSecret are PLAIN booleans standing in for bR: on an
+            -- identity-restricted unit bR is a secret number, and truthiness-testing one
+            -- errors, so it may only ever be handed to a setter.
             local bR, bG, bB
+            local haveBase, baseSecret = false, false
             if cFill and not classColored then
                 bR, bG, bB = cFill.r, cFill.g, cFill.b
+                haveBase = true
             elseif classColored and uKey == "pet" then
                 local _, ct = UnitClass("player")
                 local cc = ct and not issecretvalue(ct) and EllesmereUI.GetClassColor(ct)
-                if cc then bR, bG, bB = cc.r, cc.g, cc.b end
+                if cc then bR, bG, bB = cc.r, cc.g, cc.b; haveBase = true end
             elseif color and color.GetRGB then
                 bR, bG, bB = color:GetRGB()
+                haveBase = true
+                baseSecret = issecretvalue(bR)
             end
-            if uSettings and uSettings.gradientEnabled and bR then
+            -- Texture:SetGradient is SecretArguments="AllowedWhenUntainted", so a secret
+            -- color cannot go through it from here at all. The flat color the health
+            -- element already applied is correct, so a restricted unit keeps a flat bar.
+            if uSettings and uSettings.gradientEnabled and haveBase and not baseSecret then
                 local gc = uSettings.gradientColor
                 -- A gradient overrides region alpha, so Bar Opacity is baked into
                 -- the gradient endpoint alphas instead of SetAlpha.
@@ -1625,7 +1645,7 @@ local function ApplyDarkTheme(health)
                 ApplyBarGradient(self:GetStatusBarTexture(), uSettings.gradientDir or "HORIZONTAL",
                     bR, bG, bB, ga,
                     gc and gc.r or 0.20, gc and gc.g or 0.20, gc and gc.b or 0.80, ga)
-            elseif classColored and uKey == "pet" and bR then
+            elseif classColored and uKey == "pet" and haveBase then
                 self:SetStatusBarColor(bR, bG, bB)
             elseif cFill and not classColored then
                 self:SetStatusBarColor(cFill.r, cFill.g, cFill.b)
@@ -1652,7 +1672,14 @@ local function ApplyDarkTheme(health)
                     self.bg:SetColorTexture(cFill.r * 0.2, cFill.g * 0.2, cFill.b * 0.2, 1)
                 elseif color and color.GetRGB then
                     local r, g, b = color:GetRGB()
-                    self.bg:SetColorTexture(r * 0.2, g * 0.2, b * 0.2, 1)
+                    -- SetColorTexture takes secrets; the multiply does not, and there is no
+                    -- C-side blend to darken one with. So a restricted unit's background
+                    -- degrades to the default dark rather than throwing on the tint.
+                    if issecretvalue(r) then
+                        self.bg:SetColorTexture(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B, 1)
+                    else
+                        self.bg:SetColorTexture(r * 0.2, g * 0.2, b * 0.2, 1)
+                    end
                 else
                     -- No color source (e.g. no target): default bg.
                     self.bg:SetColorTexture(DARK_HEALTH_R, DARK_HEALTH_G, DARK_HEALTH_B, 1)
@@ -2944,6 +2971,26 @@ function PortraitOverride(self, event, evtUnit)
                 element:SetPortraitZoom(1)
                 element:SetPosition(0, 0, 0)
                 element:SetCamDistanceScale(camScale)
+            end
+        elseif element.isClass then
+            -- Class sprite lane: the engine painter is the single portrait
+            -- dispatch, so class mode paints here too. SetPortraitTexture on
+            -- this element would stamp portrait art through the sprite
+            -- cell's texcoords (the field-reported weird-colored square);
+            -- ApplyClassIconTexture instead re-asserts file + coords, and
+            -- re-reading the style here lets art-style changes ride any
+            -- repaint. Unit swaps (target changes) land through the same
+            -- guid gate as every other portrait mode.
+            if isAvailable then
+                local _, ct = UnitClass(u)
+                if issecretvalue(ct) then ct = nil end
+                local uKeyC = UnitToSettingsKey(u)
+                local uSC = uKeyC and db.profile[uKeyC]
+                ApplyClassIconTexture(element, ct or "WARRIOR",
+                    (uSC and uSC.classThemeStyle) or "modern")
+            else
+                element:SetTexCoord(0.15, 0.85, 0.15, 0.85)
+                element:SetTexture([[Interface\Icons\INV_Misc_QuestionMark]])
             end
         else
             if isAvailable then
@@ -5540,7 +5587,6 @@ local function CreatePortrait(frame, side, frameHeight, unit)
             local cs = ((us and us.portrait3dZoom) or 100) / 100
             self:SetCamDistanceScale(cs)
         end
-        model3D.Override = PortraitOverride
         model3D:Hide()
         backdrop._3d = model3D
         return model3D
@@ -5551,10 +5597,11 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     PP.Point(tex2D, "TOPLEFT", backdrop, "TOPLEFT", 0, 0)
     PP.Point(tex2D, "BOTTOMRIGHT", backdrop, "BOTTOMRIGHT", 0, 0)
     tex2D:SetTexCoord(0.15, 0.85, 0.15, 0.85)
-    tex2D.Override = PortraitOverride
     tex2D:Hide()
 
-    -- Class theme icon: a static texture, no oUF element needed.
+    -- Class theme icon: painted by the engine portrait painter's class lane
+    -- (element.isClass); this creation-time paint only seeds art before the
+    -- first dispatch.
     local texClass = backdrop:CreateTexture(nil, "ARTWORK")
     local classInset = math.floor(portraitHeight * 0.08)
     PP.Point(texClass, "TOPLEFT", backdrop, "TOPLEFT", classInset, -classInset)
@@ -5565,20 +5612,6 @@ local function CreatePortrait(frame, side, frameHeight, unit)
     local classStyle = (uSettings and uSettings.classThemeStyle) or "modern"
     ApplyClassIconTexture(texClass, classToken or "WARRIOR", classStyle)
     texClass:Hide()
-
-    texClass.Override = function(self, event, unit)
-        local f = self.__owner
-        if not f then return end
-        local evUnit = (event == "OnUpdate" and f.unit) or unit
-        if not evUnit or not UnitIsUnit(f.unit, evUnit) then return end
-        local targetUnit = f.unit
-        local _, ct = UnitClass(targetUnit)
-        if issecretvalue(ct) then ct = nil end
-        local uS = db.profile[UnitToSettingsKey(targetUnit)] or db.profile.player
-        local cStyle = (uS and uS.classThemeStyle) or "modern"
-        ApplyClassIconTexture(self, ct or "WARRIOR", cStyle)
-        self:Show()
-    end
 
     backdrop._3d = model3D
     backdrop._2d = tex2D
@@ -11913,7 +11946,9 @@ local function UnitFrame_OnLeave(self)
             local hasAnyHideOpt = s.visHideNoTarget
                                or s.visHideNoEnemy
                                or s.visHideMounted
+                               or s.visOnlyMounted
                                or s.visHideHousing
+                               or s.visOnlyHousing
                                or s.visOnlyInstances
             local keepShown = (not hiddenByOpts) and hasAnyHideOpt
             leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0
@@ -12009,6 +12044,16 @@ function InitializeFrames()
         -- left-click target) when click-cast is off.
         if type(ClickCastFrames) ~= "table" then ClickCastFrames = {} end
         ClickCastFrames[frame] = true
+        -- NO ping mixin here, deliberately (three field rounds, 2026-08-24):
+        -- an addon-installed PingableType mixin CANNOT serve secret-content
+        -- units. Reading our tainted GetIsPingable inside PingManager's
+        -- securecalled helper taints that execution, every unit value
+        -- Blizzard's own mixin then fetches comes back tainted-restricted,
+        -- and the secure caller's securecopy of the GetTargetInfo table
+        -- hard-errors ("inaccessible secret") -- even with our getter
+        -- returning nil. The reported enemy-target-frame ping error also
+        -- reproduces with NO EUI receiver in the path (pre-mixin trace, No
+        -- Lua Taint) and is upstream. Do not re-attempt.
     end
 
     -- Spawn each unit's EllesmereUI frame only when its source is "eui". A unit set to
@@ -13102,11 +13147,6 @@ function InitializeFrames()
                 if frame:IsElementEnabled("Portrait") then
                     frame:DisableElement("Portrait")
                 end
-            elseif settings.portraitMode == "class" and unit == "player" then
-                -- Class theme is a static texture -- disable oUF Portrait element (player only)
-                if frame:IsElementEnabled("Portrait") then
-                    frame:DisableElement("Portrait")
-                end
             end
         end
     end
@@ -13325,7 +13365,9 @@ function InitializeFrames()
                     local hasAnyHideOpt = s.visHideNoTarget
                                        or s.visHideNoEnemy
                                        or s.visHideMounted
+                                       or s.visOnlyMounted
                                        or s.visHideHousing
+                                       or s.visOnlyHousing
                                        or s.visOnlyInstances
                     if hiddenByOpts then
                         bodyAlpha = 0
@@ -13786,6 +13828,45 @@ end
 function SetupOptionsPanel()
     ns.db = db
     ns.frames = frames
+
+    -- Live Enable Boss Frames for the EUI source. The boss frames spawn at login
+    -- only, so the enable toggle used to be a silent no-op in the ON->OFF
+    -- direction: PromptReloadIfUnspawned only prompts when frames are MISSING,
+    -- and nothing hid the live frames -- they kept showing on every boss for the
+    -- rest of the session (field report 2026-08-13; Blizzard source toggled live,
+    -- hence "only works on Blizzard default"). The unit watch is the show/hide
+    -- authority (RegisterUnitWatch at spawn), so toggling it IS the live enable/
+    -- disable; frames never spawned this session still fall through to the
+    -- reload prompt in the options setter. Watch/Hide writes on these secure
+    -- frames are lockdown-blocked: in combat, park a one-shot that re-applies
+    -- the CURRENT setting at regen (reads the profile at fire time, so the last
+    -- click wins and stacked toggles collapse to one apply).
+    function ns.UF_SetBossFramesActive(on)
+        if InCombatLockdown() then
+            local w = ns._bossToggleRegen
+            if not w then
+                w = CreateFrame("Frame")
+                w:SetScript("OnEvent", function(self)
+                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    ns.UF_SetBossFramesActive(db.profile.enabledFrames.boss ~= false)
+                end)
+                ns._bossToggleRegen = w
+            end
+            w:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
+        for i = 1, 5 do
+            local f = frames["boss" .. i]
+            if f then
+                if on then
+                    RegisterUnitWatch(f)
+                else
+                    UnregisterUnitWatch(f)
+                    f:Hide()
+                end
+            end
+        end
+    end
     ns.ApplyFramePosition = ApplyFramePosition
     ns.GetFrameDimensions = GetFrameDimensions
     local reloadPending = false

@@ -3267,6 +3267,11 @@ function ns.RefreshAllSettings()
     if ns.ApplyClassPowerSetting then ns.ApplyClassPowerSetting() end
     -- Aura containers: fingerprint-guarded, near-free when no aura setting changed.
     if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+    -- Hide Enemy Nameplates OOC is CVar + event driven, and its options setter plus
+    -- PLAYER_LOGIN were its only callers: a value written straight into the profile
+    -- (override group, profile switch, import) flipped the checkbox while plates kept
+    -- the old behaviour. Self-guarded, so an unchanged key costs nothing.
+    if ns.ApplyOOCPlates then ns.ApplyOOCPlates() end
 end
 
 -------------------------------------------------------------------------------
@@ -4951,6 +4956,7 @@ local function GetReactionColor(unit)
 end
 local hookedUFs = {}
 local hookedHighlights = {}
+local hookedSoftTargetIcons = {}
 local npOffscreenParent = CreateFrame("Frame")
 npOffscreenParent:Hide()
 local storedParents = {}
@@ -4999,10 +5005,11 @@ local function HideBlizzardFrame(nameplate, unit)
     -- The UnitFrame ITSELF must stay on the nameplate where Blizzard placed it (alpha 0 above)
     -- -- parking the whole frame under a hidden holder flips every plate's content to
     -- IsVisible()==false and breaks click target selection between overlapping plates in packs.
-    -- Exclusions: the two kept-live frames, plus protected/forbidden children (alpha 0 hides them).
+    -- Exclusions: kept-live frames, plus protected/forbidden children (alpha 0 hides them).
     for i = 1, uf:GetNumChildren() do
         local child = select(i, uf:GetChildren())
         if child and child ~= uf.WidgetContainer and child ~= uf.AurasFrame
+        and child ~= uf.SoftTargetFrame
            and not child:IsForbidden() and not child:IsProtected() then
             if not storedParents[child] then storedParents[child] = uf end
             child:SetParent(npOffscreenParent)
@@ -5017,6 +5024,38 @@ local function HideBlizzardFrame(nameplate, unit)
     -- doesn't affect the UnitFrame's bounds.
     if uf.WidgetContainer then
         uf.WidgetContainer:SetParent(nameplate)
+    end
+    -- Keep the soft-target cursor icon working: reparent it live instead of sweeping it
+    -- offscreen or leaving it under uf's forced alpha-0.
+    if uf.SoftTargetFrame then
+        uf.SoftTargetFrame:SetParent(nameplate)
+        uf.SoftTargetFrame:SetAlpha(1)
+        -- Same icon is reused for enemy/friend/interact soft-targets; only allow the
+        -- interact case through. The hook cannot be uninstalled, so it gates on the
+        -- reparented state: while WE hold the frame its grandparent is the plate BASE,
+        -- which carries namePlateUnitToken (the field this file already uses for
+        -- base->unit resolution); after RestoreBlizzardFrame the grandparent is the
+        -- UnitFrame, the token read misses, and Blizzard's stock behavior stands.
+        local icon = uf.SoftTargetFrame.Icon
+        if icon and not hookedSoftTargetIcons[icon] then
+            hookedSoftTargetIcons[icon] = true
+            hooksecurefunc(icon, "Show", function(self)
+                local stf = self:GetParent()
+                local base = stf and stf:GetParent()
+                local ufUnit = base and base.namePlateUnitToken
+                if not ufUnit then return end
+                -- Non-self unit comparison: secret boolean whenever the unit is
+                -- identity-restricted -- which is NORMAL for enemies, and hostile
+                -- interactables (skinnable corpses, quest objects) are legitimate
+                -- soft-interact targets. Secret = cannot judge = leave the icon
+                -- alone (stock shows every soft-target icon; fail toward stock,
+                -- never toward hiding -- collapsing secret to hidden killed
+                -- enemy interact icons in the field).
+                local same = UnitIsUnit(ufUnit, "softinteract")
+                if issecretvalue and issecretvalue(same) then return end
+                if same ~= true then self:Hide() end
+            end)
+        end
     end
     if not hookedUFs[uf] then
         hookedUFs[uf] = true
@@ -5090,6 +5129,9 @@ local function RestoreBlizzardFrame(nameplate)
     end
     if uf.WidgetContainer then
         uf.WidgetContainer:SetParent(uf)
+    end
+    if uf.SoftTargetFrame then
+        uf.SoftTargetFrame:SetParent(uf)
     end
 end
 ns.HideBlizzardFrame = HideBlizzardFrame
@@ -7118,6 +7160,23 @@ function NameplateFrame:ApplyCastColor(uninterruptible)
         normalCastTint = sc
     end
     local cr, cg, cb = ComputeCastBarTint(kickReadyTint, normalCastTint)
+
+    -- Match the base cast fill to uninterruptible casts so plate opacity
+    -- doesn't reveal the interruptible color underneath the overlay.
+    if C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+        local unintColor = cfg.castBarUninterruptible or defaults.castBarUninterruptible
+        -- The settings-refresh callers pass the stored _kickProtected stamp,
+        -- which is nil until the first cast event -- and a nil reaching the
+        -- fold throws. type() is the secret-legal nil test (a plain == nil
+        -- compare throws on a secret boolean), same idiom as the Important
+        -- Cast block above.
+        local isUnint = uninterruptible
+        if type(isUnint) == "nil" then isUnint = false end
+        local ev = C_CurveUtil.EvaluateColorValueFromBoolean
+        cr = ev(isUnint, unintColor.r, cr)
+        cg = ev(isUnint, unintColor.g, cg)
+        cb = ev(isUnint, unintColor.b, cb)
+    end
     self.cast:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
     -- Shield icon is opt-out: when disabled it never shows, even on uninterruptible casts. The
     -- setting is a clean boolean, so it gates the (possibly SECRET) flag without evaluating it.
@@ -8321,20 +8380,59 @@ do
         end
     end
 
+    -- Round-robin BUDGETED sweep: each range verdict is a multi-C-call probe
+    -- walk, so classifying every plate every tick is unbounded in crowded
+    -- scenes (40 plates x 5Hz x spell+item probes was thousands of C calls
+    -- per second). 8 plates per 0.2s tick = full coverage inside ~1s at a
+    -- full plate cap, imperceptible for a fade; small scenes still resolve
+    -- every tick. Verdicts come from Range_SweepBeyond (per-unit short-TTL
+    -- cache; never touches the crosshair/QoL single-slot target caches).
+    -- Melee note: at cutoff 5 verdicts rely on the protection-gated item
+    -- walk, so in instanced combat the fade can degrade to "no fade" for
+    -- melee specs -- deliberate fail-open, never a blocked action.
     function RT.FadeTick()
         local customCutoff = p and p.outOfRangeMode == "custom" and p.outOfRangeCustomRange
         local cutoff = EllesmereUI.Range_GetAttackCutoff(customCutoff)
-        for _, plate in pairs(ns.plates) do
-            local beyond = plate.unit and EllesmereUI.Range_IsBeyondAttackRange(plate.unit, cutoff)
-            local alpha = beyond == true and ns._oorAlpha or 1
-            if (plate._oorCurAlpha or 1) ~= alpha then
-                plate._oorCurAlpha = alpha
-                ns.NT_Apply(plate)
+        local q = RT.fadeQ
+        if not q then q = {}; RT.fadeQ = q end
+        if not RT.fadeIdx or RT.fadeIdx > #q then
+            -- New cycle: snapshot the live plate set (reused table, one wipe
+            -- per cycle). Plates that detach mid-cycle are re-checked below.
+            wipe(q)
+            for _, plate in pairs(ns.plates) do q[#q + 1] = plate end
+            RT.fadeIdx = 1
+        end
+        local budget = 8
+        while RT.fadeIdx <= #q and budget > 0 do
+            local plate = q[RT.fadeIdx]
+            RT.fadeIdx = RT.fadeIdx + 1
+            budget = budget - 1
+            local unit = plate.unit
+            if unit and ns.plates[unit] == plate then
+                local beyond
+                -- Cleanly-non-attackable plates (friendly/neutral NPCs) can
+                -- never answer an attack-range probe; skip the whole walk.
+                -- Only a READABLY-false flag skips -- a secret answer falls
+                -- through to the probes, whose own gates fail open.
+                local okAtt, att = pcall(UnitCanAttack, "player", unit)
+                local skip = okAtt and not (issecretvalue and issecretvalue(att)) and att == false
+                if not skip then
+                    beyond = EllesmereUI.Range_SweepBeyond(unit, cutoff)
+                end
+                local alpha = beyond == true and ns._oorAlpha or 1
+                if (plate._oorCurAlpha or 1) ~= alpha then
+                    plate._oorCurAlpha = alpha
+                    ns.NT_Apply(plate)
+                end
             end
         end
     end
 
     function RT.ResetFade()
+        -- Drop the round-robin cursor and its plate snapshot too: a disable
+        -- mid-cycle must not pin recycled plates in the reused queue.
+        if RT.fadeQ then wipe(RT.fadeQ) end
+        RT.fadeIdx = nil
         for _, plate in pairs(ns.plates) do
             if plate._oorCurAlpha then
                 plate._oorCurAlpha = nil
@@ -8382,4 +8480,52 @@ do
     end
 
 end
+
+-------------------------------------------------------------------------------
+--  Hide Enemy Nameplates Out of Combat (EXTRAS): drives nameplateShowEnemies,
+--  the same CVar behind Blizzard's combat-legal "Show Enemy Name Plates"
+--  keybind, so plates flip cleanly at the combat edges. The combat events are
+--  registered only while the setting is on (zero cost off); disabling the
+--  setting restores plates ON only if this feature ever hid them. All state
+--  lives on ns -- this chunk is at the 200-local cap.
+-------------------------------------------------------------------------------
+ns._oocPlatesCtl = CreateFrame("Frame")
+ns.ApplyOOCPlates = function()
+    local ctl = ns._oocPlatesCtl
+    local on = p and p.hideEnemyPlatesOOC == true
+    if on then
+        ctl:RegisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:RegisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:RegisterEvent("PLAYER_ENTERING_WORLD")
+        ns._oocPlatesOwned = true
+        -- Read-guarded: RefreshAllSettings calls this on every nameplate settings
+        -- change, and a redundant SetCVar broadcasts CVAR_UPDATE to the whole UI.
+        local want = InCombatLockdown() and "1" or "0"
+        if GetCVar("nameplateShowEnemies") ~= want then
+            SetCVar("nameplateShowEnemies", want)
+        end
+    else
+        ctl:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        if ns._oocPlatesOwned then
+            ns._oocPlatesOwned = nil
+            SetCVar("nameplateShowEnemies", "1")
+        end
+    end
+end
+ns._oocPlatesCtl:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_LOGIN" then
+        self:UnregisterEvent("PLAYER_LOGIN")
+        ns.ApplyOOCPlates()
+        return
+    end
+    if event == "PLAYER_REGEN_DISABLED" then
+        SetCVar("nameplateShowEnemies", "1")
+    elseif not InCombatLockdown() then
+        -- REGEN_ENABLED, or a world entry that lands out of combat.
+        SetCVar("nameplateShowEnemies", "0")
+    end
+end)
+ns._oocPlatesCtl:RegisterEvent("PLAYER_LOGIN")
 
