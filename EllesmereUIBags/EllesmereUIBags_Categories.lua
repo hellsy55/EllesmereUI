@@ -164,44 +164,6 @@ function CategoryManager:InitCategories()
                 customInserted[uc.key] = true
             end
         else
-            -- Split mode: expand the "Item Set Gear" anchor into one category per
-            -- equipment set, named after the set. Runtime-only -- SaveState collapses
-            -- the block back to the anchor so per-character set names never reach
-            -- the shared profile. Zero sets falls through to the normal category so
-            -- the anchor keeps its saved order position and state.
-            local splitSets
-            if def.isSetGear and BP().bagSplitSetGearBySet then
-                local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
-                if setIDs then
-                    for _, setID in ipairs(setIDs) do
-                        local sname, sicon = C_EquipmentSet.GetEquipmentSetInfo(setID)
-                        if sname then
-                            splitSets = splitSets or {}
-                            splitSets[#splitSets + 1] = { id = setID, name = sname, icon = sicon }
-                        end
-                    end
-                end
-            end
-            if splitSets then
-                table.sort(splitSets, function(a, b) return a.name < b.name end)
-                -- Nested under the anchor's display name via the group system:
-                -- sidebar shows an "Item Set Gear" header with the sets indented.
-                local astate = userState[def.name]
-                local anchorName = (astate and astate.rename) or EllesmereUI.L(def.name)
-                for _, s in ipairs(splitSets) do
-                    cats[#cats + 1] = {
-                        _defaultName = "EquipSet:" .. s.id,
-                        name         = s.name,
-                        types        = def.types,
-                        icon         = s.icon or def.icon,
-                        isSetGear    = true,   -- keeps gear sorting/type-walk exclusion
-                        isEquipSet   = true,
-                        equipSetID   = s.id,
-                        noGroup      = true,
-                        groupName    = anchorName,
-                    }
-                end
-            else
             local state = userState[def.name]
             cats[#cats + 1] = {
                 _defaultName      = def.name,
@@ -221,6 +183,32 @@ function CategoryManager:InitCategories()
                 groupName         = state and state.groupName,
                 groupNameCustom   = state and state.groupNameCustom,
             }
+            -- Split mode: append one child category per equipment set right after
+            -- the "Item Set Gear" anchor. Runtime-only -- SaveState skips them, so
+            -- per-character set names never reach the shared profile; the sidebar
+            -- renders them nested one level under the anchor, wherever it sits.
+            if def.isSetGear and BP().bagSplitSetGearBySet then
+                local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
+                if setIDs then
+                    local sets = {}
+                    for _, setID in ipairs(setIDs) do
+                        local sname, sicon = C_EquipmentSet.GetEquipmentSetInfo(setID)
+                        if sname then sets[#sets + 1] = { id = setID, name = sname, icon = sicon } end
+                    end
+                    table.sort(sets, function(a, b) return a.name < b.name end)
+                    for _, s in ipairs(sets) do
+                        cats[#cats + 1] = {
+                            _defaultName = "EquipSet:" .. s.id,
+                            name         = s.name,
+                            types        = def.types,
+                            icon         = s.icon or def.icon,
+                            isSetGear    = true,   -- keeps gear sorting/type-walk exclusion
+                            isEquipSet   = true,
+                            equipSetID   = s.id,
+                            noGroup      = true,
+                        }
+                    end
+                end
             end
         end
     end
@@ -283,15 +271,11 @@ function CategoryManager:SaveState()
 
     local userState = {}
     local userOrder = {}
-    local wroteSetAnchor = false
     for _, cat in ipairs(cats) do
         if cat.isEquipSet then
-            -- Split-mode set categories are runtime-only: collapse the block to
-            -- its "Item Set Gear" anchor (once) and persist no per-set state.
-            if not wroteSetAnchor then
-                userOrder[#userOrder + 1] = "Item Set Gear"
-                wroteSetAnchor = true
-            end
+            -- Runtime-only children of the "Item Set Gear" anchor: never persisted;
+            -- InitCategories re-appends them after the anchor each rebuild.
+            -- (skip)
         else
             userOrder[#userOrder + 1] = cat._defaultName
             local hasState = false
@@ -317,13 +301,6 @@ function CategoryManager:SaveState()
                 userState[cat._defaultName] = entry
             end
         end
-    end
-    -- Split mode removed the merged anchor from cats, so the loop above never
-    -- re-emits its saved rename/group entry -- carry it over or it is lost
-    -- (e.g. the seeded "The Armory" grouping) the first time split-mode saves.
-    if wroteSetAnchor then
-        local prev = BP().bagCategoryState and BP().bagCategoryState["Item Set Gear"]
-        if prev then userState["Item Set Gear"] = prev end
     end
     BP().bagCategoryState = userState
     BP().bagCategoryOrder = userOrder
@@ -468,7 +445,9 @@ function CategoryManager:ClassifyItem(itemLink, itemID, bag, slot)
             local idx = byID and byID[setID]
             if idx then return idx end
             for i, cat in ipairs(cats) do
-                if cat.isSetGear then return i end
+                -- Anchor explicitly: children are isSetGear too, and cats order
+                -- can put them first after the anchor is drag-reordered
+                if cat.isSetGear and not cat.isEquipSet then return i end
             end
         end
     end
@@ -539,6 +518,11 @@ function CategoryManager:ClassifyAll(items)
         for i, cat in ipairs(cats) do
             if cat.isCatchAll then catchAllIdx = i end
             if cat._defaultName and disabledCats[cat._defaultName] then
+                disabledIdxSet[i] = true
+            end
+            -- Disabling the "Item Set Gear" anchor disables its set children too,
+            -- or split mode would silently bypass the user's choice.
+            if cat.isEquipSet and disabledCats["Item Set Gear"] then
                 disabledIdxSet[i] = true
             end
         end
@@ -633,11 +617,6 @@ end
 function CategoryManager:AddToGroup(catIndex, groupName)
     local cats = self:GetCategories()
     if not cats[catIndex] or not groupName then return end
-    -- The runtime equip-set group only holds set categories; a normal category
-    -- added to it would persist while the group itself rebuilds around it.
-    for _, cat in ipairs(cats) do
-        if cat.groupName == groupName and cat.isEquipSet then return end
-    end
     cats[catIndex].groupName = groupName
     self:RegenerateGroupName(groupName)
     self:SaveState()
@@ -678,11 +657,6 @@ end
 function CategoryManager:RenameGroup(oldName, newName)
     if not newName or newName == "" then return end
     local cats = self:GetCategories()
-    -- Refuse names in use by the runtime equip-set group: sharing its raw
-    -- groupName string would merge the two groups in every keyed lookup.
-    for _, cat in ipairs(cats) do
-        if cat.isEquipSet and cat.groupName == newName then return end
-    end
     for _, cat in ipairs(cats) do
         if cat.groupName == oldName then cat.groupName = newName end
     end
@@ -714,8 +688,6 @@ function CategoryManager:RegenerateGroupName(groupName)
     local cats = self:GetCategories()
     local names = {}
     for _, cat in ipairs(cats) do
-        -- The runtime equip-set group keeps its anchor-derived name
-        if cat.groupName == groupName and cat.isEquipSet then return end
         if cat.groupName == groupName then names[#names + 1] = cat.name end
     end
     local newName
@@ -733,14 +705,13 @@ function CategoryManager:RegenerateGroupName(groupName)
     end
 end
 
--- Get all unique group names. The runtime equip-set group is excluded: it is
--- not a valid "Add to Group" target (see AddToGroup).
+-- Get all unique group names.
 function CategoryManager:GetGroupNames()
     local cats = self:GetCategories()
     local seen = {}
     local groups = {}
     for _, cat in ipairs(cats) do
-        if cat.groupName and not seen[cat.groupName] and not cat.isEquipSet then
+        if cat.groupName and not seen[cat.groupName] then
             seen[cat.groupName] = true
             groups[#groups + 1] = cat.groupName
         end

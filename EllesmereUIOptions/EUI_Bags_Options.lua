@@ -122,7 +122,12 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return db.profile.bagSplitSetGearBySet == true end,
                   setValue=function(v)
                       db.profile.bagSplitSetGearBySet = v
-                      if _G.EUI_CategoryManager then _G.EUI_CategoryManager:OnEquipmentSetsChanged() end
+                      -- Re-resolves the selected view by stable key (indices shift)
+                      if _G.EUI_Bags and _G.EUI_Bags.InvalidateSetCategories then
+                          _G.EUI_Bags.InvalidateSetCategories()
+                      elseif _G.EUI_CategoryManager then
+                          _G.EUI_CategoryManager:OnEquipmentSetsChanged()
+                      end
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
