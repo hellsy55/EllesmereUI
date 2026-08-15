@@ -88,7 +88,6 @@ local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our i
 -- iteration of its own tables never sees our additions. This is the
 -- canonical taint-avoidance pattern per CLAUDE.md.
 local _blockFocus        = setmetatable({}, { __mode = "k" })  -- block -> focus texture
-local _headerClickOverlays = setmetatable({}, { __mode = "k" })  -- header -> click overlay
 local _masterHeaderCollapseHooked = false  -- guards the SetCollapsed re-skin hook below
 
 -------------------------------------------------------------------------------
@@ -433,53 +432,20 @@ local function SkinHeader(header, knownCollapsed)
     -- 1px divider beneath the header (Line Color: Class / Custom / Accent).
     EnsureAccentDivider(header)
 
-    -- Click-anywhere-on-header overlay: clicking the title text (not just the +/-
-    -- button) toggles the section, by forwarding to the MinimizeButton via a plain
-    -- button's Click() out of combat. History (2026-07-20, PR #879): this WAS a
-    -- SecureActionButtonTemplate click-redirect under the belief that a programmatic
-    -- Click() taints the collapse cascade. That evidence was confounded: the constant
-    -- taint injector was TightenTopAnchor's insecure SetPoint inside its SetPoint hook
-    -- (since removed, see the topModulePadding comment below), and the secure redirect
-    -- threw combat errors of its own. The plain-Click() form shipped here is the
-    -- field-tested-clean one -- do not "fix" it back to a secure redirect without
-    -- fresh taint-log evidence.
-    -- Never install the click-forward on ScenarioObjectiveTracker/
-    -- UIWidgetObjectiveTracker headers: their MinimizeButton:Click() runs
-    -- Blizzard's SetCollapsed() on a shares-widget-pool tracker, the same
-    -- taint surface SharesWidgetPool() guards everywhere else in this file.
-    if not _headerClickOverlays[header] and header.MinimizeButton
-       and not SharesWidgetPool(header:GetParent()) then
-        local minBtn = header.MinimizeButton
-        local overlay = CreateFrame("Button", nil, header)
-        overlay:SetFrameLevel(header:GetFrameLevel() + 1)
-        overlay:RegisterForClicks("LeftButtonUp")
-        overlay:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
-        overlay:SetPoint("BOTTOMRIGHT", minBtn, "BOTTOMLEFT", -2, 0)
-        overlay:SetScript("OnClick", function()
-            if InCombatLockdown() then return end
-            -- Forwarding Click() taints ObjectiveTrackerContainer's dispatch
-            -- loop for whichever module owns this header. Outside an instance
-            -- that's harmless (confirmed by in-game repro, 2026-08-15): click
-            -- Quests' header, then a dungeon/scenario module's own +/- button,
-            -- then Quests again -- only inside the instance does the shared
-            -- Container update loop later carry that taint into
-            -- ScenarioObjectiveTracker/UIWidgetObjectiveTracker's LayoutContents
-            -- (GetAuraDataByIndex secret-value error via ShouldShowMawBuffs).
-            -- The native +/- button alone never reproduces it. So the
-            -- click-forward is disabled for every header while in a party/
-            -- raid/scenario instance; the native +/- button keeps working
-            -- everywhere since we never touch its own OnClick.
-            local inInstance, instanceType = IsInInstance()
-            if inInstance and (instanceType == "party" or instanceType == "raid"
-                                or instanceType == "scenario") then
-                return
-            end
-            if minBtn and minBtn:IsShown() then
-                minBtn:Click()
-            end
-        end)
-        _headerClickOverlays[header] = overlay
-    end
+    -- Click-anywhere-on-header overlay REMOVED (2026-08-15). It forwarded a
+    -- click to the header's own MinimizeButton via Click(), which taints
+    -- ObjectiveTrackerContainer's shared dispatch loop for whatever module
+    -- owns that header. That taint doesn't clear on zone change: forwarding
+    -- a click on Quests' header while OUT of any instance, then later
+    -- entering a dungeon/raid/scenario, still throws a GetAuraDataByIndex
+    -- secret-value error out of ScenarioObjectiveTracker/UIWidgetObjective-
+    -- Tracker's LayoutContents (via ShouldShowMawBuffs) the next time the
+    -- container processes all modules together -- confirmed by in-game
+    -- repro, including a gate on IsInInstance() at click time, which only
+    -- narrowed the reproduction window instead of closing it. The native
+    -- +/- button never reproduces this (its OnClick is Blizzard's own,
+    -- never touched here), so collapsing a section still works -- just not
+    -- by clicking the title text anymore.
 end
 
 -------------------------------------------------------------------------------
