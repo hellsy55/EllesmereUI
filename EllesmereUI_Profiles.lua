@@ -5094,6 +5094,15 @@ function EllesmereUI.ImportProfileInteractive(opts)
         return false, "an interactive import is already pending"
     end
 
+    -- First-open split (see _SplitFirstOpen): on the session's first open the
+    -- navigation below only LOADS and the panel builds next frame, so the
+    -- Profiles page -- and with it _ProfilesConsumeApiImport -- does not exist
+    -- yet. Re-run the whole call next frame instead; the session is not created
+    -- until then, so the re-entry is not blocked as "already pending".
+    if EllesmereUI:_SplitFirstOpen(function()
+        EllesmereUI.ImportProfileInteractive(opts)
+    end) then return true end
+
     EllesmereUI._apiImportSession = {
         str      = opts.importString,
         name     = type(opts.profileName) == "string" and opts.profileName or nil,
