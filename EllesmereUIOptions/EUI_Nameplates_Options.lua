@@ -10099,6 +10099,21 @@ initFrame:SetScript("OnEvent", function(self)
             local neutralSwatch, updateNeutralSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, neutralGet, neutralSet, nil, 20)
             PP.Point(neutralSwatch, "RIGHT", hostileSwatch, "LEFT", -8, 0)
 
+            -- Two side-by-side unlabeled chips: hover tooltips say which is
+            -- which (the sibling single-swatch rows never needed one).
+            hostileSwatch:HookScript("OnEnter", function(s)
+                EllesmereUI.ShowWidgetTooltip(s, EllesmereUI.L("Hostile Color"))
+            end)
+            hostileSwatch:HookScript("OnLeave", function()
+                EllesmereUI.HideWidgetTooltip()
+            end)
+            neutralSwatch:HookScript("OnEnter", function(s)
+                EllesmereUI.ShowWidgetTooltip(s, EllesmereUI.L("Neutral Color"))
+            end)
+            neutralSwatch:HookScript("OnLeave", function()
+                EllesmereUI.HideWidgetTooltip()
+            end)
+
             EllesmereUI.RegisterWidgetRefresh(function()
                 local off = isReactionOff()
                 hostileSwatch:SetAlpha(off and 0.15 or 1)
