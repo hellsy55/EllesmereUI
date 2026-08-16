@@ -248,7 +248,7 @@ spells = {
     offensive = {
         [1249658] = { class = "DEATHKNIGHT", alts = { 152279 } },
         [42650] = { class = "DEATHKNIGHT" },
-        [191427] = { class = "DEMONHUNTER", alts = { 187827, 321067, 321068 } },
+        [191427] = { class = "DEMONHUNTER", alts = { 187827, 321067, 321068, 162264 } },
         [471306] = { class = "DEMONHUNTER", alts = { 1217605, 1225789, 473671, 1217607 } },
         [194223] = { class = "DRUID" },
         [106951] = { class = "DRUID" },
