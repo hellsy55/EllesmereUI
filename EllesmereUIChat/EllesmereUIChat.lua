@@ -298,47 +298,6 @@ local function GetFrameFontSize(id)
     return 12
 end
 
--- Blizzard fires UPDATE_CHAT_WINDOWS after SetChatWindowSize, including the
--- Font Size action in a chat tab's right-click menu. Keep a small baseline so
--- that event can mirror native changes into the EUI profile without polling
--- or hooking any Blizzard chat function.
-local _chatFontSizesSeen = {}
-local function SeedChatFontSizes()
-    if not FCF_GetChatWindowInfo then return end
-    for i = 1, 20 do
-        local cf = _G["ChatFrame" .. i]
-        if cf then
-            local size = GetFrameFontSize(i)
-            if size and size > 0 then _chatFontSizesSeen[i] = size end
-        end
-    end
-end
-
-local function SyncChatFontSizeFromBlizzard()
-    if not FCF_GetChatWindowInfo then return end
-    local changedSize
-    for i = 1, 20 do
-        local cf = _G["ChatFrame" .. i]
-        if cf then
-            local size = GetFrameFontSize(i)
-            if size and size > 0 then
-                local previous = _chatFontSizesSeen[i]
-                if previous and previous ~= size then changedSize = size end
-                _chatFontSizesSeen[i] = size
-            end
-        end
-    end
-    if changedSize then
-        local cfg = ECHAT.DB()
-        if cfg and cfg.chatFontSize ~= changedSize then
-            cfg.chatFontSize = changedSize
-        end
-    end
-end
-
-SeedChatFontSizes()
-ECHAT.SyncChatFontSizeFromBlizzard = SyncChatFontSizeFromBlizzard
-
 local function GetEditBoxHeight()
     return min(60, max(10, ECHAT.DB().editBoxHeight or 23))
 end
@@ -694,10 +653,10 @@ end
 -- means "not yet captured") is the source of truth; Blizzard's per-window
 -- storage stays the delivery vehicle via ApplyChatFontSize, so the taint
 -- posture is unchanged. Genesis: seeded from the FIRST character's live
--- size at the first settled sight (pixel-invisible on that character).
--- Native tab-menu changes are mirrored back into this profile value by the
--- UPDATE_CHAT_WINDOWS handler, and every later login re-asserts it across
--- windows.
+-- size at the first settled sight (pixel-invisible on that character); every
+-- later login re-asserts the profile value across windows. The interaction
+-- follower mirrors native tab-menu changes because that menu writes the
+-- frame font directly without emitting UPDATE_CHAT_WINDOWS.
 function ECHAT.SyncChatFontSize()
     local cfg = ECHAT.DB()
     if not cfg then return end
@@ -709,11 +668,9 @@ function ECHAT.SyncChatFontSize()
                 cfg.chatFontSize = math.floor(fh + 0.5)
             end
         end
-        SeedChatFontSizes()
         return -- live sizes already match what was just captured
     end
     ECHAT.ApplyChatFontSize(cfg.chatFontSize)
-    SeedChatFontSizes()
 end
 
 -- Class-colored names in message BODIES only: the engine's display
@@ -1130,8 +1087,18 @@ do
     local accum = 0
     local lastSelected
     local lastShown = {}
-    local lastFontH = {}
+    local lastFontSize = {}
     local lastDockCount
+
+    -- Seed before the first interaction so a fast tab-menu change is still
+    -- recognized as a change from the settled Blizzard value.
+    for i = 1, 20 do
+        local cf = _G["ChatFrame" .. i]
+        if cf and cf.GetFont then
+            local size = GetFrameFontSize(i)
+            if size and size > 0 then lastFontSize[i] = size end
+        end
+    end
 
     follower:SetScript("OnUpdate", function(_, elapsed)
         -- Geometry every frame while armed: drags need per-frame follow.
@@ -1168,19 +1135,25 @@ do
                 if ECHAT.QueueTabPass then ECHAT.QueueTabPass() end
             end
         end
-        -- Per-window font size can change from Blizzard's tab menu (secure
-        -- flow we never touch); the UPDATE_CHAT_WINDOWS handler mirrors that
-        -- value into the EUI profile. This existing watcher only refreshes
-        -- our visible copy from Blizzard's storage.
+        -- Blizzard's tab menu writes the frame font directly and does not emit
+        -- UPDATE_CHAT_WINDOWS. Mirror the changed stored size into the EUI
+        -- profile while this existing interaction-only watcher is armed, then
+        -- refresh our visible copy from Blizzard's storage.
         for i = 1, 20 do
             local cf = _G["ChatFrame" .. i]
             if cf and cf.GetFont then
-                local _, fh = cf:GetFont()
-                if fh and fh ~= lastFontH[i] then
-                    if lastFontH[i] and ECHAT.EngineApplyFontTo then
+                local size = GetFrameFontSize(i)
+                if size and size ~= lastFontSize[i] then
+                    if lastFontSize[i] then
+                        local cfg = ECHAT.DB()
+                        if cfg and cfg.chatFontSize ~= size then
+                            cfg.chatFontSize = size
+                        end
+                    end
+                    if lastFontSize[i] and ECHAT.EngineApplyFontTo then
                         ECHAT.EngineApplyFontTo(cf)
                     end
-                    lastFontH[i] = fh
+                    lastFontSize[i] = size
                 end
             end
         end
@@ -4989,12 +4962,7 @@ initFrame:SetScript("OnEvent", function(self)
     tabPassFrame:RegisterEvent("UPDATE_FLOATING_CHAT_WINDOWS")
     tabPassFrame:RegisterEvent("UI_SCALE_CHANGED")
     tabPassFrame:RegisterEvent("DISPLAY_SIZE_CHANGED")
-    tabPassFrame:SetScript("OnEvent", function(self, event)
-        if event == "UPDATE_CHAT_WINDOWS" and ECHAT.SyncChatFontSizeFromBlizzard then
-            ECHAT.SyncChatFontSizeFromBlizzard()
-        end
-        QueueFullPass()
-    end)
+    tabPassFrame:SetScript("OnEvent", QueueFullPass)
     -- Edit Mode can rebuild the chat dock and tab geometry after a panel resize.
     -- Re-assert tab appearance only once that update has left Blizzard's
     -- event/script stack; the short second pass covers the final size commit
