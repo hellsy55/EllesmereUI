@@ -1977,6 +1977,31 @@ end
 -- Balance Druid showing Mana instead of Astral Power).
 _G._EUI_ResolvedPowerType = _G._EUI_ResolvedPowerType or {}
 
+local PLAYER_POWER_DEFAULT = {
+    PRIEST = { [3] = 0 },   -- Shadow: default to Mana
+}
+local PLAYER_POWER_ALT = {
+    DRUID  = { [1] = 0, [2] = 0, [3] = 0 },  -- Balance/Feral/Guardian -> Mana
+    PRIEST = { [3] = nil },                     -- Shadow alt -> Insanity (UnitPowerType)
+    SHAMAN = { [1] = 0 },                       -- Elemental -> Mana
+}
+
+function EllesmereUI.GetPlayerPowerOverride()
+    local _, classFile = UnitClass("player")
+    local classDef = PLAYER_POWER_DEFAULT[classFile]
+    local classAlt = PLAYER_POWER_ALT[classFile]
+    if not (classDef or classAlt) then return nil end
+    local spec = GetSpecialization and GetSpecialization()
+    if not spec then return nil end
+    local ov = db.profile.player and db.profile.player.powerTypeOverride
+    if ov and ov[spec] and classAlt then
+        return classAlt[spec]
+    elseif classDef and classDef[spec] ~= nil then
+        return classDef[spec]
+    end
+    return nil
+end
+
 -- (The perpp/curpp/absorb piece functions live in the zone-formatter block
 -- below; they read the _EUI_ globals above.)
 
@@ -5465,32 +5490,10 @@ local function CreatePowerBar(frame, unit, settings)
     -- other specs default to UnitPowerType.
     if unit == "player" then
         local _, classFile = UnitClass("player")
-        -- Specs whose addon default differs from UnitPowerType (forced value).
-        local SPEC_DEFAULT_POWER = {
-            PRIEST = { [3] = 0 },   -- Shadow: default to Mana
-        }
-        -- Specs with an alternative choice; value = powerType to force
-        -- (nil = remove the override and let UnitPowerType decide).
-        local SPEC_ALT_POWER = {
-            DRUID  = { [1] = 0, [2] = 0, [3] = 0 },  -- Balance/Feral/Guardian -> Mana
-            PRIEST = { [3] = nil },                     -- Shadow alt -> Insanity (UnitPowerType)
-            SHAMAN = { [1] = 0 },                       -- Elemental -> Mana
-        }
-        local classDef = SPEC_DEFAULT_POWER[classFile]
-        local classAlt = SPEC_ALT_POWER[classFile]
-        if classDef or classAlt then
+        if PLAYER_POWER_DEFAULT[classFile] or PLAYER_POWER_ALT[classFile] then
             power.displayAltPower = true
             power.GetDisplayPower = function(self, u)
-                local spec = GetSpecialization and GetSpecialization()
-                if not spec then return nil end
-                local resolved
-                local ps = GetSettingsForUnit("player")
-                local ov = ps and ps.powerTypeOverride
-                if ov and ov[spec] and classAlt then
-                    resolved = classAlt[spec]  -- nil = UnitPowerType, number = forced
-                elseif classDef and classDef[spec] ~= nil then
-                    resolved = classDef[spec]
-                end
+                local resolved = EllesmereUI.GetPlayerPowerOverride()
                 -- Publish for tags so the text matches the bar.
                 _G._EUI_ResolvedPowerType[u or "player"] = resolved
                 return resolved
