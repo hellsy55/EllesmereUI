@@ -11451,13 +11451,14 @@ WSkin.RegisterWindow({
 end
 
 ---------
---  Loot rolls and group invites.
+--  Loot rolls, group invites and the ready check.
 --
---  Three small packs sharing one block: lootroll (group loot roll popups:
+--  Four small packs sharing one block: lootroll (group loot roll popups:
 --  need/greed/DE/pass), loothistory ("Loot Rolls" window, GroupLootHistoryFrame),
---  groupinvite ("You have been invited to a group", both invite dialogs).
+--  groupinvite ("You have been invited to a group", both invite dialogs),
+--  readycheck (the ready prompt + the initiator's response list).
 --
---  ONE file-scope local for all three, same rule as the Social UI pack: this
+--  ONE file-scope local for all four, same rule as the Social UI pack: this
 --  file's main chunk sits at Lua 5.1's hard 200-local ceiling, and going over
 --  is a COMPILE ERROR. Helpers and constants hang off LP; a do...end block buys no headroom on its own.
 -------------------------------------------------------------------------------
@@ -11948,6 +11949,277 @@ WSkin.RegisterWindow({
         end
         Wire("LFGListInviteDialog", false)
         Wire("LFGInvitePopup", true)
+    end,
+})
+
+-------------------------------------------------------------------------------
+--  Ready check. Two frames, one setting, same reasoning as the group invites:
+--  ReadyCheckFrame (the "Are you ready?" prompt with Yes/No that every member
+--  gets) and ReadyCheckListenerFrame (the response list the initiator watches).
+--
+--  The waiting "?" glyph is ReadyCheckPortrait, a REGION OF THE PROMPT and so
+--  in the same region list the shell blanket-fades. It is parked on a
+--  PROTECT_KEYS slot (caret) BEFORE the shell runs, exactly as the invite
+--  dialog does with its role icon: the glyph is what identifies this popup at a
+--  glance, and the slot is the engine's supported "keep this texture" channel,
+--  honored by Shell's initial fade and every later Restrip pass.
+--
+--  Both frames are skinned from their own OnShow, never from the login pass:
+--  the listener frame is list-backed, and the loot-history doctrine applies --
+--  a skin must never be what triggers such a frame's first layout.
+-------------------------------------------------------------------------------
+LP.RC_PAD      = 24   -- side padding kept clear of the message
+LP.RC_MAX_GROW = 2    -- hard ceiling: never wider than twice Blizzard's own width
+
+-- Capture a region's offset from the frame's TOP anchor (center-x delta, top
+-- delta, half width) so it can be re-anchored later without guessing Blizzard's
+-- own points. The half width is what lets a GROUP of regions be re-centered
+-- from stored numbers alone, with no second measuring pass.
+-- Returns nil while the layout has no usable geometry yet -- the caller then
+-- skips this pass and captures on the next show, rather than freezing garbage.
+function LP.CaptureTopOffset(region, fr)
+    local rl, rr, rt = region:GetLeft(), region:GetRight(), region:GetTop()
+    local fl, fRight, ft = fr:GetLeft(), fr:GetRight(), fr:GetTop()
+    if not (rl and rr and rt and fl and fRight and ft) then return nil end
+    for _, v in ipairs({ rl, rr, rt, fl, fRight, ft }) do
+        if issecretvalue(v) then return nil end
+    end
+    return ((rl + rr) / 2) - ((fl + fRight) / 2), rt - ft, (rr - rl) / 2
+end
+
+-- Geometry pass, run on every show and whenever the portrait is toggled.
+--
+--  1. WIDTH. Blizzard sizes this popup for a bare name, so on most realms
+--     "<name>-<realm> has initiated a ready check." wraps mid-sentence. The
+--     message is measured and the frame grown to fit it on one line -- always
+--     recomputed from the ORIGINAL width, so a long name cannot leave the popup
+--     permanently wide, and capped so a pathological one wraps instead of
+--     running off the screen.
+--  2. CENTERING, and ONLY with the portrait hidden. Blizzard insets message,
+--     title and buttons to clear the glyph; with it up that inset is load-
+--     bearing (centering the message runs it under the artwork), with it hidden
+--     it is a lopsided hole on the left. So all three keep Blizzard's own offset
+--     while the glyph is up and go dead center once it is gone.
+function LP.FitReadyCheck()
+    local fr = _G.ReadyCheckFrame
+    if not fr or fr:IsForbidden() then return end
+    local d = FFD[fr]
+    local fs = d and d.rcText
+    if not fs then return end
+
+    if not d.rcBaseW then
+        local w = fr:GetWidth()
+        if not w or w <= 0 or issecretvalue(w) then return end
+        d.rcBaseW = w
+    end
+
+    if not d.rcTextDX then
+        local dx, dy = LP.CaptureTopOffset(fs, fr)
+        if not dy then return end
+        d.rcTextDX, d.rcTextDY = dx, dy
+    end
+    -- Own guard, not folded into the one above: a title whose geometry is not
+    -- ready yet would otherwise never be captured once the message succeeded.
+    -- A true offset of 0 still guards correctly -- 0 is truthy in Lua.
+    if d.rcTitle and not d.rcTitleDX then
+        d.rcTitleDX, d.rcTitleDY = LP.CaptureTopOffset(d.rcTitle, fr)
+    end
+    -- Buttons, captured BEFORE the first resize -- this is the whole point of
+    -- doing it here rather than further down. Anchored to the frame's edges
+    -- they would drift apart by the full growth, and measuring them after a
+    -- resize would bake that spread in permanently.
+    if d.rcBtns then
+        for _, b in ipairs(d.rcBtns) do
+            local bd = GetFFD(b)
+            if not bd.rcDX then bd.rcDX, bd.rcDY, bd.rcHW = LP.CaptureTopOffset(b, fr) end
+        end
+    end
+
+    local need = fs.GetStringWidth and fs:GetStringWidth()
+    if not need or issecretvalue(need) then return end
+
+    -- NOTHING is re-centered while the glyph is up: Blizzard's inset is what
+    -- keeps the message clear of the portrait, and overriding it runs the text
+    -- straight under the artwork. Centering is strictly the compensation for a
+    -- hidden glyph. With it up we keep the inset and reserve it on BOTH sides
+    -- of the wrap box, so the box stays inside the frame and the line still fits.
+    local hidden = EllesmereUIDB and EllesmereUIDB.readyCheckHidePortrait
+    local inset  = hidden and 0 or math.abs(d.rcTextDX or 0)
+
+    local pad  = LP.RC_PAD * 2 + inset * 2
+    local want = math.max(d.rcBaseW, math.min(need + pad, d.rcBaseW * LP.RC_MAX_GROW))
+    fr:SetWidth(want)
+    fs:SetWidth(want - pad)
+    fs:ClearAllPoints()
+    fs:SetPoint("TOP", fr, "TOP", hidden and 0 or d.rcTextDX, d.rcTextDY)
+
+    if d.rcTitle and d.rcTitleDX then
+        d.rcTitle:ClearAllPoints()
+        d.rcTitle:SetPoint("TOP", fr, "TOP", hidden and 0 or d.rcTitleDX, d.rcTitleDY)
+    end
+
+    -- Re-applied from the captured offsets, so size and the gap between them
+    -- are exactly what Blizzard laid out; only the frame around them grew.
+    --
+    -- Plus, and ONLY with the glyph hidden, the same correction the message
+    -- gets: the pair inherits Blizzard's portrait inset and therefore sits
+    -- right of center. The shift is derived from the pair's OUTER edges (min
+    -- left, max right) rather than an average of their centers, so it stays
+    -- correct if the two buttons ever differ in width, and it is applied to
+    -- BOTH -- moving one alone would just trade a lopsided pair for a lopsided gap.
+    if d.rcBtns then
+        local minL, maxR
+        for _, b in ipairs(d.rcBtns) do
+            local bd = GetFFD(b)
+            if bd.rcDX and bd.rcHW then
+                local l, r = bd.rcDX - bd.rcHW, bd.rcDX + bd.rcHW
+                minL = minL and math.min(minL, l) or l
+                maxR = maxR and math.max(maxR, r) or r
+            end
+        end
+        local shift = (hidden and minL) and -((minL + maxR) / 2) or 0
+        for _, b in ipairs(d.rcBtns) do
+            local bd = GetFFD(b)
+            if bd.rcDX then
+                b:ClearAllPoints()
+                b:SetPoint("TOP", fr, "TOP", bd.rcDX + shift, bd.rcDY)
+            end
+        end
+    end
+end
+
+-- Portrait visibility (EllesmereUIDB.readyCheckHidePortrait, default off).
+-- ALPHA, never Hide(): the glyph rides a PROTECT_KEYS slot, so Shell's fade and
+-- every later Restrip pass leave whatever alpha is set here alone. Falls back to
+-- the global for the case where the prompt has not been skinned yet.
+function LP.ApplyReadyCheckPortrait()
+    local fr = _G.ReadyCheckFrame
+    local tex = (fr and FFD[fr] and FFD[fr].caret) or _G.ReadyCheckPortrait
+    if tex and tex.SetAlpha then
+        tex:SetAlpha((EllesmereUIDB and EllesmereUIDB.readyCheckHidePortrait) and 0 or 1)
+    end
+    -- The title's centering follows the glyph, so the toggle lands live.
+    LP.FitReadyCheck()
+end
+
+function LP.SkinReadyCheck(fr)
+    if not fr or fr:IsForbidden() then return end
+    local d = GetFFD(fr)
+
+    if not d.caret then
+        -- Named lookup first, then INSPECT the regions: which key holds the
+        -- glyph has moved between templates and a wrong guess fails silently,
+        -- so the texture's own path (Interface\RaidFrame\ReadyCheck-Waiting) is
+        -- the one identifier that cannot go stale.
+        d.caret = _G.ReadyCheckPortrait or fr.Portrait or fr.PortraitTexture
+        if not d.caret and fr.GetRegions then
+            for i = 1, select("#", fr:GetRegions()) do
+                local r = select(i, fr:GetRegions())
+                if r and r.IsObjectType and r:IsObjectType("Texture") then
+                    local hay = WSkin.TexHay(r)
+                    if hay and (WSkin.TexIsIcon(hay) or hay:find("readycheck", 1, true)) then
+                        d.caret = r
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    LP.Shell("readycheck", fr)
+
+    if fr.NineSlice then WSkin.FadeNineSlice(fr.NineSlice) end
+    LP.FadeKeys(fr, LP.ART_KEYS)
+    WSkin.FadeKeyedArt(fr)
+
+    -- Yes/No are UIPanelButtons named off the frame on some templates and
+    -- globally (ReadyCheckFrameYesButton) on others; both paths are cheap and idempotent.
+    local n = fr.GetName and fr:GetName()
+    local btns = d.rcBtns or {}
+    for _, k in ipairs({ "YesButton", "NoButton" }) do
+        local b = fr[k] or (n and _G[n .. k])
+        if b then
+            WSkin.Button(b)
+            WSkin.StateButtonLabel(b)
+            if not d.rcBtns then btns[#btns + 1] = b end
+        end
+    end
+    d.rcBtns = btns
+    WSkin.ButtonsIn(fr)
+
+    LP.FontRegions(fr)
+    if n and _G[n .. "Text"] then WSkin.Font(_G[n .. "Text"]) end
+
+    -- Message + title for the geometry pass below. Resolved here, where the
+    -- frame is in hand, and parked on FFD so the pass itself needs no lookups.
+    d.rcText = d.rcText or (n and _G[n .. "Text"]) or fr.Text
+    d.rcTitle = d.rcTitle
+        or (fr.TitleContainer and fr.TitleContainer.TitleText)
+        or fr.TitleText
+        or (n and _G[n .. "TitleText"])
+
+    -- A second ready check started while the first is still up re-uses a SHOWN
+    -- frame, so OnShow never fires and the width would keep the previous name's
+    -- measurement. The message being written is the reliable signal.
+    if d.rcText and not d.rcTextHooked then
+        d.rcTextHooked = true
+        for _, setter in ipairs({ "SetText", "SetFormattedText" }) do
+            if d.rcText[setter] then hooksecurefunc(d.rcText, setter, LP.FitReadyCheck) end
+        end
+    end
+
+    -- Last, and after the re-font: the message is measured here, so it has to
+    -- be carrying its final face and size. Also covers a prompt shown for the
+    -- first time with the portrait already toggled off, no options round trip.
+    LP.ApplyReadyCheckPortrait()
+end
+
+-- The initiator's list. Chrome only: shell, border, title strip, close button.
+-- The response ROWS (name + ready/not-ready/waiting icon) stay stock -- those
+-- icons are the window's whole content, and Blizzard re-stamps them per answer.
+function LP.SkinReadyCheckList(fr)
+    if not fr or fr:IsForbidden() then return end
+
+    -- Keeps its title row, so no noTopBar here: the black strip is what the
+    -- title then sits on (WSkin.CommonChrome re-centers it there).
+    WSkin.Shell("readycheck", fr)
+
+    if fr.NineSlice then WSkin.FadeNineSlice(fr.NineSlice) end
+    LP.FadeKeys(fr, LP.ART_KEYS)
+    WSkin.FadeKeyedArt(fr)
+
+    -- Header art lives on the title container, one level down from the frame's
+    -- own regions, so the shell fade never reaches it. Textures only -- the
+    -- title FontString is a region of the same container.
+    local tc = fr.TitleContainer
+    if tc then
+        WSkin.FadeRegions(tc)
+        WSkin.Register(tc, true)
+        LP.FontRegions(tc)
+    end
+
+    WSkin.CommonChrome(fr)
+    LP.FontRegions(fr)
+end
+
+WSkin.RegisterWindow({
+    key = "readycheck",
+    apply = function()
+        local function Wire(name, fn)
+            LP.WhenFrameExists(name, function(fr)
+                local function apply() fn(fr) end
+                WSkin.HookShow(fr, apply)
+                -- A ready check running through a reload puts one of these on
+                -- screen before we ever see an OnShow.
+                if fr:IsShown() then apply() end
+            end)
+        end
+        Wire("ReadyCheckFrame", LP.SkinReadyCheck)
+        Wire("ReadyCheckListenerFrame", LP.SkinReadyCheckList)
+
+        -- Options entry point: the portrait toggle lands on a prompt that is
+        -- already on screen, and on the next one either way.
+        EllesmereUI._ReadyCheck_Refresh = LP.ApplyReadyCheckPortrait
     end,
 })
 end
