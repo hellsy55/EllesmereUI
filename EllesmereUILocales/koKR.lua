@@ -6858,7 +6858,7 @@ L["Enter a volume from 0 to 100 for %1$s:"] = "%1$s의 음량을 0에서 100 사
 L[" (Rested: %s)"] = " (휴식 상태: %s)"
 L[" (Rested: %.1f%%)"] = " (휴식 상태: %.1f%%)"
 L["House Level %d: %d / %d"] = "집 레벨 %d: %d / %d"
---2026-07-20 신규
+--2026-08-16 신규
 --재사용 대기시간 관리자 
 L["ADDITIONAL BAR OFFSET"] = "추가 바 오프셋"
 L["Extra horizontal shift stacked on top of this bar's normal position. Unlock mode shows the base position; the offset re-applies when you exit."] = "이 바의 기본 위치 위에 추가로 적용되는 가로 이동 거리입니다. 프레임 이동 모드에서는 기본 위치가 표시되며, 이동 모드를 종료하면 오프셋이 다시 적용됩니다."
