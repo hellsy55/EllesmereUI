@@ -12771,7 +12771,7 @@ end
 -- plate) goes for the same reason.
 --
 -- Dropping the rarity cue ENTIRELY was the follow-on call, and that was wrong
--- too (reversed 2026-08-14 on Noah's ask): "quality still reads from the
+-- too (reversed 2026-08-14 on maintainer request): "quality still reads from the
 -- tooltip" meant hovering every tile to see what mattered. The ring stays
 -- stripped, but it is now the SOURCE the square border reads its color from,
 -- so the rarity is back without the rounded art coming with it.
@@ -12899,98 +12899,6 @@ WSkin.RegisterWindow({
 })
 
 -------------------------------------------------------------------------------
---  Ready check (ReadyCheckFrame). All of the art and both buttons live on the
---  child ReadyCheckListenerFrame -- the outer frame carries no regions -- so
---  the shell goes on the LISTENER.
---
---  Ships as a WINDOW key rather than a plain toggle so the options card's
---  EllesmereUI/Modern/Blizzard dropdown drives it, same as the loot popups.
---
---  The portrait is re-asserted on every show: it is set per ready check, and
---  a shell pass that lands after Blizzard's setup would otherwise leave it
---  faded. Cheap enough to do unconditionally.
--------------------------------------------------------------------------------
-function HP.ApplyReadyCheck()
-    local outer = _G.ReadyCheckFrame
-    local f = _G.ReadyCheckListenerFrame or outer
-    if not f or f:IsForbidden() then return end
-
-    local function Pass()
-        HP.Shell("readycheck", f, { noTopBar = true })
-        if f.NineSlice then WSkin.FadeNineSlice(f.NineSlice) end
-        HP.FadeKeys(f, HP.ART_KEYS)
-        local title = f.TitleContainer and f.TitleContainer.TitleText
-        if title then WSkin.White(title) end
-        local body = _G.ReadyCheckFrameText
-        if body then WSkin.White(body) end
-        for _, n in ipairs({ "ReadyCheckFrameYesButton", "ReadyCheckFrameNoButton" }) do
-            local b = _G[n]
-            if b then HP.Button(b) end
-        end
-        -- Portrait REMOVED, not preserved. Blizzard's corner portrait is a
-        -- PortraitFrameTemplate device: it is drawn half outside the panel and
-        -- relies on the ornate ring art to nest into. Once the shell strips
-        -- that art the circle just floats off the left edge, which is how it
-        -- looked in game. Dropping it is also what every other skinned EUI
-        -- window does, and nothing is lost -- the initiator's name is already
-        -- in the message text.
-        WSkin.RemovePortrait(f)
-
-        -- With the portrait gone, re-center the two strings Blizzard had
-        -- shifted right to clear it: TitleContainer is inset TOPLEFT x=58 vs
-        -- TOPRIGHT x=-24, and the message sits at TOP x=20. Left alone they
-        -- read visibly off-center on a panel that no longer has a portrait.
-        -- One-shot and FFD-guarded; these are plain dialog frames, not secure.
-        local d = GetFFD(f)
-        if not d.centeredForNoPortrait then
-            d.centeredForNoPortrait = true
-            local tc = f.TitleContainer
-            if tc and tc.SetPoint then
-                tc:ClearAllPoints()
-                tc:SetPoint("TOPLEFT", f, "TOPLEFT", 24, -1)
-                tc:SetPoint("TOPRIGHT", f, "TOPRIGHT", -24, -1)
-            end
-            local body = _G.ReadyCheckFrameText
-            if body and body.SetPoint then
-                body:ClearAllPoints()
-                -- -30 rather than -37: a long initiator name wraps this to TWO
-                -- lines ("<Name>-<Realm> has initiated a ready / check.") and
-                -- the second line ran into the Ready / Not Ready row. The text
-                -- moves UP rather than the buttons moving down -- the buttons
-                -- sit 16px off the bottom edge and have no room to give.
-                body:SetPoint("TOP", f, "TOP", 0, -30)
-            end
-            -- The BUTTON ROW carries the same offset and is the most obvious
-            -- one, because a shifted pair shows as unequal margins on each side.
-            -- Blizzard anchors Yes at BOTTOMRIGHT->BOTTOM x=+11 and No at
-            -- BOTTOMLEFT->BOTTOM x=+22, which puts the pair's midpoint ~16px
-            -- right of center. Re-anchored symmetrically about BOTTOM: each
-            -- button sits BTN_GAP/2 from the middle, so the gap between them
-            -- stays even and the row centers on the panel.
-            local yes, no = _G.ReadyCheckFrameYesButton, _G.ReadyCheckFrameNoButton
-            if yes and no and yes.SetPoint and no.SetPoint then
-                local half = 6   -- 12px between the buttons (Blizzard's was 11)
-                yes:ClearAllPoints()
-                yes:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -half, 16)
-                no:ClearAllPoints()
-                no:SetPoint("BOTTOMLEFT", f, "BOTTOM", half, 16)
-            end
-        end
-    end
-
-    Pass()
-    HP.OnShow(f, Pass)
-    if outer and outer ~= f then HP.OnShow(outer, Pass) end
-end
-
-WSkin.RegisterWindow({
-    key = "readycheck",
-    apply = function()
-        HP.WhenFrameExists("ReadyCheckFrame", function() HP.ApplyReadyCheck() end)
-    end,
-})
-
--------------------------------------------------------------------------------
 --  Delves difficulty picker (DelvesDifficultyPickerFrame,
 --  Blizzard_DelvesDifficultyPicker): the tier picker with the reward list.
 --
@@ -13006,7 +12914,7 @@ function HP.ApplyDelvePicker()
     if not f or f:IsForbidden() then return end
 
     local function Pass()
-        -- FOUR TARGETED CHANGES, by Noah's call. The full window shell was
+        -- FOUR TARGETED CHANGES, by maintainer call. The full window shell was
         -- built, shown to him and REJECTED, so there is deliberately no
         -- HP.Shell, no region fade and no font pass here: Blizzard's
         -- background, title, scenario label, description, scenic art, reward
@@ -13385,17 +13293,16 @@ WSkin.RegisterWindow({
 --  insets, and a money row. Yours is editable (MoneyInputFrameTemplate, three
 --  edit boxes); theirs is read-only.
 --
---  THE RECIPIENT PORTRAIT STAYS, which no other window pack does. Two
---  different portraits are in play and only one of them goes:
+--  BOTH PORTRAITS GO, as on every other window pack. Two are in play:
 --    - TradeFrame's ButtonFrameTemplate CORNER portrait is removed as always.
 --      It is drawn half outside the panel and floats free once the frame art
 --      is gone.
---    - TradeFrame.RecipientOverlay.portrait -- the face of the person you are
---      handing gold to -- is kept by request. Its UI-Frame-PortraitMetal
---      corner atlas is stripped and replaced with the house square + 1px edge,
---      so it reads as part of the window instead of bolted onto it.
---  EllesmereUIDB.tradeHidePortrait turns it off, live, for anyone who wants
---  the clean panel.
+--    - TradeFrame.RecipientOverlay.portrait -- the trade partner's face -- is
+--      removed by HP.TradeHidePortrait. Blizzard anchors that overlay above
+--      the frame's top edge and lets its metal corner atlas bridge the
+--      overhang, so with the atlas gone there is nowhere for it to sit that
+--      does not read as pasted onto the title row; the partner's name is
+--      already in the header.
 -------------------------------------------------------------------------------
 
 -- Frame art that is NOT reachable through the shell's own region fade: the

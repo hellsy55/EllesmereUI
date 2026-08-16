@@ -1504,20 +1504,19 @@ qolFrame:SetScript("OnEvent", function(self)
             hooksecurefunc(f, "Show", Enforce)
         end
 
-        -- Options-side apply: a toggle must bite now, not on the next drop.
-        -- The closeGen bump also cancels a pending auto-close when the mode
-        -- changes or the feature is switched off mid-countdown.
-        EllesmereUI._applyHideLootHistory = function()
-            HookHistory()
-            closeGen = closeGen + 1
-            local f = HistoryFrame()
-            if f and f:IsShown() then Enforce() end
-        end
-
-        -- Created with its Blizzard_ addon on first use, not necessarily at login.
-        if _G.GroupLootHistoryFrame then
-            HookHistory()
-        else
+        -- Hook now, or arm ONE waiter for the frame's Blizzard_ addon (it is
+        -- created on first use, not necessarily at login). Shared by the
+        -- load-time install and a mid-session enable that beats the frame's
+        -- creation -- without the waiter half, that enable would silently
+        -- never hook.
+        local waiterArmed = false
+        local function EnsureInstalled()
+            if _G.GroupLootHistoryFrame then
+                HookHistory()
+                return
+            end
+            if waiterArmed then return end
+            waiterArmed = true
             local waiter = CreateFrame("Frame")
             waiter:RegisterEvent("ADDON_LOADED")
             waiter:SetScript("OnEvent", function(self)
@@ -1526,6 +1525,26 @@ qolFrame:SetScript("OnEvent", function(self)
                     self:UnregisterAllEvents()
                 end
             end)
+        end
+
+        -- Options-side apply: a toggle must bite now, not on the next drop.
+        -- The closeGen bump also cancels a pending auto-close when the mode
+        -- changes or the feature is switched off mid-countdown.
+        EllesmereUI._applyHideLootHistory = function()
+            if EllesmereUIDB and EllesmereUIDB.hideLootHistory then
+                EnsureInstalled()
+            end
+            closeGen = closeGen + 1
+            local f = HistoryFrame()
+            if f and f:IsShown() then Enforce() end
+        end
+
+        -- Load-time install ONLY for users with the feature already on
+        -- (zero cost disabled: no waiter frame, no ADDON_LOADED listener,
+        -- no hooks -- a later enable installs through _applyHideLootHistory
+        -- above).
+        if EllesmereUIDB and EllesmereUIDB.hideLootHistory then
+            EnsureInstalled()
         end
     end
 

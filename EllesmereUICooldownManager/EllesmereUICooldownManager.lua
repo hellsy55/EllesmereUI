@@ -3365,6 +3365,23 @@ function ns.AnchorCoordToCenter(pt, sx, sy, fw, fh)
     return x, y
 end
 
+-- "Additional Bar Offset" (bd.addOffsetX/Y; ADDITIONAL BAR OFFSET options
+-- section): a render-only displacement stacked on top of whatever positioned
+-- the bar -- saved position, module anchor (party/player/ERB), or the shared
+-- unlock anchor system (which folds it through _anchorExtraOffset instead of
+-- this helper). Suppressed while unlock mode is active so movers show and save
+-- TRUE positions; the shift-provider lifecycle hooks strip it on unlock entry
+-- and re-apply it on exit. nil/0 = zero work and zero movement (purely
+-- additive feature). On ns: this file is at the 200-local cap.
+ns.CDMAddOffset = function(bd)
+    if not bd then return 0, 0 end
+    local ox = bd.addOffsetX or 0
+    local oy = bd.addOffsetY or 0
+    if ox == 0 and oy == 0 then return 0, 0 end
+    if EllesmereUI._unlockActive then return 0, 0 end
+    return ox, oy
+end
+
 local function ApplyBarPositionCentered(frame, pos, barKey)
     if not pos or not pos.point then return end
     local fw = frame:GetWidth() or 0
@@ -3399,6 +3416,11 @@ local function ApplyBarPositionCentered(frame, pos, barKey)
             end
         end
     end
+
+    -- Additional Bar Offset: applied PRE-snap so the sum lands on the pixel
+    -- grid; a zero offset is a guaranteed no-op.
+    local aox, aoy = ns.CDMAddOffset(bd)
+    px, py = px + aox, py + aoy
 
     -- Snap to physical pixel grid. CENTER anchor: SnapCenterForDim preserves the +0.5 offset
     -- odd-pixel-dim frames need for whole-pixel edges. Single-edge anchors: the growth-axis
@@ -3468,11 +3490,17 @@ local function SaveCDMBarPosition(barKey, frame)
         ay = cy * ratio
     end
 
-    -- Store relative to UIParent CENTER so offset math is consistent
+    -- Store relative to UIParent CENTER so offset math is consistent.
+    -- Additional Bar Offset: live geometry includes the render-only offset
+    -- while out of unlock mode -- subtract it so the SAVED position is always
+    -- the BASE (else the Row Growth recapture bakes it in and the bar drifts
+    -- by one offset per edit). In unlock mode both terms are already base:
+    -- the frame carries no offset and CDMAddOffset returns 0.
+    local aox, aoy = ns.CDMAddOffset(bd)
     p.cdmBarPositions[barKey] = {
         point = pt, relPoint = "CENTER",
-        x = (ax - uiW / 2) / scale,
-        y = (ay - uiH / 2) / scale,
+        x = (ax - uiW / 2) / scale - aox,
+        y = (ay - uiH / 2) / scale - aoy,
     }
 end
 
@@ -3767,6 +3795,10 @@ BuildCDMBar = function(barIndex)
             local side = barData.partyFrameSide or "LEFT"
             local oX = barData.partyFrameOffsetX or 0
             local oY = barData.partyFrameOffsetY or 0
+            do -- Additional Bar Offset stacks on the anchor's own offsets
+                local aox, aoy = ns.CDMAddOffset(barData)
+                oX, oY = oX + aox, oY + aoy
+            end
             local PPa = EllesmereUI and EllesmereUI.PP
             if PPa and PPa.SnapForES then
                 local es = frame:GetEffectiveScale()
@@ -3803,6 +3835,10 @@ BuildCDMBar = function(barIndex)
             local side = barData.playerFrameSide or "LEFT"
             local oX = barData.playerFrameOffsetX or 0
             local oY = barData.playerFrameOffsetY or 0
+            do -- Additional Bar Offset stacks on the anchor's own offsets
+                local aox, aoy = ns.CDMAddOffset(barData)
+                oX, oY = oX + aox, oY + aoy
+            end
             local PPa = EllesmereUI and EllesmereUI.PP
             if PPa and PPa.SnapForES then
                 local es = frame:GetEffectiveScale()
@@ -3846,6 +3882,10 @@ BuildCDMBar = function(barIndex)
             local gap = barData.spacing or 2
             local oX = barData.anchorOffsetX or 0
             local oY = barData.anchorOffsetY or 0
+            do -- Additional Bar Offset stacks on the anchor's own offsets
+                local aox, aoy = ns.CDMAddOffset(barData)
+                oX, oY = oX + aox, oY + aoy
+            end
             local PPa = EllesmereUI and EllesmereUI.PP
             if PPa and PPa.SnapForES then
                 local es = frame:GetEffectiveScale()
@@ -8809,6 +8849,29 @@ RegisterCDMUnlockElements = function()
             local isMouseAnchored = barData.anchorTo == "mouse"
             if not isPartyAnchored and not isPlayerFrameAnchored and not isMouseAnchored then
             local bd = barDataByKey[key]
+            -- Additional Bar Offset: the unlock-anchored side folds through the
+            -- shared _anchorExtraOffset registry (both ApplyAnchorPosition
+            -- placement branches consume it) -- the getter is registered ONLY
+            -- while the offset is nonzero (zero-cost otherwise) and cleared
+            -- here so an edit back to 0 leaves no stale entry. It returns 0
+            -- during unlock mode: movers show and save the BASE position.
+            local hasAddOffset = (barData.addOffsetX or 0) ~= 0 or (barData.addOffsetY or 0) ~= 0
+            do
+                local xoff = EllesmereUI._anchorExtraOffset
+                if not xoff then
+                    xoff = {}
+                    EllesmereUI._anchorExtraOffset = xoff
+                end
+                if hasAddOffset then
+                    xoff["CDM_" .. key] = function()
+                        local bd3 = barDataByKey[key]
+                        if not bd3 or EllesmereUI._unlockActive then return 0, 0 end
+                        return bd3.addOffsetX or 0, bd3.addOffsetY or 0
+                    end
+                else
+                    xoff["CDM_" .. key] = nil
+                end
+            end
             -- Collect linked unlock element keys (children anchored to this bar)
             local linked = nil
             if anchorChildren[key] then
@@ -8826,6 +8889,18 @@ RegisterCDMUnlockElements = function()
                 label = "CDM: " .. barData.name,
                 group = "Cooldown Manager",
                 order = 600,
+                -- Additional Bar Offset marker: distinct warm mover tint +
+                -- explanatory tooltip while an offset is set (nil otherwise --
+                -- the mover renders exactly as before).
+                moverBg = hasAddOffset and { r = 0.32, g = 0.19, b = 0.05 } or nil,
+                moverTooltip = hasAddOffset and function()
+                    local bd3 = barDataByKey[key]
+                    local ox = (bd3 and bd3.addOffsetX) or 0
+                    local oy = (bd3 and bd3.addOffsetY) or 0
+                    return EllesmereUI.Lf(
+                        "This bar has an Additional Bar Offset (X %1$s, Y %2$s) set in its options. Unlock mode shows the base position; the offset re-applies when you exit.",
+                        ox, oy)
+                end or nil,
                 linkedKeys = linked,
                 noAnchorTarget = isDynamic,
                 noResize = isDynamic,
@@ -8968,6 +9043,79 @@ RegisterCDMUnlockElements = function()
     end
     -- Expose for ApplyAnchorPosition's growth-direction edge read. Width-independent: stores edge anchor directly (LEFT/RIGHT/TOP).
     EllesmereUI._cdmBarPositions = ECME.db.profile.cdmBarPositions
+end
+
+-- "Additional Bar Offset" unlock lifecycle: rides the shared shift-provider
+-- list (EUI_UnlockMode.lua; direct or-preserve push, never an API call). dir
+-- is inert -- anchored bars receive the offset through _anchorExtraOffset, not
+-- the shift path. enter (unlock entry + combat resume, before positions are
+-- snapshotted) re-builds so UN-anchored offset bars land at their true saved
+-- positions (_unlockActive is already set, the offset helper returns 0);
+-- restore (unlock exit) re-builds to re-apply the offset and re-runs the
+-- anchors of unlock-anchored offset bars (the build deliberately leaves those
+-- positions alone). Everything self-gates on a nonzero offset existing, so a
+-- profile that never touches the setting schedules ZERO work. do-block: this
+-- file is at the 200-local cap, nothing here may persist a file-scope local.
+do
+    local function AnyBarHasAddOffset()
+        local p = ECME and ECME.db and ECME.db.profile
+        local bars = p and p.cdmBars and p.cdmBars.bars
+        if not bars then return false end
+        for i = 1, #bars do
+            local bd = bars[i]
+            if bd.enabled and ((bd.addOffsetX or 0) ~= 0 or (bd.addOffsetY or 0) ~= 0) then
+                return true
+            end
+        end
+        return false
+    end
+    EllesmereUI._anchorShiftProviders = EllesmereUI._anchorShiftProviders or {}
+    table.insert(EllesmereUI._anchorShiftProviders, {
+        dir = function() return 0 end,
+        wants = AnyBarHasAddOffset,
+        enter = function()
+            -- Reposition ONLY the offset bars, never a full rebuild: a rebuild
+            -- re-applies saved positions to EVERY un-anchored bar, which would
+            -- revert un-saved mover drags on the combat-resume path
+            -- (audit-caught). _unlockActive is already true here, so the
+            -- offset helper reads 0 and each bar lands at its BASE position
+            -- for the snapshot. Unlock-ANCHORED offset bars are stripped by
+            -- the wants-gated anchor reapply that follows; module-anchored
+            -- bars have no movers and snapshot nothing.
+            local p = ECME and ECME.db and ECME.db.profile
+            local bars = p and p.cdmBars and p.cdmBars.bars
+            if not bars then return end
+            for i = 1, #bars do
+                local bd = bars[i]
+                if bd.enabled and ((bd.addOffsetX or 0) ~= 0 or (bd.addOffsetY or 0) ~= 0)
+                    and (bd.anchorTo or "none") == "none"
+                    and not (EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored("CDM_" .. bd.key)) then
+                    local frame = cdmBarFrames[bd.key]
+                    local pos = p.cdmBarPositions and p.cdmBarPositions[bd.key]
+                    if frame and pos and pos.point then
+                        ApplyBarPositionCentered(frame, pos, bd.key)
+                    end
+                end
+            end
+        end,
+        restore = function()
+            if not AnyBarHasAddOffset() then return end
+            BuildAllCDMBars()
+            if EllesmereUI.PropagateAnchorChain and EllesmereUI.IsUnlockAnchored then
+                local p = ECME and ECME.db and ECME.db.profile
+                local bars = p and p.cdmBars and p.cdmBars.bars
+                if bars then
+                    for i = 1, #bars do
+                        local bd = bars[i]
+                        if bd.enabled and ((bd.addOffsetX or 0) ~= 0 or (bd.addOffsetY or 0) ~= 0)
+                            and EllesmereUI.IsUnlockAnchored("CDM_" .. bd.key) then
+                            EllesmereUI.PropagateAnchorChain("CDM_" .. bd.key)
+                        end
+                    end
+                end
+            end
+        end,
+    })
 end
 ns.RegisterCDMUnlockElements = RegisterCDMUnlockElements
 _G._ECME_RegisterUnlock = RegisterCDMUnlockElements

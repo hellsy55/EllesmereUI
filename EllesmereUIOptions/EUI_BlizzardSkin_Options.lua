@@ -780,7 +780,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end },
             { type="toggle", text="Reskin Extra Action Buttons",
-              tooltip="Squares the extra action and zone ability buttons and gives them Action Bar 1's border.\n\nOff by default. The size slider below works whether this is on or off.",
+              tooltip="Squares the extra action and zone ability buttons and gives them a thin black border.\n\nOff by default. The size slider below works whether this is on or off.",
               getValue=function()
                   -- DEFAULT OFF: opt-in, so nil reads as unchecked.
                   return EllesmereUIDB and EllesmereUIDB.reskinExtraActionButton == true
@@ -790,7 +790,6 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.reskinExtraActionButton = v and true or false
               end })
         y = y - h
-
 
         return math.abs(y)
     end
@@ -2042,16 +2041,6 @@ initFrame:SetScript("OnEvent", function(self)
             end,
         },
         {
-            key   = "readycheck",
-            title = "Ready Check",
-            desc  = "The ready check prompt: frame, title, message and the Ready / Not Ready buttons. The initiator's portrait stays.",
-            reloadMsg = "Changing the Ready Check reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
-            setEnabled = function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.reskinReadyCheck = v
-            end,
-        },
-        {
             key   = "delvepicker",
             title = "Delve Tier Picker",
             desc  = "The delve difficulty window: tier dropdown, reward list and Enter button. The Map Properties row is left stock -- it is a Blizzard widget display and is not safe to restyle.",
@@ -3067,6 +3056,12 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinInspectRecipe = nil
                 EllesmereUIDB.reskinDelves = nil
                 EllesmereUIDB.reskinSocialUI = nil
+                EllesmereUIDB.reskinQueueStatus = nil
+                EllesmereUIDB.reskinDelvePicker = nil
+                EllesmereUIDB.reskinPlayerChoice = nil
+                EllesmereUIDB.reskinTrade = nil
+                EllesmereUIDB.reskinWidgetBars = nil
+                EllesmereUIDB.reskinExtraActionButton = nil
                 EllesmereUIDB.lfgRememberRoles = nil
                 EllesmereUIDB.lfgSavedRoles = nil
                 EllesmereUIDB.showMythicRating = nil

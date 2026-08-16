@@ -6601,15 +6601,32 @@ end
     ns.ReflowFontString(timerText)
     ns.ReflowFontString(nameText)
 
-    -- Hide pips when not empowering
+    -- Hide pips (build reset), then RE-LAY them for an in-flight empower:
+    -- same wipe-sticks class as the channel ticks below (field: Evokers
+    -- randomly losing all stage marks for one empowered cast whenever a
+    -- width-match/anchor re-apply landed mid-cast). Geometry is final here,
+    -- so the pips re-anchor against the rebuilt bar.
     if castBarFrame._pips then
         for i = 1, #castBarFrame._pips do
             castBarFrame._pips[i]:Hide()
         end
     end
+    if castBarFrame._empowering and castBarFrame._empStages then
+        ns.ERB_LayoutEmpowerPips(castBarFrame._empStages)
+    end
 
-    -- Hide channel ticks; redrawn just below if a channel is still running
+    -- Hide channel ticks (build reset), then RE-SHOW them for an in-flight
+    -- channel: ApplyAll can run mid-channel (unlock rebuilds, width-match and
+    -- anchor-link re-applies, options edits, spec-override/profile refreshes --
+    -- field: Arcane Missiles marks vanishing when a Bloodlust buff arrived
+    -- mid-channel), and without the re-show the wipe sticks until the NEXT
+    -- channel starts: a channel whose reported window never changes gets no
+    -- further CHANNEL_UPDATE to redraw them. Geometry is final here, so the
+    -- marks re-anchor against the rebuilt bar.
     HideChannelTicks()
+    if castBarFrame._channeling and castBarFrame._tickSpellID then
+        ShowChannelTicks(castBarFrame._tickSpellID)
+    end
 
     -- Idle when not casting (empty bar with "Always Show", else hidden). Runs LAST
     -- on purpose: the idle state re-suppresses the spark and icon the style pass
@@ -6617,15 +6634,6 @@ end
     if not castBarFrame._casting and not castBarFrame._channeling and not castBarFrame._empowering then
         ns.ShowIdleCastBar()
     else
-        -- Rebuilds can land MID-CHANNEL (spec-override/profile refreshes via
-        -- ApplyAll -- observed live when a Bloodlust buff arrived during an
-        -- Arcane Missiles channel). The hide above would otherwise blank the
-        -- tick marks for the rest of the cast: channels whose reported window
-        -- never changes get no further CHANNEL_UPDATE to redraw them.
-        if castBarFrame._channeling then
-            local _, _, _, _, _, _, _, chanSpellID = UnitChannelInfo("player")
-            if chanSpellID then ShowChannelTicks(chanSpellID) end
-        end
         ns.ActivateCastBar()
     end
 end
@@ -6636,6 +6644,10 @@ end
 -- point) draws slightly wider in gold. Layout mirrors the empower pip code above.
 ShowChannelTicks = function(spellID)
     if not castBarFrame then return end
+    -- Stashed so a mid-channel bar rebuild can re-show this channel's marks
+    -- (see the BuildCastBar tail). Stale values are inert: the re-show gates
+    -- on _channeling, and every channel start restores the stash.
+    castBarFrame._tickSpellID = spellID
     local cb = ERB.db.profile.castBar
     if not cb.showChannelTicks then return end
 
@@ -7581,56 +7593,72 @@ OnEmpowerStart = function()
         cachedStageThresholds = nil
     end
     if stages then
-        local bar = castBarFrame._bar
-        local barWidth = bar:GetWidth()
-        local barHeight = bar:GetHeight()
-        local numStages = #stages
-        castBarFrame._numStages = numStages
-
-        -- Physical-pixel sizing: PP.perfect / effectiveScale = one PHYSICAL
-        -- pixel in the bar's local units, so the pip is exactly 2 physical
-        -- pixels wide at every UI scale (the old effectiveScale rounding
-        -- treated 2 as UI units and drifted between 1 and 3 physical pixels).
-        local effectiveScale = bar:GetEffectiveScale()
-        local PPc = EllesmereUI and EllesmereUI.PP
-        local onePx = ((PPc and PPc.perfect) or 1) / effectiveScale
-        local pipWidth = 2 * onePx
-        local snappedHeight = (PPc and PPc.SnapForES)
-            and PPc.SnapForES(barHeight, effectiveScale) or barHeight
-
-        -- Position a pip at each stage boundary (skip the last -- it's the bar end)
-        local lastOffset = 0
-        for i = 1, numStages - 1 do
-            local pip = castBarFrame._pips[i]
-            if not pip then
-                pip = bar:CreateTexture(nil, "OVERLAY", nil, 2)
-                pip:SetColorTexture(1, 1, 1, 0.85)
-                if pip.SetSnapToPixelGrid then
-                    pip:SetSnapToPixelGrid(false)
-                    pip:SetTexelSnappingBias(0)
-                end
-                castBarFrame._pips[i] = pip
-            end
-            local rawOffset = lastOffset + (barWidth * stages[i])
-            lastOffset = rawOffset
-            -- Width-aware center snap: both pip edges land on the physical
-            -- grid (a centered even-width mark on a grid point is exact).
-            local snappedOffset = (PPc and PPc.SnapCenterForDim)
-                and PPc.SnapCenterForDim(rawOffset, pipWidth, effectiveScale)
-                or (floor(rawOffset * effectiveScale + 0.5) / effectiveScale)
-            pip:SetSize(pipWidth, snappedHeight)
-            pip:ClearAllPoints()
-            pip:SetPoint("CENTER", bar, "LEFT", snappedOffset, 0)
-            pip:Show()
-        end
-
-        -- Hide any extra pips from a previous cast with more stages
-        for i = numStages, #castBarFrame._pips do
-            castBarFrame._pips[i]:Hide()
-        end
+        -- Stashed so a mid-empower bar rebuild can re-lay this cast's stage
+        -- pips (see the BuildCastBar tail; the channel ticks' stash twin).
+        -- Stale values are inert: the re-lay gates on _empowering, and every
+        -- empower start restores the stash.
+        castBarFrame._empStages = stages
+        ns.ERB_LayoutEmpowerPips(stages)
     end
 
     ns.ActivateCastBar()
+end
+
+-- Stage pip layout for an empowered cast, shared by OnEmpowerStart and the
+-- BuildCastBar tail (a mid-empower rebuild must re-lay the marks against
+-- the rebuilt bar, exactly like the channel-tick re-show -- without it the
+-- build reset's pip wipe sticks for the rest of that cast; field: Evokers
+-- randomly losing all stage ticks for one cast). On ns: the file is at the
+-- 200-local cap.
+function ns.ERB_LayoutEmpowerPips(stages)
+    if not (castBarFrame and stages) then return end
+    local bar = castBarFrame._bar
+    local barWidth = bar:GetWidth()
+    local barHeight = bar:GetHeight()
+    local numStages = #stages
+    castBarFrame._numStages = numStages
+
+    -- Physical-pixel sizing: PP.perfect / effectiveScale = one PHYSICAL
+    -- pixel in the bar's local units, so the pip is exactly 2 physical
+    -- pixels wide at every UI scale (the old effectiveScale rounding
+    -- treated 2 as UI units and drifted between 1 and 3 physical pixels).
+    local effectiveScale = bar:GetEffectiveScale()
+    local PPc = EllesmereUI and EllesmereUI.PP
+    local onePx = ((PPc and PPc.perfect) or 1) / effectiveScale
+    local pipWidth = 2 * onePx
+    local snappedHeight = (PPc and PPc.SnapForES)
+        and PPc.SnapForES(barHeight, effectiveScale) or barHeight
+
+    -- Position a pip at each stage boundary (skip the last -- it's the bar end)
+    local lastOffset = 0
+    for i = 1, numStages - 1 do
+        local pip = castBarFrame._pips[i]
+        if not pip then
+            pip = bar:CreateTexture(nil, "OVERLAY", nil, 2)
+            pip:SetColorTexture(1, 1, 1, 0.85)
+            if pip.SetSnapToPixelGrid then
+                pip:SetSnapToPixelGrid(false)
+                pip:SetTexelSnappingBias(0)
+            end
+            castBarFrame._pips[i] = pip
+        end
+        local rawOffset = lastOffset + (barWidth * stages[i])
+        lastOffset = rawOffset
+        -- Width-aware center snap: both pip edges land on the physical
+        -- grid (a centered even-width mark on a grid point is exact).
+        local snappedOffset = (PPc and PPc.SnapCenterForDim)
+            and PPc.SnapCenterForDim(rawOffset, pipWidth, effectiveScale)
+            or (floor(rawOffset * effectiveScale + 0.5) / effectiveScale)
+        pip:SetSize(pipWidth, snappedHeight)
+        pip:ClearAllPoints()
+        pip:SetPoint("CENTER", bar, "LEFT", snappedOffset, 0)
+        pip:Show()
+    end
+
+    -- Hide any extra pips from a previous cast with more stages
+    for i = numStages, #castBarFrame._pips do
+        castBarFrame._pips[i]:Hide()
+    end
 end
 
 OnEmpowerUpdate = function()
@@ -9067,42 +9095,50 @@ function ERB:OnInitialize()
         if not IsPowerBarHidden() then return 0 end
         return (mode == "Up") and 1 or -1
     end
-    -- Consulted inside ApplyAnchorPosition. Returns 0 while unlock mode is
-    -- active so the layout shows normal (and movers capture true positions).
-    -- Returns dir (+1/-1/0) and an optional extra-pixel offset added to the shift
-    -- magnitude ("Extra Y Offset"). The extra is only meaningful when dir ~= 0.
-    EllesmereUI._GetAnchorTargetShiftDir = function(targetKey, childKey)
-        if EllesmereUI._unlockActive then return 0 end
-        if targetKey == "ERB_ClassResource" then
-            local dir = ResolveShiftDir()
-            if dir == 0 then return 0 end
-            local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
-            return dir, (sp and sp.shiftElementsIfNoResourceExtraY) or 0
-        end
-        if targetKey == "ERB_Power" then
-            local dir = ResolveShiftDirPower()
-            if dir == 0 then return 0 end
-            local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
-            return dir, (pp and pp.shiftElementsIfNoPowerExtraY) or 0
-        end
-        return 0
-    end
-    -- Whether a shift WOULD apply outside unlock mode (unlock entry uses this to
-    -- decide whether to un-shift before snapshotting positions). None = false.
-    _G._ERB_ShiftWantsApply = function()
-        return ResolveShiftDir() ~= 0 or ResolveShiftDirPower() ~= 0
-    end
-    -- Re-apply the shift after unlock mode closes (PropagateAnchorChain is a
-    -- no-op while unlocked, so this runs on exit). Gated so None = zero work.
-    _G._ERB_RestoreShift = function()
-        if not EllesmereUI.PropagateAnchorChain then return end
-        if ResolveShiftDir() ~= 0 then
-            EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
-        end
-        if ResolveShiftDirPower() ~= 0 then
-            EllesmereUI.PropagateAnchorChain("ERB_Power")
-        end
-    end
+    -- Seeded into the shared shift-provider list (EUI_UnlockMode.lua dispatches
+    -- EllesmereUI._GetAnchorTargetShiftDir over it; CooldownManager seeds its
+    -- own provider for TBBG_ keys). Direct or-preserve push, NEVER an API call:
+    -- registration must carry zero load-order coupling (the old single-slot
+    -- assignment's property; a cross-file call here hit nil in the field).
+    -- dir: consulted inside ApplyAnchorPosition; returns 0 while unlock mode is
+    -- active so the layout shows normal (and movers capture true positions),
+    -- else dir (+1/-1/0) and an optional extra-pixel offset added to the shift
+    -- magnitude ("Extra Y Offset" -- only meaningful when dir ~= 0). wants:
+    -- whether a shift WOULD apply outside unlock mode (unlock entry un-shifts
+    -- before snapshotting; deliberately ignores unlock state). restore:
+    -- re-apply after unlock closes (PropagateAnchorChain is a no-op while
+    -- unlocked). Gated so None = zero work.
+    EllesmereUI._anchorShiftProviders = EllesmereUI._anchorShiftProviders or {}
+    table.insert(EllesmereUI._anchorShiftProviders, {
+        dir = function(targetKey, childKey)
+            if EllesmereUI._unlockActive then return 0 end
+            if targetKey == "ERB_ClassResource" then
+                local dir = ResolveShiftDir()
+                if dir == 0 then return 0 end
+                local sp = ERB.db and ERB.db.profile and ERB.db.profile.secondary
+                return dir, (sp and sp.shiftElementsIfNoResourceExtraY) or 0
+            end
+            if targetKey == "ERB_Power" then
+                local dir = ResolveShiftDirPower()
+                if dir == 0 then return 0 end
+                local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
+                return dir, (pp and pp.shiftElementsIfNoPowerExtraY) or 0
+            end
+            return 0
+        end,
+        wants = function()
+            return ResolveShiftDir() ~= 0 or ResolveShiftDirPower() ~= 0
+        end,
+        restore = function()
+            if not EllesmereUI.PropagateAnchorChain then return end
+            if ResolveShiftDir() ~= 0 then
+                EllesmereUI.PropagateAnchorChain("ERB_ClassResource")
+            end
+            if ResolveShiftDirPower() ~= 0 then
+                EllesmereUI.PropagateAnchorChain("ERB_Power")
+            end
+        end,
+    })
 
     BuildBarTypeSpecMap()
 

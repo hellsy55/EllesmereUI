@@ -2594,6 +2594,27 @@ EllesmereUI.RegisterMigration({
 })
 
 EllesmereUI.RegisterMigration({
+    id          = "blizzskin_widget_bars_seed_v1",
+    scope       = "global",
+    description = "Seed the new Reskin Widget Bars toggle from existing chrome preferences: on only when Reskin Tooltips AND Reskin Popups and Menus are both on, so accounts that turned those off do not get newly skinned HUD bars.",
+    body        = function(ctx)
+        local db = ctx.db
+        if not db then return end
+        -- Registered AFTER the master-split migration on purpose: an account
+        -- jumping many versions gets reskinPopupsMenus seeded first in the
+        -- same pass, so this reads the settled value. Writes an explicit
+        -- boolean both ways; the key is independent from here on (same
+        -- contract as reskinPopupsMenus itself). Fresh installs never run
+        -- this (genesis stamp) and keep nil = on, which matches both masters
+        -- defaulting on.
+        if db.reskinWidgetBars == nil then
+            db.reskinWidgetBars = (db.customTooltips ~= false)
+                and (db.reskinPopupsMenus ~= false)
+        end
+    end,
+})
+
+EllesmereUI.RegisterMigration({
     id          = "texture_kringel_diamonds_to_blinkii_v1",
     scope       = "profile",
     description = "Rename the saved 'kringel-diamonds' bar texture value to its replacement 'blinkii-diamonds' across Unit Frames, Raid Frames, Nameplates, Resource Bars, and Damage Meters.",
