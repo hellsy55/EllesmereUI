@@ -46,7 +46,7 @@ local AK -- EllesmereUI.AuraKit, resolved at first sync
 -- distinct threshold; bounded by the slider range, so no eviction needed).
 local function ClampThr(v)
     v = tonumber(v) or 5
-    if v < 3 then v = 3 elseif v > 120 then v = 120 end
+    if v < 1 then v = 1 elseif v > 120 then v = 120 end
     return math.floor(v + 0.5)
 end
 
