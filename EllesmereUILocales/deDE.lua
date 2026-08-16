@@ -5934,6 +5934,7 @@ L["Which direction new icons extend from the frame's edge."] = "In welche Richtu
 L["Which hearthstone the left click uses. Random Hearthstone picks a random owned variant each cast. Right click always rolls a random one."] = "Welcher Ruhestein beim Linksklick verwendet wird. 'Zufälliger Ruhestein' wählt bei jedem Wirken eine zufällige besessene Variante aus. Rechtsklick wählt immer einen zufälligen."
 L["Which latency to show: home, world, or both side by side."] = "Welche Latenz angezeigt werden soll: Standort, Welt oder beide nebeneinander."
 L["Which micro menu buttons this block shows."] = "Welche Tasten des Mikromenüs dieser Block anzeigt."
+L["Which minimap corner the Blizzard element row (tracking, calendar, mail, crafting) builds out from and the direction it grows."] = "Aus welcher Ecke der Minimap die Leiste der Blizzard Elemente (Aufspüren, Kalender, Post, Handwerk) hervorgeht und in welche Richtung sie wächst."
 L["Which minimap corner the button row builds out from and the direction it grows."] = "Aus welcher Ecke der Minimap die Schaltflächenleiste hervorgeht und in welche Richtung sie wächst."
 L["Which sections the gold tooltip shows."] = "Welche Abschnitte der Gold Tooltip anzeigt."
 L["Which view bags (and the bank) open to by default. The bank has no MultiBag view, so MultiBag opens the bank to OneBank."] = "Bestimmt, mit welcher Ansicht sich Taschen (und die Bank) standardmäßig öffnen. Die Bank besitzt keine Mehrfachtaschen Ansicht, daher öffnet Mehrfachtasche die Bank in der Einzeltaschen Ansicht."
