@@ -376,17 +376,7 @@ local function SweepBody(unit, out)
                     -- Each column resolves its own prefix; the lookup is
                     -- memoised, so this is a table read per aura.
                     local p = def.prefix()
-                    if p and aura.name:find(p, 1, true) == 1 then
-                        out[def.key] = true
-                        -- The full buff name -- "<prefix>: <boss>" -- rides
-                        -- along with the boolean verdict, so a tooltip can
-                        -- show which boss's rune this actually is. New raids
-                        -- need nothing added here: any name carrying the
-                        -- resolved prefix already qualifies, current tier or
-                        -- future.
-                        out.names = out.names or {}
-                        out.names[def.key] = aura.name
-                    end
+                    if p and aura.name:find(p, 1, true) == 1 then out[def.key] = true end
                 end
             end
         end
@@ -561,8 +551,8 @@ local win
 local rows      = {}   -- flat, member-column major
 local colHeader = {}   -- column key -> one frame per member column
 local sweeper
-local closeTimer   -- armed only when the window was opened BY a ready check
-local CLOSE_DELAY_AFTER_FINISH = 30   -- seconds to leave the grid up after READY_CHECK_FINISHED
+local closeTimer   -- always armed while the window is shown, however it opened
+local CLOSE_DELAY = 30   -- seconds the window stays open before auto-closing
 
 local function MakeRow(parent, index)
     local r = CreateFrame("Frame", nil, parent)
@@ -632,22 +622,6 @@ local function MakeRow(parent, index)
             tex:SetSize(ICON_SZ, ICON_SZ)
             tex:SetAlpha(0.9)
             r._cells[c] = tex
-
-            -- Name-prefix columns (Vantus) carry the actual buff name
-            -- alongside the checkmark -- see SweepBody -- so the icon itself
-            -- can answer "which boss" on hover instead of just "present".
-            -- Every other column already says what it is from its header;
-            -- only a prefix match hides that detail behind a boolean.
-            if def.prefix then
-                tex:EnableMouse(true)
-                tex:SetScript("OnEnter", function(self)
-                    if not self._tipName then return end
-                    GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-                    GameTooltip:AddLine(self._tipName)
-                    GameTooltip:Show()
-                end)
-                tex:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            end
         end
     end
 
@@ -989,14 +963,6 @@ local function Refresh()
                         -- Unanswerable, or the client would not say.
                         cell:Hide()
                     end
-                    -- Refreshed every paint, present or not: a stale name
-                    -- from a prior boss must not survive into a row that no
-                    -- longer has one, or a swap between two Vantus runes
-                    -- would go on showing the first.
-                    if def.prefix then
-                        cell._tipName = (v == true) and e.checks.names
-                            and e.checks.names[def.key] or nil
-                    end
                 end
             end
             r:Show()
@@ -1118,6 +1084,15 @@ function ns.ShowRaidCheck(fromReadyCheck)
 
     win:Show()
     Refresh()
+    -- Always closes itself CLOSE_DELAY seconds after opening, no matter how
+    -- it was opened -- a ready check, or the player manually toggling it
+    -- with /euiraidcheck. Re-showing (another ready check, or opening it
+    -- again manually) restarts the countdown rather than stacking one.
+    if closeTimer then closeTimer:Cancel() end
+    closeTimer = C_Timer.NewTimer(CLOSE_DELAY, function()
+        closeTimer = nil
+        if win and win:IsShown() then ns.HideRaidCheck() end
+    end)
     -- An interval driver, not a per-frame one: people drink their flask DURING
     -- the check so the grid has to follow, but not at frame rate. The frame is
     -- created here, in this addon's chunk, because the engine bills a
@@ -1171,11 +1146,8 @@ ev:SetScript("OnEvent", function(_, event)
         local C = EllesmereUI.Comms
         if C then C.Send(MSG_REPORT, MyReport(), C.REPLY_SPREAD) end
         -- Any ready check, whoever started it: an assistant checking the raid
-        -- and the leader should see the same thing.
+        -- and the leader should see the same thing. (Arms the close timer.)
         ns.ShowRaidCheck(true)
-        -- A fresh check cancels any close countdown left over from a
-        -- previous one -- that check is done, this one just started.
-        if closeTimer then closeTimer:Cancel(); closeTimer = nil end
         return
     end
     if event == "READY_CHECK_CONFIRM" then
@@ -1188,16 +1160,6 @@ ev:SetScript("OnEvent", function(_, event)
     if event == "READY_CHECK_FINISHED" then
         readyCheckActive = false
         Refresh()
-        -- Blizzard's own check just ended -- either everyone answered or its
-        -- own timeout hit. The grid is still worth reading right after
-        -- (that's the moment a raid leader is actually looking at it), so
-        -- give it CLOSE_DELAY_AFTER_FINISH more seconds before closing on
-        -- its own, rather than closing the instant the check ends.
-        if closeTimer then closeTimer:Cancel() end
-        closeTimer = C_Timer.NewTimer(CLOSE_DELAY_AFTER_FINISH, function()
-            closeTimer = nil
-            if win and win:IsShown() then ns.HideRaidCheck() end
-        end)
         return
     end
     -- Leaving the group, or losing rank without the option, closes it.
