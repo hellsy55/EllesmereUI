@@ -3962,6 +3962,17 @@ local function ComputeTopRowStride(barData, count)
     return stride, numRows, topCount
 end
 
+-- Minimum Bar Size, counted in icon slots along the GROWTH axis. That axis is ALWAYS the `stride`
+-- term of the size formulas (width on horizontal bars, height on vertical), so one rule covers both
+-- orientations. Returns the stride the CONTAINER reserves; the LAYOUT stride is never replaced --
+-- grid wrapping (col = idx % stride) and per-row centering keep using the real icon count, and the
+-- reserved surplus becomes a single centering offset. nil/0 (the default) is a straight passthrough.
+local function ReserveStride(barData, stride)
+    local minN = barData.minSizeIcons
+    if minN and minN > stride then return minN end
+    return stride
+end
+
 -- Empty custom bars still need a stable footprint so unlock mode can keep a visible mover and convert drag positions correctly before any icons exist.
 local EMPTY_CDM_BAR_SIZE = { 100, 36 }
 
@@ -3988,14 +3999,17 @@ local function ComputeCDMBarSize(barData, count)
     -- custom top-row split's second row is empty, so no empty row is reserved.
     local stride, rows = ComputeTopRowStride(barData, count)
     if rows < 1 then rows = 1 end
+    -- Minimum Bar Size reserves extra growth-axis slots (no-op when unset). Unlike LayoutCDMBar
+    -- there is no match gate here: this is the pre-layout footprint estimate, and a matched bar's live frame rect (checked first by GetStableCDMBarSize) always wins over it.
+    local resStride = ReserveStride(barData, stride)
     local grow = barData.growDirection or "CENTER"
     local isH = (grow == "RIGHT" or grow == "LEFT" or grow == "CENTER")
     if isH then
-        return stride * iW + (stride - 1) * sp,
+        return resStride * iW + (resStride - 1) * sp,
                rows * iH + (rows - 1) * sp
     end
     return rows * iW + (rows - 1) * sp,
-           stride * iH + (stride - 1) * sp
+           resStride * iH + (resStride - 1) * sp
 end
 
 -- Authoritative footprint for unlock mode: live frame when it has bounds, else derived from bar config, else the stable empty-bar placeholder.
@@ -4235,6 +4249,24 @@ LayoutCDMBar = function(barKey)
         perRowActive = true
     end
 
+    -- Minimum Bar Size: reserve growth-axis room for at least minSizeIcons icon slots so a bar that
+    -- loses icons (spec/talent swap, shift-hidden cooldowns) keeps its footprint -- everything
+    -- matching its width or anchored to its edges then stays put, and the icons still present are
+    -- centered in the surplus. SKIPPED while the GROWTH axis is match-owned: that axis measures
+    -- exactly what the match target dictates and padding it would overshoot. A match on the
+    -- PERPENDICULAR axis is fine -- the growth axis still varies with icon count there.
+    local growMatched
+    if isHoriz then growMatched = widthMatchTarget else growMatched = heightMatchTarget end
+    local resStride = growMatched and stride or ReserveStride(barData, stride)
+    -- What resStride real icons measure at the BASE icon size, spacing included. Integer physical px like every other term here, so both bar edges stay on the pixel grid.
+    local reservedPx = 0
+    if resStride > stride then
+        local basePx = isHoriz and iconWPx or iconHPx
+        reservedPx = resStride * basePx + (resStride - 1) * spacingPx
+    end
+    -- Offset that centers the real icon block inside the surplus (uniform layout only; the per-row branch centers each row inside the total already).
+    local padOffsetPx = 0
+
     local totalWPx, totalHPx
     if perRowActive then
         -- Two rows, independent icon sizes. Top row = customTopCount icons, the bottom takes the
@@ -4245,19 +4277,30 @@ LayoutCDMBar = function(barKey)
             local topRowW = topN * rowWPx[1] + math.max(0, topN - 1) * spacingPx
             local botRowW = botN * rowWPx[2] + math.max(0, botN - 1) * spacingPx
             totalWPx = math.max(topRowW, botRowW)
+            -- No pad offset needed: both rows are centered against totalWPx below, so growing it IS the centering.
+            if reservedPx > totalWPx then totalWPx = reservedPx end
             totalHPx = rowHPx[1] + rowHPx[2] + spacingPx
         else
             local topColH = topN * rowHPx[1] + math.max(0, topN - 1) * spacingPx
             local botColH = botN * rowHPx[2] + math.max(0, botN - 1) * spacingPx
             totalHPx = math.max(topColH, botColH)
+            if reservedPx > totalHPx then totalHPx = reservedPx end
             totalWPx = rowWPx[1] + rowWPx[2] + spacingPx
         end
     elseif isHoriz then
         totalWPx = stride  * iconWPx + (stride  - 1) * spacingPx + extraPixels
         totalHPx = effRows * iconHPx + (effRows - 1) * spacingPx + extraPixelsH
+        if reservedPx > totalWPx then
+            padOffsetPx = math.floor((reservedPx - totalWPx) / 2 + 0.5)
+            totalWPx = reservedPx
+        end
     else
         totalWPx = effRows * iconWPx + (effRows - 1) * spacingPx + extraPixels
         totalHPx = stride  * iconHPx + (stride  - 1) * spacingPx + extraPixelsH
+        if reservedPx > totalHPx then
+            padOffsetPx = math.floor((reservedPx - totalHPx) / 2 + 0.5)
+            totalHPx = reservedPx
+        end
     end
 
     -- Do NOT force an even totalWPx for CENTER grow: SnapCenterForDim (used by ApplyBarPositionCentered
@@ -4371,6 +4414,8 @@ LayoutCDMBar = function(barKey)
     -- Uniform icon size: every bar except the 2-row per-row-size case above.
     local stepW = iconW + spacing
     local stepH = iconH + spacing
+    -- Minimum Bar Size surplus in coord space: shifts the whole icon block along the GROWTH axis so it sits centered in the reserved footprint. 0 whenever the reservation is off or already filled.
+    local padOffset = padOffsetPx * onePx
 
     local topRowCount = customTopCount
     if topRowCount < 0 then topRowCount = 0 end
@@ -4470,7 +4515,7 @@ LayoutCDMBar = function(barKey)
                 rowOffset = math.floor((stride - rowCount) * stepW / 2 + 0.5)
             end
             anchorPt, anchorRelPt = "TOPLEFT", "TOPLEFT"
-            anchorX = (posX + rowOffset) * iS
+            anchorX = (posX + rowOffset + padOffset) * iS
             anchorY = -(posY + extraBeforeR) * iS
         else
             if rowHasLess then
@@ -4478,7 +4523,7 @@ LayoutCDMBar = function(barKey)
             end
             anchorPt, anchorRelPt = "TOPLEFT", "TOPLEFT"
             anchorX = (vRow * stepW + extraBeforeR) * iS
-            anchorY = -(col * stepH + extraBefore + rowOffset) * iS
+            anchorY = -(col * stepH + extraBefore + rowOffset + padOffset) * iS
         end
 
         if anchorPt then
@@ -9188,6 +9233,8 @@ function ECME:CDMFinishSetup()
                             -- Effective row count: collapses to 1 when a custom top-row split has no icons in its second row yet.
                             local stride, numRows = ComputeTopRowStride(barData, cachedCount)
                             if numRows < 1 then numRows = 1 end
+                            -- Minimum Bar Size reserves extra growth-axis slots (no-op when unset); without it a bar under its minimum pre-sizes too small and visibly snaps once real data lands.
+                            local resStride = ReserveStride(barData, stride)
                             local isHoriz = (grow == "RIGHT" or grow == "LEFT" or (grow == "CENTER" and not barData.verticalOrientation))
                             -- Compute total in integer phys px to avoid PP.Scale floor losing 1 px to floating-point dust on the multiply.
                             local PPpc = EllesmereUI and EllesmereUI.PP
@@ -9197,11 +9244,11 @@ function ECME:CDMFinishSetup()
                             local spacingPx = math.floor(spacing / onePxPc + 0.5)
                             local totalWPx, totalHPx
                             if isHoriz then
-                                totalWPx = stride  * iconWPx + (stride  - 1) * spacingPx
-                                totalHPx = numRows * iconHPx + (numRows - 1) * spacingPx
+                                totalWPx = resStride * iconWPx + (resStride - 1) * spacingPx
+                                totalHPx = numRows   * iconHPx + (numRows   - 1) * spacingPx
                             else
-                                totalWPx = numRows * iconWPx + (numRows - 1) * spacingPx
-                                totalHPx = stride  * iconHPx + (stride  - 1) * spacingPx
+                                totalWPx = numRows   * iconWPx + (numRows   - 1) * spacingPx
+                                totalHPx = resStride * iconHPx + (resStride - 1) * spacingPx
                             end
                             local totalW = totalWPx * onePxPc
                             local totalH = totalHPx * onePxPc
