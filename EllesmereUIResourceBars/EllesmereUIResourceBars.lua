@@ -202,6 +202,10 @@ local CHANNEL_TICK_DATA = {
     [205021]  = { ticks = 5 },                                     -- Ray of Frost
     -- Druid
     [740]     = { ticks = 4 },                                     -- Tranquility
+    -- Hunter
+    -- Rapid Fire shoots once at channel start and once at channel end. Quick
+    -- Draw (459794) adds three shots without changing the channel duration.
+    [257044]  = { missiles = 7, addMissiles = { [459794] = 3 } },  -- Rapid Fire
     -- Demon Hunter
     [198013]  = { tickInterval = 0.2 },                            -- Eye Beam
     [473728]  = { tickInterval = 0.2 },                            -- Void Ray (Devourer)

@@ -12159,23 +12159,35 @@ WSkin.RegisterWindow({
 })
 
 -------------------------------------------------------------------------------
---  Ready check. Two frames, one setting, same reasoning as the group invites:
---  ReadyCheckFrame (the "Are you ready?" prompt with Yes/No that every member
---  gets) and ReadyCheckListenerFrame (the response list the initiator watches).
+--  Ready check. Two frames, one setting -- and the names are actively
+--  misleading, so read Blizzard_FrameXML/Mainline/ReadyCheck.xml before
+--  touching this. ReadyCheckListenerFrame is NOT a listener and NOT a response
+--  list: it is a CHILD of ReadyCheckFrame, setAllPoints to it, and it owns
+--  every visible piece of the popup -- Bg, NineSlice, TitleContainer,
+--  PortraitContainer, ReadyCheckFrameText, and both Yes/No buttons.
+--  ReadyCheckFrame itself is an empty 323x100 container with no art at all.
 --
---  The waiting "?" glyph is ReadyCheckPortrait, a REGION OF THE PROMPT and so
---  in the same region list the shell blanket-fades. It is parked on a
---  PROTECT_KEYS slot (caret) BEFORE the shell runs, exactly as the invite
---  dialog does with its role icon: the glyph is what identifies this popup at a
---  glance, and the slot is the engine's supported "keep this texture" channel,
---  honored by Shell's initial fade and every later Restrip pass.
+--  ShowReadyCheck() then does this:
+--
+--      if UnitIsUnit("player", initiator) then ReadyCheckListenerFrame:Hide()
+--      else                                    ReadyCheckListenerFrame:Show()
+--
+--  So the person who STARTED the check is shown the bare outer frame and
+--  nothing else. Anything drawn on ReadyCheckFrame is a block only they see.
+--  The shell therefore belongs on the listener, never on the outer frame.
+--
+--  The portrait is ReadyCheckPortrait, inside the listener's PortraitContainer
+--  -- one level down from the listener's own regions, so the shell's blanket
+--  region fade never reaches it and it needs no protection slot.
 --
 --  Both frames are skinned from their own OnShow, never from the login pass:
---  the listener frame is list-backed, and the loot-history doctrine applies --
---  a skin must never be what triggers such a frame's first layout.
+--  a skin must never be what triggers a frame's first layout.
 -------------------------------------------------------------------------------
 LP.RC_PAD      = 24   -- side padding kept clear of the message
 LP.RC_MAX_GROW = 2    -- hard ceiling: never wider than twice Blizzard's own width
+LP.RC_TEXT_Y   = -30  -- message top offset (Blizzard's -37; see FitReadyCheck)
+LP.RC_BTN_GAP  = 12   -- gap between Ready and Not Ready
+LP.RC_BTN_Y    = 16   -- button row off the panel bottom (Blizzard's own value)
 
 -- Capture a region's offset from the frame's TOP anchor (center-x delta, top
 -- delta, half width) so it can be re-anchored later without guessing Blizzard's
@@ -12230,109 +12242,65 @@ function LP.FitReadyCheck()
     if d.rcTitle and not d.rcTitleDX then
         d.rcTitleDX, d.rcTitleDY = LP.CaptureTopOffset(d.rcTitle, fr)
     end
-    -- Buttons, captured BEFORE the first resize -- this is the whole point of
-    -- doing it here rather than further down. Anchored to the frame's edges
-    -- they would drift apart by the full growth, and measuring them after a
-    -- resize would bake that spread in permanently.
-    if d.rcBtns then
-        for _, b in ipairs(d.rcBtns) do
-            local bd = GetFFD(b)
-            if not bd.rcDX then bd.rcDX, bd.rcDY, bd.rcHW = LP.CaptureTopOffset(b, fr) end
-        end
-    end
-
     local need = fs.GetStringWidth and fs:GetStringWidth()
     if not need or issecretvalue(need) then return end
 
-    -- NOTHING is re-centered while the glyph is up: Blizzard's inset is what
-    -- keeps the message clear of the portrait, and overriding it runs the text
-    -- straight under the artwork. Centering is strictly the compensation for a
-    -- hidden glyph. With it up we keep the inset and reserve it on BOTH sides
-    -- of the wrap box, so the box stays inside the frame and the line still fits.
-    local hidden = EllesmereUIDB and EllesmereUIDB.readyCheckHidePortrait
-    local inset  = hidden and 0 or math.abs(d.rcTextDX or 0)
-
-    local pad  = LP.RC_PAD * 2 + inset * 2
+    -- EVERYTHING is centered, because the portrait is gone (SkinReadyCheckList
+    -- removes it). Blizzard insets the title, message and button row to the
+    -- right to clear a glyph that is no longer drawn, and left alone that reads
+    -- as a lopsided hole down the left side of the panel. No inset is reserved
+    -- in the wrap box either -- the full width is usable now.
+    local pad  = LP.RC_PAD * 2
     local want = math.max(d.rcBaseW, math.min(need + pad, d.rcBaseW * LP.RC_MAX_GROW))
     fr:SetWidth(want)
     fs:SetWidth(want - pad)
     fs:ClearAllPoints()
-    fs:SetPoint("TOP", fr, "TOP", hidden and 0 or d.rcTextDX, d.rcTextDY)
+    -- RC_TEXT_Y, not Blizzard's -37: a long "<Name>-<Realm> has initiated a
+    -- ready check." wraps to TWO lines and the second one runs into the button
+    -- row. The message moves UP rather than the buttons moving down -- the
+    -- buttons sit RC_BTN_Y off the bottom edge and have no room to give.
+    fs:SetPoint("TOP", fr, "TOP", 0, LP.RC_TEXT_Y)
 
-    if d.rcTitle and d.rcTitleDX then
+    if d.rcTitle and d.rcTitleDY then
         d.rcTitle:ClearAllPoints()
-        d.rcTitle:SetPoint("TOP", fr, "TOP", hidden and 0 or d.rcTitleDX, d.rcTitleDY)
+        d.rcTitle:SetPoint("TOP", fr, "TOP", 0, d.rcTitleDY)
     end
 
-    -- Re-applied from the captured offsets, so size and the gap between them
-    -- are exactly what Blizzard laid out; only the frame around them grew.
-    --
-    -- Plus, and ONLY with the glyph hidden, the same correction the message
-    -- gets: the pair inherits Blizzard's portrait inset and therefore sits
-    -- right of center. The shift is derived from the pair's OUTER edges (min
-    -- left, max right) rather than an average of their centers, so it stays
-    -- correct if the two buttons ever differ in width, and it is applied to
-    -- BOTH -- moving one alone would just trade a lopsided pair for a lopsided gap.
-    if d.rcBtns then
-        local minL, maxR
-        for _, b in ipairs(d.rcBtns) do
-            local bd = GetFFD(b)
-            if bd.rcDX and bd.rcHW then
-                local l, r = bd.rcDX - bd.rcHW, bd.rcDX + bd.rcHW
-                minL = minL and math.min(minL, l) or l
-                maxR = maxR and math.max(maxR, r) or r
-            end
-        end
-        local shift = (hidden and minL) and -((minL + maxR) / 2) or 0
-        for _, b in ipairs(d.rcBtns) do
-            local bd = GetFFD(b)
-            if bd.rcDX then
-                b:ClearAllPoints()
-                b:SetPoint("TOP", fr, "TOP", bd.rcDX + shift, bd.rcDY)
-            end
-        end
+    -- Anchored symmetrically about the panel's BOTTOM rather than replayed from
+    -- Blizzard's own offsets. Blizzard puts Ready at BOTTOMRIGHT->BOTTOM x=+11
+    -- and Not Ready at BOTTOMLEFT->BOTTOM x=+22, which sits the pair's midpoint
+    -- ~16px right of center -- the same portrait inset the text carries, and the
+    -- most visible one, because a shifted pair shows as unequal margins on each
+    -- side. Half the gap from the middle each keeps the gap even AND centers the
+    -- row, and it tracks the SetWidth above for free.
+    local yes, no = d.rcBtns and d.rcBtns[1], d.rcBtns and d.rcBtns[2]
+    if yes and no then
+        local half = LP.RC_BTN_GAP / 2
+        yes:ClearAllPoints()
+        yes:SetPoint("BOTTOMRIGHT", fr, "BOTTOM", -half, LP.RC_BTN_Y)
+        no:ClearAllPoints()
+        no:SetPoint("BOTTOMLEFT", fr, "BOTTOM", half, LP.RC_BTN_Y)
     end
-end
-
--- Portrait visibility (EllesmereUIDB.readyCheckHidePortrait, default off).
--- ALPHA, never Hide(): the glyph rides a PROTECT_KEYS slot, so Shell's fade and
--- every later Restrip pass leave whatever alpha is set here alone. Falls back to
--- the global for the case where the prompt has not been skinned yet.
-function LP.ApplyReadyCheckPortrait()
-    local fr = _G.ReadyCheckFrame
-    local tex = (fr and FFD[fr] and FFD[fr].caret) or _G.ReadyCheckPortrait
-    if tex and tex.SetAlpha then
-        tex:SetAlpha((EllesmereUIDB and EllesmereUIDB.readyCheckHidePortrait) and 0 or 1)
-    end
-    -- The title's centering follows the glyph, so the toggle lands live.
-    LP.FitReadyCheck()
 end
 
 function LP.SkinReadyCheck(fr)
     if not fr or fr:IsForbidden() then return end
     local d = GetFFD(fr)
 
-    if not d.caret then
-        -- Named lookup first, then INSPECT the regions: which key holds the
-        -- glyph has moved between templates and a wrong guess fails silently,
-        -- so the texture's own path (Interface\RaidFrame\ReadyCheck-Waiting) is
-        -- the one identifier that cannot go stale.
-        d.caret = _G.ReadyCheckPortrait or fr.Portrait or fr.PortraitTexture
-        if not d.caret and fr.GetRegions then
-            for i = 1, select("#", fr:GetRegions()) do
-                local r = select(i, fr:GetRegions())
-                if r and r.IsObjectType and r:IsObjectType("Texture") then
-                    local hay = WSkin.TexHay(r)
-                    if hay and (WSkin.TexIsIcon(hay) or hay:find("readycheck", 1, true)) then
-                        d.caret = r
-                        break
-                    end
-                end
-            end
-        end
+    -- NO SHELL ON THIS FRAME. ReadyCheckFrame is a bare 323x100 container: the
+    -- background, NineSlice, TitleContainer, portrait, message and BOTH buttons
+    -- are all children of ReadyCheckListenerFrame, which is setAllPoints to it.
+    -- ShowReadyCheck() HIDES that child for the initiator, so Blizzard shows the
+    -- person who started the check a completely artless frame. A backdrop here
+    -- is therefore a black block that ONLY the initiator ever sees -- the rest
+    -- of the group has the listener's own skin covering it.
+    --
+    -- The listener carries the shell instead (LP.SkinReadyCheckList). This stays
+    -- as the fallback for a template that ever drops the child and puts the art
+    -- back on the outer frame.
+    if not _G.ReadyCheckListenerFrame then
+        LP.Shell("readycheck", fr)
     end
-
-    LP.Shell("readycheck", fr)
 
     if fr.NineSlice then WSkin.FadeNineSlice(fr.NineSlice) end
     LP.FadeKeys(fr, LP.ART_KEYS)
@@ -12358,8 +12326,18 @@ function LP.SkinReadyCheck(fr)
 
     -- Message + title for the geometry pass below. Resolved here, where the
     -- frame is in hand, and parked on FFD so the pass itself needs no lookups.
+    --
+    -- The title is looked up on the LISTENER first. TitleContainer is a child
+    -- of that frame, not of this one, and its TitleText is an unnamed parentKey
+    -- -- so every lookup rooted at ReadyCheckFrame (fr.TitleContainer,
+    -- fr.TitleText, _G.ReadyCheckFrameTitleText) misses, silently, and the
+    -- title simply never gets positioned. The fr.* paths stay as the fallback
+    -- for a template that moves it back out.
+    local host = _G.ReadyCheckListenerFrame or fr
     d.rcText = d.rcText or (n and _G[n .. "Text"]) or fr.Text
     d.rcTitle = d.rcTitle
+        or (host.TitleContainer and host.TitleContainer.TitleText)
+        or host.TitleText
         or (fr.TitleContainer and fr.TitleContainer.TitleText)
         or fr.TitleText
         or (n and _G[n .. "TitleText"])
@@ -12375,14 +12353,14 @@ function LP.SkinReadyCheck(fr)
     end
 
     -- Last, and after the re-font: the message is measured here, so it has to
-    -- be carrying its final face and size. Also covers a prompt shown for the
-    -- first time with the portrait already toggled off, no options round trip.
-    LP.ApplyReadyCheckPortrait()
+    -- be carrying its final face and size.
+    LP.FitReadyCheck()
 end
 
--- The initiator's list. Chrome only: shell, border, title strip, close button.
--- The response ROWS (name + ready/not-ready/waiting icon) stay stock -- those
--- icons are the window's whole content, and Blizzard re-stamps them per answer.
+-- The prompt's BODY, despite the name -- see the block comment above. This is
+-- the frame that actually carries the popup's art, so it is the one that gets
+-- the shell. It is shown to everyone EXCEPT the initiator, which is precisely
+-- what keeps the skin off the initiator's screen.
 function LP.SkinReadyCheckList(fr)
     if not fr or fr:IsForbidden() then return end
 
@@ -12404,8 +12382,28 @@ function LP.SkinReadyCheckList(fr)
         LP.FontRegions(tc)
     end
 
+    -- Portrait REMOVED, and with no option to bring it back. Blizzard's corner
+    -- portrait is a PortraitFrameTemplate device: drawn half outside the panel
+    -- and relying on the ornate ring art to nest into. Once the shell strips
+    -- that art the circle just floats off the left edge. Nothing is lost -- the
+    -- initiator's name is already in the message text -- and FitReadyCheck
+    -- centers the panel's contents on the strength of it being gone.
+    WSkin.RemovePortrait(fr)
+
+    -- Title and message explicitly whitened: both are GameFontNormal, so they
+    -- come up Blizzard gold against the shell instead of matching every other
+    -- skinned window.
+    local title = fr.TitleContainer and fr.TitleContainer.TitleText
+    if title then WSkin.White(title) end
+    local body = _G.ReadyCheckFrameText
+    if body then WSkin.White(body) end
+
     WSkin.CommonChrome(fr)
     LP.FontRegions(fr)
+
+    -- The geometry pass keys off ReadyCheckFrame, and its capture needs the
+    -- message laid out -- which it now is, on the frame that actually owns it.
+    LP.FitReadyCheck()
 end
 
 WSkin.RegisterWindow({
@@ -12422,10 +12420,6 @@ WSkin.RegisterWindow({
         end
         Wire("ReadyCheckFrame", LP.SkinReadyCheck)
         Wire("ReadyCheckListenerFrame", LP.SkinReadyCheckList)
-
-        -- Options entry point: the portrait toggle lands on a prompt that is
-        -- already on screen, and on the next one either way.
-        EllesmereUI._ReadyCheck_Refresh = LP.ApplyReadyCheckPortrait
     end,
 })
 end

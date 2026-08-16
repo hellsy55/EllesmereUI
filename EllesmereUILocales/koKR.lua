@@ -5543,9 +5543,9 @@ L["|cff888888No friends online|r"] = "|cff888888접속 중인 친구 없음|r"
 -- add Minimap Dropdown (미니맵 드롭다운)
 L["Above Map"] = "미니맵 위"
 L["Below Map"] = "미니맵 아래"
-L["Bottom Left, Grow Right"] = "왼쪽 하단, 오른쪽으로 확장"
+L["Bottom Left, Grow Right"] = "왼쪽 하단, 오른쪽 확장"
 L["Bottom Left, Grow Up"] = "왼쪽 하단, 위로 확장"
-L["Bottom Right, Grow Left"] = "오른쪽 하단, 왼쪽으로 확장"
+L["Bottom Right, Grow Left"] = "오른쪽 하단, 왼쪽 확장"
 L["Bottom Right, Grow Up"] = "오른쪽 하단, 위로 확장"
 L["Edge Box"] = "가장자리 상자"
 L["Hide Extra Buttons"] = "추가 버튼 숨기기"
@@ -5555,9 +5555,9 @@ L["On Hover"] = "마우스 오버 시"
 L["Show Blizzard Elements"] = "블리자드 요소 표시"
 L["Textured Circle"] = "텍스처 원"
 L["Top Left, Grow Down"] = "왼쪽 상단, 아래로 확장"
-L["Top Left, Grow Right"] = "왼쪽 상단, 오른쪽으로 확장"
+L["Top Left, Grow Right"] = "왼쪽 상단, 오른쪽 확장"
 L["Top Right, Grow Down"] = "오른쪽 상단, 아래로 확장"
-L["Top Right, Grow Left"] = "오른쪽 상단, 왼쪽으로 확장"
+L["Top Right, Grow Left"] = "오른쪽 상단, 왼쪽 확장"
 L["Ungroup Minimap Buttons"] = "미니맵 버튼 그룹 해제"
 L["Zoom +/- Icons"] = "확대/축소 +/- 아이콘"
 -- add Minimap Tooltip (미니맵 툴팁)
@@ -6866,6 +6866,52 @@ L["Enter a volume from 0 to 100 for %1$s:"] = "%1$s의 음량을 0에서 100 사
 L[" (Rested: %s)"] = " (휴식 상태: %s)"
 L[" (Rested: %.1f%%)"] = " (휴식 상태: %.1f%%)"
 L["House Level %d: %d / %d"] = "집 레벨 %d: %d / %d"
+--2026-08-16 신규
+--재사용 대기시간 관리자 
+L["ADDITIONAL BAR OFFSET"] = "추가 바 오프셋"
+L["Extra horizontal shift stacked on top of this bar's normal position. Unlock mode shows the base position; the offset re-applies when you exit."] = "이 바의 기본 위치 위에 추가로 적용되는 가로 이동 거리입니다. 프레임 이동 모드에서는 기본 위치가 표시되며, 이동 모드를 종료하면 오프셋이 다시 적용됩니다."
+L["Extra vertical shift stacked on top of this bar's normal position. Unlock mode shows the base position; the offset re-applies when you exit."] = "이 바의 기본 위치 위에 추가로 적용되는 세로 이동 거리입니다. 프레임 이동 모드에서는 기본 위치가 표시되며, 이동 모드를 종료하면 오프셋이 다시 적용됩니다."
+
+--편의 기능 
+L["Hide Loot Rolls Window"] = "전리품 주사위 창 숨기기"
+L["Hides Blizzard's \"Loot Rolls\" window -- the running list of dropped items showing who rolled what and who won. Use the cog to let it appear briefly and close itself instead. The Need/Greed roll popups themselves are not affected."] = "블리자드 기본 '전리품 주사위' 창(획득한 아이템 목록과 주사위 굴림 현황 및 낙찰자를 보여주는 창)을 숨깁니다. 톱니바퀴 아이콘을 설정하면 창이 잠시 나타났다가 자동으로 닫히게 할 수 있습니다. 입찰/차선 주사위 선택 창 자체에는 영향을 주지 않습니다."
+L["Loot Rolls Window Settings"] = "전리품 주사위 창 설정"
+L["Hide Completely"] = "완전히 숨기기"
+L["Close After Delay"] = "일정 시간 후 닫기"
+L["Close After (sec)"] = "닫기 지연 시간 (초)"
+
+--기본 UI 개선
+L["The ready check prompt with its Yes / No buttons, plus the initiator's response list."] = "수락 / 거절 단추가 포함된 전투 준비 창과 전투 준비를 시작한 사람의 응답 현황 목록입니다."
+L["Hide Portrait"] = "초상화 숨기기"
+L["Hides the ready check glyph above the prompt, leaving just the question and the Yes / No buttons. Applies while the Ready Check reskin is enabled."] = "전투 준비 창 상단의 문양을 숨기고 질문과 수락 / 거절 단추만 남겨둡니다. 이 옵션은 전투 준비 스킨 변경 기능이 활성화되어 있을 때만 적용됩니다."
+L["The panel the minimap Group Finder eye shows on hover: queue titles, role icons and counts, and time in queue."] = "미니맵 파티 찾기 아이콘(눈동자)에 마우스를 올렸을 때 표시되는 창입니다. 신청한 대기열 이름, 역할 아이콘 및 인원수, 대기 시간이 포함됩니다."
+L["Delve Tier Picker"] = "구렁 단계 선택창"
+L["The delve difficulty window: tier dropdown, reward list and Enter button. The Map Properties row is left stock -- it is a Blizzard widget display and is not safe to restyle."] = "구렁 난이도 창을 변경합니다. 단계 드롭다운 메뉴, 보상 목록, 입장 단추가 포함됩니다. '지도 속성' 영역은 블리자드 기본 위젯 표시 방식이라 스타일을 변경하면 오류가 발생할 수 있어 원본 그대로 유지합니다."
+L["Choice Windows"] = "선택창"
+L["Weekly and event choice windows such as Abundance harvests and \"how will you aid...\" pickers: option plates, headers, reward icons and buttons. Option artwork stays."] = "풍요로운 구렁 보상이나 '누구를 도우시겠습니까...' 같은 주간 및 이벤트 선택창을 변경합니다. 선택지 판, 머리말, 보상 아이콘 및 단추가 포함됩니다. 선택지 아트워크는 그대로 유지됩니다."
+L["Trade"] = "거래"
+L["The player-to-player trade window: frame, both item columns, the enchant slots, money rows and buttons. Item icons are squared and carry a rarity border. Both portraits are removed, as on every other window."] = "플레이어 간 거래 창을 변경합니다. 프레임, 양쪽 아이템 칸, 마법부여 칸, 골드 입력 칸 및 단추가 포함됩니다. 아이템 아이콘은 사각형으로 바뀌고 등급별 테두리가 적용됩니다. 다른 창들과 마찬가지로 양쪽 캐릭터 초상화는 제거됩니다."
+
+--기본 UI 개선 - 툴팁, 메뉴&팝업/알림
+L["BLIZZARD HUD"] = "블리자드 HUD"
+L["Reskin Widget Bars"] = "위젯 바 스킨 변경"
+L["Reskin Extra Action Buttons"] = "추가 행동 단추 스킨 변경"
+L["Restyles Blizzard's on-screen progress bars (event objectives, nameplate counters) to the EUI look. Requires reload to apply.\n\nThese bars are drawn over rather than modified, so if the game ever reports their contents as protected the original bar is shown instead."] = "화면에 표시되는 블리자드 진행 바(이벤트 목표, 이름표 카운터 등)를 EUI 스타일로 변경합니다. 적용하려면 UI를 다시 불러와야 합니다.\n\n이 바들은 기존 바를 수정하는 것이 아니라 그 위에 새로 그리는 방식입니다. 따라서 게임에서 해당 콘텐츠를 '보호됨'으로 판단하면 원래의 블리자드 기본 바가 대신 표시됩니다."
+L["Squares the extra action and zone ability buttons and gives them a thin black border.\n\nOff by default. The size slider below works whether this is on or off."] = "추가 행동 단추와 지역 능력을 사각형 모양으로 바꾸고 얇은 검은색 테두리를 적용합니다.\n\n기본값은 비활성화입니다. 아래의 크기 조절 슬라이더는 이 옵션의 켜짐/꺼짐 여부와 상관없이 작동합니다."
+L["Reskins the dungeon and battleground queue accept popups with the EUI dark style, and adds an accept countdown timer bar to the dungeon one."] = "던전 및 전장 입장 수락 알림창을 EUI 어두운 스타일로 변경하고, 던전 알림창에는 입장 수락 초읽기 바를 추가합니다."
+
+--가방
+L["Show Set Name on Gear"] = "장비에 세트 이름 표시"
+L["Display the equipment set's name at the bottom of bag items that belong to one of your equipment sets."] = "저장된 장비 세트에 포함된 가방 아이템의 하단에 해당 장비 세트의 이름을 표시합니다."
+L["Split Set Gear by Set"] = "장비 세트별로 아이템 분류"
+L["Show one sub-category per equipment set (named after the set) nested under Item Set Gear. Gear in several sets goes to the first one."] = "'세트 장비' 항목 아래에 각 장비 세트별 하위 분류(세트 이름)를 생성하여 표시합니다. 여러 세트에 중복으로 포함된 장비는 첫 번째 세트에 분류됩니다."
+
+--이름표 
+L["Color Name by Reaction"] = "대상 관계별 이름 색상 적용"
+L["Colors the enemy nameplate name text to match the unit's reaction (Hostile or Neutral) instead of the Enemy Name Text color."] = "적 이름표의 이름 텍스트 색상을 '적 이름 텍스트' 색상 대신 대상과의 관계(적대적 또는 중립적)에 맞춰 변경합니다."
+
+--오라/강화 효과 알림
+L["Pick which content the class-special reminders (poisons/rites/imbues/shields) appear in.\nRested areas (cities and inns) always stay hidden."] = "직업 전용 알림(독/의식/무기 부여/보호막)을 표시할 콘텐츠를 선택합니다. 휴식 지역(도시 및 여관)에서는 항상 숨겨집니다."
 
 -- == Chat prints (채팅창 print 출력 - 소스 엘키(L/Lf) 삽입 대기) ==================
 -- 원본이 print() 에 영문 리터럴을 직접 쓰는 곳들. 엔진 자동번역 밖이라 소스에서

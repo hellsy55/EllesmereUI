@@ -621,6 +621,73 @@ local reagentSlots = {}
 local bagSlots     = {}
 
 -------------------------------------------------------------------------------
+--  Pawn bag upgrade advisor integration
+-------------------------------------------------------------------------------
+local pawnRegistered = false
+local pawnPending = setmetatable({}, { __mode = "k" })
+local pawnPositioned = setmetatable({}, { __mode = "k" })
+local pawnRetryScheduled = false
+local UpdatePawnArrow
+
+local function RetryPawnArrows()
+    pawnRetryScheduled = false
+    local pending = pawnPending
+    pawnPending = setmetatable({}, { __mode = "k" })
+
+    for btn, expectedLink in pairs(pending) do
+        local parent = btn:GetParent()
+        local currentLink = parent and C_Container.GetContainerItemLink(parent:GetID(), btn:GetID())
+        if btn:IsShown() and currentLink == expectedLink then
+            UpdatePawnArrow(btn, currentLink)
+        end
+    end
+end
+
+UpdatePawnArrow = function(btn, itemLink)
+    if not pawnRegistered or not btn.UpgradeIcon then return end
+    if not pawnPositioned[btn] then
+        btn.UpgradeIcon:ClearAllPoints()
+        btn.UpgradeIcon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+        btn.UpgradeIcon:SetSize(16, 16)
+        pawnPositioned[btn] = true
+    end
+    btn.UpgradeIcon:Hide()
+
+    if not itemLink or not PawnCommon or not PawnCommon.ShowBagUpgradeAdvisor then
+        pawnPending[btn] = nil
+        return
+    end
+
+    local isUpgrade = PawnShouldItemLinkHaveUpgradeArrow(itemLink, true)
+    if isUpgrade == nil then
+        pawnPending[btn] = itemLink
+        if not pawnRetryScheduled then
+            pawnRetryScheduled = true
+            C_Timer.After(0, RetryPawnArrows)
+        end
+    else
+        pawnPending[btn] = nil
+        btn.UpgradeIcon:SetShown(isUpgrade)
+    end
+end
+
+local function RefreshPawnArrows()
+    if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end
+    if EUI_BagsReagent:IsVisible() then EUI_BagsReagent:RefreshInventory() end
+end
+
+local function RegisterPawnIntegration()
+    if pawnRegistered or BP().enhancedBags == false then return end
+    if type(PawnRegisterThirdPartyBag) ~= "function"
+        or type(PawnShouldItemLinkHaveUpgradeArrow) ~= "function" then return end
+
+    pawnRegistered = true
+    PawnRegisterThirdPartyBag("EllesmereUI Bags", {
+        RefreshAll = RefreshPawnArrows,
+    })
+end
+
+-------------------------------------------------------------------------------
 --  Per-category state (for targeted sidebar updates on item count changes)
 -------------------------------------------------------------------------------
 local _slotCategories = {}     -- bag*1000+slot -> categoryIndex from last full refresh
@@ -1261,6 +1328,12 @@ local function CreateHeader()
         clear:SetShown(text ~= "")
         C_Container.SetItemSearch(text)
         if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end
+        -- SetItemSearch is client-global and the bank reads isFiltered too:
+        -- re-render an open bank so both windows always show the same filter
+        -- state (the bank's box already mirrors this refresh toward bags).
+        if EUI_Bank and EUI_Bank:IsVisible() and EUI_Bank.RefreshBank then
+            EUI_Bank:RefreshBank()
+        end
     end)
 
     local close = CreateFrame("Button", nil, header)
@@ -2578,6 +2651,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         end
 
     end
+    UpdatePawnArrow(btn, data.itemLink)
 end
 
 -------------------------------------------------------------------------------
@@ -6192,6 +6266,7 @@ function EUI_BagsReagent:RefreshInventory()
         btn:Show()
         btn:SetID(data.slot)
         parent:SetID(data.bag)
+        local itemLink = data.info and C_Container.GetContainerItemLink(data.bag, data.slot)
 
         if not data.info then
             btn:SetItemButtonTexture(nil)
@@ -6212,7 +6287,6 @@ function EUI_BagsReagent:RefreshInventory()
             if btn.ItemLevelText and data.info.itemID then
                 local showItemlevel = BP().showItemlevelInBags ~= false
                 if showItemlevel then
-                    local itemLink = C_Container.GetContainerItemLink(data.bag, data.slot)
                     if itemLink then
                         local _, _, quality, level = GetItemInfo(itemLink)
                         if IsGearItem(itemLink) then
@@ -6236,6 +6310,7 @@ function EUI_BagsReagent:RefreshInventory()
             if c then SetInsetBorderColor(btn, c.r, c.g, c.b, 1)
             else SetInsetBorderColor(btn, 0.25, 0.25, 0.25, 1) end
         end
+        UpdatePawnArrow(btn, itemLink)
 
         local col = (i - 1) % REAGENT_COLUMNS
         local row = math.floor((i - 1) / REAGENT_COLUMNS)
@@ -6313,6 +6388,8 @@ end
 --  StartAddon
 -------------------------------------------------------------------------------
 local function StartAddon()
+    RegisterPawnIntegration()
+
     -- Apply default view based on setting (DB now available)
     local _dbt = GetDefaultBagType()
     if _dbt == "onebag" then
