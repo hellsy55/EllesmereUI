@@ -8697,19 +8697,28 @@ local function StyleSimpleFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -8731,7 +8740,7 @@ local function StyleSimpleFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -8960,19 +8969,28 @@ local function StylePetFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -8994,7 +9012,7 @@ local function StylePetFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
@@ -9247,19 +9265,28 @@ local function StyleBossFrame(frame, unit)
     local function ApplyAbsorbGate(zone, fs, content)
         local isHeal = (content == "healabsorbshort")
         local wantGate = (content == "absorbshort" or isHeal)
+        -- Each zone's own holder (falls back to textOverlay for a zone that
+        -- doesn't exist on this frame type, e.g. no Extra Text) is used as the
+        -- gate/clip parent so the zone's "Strata" setting still applies while
+        -- an Absorb Short gate has the text reparented.
+        local zoneHolder = (zone == "left" and frame._leftTextHolder)
+            or (zone == "right" and frame._rightTextHolder)
+            or (zone == "center" and frame._centerTextHolder)
+            or (zone == "extra" and frame._extraTextHolder)
+            or textOverlay
         local g = frame._absGate and frame._absGate[zone]
         if wantGate then
             if not g then
                 frame._absGate = frame._absGate or {}
                 frame._absClip = frame._absClip or {}
-                g = CreateFrame("StatusBar", nil, textOverlay)
+                g = CreateFrame("StatusBar", nil, zoneHolder)
                 g:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
                 g:SetStatusBarColor(1, 1, 1, 0)  -- geometry only; never drawn
                 g:SetMinMaxValues(0, 1)
                 g:SetValue(0)
-                local clip = CreateFrame("Frame", nil, textOverlay)
+                local clip = CreateFrame("Frame", nil, zoneHolder)
                 clip:SetClipsChildren(true)
-                clip:SetFrameLevel(textOverlay:GetFrameLevel() + 1)
+                clip:SetFrameLevel(zoneHolder:GetFrameLevel() + 1)
                 clip:SetPoint("TOPLEFT", g, "TOPLEFT", 0, 0)
                 clip:SetPoint("BOTTOMRIGHT", g:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
                 frame._absGate[zone] = g
@@ -9281,7 +9308,7 @@ local function StyleBossFrame(frame, unit)
             g:SetValue(amt)
         elseif g then
             local clip = frame._absClip[zone]
-            if fs:GetParent() == clip then fs:SetParent(textOverlay) end
+            if fs:GetParent() == clip then fs:SetParent(zoneHolder) end
             g:Hide(); if clip then clip:Hide() end
         end
     end
