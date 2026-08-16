@@ -1536,6 +1536,9 @@ local function SlotDisplay(slot)
         return icon or QUESTION_MARK, name or slot.name
 
     elseif k == "macrotext" then
+        if slot.iconAtlas then
+            return { atlas = slot.iconAtlas }, slot.name or "Macro"
+        end
         return slot.icon or QUESTION_MARK, slot.name or "Macro"
 
     elseif k == "dynamicrez" then
@@ -2117,6 +2120,12 @@ end
 -- its first child's marker icon stays whole too. Shared with the options
 -- picker's rows, which draw the same icons at list size.
 local function ApplyIconCrop(tex, icon)
+    -- Atlas-backed icons already have their own UVs and should not be cropped.
+    if type(icon) == "table" and icon.atlas then
+        tex:SetTexCoord(0, 1, 0, 1)
+        return
+    end
+
     if type(icon) == "string"
        and (icon:find("RaidTargetingIcon", 1, true)
             or icon:find("UI-GroupLoot-Pass-Up", 1, true)) then
@@ -2126,6 +2135,15 @@ local function ApplyIconCrop(tex, icon)
     end
 end
 ns.ApplyIconCrop = ApplyIconCrop
+
+local function SetIconTexture(tex, icon)
+    if type(icon) == "table" and icon.atlas then
+        tex:SetAtlas(icon.atlas, true)
+    else
+        tex:SetTexture(icon or QUESTION_MARK)
+    end
+end
+ns.SetIconTexture = SetIconTexture
 
 local function CreateSlotWidget(view, index)
     local w = CreateFrame("Button", nil, view.frame, "BackdropTemplate")
@@ -4751,7 +4769,7 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     w.usability = (showUsability and not placeholder) and SlotUsability(slot) or nil
 
     local icon, name = SlotDisplay(slot)
-    w.icon:SetTexture(icon or QUESTION_MARK)
+    SetIconTexture(w.icon, icon)
     -- Per paint: the widget is pooled, and the marker textures take the full
     -- rect where everything else takes the crop.
     ApplyIconCrop(w.icon, icon)
@@ -5293,7 +5311,7 @@ function PaletteView:AdvanceLiveIcons()
         local slot = self:CellSlot(index)
         if w and slot then
             local icon = SlotDisplay(slot)
-            w.icon:SetTexture(icon or QUESTION_MARK)
+            SetIconTexture(w.icon, icon)
             ApplyIconCrop(w.icon, icon)
         end
     end
