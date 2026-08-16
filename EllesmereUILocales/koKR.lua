@@ -5535,9 +5535,9 @@ L["|cff888888No friends online|r"] = "|cff888888접속 중인 친구 없음|r"
 -- add Minimap Dropdown (미니맵 드롭다운)
 L["Above Map"] = "미니맵 위"
 L["Below Map"] = "미니맵 아래"
-L["Bottom Left, Grow Right"] = "왼쪽 하단, 오른쪽으로 확장"
+L["Bottom Left, Grow Right"] = "왼쪽 하단, 오른쪽 확장"
 L["Bottom Left, Grow Up"] = "왼쪽 하단, 위로 확장"
-L["Bottom Right, Grow Left"] = "오른쪽 하단, 왼쪽으로 확장"
+L["Bottom Right, Grow Left"] = "오른쪽 하단, 왼쪽 확장"
 L["Bottom Right, Grow Up"] = "오른쪽 하단, 위로 확장"
 L["Edge Box"] = "가장자리 상자"
 L["Hide Extra Buttons"] = "추가 버튼 숨기기"
@@ -5547,9 +5547,9 @@ L["On Hover"] = "마우스 오버 시"
 L["Show Blizzard Elements"] = "블리자드 요소 표시"
 L["Textured Circle"] = "텍스처 원"
 L["Top Left, Grow Down"] = "왼쪽 상단, 아래로 확장"
-L["Top Left, Grow Right"] = "왼쪽 상단, 오른쪽으로 확장"
+L["Top Left, Grow Right"] = "왼쪽 상단, 오른쪽 확장"
 L["Top Right, Grow Down"] = "오른쪽 상단, 아래로 확장"
-L["Top Right, Grow Left"] = "오른쪽 상단, 왼쪽으로 확장"
+L["Top Right, Grow Left"] = "오른쪽 상단, 왼쪽 확장"
 L["Ungroup Minimap Buttons"] = "미니맵 버튼 그룹 해제"
 L["Zoom +/- Icons"] = "확대/축소 +/- 아이콘"
 -- add Minimap Tooltip (미니맵 툴팁)
@@ -6858,33 +6858,21 @@ L["Enter a volume from 0 to 100 for %1$s:"] = "%1$s의 음량을 0에서 100 사
 L[" (Rested: %s)"] = " (휴식 상태: %s)"
 L[" (Rested: %.1f%%)"] = " (휴식 상태: %.1f%%)"
 L["House Level %d: %d / %d"] = "집 레벨 %d: %d / %d"
--- 2026-08-16 신규
-
--- 프레임 위치 & 오프셋 설정 (Frame & Bar Offsets)
+--2026-07-20 신규
+--재사용 대기시간 관리자 
 L["ADDITIONAL BAR OFFSET"] = "추가 바 오프셋"
 L["Extra horizontal shift stacked on top of this bar's normal position. Unlock mode shows the base position; the offset re-applies when you exit."] = "이 바의 기본 위치 위에 추가로 적용되는 가로 이동 거리입니다. 프레임 이동 모드에서는 기본 위치가 표시되며, 이동 모드를 종료하면 오프셋이 다시 적용됩니다."
 L["Extra vertical shift stacked on top of this bar's normal position. Unlock mode shows the base position; the offset re-applies when you exit."] = "이 바의 기본 위치 위에 추가로 적용되는 세로 이동 거리입니다. 프레임 이동 모드에서는 기본 위치가 표시되며, 이동 모드를 종료하면 오프셋이 다시 적용됩니다."
-L["This bar has an Additional Bar Offset (X %1$s, Y %2$s) set in its options. Unlock mode shows the base position; the offset re-applies when you exit."] = "이 바의 옵션에 추가 바 오프셋(X %1$s, Y %2$s)이 설정되어 있습니다. 프레임 이동 모드에서는 기본 위치가 표시되며, 이동 모드를 종료하면 오프셋이 다시 적용됩니다."
-L["When the current spec has no bars in this group, keeps elements anchored to the group in place and shifts them up or down by one bar height (tune with the cog's Extra Y Offset) to cover its empty slot."] = "현재 전문 기술/专精이 이 그룹에 바를 가지고 있지 않을 때, 해당 그룹에 고정된 요소들을 제자리에 유지하면서 빈 자리를 메우기 위해 바 한 개 높이만큼 위아래로 이동시킵니다. (톱니바퀴 아이콘의 '추가 Y 오프셋'으로 미세 조정 가능)"
-L["Shift Elements If No Bars"] = "바가 없을 때 요소 이동"
-L["Bar Text Offsets"] = "바 텍스트 오프셋"
 
---블리자드 UI 스킨 & 알림창 변경 (Blizzard UI Reskinning & Popups)
-L["BLIZZARD HUD"] = "블리자드 HUD"
-L["Reskin Widget Bars"] = "위젯 바 스킨 변경"
-L["Reskin Extra Action Buttons"] = "추가 행동 단추 스킨 변경"
-L["Widget bar reskin requires a UI reload to apply."] = "위젯 바 스킨 설정을 적용하려면 UI를 다시 불러와야 합니다."
-L["Restyles Blizzard's on-screen progress bars (event objectives, nameplate counters) to the EUI look. Requires reload to apply.\n\nThese bars are drawn over rather than modified, so if the game ever reports their contents as protected the original bar is shown instead."] = "화면에 표시되는 블리자드 진행 바(이벤트 목표, 이름표 카운터 등)를 EUI 스타일로 변경합니다. 적용하려면 UI를 다시 불러와야 합니다.\n\n이 바들은 기존 바를 수정하는 것이 아니라 그 위에 새로 그리는 방식입니다. 따라서 게임에서 해당 콘텐츠를 '보호됨'으로 판단하면 원래의 블리자드 기본 바가 대신 표시됩니다."
-L["Squares the extra action and zone ability buttons and gives them a thin black border.\n\nOff by default. The size slider below works whether this is on or off."] = "추가 행동 단추와 지역 능력을 사각형 모양으로 바꾸고 얇은 검은색 테두리를 적용합니다.\n\n기본값은 비활성화입니다. 아래의 크기 조절 슬라이더는 이 옵션의 켜짐/꺼짐 여부와 상관없이 작동합니다."
-L["Reskins the dungeon and battleground queue accept popups with the EUI dark style, and adds an accept countdown timer bar to the dungeon one."] = "던전 및 전장 입장 수락 알림창을 EUI 어두운 스타일로 변경하고, 던전 알림창에는 입장 수락 대기시간 초읽기 바를 추가합니다."
-
---특정 게임 창 설정 (Dungeon, Delve, Trade, Ready Check, etc.)
+--편의 기능 
 L["Hide Loot Rolls Window"] = "전리품 주사위 창 숨기기"
 L["Hides Blizzard's \"Loot Rolls\" window -- the running list of dropped items showing who rolled what and who won. Use the cog to let it appear briefly and close itself instead. The Need/Greed roll popups themselves are not affected."] = "블리자드 기본 '전리품 주사위' 창(획득한 아이템 목록과 주사위 굴림 현황 및 낙찰자를 보여주는 창)을 숨깁니다. 톱니바퀴 아이콘을 설정하면 창이 잠시 나타났다가 자동으로 닫히게 할 수 있습니다. 입찰/차선 주사위 선택 창 자체에는 영향을 주지 않습니다."
 L["Loot Rolls Window Settings"] = "전리품 주사위 창 설정"
 L["Hide Completely"] = "완전히 숨기기"
 L["Close After Delay"] = "일정 시간 후 닫기"
 L["Close After (sec)"] = "닫기 지연 시간 (초)"
+
+--기본 UI 개선
 L["The ready check prompt with its Yes / No buttons, plus the initiator's response list."] = "수락 / 거절 단추가 포함된 전투 준비 창과 전투 준비를 시작한 사람의 응답 현황 목록입니다."
 L["Hide Portrait"] = "초상화 숨기기"
 L["Hides the ready check glyph above the prompt, leaving just the question and the Yes / No buttons. Applies while the Ready Check reskin is enabled."] = "전투 준비 창 상단의 문양을 숨기고 질문과 수락 / 거절 단추만 남겨둡니다. 이 옵션은 전투 준비 스킨 변경 기능이 활성화되어 있을 때만 적용됩니다."
@@ -6896,77 +6884,27 @@ L["Weekly and event choice windows such as Abundance harvests and \"how will you
 L["Trade"] = "거래"
 L["The player-to-player trade window: frame, both item columns, the enchant slots, money rows and buttons. Item icons are squared and carry a rarity border. Both portraits are removed, as on every other window."] = "플레이어 간 거래 창을 변경합니다. 프레임, 양쪽 아이템 칸, 마법부여 칸, 골드 입력 칸 및 단추가 포함됩니다. 아이템 아이콘은 사각형으로 바뀌고 등급별 테두리가 적용됩니다. 다른 창들과 마찬가지로 양쪽 캐릭터 초상화는 제거됩니다."
 
---UI 재설정/리로드 알림 (Reload Requirement Notices)
-L["Changing the Choice Windows reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles."] = "선택창 스킨 설정을 변경하면 블리자드 스타일과 Ellesmere 스타일 간의 완전한 전환을 위해 UI를 다시 불러와야 합니다."
-L["Changing the Delve Tier Picker reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles."] = "구렁 단계 선택창 스킨 설정을 변경하면 블리자드 스타일과 Ellesmere 스타일 간의 완전한 전환을 위해 UI를 다시 불러와야 합니다."
-L["Changing the Queue Status reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles."] = "대기열 상태 창 스킨 설정을 변경하면 블리자드 스타일과 Ellesmere 스타일 간의 완전한 전환을 위해 UI를 다시 불러와야 합니다."
-L["Changing the Ready Check reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles."] = "전투 준비 창 스킨 설정을 변경하면 블리자드 스타일과 Ellesmere 스타일 간의 완전한 전환을 위해 UI를 다시 불러와야 합니다."
-L["Changing the Trainer reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles."] = "전문 기술 훈련사 창 스킨 설정을 변경하면 블리자드 스타일과 Ellesmere 스타일 간의 완전한 전환을 위해 UI를 다시 불러와야 합니다."
+--기본 UI 개선 - 툴팁, 메뉴&팝업/알림
+L["BLIZZARD HUD"] = "블리자드 HUD"
+L["Reskin Widget Bars"] = "위젯 바 스킨 변경"
+L["Reskin Extra Action Buttons"] = "추가 행동 단추 스킨 변경"
+L["Restyles Blizzard's on-screen progress bars (event objectives, nameplate counters) to the EUI look. Requires reload to apply.\n\nThese bars are drawn over rather than modified, so if the game ever reports their contents as protected the original bar is shown instead."] = "화면에 표시되는 블리자드 진행 바(이벤트 목표, 이름표 카운터 등)를 EUI 스타일로 변경합니다. 적용하려면 UI를 다시 불러와야 합니다.\n\n이 바들은 기존 바를 수정하는 것이 아니라 그 위에 새로 그리는 방식입니다. 따라서 게임에서 해당 콘텐츠를 '보호됨'으로 판단하면 원래의 블리자드 기본 바가 대신 표시됩니다."
+L["Squares the extra action and zone ability buttons and gives them a thin black border.\n\nOff by default. The size slider below works whether this is on or off."] = "추가 행동 단추와 지역 능력을 사각형 모양으로 바꾸고 얇은 검은색 테두리를 적용합니다.\n\n기본값은 비활성화입니다. 아래의 크기 조절 슬라이더는 이 옵션의 켜짐/꺼짐 여부와 상관없이 작동합니다."
+L["Reskins the dungeon and battleground queue accept popups with the EUI dark style, and adds an accept countdown timer bar to the dungeon one."] = "던전 및 전장 입장 수락 알림창을 EUI 어두운 스타일로 변경하고, 던전 알림창에는 입장 수락 초읽기 바를 추가합니다."
 
---이름표 및 광환/오라/버프/디버프 (Nameplates & Auras)
-L["Colors the enemy nameplate name text to match the unit's reaction (Hostile or Neutral) instead of the Enemy Name Text color."] = "敵方 이름표의 이름 텍스트 색상을 '적방 이름 텍스트' 색상 대신 대상과의 관계(적대적 또는 중립적)에 맞춰 변경합니다."
-L["Color Name by Reaction"] = "대상 관계별 이름 색상 적용"
-L["Hostile Color"] = "적대적 색상"
-L["Neutral Color"] = "중립적 색상"
-L["Auras with a dispel type you can dispel"] = "내가 해제할 수 있는 유형의 광환/효과"
-L["Buffs you can spellsteal or purge"] = "마법 훔치기 또는 무효화할 수 있는 이로운 효과"
-L["Debuffs Blizzard flags as important"] = "블리자드가 중요하게 표시한 해로운 효과"
-L["Disable All"] = "모두 비활성화"
-L["Keeps Blizzard's own buff and debuff display and turns off the built-in Buffs and Debuffs bars. Custom bars keep working."] = "블리자드 기본 버프/디버프 표시를 유지하고 내장된 버프 및 디버프 바를 끕니다. 자릿 지정 바는 계속 작동합니다."
-L["Major defensive cooldowns"] = "주요 생존기/방어형 재사용 대기시간"
-L["Player Aura Bars are disabled and Blizzard's default display is back. A UI reload is recommended to finish cleanup."] = "'플레이어 광환/오라 바'가 비활성화되고 블리자드 기본 표시로 돌아왔습니다. 설정을 완전히 정리하려면 UI를 다시 불러오는 것을 권장합니다."
-L["Show every buff that has a duration (hides permanent buffs). Use the Hide lane below to remove specific filters."] = "지속 시간이 있는 모든 이로운 효과를 표시합니다(영구 버프는 숨김). 특정 필터를 제거하려면 하단의 '숨기기' 칸을 사용하세요."
-L["Show every buff. Use the Hide lane below to remove specific filters."] = "모든 이로운 효과를 표시합니다. 특정 필터를 제거하려면 하단의 '숨기기' 칸을 사용하세요."
-L["Show every debuff. Use the Hide lane below to remove specific filters."] = "모든 해로운 효과를 표시합니다. 특정 필터를 제거하려면 하단의 '숨기기' 칸을 사용하세요."
-L["Turns off Player Aura Bars completely."] = "플레이어 광환/오라 바를 완전히 끕니다."
-L["Use Blizzard Buffs"] = "블리자드 기본 버프 사용"
-L["You are displaying NO buffs at all."] = "현재 어떠한 이로운 효과도 표시하지 않고 있습니다."
-L["You are displaying NO debuffs at all."] = "현재 어떠한 해로운 효과도 표시하지 않고 있습니다."
-L["Debuffs not caused by any player or player pet (this is what shows most pve debuffs)."] = "플레이어나 플레이어의 소환수로 인해 발생하지 않은 해로운 효과입니다(대부분의 PvE 디버프가 여기에 해당합니다)."
-L["Friendly Boss Group"] = "우호적 우두머리 그룹"
-
---가방 및 장비 세트 (Bags & Equipment Sets)
-L["Bag %1$d"] = "가방 %1$d"
-L["Bank Tab %1$d"] = "은행 탭 %1$d"
-L["Tab %1$d"] = "탭 %1$d"
-L["Display the equipment set's name at the bottom of bag items that belong to one of your equipment sets."] = "저장된 장비 세트에 포함된 가방 아이템의 하단에 해당 장비 세트의 이름을 표시합니다."
-L["Set Name Text Options"] = "장비 세트 이름 문자 옵션"
-L["Show one sub-category per equipment set (named after the set) nested under Item Set Gear. Gear in several sets goes to the first one."] = "'세트 장비' 항목 아래에 각 장비 세트별 하위 분류(세트 이름)를 생성하여 표시합니다. 여러 세트에 중복으로 포함된 장비는 첫 번째 세트에 분류됩니다."
+--가방
 L["Show Set Name on Gear"] = "장비에 세트 이름 표시"
+L["Display the equipment set's name at the bottom of bag items that belong to one of your equipment sets."] = "저장된 장비 세트에 포함된 가방 아이템의 하단에 해당 장비 세트의 이름을 표시합니다."
 L["Split Set Gear by Set"] = "장비 세트별로 아이템 분류"
+L["Show one sub-category per equipment set (named after the set) nested under Item Set Gear. Gear in several sets goes to the first one."] = "'세트 장비' 항목 아래에 각 장비 세트별 하위 분류(세트 이름)를 생성하여 표시합니다. 여러 세트에 중복으로 포함된 장비는 첫 번째 세트에 분류됩니다."
 
---핑 시스템 및 메뉴 (Pings & Action Menus)
-L["Assist"] = "지원 요청"
-L["Look"] = "여기 확인"
-L["On My Way"] = "가는 중"
-L["Warning"] = "경고"
-L["Pings"] = "핑 시스템"
-L["nested action menu, %1$d entries"] = "하위 행동 메뉴, 항목 %1$d개"
-L["nested action menu, %1$d entry"] = "하위 행동 메뉴, 항목 %1$d개"
+--이름표 
+L["Color Name by Reaction"] = "대상 관계별 이름 색상 적용"
+L["Colors the enemy nameplate name text to match the unit's reaction (Hostile or Neutral) instead of the Enemy Name Text color."] = "적 이름표의 이름 텍스트 색상을 '적 이름 텍스트' 색상 대신 대상과의 관계(적대적 또는 중립적)에 맞춰 변경합니다."
 
--- 레이아웃 및 규격 / 텍스트 / 상속 옵션 (Layout, Text, Inheritance & General)
-L["Icon Slots Tall (0 = Off)"] = "아이콘 세로 칸수 (0 = 비활성화)"
-L["Icon Slots Wide (0 = Off)"] = "아이콘 가로 칸수 (0 = 비활성화)"
-L["Minimum Height"] = "최소 높이"
-L["Minimum Width"] = "최소 너비"
-L["Game Text Scale"] = "게임 텍스트 크기 조절"
-L["Scales the size of Blizzard's default game text (menus, tooltips, quest log, and more). Requires a UI reload."] = "블리자드 기본 게임 텍스트(메뉴, 툴팁, 임무 일지 등)의 크기를 조절합니다. 변경 사항을 적용하려면 UI를 다시 불러와야 합니다."
-L["Hide these instead of showing them"] = "이 항목들을 표시하지 않고 숨깁니다"
-L["a tertiary stat in Stats to Show"] = "'표시할 능력치'의 3차 능력치"
-L["Abbreviate Stat Labels"] = "능력치 명칭 축약"
-L["Stats to Show"] = "표시할 능력치"
-L["Learn %1$d skill for %2$s"] = "%2$s을(를) 지불하고 %1$d개의 기술 배우기"
-L["Learn %1$d skills for %2$s"] = "%2$s을(를) 지불하고 %1$d개의 기술 배우기"
-L["Add To"] = "추가 위치:"
-L["All DPS (Non-Aug)"] = "모든 딜러 (증강 제외)"
-L["All Healers/Aug"] = "모든 힐러/증강 딜러"
-L["Edit in %1$s"] = "%1$s에서 편집"
-L["Inherited from %1$s"] = "%1$s에서 상속됨"
-L["Inherited from %1$s. Edit it there, or use the tile toggle to enable or disable it for this spec."] = "%1$s에서 설정이 상속되었습니다. 해당 위치에서 편집하거나, 토글 버튼을 사용하여 현재 전문 특성에 활성화/비활성화할 수 있습니다."
-L["Inherited from %1$s. Editable only there."] = "%1$s에서 상속되었습니다. 해당 설정에서만 편집할 수 있습니다."
-L["layer"] = "레이어"
-L["overlap"] = "겹침"
-L["strata"] = "프레임 계층(Strata)"
+--오라/강화 효과 알림
+L["Pick which content the class-special reminders (poisons/rites/imbues/shields) appear in.\nRested areas (cities and inns) always stay hidden."] = "직업 전용 알림(독/의식/무기 부여/보호막)을 표시할 콘텐츠를 선택합니다. 휴식 지역(도시 및 여관)에서는 항상 숨겨집니다."
+
 -- == Chat prints (채팅창 print 출력 - 소스 엘키(L/Lf) 삽입 대기) ==================
 -- 원본이 print() 에 영문 리터럴을 직접 쓰는 곳들. 엔진 자동번역 밖이라 소스에서
 -- L()/Lf() 래핑이 들어가야 적용된다 (보류 목록: project_pending_bags_lwrap 참고).
