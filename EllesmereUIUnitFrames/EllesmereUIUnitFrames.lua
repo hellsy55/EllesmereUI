@@ -3386,6 +3386,12 @@ local MASK_INSETS = {
     square   = 17,
 }
 
+-- Shared with EllesmereUIUnitFrames_PlayerAuraBars.lua (same addon/ns), which reuses
+-- this shape media set for Player Aura Bars' iconShape feature.
+ns.PORTRAIT_MASKS   = PORTRAIT_MASKS
+ns.PORTRAIT_BORDERS = PORTRAIT_BORDERS
+ns.MASK_INSETS      = MASK_INSETS
+
 -- Apply a detached portrait shape (mask + border overlay) to a portrait backdrop;
 -- creates the mask/border textures on first call, then updates them.
 --   backdrop  : the portrait backdrop frame
