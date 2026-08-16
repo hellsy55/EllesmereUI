@@ -1808,6 +1808,7 @@ do
         "reskinItemUpgrade", "reskinLoot", "reskinLootToast", "lootToastQualityStrip",
         "lootToastQualityStripMoney", "lootToastScale",
         "reskinLootRoll", "reskinLootHistory", "reskinGroupInvite",
+        "reskinReadyCheck", "readyCheckHidePortrait",
         "reskinMicroMenu", "reskinHousing", "reskinDressUp", "reskinTransmog",
         "reskinMerchant", "reskinAuctionHouse", "reskinMacros",
         "reskinSettings", "reskinAddonList", "reskinCraftOrders",

@@ -5066,7 +5066,7 @@ initFrame:SetScript("OnEvent", function(self)
                           bd.timerDecimals = v or nil; RefreshTBB()
                       end })
                 table.insert(durationRows, 3,
-                    { type = "slider", label = "Decimal Threshold", min = 3, max = 120, step = 1,
+                    { type = "slider", label = "Decimal Threshold", min = 1, max = 120, step = 1,
                       disabled = function()
                           local bd = SelectedTBB()
                           return not (bd and bd.timerDecimals)
@@ -16736,25 +16736,65 @@ initFrame:SetScript("OnEvent", function(self)
             -- (Hide Buffs When Inactive toggle removed: always forced ON.)
         end
 
-        -- Keep Buffs in Same Place (native buff bars): reserves every tracked buff's slot so
-        -- active buffs never reposition; inactive slots are invisible. Reuses the Always-Show
-        -- placeholder path internally (placeholders injected, then rendered alpha 0). Mutually exclusive with Always Show Buffs -- disabled while that is on.
+        -- Minimum Bar Size | Keep Buffs in Same Place (native buff bars).
+        --
+        -- Minimum Bar Size reserves room for at least N icon slots along the bar's GROWTH axis, so
+        -- a bar that loses icons (spec/talent swap) keeps its footprint instead of dragging
+        -- width-matched and edge-anchored elements inward; the icons still shown render centered in
+        -- the reserved space. The label tracks orientation (growth axis = width on horizontal bars,
+        -- height on vertical); build-time resolution is safe because the page rebuilds on
+        -- orientation flips and bar switches (same reasoning as the Row Growth dropdown above).
+        -- Locked while the GROWTH axis is width/height matched -- the match owns that axis -- but a
+        -- bar with a value already set stays editable so it can be cleared.
+        --
+        -- Keep Buffs in Same Place reserves every tracked buff's slot so active buffs never
+        -- reposition; inactive slots are invisible. Reuses the Always-Show placeholder path
+        -- internally (placeholders injected, then rendered alpha 0). Mutually exclusive with Always Show Buffs -- disabled while that is on.
+        local minSizeVert = BD().verticalOrientation == true
+        local minSizeDis, minSizeTip = EllesmereUI.MatchGuard("CDM_" .. barKey, minSizeVert and "Height" or "Width")
+        local minSizeRight
         if isBuffBar then
-            _, h = W:DualRow(parent, y,
-                { type="toggle", text="Keep Buffs in Same Place",
-                  disabled=function()
-                      local b = BD()
-                      return b.showInactiveBuffIcons == true or AnyIconAlwaysShowOn(b.key)
-                  end,
-                  disabledTooltip="Disabled while Always Show Buffs is enabled (on the bar, or on any individual buff)", rawTooltip=true,
-                  getValue=function() return BD().hidePlaceholderIcon == true end,
-                  setValue=function(v)
-                      BD().hidePlaceholderIcon = v
-                      ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type="label", text="" }); y = y - h
+            minSizeRight = { type="toggle", text="Keep Buffs in Same Place",
+                disabled=function()
+                    local b = BD()
+                    return b.showInactiveBuffIcons == true or AnyIconAlwaysShowOn(b.key)
+                end,
+                disabledTooltip="Disabled while Always Show Buffs is enabled (on the bar, or on any individual buff)", rawTooltip=true,
+                getValue=function() return BD().hidePlaceholderIcon == true end,
+                setValue=function(v)
+                    BD().hidePlaceholderIcon = v
+                    ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+                    EllesmereUI:RefreshPage()
+                end }
+        else
+            minSizeRight = { type="label", text="" }
         end
+        _, h = W:DualRow(parent, y,
+            { type="slider", text=minSizeVert and "Minimum Height (0 = Off)" or "Minimum Width (0 = Off)",
+              min=0, max=20, step=1,
+              tooltip=minSizeVert
+                  and "Counted in icons. The bar never becomes shorter than this many icon slots -- fewer icons render centered in the reserved space, so anything matching its height or anchored to its top/bottom edge stays put."
+                  or "Counted in icons. The bar never becomes narrower than this many icon slots -- fewer icons render centered in the reserved space, so anything matching its width or anchored to its left/right edge stays put.",
+              -- A matched bar with a value already set can still lower/clear it -- a disabled control must never trap an existing value on.
+              disabled=function()
+                  local b = BD()
+                  return minSizeDis() and not (b.minSizeIcons and b.minSizeIcons > 0)
+              end,
+              disabledTooltip=minSizeTip, rawTooltip=true,
+              getValue=function() return BD().minSizeIcons or 0 end,
+              setValue=function(v)
+                  if v == 0 then v = nil end
+                  local bd = BD()
+                  bd.minSizeIcons = v
+                  -- Growth-axis extent changed, so any cached match dims no longer apply.
+                  bd._matchIconPhys = nil
+                  bd._matchExtraPixels = nil
+                  bd._matchStride = nil
+                  bd._matchExtraPixelsH = nil
+                  bd._matchStrideH = nil
+                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+              end },
+            minSizeRight); y = y - h
 
         end -- not isFocusKick (Bar Layout section)
 

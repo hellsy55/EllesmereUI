@@ -73,6 +73,76 @@ local GROW_DIR_ORDER = { "LEFT", "RIGHT", "CENTER_HORIZONTAL", "CENTER_VERTICAL"
 local ICON_WRAP_VALUES = { LEFT = "Left", RIGHT = "Right", UP = "Up", DOWN = "Down" }
 local ICON_WRAP_ORDER = { "LEFT", "RIGHT", "UP", "DOWN" }
 
+-- Same shape vocabulary and media set as Action Bars' Custom Button Shape
+-- (EUI_ActionBars_Options.lua), minus "cropped" -- PAB has no equivalent
+-- "cropped square" concept.
+local SHAPE_VALUES = {
+    none = "None", square = "Square", circle = "Circle",
+    csquare = "Curved Square", diamond = "Diamond", hexagon = "Hexagon",
+    portrait = "Portrait", shield = "Shield",
+}
+local SHAPE_ORDER = { "none", "square", "circle", "csquare", "diamond", "hexagon", "portrait", "shield" }
+
+-- Levels map 1:1 to Action Bars' ns.BORDER_THICKNESS regular values (thin=1, normal=2,
+-- heavy=3, strong=4), so cfg.borderSize stays the same plain 0-4 number used elsewhere
+-- (regular border thickness, per-filter Icon Effects override).
+local BORDER_SIZE_LEVELS = { "none", "thin", "normal", "heavy", "strong" }
+local BORDER_SIZE_VALUES = { none = "None", thin = "Thin", normal = "Normal", heavy = "Heavy", strong = "Strong" }
+local BORDER_SIZE_NUM = { none = 0, thin = 1, normal = 2, heavy = 3, strong = 4 }
+local BORDER_SIZE_KEY = { [0] = "none", [1] = "thin", [2] = "normal", [3] = "heavy", [4] = "strong" }
+-- Levels with no distinct shape-border rendering (PabShapeBorderSize collapses them
+-- all to "off"); Strong is the only one worth keeping enabled once a shape is active.
+local BORDER_SIZE_SHAPE_DISABLED = { thin = true, normal = true, heavy = true }
+local BORDER_SIZE_DEFAULT_SHAPE = "strong"
+
+-- Every PAB bar (default Buffs/Debuffs plus any custom ones), for the sync-icon
+-- "Apply to: All | Multiple" rows. entry.cfg is the live table, not a copy.
+local function PabAllBarEntries()
+    local s = ns.db and ns.db.profile and ns.db.profile.playerAuraBars
+    if not s then return {} end
+    local list = {}
+    list[#list + 1] = { key = "buffs", label = "Buffs", isBuff = true, cfg = ns.PAB_DefaultBuffsCfg(s) }
+    list[#list + 1] = { key = "debuffs", label = "Debuffs", isBuff = false, cfg = ns.PAB_DefaultDebuffsCfg(s) }
+    local buffBars = ns.PAB_CustomBuffBars and ns.PAB_CustomBuffBars()
+    if buffBars then
+        for i = 1, #buffBars do
+            local bar = buffBars[i]
+            list[#list + 1] = { key = "custombuff_" .. bar.id, label = bar.name or "Buff Bar", isBuff = true, cfg = bar }
+        end
+    end
+    local debuffBars = ns.PAB_CustomDebuffBars and ns.PAB_CustomDebuffBars()
+    if debuffBars then
+        for i = 1, #debuffBars do
+            local bar = debuffBars[i]
+            list[#list + 1] = { key = "customdebuff_" .. bar.id, label = bar.name or "Debuff Bar", isBuff = false, cfg = bar }
+        end
+    end
+    return list
+end
+
+-- Which PabAllBarEntries() row a given (cfg, isBuff) pair is.
+local function PabBarKeyOf(cfg, isBuff)
+    local s = ns.db and ns.db.profile and ns.db.profile.playerAuraBars
+    if s then
+        if cfg == ns.PAB_DefaultBuffsCfg(s) then return "buffs" end
+        if cfg == ns.PAB_DefaultDebuffsCfg(s) then return "debuffs" end
+    end
+    if cfg.id then return (isBuff and "custombuff_" or "customdebuff_") .. cfg.id end
+    return ""
+end
+
+-- Restyles one bar live after the caller has written fields onto entry.cfg.
+local function PabApplyBarEntry(entry)
+    if entry.key == "buffs" or entry.key == "debuffs" then
+        if ns.PAB_Restyle then ns.PAB_Restyle() end
+        if ns.PAB_ApplyLiveConfig then ns.PAB_ApplyLiveConfig(entry.isBuff) end
+    elseif entry.isBuff then
+        if ns.PAB_ReloadCustomBuffBar then ns.PAB_ReloadCustomBuffBar(entry.cfg.id) end
+    else
+        if ns.PAB_ReloadCustomDebuffBar then ns.PAB_ReloadCustomDebuffBar(entry.cfg.id) end
+    end
+end
+
 -- Native AuraContainerSortMethod/AuraContainerSortDirection enum names
 -- (in-game dump: AuraContainerSortMethod = {Default=0,
 -- BigDefensive=1, UnitFrameDebuff=2, ImportantOnly=3, Expiration=4,
@@ -872,9 +942,17 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
     local borderRow
     borderRow, hh = W:DualRow(frame, sy,
         {
-            type = "slider", text = "Border Size", min = 0, max = 4, step = 1, trackWidth = 120,
-            getValue = function() return cfg.borderSize or 1 end,
-            setValue = function(v) cfg.borderSize = v; apply() end
+            type = "dropdown", text = "Border Size",
+            values = BORDER_SIZE_VALUES, order = BORDER_SIZE_LEVELS,
+            itemDisabled = function(v)
+                local shape = cfg.iconShape
+                return shape and shape ~= "none" and BORDER_SIZE_SHAPE_DISABLED[v] or false
+            end,
+            itemDisabledTooltip = function()
+                return "This option requires a non-custom shape to be selected"
+            end,
+            getValue = function() return BORDER_SIZE_KEY[cfg.borderSize or 1] or "thin" end,
+            setValue = function(v) cfg.borderSize = BORDER_SIZE_NUM[v] or 1; apply() end
         },
         {
             type = "slider", text = "Spacing", min = -5, max = 20, step = 1, trackWidth = 120,
@@ -897,6 +975,57 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+    end
+    do
+        local rgn = borderRow._leftRegion
+        local keys, labels = {}, {}
+        for _, entry in ipairs(PabAllBarEntries()) do
+            keys[#keys + 1] = entry.key
+            labels[entry.key] = entry.label
+        end
+        local function CopyBorderTo(entry)
+            entry.cfg.borderSize = cfg.borderSize
+            entry.cfg.borderR, entry.cfg.borderG, entry.cfg.borderB, entry.cfg.borderA =
+                cfg.borderR, cfg.borderG, cfg.borderB, cfg.borderA
+            PabApplyBarEntry(entry)
+        end
+        EllesmereUI.BuildSyncIcon({
+            region  = rgn,
+            tooltip = "Apply Border Size and Color to all Bars",
+            onClick = function()
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    if entry.cfg ~= cfg then CopyBorderTo(entry) end
+                end
+                EllesmereUI:RefreshPage()
+            end,
+            isSynced = function()
+                local size = cfg.borderSize or 1
+                local r, g, b, a = cfg.borderR or 0, cfg.borderG or 0, cfg.borderB or 0, cfg.borderA or 1
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    local c = entry.cfg
+                    if (c.borderSize or 1) ~= size or (c.borderR or 0) ~= r or (c.borderG or 0) ~= g
+                        or (c.borderB or 0) ~= b or (c.borderA or 1) ~= a then
+                        return false
+                    end
+                end
+                return true
+            end,
+            flashTargets = function() return { rgn } end,
+            multiApply = {
+                elementKeys   = keys,
+                elementLabels = labels,
+                getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
+                onApply       = function(checkedKeys)
+                    local byKey = {}
+                    for _, entry in ipairs(PabAllBarEntries()) do byKey[entry.key] = entry end
+                    for _, key in ipairs(checkedKeys) do
+                        local entry = byKey[key]
+                        if entry then CopyBorderTo(entry) end
+                    end
+                    EllesmereUI:RefreshPage()
+                end,
+            },
+        })
     end
     do
         -- Row Spacing lives here, not in Icons Per Row's cog -- it's spacing between
@@ -948,6 +1077,76 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             },
         })
         ns._PAMakeCogBtn(rgn, cogShow)
+    end
+
+    -- Icon Shape reuses the base Border Size/Color above -- no separate shape fields.
+    local shapeRow
+    shapeRow, hh = W:DualRow(frame, sy,
+        {
+            type = "dropdown", text = "Icon Shape",
+            values = SHAPE_VALUES, order = SHAPE_ORDER,
+            getValue = function() return cfg.iconShape or "none" end,
+            setValue = function(v)
+                cfg.iconShape = v
+                -- Entering shape mode with a now-disabled Border Size level selected:
+                -- snap to the shape default, same as Action Bars' own shape dropdown
+                -- resetting border thickness on every shape change.
+                local curKey = BORDER_SIZE_KEY[cfg.borderSize or 1] or "thin"
+                if v ~= "none" and BORDER_SIZE_SHAPE_DISABLED[curKey] then
+                    cfg.borderSize = BORDER_SIZE_NUM[BORDER_SIZE_DEFAULT_SHAPE]
+                end
+                apply()
+            end
+        },
+        {
+            -- cfg.iconZoom stays a raw 0-1 fraction (SetTexCoord's own units); the
+            -- slider itself works in percent, like Action Bars' Icon Zoom.
+            type = "slider", text = "Icon Zoom", min = 0, max = 15, step = 0.5, trackWidth = 120,
+            getValue = function() return (cfg.iconZoom or 0.055) * 100 end,
+            setValue = function(v) cfg.iconZoom = v / 100; apply() end
+        }
+    ); sy = sy - hh
+    do
+        local rgn = shapeRow._leftRegion
+        local keys, labels = {}, {}
+        for _, entry in ipairs(PabAllBarEntries()) do
+            keys[#keys + 1] = entry.key
+            labels[entry.key] = entry.label
+        end
+        EllesmereUI.BuildSyncIcon({
+            region  = rgn,
+            tooltip = "Apply Icon Shape to all Bars",
+            onClick = function()
+                local shape = cfg.iconShape
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    if entry.cfg ~= cfg then entry.cfg.iconShape = shape; PabApplyBarEntry(entry) end
+                end
+                EllesmereUI:RefreshPage()
+            end,
+            isSynced = function()
+                local shape = cfg.iconShape or "none"
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    if (entry.cfg.iconShape or "none") ~= shape then return false end
+                end
+                return true
+            end,
+            flashTargets = function() return { rgn } end,
+            multiApply = {
+                elementKeys   = keys,
+                elementLabels = labels,
+                getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
+                onApply       = function(checkedKeys)
+                    local shape = cfg.iconShape
+                    local byKey = {}
+                    for _, entry in ipairs(PabAllBarEntries()) do byKey[entry.key] = entry end
+                    for _, key in ipairs(checkedKeys) do
+                        local entry = byKey[key]
+                        if entry then entry.cfg.iconShape = shape; PabApplyBarEntry(entry) end
+                    end
+                    EllesmereUI:RefreshPage()
+                end,
+            },
+        })
     end
 
     local swipeRow
@@ -1206,9 +1405,17 @@ local function BuildFxEffects(frame, sy, cfg, apply)
         -- filters; 0 = the bar's own icon size).
         local bRow
         bRow, hh = W:DualRow(frame, sy,
-            { type = "slider", text = "Border", min = 0, max = 4, step = 1, trackWidth = 120,
-              getValue = function() return e.borderSize or 0 end,
-              setValue = function(v) e.borderSize = v; apply() end },
+            { type = "dropdown", text = "Border",
+              values = BORDER_SIZE_VALUES, order = BORDER_SIZE_LEVELS,
+              itemDisabled = function(v)
+                  local shape = cfg.iconShape
+                  return shape and shape ~= "none" and BORDER_SIZE_SHAPE_DISABLED[v] or false
+              end,
+              itemDisabledTooltip = function()
+                  return "This option requires a non-custom shape to be selected"
+              end,
+              getValue = function() return BORDER_SIZE_KEY[e.borderSize or 0] or "none" end,
+              setValue = function(v) e.borderSize = BORDER_SIZE_NUM[v] or 0; apply() end },
             { type = "slider", text = "Size", min = 0, max = 400, step = 1, trackWidth = 120,
               getValue = function() return e.size or 0 end,
               setValue = function(v)

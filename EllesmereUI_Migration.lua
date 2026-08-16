@@ -3852,3 +3852,31 @@ EllesmereUI.RegisterMigration({
         end
     end,
 })
+
+--------------------------------------------------------------------------------
+--  Cyrillic locales gained real font choice: several bundled faces carry the
+--  full Cyrillic block (EllesmereUI.FONT_CYRILLIC) and ResolveFontName now
+--  honours them instead of forcing the system glyph font. That must not change
+--  what anyone already sees, so existing installs are pinned to System Default
+--  and the new faces stay an opt-in pick.
+--
+--  Detecting "untouched" is exact here: before this change the ruRU picker could
+--  only ever store the __system sentinel, the __expressway sentinel, or an
+--  external SharedMedia name. Plain "Expressway" was unreachable as a choice, so
+--  it can only be the seeded default -- rewriting just that value leaves every
+--  deliberate pick alone. Fresh installs never reach this body; GetFontsDB seeds
+--  the correct default for them directly.
+--------------------------------------------------------------------------------
+EllesmereUI.RegisterMigration({
+    id          = "ru_cyrillic_font_optin_v1",
+    scope       = "global",
+    description = "Pin existing Cyrillic-locale installs to the system glyph font so the newly selectable bundled Cyrillic faces stay opt-in.",
+    body        = function(ctx)
+        if EllesmereUI.LOCALE_SCRIPT ~= "cyrillic" then return end
+        local fonts = ctx.db and ctx.db.fonts
+        if not fonts then return end            -- fresh install: GetFontsDB seeds it
+        if fonts.global == "Expressway" then
+            fonts.global = EllesmereUI.SYSTEM_FONT_KEY
+        end
+    end,
+})

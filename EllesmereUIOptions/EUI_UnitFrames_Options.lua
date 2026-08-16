@@ -12801,24 +12801,48 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return MVal("customBgAlpha", 100) end,
                   setValue=function(v) MSet("customBgAlpha", v) end },
                 reverseFillWidget);  y = y - h
-            -- Inline Bar Background color swatch (customBgColor) on the slider region.
+            -- inline bg colors - custom swatch + class swatch
+            -- tot/focus use class for player, reaction for npc
+            -- pet resolves to player's class color
             if not EllesmereUI._prebuilding then
-                local rgn = bgRow._leftRegion
-                local bgSwGet = function()
-                    local c = MGet("customBgColor")
-                    if c then return c.r, c.g, c.b end
-                    return 17/255, 17/255, 17/255
-                end
-                local bgSwSet = function(r, g, b)
-                    settingsTable.customBgColor = { r=r, g=g, b=b }
-                    ReloadAndUpdate()
-                end
-                local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
-                bgSw:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(bgSw, "Bar Background Color") end)
-                bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                rgn._lastInline = bgSw
-                RegisterWidgetRefresh(function() bgSwUpdate() end)
+                EllesmereUI.BuildInlineSwatches(bgRow._leftRegion, {
+                    { tooltip = "Custom Background Color", hasAlpha = false,
+                      getValue = function()
+                          local c = MGet("customBgColor")
+                          if c then return c.r, c.g, c.b end
+                          return 17/255, 17/255, 17/255
+                      end,
+                      setValue = function(r, g, b)
+                          settingsTable.customBgColor = { r=r, g=g, b=b }
+                          ReloadAndUpdate()
+                      end,
+                      onClick = function(self)
+                          if MVal("bgClassColored", false) then
+                              settingsTable.bgClassColored = false
+                              ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                              return
+                          end
+                          if self._eabOrigClick then self._eabOrigClick(self) end
+                      end,
+                      refreshAlpha = function()
+                          return MVal("bgClassColored", false) and 0.3 or 1
+                      end },
+                    { tooltip = "Class Colored Background", hasAlpha = false,
+                      getValue = function()
+                          local _, ct = UnitClass("player")
+                          local cc = ct and RAID_CLASS_COLORS[ct]
+                          if cc then return cc.r, cc.g, cc.b end
+                          return 1, 1, 1
+                      end,
+                      setValue = function() end,
+                      onClick = function()
+                          settingsTable.bgClassColored = true
+                          ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                      end,
+                      refreshAlpha = function()
+                          return MVal("bgClassColored", false) and 1 or 0.3
+                      end },
+                })
             end
         end
 
