@@ -1325,10 +1325,8 @@ initFrame:SetScript("OnEvent", function(self)
         local function PreviewPowerColor(fs, contentKey, usePowerColor)
             if not fs or not usePowerColor then return end
             if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-                -- EUI global power color (player's current power) as the real frame
-                -- uses, not hardcoded blue.
-                local _, pToken = UnitPowerType("player")
-                local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                local pcR, pcG, pcB = EllesmereUI.ResolveUnitPowerColor("player")
+                local info = pcR and { r = pcR, g = pcG, b = pcB }
                 if info then fs:SetTextColor(info.r, info.g, info.b)
                 else fs:SetTextColor(1, 1, 1) end
             end
