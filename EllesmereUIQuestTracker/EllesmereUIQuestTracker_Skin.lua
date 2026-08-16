@@ -88,7 +88,6 @@ local _blockIcons        = setmetatable({}, { __mode = "k" })  -- block -> our i
 -- iteration of its own tables never sees our additions. This is the
 -- canonical taint-avoidance pattern per CLAUDE.md.
 local _blockFocus        = setmetatable({}, { __mode = "k" })  -- block -> focus texture
-local _headerClickOverlays = setmetatable({}, { __mode = "k" })  -- header -> click overlay
 local _masterHeaderCollapseHooked = false  -- guards the SetCollapsed re-skin hook below
 
 -------------------------------------------------------------------------------
@@ -433,30 +432,54 @@ local function SkinHeader(header, knownCollapsed)
     -- 1px divider beneath the header (Line Color: Class / Custom / Accent).
     EnsureAccentDivider(header)
 
-    -- Click-anywhere-on-header overlay: clicking the title text (not just the +/-
-    -- button) toggles the section, by forwarding to the MinimizeButton via a plain
-    -- button's Click() out of combat. History (2026-07-20, PR #879): this WAS a
-    -- SecureActionButtonTemplate click-redirect under the belief that a programmatic
-    -- Click() taints the collapse cascade. That evidence was confounded: the constant
-    -- taint injector was TightenTopAnchor's insecure SetPoint inside its SetPoint hook
-    -- (since removed, see the topModulePadding comment below), and the secure redirect
-    -- threw combat errors of its own. The plain-Click() form shipped here is the
-    -- field-tested-clean one -- do not "fix" it back to a secure redirect without
-    -- fresh taint-log evidence.
-    if not _headerClickOverlays[header] and header.MinimizeButton then
-        local minBtn = header.MinimizeButton
-        local overlay = CreateFrame("Button", nil, header)
-        overlay:SetFrameLevel(header:GetFrameLevel() + 1)
-        overlay:RegisterForClicks("LeftButtonUp")
-        overlay:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
-        overlay:SetPoint("BOTTOMRIGHT", minBtn, "BOTTOMLEFT", -2, 0)
-        overlay:SetScript("OnClick", function()
-            if InCombatLockdown() then return end
-            if minBtn and minBtn:IsShown() then
-                minBtn:Click()
+    -- Click-anywhere-on-header, without any addon code in the click path.
+    --
+    -- The addon-owned overlay this replaces (removed 2026-08-15) forwarded a
+    -- click to the header's own MinimizeButton via Click(). That runs
+    -- Blizzard's collapse cascade from OUR execution, tainting
+    -- ObjectiveTrackerContainer's shared dispatch loop for whatever module
+    -- owns the header -- and the taint outlives the zone change: clicking a
+    -- header outside any instance, then entering a dungeon, still threw
+    -- GetAuraDataByIndex secret-value errors out of ScenarioObjectiveTracker/
+    -- UIWidgetObjectiveTracker's LayoutContents (via ShouldShowMawBuffs) once
+    -- the container processed every module together. Gating the forward on
+    -- IsInCombat/IsInInstance only narrowed the repro window, never closed it.
+    --
+    -- Widening the NATIVE MinimizeButton's hit rect across the header instead
+    -- means no Click() forward exists at all: the client dispatches the click
+    -- straight to Blizzard's own OnClick closure (set in the header mixin's
+    -- OnLoad, never touched here), which is bit-for-bit the path a bare +/-
+    -- press already takes -- the one the repro never reproduced on. Blizzard
+    -- never calls SetHitRectInsets on these buttons itself (verified against
+    -- Gethe/wow-ui-source), so nothing fights this, and the header frame
+    -- itself is not mouse-enabled, so it can't swallow the click.
+    if minBtn and minBtn.SetHitRectInsets then
+        local headerW = header.GetWidth and header:GetWidth() or 0
+        local headerH = header.GetHeight and header:GetHeight() or 0
+        local btnW    = minBtn.GetWidth and minBtn:GetWidth() or 0
+        local btnH    = minBtn.GetHeight and minBtn:GetHeight() or 0
+        if headerW > 0 and btnW > 0 then
+            -- Stop short of the FilterButton while it's showing (master header
+            -- only, hidden by default) so it keeps its own clicks. XML anchors
+            -- it 2px left of MinimizeButton.
+            local reserved = btnW
+            local filter = header.FilterButton
+            if filter and filter.IsShown and filter:IsShown() then
+                reserved = reserved + ((filter.GetWidth and filter:GetWidth()) or 0) + 2
             end
-        end)
-        _headerClickOverlays[header] = overlay
+            -- Negative inset expands the hit rect outward from that edge.
+            -- Re-applied on every skin pass so it tracks header size changes
+            -- (Edit Mode resize); clamped so a stale/short header can never
+            -- leave a hit area hanging off the header into empty screen.
+            local extendX = headerW - reserved
+            if extendX < 0 then extendX = 0 end
+            -- The button is shorter than the header (16 vs 26 on section
+            -- headers), so match the header's height as well or the top and
+            -- bottom few pixels of the title stay dead.
+            local extendY = (headerH - btnH) / 2
+            if extendY < 0 then extendY = 0 end
+            minBtn:SetHitRectInsets(-extendX, 0, -extendY, -extendY)
+        end
     end
 end
 
