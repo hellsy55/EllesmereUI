@@ -318,7 +318,7 @@ local defaults = {
         showWhenRaid     = true,
         frameStrata      = "LOW",
 
-        -- Friendly Boss Frames (boss1-5 healable NPC frames, raid only)
+        -- Friendly Boss Frames (boss1-5 healable NPC frames, raid and party)
         friendlyBoss = {
             display  = "never",   -- "never" | "healers" | "always"
             position = "right",   -- "left" | "right" | "free"
@@ -4615,11 +4615,14 @@ ns._UpdateButtonHealth = function(button)
 end
 
 -------------------------------------------------------------------------------
---  Friendly Boss Frames (raid only): five standalone secure unit buttons for
+--  Friendly Boss Frames (any group): five standalone secure unit buttons for
 --  boss1-boss5. A secure visibility driver on [@bossN,help] is the entire
 --  detection (encounters expose healable friendly NPCs as boss units) -- no
---  NPC database, fully combat safe. Buttons render ONLY health bar +
---  name/health text, following raid-frame settings. Excluded from preview and
+--  NPC database, fully combat safe. Dungeon encounters use the same boss unit
+--  tokens as raids, so the group gate covers party too; attached positions
+--  slot in beside the party container there. Buttons render ONLY health bar +
+--  name/health text, following the RAID frame settings in a party too (one
+--  styled group, and the indicator containers are built once). Excluded from preview and
 --  unlock mode (Free Move uses its own drag overlay). Display "healers"
 --  builds/activates only on a healer spec.
 -------------------------------------------------------------------------------
@@ -4987,13 +4990,13 @@ FB.EnsureBuilt = function()
     -- Slot controller: collapses friendly bosses into the FIRST slots (button positions fixed;
     -- units assigned in bossN order, buttons shown/hidden). Runs in the restricted environment so
     -- mid-combat spawns/despawns reflow safely (insecure code cannot Show/Hide or re-unit protected
-    -- buttons in combat). Drivers registered in FB_Apply feed state-inraid / state-fb1..5. One
+    -- buttons in combat). Drivers registered in FB_Apply feed state-ingroup / state-fb1..5. One
     -- shared body per attribute; FB_Apply also force-runs it via SecureHandlerExecute because the
     -- driver manager skips the handler when a re-registered driver's value is unchanged.
     FB.RELAYOUT = [[
-        local inraid = self:GetAttribute("state-inraid")
+        local ingroup = self:GetAttribute("state-ingroup")
         local slot = 0
-        if inraid == 1 or inraid == "1" then
+        if ingroup == 1 or ingroup == "1" then
             for i = 1, 5 do
                 local v = self:GetAttribute("state-fb" .. i)
                 if v == 1 or v == "1" then
@@ -5019,7 +5022,7 @@ FB.EnsureBuilt = function()
     -- The relayout body lives in its own attribute so the handler and the force-run share it.
     controller:SetAttributeNoHandler("fb_relayout", FB.RELAYOUT)
     controller:SetAttributeNoHandler("_onattributechanged", [[
-        if name == "state-inraid" or name == "state-fb1" or name == "state-fb2"
+        if name == "state-ingroup" or name == "state-fb1" or name == "state-fb2"
            or name == "state-fb3" or name == "state-fb4" or name == "state-fb5" then
             self:RunAttribute("fb_relayout")
         end
@@ -5138,7 +5141,29 @@ FB.Anchor = function(owner)
                 anchorHdr = xf.container
             end
         end
-        if not anchorHdr and s.mergeGroups then
+        -- Party/dungeon: every raid group header is hidden there, so the boss group slots in beside
+        -- the party container as if it were the next group -- along the axis the party frames do NOT
+        -- stack on, the way "before first / after last group" reads in a raid. Extra Frames is raid
+        -- only and keeps the raid path. Party frames off screen leaves nothing to attach to: this
+        -- branch anchors nothing and the free position below takes over.
+        if owner == FB and not anchorHdr and not IsInRaid() then
+            local pc = ns._partyContainerFrame
+            if pc and pc:IsShown() then
+                local gap = s.groupSpacing or -1
+                local before = (fb.position == "left")
+                -- Party growth axis comes from partyHorizontal alone (_LayoutPartyFrames): the flip
+                -- and "centered" variants only reverse it, and the container spans all five slots
+                -- either way, so the perpendicular attach point is the same.
+                if s.partyHorizontal then
+                    if before then c:SetPoint("BOTTOMLEFT", pc, "TOPLEFT", 0, gap)
+                    else c:SetPoint("TOPLEFT", pc, "BOTTOMLEFT", 0, -gap) end
+                else
+                    if before then c:SetPoint("TOPRIGHT", pc, "TOPLEFT", -gap, 0)
+                    else c:SetPoint("TOPLEFT", pc, "TOPRIGHT", gap, 0) end
+                end
+                return
+            end
+        elseif not anchorHdr and s.mergeGroups then
             anchorHdr = ns._flatHeader
         elseif not anchorHdr then
             -- The boss group slots in before the first / after the last group that is BOTH enabled
@@ -5196,6 +5221,12 @@ FB.Anchor = function(owner)
     c:SetPoint("CENTER", UIParent, "CENTER", p.x or 100, p.y or 0)
 end
 
+-- Re-anchor only (no restyle): the party visibility pass calls this on the party container's
+-- show/hide edge, since attached positions hang off that container outside a raid.
+function ns.FB_ReAnchor()
+    if FB.built then FB.Anchor() end
+end
+
 -- Master apply: activates, deactivates and refreshes the whole feature. Called from OnEnable, the
 -- options dropdowns, spec changes, profile swaps (_ERF_RefreshAll) and the post-combat dirty pass.
 function ns.FB_Apply()
@@ -5207,7 +5238,7 @@ function ns.FB_Apply()
     if not FB.ShouldBeActive() then
         if FB.built then
             if FB.controller then
-                UnregisterAttributeDriver(FB.controller, "state-inraid")
+                UnregisterAttributeDriver(FB.controller, "state-ingroup")
                 for i = 1, 5 do
                     UnregisterAttributeDriver(FB.controller, "state-fb" .. i)
                 end
@@ -5228,7 +5259,9 @@ function ns.FB_Apply()
     FB.Anchor()
     FB.container:Show()
     -- Drivers feed the slot controller, which assigns bosses to the first slots in bossN order and shows/hides buttons securely.
-    RegisterAttributeDriver(FB.controller, "state-inraid", "[@raid1,exists] 1; 0")
+    -- Group gate: raid OR party. Dungeon encounters (a healable friendly boss) use the same
+    -- bossN tokens, so a raid-only gate hid the frames for the whole 5-man half of the game.
+    RegisterAttributeDriver(FB.controller, "state-ingroup", "[@raid1,exists][@party1,exists] 1; 0")
     for i = 1, 5 do
         RegisterAttributeDriver(FB.controller, "state-fb" .. i, "[@boss" .. i .. ",help] 1; 0")
     end
@@ -9015,6 +9048,12 @@ ns._LayoutPartyFrames = function()
     -- Self button + header slot positioning ran above (ns._PositionPartySlots),
     -- before the attribute pass so a header Hide/Show re-process anchors the
     -- children against the already-correct header position and size.
+
+    -- The friendly boss group attaches to this container (and to the growth axis derived above)
+    -- while not in a raid, so every layout pass -- Horizontal Frames, Flip Growth, party size,
+    -- cell spacing -- has to move it too. OOC only (this function bails in combat). In a raid the
+    -- boss group hangs off the raid headers instead, so skip the re-anchor scan there.
+    if not IsInRaid() and ns.FB_ReAnchor then ns.FB_ReAnchor() end
 end
 
 -- Party visibility: show/hide based on group state.
@@ -9077,6 +9116,14 @@ ns._UpdatePartyVisibility = function()
         end
 
         wipe(ns._partyUnitToButton)
+    end
+
+    -- Attach-point edges the layout pass above cannot cover: the boss group's own roster pass can
+    -- run before the party frames are up, and the hidden branch never lays out at all (the group
+    -- then falls back to its free position). EDGE only -- this recompute runs on every roster event.
+    if ns._fbPartyAttachState ~= visible then
+        ns._fbPartyAttachState = visible
+        if ns.FB_ReAnchor then ns.FB_ReAnchor() end
     end
 end
 
