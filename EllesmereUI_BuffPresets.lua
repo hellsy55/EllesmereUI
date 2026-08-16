@@ -258,7 +258,7 @@ spells = {
         [186254] = { class = "HUNTER", alts = { 1235388, 1285912, 19574 } },
         [288613] = { class = "HUNTER" },
         [190319] = { class = "MAGE" },
-        [365350] = { class = "MAGE" },
+        [365350] = { class = "MAGE", alts = { 365362 } },
         [1249625] = { class = "MONK" },
         [10060] = { class = "PRIEST" },
         [114050] = { class = "SHAMAN", alts = { 114051, 114052 } },
