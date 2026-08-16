@@ -432,36 +432,31 @@ local function SkinHeader(header, knownCollapsed)
     -- 1px divider beneath the header (Line Color: Class / Custom / Accent).
     EnsureAccentDivider(header)
 
-    -- Click-anywhere-on-header, without any addon code in the click path.
-    --
-    -- The addon-owned overlay this replaces (removed 2026-08-15) forwarded a
-    -- click to the header's own MinimizeButton via Click(). That runs
-    -- Blizzard's collapse cascade from OUR execution, tainting
-    -- ObjectiveTrackerContainer's shared dispatch loop for whatever module
-    -- owns the header -- and the taint outlives the zone change: clicking a
-    -- header outside any instance, then entering a dungeon, still threw
-    -- GetAuraDataByIndex secret-value errors out of ScenarioObjectiveTracker/
-    -- UIWidgetObjectiveTracker's LayoutContents (via ShouldShowMawBuffs) once
-    -- the container processed every module together. Gating the forward on
-    -- IsInCombat/IsInInstance only narrowed the repro window, never closed it.
-    --
-    -- Widening the NATIVE MinimizeButton's hit rect across the header instead
-    -- means no Click() forward exists at all: the client dispatches the click
-    -- straight to Blizzard's own OnClick closure (set in the header mixin's
-    -- OnLoad, never touched here), which is bit-for-bit the path a bare +/-
-    -- press already takes -- the one the repro never reproduced on. Blizzard
-    -- never calls SetHitRectInsets on these buttons itself (verified against
-    -- Gethe/wow-ui-source), so nothing fights this, and the header frame
-    -- itself is not mouse-enabled, so it can't swallow the click.
+    -- Click-anywhere-on-header: widen the NATIVE MinimizeButton's hit rect
+    -- across the header, so a title click dispatches straight to Blizzard's
+    -- own OnClick -- the identical path a bare +/- press takes.
+    -- HARD RULE: no addon code may run in this click path. Forwarding via an
+    -- overlay's Click() ran the collapse cascade from our execution and
+    -- tainted the container's shared dispatch loop -- a field-confirmed
+    -- injector (secret-aura GetAuraDataByIndex errors out of LayoutContents),
+    -- and the taint survives zone changes, so combat/instance gating cannot
+    -- close it. Do not reintroduce any overlay or click redirect here without
+    -- fresh taint-log evidence. Blizzard never calls SetHitRectInsets on
+    -- these buttons (source-verified), and the header frame is not
+    -- mouse-enabled, so nothing fights or swallows this.
     if minBtn and minBtn.SetHitRectInsets then
         local headerW = header.GetWidth and header:GetWidth() or 0
         local headerH = header.GetHeight and header:GetHeight() or 0
         local btnW    = minBtn.GetWidth and minBtn:GetWidth() or 0
         local btnH    = minBtn.GetHeight and minBtn:GetHeight() or 0
         if headerW > 0 and btnW > 0 then
-            -- Stop short of the FilterButton while it's showing (master header
-            -- only, hidden by default) so it keeps its own clicks. XML anchors
-            -- it 2px left of MinimizeButton.
+            -- Reserve the FilterButton's width while it is showing (master
+            -- header only, hidden by default; anchored 2px left of the
+            -- MinimizeButton). The widened rect still passes under it, but
+            -- the filter is declared later at the same frame level, so it
+            -- renders on top and keeps its own clicks; the reservation just
+            -- shortens the extension (accepted: the leftmost ~20px of the
+            -- header don't toggle while the filter is shown).
             local reserved = btnW
             local filter = header.FilterButton
             if filter and filter.IsShown and filter:IsShown() then

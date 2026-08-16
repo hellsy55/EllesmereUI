@@ -77,7 +77,14 @@ local function AddBorder(frame, r, g, b, a)
     if GetFFD(frame).border then return end
     local PP = EUI and (EUI.PanelPP or EUI.PP)
     if PP and PP.CreateBorder then
-        PP.CreateBorder(frame, r or Theme.brdR, g or Theme.brdG, b or Theme.brdB, a or Theme.brdA, 1, "OVERLAY", 7)
+        -- BORDER/-7 strips with the container demoted to the skinned frame's own
+        -- level: at equal frame levels regions interleave by draw layer, so text
+        -- and content on the frame render above the border (at the default +1
+        -- container level, frame level beats every layer and the border covers
+        -- bar text -- XP/reputation bar labels). Demotion is window-engine-only
+        -- on purpose: every other CreateBorder consumer keeps the +1 contract.
+        local c = PP.CreateBorder(frame, r or Theme.brdR, g or Theme.brdG, b or Theme.brdB, a or Theme.brdA, 1, "BORDER", -7)
+        if c and c.SetFrameLevel then c:SetFrameLevel(frame:GetFrameLevel()) end
         GetFFD(frame).border = true
     end
 end

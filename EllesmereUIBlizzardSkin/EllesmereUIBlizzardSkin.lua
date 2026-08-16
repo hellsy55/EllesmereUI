@@ -66,7 +66,6 @@ local WINDOW_ENABLE_KEYS = {
     -- delvepicker is the Delves TIER PICKER, a separate frame from the
     -- companion configuration window that `delves` above covers.
     queuestatus     = "reskinQueueStatus",
-    readycheck      = "reskinReadyCheck",
     delvepicker     = "reskinDelvePicker",
     playerchoice    = "reskinPlayerChoice",
     trade           = "reskinTrade",
@@ -97,6 +96,8 @@ do
     local BATCHES = {
         { marker = "lootSkinStyleSeeded",  keys = { "lootroll", "loothistory", "groupinvite" } },
         { marker = "readyCheckStyleSeeded", keys = { "readycheck" } },
+        { marker = "queueChoiceTradeStyleSeeded",
+          keys = { "queuestatus", "delvepicker", "playerchoice", "trade" } },
     }
     local function SeedBatch(marker, newKeys)
         if EllesmereUIDB[marker] then return end
@@ -1241,7 +1242,7 @@ end
 
         -- popup/dialog/closeBtn default to the LFG dungeon trio. The params
         -- exist so a caller can pass a different popup/dialog pair; PvP support
-        -- was built on that and then SCRAPPED at Noah's call, so the LFG popup
+        -- was built on that and then SCRAPPED by maintainer call, so the LFG popup
         -- is currently the only caller and the defaults are always used.
         local function SkinQueuePopup(popup, dialog, closeBtn)
             popup = popup or LFGDungeonReadyPopup
@@ -3244,10 +3245,8 @@ end
         hooked   = setmetatable({}, { __mode = "k" }),
         containers = {},
         -- Set at PLAYER_LOGIN only when the setting is on. Nothing here has
-        -- run if this is false, which is what /euihud reports rather than
-        -- quietly building the covers the gate exists to prevent.
+        -- run while this is false.
         installed = false,
-        stats    = {},
     }
 
     local NAMED_CONTAINERS = {
@@ -3257,6 +3256,10 @@ end
         "UIWidgetCenterDisplayFrame",
     }
 
+    -- Existing accounts get an EXPLICIT boolean seeded once by the
+    -- blizzskin_widget_bars_seed_v1 migration (on only when Reskin Tooltips
+    -- AND Reskin Popups and Menus are both on); nil survives only on fresh
+    -- installs, where both of those masters default on too -- so nil = on.
     local function CoverEnabled()
         return not EllesmereUIDB or EllesmereUIDB.reskinWidgetBars ~= false
     end
@@ -3437,9 +3440,9 @@ end
         -- UIParent parenting was the original design ("write on ours, none on
         -- theirs") and it does not reliably draw on top: inside a toplevel
         -- window, Blizzard's subtree and a UIParent child are different
-        -- branches, and matching strata + level+2 was NOT enough -- /euihud
-        -- reported four covers shown, sized and reading fine while the stock
-        -- bars stayed visible underneath.
+        -- branches, and matching strata + level+2 was NOT enough -- covers
+        -- shown, sized and reading fine while the stock bars stayed visible
+        -- underneath.
         --
         -- SetParent on OUR OWN frame is still not a write into the widget tree;
         -- nothing on a Blizzard frame is modified. It also makes the cover
@@ -3465,7 +3468,7 @@ end
         c.euiLabel = label
         HouseFont(label, true)
         BarFill(c)
-        -- Tiny black outline on EVERY bar, per Noah. The earlier "no border"
+        -- Tiny black outline on EVERY bar, by maintainer call. The earlier "no border"
         -- call was about the THEMED accent border, which is heavy on a 15px
         -- bar; a 1px black edge is what actually defines it.
         ThinBorder(c)
@@ -3675,11 +3678,6 @@ end
         return { f:GetChildren() }
     end
 
-    -- Same idea for regions; used only by the /euihud dump.
-    local function KidsOfRegions(f)
-        return { f:GetRegions() }
-    end
-
     -- Walk a container for StatusBars. Depth-capped and children taken once.
     local function CollectBars(frame, depth, out, seen)
         if not frame or depth > 4 then return end
@@ -3758,8 +3756,30 @@ end
         for i = 1, #HUD.containers do
             CollectBars(HUD.containers[i], 0, bars, seen)
         end
+        -- WIDGET CONTAINERS ONLY, never the whole plate. A nameplate base
+        -- frame also hosts unit-frame trees (EllesmereUI's own health and cast
+        -- bars are StatusBars parented under it), and a full walk adopts and
+        -- art-strips those. The container is found by the same widgetPools
+        -- probe Discover uses; with EUI nameplates off it sits one level down,
+        -- under the Blizzard unit frame's WidgetContainer key instead.
         for plate in pairs(HUD.plates) do
-            CollectBars(plate, 0, bars, seen)
+            local okKids, kids = pcall(KidsOf, plate)
+            if okKids and kids then
+                for i = 1, #kids do
+                    local ch = kids[i]
+                    if ch and not (ch.IsForbidden and ch:IsForbidden()) then
+                        local okP, pools = pcall(HUDGet, ch, "widgetPools")
+                        if okP and pools ~= nil then
+                            CollectBars(ch, 0, bars, seen)
+                        else
+                            local okW, wc = pcall(HUDGet, ch, "WidgetContainer")
+                            if okW and wc and not (wc.IsForbidden and wc:IsForbidden()) then
+                                CollectBars(wc, 0, bars, seen)
+                            end
+                        end
+                    end
+                end
+            end
         end
         for i = 1, #bars do
             Adopt(bars[i])
@@ -3774,9 +3794,6 @@ end
                 end
             end
         end
-        HUD.stats.containers = #HUD.containers
-        HUD.stats.bars = #bars
-        HUD.stats.live = live
         return live
     end
 
@@ -3904,80 +3921,6 @@ end
         end
     end)
 
-    -- Debug dump: go here before going to the code. Reports what the LAST pass
-    -- actually saw rather than what the layout is assumed to be -- guessing
-    -- Blizzard's widget layout from a screenshot has failed twice before.
-    EllesmereUI._HUDWidgetDump = function()
-        -- FIRST. Discover+Sweep below would build the very covers the login
-        -- gate exists to prevent, and a dump that quietly turns the feature
-        -- back on for one pass is worse than no dump.
-        if not HUD.installed then
-            print("|cff0cd29fEUI HUD|r widget bar covers are OFF"
-                  .. " (Options > Blizzard Skin > Blizzard HUD)."
-                  .. " Nothing is registered; enable it and reload.")
-            return
-        end
-        Discover()
-        Sweep()
-        local n = 0
-        for _ in pairs(HUD.covers) do n = n + 1 end
-        local r = 0
-        for _ in pairs(HUD.retired) do r = r + 1 end
-        local p = 0
-        for _ in pairs(HUD.plates) do p = p + 1 end
-        local hk = 0
-        for _ in pairs(HUD.hooked) do hk = hk + 1 end
-        -- `hooked` is the one that answers "why is this bar frozen": a covered
-        -- bar with no hook is one whose value can move with no event, and it
-        -- will sit at a stale number until something else sweeps.
-        print(("|cff0cd29fEUI HUD|r containers=%d bars=%d live=%d covers=%d retired=%d plates=%d hooked=%d")
-            :format(HUD.stats.containers or 0, HUD.stats.bars or 0, HUD.stats.live or 0,
-                    n, r, p, hk))
-        -- ONE LINE PER COVERED BAR. An earlier version printed every region of
-        -- every bar and its parent, which buried the answer in chat. The three
-        -- numbers that actually matter are the bar's height, the tallest piece
-        -- of Blizzard border art wrapping it, and the pad we chose to swallow
-        -- the difference -- if pad is at the MAX_VPAD ceiling, the cover is
-        -- deliberately refusing to follow an oversized end-cap atlas.
-        for bar, cov in pairs(HUD.covers) do
-            local okS, bwid, bh = SafeRead(bar, "GetSize")
-            local cwid, ch = cov:GetSize()
-            local tallest = 0
-            for _, k in ipairs({ "BorderCenter", "BorderLeft", "BorderRight" }) do
-                local okT, t = pcall(HUDGet, bar, k)
-                if okT and t then
-                    local okH, h = pcall(t.GetHeight, t)
-                    if okH and type(h) == "number" and h > tallest then tallest = h end
-                end
-            end
-            -- SHOWN and the value reads matter as much as the sizes: a cover
-            -- that exists and is correctly layered but silently RETIRED (a
-            -- failed or secret min/max/value read) looks identical in a frame
-            -- stack to one that is working, and leaves Blizzard's bar on show.
-            local okV, v = SafeRead(bar, "GetValue")
-            local okMM = SafeRead(bar, "GetMinMaxValues")
-            local okL2, barLvl = SafeRead(bar, "GetFrameLevel")
-            print(("  bar=%.0fx%.0f cover=%.0fx%.0f border=%.0f pad=%.1f%s shown=%s reads=%s lvl=%d/%d %s"):format(
-                okS and bwid or -1, okS and bh or -1, cwid or -1, ch or -1,
-                tallest, cov.euiPad or -1,
-                (cov.euiPad or 0) >= MAX_VPAD and "(CAP)" or "",
-                cov:IsShown() and "Y" or "N",
-                (okV and okMM) and "ok" or "FAILED",
-                cov:GetFrameLevel(), (okL2 and type(barLvl) == "number") and barLvl or -1,
-                cov:GetParent() == UIParent and "|cffff6060parent=UIParent|r" or "parent=bar's"))
-        end
-        -- Retired bars are the silent failure mode: Blizzard's bar is deliberately
-        -- left on show, so the only symptom is "the skin did nothing".
-        for bar in pairs(HUD.retired) do
-            local okP, parent = SafeRead(bar, "GetParent")
-            local okN, nm = okP and pcall(parent.GetName, parent)
-            print(("  |cffff6060RETIRED|r bar under %s"):format(
-                (okN and nm) or "<anon>"))
-        end
-    end
-    SLASH_EUIHUD1 = "/euihud"
-    SlashCmdList["EUIHUD"] = function() EllesmereUI._HUDWidgetDump() end
-
     ---------------------------------------------------------------------------
     --  Extra action button (ExtraActionButton1).
     --
@@ -4025,24 +3968,14 @@ end
             pcall(btn.icon.SetTexCoord, btn.icon, 0.08, 0.92, 0.08, 0.92)
         end
         if not d.border then
-            -- FOLLOW ACTION BAR 1 rather than drawing a fixed house border, so
-            -- the extra action button picks up bar 1's thickness, color,
-            -- texture, class-color and icon zoom -- and keeps tracking them
-            -- when those options change. Bar 1's key is "MainBar", NOT "bar1".
-            --
-            -- Falls back to the plain border if ActionBars is absent or older
-            -- than the seam (it is registered from that addon, which an EUI
-            -- update can revert).
-            local reg = EllesmereUI.RegisterActionBarBorderFollower
-            if type(reg) == "function" then
-                reg("MainBar", btn)
+            -- 1px black edge on its own host frame above the icon, the same
+            -- stacking every squared item tile uses. NOT AddBorder: its border
+            -- container renders below same-level ARTWORK regions, and the icon
+            -- stretched over the full button rect would hide the edge entirely.
+            local W = WS()
+            if W and W.QualityBorder then
+                W.QualityBorder(btn, btn.icon or btn, 0, 0, 0)
                 d.border = true
-            else
-                local W = WS()
-                if W and W.AddBorder then
-                    W.AddBorder(btn)
-                    d.border = true
-                end
             end
         end
         -- Keybind and charge count are deliberately left in Blizzard's outlined
@@ -4053,15 +3986,19 @@ end
     eabEv:RegisterEvent("PLAYER_LOGIN")
     eabEv:RegisterEvent("UPDATE_EXTRA_ACTIONBAR")
     eabEv:SetScript("OnEvent", function()
-        StripExtraAction()
-        if C_Timer then
-            C_Timer.After(0, StripExtraAction)
-            C_Timer.After(0.3, StripExtraAction)
-        end
+        -- Hook install is unconditional so a mid-session enable takes effect on
+        -- the button's next show; the strip and its catch-up timers are gated
+        -- here so the default-off state never allocates per event.
         local btn = _G.ExtraActionButton1
         if btn and not GetFFD(btn).showHook then
             GetFFD(btn).showHook = true
             btn:HookScript("OnShow", StripExtraAction)
+        end
+        if not (EllesmereUIDB and EllesmereUIDB.reskinExtraActionButton == true) then return end
+        StripExtraAction()
+        if C_Timer then
+            C_Timer.After(0, StripExtraAction)
+            C_Timer.After(0.3, StripExtraAction)
         end
     end)
 
@@ -4123,21 +4060,14 @@ end
                     pcall(btn.Icon.SetTexCoord, btn.Icon, 0.08, 0.92, 0.08, 0.92)
                 end
                 if not d.border then
-                    -- Same Action Bar 1 follower as the extra action button, so
-                    -- the two granted-ability buttons match each other and the
-                    -- bar. Registration dedupes by identity, which matters here
-                    -- because these buttons are POOLED and this runs per zone
-                    -- change. Bar 1's key is "MainBar", not "bar1".
-                    local reg = EllesmereUI.RegisterActionBarBorderFollower
-                    if type(reg) == "function" then
-                        reg("MainBar", btn)
+                    -- Same border as the extra action button, so the two
+                    -- granted-ability buttons match. Guarded by d.border, which
+                    -- matters here because these buttons are POOLED and this
+                    -- runs per zone change.
+                    local W = WS()
+                    if W and W.QualityBorder then
+                        W.QualityBorder(btn, btn.Icon or btn, 0, 0, 0)
                         d.border = true
-                    else
-                        local W = WS()
-                        if W and W.AddBorder then
-                            W.AddBorder(btn)
-                            d.border = true
-                        end
                     end
                 end
             end
@@ -4152,11 +4082,10 @@ end
         pcall(zaEv.RegisterEvent, zaEv, e)
     end
     zaEv:SetScript("OnEvent", function()
-        StripZoneAbility()
-        if C_Timer then
-            C_Timer.After(0, StripZoneAbility)
-            C_Timer.After(0.3, StripZoneAbility)
-        end
+        -- Same shape as the extra action button's handler: hooks install
+        -- unconditionally (the strip self-gates at near-zero cost), the strip
+        -- and its catch-up timers only run with the feature ON -- zone changes
+        -- are frequent, and default-off must not allocate on every one.
         local f = _G.ZoneAbilityFrame
         if f and not GetFFD(f).zaHooks then
             GetFFD(f).zaHooks = true
@@ -4166,6 +4095,12 @@ end
             if type(f.UpdateDisplayedZoneAbilities) == "function" then
                 hooksecurefunc(f, "UpdateDisplayedZoneAbilities", StripZoneAbility)
             end
+        end
+        if not (EllesmereUIDB and EllesmereUIDB.reskinExtraActionButton == true) then return end
+        StripZoneAbility()
+        if C_Timer then
+            C_Timer.After(0, StripZoneAbility)
+            C_Timer.After(0.3, StripZoneAbility)
         end
     end)
 end)()

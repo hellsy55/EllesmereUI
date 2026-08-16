@@ -318,7 +318,9 @@ local defaults = {
         showWhenRaid     = true,
         frameStrata      = "LOW",
 
-        -- Friendly Boss Frames (boss1-5 healable NPC frames, raid and party)
+        -- Friendly Boss Frames (boss1-5 healable NPC frames; raid, plus party
+        -- via the opt-in showInDungeons key -- absent = raid only, no default
+        -- on purpose so existing users keep the raid-only behavior)
         friendlyBoss = {
             display  = "never",   -- "never" | "healers" | "always"
             position = "right",   -- "left" | "right" | "free"
@@ -1694,7 +1696,7 @@ function ns.RefreshAllNames()
     if not s then return end
     local function refresh(unit, btn)
         local d = GetFFD(btn)
-		-- Party buttons read through the party proxy so a per-party cap applies.
+        -- Party buttons read through the party proxy so a per-party cap applies.
         local bs = (d and d._isParty) and (ns._scaledPartyProxy or s) or s
         if d and d.nameText then
             d.nameText:SetText(ResolveDisplayName(unit, true, bs))
@@ -4619,7 +4621,8 @@ end
 --  boss1-boss5. A secure visibility driver on [@bossN,help] is the entire
 --  detection (encounters expose healable friendly NPCs as boss units) -- no
 --  NPC database, fully combat safe. Dungeon encounters use the same boss unit
---  tokens as raids, so the group gate covers party too; attached positions
+--  tokens as raids, so the group gate can cover party too -- behind the Show
+--  in Dungeons opt-in (fb.showInDungeons, default off); attached positions
 --  slot in beside the party container there. Buttons render ONLY health bar +
 --  name/health text, following the RAID frame settings in a party too (one
 --  styled group, and the indicator containers are built once). Excluded from preview and
@@ -5146,7 +5149,8 @@ FB.Anchor = function(owner)
         -- stack on, the way "before first / after last group" reads in a raid. Extra Frames is raid
         -- only and keeps the raid path. Party frames off screen leaves nothing to attach to: this
         -- branch anchors nothing and the free position below takes over.
-        if owner == FB and not anchorHdr and not IsInRaid() then
+        if owner == FB and not anchorHdr and not IsInRaid()
+           and fb.showInDungeons == true then
             local pc = ns._partyContainerFrame
             if pc and pc:IsShown() then
                 local gap = s.groupSpacing or -1
@@ -5222,9 +5226,13 @@ FB.Anchor = function(owner)
 end
 
 -- Re-anchor only (no restyle): the party visibility pass calls this on the party container's
--- show/hide edge, since attached positions hang off that container outside a raid.
+-- show/hide edge, since attached positions hang off that container outside a raid. Gated on
+-- the Show in Dungeons opt-in: with it off the party attach branch is inert, so the party
+-- layout/visibility hooks skip the re-anchor entirely (zero added work for raid-only users).
 function ns.FB_ReAnchor()
-    if FB.built then FB.Anchor() end
+    if not FB.built then return end
+    local fb = FB.Settings and FB.Settings()
+    if fb and fb.showInDungeons == true then FB.Anchor() end
 end
 
 -- Master apply: activates, deactivates and refreshes the whole feature. Called from OnEnable, the
@@ -5259,9 +5267,14 @@ function ns.FB_Apply()
     FB.Anchor()
     FB.container:Show()
     -- Drivers feed the slot controller, which assigns bosses to the first slots in bossN order and shows/hides buttons securely.
-    -- Group gate: raid OR party. Dungeon encounters (a healable friendly boss) use the same
-    -- bossN tokens, so a raid-only gate hid the frames for the whole 5-man half of the game.
-    RegisterAttributeDriver(FB.controller, "state-ingroup", "[@raid1,exists][@party1,exists] 1; 0")
+    -- Group gate: raid only by default; raid OR party with Show in Dungeons on (the cog on
+    -- Add Friendly Boss Group -- opt-in, so existing users keep raid-only behavior). Dungeon
+    -- encounters expose the same healable bossN tokens. The toggle's setter re-runs FB_Apply,
+    -- so re-registering here applies the flip live in either direction.
+    local groupCond = (fb.showInDungeons == true)
+        and "[@raid1,exists][@party1,exists] 1; 0"
+        or "[@raid1,exists] 1; 0"
+    RegisterAttributeDriver(FB.controller, "state-ingroup", groupCond)
     for i = 1, 5 do
         RegisterAttributeDriver(FB.controller, "state-fb" .. i, "[@boss" .. i .. ",help] 1; 0")
     end
@@ -14469,29 +14482,60 @@ function ERF:OnEnable()
     -- Extra Frames: initial activation (raid-only member duplicates)
     if ns.XF_Apply then ns.XF_Apply() end
 
-    -- DEFERRED LOGIN PASS. Runs in its OWN C_Timer execution -- its own
-    -- script-watchdog budget -- on the first frame after the loading screen
-    -- (timers never fire during it), normally before that frame renders.
-    -- Everything here is combat-legal: the insecure styling bodies for every
+    -- DEFERRED LOGIN PASS, BUDGET-FRAGMENTED. Starts on the first frame
+    -- after the loading screen (timers never fire during it). Everything
+    -- here is combat-legal: the insecure styling bodies for every
     -- pre-spawned button (~80% of this module's login CPU), then the full
     -- reload passes, whose protected ops self-gate in combat and heal on the
-    -- regen dirty-flag path. Order is load-bearing: BM lookup before the
-    -- bodies (aura shell pools size from the indicator lists), bodies before
-    -- the restyle loops.
+    -- regen dirty-flag path. Order is load-bearing and preserved by C_Timer
+    -- FIFO: BM lookup before the bodies (aura shell pools size from the
+    -- indicator lists), bodies before the restyle loops.
+    --
+    -- WHY FRAGMENTED: each C_Timer callback is its own execution and so its
+    -- own 12.1 script-watchdog budget -- but a budget is a fixed slice, and
+    -- this pass's cost scales with button count x profile size. As ONE tick
+    -- it exceeded its own budget on slower machines (field: watchdog kill
+    -- inside _RefreshProxyModes at the TAIL of the tick -- the named line is
+    -- just where the budget died, not the culprit). Now the styling loop
+    -- self-limits with debugprofilestop and re-queues, and each reload pass
+    -- runs as its own execution, so no single execution here scales with
+    -- data size. Fast machines still finish styling in one tick; slow ones
+    -- style progressively over a few frames instead of erroring. Buttons
+    -- created between slices (roster spawns) are healed by the restyle-loop
+    -- fallbacks and the 0.5s safety pass, same as the existing one-tick gap;
+    -- UpdateButton's `not d.styled` guard covers event dispatch in the gap.
     C_Timer.After(0, function()
-        -- Invalidate the login frame's paint stamps so the deferred repaint
-        -- can never be deduped away (mirrors _ERF_RefreshAll).
+        -- Invalidate the frame's paint stamps so the deferred repaint can
+        -- never be deduped away (mirrors _ERF_RefreshAll). Re-bumped in each
+        -- later stage: every stage is a new frame with its own stamps.
         ns._paintGen = (ns._paintGen or 0) + 1
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
-        for _, btn in ipairs(allButtons) do
-            StyleButton(btn)
+        local queue = {}
+        for _, btn in ipairs(allButtons) do queue[#queue + 1] = btn end
+        for _, btn in ipairs(ns._partyAllButtons) do queue[#queue + 1] = btn end
+        local idx = 1
+        local function drain()
+            local deadline = debugprofilestop() + 8
+            while idx <= #queue do
+                StyleButton(queue[idx])
+                idx = idx + 1
+                if idx <= #queue and debugprofilestop() > deadline then
+                    C_Timer.After(0, drain)
+                    return
+                end
+            end
+            -- Styling complete: each remaining pass gets a whole budget.
+            C_Timer.After(0, function()
+                ns._paintGen = (ns._paintGen or 0) + 1
+                ReloadFrames()
+            end)
+            C_Timer.After(0, function()
+                ns._paintGen = (ns._paintGen or 0) + 1
+                ns.ReloadPartyFrames()
+            end)
+            C_Timer.After(0, RegisterWithUnlockMode)
         end
-        for _, btn in ipairs(ns._partyAllButtons) do
-            StyleButton(btn)
-        end
-        ReloadFrames()
-        ns.ReloadPartyFrames()
-        RegisterWithUnlockMode()
+        drain()
     end)
 
     -- Profile-swap refresh: EllesmereUI.RefreshAllAddons calls this on a profile

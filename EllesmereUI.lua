@@ -1455,6 +1455,46 @@ function EllesmereUI.Print(...)
     f:AddMessage(strjoin(" ", tostringall(...)))
 end
 
+-- Budgeted step runner -- the 12.1 script-watchdog defense for any pass whose
+-- cost scales with data size (frames x settings x profile keys). Runs `steps`
+-- (an array of functions) strictly in order, spending at most `msBudget`
+-- (default 8) milliseconds of CPU per execution; when the budget is spent the
+-- remainder re-queues via C_Timer.After(0), so every continuation gets a
+-- fresh watchdog budget. By construction no single execution here can
+-- approach the watchdog limit, on any machine, at any step count.
+--
+-- NOTHING runs in the caller's execution: the first slice is deferred too,
+-- so a caller that already spent real budget (a profile apply, an options
+-- click) never gets this work stacked on top. Timers do not fire during
+-- loading screens, so from a login-window caller the first slice lands on
+-- the first frame after the screen drops.
+--
+-- Each step runs under pcall with errors routed to the standard error
+-- handler and the chain CONTINUING: an async chain that died mid-way would
+-- silently strand `onDone` (completion/cleanup) and every later step, which
+-- is worse than one step's failure. Steps must tolerate a failed
+-- predecessor; a sequence that cannot should stay synchronous instead.
+-- `onDone` (optional) runs after the last step, in that final execution.
+-- No file-scope locals here on purpose: this file sits on the 200-local cap.
+function EllesmereUI.RunBudgeted(steps, msBudget, onDone)
+    local idx, n = 1, #steps
+    local budget = msBudget or 8
+    local function drain()
+        local deadline = debugprofilestop() + budget
+        while idx <= n do
+            local ok, err = pcall(steps[idx])
+            idx = idx + 1
+            if not ok and err then geterrorhandler()(err) end
+            if idx <= n and debugprofilestop() > deadline then
+                C_Timer.After(0, drain)
+                return
+            end
+        end
+        if onDone then onDone() end
+    end
+    C_Timer.After(0, drain)
+end
+
 local mainFrame, bgFrame, clickArea, sidebar, contentFrame
 local headerFrame, tabBar, scrollFrame, scrollChild, footerFrame, contentHeaderFrame
 local sidebarButtons = {}
@@ -4089,29 +4129,46 @@ do
     end
 end
 
--- "Apply to All Game Text": swaps Blizzard's default game fonts to the user's global face.
--- Taint-safe: runs once at PLAYER_LOGIN (out of combat), sets STANDARD_TEXT_FONT, and SetFonts
--- Blizzard's named font OBJECTS (not secure frames, no keys written onto Blizzard frame
--- tables). Typeface only, native size/outline preserved; toggling requires a reload (no undo path: disabled = skipped, defaults kept).
+-- "Apply to All Game Text" + "Game Text Scale": swaps Blizzard's default game fonts to
+-- the user's global face and/or scales their sizes. Taint-safe: runs once at PLAYER_LOGIN
+-- (out of combat), sets STANDARD_TEXT_FONT, and SetFonts Blizzard's named font OBJECTS
+-- (not secure frames, no keys written onto Blizzard frame tables). Outline preserved;
+-- sizes multiply from each object's NATIVE size (single once-per-session pass, so the
+-- scale can never compound); either setting requires a reload (no undo path: off/100% =
+-- that half skipped, defaults kept). Scale works without the face swap too -- each
+-- object keeps its own face at the scaled size.
 function EllesmereUI.ApplyGlobalFontToGameText()
     local db = EllesmereUI.GetFontsDB()
-    if not db.applyToAllGameText then return end
-    local path = ResolveFontName(db.global or "Expressway")
-    if not path then return end
+    -- Zero cost while fully off: both settings absent (scale 100 stores nil)
+    -- means two table reads and out -- nothing computed, nothing enumerated.
+    if not db.applyToAllGameText and not db.gameTextScale then return end
+    local scale = tonumber(db.gameTextScale) or 100
+    if scale < 75 then scale = 75 elseif scale > 125 then scale = 125 end
+    scale = scale / 100
+    local swap = db.applyToAllGameText and true or false
+    local path
+    if swap then
+        path = ResolveFontName(db.global or "Expressway")
+        if not path then swap = false end
+    end
+    if not swap and scale == 1 then return end
 
-    -- Universal fallback consumed by newly-created Blizzard/addon text.
-    _G.STANDARD_TEXT_FONT = path
+    if swap then
+        -- Universal fallback consumed by newly-created Blizzard/addon text.
+        _G.STANDARD_TEXT_FONT = path
+    end
 
     -- Enumerate every registered font object via the game's own font list (no
     -- hardcoded list to go stale); covers Blizzard + other addons in one pass.
     local fonts = (GetFonts and GetFonts()) or {}
     for i = 1, #fonts do
         local obj = _G[fonts[i]]
-        -- Swap the face only (native size/outline preserved). Guard each:
-        -- GetFonts may list entries that are not usable font objects.
+        -- Guard each: GetFonts may list entries that are not usable font objects.
         if obj and type(obj) == "table" and obj.GetFont and obj.SetFont then
-            local _, size, flags = obj:GetFont()
-            if size and size > 0 then obj:SetFont(path, size, flags) end
+            local face, size, flags = obj:GetFont()
+            if size and size > 0 then
+                obj:SetFont(swap and path or face, size * scale, flags)
+            end
         end
     end
 end
@@ -5594,8 +5651,11 @@ function EllesmereUI.MakeUnlockElement(opts)
         -- resize and width/height matching stay available.
         keepMoverWhenAnchored = opts.keepMoverWhenAnchored,
         -- moverBg: optional {r,g,b} tint for the mover background (default: dark overlay).
+        -- moverTooltip: optional hover tooltip (string or function) on the mover
+        -- (first use: CDM's Additional Bar Offset marker).
         -- subtitle: optional dimmed helper line under the mover label.
         moverBg           = opts.moverBg,
+        moverTooltip      = opts.moverTooltip,
         subtitle          = opts.subtitle,
     }
 end
@@ -11059,8 +11119,34 @@ local function ShowSidebarUnlockTip()
     end)
 end
 
-function EllesmereUI:Show()
+-- FIRST-OPEN SPLIT: the session's first open pays two heavy bills --
+-- EnsureLoaded (LoadAddOn parsing the whole LoD options addon + every deferred
+-- init) and the full panel build -- and the per-execution watchdog meters them
+-- TOGETHER when both run in one hardware-event handler (field: "script ran too
+-- long" aborting mid-sidebar on the very first open). Split them: the
+-- triggering execution only LOADS; afterFn (the caller re-invoking itself)
+-- runs next frame with its own fresh budget. Later opens (already loaded) stay
+-- fully synchronous -- returns false and the caller proceeds as before.
+-- EnsureLoaded itself stays synchronous: direct callers (DataBars' block
+-- settings path) use the deferred inits' results in the same execution. A
+-- failed load (options addon disabled) also returns false so the caller runs
+-- the exact legacy failure path; _openPending swallows re-clicks during the
+-- one-frame gap so a Toggle can't double-fire.
+function EllesmereUI:_SplitFirstOpen(afterFn)
+    if self._deferredLoaded then return false end
     self:EnsureLoaded()
+    if not self._deferredLoaded then return false end
+    self._openPending = true
+    C_Timer.After(0, function()
+        EllesmereUI._openPending = nil
+        afterFn()
+    end)
+    return true
+end
+
+function EllesmereUI:Show()
+    if self._openPending then return end
+    if self:_SplitFirstOpen(function() EllesmereUI:Show() end) then return end
     CreateMainFrame()
     RefreshSidebarStates()
     mainFrame:Show()
@@ -11068,7 +11154,8 @@ function EllesmereUI:Show()
 end
 function EllesmereUI:Hide()   if mainFrame then mainFrame:Hide() end end
 function EllesmereUI:Toggle()
-    self:EnsureLoaded()
+    if self._openPending then return end
+    if self:_SplitFirstOpen(function() EllesmereUI:Toggle() end) then return end
     CreateMainFrame()
     if mainFrame:IsShown() then
         mainFrame:Hide()
@@ -11136,7 +11223,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.8"
+EllesmereUI.VERSION = "8.8.9"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -11629,7 +11716,10 @@ function EllesmereUI:ShowModule(folderName)
         EllesmereUI.Print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
         return
     end
-    self:EnsureLoaded()
+    if self._openPending then return end
+    -- First-open split (see _SplitFirstOpen): the combat check above stays in
+    -- the click execution; the deferred re-invoke re-checks it harmlessly.
+    if self:_SplitFirstOpen(function() EllesmereUI:ShowModule(folderName) end) then return end
     CreateMainFrame()
     RefreshSidebarStates()
     mainFrame:Show()

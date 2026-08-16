@@ -11840,6 +11840,12 @@ local function ReloadFrames()
     -- settings path landing here (fonts, profiles, options) forces one explicit
     -- re-skin of the default and custom bars, both change-guarded no-ops when nothing changed.
     if ns.PAB_Restyle then ns.PAB_Restyle() end
+    -- Profile-grade resync: enable/useBlizzard modes, native frames, default
+    -- movers, and a late build when a swap lands on an enabled profile from
+    -- a disabled-at-login session. Cheap no-op when nothing changed.
+    if ns.PAB_ProfileResync then ns.PAB_ProfileResync() end
+    -- Reload-all also SWEEPS stale bar ids (a previous profile's bars must
+    -- park on swap -- field report).
     if ns.PAB_ReloadAllCustomBars then ns.PAB_ReloadAllCustomBars() end
 end
 
