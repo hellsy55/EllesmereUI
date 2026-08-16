@@ -167,6 +167,11 @@ local PT = {
 --  Channel tick data: spellID -> { ticks, [modSpell, modTicks] } or { tickInterval }
 --  ticks = fixed tick count (haste speeds ticks up, count unchanged).
 --  tickInterval = fixed seconds/tick (haste extends duration, adds ticks).
+--  missiles = fencepost count: first missile AT channel start, last AT the
+--  channel end, so M missiles span M-1 intervals (interior marks at
+--  i/(M-1)); addMissiles = { [spellID] = extra } raises M while the player
+--  knows the spell or carries the aura, and a recast during a running
+--  channel keeps the outgoing cast's schedule -- see ShowChannelTicks.
 --  modSpell/modTicks: use modTicks if player knows modSpell (talent).
 --  Spell IDs verified against Wowhead/Warcraft Wiki; add a row when a spell
 --  reworks or a new channeled spell is added.
@@ -189,7 +194,10 @@ local CHANNEL_TICK_DATA = {
     [373129]  = { ticks = 3 },                                     -- Penance / Dark Reprimand (DPS)
     [400171]  = { ticks = 3 },                                     -- Penance / Dark Reprimand (Heal)
     -- Mage
-    [5143]    = { ticks = 5 },                                     -- Arcane Missiles
+    -- Arcane Missiles: 5 missiles, fenceposted (see the missiles model
+    -- above), so only 3 interior marks base. Amplification (236628) adds 2
+    -- missiles and the tier set 2pc (1296581) adds 1.
+    [5143]    = { missiles = 5, addMissiles = { [236628] = 2, [1296581] = 1 } },
     [12051]   = { ticks = 6 },                                     -- Evocation
     [205021]  = { ticks = 5 },                                     -- Ray of Frost
     -- Druid
@@ -6600,7 +6608,7 @@ end
         end
     end
 
-    -- Hide channel ticks when not channeling
+    -- Hide channel ticks; redrawn just below if a channel is still running
     HideChannelTicks()
 
     -- Idle when not casting (empty bar with "Always Show", else hidden). Runs LAST
@@ -6609,6 +6617,15 @@ end
     if not castBarFrame._casting and not castBarFrame._channeling and not castBarFrame._empowering then
         ns.ShowIdleCastBar()
     else
+        -- Rebuilds can land MID-CHANNEL (spec-override/profile refreshes via
+        -- ApplyAll -- observed live when a Bloodlust buff arrived during an
+        -- Arcane Missiles channel). The hide above would otherwise blank the
+        -- tick marks for the rest of the cast: channels whose reported window
+        -- never changes get no further CHANNEL_UPDATE to redraw them.
+        if castBarFrame._channeling then
+            local _, _, _, _, _, _, _, chanSpellID = UnitChannelInfo("player")
+            if chanSpellID then ShowChannelTicks(chanSpellID) end
+        end
         ns.ActivateCastBar()
     end
 end
@@ -6706,6 +6723,96 @@ ShowChannelTicks = function(spellID)
                     positions[#positions + 1] = t / dur
                     t = t + interval
                 end
+            end
+        elseif tickData.missiles then
+            -- Fencepost cadence: the first missile fires AT channel start and
+            -- the last AT channel end, so M missiles span M-1 intervals and
+            -- interior marks sit at i/(M-1). A recast begun while the
+            -- previous channel of the SAME spell was still running fires one
+            -- missile immediately (at the bar start, no mark) and then keeps
+            -- the OUTGOING cast's schedule: its first mark lands where the
+            -- old cadence's next missile was due, and the channel runs that
+            -- much longer -- one more interior mark than a fresh cast.
+            local M = tickData.missiles
+            if tickData.addMissiles then
+                for id, extra in pairs(tickData.addMissiles) do
+                    -- Talents answer IsPlayerSpell; set bonuses may only
+                    -- surface as a hidden player aura. Either counts.
+                    if IsPlayerSpell(id)
+                        or (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+                            and C_UnitAuras.GetPlayerAuraBySpellID(id)) then
+                        M = M + extra
+                    end
+                end
+            end
+            local dur = castBarFrame._endTime - castBarFrame._startTime
+            local startT = castBarFrame._startTime
+            -- Chain carry is computed ONCE per cast, keyed on the channel
+            -- castID: a mid-cast CHANNEL_UPDATE can re-time the reported
+            -- window while the live channel keeps its snapshotted cadence
+            -- (observed with Bloodlust landing mid-channel), and hover
+            -- refires duplicate events -- both re-enter here for the SAME
+            -- cast and must not chain the cast onto itself. The 0.5s start
+            -- window is the fallback when no castID is available.
+            local castID = castBarFrame._castID
+            local sameCast
+            if castID and castBarFrame._mslCastID then
+                sameCast = (castID == castBarFrame._mslCastID)
+            else
+                sameCast = castBarFrame._mslStart
+                    and (startT - castBarFrame._mslStart) < 0.5
+            end
+            if not sameCast then
+                local carry = 0
+                local pEnd = castBarFrame._mslPrevEnd
+                local pInt = castBarFrame._mslPrevInterval
+                if castBarFrame._mslPrevSpell == spellID
+                    and pEnd and pInt and pInt > 0 and startT < pEnd - 0.01 then
+                    -- The missile grid is anchored at the channel END, so
+                    -- time-to-next-missile is (pEnd - startT) mod pInt.
+                    carry = math.fmod(pEnd - startT, pInt)
+                    -- Near-zero carry is grid-aligned, and a recast right
+                    -- after a missile (carry ~= a full interval) has been
+                    -- observed to LOSE the bonus missile: both lay out
+                    -- like a fresh cast.
+                    if carry < 0.01 or carry > pInt - 0.05 then carry = 0 end
+                end
+                castBarFrame._mslCarry = carry
+                castBarFrame._mslCastID = castID
+                castBarFrame._mslStart = startT
+            end
+            local carry = castBarFrame._mslCarry or 0
+            -- Chained layout: the reported duration is carry plus M-1
+            -- intervals, so marks sit at carry + k*interval as fractions of
+            -- the reported window.
+            local chained = false
+            if carry > 0 and dur > 0 then
+                local interval = (dur - carry) / (M - 1)
+                if interval > 0.01 then
+                    positions = {}
+                    local t = carry
+                    while t < dur - interval * 0.05 and #positions < 12 do
+                        positions[#positions + 1] = t / dur
+                        t = t + interval
+                    end
+                    if #positions > 0 then chained = true else positions = nil end
+                end
+            end
+            -- Fresh layout: pure fractions, independent of the reported
+            -- window. Also the fallback when the chained math degenerates
+            -- (carry at or past the reported end, non-positive duration), so
+            -- a mid-channel re-report can never blank the marks outright.
+            if not positions then
+                positions = {}
+                for i = 1, min(M - 2, 12) do
+                    positions[i] = i / (M - 1)
+                end
+            end
+            -- Bank this cast's cadence for a possible chain into the next.
+            if dur > 0 then
+                castBarFrame._mslPrevEnd = castBarFrame._endTime
+                castBarFrame._mslPrevInterval = (chained and (dur - carry) or dur) / (M - 1)
+                castBarFrame._mslPrevSpell = spellID
             end
         else
             local numTicks
