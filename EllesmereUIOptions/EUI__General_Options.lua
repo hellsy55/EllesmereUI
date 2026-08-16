@@ -3415,21 +3415,45 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "GLOBAL FONT", y);  y = y - h
 
-        -- Glyph-restricted locales (CJK, Cyrillic): bundled fonts are Latin-only and cannot render the script, so the picker offers only
-        -- "System Default" plus external SharedMedia fonts (which may carry the right glyphs). Per-module fonts and the game-text swap stay hidden (Latin).
+        -- Glyph-restricted locales (CJK, Cyrillic): most bundled fonts are Latin-only and cannot render the script, so the picker
+        -- offers "System Default" plus external SharedMedia fonts (which may carry the right glyphs).
         local localeRestricted = EllesmereUI.LOCALE_FONT_FALLBACK ~= nil
+        -- ruRU is only PARTLY restricted: the faces listed in FONT_CYRILLIC carry the full
+        -- Cyrillic block (verified cmap), so they are offered as normal entries and
+        -- ResolveFontName honours them. CJK keeps the old System-Default-only picker.
+        local localeCyrillic = localeRestricted and EllesmereUI.LOCALE_SCRIPT == "cyrillic"
 
         local fontDropValues = {}
         local fontDropOrder  = {}
         if localeRestricted then
-            -- System Default + an explicit Expressway entry + external SharedMedia.
-            -- Other bundled Latin fonts are omitted (render local script as
-            -- boxes); Expressway is the informed opt-in, using a distinct sentinel key so the untouched default still maps to System Default.
             fontDropValues[EllesmereUI.SYSTEM_FONT_KEY] = { text = "System Default", font = EllesmereUI.LOCALE_FONT_FALLBACK }
             fontDropOrder[#fontDropOrder + 1] = EllesmereUI.SYSTEM_FONT_KEY
-            fontDropValues[EllesmereUI.EXPRESSWAY_FORCED_KEY] = { text = "Expressway (Latin only)",
-                font = EllesmereUI.MEDIA_PATH .. "fonts\\Expressway.TTF" }
-            fontDropOrder[#fontDropOrder + 1] = EllesmereUI.EXPRESSWAY_FORCED_KEY
+            if localeCyrillic then
+                -- Cyrillic-capable bundled faces, kept in FONT_ORDER sequence so the
+                -- picker matches the Latin-locale ordering. Latin-only bundles stay out.
+                local FONT_DIR_CYR = EllesmereUI.MEDIA_PATH .. "fonts\\"
+                local sepDone = false
+                for _, name in ipairs(EllesmereUI.FONT_ORDER) do
+                    local cyrFile = name ~= "---" and EllesmereUI.FONT_CYRILLIC[name]
+                        and EllesmereUI.FONT_FILES[name]
+                    if cyrFile then
+                        if not sepDone then
+                            fontDropOrder[#fontDropOrder + 1] = "---"
+                            sepDone = true
+                        end
+                        fontDropValues[name] = {
+                            text = (EllesmereUI.FONT_DISPLAY_NAMES and EllesmereUI.FONT_DISPLAY_NAMES[name]) or name,
+                            font = FONT_DIR_CYR .. cyrFile,
+                        }
+                        fontDropOrder[#fontDropOrder + 1] = name
+                    end
+                end
+            else
+                -- Expressway is the informed Latin opt-in, using a distinct sentinel key so the untouched default still maps to System Default.
+                fontDropValues[EllesmereUI.EXPRESSWAY_FORCED_KEY] = { text = "Expressway (Latin only)",
+                    font = EllesmereUI.MEDIA_PATH .. "fonts\\Expressway.TTF" }
+                fontDropOrder[#fontDropOrder + 1] = EllesmereUI.EXPRESSWAY_FORCED_KEY
+            end
             if EllesmereUI.AppendExternalSharedMediaFonts then
                 EllesmereUI.AppendExternalSharedMediaFonts(fontDropValues, fontDropOrder)
             end
@@ -3478,7 +3502,11 @@ initFrame:SetScript("OnEvent", function(self)
               values=fontDropValues, order=fontDropOrder,
               getValue=function()
                   local g = EllesmereUI.GetFontsDB().global or "Expressway"
-                  -- In glyph-restricted locales the stored bundled-font default maps to the System Default entry; a chosen SM font shows as-is.
+                  -- Cyrillic locales list Expressway as a normal entry, so an older
+                  -- __expressway opt-in collapses onto it (same file) instead of falling
+                  -- through to System Default and misreporting the active face.
+                  if localeCyrillic and g == EllesmereUI.EXPRESSWAY_FORCED_KEY then return "Expressway" end
+                  -- In glyph-restricted locales a stored Latin-only bundled font maps to the System Default entry; a chosen SM font shows as-is.
                   if localeRestricted and not fontDropValues[g] then return EllesmereUI.SYSTEM_FONT_KEY end
                   return g
               end,
