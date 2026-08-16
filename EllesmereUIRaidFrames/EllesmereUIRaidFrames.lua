@@ -4621,7 +4621,8 @@ end
 --  NPC database, fully combat safe. Dungeon encounters use the same boss unit
 --  tokens as raids, so the group gate covers party too; attached positions
 --  slot in beside the party container there. Buttons render ONLY health bar +
---  name/health text, following raid-frame settings. Excluded from preview and
+--  name/health text, following the RAID frame settings in a party too (one
+--  styled group, and the indicator containers are built once). Excluded from preview and
 --  unlock mode (Free Move uses its own drag overlay). Display "healers"
 --  builds/activates only on a healer spec.
 -------------------------------------------------------------------------------
@@ -5150,8 +5151,10 @@ FB.Anchor = function(owner)
             if pc and pc:IsShown() then
                 local gap = s.groupSpacing or -1
                 local before = (fb.position == "left")
-                local pgrow = (ns._scaledPartyProxy and ns._scaledPartyProxy.unitGrowth) or "DOWN"
-                if pgrow == "RIGHT" or pgrow == "LEFT" then
+                -- Party growth axis comes from partyHorizontal alone (_LayoutPartyFrames): the flip
+                -- and "centered" variants only reverse it, and the container spans all five slots
+                -- either way, so the perpendicular attach point is the same.
+                if s.partyHorizontal then
                     if before then c:SetPoint("BOTTOMLEFT", pc, "TOPLEFT", 0, gap)
                     else c:SetPoint("TOPLEFT", pc, "BOTTOMLEFT", 0, -gap) end
                 else
@@ -9045,6 +9048,12 @@ ns._LayoutPartyFrames = function()
     -- Self button + header slot positioning ran above (ns._PositionPartySlots),
     -- before the attribute pass so a header Hide/Show re-process anchors the
     -- children against the already-correct header position and size.
+
+    -- The friendly boss group attaches to this container (and to the growth axis derived above)
+    -- while not in a raid, so every layout pass -- Horizontal Frames, Flip Growth, party size,
+    -- cell spacing -- has to move it too. OOC only (this function bails in combat). In a raid the
+    -- boss group hangs off the raid headers instead, so skip the re-anchor scan there.
+    if not IsInRaid() and ns.FB_ReAnchor then ns.FB_ReAnchor() end
 end
 
 -- Party visibility: show/hide based on group state.
@@ -9109,8 +9118,9 @@ ns._UpdatePartyVisibility = function()
         wipe(ns._partyUnitToButton)
     end
 
-    -- The friendly boss group attaches to the party container while not in a raid, and its own
-    -- roster pass can run before the party frames are up. Re-anchor on the show/hide EDGE only.
+    -- Attach-point edges the layout pass above cannot cover: the boss group's own roster pass can
+    -- run before the party frames are up, and the hidden branch never lays out at all (the group
+    -- then falls back to its free position). EDGE only -- this recompute runs on every roster event.
     if ns._fbPartyAttachState ~= visible then
         ns._fbPartyAttachState = visible
         if ns.FB_ReAnchor then ns.FB_ReAnchor() end
