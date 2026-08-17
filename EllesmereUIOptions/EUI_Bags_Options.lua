@@ -108,12 +108,7 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return db.profile.bagAutoSize == true end,
                   setValue=function(v)
                       db.profile.bagAutoSize = v
-                      if _G.EUI_Bags then
-                          _G.EUI_Bags._asCols = nil
-                          _G.EUI_Bags._asMaxGridW = nil
-                          _G.EUI_Bags._asMaxH = nil
-                          if _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                      end
+                      ResetAndRefreshBagLayout()
                   end }
             ); y = y - h
 
@@ -883,40 +878,43 @@ initFrame:SetScript("OnEvent", function(self)
                 local armoryCog = CreateFrame("Button", nil, leftRgn)
                 armoryCog:SetSize(26, 26)
                 armoryCog:SetPoint("RIGHT", leftRgn._control, "LEFT", -8, 0)
+                leftRgn._lastInline = armoryCog
                 armoryCog:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
                 local armoryCogTex = armoryCog:CreateTexture(nil, "OVERLAY")
                 armoryCogTex:SetAllPoints()
                 armoryCogTex:SetTexture(EllesmereUI.COGS_ICON)
-                local function ArmoryCogOff()
+                local function ArmoryCogState()
                     local dc = db.profile.bagDisabledCategories
-                    return db.profile.bagArmoryGroupBySlot ~= true or (dc and dc["Armor"] == true)
+                    if dc and dc["Armor"] == true then return true, "Armor" end
+                    if db.profile.bagArmoryGroupBySlot ~= true then
+                        return true, "Group Armory by Slot"
+                    end
+                    return false
                 end
-                local function ArmoryCogRequirement()
-                    local dc = db.profile.bagDisabledCategories
-                    return (dc and dc["Armor"] == true) and "Armor" or "Group Armory by Slot"
-                end
-                armoryCog:SetAlpha(ArmoryCogOff() and 0.15 or 0.4)
+                armoryCog:SetAlpha(ArmoryCogState() and 0.15 or 0.4)
                 armoryCog:SetScript("OnEnter", function(self)
-                    if ArmoryCogOff() then
-                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip(ArmoryCogRequirement()))
+                    local off, reason = ArmoryCogState()
+                    if off then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip(reason))
                     else self:SetAlpha(0.7) end
                 end)
                 armoryCog:SetScript("OnLeave", function(self)
-                    self:SetAlpha(ArmoryCogOff() and 0.15 or 0.4)
+                    self:SetAlpha(ArmoryCogState() and 0.15 or 0.4)
                     EllesmereUI.HideWidgetTooltip()
                 end)
                 armoryCog:SetScript("OnClick", function(self)
-                    if not ArmoryCogOff() then armoryCogShow(self) end
+                    if not ArmoryCogState() then armoryCogShow(self) end
                 end)
                 local armoryBlock = CreateFrame("Frame", nil, armoryCog)
                 armoryBlock:SetAllPoints(); armoryBlock:SetFrameLevel(armoryCog:GetFrameLevel() + 10); armoryBlock:EnableMouse(true)
                 armoryBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(armoryCog, EllesmereUI.DisabledTooltip(ArmoryCogRequirement()))
+                    local _, reason = ArmoryCogState()
+                    EllesmereUI.ShowWidgetTooltip(armoryCog, EllesmereUI.DisabledTooltip(reason))
                 end)
                 armoryBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                if ArmoryCogOff() then armoryBlock:Show() else armoryBlock:Hide() end
+                if ArmoryCogState() then armoryBlock:Show() else armoryBlock:Hide() end
                 EllesmereUI.RegisterWidgetRefresh(function()
-                    if ArmoryCogOff() then armoryCog:SetAlpha(0.15); armoryBlock:Show()
+                    if ArmoryCogState() then armoryCog:SetAlpha(0.15); armoryBlock:Show()
                     else armoryCog:SetAlpha(0.4); armoryBlock:Hide() end
                 end)
             end

@@ -5439,9 +5439,9 @@ function EUI_Bags:RefreshInventory()
 
     -- Compact Armory layout. Reuses the existing slot, sub-header, empty-pad,
     -- and assignment pools; only the coordinates differ from the full-row path.
-    -- Build the closure only while both required settings are active.
+    local armorySlotGrouping = ArmorySlotGroupingEnabled()
     local RenderCompactSlotBuckets
-    if BP().bagCompactArmorySlotGroups and ArmorySlotGroupingEnabled() then
+    if BP().bagCompactArmorySlotGroups and armorySlotGrouping then
         RenderCompactSlotBuckets = function(buckets, subHeaderIdx, assignCatKey)
             local stride = SLOT_SIZE + SPACING
             local usableWidth = columns * stride - SPACING
@@ -5567,6 +5567,56 @@ function EUI_Bags:RefreshInventory()
             end
 
             curY = rowTop - 6
+            return subHeaderIdx
+        end
+    end
+
+    local RenderSlotBuckets
+    if armorySlotGrouping then
+        RenderSlotBuckets = function(buckets, subHeaderIdx, assignCatKey)
+            if RenderCompactSlotBuckets then
+                return RenderCompactSlotBuckets(buckets, subHeaderIdx, assignCatKey)
+            end
+
+            local assignShown = false
+            for _, bucket in ipairs(buckets) do
+                if #bucket.items > 0 then
+                    subHeaderIdx = subHeaderIdx + 1
+                    local header = GetOrCreateExpSubHeader(subHeaderIdx)
+                    header:SetParent(child)
+                    header:ClearAllPoints()
+                    header:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
+                    header:SetWidth(gridW)
+                    header._label:SetText(bucket.label .. " (" .. #bucket.items .. ")")
+                    SetBagFont(header._label, math.max(8, catTitleSize - 2))
+                    header:Show()
+                    curY = curY - 18
+                    RenderItemBlock(bucket.items)
+
+                    if assignCatKey and not assignShown then
+                        assignShown = true
+                        local remainder = #bucket.items % columns
+                        if remainder ~= 0 then
+                            curY = curY + (SLOT_SIZE + SPACING)
+                        end
+                        slotIdx = slotIdx + 1
+                        local assignSlot = GetOrCreateSlot(slotIdx)
+                        if assignSlot then
+                            assignSlot:GetParent():SetParent(child)
+                            RenderButton(assignSlot, { bag = 0, slot = 0 }, slotIdx,
+                                remainder, 0, startX, curY, columns)
+                            local overlay = GetOrCreateAssignOverlay()
+                            overlay._assignCatKey = assignCatKey
+                            overlay:SetParent(child)
+                            overlay:ClearAllPoints()
+                            overlay:SetAllPoints(assignSlot)
+                            overlay:Show()
+                        end
+                        curY = curY - (SLOT_SIZE + SPACING)
+                    end
+                end
+            end
+            curY = curY - 6
             return subHeaderIdx
         end
     end
@@ -5901,7 +5951,7 @@ function EUI_Bags:RefreshInventory()
             local itemCount = #sectionItems
             if itemCount == 0 and not isUserCreated and not showPinAdd and not alwaysShow then return end
 
-            local useSlotNest = ArmorySlotGroupingEnabled()
+            local useSlotNest = armorySlotGrouping
                 and IsGearOnlyGroup(sectionName)
                 and itemCount > 0
                 and not showPinAdd
@@ -5974,56 +6024,10 @@ function EUI_Bags:RefreshInventory()
                 if #buckets > 0 then
                     local showAssign = assignCatIdx and EUI_CategoryManager
                         and EUI_CategoryManager:CanAssignToCategory(assignCatIdx)
-                    if RenderCompactSlotBuckets then
-                        local cats = showAssign and EUI_CategoryManager:GetCategories()
-                        local assignCat = cats and cats[assignCatIdx]
-                        expSubIdx = RenderCompactSlotBuckets(buckets, expSubIdx,
-                            assignCat and assignCat._defaultName)
-                        return
-                    end
-                    local assignShown = false
-                    for _, buck in ipairs(buckets) do
-                        if #buck.items > 0 then
-                            expSubIdx = expSubIdx + 1
-                            local sh = GetOrCreateExpSubHeader(expSubIdx)
-                            sh:SetParent(child)
-                            sh:ClearAllPoints()
-                            sh:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
-                            sh:SetWidth(gridW)
-                            sh._label:SetText(buck.label .. " (" .. #buck.items .. ")")
-                            SetBagFont(sh._label, math.max(8, catTitleSize - 2))
-                            sh:Show()
-                            curY = curY - 18
-                            RenderItemBlock(buck.items)
-                            if showAssign and not assignShown then
-                                assignShown = true
-                                local cats = EUI_CategoryManager:GetCategories()
-                                local aCat = cats[assignCatIdx]
-                                if aCat then
-                                    local n = #buck.items
-                                    local remainder = n % columns
-                                    if remainder ~= 0 then
-                                        curY = curY + (SLOT_SIZE + SPACING)
-                                    end
-                                    slotIdx = slotIdx + 1
-                                    local aSlot = GetOrCreateSlot(slotIdx)
-                                    if aSlot then
-                                        aSlot:GetParent():SetParent(child)
-                                        local col = remainder
-                                        RenderButton(aSlot, { bag = 0, slot = 0 }, slotIdx, col, 0, startX, curY, columns)
-                                        local aOv = GetOrCreateAssignOverlay()
-                                        aOv._assignCatKey = aCat._defaultName
-                                        aOv:SetParent(child)
-                                        aOv:ClearAllPoints()
-                                        aOv:SetAllPoints(aSlot)
-                                        aOv:Show()
-                                    end
-                                    curY = curY - (SLOT_SIZE + SPACING)
-                                end
-                            end
-                        end
-                    end
-                    curY = curY - 6
+                    local cats = showAssign and EUI_CategoryManager:GetCategories()
+                    local assignCat = cats and cats[assignCatIdx]
+                    expSubIdx = RenderSlotBuckets(buckets, expSubIdx,
+                        assignCat and assignCat._defaultName)
                     return
                 end
             end
@@ -6248,7 +6252,7 @@ function EUI_Bags:RefreshInventory()
             local members = EUI_CategoryManager:GetGroupMembers(selectedGroupName)
             local headerIdx = 0
             local expSubIdx = 0
-            local useSlotNest = ArmorySlotGroupingEnabled() and IsGearOnlyGroup(selectedGroupName)
+            local useSlotNest = armorySlotGrouping and IsGearOnlyGroup(selectedGroupName)
 
             local itemsByMember = {}
             for _, mi in ipairs(members) do itemsByMember[mi] = {} end
@@ -6297,50 +6301,8 @@ function EUI_Bags:RefreshInventory()
                 if useSlotNest and #memberItems > 0 then
                     local buckets = BuildSlotBuckets(memberItems)
                     local showAssign = EUI_CategoryManager and EUI_CategoryManager:CanAssignToCategory(mi)
-                    if RenderCompactSlotBuckets then
-                        expSubIdx = RenderCompactSlotBuckets(buckets, expSubIdx,
-                            showAssign and memberCat and memberCat._defaultName)
-                    else
-                    local assignShown = false
-                    for _, buck in ipairs(buckets) do
-                        if #buck.items > 0 then
-                            expSubIdx = expSubIdx + 1
-                            local sh = GetOrCreateExpSubHeader(expSubIdx)
-                            sh:SetParent(child)
-                            sh:ClearAllPoints()
-                            sh:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
-                            sh:SetWidth(gridW)
-                            sh._label:SetText(buck.label .. " (" .. #buck.items .. ")")
-                            SetBagFont(sh._label, math.max(8, catTitleSize - 2))
-                            sh:Show()
-                            curY = curY - 18
-                            RenderItemBlock(buck.items)
-                            if showAssign and not assignShown and memberCat then
-                                assignShown = true
-                                local n = #buck.items
-                                local remainder = n % columns
-                                if remainder ~= 0 then
-                                    curY = curY + (SLOT_SIZE + SPACING)
-                                end
-                                slotIdx = slotIdx + 1
-                                local aSlot = GetOrCreateSlot(slotIdx)
-                                if aSlot then
-                                    aSlot:GetParent():SetParent(child)
-                                    local col = remainder
-                                    RenderButton(aSlot, { bag = 0, slot = 0 }, slotIdx, col, 0, startX, curY, columns)
-                                    local aOv = GetOrCreateAssignOverlay()
-                                    aOv._assignCatKey = memberCat._defaultName
-                                    aOv:SetParent(child)
-                                    aOv:ClearAllPoints()
-                                    aOv:SetAllPoints(aSlot)
-                                    aOv:Show()
-                                end
-                                curY = curY - (SLOT_SIZE + SPACING)
-                            end
-                        end
-                    end
-                    curY = curY - 6
-                    end
+                    expSubIdx = RenderSlotBuckets(buckets, expSubIdx,
+                        showAssign and memberCat and memberCat._defaultName)
                 else
                 for j, data in ipairs(memberItems) do
                     slotIdx = slotIdx + 1
@@ -6522,7 +6484,7 @@ function EUI_Bags:RefreshInventory()
             end
 
             local itemCount = #displayItems
-            local useSlotNest = ArmorySlotGroupingEnabled()
+            local useSlotNest = armorySlotGrouping
                 and selCat and IsArmoryGearCategory(selCat)
                 and itemCount > 0
 
@@ -6532,50 +6494,8 @@ function EUI_Bags:RefreshInventory()
                 local showAssign = selectedCategoryIndex > 0
                     and EUI_CategoryManager
                     and EUI_CategoryManager:CanAssignToCategory(selectedCategoryIndex)
-                if RenderCompactSlotBuckets then
-                    expSubIdx = RenderCompactSlotBuckets(buckets, expSubIdx,
-                        showAssign and selCat and selCat._defaultName)
-                else
-                local assignShown = false
-                for _, buck in ipairs(buckets) do
-                    if #buck.items > 0 then
-                        expSubIdx = expSubIdx + 1
-                        local sh = GetOrCreateExpSubHeader(expSubIdx)
-                        sh:SetParent(child)
-                        sh:ClearAllPoints()
-                        sh:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
-                        sh:SetWidth(gridW)
-                        sh._label:SetText(buck.label .. " (" .. #buck.items .. ")")
-                        SetBagFont(sh._label, math.max(8, catTitleSize - 2))
-                        sh:Show()
-                        curY = curY - 18
-                        RenderItemBlock(buck.items)
-                        if showAssign and not assignShown and selCat then
-                            assignShown = true
-                            local n = #buck.items
-                            local remainder = n % columns
-                            if remainder ~= 0 then
-                                curY = curY + (SLOT_SIZE + SPACING)
-                            end
-                            slotIdx = slotIdx + 1
-                            local aSlot = GetOrCreateSlot(slotIdx)
-                            if aSlot then
-                                aSlot:GetParent():SetParent(child)
-                                local col = remainder
-                                RenderButton(aSlot, { bag = 0, slot = 0 }, slotIdx, col, 0, startX, curY, columns)
-                                local aOv = GetOrCreateAssignOverlay()
-                                aOv._assignCatKey = selCat._defaultName
-                                aOv:SetParent(child)
-                                aOv:ClearAllPoints()
-                                aOv:SetAllPoints(aSlot)
-                                aOv:Show()
-                            end
-                            curY = curY - (SLOT_SIZE + SPACING)
-                        end
-                    end
-                end
-                curY = curY - 6
-                end
+                expSubIdx = RenderSlotBuckets(buckets, expSubIdx,
+                    showAssign and selCat and selCat._defaultName)
             else
             for i, data in ipairs(displayItems) do
                 slotIdx = slotIdx + 1
