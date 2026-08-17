@@ -9221,6 +9221,20 @@ function ns.SetupViewerHooks()
                 if ns.RequestCDMDropPass then ns.RequestCDMDropPass("settings") end
             end)
         end, cdmSettingsOwner)
+        -- Blizzard's own "layout data changed" signal (SetHasPendingChanges ->
+        -- NotifyListeners), fired for BOTH switching to a different saved
+        -- layout and editing the active one in place. The auto-reseed gate
+        -- below is keyed by layout id, which misses the in-place case: adding
+        -- a spell to the layout you're already on doesn't change that id, so
+        -- the spell would otherwise never get an assignedSpells slot. Wipe the
+        -- whole session table, same as the talent/loadout invalidations --
+        -- reseed is add-only and self-guarded, so clearing an unrelated
+        -- spec's flag just costs one harmless extra pass next time it's
+        -- visited. The OnHide handler above still owns queuing the reanchor
+        -- that actually re-runs the reseed once the panel settles.
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
+            if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
+        end, cdmSettingsOwner)
     end
 
     -- 4b. Delayed reanchor on load: catch frames created after initial setup.
