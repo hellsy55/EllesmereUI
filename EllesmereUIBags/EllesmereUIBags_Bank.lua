@@ -598,6 +598,7 @@ local function EnsureBankTabConfigFrame()
     if EUI_BankTabConfigFrame.OpenBankTabSettings then return end
     -- Options surface is LoadOnDemand; load it so EUI.BuildCheckboxControl exists.
     if not EUI.BuildCheckboxControl then EUI:EnsureLoaded() end
+    if not EUI.BuildCheckboxControl then return end
     local bgAtlasBTC = EUI_BankTabConfigFrame:CreateTexture(nil, "BACKGROUND")
     bgAtlasBTC:SetAllPoints()
     bgAtlasBTC:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\modern_blizz.png")
@@ -2089,7 +2090,9 @@ function BuildBankSidebar()
                     -- The bagID is the tab ID UpdateBankTabSettings expects:
                     -- Enum.BagIndex.CharacterBankTab_1..6 / AccountBankTab_1..5
                     EnsureBankTabConfigFrame()
-                    EUI_BankTabConfigFrame:OpenBankTabSettings(tabData, tabData.bagID)
+                    if EUI_BankTabConfigFrame.OpenBankTabSettings then
+                        EUI_BankTabConfigFrame:OpenBankTabSettings(tabData, tabData.bagID)
+                    end
                     return
                 end
             end
