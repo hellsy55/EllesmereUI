@@ -7973,7 +7973,7 @@ local function CollectAndReanchor()
                 if ns.QueueReanchor then ns.QueueReanchor() end
             end
         end
-        -- Automatic base-bar materialization (once per spec per session):
+        -- Automatic base-bar materialization (once per spec+layout per session):
         -- untouched default-bar spells render through the frames-as-truth fallback
         -- without ever being recorded in assignedSpells, so export strings shipped
         -- incomplete stores and the import ghost pass hid exactly those spells on
@@ -7983,11 +7983,19 @@ local function CollectAndReanchor()
         -- ghosting is pending (Reseed self-guards too), and buff-family bars
         -- excluded (cdUtilOnly: picker-authoritative). The session flag is wiped
         -- on talent/loadout changes so newly learned spells re-materialize.
+        -- Keyed by the active BLIZZARD CDM layout too, not spec alone: a spell
+        -- only tracked on a preset (e.g. an ST preset's Cobra Shot) that the
+        -- user switches to AFTER the first reseed of this spec was invisible
+        -- then and would otherwise spill over -- landing at Blizzard's raw
+        -- layoutIndex position instead of its assigned slot -- for the rest of
+        -- the session.
         if ns.ReseedAssignedSpellsFromLiveIcons and prof
            and prof._barFilterModelV6 and not prof._importGhostMode then
             ns._reseededSpecsSession = ns._reseededSpecsSession or {}
-            if not ns._reseededSpecsSession[specKey] then
-                ns._reseededSpecsSession[specKey] = true
+            local layoutID = ns.GetActiveCDMLayoutID and ns.GetActiveCDMLayoutID()
+            local reseedKey = specKey .. "|" .. tostring(layoutID or "?")
+            if not ns._reseededSpecsSession[reseedKey] then
+                ns._reseededSpecsSession[reseedKey] = true
                 ns.ReseedAssignedSpellsFromLiveIcons(true)
                 -- NO drop pass here, EVER (field data loss, 8.8.7 -> fixed
                 -- 8.8.8): this tail runs synchronously inside the spec-swap
@@ -9212,6 +9220,20 @@ function ns.SetupViewerHooks()
             C_Timer.After(0.4, function()
                 if ns.RequestCDMDropPass then ns.RequestCDMDropPass("settings") end
             end)
+        end, cdmSettingsOwner)
+        -- Blizzard's own "layout data changed" signal (SetHasPendingChanges ->
+        -- NotifyListeners), fired for BOTH switching to a different saved
+        -- layout and editing the active one in place. The auto-reseed gate
+        -- below is keyed by layout id, which misses the in-place case: adding
+        -- a spell to the layout you're already on doesn't change that id, so
+        -- the spell would otherwise never get an assignedSpells slot. Wipe the
+        -- whole session table, same as the talent/loadout invalidations --
+        -- reseed is add-only and self-guarded, so clearing an unrelated
+        -- spec's flag just costs one harmless extra pass next time it's
+        -- visited. The OnHide handler above still owns queuing the reanchor
+        -- that actually re-runs the reseed once the panel settles.
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
+            if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
         end, cdmSettingsOwner)
     end
 
