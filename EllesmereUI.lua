@@ -4457,6 +4457,18 @@ end
 --      the REAL color in altR/altG/altB (what oUF paints the bar with), so use it.
 --   3) Token unmatched, no alt color, standard integer type -> custom color (safety net).
 function EllesmereUI.ResolveUnitPowerColor(unit)
+    -- Color by the forced display power type, if one is set, not the
+    -- unit's real current power type. Computed fresh each call, not read
+    -- from a cache, so it can't lag behind a setting or spec change.
+    if unit == "player" and EllesmereUI.GetPlayerPowerOverride then
+        local override = EllesmereUI.GetPlayerPowerOverride()
+        if override ~= nil then
+            local overrideKey = EllesmereUI.POWER_ENUM_TO_KEY[override]
+            local overrideInfo = overrideKey and EllesmereUI.GetPowerColor(overrideKey)
+            if overrideInfo then return overrideInfo.r, overrideInfo.g, overrideInfo.b end
+        end
+    end
+    
     local pType, pToken, altR, altG, altB = UnitPowerType(unit)
     local info = EllesmereUI.GetPowerColor(pToken)
     if info then return info.r, info.g, info.b end
