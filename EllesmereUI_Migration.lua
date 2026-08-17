@@ -192,6 +192,55 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- Frame spell and item bindings historically ignored the Friendly/Enemy
+-- toggles, as did Hovercast item bindings. Seed those paths as unrestricted,
+-- and split legacy "Frames + Hovercast" bindings so their separate reaction
+-- behavior is preserved.
+EllesmereUI.RegisterMigration({
+    id          = "clickcast_frame_spell_reaction_v1",
+    scope       = "global",
+    description = "Preserve legacy frame click-cast reaction behavior when reaction toggles become active",
+    body        = function(ctx)
+        local cc = ctx.db.clickCast
+        if type(cc) ~= "table" then return end
+        local function migrate(list)
+            if type(list) ~= "table" then return end
+            local count = #list
+            for i = 1, count do
+                local b = list[i]
+                if type(b) == "table" and (b.type == "spell" or b.type == "item") then
+                    -- Both flags previously meant unrestricted. They now mean
+                    -- inactive, so preserve the old behavior before enabling
+                    -- the new disable state.
+                    if b.hoverFriendly == false and b.hoverEnemy == false then
+                        b.hoverFriendly = true
+                        b.hoverEnemy = true
+                    end
+                    if b.type == "item" and b.hovercast then
+                        b.hoverFriendly = true
+                        b.hoverEnemy = true
+                    elseif not b.hovercast then
+                        b.hoverFriendly = true
+                        b.hoverEnemy    = true
+                    elseif b.hovercast == "both" then
+                        local frameBinding = {}
+                        for key, value in pairs(b) do frameBinding[key] = value end
+                        frameBinding.hovercast = false
+                        frameBinding.hoverFriendly = true
+                        frameBinding.hoverEnemy = true
+                        b.hovercast = true
+                        list[#list + 1] = frameBinding
+                    end
+                end
+            end
+        end
+        migrate(cc.globals)
+        if type(cc.specs) == "table" then
+            for _, list in pairs(cc.specs) do migrate(list) end
+        end
+    end,
+})
+
 --------------------------------------------------------------------------------
 --  Position snap helpers
 --  Used by position_snap_v3 and exposed as EllesmereUI.SnapProfilePositions for
