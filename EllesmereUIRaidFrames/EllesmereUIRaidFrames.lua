@@ -666,6 +666,11 @@ local defaults = {
 
         -- Range & misc
         oorAlpha         = 0.4,
+        -- When true, out-of-range units darken instead of fading transparent
+        -- (matches Blizzard's default party/raid frame look). Cog on the Out
+        -- of Range Alpha option; off by default.
+        oorDarken        = false,
+        oorDarkenColor   = { r = 0.5, g = 0.5, b = 0.5 },
         -- showTooltip is the on/off fallback the "Show Raid Frames Tooltip"
         -- dropdown derives from (ns._ResolveTooltipMode); picking an option writes
         -- tooltipMode = always|outOfCombat|outOfBossCombat|never. Raid/party only.
@@ -7582,6 +7587,11 @@ local function ApplyRangeAlpha(btn, rangeAlpha)
     d.rangeAlpha = rangeAlpha
     local bmA = btn._bmSavedAlpha or 1
     btn:SetAlpha(bmA * rangeAlpha)
+    -- Plain (non-darken) alpha is the "normal" state; clear any leftover
+    -- darken overlay so toggling Darken Frames Out of Range off (or the
+    -- offline/in-range branches, which always go through here) can't leave
+    -- a stuck dark tint behind.
+    if btn._oorDarkenTex then btn._oorDarkenTex:SetAlpha(0) end
 end
 
 -- Secret-safe range alpha via SetAlphaFromBoolean (UnitInRange can return a
@@ -7596,6 +7606,78 @@ local function ApplyRangeAlphaSecret(btn, inRange, inAlpha, outAlpha)
         return
     end
     GetFFD(btn).rangeAlpha = nil
+    if btn._oorDarkenTex then btn._oorDarkenTex:SetAlpha(0) end
+end
+
+-- Fallback when the user hasn't picked a custom Darken Color yet.
+local DEFAULT_DARKEN_COLOR = { r = 0.5, g = 0.5, b = 0.5 }
+
+-- "Darken Frames Out of Range Instead" (oorDarken cog on the Out of Range
+-- Alpha option). Lazily creates a full-frame texture per button (tinted with
+-- the user's chosen Darken Color, gray by default) rather than fading the
+-- button's own alpha.
+--
+-- IMPORTANT: health/power/portrait/top-name-bar art each live on their own
+-- CHILD FRAME (health = button level+2, power +3, tnb +4 -- see button
+-- creation above), not as texture regions owned by `button` itself. Cross-
+-- frame draw order is decided by frame LEVEL first, texture layer/sublevel
+-- only orders regions that share the same owning frame. So the overlay is
+-- built on its own dedicated child frame at button level+6 -- above health/
+-- power/portrait/tnb (+2..+4) so it actually darkens them, but below the
+-- border (+8), threat glow (+10), and the text band (ns.LVL_TEXT = 12: name/
+-- health text, role icon, leader crown) and markers (ns.LVL_MARKER = 26), so
+-- those stay fully readable -- matching Blizzard's default out-of-range look.
+local function GetDarkenOverlay(btn)
+    local ov = btn._oorDarkenTex
+    if not ov then
+        -- Compute the host level from the REAL child frames instead of a
+        -- guessed constant offset: covers whichever of health/power actually
+        -- exist on this button (power is absent for some specs), with a
+        -- button+5 floor as a fallback for anything not directly referenced
+        -- (e.g. the optional Top Name Bar at button+4).
+        local d = GetFFD(btn)
+        local base = btn:GetFrameLevel() + 5
+        if d.health and d.health.GetFrameLevel then
+            base = math.max(base, d.health:GetFrameLevel())
+        end
+        if d.power and d.power.GetFrameLevel then
+            base = math.max(base, d.power:GetFrameLevel())
+        end
+        local host = CreateFrame("Frame", nil, btn)
+        host:SetFrameLevel(base + 1)
+        host:SetAllPoints(btn)
+        ov = host:CreateTexture(nil, "ARTWORK")
+        ov:SetAllPoints(host)
+        ov:SetColorTexture(DEFAULT_DARKEN_COLOR.r, DEFAULT_DARKEN_COLOR.g, DEFAULT_DARKEN_COLOR.b, 1)
+        ov:SetAlpha(0)
+        ov:Show()
+        btn._oorDarkenHost = host
+        btn._oorDarkenTex = ov
+    end
+    return ov
+end
+
+-- Darken variant of ApplyRangeAlpha for plain (non-secret) booleans: button
+-- keeps full BM-respecting alpha; the tinted overlay fades in/out instead.
+local function ApplyDarken(btn, dark, strength, color)
+    ApplyRangeAlpha(btn, 1)  -- resets button alpha + clears the overlay first
+    local ov = GetDarkenOverlay(btn)
+    ov:SetColorTexture(color.r, color.g, color.b, 1)
+    ov:SetAlpha(dark and strength or 0)
+end
+
+-- Secret-safe darken: `inRange` may be a secret boolean (Midnight), so the
+-- overlay's alpha is driven through SetAlphaFromBoolean rather than a Lua
+-- if/else -- the same pattern ApplyRangeAlphaSecret uses for button alpha.
+local function ApplyDarkenSecret(btn, inRange, strength, color)
+    ApplyRangeAlpha(btn, 1)  -- resets button alpha + clears the overlay first
+    local ov = GetDarkenOverlay(btn)
+    ov:SetColorTexture(color.r, color.g, color.b, 1)
+    if ov.SetAlphaFromBoolean then
+        ov:SetAlphaFromBoolean(inRange, 0, strength)
+    else
+        ov:SetAlpha(strength)
+    end
 end
 
 -- Evaluate + apply range alpha for ONE unit. Shared by the
@@ -7607,6 +7689,41 @@ local function UpdateButtonRange(unit, btn)
     local rd = GetFFD(btn)
     local rs = rd._isParty and ns._scaledPartyProxy or (rd._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
     local oorAlpha = rs.oorAlpha or 0.4
+
+    if rs.oorDarken then
+        -- Darken mode ("Darken Frames Out of Range Instead"): the button
+        -- itself stays at full (BM-respecting) alpha; a tinted overlay fades
+        -- in over out-of-range frames instead. Strength derives from the
+        -- same Out of Range Alpha value (lower % = darker), so one slider
+        -- still drives both modes -- oorDarken/oorDarkenColor are our own
+        -- saved settings, read directly (never secret).
+        local strength = 1 - oorAlpha
+        local color = rs.oorDarkenColor or DEFAULT_DARKEN_COLOR
+        if UnitIsUnit(unit, "player") or not UnitExists(unit) then
+            ApplyDarken(btn, false, strength, color)
+        elseif not UnitIsConnected(unit) then
+            -- Offline keeps its fixed 80% alpha dim, not the OOR darken --
+            -- same reasoning as the alpha-mode branch below.
+            ApplyRangeAlpha(btn, 0.8)
+        elseif UnitPhaseReason and UnitPhaseReason(unit) then
+            ApplyDarken(btn, true, strength, color)
+        elseif UnitIsDeadOrGhost(unit) then
+            ApplyDarkenSecret(btn, UnitInRange(unit), strength, color)
+        elseif usesSpellRange then
+            local r = C_Spell_IsSpellInRange(playerFriendlySpell, unit)
+            if r == true then
+                ApplyDarken(btn, false, strength, color)
+            elseif r == false then
+                ApplyDarken(btn, true, strength, color)
+            else
+                ApplyDarkenSecret(btn, UnitInRange(unit), strength, color)
+            end
+        else
+            ApplyDarkenSecret(btn, UnitInRange(unit), strength, color)
+        end
+        return
+    end
+
     if UnitIsUnit(unit, "player") or not UnitExists(unit) then
         ApplyRangeAlpha(btn, 1)
     elseif not UnitIsConnected(unit) then
@@ -8461,7 +8578,7 @@ do
             "topNameBarTextOffsetX", "topNameBarTextOffsetY", "topNameBarTextAlign",
         },
         rangeTooltip = {
-            "oorAlpha", "showTooltip", "tooltipMode", "frameStrata",
+            "oorAlpha", "oorDarken", "oorDarkenColor", "showTooltip", "tooltipMode", "frameStrata",
         },
     }
     for section, keys in pairs(map) do
