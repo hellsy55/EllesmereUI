@@ -7537,10 +7537,14 @@ end
 -- is documented Nilable on BOTH UnitChannelInfo and this event's payload, so an
 -- equality test rejects real stops. Blizzard's own CastingBarFrame matches a
 -- castID for plain casts only and accepts any channel/empower stop, which is
--- what OnEmpowerStop below already does.
+-- what OnEmpowerStop below already does. Instead the live channel is re-queried:
+-- an instantly restarted channel (Clearcasting Arcane Missiles) can deliver the
+-- OLD channel's STOP after the NEW channel's START, and that late stop must not
+-- tear down the bar that is still channeling.
 local function OnChannelStop()
     if not castBarFrame then return end
     if not castBarFrame._channeling then return end
+    if UnitChannelInfo("player") then return end
     castBarFrame._channeling = false
     castBarFrame._castID = nil
     ns.ShowIdleCastBar()

@@ -982,6 +982,81 @@ ns.SpecPositionName = function(index)
 end
 
 -------------------------------------------------------------------------------
+--  Dynamic Profession: a dynamicprofession slot names a POSITION (1/2 = the
+--  two primary professions in GetProfessions order, 3/4/5 = Cooking, Fishing,
+--  Archaeology), resolved live to that profession's opener spell, or with
+--  slot.extra its second non-passive spell (Smelting, Prospecting, Milling).
+--  Unlearned positions and professions with no second ability resolve to nil
+--  and go dark under Hide Unusable Entries. Resolvers live on ns (200-local
+--  ceiling). Memoized per (index, extra) -- SlotUsable, ResolveAction and
+--  SlotDisplay all ask for the same slot every push -- and wiped from
+--  PushAllPalettes beside usableMemo, whose SPELLS_CHANGED request is the
+--  learn/unlearn edge.
+-------------------------------------------------------------------------------
+do
+    local cache = {}
+
+    local function Resolve(slot)
+        if not slot or slot.kind ~= "dynamicprofession" then return nil, nil end
+        local i = tonumber(slot.index)
+        if not i then return nil, nil end
+        local key = i * 2 + (slot.extra and 1 or 0)
+        local hit = cache[key]
+        if hit then return hit.book, hit.spell end
+
+        local prof1, prof2, arch, fish, cook = GetProfessions()
+        local book
+        if i == 1 then book = prof1
+        elseif i == 2 then book = prof2
+        elseif i == 3 then book = cook
+        elseif i == 4 then book = fish
+        elseif i == 5 then book = arch
+        end
+
+        -- Nth non-passive spell of the book's spellbook block: 1 = opener,
+        -- 2 = second ability (nil when the profession has none).
+        local spell
+        if book then
+            local _, _, _, _, numSpells, spellOffset = GetProfessionInfo(book)
+            local which = slot.extra and 2 or 1
+            local seen = 0
+            for n = 1, (numSpells or 0) do
+                local info = C_SpellBook.GetSpellBookItemInfo(
+                    n + (spellOffset or 0), Enum.SpellBookSpellBank.Player)
+                if info and info.spellID and not info.isPassive then
+                    seen = seen + 1
+                    if seen == which then spell = info.spellID; break end
+                end
+            end
+        end
+
+        cache[key] = { book = book, spell = spell }
+        return book, spell
+    end
+
+    ns.ProfessionBookIndexFor = function(slot) return (Resolve(slot)) end
+    ns.ProfessionSpellFor = function(slot) return (select(2, Resolve(slot))) end
+    ns.WipeProfessionCache = function() wipe(cache) end
+end
+
+-- Picker / unresolved-placeholder name for a dynamicprofession position (the
+-- ns.SpecPositionName counterpart): positions 1-2 by number, 3-5 by the
+-- client's own skill name.
+ns.ProfessionPositionName = function(index, extra)
+    index = tonumber(index)
+    local base
+    if index == 3 then base = COOKING or "Cooking"
+    elseif index == 4 then base = FISHING or "Fishing"
+    elseif index == 5 then base = ARCHAEOLOGY or "Archaeology"
+    else base = EllesmereUI.Lf("Profession %1$d", index or 0)
+    end
+    if extra then
+        return EllesmereUI.Lf("%1$s Extra Ability", base)
+    end
+    return base
+end
+
+-------------------------------------------------------------------------------
 --  Dynamic Rez
 --
 --  One entry that is whichever resurrection spell this character has, so a
@@ -1183,14 +1258,17 @@ end
 
 -- Can this character do anything with the slot? Only the kinds that resolve
 -- against one character's own kit are tested -- another class's
--- specialization, a spell no book here holds, a macro this character does
--- not have, a resurrection this class has none of. Everything else (items,
--- toys, mounts, pets, markers, nested menus) is account-wide or
--- self-resolving and stays.
+-- specialization, a profession position this character does not reach, a
+-- spell no book here holds, a macro this character does not have, a
+-- resurrection this class has none of. Everything else (items, toys,
+-- mounts, pets, markers, nested menus) is account-wide or self-resolving
+-- and stays.
 local function SlotUsable(slot)
     local k = slot and slot.kind
     if k == "spec" or k == "dynamicspec" then
         return SpecIndexFor(slot) ~= nil
+    elseif k == "dynamicprofession" then
+        return ns.ProfessionSpellFor(slot) ~= nil
     elseif k == "spell" then
         return SpellKnownHere(tonumber(slot.id))
     elseif k == "macro" then
@@ -1256,6 +1334,15 @@ local function ResolveAction(slot, p)
     if k == "spell" then
         if type(slot.id) ~= "number" then return nil end
         return "spell", "spell", slot.id
+
+    elseif k == "dynamicprofession" then
+        -- Resolved to the CURRENT position's spell every time the
+        -- attributes are written, then fired the same way any other spell
+        -- slot is -- see ns.ProfessionSpellFor above for what makes the
+        -- position current.
+        local spellID = ns.ProfessionSpellFor(slot)
+        if not spellID then return nil end
+        return "spell", "spell", spellID
 
     elseif k == "item" then
         if type(slot.id) ~= "number" then return nil end
@@ -1611,6 +1698,31 @@ local function SlotDisplay(slot)
             end
         end
         return QUESTION_MARK, slot.name
+
+    elseif k == "dynamicprofession" then
+        if slot.extra then
+            -- The ABILITY's own name and icon -- Smelting, Prospecting,
+            -- Milling -- rather than the profession's: unlike the opener,
+            -- which is the profession by another name, the second ability
+            -- is its own spell and reads as one.
+            local spellID = ns.ProfessionSpellFor(slot)
+            if spellID then
+                local info = C_Spell.GetSpellInfo(spellID)
+                if info then return info.iconID or QUESTION_MARK, info.name or slot.name end
+            end
+        else
+            local bookIndex = ns.ProfessionBookIndexFor(slot)
+            if bookIndex then
+                -- The profession's own name and icon, not the opener
+                -- spell's -- the same skill icon its spellbook entry shows.
+                local name, icon = GetProfessionInfo(bookIndex)
+                return icon or QUESTION_MARK, name or slot.name
+            end
+        end
+        -- A position this character does not reach, or (on slot.extra) a
+        -- profession with no second ability. Names the seat rather than an
+        -- occupant, same as an empty dynamicspec position.
+        return QUESTION_MARK, ns.ProfessionPositionName(tonumber(slot.index), slot.extra)
 
     elseif k == "battlepet" then
         if type(slot.guid) ~= "string" then return QUESTION_MARK, slot.name end
@@ -8657,6 +8769,8 @@ local function PushAllPalettes()
     pushDirty = false
     -- The one place usability answers are allowed to change -- see usableMemo.
     wipe(usableMemo)
+    -- Same lifecycle, same reason -- see the Dynamic Profession section.
+    if ns.WipeProfessionCache then ns.WipeProfessionCache() end
     for i = 1, PaletteCount() do PushPalette(i) end
 end
 
