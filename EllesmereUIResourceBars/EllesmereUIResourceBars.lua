@@ -381,12 +381,18 @@ local function GetPrimaryPowerType()
     local _, classFile = UnitClass("player")
     local spec = GetSpecialization()
     local form = GetShapeshiftFormID()
+    -- powerTypeOverride is keyed by SPEC ID, never by the GetSpecialization()
+    -- index: one profile holds one set, so an index key collides across classes
+    -- and the same flag means opposite things per class (slot 3 is Guardian,
+    -- Shadow and Augmentation, wanting Mana, Insanity and Ebon Might). Cached, so
+    -- this is one table read after the first call per spec.
+    local ovSpec = _G._ERB_ResolveSpecIDCached and _G._ERB_ResolveSpecIDCached() or nil
 
     -- Druid form handling
     if classFile == "DRUID" then
         local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
         local ov = pp and pp.powerTypeOverride
-        if ov and ov[spec] then
+        if ovSpec and ov and ov[ovSpec] then
             if spec == 1 then return PT.LUNAR_POWER end  -- Balance alt: Astral Power
             return PT.MANA                                -- Feral/Guardian alt: Mana
         end
@@ -398,12 +404,12 @@ local function GetPrimaryPowerType()
     if classFile == "SHAMAN" and spec == 1 then
         local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
         local ov = pp and pp.powerTypeOverride
-        if ov and ov[spec] then return PT.MAELSTROM end  -- Elemental alt: Maelstrom
+        if ovSpec and ov and ov[ovSpec] then return PT.MAELSTROM end  -- Elemental alt: Maelstrom
     end
     if classFile == "PRIEST" and spec == 3 then
         local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
         local ov = pp and pp.powerTypeOverride
-        if ov and ov[spec] then return PT.INSANITY end   -- Shadow alt: Insanity
+        if ovSpec and ov and ov[ovSpec] then return PT.INSANITY end   -- Shadow alt: Insanity
     end
     if classFile == "HUNTER" then
         -- BM/MM show Focus as the class resource bar, not power; Survival keeps
@@ -425,7 +431,9 @@ local function GetPrimaryPowerType()
     if classFile == "EVOKER" and spec == 3 then
         local pp = ERB.db and ERB.db.profile and ERB.db.profile.primary
         local ov = pp and pp.powerTypeOverride
-        if not (ov and ov[spec]) then return "EBON_MIGHT" end
+        -- Inverted against the others: Augmentation's DEFAULT is Ebon Might and
+        -- the override opts into plain Mana. Same spec-ID key either way.
+        if not (ovSpec and ov and ov[ovSpec]) then return "EBON_MIGHT" end
         return PT.MANA
     end
 
