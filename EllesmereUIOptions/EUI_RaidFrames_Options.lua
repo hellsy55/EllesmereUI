@@ -4010,6 +4010,48 @@ initFrame:SetScript("OnEvent", function(self)
               order={ "always", "outOfCombat", "outOfBossCombat", "never" },
               getValue=function() return CurTooltipMode() end,
               setValue=function(v) SSet("tooltipMode", v) end });  y = y - h
+        -- Cog: switch Out of Range Alpha from fading the frame transparent to
+        -- darkening it instead (Blizzard's default party/raid frame look).
+        -- Reuses the same Out of Range Alpha % as darken strength.
+        if not EllesmereUI._prebuilding then
+            local rgn = row._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Out of Range Alpha",
+                rows = {
+                    { type="toggle", label="Darken Frames Out of Range Instead",
+                      tooltip="Out-of-range frames darken instead of fading transparent, matching Blizzard's default party/raid frame look. Uses the same Out of Range Alpha % as brightness: 100% = no visible difference in/out of range, 10% = out-of-range frames drop to 10% brightness.",
+                      get=function() return SVal("oorDarken", false) == true end,
+                      set=function(v)
+                          SSet("oorDarken", v)
+                          -- Seed all buttons so the mode switch takes effect now
+                          -- (mirrors the slider's own seed-on-change).
+                          if ns._RangeSeedAll then ns._RangeSeedAll() end
+                      end },
+                    { type="colorpicker", label="Darken Color", hasAlpha=false,
+                      tooltip="Color of the out-of-range darken overlay. Defaults to gray -- pick something else if it's hard to see against your Fill Color.",
+                      get=function()
+                          local c = SVal("oorDarkenColor", nil)
+                          if c then return c.r, c.g, c.b end
+                          return 0.5, 0.5, 0.5
+                      end,
+                      set=function(r, g, b)
+                          SSet("oorDarkenColor", { r = r, g = g, b = b })
+                          if ns._RangeSeedAll then ns._RangeSeedAll() end
+                      end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(s) cogShow(s) end)
+        end
         -- Cog: buff/HoT aura-icon tooltips (Buff Manager), hidden by default and opt-in here. This is the ONLY gate on the aura tip: the dropdown's tooltip mode governs the UNIT tooltip and must NOT veto an aura tip enabled here (see ns.RaidFrameTooltipAllowed).
         if not EllesmereUI._prebuilding then
             local rgn = row._rightRegion
