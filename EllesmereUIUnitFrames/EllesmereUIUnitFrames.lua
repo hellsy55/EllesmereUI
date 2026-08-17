@@ -3151,6 +3151,23 @@ local function ApplyClassColor(fs, unit, useClassColor, customR, customG, custom
         -- with the eui-tgtname tag via ns.ResolveUnitNameColor.
         local r, g, b = ns.ResolveUnitNameColor(unit)
         if r then fs:SetTextColor(r, g, b); return end
+        -- ResolveUnitNameColor returns nil for a SECRET class token (identity-restricted
+        -- units: focus-target, ToT) since it can't be used as a table key or formatted by
+        -- the [eui-tgtcol] hex-escape tag it also feeds. SetTextColor accepts secrets
+        -- directly, so recover the real color here the same way the health bar does:
+        -- the user's custom color when the unit matches a group member, else Blizzard's.
+        if UnitIsPlayer(unit) or (UnitInPartyIsAI and UnitInPartyIsAI(unit)) then
+            local _, class = UnitClass(unit)
+            if issecretvalue(class) then
+                local ok, sr, sg, sb = EllesmereUI.GetClassColorForRestrictedUnit(unit, class)
+                if ok then
+                    fs:SetTextColor(sr, sg, sb); return
+                elseif C_ClassColor and C_ClassColor.GetClassColor then
+                    local c = C_ClassColor.GetClassColor(class)
+                    if c then fs:SetTextColor(c.r, c.g, c.b); return end
+                end
+            end
+        end
     end
     fs:SetTextColor(customR or 1, customG or 1, customB or 1)
 end
