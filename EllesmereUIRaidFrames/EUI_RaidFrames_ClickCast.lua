@@ -276,24 +276,96 @@ local function IsFrameBinding(binding)
     return (not binding.hovercast) or binding.hovercast == "both"
 end
 
+function ns.CC_GetBindingUnitType(binding)
+    local friendly, enemy = binding.hoverFriendly, binding.hoverEnemy
+    if friendly == false and enemy == false then return "both" end
+    -- The Friendly checkbox is default-on in the UI, so an omitted value is
+    -- friendly unless Enemy is explicitly enabled as well. Enemy is opt-in.
+    friendly = friendly ~= false
+    enemy = enemy == true
+    if friendly and not enemy then return "friendly" end
+    if enemy and not friendly then return "harmful" end
+    return "both"
+end
+
+-- Two spell bindings may share a key when their existing Friendly/Enemy
+-- checkboxes select opposite reactions. Combine those branches into one macro.
+function ns.CC_AreComplementarySpellBindings(a, b)
+    if not a or not b or a.type ~= "spell" or b.type ~= "spell"
+        or a.key ~= b.key or a.harmfulSpell or b.harmfulSpell then return false end
+    local aHover = a.hovercast or false
+    local bHover = b.hovercast or false
+    if aHover ~= bHover or a.oocOnly ~= b.oocOnly then return false end
+    local aReaction, bReaction = ns.CC_GetBindingUnitType(a), ns.CC_GetBindingUnitType(b)
+    return (aReaction == "friendly" and bReaction == "harmful")
+        or (aReaction == "harmful" and bReaction == "friendly")
+end
+
+function ns.CC_MergeComplementarySpellBindings(bindings)
+    local result = {}
+    for _, binding in ipairs(bindings) do
+        local merged = false
+        for i, previous in ipairs(result) do
+            if ns.CC_AreComplementarySpellBindings(previous, binding) then
+                local friendly = ns.CC_GetBindingUnitType(previous) == "friendly" and previous or binding
+                local harmful = friendly == previous and binding or previous
+                local combined = {}
+                for key, value in pairs(friendly) do combined[key] = value end
+                combined.harmfulSpell = harmful.spell
+                combined.harmfulSpellID = harmful.spellID
+                combined.harmfulIcon = harmful.icon
+                combined.hoverFriendly = true
+                combined.hoverEnemy = true
+                combined.smartRez = friendly.smartRez or harmful.smartRez
+                result[i] = combined
+                merged = true
+                break
+            end
+        end
+        if not merged then result[#result + 1] = binding end
+    end
+    return result
+end
+
 -- Merges globals + current spec (spec wins key conflicts); only enabled
 -- bindings; gated on the master enable toggle.
 local function GetActiveBindings()
     local cc = GetClickCastDB()
     if not cc or not cc.enabled then return {} end
-    local result, usedKeys = {}, {}
+    local result, usedKeys, specBindings, specReactions = {}, {}, {}, {}
     for _, b in ipairs(GetSpecBindings()) do
         if b.enabled ~= false and b.key and MatchesGroupCtx(b) then
             result[#result + 1] = b
+            specBindings[#specBindings + 1] = b
             usedKeys[b.key] = true
+            if b.type == "spell" then
+                local reaction = ns.CC_GetBindingUnitType(b)
+                if reaction ~= "both" then
+                    specReactions[b.key] = specReactions[b.key] or {}
+                    specReactions[b.key][reaction] = true
+                end
+            end
         end
     end
     for _, b in ipairs(cc.globals) do
-        if b.enabled ~= false and b.key and not usedKeys[b.key] and MatchesGroupCtx(b) then
+        local keepGlobal = not usedKeys[b.key]
+        if not keepGlobal then
+            local reaction = b.type == "spell" and ns.CC_GetBindingUnitType(b) or nil
+            local reactions = specReactions[b.key]
+            if reaction and reaction ~= "both" and not (reactions and reactions[reaction]) then
+                for _, specBinding in ipairs(specBindings) do
+                    if ns.CC_AreComplementarySpellBindings(specBinding, b) then
+                        keepGlobal = true
+                        break
+                    end
+                end
+            end
+        end
+        if b.enabled ~= false and b.key and keepGlobal and MatchesGroupCtx(b) then
             result[#result + 1] = b
         end
     end
-    return result
+    return ns.CC_MergeComplementarySpellBindings(result)
 end
 
 -------------------------------------------------------------------------------
@@ -413,6 +485,18 @@ local function ResolveCastSpellName(binding)
     return binding.spell
 end
 
+local function ResolveHarmfulSpellName(binding)
+    local id = binding.harmfulSpellID
+    if type(id) == "number" and id > 0 and C_Spell and C_Spell.GetBaseSpell then
+        local baseId = C_Spell.GetBaseSpell(id)
+        if type(baseId) == "number" and baseId > 0 and baseId ~= id then
+            local name = C_Spell.GetSpellName and C_Spell.GetSpellName(baseId)
+            if name then return name end
+        end
+    end
+    return binding.harmfulSpell
+end
+
 -- Builds dynamic-rez /cast lines (used by the dynamicrez binding type + Smart
 -- Rez). Returns a list of macro lines (possibly empty) or nil if the class has
 -- no rez kit. Never includes /stopmacro -- caller adds that for oocOnly.
@@ -453,13 +537,34 @@ local function BuildBaseMacroText(binding)
         local name = ResolveCastSpellName(binding)
         if not name then return nil end
         local isRez = IsRezSpellBinding(binding)
+        local unitType = ns.CC_GetBindingUnitType(binding)
         local conds = { "@mouseover" }
-        if isHC then
-            if binding.hoverFriendly and not binding.hoverEnemy then
-                conds[#conds + 1] = "help"
-            elseif binding.hoverEnemy and not binding.hoverFriendly then
-                conds[#conds + 1] = "harm"
+        if binding.harmfulSpell then
+            local harmfulName = ResolveHarmfulSpellName(binding)
+            if harmfulName then
+                local lines = {}
+                local function AddReactionLine(reaction, spellName)
+                    local reactionEnabled = (reaction == "help" and unitType ~= "harmful")
+                        or (reaction == "harm" and unitType ~= "friendly")
+                    if not reactionEnabled then return end
+                    local reactionConds = { "@mouseover", reaction }
+                    if not isRez then
+                        reactionConds[#reactionConds + 1] = "exists"
+                        reactionConds[#reactionConds + 1] = "nodead"
+                    end
+                    if binding.oocOnly then reactionConds[#reactionConds + 1] = "nocombat" end
+                    lines[#lines + 1] = "/cast [" .. table.concat(reactionConds, ",") .. guard .. "] " .. spellName
+                end
+                AddReactionLine("help", name)
+                AddReactionLine("harm", harmfulName)
+                if #lines == 0 then return nil end
+                return table.concat(lines, "\n")
             end
+        end
+        if unitType == "friendly" then
+            conds[#conds + 1] = "help"
+        elseif unitType == "harmful" then
+            conds[#conds + 1] = "harm"
         end
         -- exists,nodead: without it, a gone/dead hovered unit lets the cast fall
         -- through to Blizzard default targeting -- with auto self-cast on, it
@@ -1492,15 +1597,25 @@ ns.CC_GetCurrentSpecName = GetCurrentSpecName
 ns.CC_GetCurrentSpecIcon = GetCurrentSpecIcon
 ns.CC_GetClickCastDB     = GetClickCastDB
 
--- Finds all bindings (excluding the given one) sharing a key; returns a list
--- of names or an empty table.
+-- Bindings only compete when their key is dispatched through at least one of
+-- the same paths. Frame-only and hover-only bindings may therefore share a key;
+-- a "both" binding overlaps either path.
+local function BindingsShareCastPath(a, b)
+    return (IsFrameBinding(a) and IsFrameBinding(b))
+        or (IsHoverBinding(a) and IsHoverBinding(b))
+end
+
+-- Finds all bindings (excluding the given one) sharing a key and a cast path;
+-- returns a list of names or an empty table.
 local function FindKeyConflicts(keyStr, excludeBinding)
     if not keyStr then return {} end
     local conflicts = {}
     local cc = GetClickCastDB()
     if not cc then return conflicts end
     for _, b in ipairs(cc.globals) do
-        if b ~= excludeBinding and b.key == keyStr then
+        if b ~= excludeBinding and b.enabled ~= false and b.key == keyStr
+            and BindingsShareCastPath(excludeBinding, b)
+            and not ns.CC_AreComplementarySpellBindings(excludeBinding, b) then
             conflicts[#conflicts + 1] = ns.CC_GetBindingName(b)
         end
     end
@@ -1510,7 +1625,9 @@ local function FindKeyConflicts(keyStr, excludeBinding)
     local activeList = specID and cc.specs[specID]
     if activeList then
         for _, b in ipairs(activeList) do
-            if b ~= excludeBinding and b.key == keyStr then
+            if b ~= excludeBinding and b.enabled ~= false and b.key == keyStr
+                and BindingsShareCastPath(excludeBinding, b)
+                and not ns.CC_AreComplementarySpellBindings(excludeBinding, b) then
                 conflicts[#conflicts + 1] = ns.CC_GetBindingName(b)
             end
         end
@@ -1992,6 +2109,40 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
         keySub:SetPoint("RIGHT", tile, "RIGHT", -30, 0)
         keySub:SetJustifyH("LEFT"); keySub:SetWordWrap(false)
         keySub:SetText(binding.key and ns.CC_FormatKey(binding.key) or EllesmereUI.L("Not Bound"))
+
+        -- Complementary Friendly/Harmful spell pairs may share a key. Mark only
+        -- real collisions, positioned in the sidebar action area so the marker
+        -- never obscures the spell icon.
+        if side == "spec" and binding.type == "spell" and binding.enabled ~= false and binding.key then
+            local conflicts = FindKeyConflicts(binding.key, binding)
+            if #conflicts > 0 then
+                local warning = CreateFrame("Button", nil, tile)
+                warning:SetSize(18, 18)
+                warning:SetPoint("TOPRIGHT", tile, "TOPRIGHT", -26, -7)
+                warning:SetFrameLevel(tile:GetFrameLevel() + 2)
+                local warningText = MakeFont(warning, 15, 1, 0.25, 0.15, 1)
+                warningText:SetAllPoints()
+                warningText:SetJustifyH("CENTER")
+                warningText:SetText("!")
+                local warningTooltip = {
+                    EllesmereUI.L("Conflicting Keybind"),
+                    EllesmereUI.Lf("%s is also assigned to:", ns.CC_FormatKey(binding.key)),
+                }
+                for _, name in ipairs(conflicts) do
+                    warningTooltip[#warningTooltip + 1] = "- " .. EllesmereUI.L(name)
+                end
+                warningTooltip = table.concat(warningTooltip, "\n")
+                warning:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, warningTooltip, {
+                        color = { 1, 0.25, 0.15, 0.9 },
+                        justify = "LEFT",
+                        width = 250,
+                    })
+                end)
+                warning:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                warning:SetScript("OnClick", function() onSelect(side, idx) end)
+            end
+        end
 
         if onDelete then
             local delBtn = CreateFrame("Button", nil, tile)
@@ -2692,7 +2843,8 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                     local binding
                     if hoveredItem.id then
                         binding = { type = "spell", spell = hoveredItem.name, spellID = hoveredItem.id,
-                            icon = hoveredItem.icon, key = captured, enabled = true }
+                            icon = hoveredItem.icon, key = captured, enabled = true,
+                            hoverFriendly = true, hoverEnemy = true }
                     elseif hoveredItem.macroName then
                         binding = { type = "macro", macroName = hoveredItem.macroName,
                             icon = hoveredItem.icon, key = captured, enabled = true }
@@ -2718,7 +2870,8 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                     local binding
                     if hoveredItem.id then
                         binding = { type = "spell", spell = hoveredItem.name, spellID = hoveredItem.id,
-                            icon = hoveredItem.icon, key = captured, enabled = true }
+                            icon = hoveredItem.icon, key = captured, enabled = true,
+                            hoverFriendly = true, hoverEnemy = true }
                     elseif hoveredItem.macroName then
                         binding = { type = "macro", macroName = hoveredItem.macroName,
                             icon = hoveredItem.icon, key = captured, enabled = true }
@@ -2969,7 +3122,7 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                     ns.CC_AddSpecBinding({
                         type = "spell", spell = item.name, spellID = item.id, icon = item.icon,
                         enabled = true, oocOnly = false, hovercast = false,
-                        hoverFriendly = true, hoverEnemy = false,
+                        hoverFriendly = true, hoverEnemy = true,
                     })
                     ns._ccSelSide = "spec"; ns._ccSelIndex = #(GetSpecBindings()); RebuildPage()
                 end)
@@ -3292,17 +3445,7 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
             local kbBtn = BuildKeybindButton(row, 180,
                 function() return selectedBinding.key end,
                 function(newKey)
-                    if cc.hideKeyWarning then ApplyKey(newKey); return end
-                    local conflicts = FindKeyConflicts(newKey, selectedBinding)
-                    if #conflicts == 0 then ApplyKey(newKey); return end
-                    EllesmereUI:ShowConfirmPopup({
-                        title = EllesmereUI.L("Duplicate Keybind"),
-                        message = EllesmereUI.Lf("%s is already assigned to:\n%s", ns.CC_FormatKey(newKey), table.concat(conflicts, ", ")),
-                        confirmText = EllesmereUI.L("Okay"),
-                        cancelText = EllesmereUI.L("Don't Show Again"),
-                        onConfirm = function() ApplyKey(newKey) end,
-                        onCancel = function() cc.hideKeyWarning = true; ApplyKey(newKey) end,
-                    })
+                    ApplyKey(newKey)
                 end,
                 function()
                     selectedBinding.key = nil
@@ -3444,13 +3587,9 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                 centerY = centerY - ROW_H
             end
 
-            -- Hovercast targets (only when the mouseover path is involved)
-            if selectedBinding.hovercast then
-                -- Friendly + Enemy share ONE row. They are a single "which units"
-                -- choice, and the center column is a fixed-height, non-scrolling
-                -- panel that was already close to full: a row each would push the
-                -- last row past the bottom of the scroll viewport, where it is
-                -- clipped and invisible.
+            -- Spell reactions use the same Friendly/Enemy toggles as Hovercast.
+            -- They are also available for frame-only spell bindings.
+            if selectedBinding.type == "spell" or selectedBinding.hovercast then
                 do
                     local row = MakeRow(centerY)
                     RowLabel(row, "    Unit Types")
@@ -3459,6 +3598,7 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                         function(v)
                             selectedBinding.hoverEnemy = v
                             ns.CC_ApplyBindings()
+                            RebuildPage()
                         end)
                     local eLbl = MakeFont(row, 13, 1, 1, 1, 0.8)
                     eLbl:SetPoint("RIGHT", ePill, "LEFT", -8, 0)
@@ -3469,6 +3609,7 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                         function(v)
                             selectedBinding.hoverFriendly = v
                             ns.CC_ApplyBindings()
+                            RebuildPage()
                         end)
                     fPill:ClearAllPoints()
                     PP.Point(fPill, "RIGHT", eLbl, "LEFT", -18, 0)
@@ -3579,7 +3720,7 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
                 ns.CC_AddSpecBinding({
                     type = "spell", spell = sp.name, spellID = sp.id, icon = sp.icon,
                     enabled = true, oocOnly = false, hovercast = false,
-                    hoverFriendly = true, hoverEnemy = false,
+                    hoverFriendly = true, hoverEnemy = true,
                 })
                 ns._ccSelSide = "spec"
                 ns._ccSelIndex = #(GetSpecBindings())

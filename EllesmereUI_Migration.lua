@@ -192,6 +192,68 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- Frame-only spell bindings historically ignored the Friendly/Enemy toggles.
+-- Seed both flags before those existing bindings begin honoring the toggles so
+-- their behavior remains unrestricted until the user changes the setting.
+EllesmereUI.RegisterMigration({
+    id          = "clickcast_frame_spell_reaction_v1",
+    scope       = "profile",
+    description = "Preserve unrestricted frame-only spell bindings when reaction toggles become active",
+    body        = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        local cc = rf and rf.clickCast
+        if type(cc) ~= "table" then return end
+        local function seed(list)
+            if type(list) ~= "table" then return end
+            for _, b in ipairs(list) do
+                if type(b) == "table" and b.type == "spell" and not b.hovercast then
+                    b.hoverFriendly = true
+                    b.hoverEnemy    = true
+                end
+            end
+        end
+        seed(cc.globals)
+        if type(cc.specs) == "table" then
+            for _, list in pairs(cc.specs) do seed(list) end
+        end
+    end,
+})
+
+-- Before frame casts honored Friendly/Enemy, a "Frames + Hovercast" spell
+-- could have a reaction filter for hovercast while remaining unrestricted on
+-- frames. Preserve that split behavior as two bindings now that both paths
+-- share the same checkbox fields.
+EllesmereUI.RegisterMigration({
+    id          = "clickcast_frame_spell_reaction_v2",
+    scope       = "profile",
+    description = "Split legacy Frames + Hovercast spells to preserve their separate reaction behavior",
+    body        = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        local cc = rf and rf.clickCast
+        if type(cc) ~= "table" then return end
+        local function split(list)
+            if type(list) ~= "table" then return end
+            local count = #list
+            for i = 1, count do
+                local b = list[i]
+                if type(b) == "table" and b.type == "spell" and b.hovercast == "both" then
+                    local frameBinding = {}
+                    for key, value in pairs(b) do frameBinding[key] = value end
+                    frameBinding.hovercast = false
+                    frameBinding.hoverFriendly = true
+                    frameBinding.hoverEnemy = true
+                    b.hovercast = true
+                    list[#list + 1] = frameBinding
+                end
+            end
+        end
+        split(cc.globals)
+        if type(cc.specs) == "table" then
+            for _, list in pairs(cc.specs) do split(list) end
+        end
+    end,
+})
+
 --------------------------------------------------------------------------------
 --  Position snap helpers
 --  Used by position_snap_v3 and exposed as EllesmereUI.SnapProfilePositions for
