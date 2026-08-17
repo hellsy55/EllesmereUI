@@ -1881,12 +1881,12 @@ local function ApplyDarkTheme(health, unit)
             end
             if self.bg then
                 AnchorHealthBg(self)
-                local bgClassR, bgClassG, bgClassB
+                local bgClassOk, bgClassR, bgClassG, bgClassB
                 if bgClassColored then
                     local classUnit = ClassColorSourceUnit(uKey, unit or self.unit or uKey)
-                    bgClassR, bgClassG, bgClassB = ns.ResolveBgClassColor(classUnit)
+                    bgClassOk, bgClassR, bgClassG, bgClassB = ns.ResolveBgClassColor(classUnit)
                 end
-                if bgClassR then
+                if bgClassOk then
                     -- Full class color; opacity comes from customBgAlpha (SetAlpha).
                     self.bg:SetColorTexture(bgClassR, bgClassG, bgClassB, 1)
                 elseif cBg then
@@ -1913,12 +1913,12 @@ local function ApplyDarkTheme(health, unit)
             -- PostUpdateColor re-applies this so it survives texture swaps.
             AnchorHealthBg(health)
             local bgClassColored = unitSettings and unitSettings.bgClassColored
-            local bgClassR, bgClassG, bgClassB
+            local bgClassOk, bgClassR, bgClassG, bgClassB
             if bgClassColored then
                 local classUnit = ClassColorSourceUnit(unitKey, unitKey or (health.__owner and health.__owner.unit))
-                bgClassR, bgClassG, bgClassB = ns.ResolveBgClassColor(classUnit)
+                bgClassOk, bgClassR, bgClassG, bgClassB = ns.ResolveBgClassColor(classUnit)
             end
-            if bgClassR then
+            if bgClassOk then
                 -- Full class color; PostUpdateColor keeps it correct on updates.
                 health.bg:SetColorTexture(bgClassR, bgClassG, bgClassB, 1)
             elseif customBg then
@@ -2303,17 +2303,30 @@ end
 -- party members) keep EllesmereUI.GetClassColor (custom colors + Class Color Darken
 -- baked in); NPCs fall through to the reaction color, matching the unit name, the
 -- border and the custom Enemy Colors override. On ns for the local cap.
+-- Returns ok, r, g, b -- ok is a PLAIN boolean, r/g/b may be SECRET numbers on an
+-- identity-restricted unit (ToT/focus-target): callers must branch on ok, never on
+-- the truthiness of r, and may only ever hand r/g/b to a setter like SetColorTexture.
 ns.ResolveBgClassColor = function(classUnit)
-    if not classUnit then return nil end
+    if not classUnit then return false end
     if UnitIsPlayer(classUnit) or (UnitInPartyIsAI and UnitInPartyIsAI(classUnit)) then
         local _, ct = UnitClass(classUnit)
-        -- ct can be secret (out-of-range/uninspectable units).
-        -- issecretvalue FIRST: truthiness-testing a secret errors.
-        local cc = not issecretvalue(ct) and ct and EllesmereUI.GetClassColor(ct)
-        if cc then return cc.r, cc.g, cc.b end
-        return nil
+        if issecretvalue(ct) then
+            -- Same recovery as ApplyClassColor/UF_SecretSafeHealthColor: the user's
+            -- custom color for a matching group member, else Blizzard's shade.
+            local ok, r, g, b = EllesmereUI.GetClassColorForRestrictedUnit(classUnit, ct)
+            if ok then return true, r, g, b end
+            if C_ClassColor and C_ClassColor.GetClassColor then
+                local c = C_ClassColor.GetClassColor(ct)
+                if c then return true, c.r, c.g, c.b end
+            end
+            return false
+        end
+        local cc = ct and EllesmereUI.GetClassColor(ct)
+        if cc then return true, cc.r, cc.g, cc.b end
+        return false
     end
-    return ns.ResolveUnitNameColor(classUnit)
+    local r, g, b = ns.ResolveUnitNameColor(classUnit)
+    return r ~= nil, r, g, b
 end
 
 -- External nickname providers key us by this addon name. Suite = "EllesmereUI" (the
