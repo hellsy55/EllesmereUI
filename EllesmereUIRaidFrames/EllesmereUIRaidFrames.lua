@@ -1192,7 +1192,7 @@ end
 -------------------------------------------------------------------------------
 --  Raid size tier resolution: width/height for a group size from the defined
 --  overrides, cascading toward 20-man (the base) when a tier is undefined.
---  Tiers: 10, 15, 20(base), 25, 30
+--  Tiers: 10, 15, 20(base), 25, 30, 40
 -------------------------------------------------------------------------------
 ns._GetRaidSizeFrameDimensions = function(groupSize)
     local s = db.profile
@@ -1604,7 +1604,8 @@ function ns.GetBgColor(unit, s)
             if cc then return cc.r, cc.g, cc.b, a end
         end
     end
-    local c = s.customBgColor
+    -- Partial/imported profiles can lack the key (field report 2026-08-16).
+    local c = s.customBgColor or defaults.customBgColor
     return c.r, c.g, c.b, a
 end
 
@@ -1621,7 +1622,8 @@ local function GetNameColor(unit, s)
         return c.r, c.g, c.b
     else -- "class"
         local _, classToken = UnitClass(unit)
-        if classToken then
+        -- Secret-safe: a secret classToken would throw on GetClassColor's table index.
+        if classToken and not issecretvalue(classToken) then
             local cc = EllesmereUI.GetClassColor(classToken)
             if cc then return cc.r, cc.g, cc.b end
         end
@@ -1637,7 +1639,8 @@ local function GetTopNameBarColor(unit, s)
         return c.r, c.g, c.b
     end
     local _, classToken = UnitClass(unit)
-    if classToken then
+    -- Secret-safe: a secret classToken would throw on GetClassColor's table index.
+    if classToken and not issecretvalue(classToken) then
         local cc = EllesmereUI.GetClassColor(classToken)
         if cc then return cc.r, cc.g, cc.b end
     end
@@ -1723,7 +1726,8 @@ local function GetHealthTextColor(unit, s)
         return 1, 1, 1
     elseif mode == "class" then
         local _, classToken = UnitClass(unit)
-        if classToken then
+        -- Secret-safe: a secret classToken would throw on GetClassColor's table index.
+        if classToken and not issecretvalue(classToken) then
             local cc = EllesmereUI.GetClassColor(classToken)
             if cc then return cc.r, cc.g, cc.b end
         end
@@ -1745,7 +1749,8 @@ function ns.GetHealAbsorbTextColor(unit, s)
         return 1, 0.3, 0.3
     elseif mode == "class" then
         local _, classToken = UnitClass(unit)
-        if classToken then
+        -- Secret-safe: a secret classToken would throw on GetClassColor's table index.
+        if classToken and not issecretvalue(classToken) then
             local cc = EllesmereUI.GetClassColor(classToken)
             if cc then return cc.r, cc.g, cc.b end
         end
@@ -3077,7 +3082,7 @@ local function StyleButton(button)
     -- Background (visible behind the health bar where HP is missing)
     local bg = button:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    local bgc = s.customBgColor
+    local bgc = s.customBgColor or defaults.customBgColor
     bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
     if PP then PP.DisablePixelSnap(bg) end
     d.bg = bg
@@ -5584,7 +5589,10 @@ XF.Layout = function()
     local aw = PixelSnap(ns._activeSizeW or s.frameWidth or 72)
     local ah = PixelSnap(ns._activeSizeH or s.frameHeight or 46)
     local ratio = 1
-    if aw > 0 and ah > 0 then
+    -- Auto Resize Indicators cog toggle (nil = ON, additive key): off keeps
+    -- indicators/auras/BM at the real frames' base scale regardless of the
+    -- extra frames' custom size.
+    if aw > 0 and ah > 0 and (not set or set.autoResizeIndicators ~= false) then
         ratio = math.max(math.min(math.min(w / aw, h / ah), 1.3), 0.7)
     end
     ns._xfExtraRatio = ratio
@@ -7199,26 +7207,30 @@ ns._RFResolveTierOverride = function(numMembers)
     -- User-tunable switch boundaries (per-tier cog sliders): the LOWER tiers
     -- store the highest count they COVER (sizeCap), the UPPER tiers the
     -- count they ENGAGE at (sizeMin). Absent keys reproduce the classic
-    -- cascade exactly (10/15/20, 25 engaging at 21, 30 at 26), so profiles
-    -- that never touch the sliders resolve byte-identically.
-    local o10, o15, o25, o30 = overrides[10], overrides[15], overrides[25], overrides[30]
+    -- cascade exactly (10/15/20, 25 engaging at 21, 30 at 26, 40 at 31), so
+    -- profiles that never touch the sliders resolve byte-identically.
+    local o10, o15, o25, o30, o40 = overrides[10], overrides[15], overrides[25], overrides[30], overrides[40]
     local b10 = (o10 and o10.sizeCap) or 10
     local b15 = (o15 and o15.sizeCap) or 15
     local b25 = (o25 and o25.sizeMin) or 21
     local b30 = (o30 and o30.sizeMin) or 26
+    local b40 = (o40 and o40.sizeMin) or 31
     local tier
     if numMembers <= b10 then    tier = 10
     elseif numMembers <= b15 then tier = 15
     elseif numMembers < b25 then tier = 20
     elseif numMembers < b30 then tier = 25
-    else                         tier = 30
+    elseif numMembers < b40 then tier = 30
+    else                         tier = 40
     end
     if tier == 20 then return 20, nil end
     local ov
     if tier < 20 then
         ov = overrides[tier] or (tier == 10 and overrides[15]) or nil
     else
-        ov = overrides[tier] or (tier == 30 and overrides[25]) or nil
+        ov = overrides[tier]
+        if not ov and tier == 30 then ov = overrides[25] end
+        if not ov and tier == 40 then ov = overrides[30] or overrides[25] end
     end
     return tier, ov or nil
 end
@@ -9433,6 +9445,15 @@ local function RegisterWithUnlockMode()
             group = "Raid Frames",
             order = 502,
             noResize = true,
+            -- Disabled feature = no mover. Gates on the SETTING (mode none),
+            -- not on the group-type activity gate: an enabled display should
+            -- stay positionable while solo. The options mode setter
+            -- re-registers via ns._RFRegisterUnlock so an open unlock session
+            -- gains or loses the mover live in both directions.
+            isHidden = function()
+                local hm = ns._HMSet and ns._HMSet()
+                return not hm or (hm.mode or "none") == "none"
+            end,
             getFrame = function()
                 return ns._hmContainer or (ns._HMEnsureContainer and ns._HMEnsureContainer())
             end,
@@ -9463,6 +9484,10 @@ local function RegisterWithUnlockMode()
         }),
     })
 end
+-- Options-side re-registration seam (the function above is a file-scope local
+-- the options file cannot reach): setting changes that flip an element's
+-- isHidden verdict re-register so an open unlock session updates live.
+ns._RFRegisterUnlock = RegisterWithUnlockMode
 
 -------------------------------------------------------------------------------
 --  Healer Mana Text Display (Extras): one text row per group healer, riding
@@ -10778,7 +10803,7 @@ local function CreatePreviewFrame(index)
     f:Hide()
 
     -- Background
-    local bgc = s.customBgColor
+    local bgc = s.customBgColor or defaults.customBgColor
     local bg = f:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(bgc.r, bgc.g, bgc.b, (s.bgDarkness or 50) / 100)
@@ -11647,7 +11672,7 @@ local function ApplyPreviewData(f, index)
             if cc then
                 f._bg:SetColorTexture(cc.r, cc.g, cc.b, bgA)
             else
-                local bgc = s.customBgColor
+                local bgc = s.customBgColor or defaults.customBgColor
                 f._bg:SetColorTexture(bgc.r, bgc.g, bgc.b, bgA)
             end
         end
@@ -14355,11 +14380,11 @@ end
 -- Registers EUI as a frame provider with any installed, supported tracker.
 -- Inert when none is present. Called once from OnEnable.
 ns._RegisterTrackerProviders = function()
-    -- MiniCC: stable public global MiniCCApi.v1, created at its file load and so
-    -- present by PLAYER_LOGIN whenever MiniCC is enabled.
-    if MiniCCApi and MiniCCApi.v1 and MiniCCApi.v1.RegisterFrameProvider then
+    -- MiniAuras: stable public global MiniAurasApi.v1, created at its file load and so
+    -- present by PLAYER_LOGIN whenever MiniAuras is enabled.
+    if MiniAurasApi and MiniAurasApi.v1 and MiniAurasApi.v1.RegisterFrameProvider then
         pcall(function()
-            MiniCCApi.v1:RegisterFrameProvider({
+            MiniAurasApi.v1:RegisterFrameProvider({
                 Name = "EllesmereUI",
                 GetFrames = ns._CollectTrackerFrames,
                 RegisterRefreshFrames = function(cb) ns._trackerRefreshCb = cb end,
@@ -14634,7 +14659,7 @@ function ERF:OnEnable()
 
 
     -- Expose EUI party frames to external trackers that support a provider
-    -- API (e.g. MiniCC). No-op when none is installed.
+    -- API (e.g. MiniAuras). No-op when none is installed.
     ns._RegisterTrackerProviders()
 
     -- Event frame: register global (non-unit) events

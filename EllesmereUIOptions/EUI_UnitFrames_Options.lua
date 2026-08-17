@@ -1331,10 +1331,8 @@ initFrame:SetScript("OnEvent", function(self)
         local function PreviewPowerColor(fs, contentKey, usePowerColor)
             if not fs or not usePowerColor then return end
             if contentKey == "perpp" or contentKey == "curpp" or contentKey == "curhp_curpp" or contentKey == "perhp_perpp" then
-                -- EUI global power color (player's current power) as the real frame
-                -- uses, not hardcoded blue.
-                local _, pToken = UnitPowerType("player")
-                local info = EllesmereUI.GetPowerColor(pToken or "MANA")
+                local pcR, pcG, pcB = EllesmereUI.ResolveUnitPowerColor("player")
+                local info = pcR and { r = pcR, g = pcG, b = pcB }
                 if info then fs:SetTextColor(info.r, info.g, info.b)
                 else fs:SetTextColor(1, 1, 1) end
             end
@@ -5960,7 +5958,7 @@ initFrame:SetScript("OnEvent", function(self)
                   -- healthClassColored are left exactly as the user had them and come
                   -- back untouched the moment Dynamic Color goes to Off.
                   disabled = function() return SVal("healthColorMode", "none") ~= "none" end,
-                  disabledTooltip = "Dynamic Color is on -- the fill color comes from the unit's health",
+                  disabledTooltip = "Dynamic Color is on -- the fill color comes from the unit's health", rawTooltip = true,
                   getValue = function()
                       local c = SGet("customFillColor")
                       if c then return c.r, c.g, c.b end
@@ -5995,7 +5993,7 @@ initFrame:SetScript("OnEvent", function(self)
                   -- uses the class color, but as the 100% stop of the curve, not as
                   -- this flat choice.
                   disabled = function() return SVal("healthColorMode", "none") ~= "none" end,
-                  disabledTooltip = "Dynamic Color is on -- the fill color comes from the unit's health",
+                  disabledTooltip = "Dynamic Color is on -- the fill color comes from the unit's health", rawTooltip = true,
                   getValue = function()
                       local _, ct = UnitClass("player")
                       if ct and RAID_CLASS_COLORS[ct] then

@@ -1088,12 +1088,31 @@ local function ResolveCDIDToBar(cdID, viewerDefaultBar)
 
     -- Equipment-backed entry: the slot is the only identity it has, so it routes
     -- before every sid probe below (all of which would miss). Memoized like any
-    -- other resolve; the slot map is rebuilt with the rest.
-    if CdidIDReadable(info.equipSlot) then
-        local slotBar = ns._divertedSlotCD[info.equipSlot]
-        if slotBar then
-            _cdidRouteMap[cdID] = slotBar
-            return slotBar
+    -- other resolve; the slot map is rebuilt with the rest. CD/utility viewers
+    -- ONLY: a BUFF-viewer equipment row is a tracked trinket PROC BUFF
+    -- (category EquipSlotTracked), and the slot map is the CD-side preset
+    -- lane -- routing buff rows through it captured proc buffs onto the
+    -- trinket preset's bar, overriding their custom buff bar assignment
+    -- (field report 2026-08-16: worked with the presets absent, captured with
+    -- them present). Buff rows fall through to the sid probes instead: their
+    -- raw linked list carries the proc sid even at rest.
+    if viewerDefaultBar ~= "buffs" then
+        if CdidIDReadable(info.equipSlot) then
+            local slotBar = ns._divertedSlotCD[info.equipSlot]
+            if slotBar then
+                _cdidRouteMap[cdID] = slotBar
+                return slotBar
+            end
+        elseif issecretvalue and issecretvalue(info.equipSlot) then
+            -- Equipment row with its slot UNREADABLE (active in restricted
+            -- content): the sid probes below see the active window's use-spell
+            -- forms and can route -- and PIN via the cdID cache -- the row onto
+            -- whatever bar happens to carry that form (the occasional
+            -- custom->default "trinket jump", same field report). The slot is
+            -- the one stable channel for these rows, so resolve transiently to
+            -- the fallback, uncached, and let the next clean pass route by
+            -- slot.
+            return viewerDefaultBar
         end
     end
 
@@ -5000,9 +5019,9 @@ end
 -- Potential, Potion of Recklessness, health). The preset icon resolves to the best
 -- variant actually in bags (preset.displayOrder, best first) and shows THAT variant's
 -- icon, exact bag count, and tooltip -- 2 Fleeting pots show "2" even with 50 regular
--- ones in the bank of another rank. With the profile-level "Swap Light/Reckless Pots
+-- ones in the bank of another rank. With the profile-level "Swap Combat Potions
 -- When Missing" toggle on, a preset whose own family is fully out of bags resolves the
--- partner family's chain instead. Identity is untouched (frame key, assigned-spell key,
+-- partner families' chains instead. Identity is untouched (frame key, assigned-spell key,
 -- saved settings and active states all stay on the preset's primary item; only the
 -- DISPLAY resolves, so a running swipe survives the icon swapping variants).
 -- Re-resolution is generation-gated: bag events, the options toggle, and profile
@@ -5036,18 +5055,28 @@ do
     end
 
     -- Ordered id list to walk for a preset: own displayOrder, with the partner
-    -- family's appended while the swap toggle is on. Static data, built once
-    -- per preset; the live toggle read just picks which cached list to return.
+    -- families' appended IN swapWith ORDER while the swap toggle is on (list of
+    -- keys; a plain string still works). Static data, built once per preset;
+    -- the live toggle read just picks which cached list to return.
     function PotSwap.Chain(preset)
         if not chains then chains = {} end
         local c = chains[preset]
         if not c then
             c = { own = preset.displayOrder }
-            local partner = preset.swapWith and PresetByKey(preset.swapWith)
-            if partner and partner.displayOrder then
-                local both = {}
-                for i = 1, #preset.displayOrder do both[#both + 1] = preset.displayOrder[i] end
-                for i = 1, #partner.displayOrder do both[#both + 1] = partner.displayOrder[i] end
+            local sw = preset.swapWith
+            if sw then
+                local keys = (type(sw) == "table") and sw or { sw }
+                local both
+                for k = 1, #keys do
+                    local partner = PresetByKey(keys[k])
+                    if partner and partner.displayOrder then
+                        if not both then
+                            both = {}
+                            for i = 1, #preset.displayOrder do both[#both + 1] = preset.displayOrder[i] end
+                        end
+                        for i = 1, #partner.displayOrder do both[#both + 1] = partner.displayOrder[i] end
+                    end
+                end
                 c.both = both
             end
             chains[preset] = c
@@ -5083,8 +5112,10 @@ do
         f._displayCount = count
         if f._displayItemID ~= id then
             f._displayItemID = id
-            local icon = (id == preset.itemID) and preset.icon
-                or (C_Item.GetItemIconByID and C_Item.GetItemIconByID(id))
+            -- preset.icon is PICKER-ONLY art (the current-tier pot): every resolved
+            -- variant, the primary included, paints its own item art so the icon
+            -- always matches the counted/tooltipped variant.
+            local icon = (C_Item.GetItemIconByID and C_Item.GetItemIconByID(id))
                 or preset.icon
             if f._tex then f._tex:SetTexture(icon) end
         end
@@ -7942,7 +7973,7 @@ local function CollectAndReanchor()
                 if ns.QueueReanchor then ns.QueueReanchor() end
             end
         end
-        -- Automatic base-bar materialization (once per spec per session):
+        -- Automatic base-bar materialization (once per spec+layout per session):
         -- untouched default-bar spells render through the frames-as-truth fallback
         -- without ever being recorded in assignedSpells, so export strings shipped
         -- incomplete stores and the import ghost pass hid exactly those spells on
@@ -7952,11 +7983,19 @@ local function CollectAndReanchor()
         -- ghosting is pending (Reseed self-guards too), and buff-family bars
         -- excluded (cdUtilOnly: picker-authoritative). The session flag is wiped
         -- on talent/loadout changes so newly learned spells re-materialize.
+        -- Keyed by the active BLIZZARD CDM layout too, not spec alone: a spell
+        -- only tracked on a preset (e.g. an ST preset's Cobra Shot) that the
+        -- user switches to AFTER the first reseed of this spec was invisible
+        -- then and would otherwise spill over -- landing at Blizzard's raw
+        -- layoutIndex position instead of its assigned slot -- for the rest of
+        -- the session.
         if ns.ReseedAssignedSpellsFromLiveIcons and prof
            and prof._barFilterModelV6 and not prof._importGhostMode then
             ns._reseededSpecsSession = ns._reseededSpecsSession or {}
-            if not ns._reseededSpecsSession[specKey] then
-                ns._reseededSpecsSession[specKey] = true
+            local layoutID = ns.GetActiveCDMLayoutID and ns.GetActiveCDMLayoutID()
+            local reseedKey = specKey .. "|" .. tostring(layoutID or "?")
+            if not ns._reseededSpecsSession[reseedKey] then
+                ns._reseededSpecsSession[reseedKey] = true
                 ns.ReseedAssignedSpellsFromLiveIcons(true)
                 -- NO drop pass here, EVER (field data loss, 8.8.7 -> fixed
                 -- 8.8.8): this tail runs synchronously inside the spec-swap
@@ -9181,6 +9220,20 @@ function ns.SetupViewerHooks()
             C_Timer.After(0.4, function()
                 if ns.RequestCDMDropPass then ns.RequestCDMDropPass("settings") end
             end)
+        end, cdmSettingsOwner)
+        -- Blizzard's own "layout data changed" signal (SetHasPendingChanges ->
+        -- NotifyListeners), fired for BOTH switching to a different saved
+        -- layout and editing the active one in place. The auto-reseed gate
+        -- below is keyed by layout id, which misses the in-place case: adding
+        -- a spell to the layout you're already on doesn't change that id, so
+        -- the spell would otherwise never get an assignedSpells slot. Wipe the
+        -- whole session table, same as the talent/loadout invalidations --
+        -- reseed is add-only and self-guarded, so clearing an unrelated
+        -- spec's flag just costs one harmless extra pass next time it's
+        -- visited. The OnHide handler above still owns queuing the reanchor
+        -- that actually re-runs the reseed once the panel settles.
+        EventRegistry:RegisterCallback("CooldownViewerSettings.OnDataChanged", function()
+            if ns._reseededSpecsSession then wipe(ns._reseededSpecsSession) end
         end, cdmSettingsOwner)
     end
 
