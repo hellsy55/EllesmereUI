@@ -170,11 +170,10 @@ end
 -- on existing bindings to stay unfiltered; toggles apply going forward.
 EllesmereUI.RegisterMigration({
     id          = "clickcast_macro_hover_reaction_v1",
-    scope       = "profile",
+    scope       = "global",
     description = "Keep existing hovercast macro bindings unfiltered now that Friendly/Enemy applies to them",
     body        = function(ctx)
-        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
-        local cc = rf and rf.clickCast
+        local cc = ctx.db.clickCast
         if type(cc) ~= "table" then return end
         local function seed(list)
             if type(list) ~= "table" then return end
@@ -192,64 +191,48 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
--- Frame-only spell bindings historically ignored the Friendly/Enemy toggles.
--- Seed both flags before those existing bindings begin honoring the toggles so
--- their behavior remains unrestricted until the user changes the setting.
+-- Frame spell and item bindings historically ignored the Friendly/Enemy
+-- toggles. Seed frame-only bindings as unrestricted, and split legacy
+-- "Frames + Hovercast" spell bindings so their separate reaction behavior is
+-- preserved.
 EllesmereUI.RegisterMigration({
     id          = "clickcast_frame_spell_reaction_v1",
-    scope       = "profile",
-    description = "Preserve unrestricted frame-only spell bindings when reaction toggles become active",
+    scope       = "global",
+    description = "Preserve legacy frame click-cast reaction behavior when reaction toggles become active",
     body        = function(ctx)
-        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
-        local cc = rf and rf.clickCast
+        local cc = ctx.db.clickCast
         if type(cc) ~= "table" then return end
-        local function seed(list)
-            if type(list) ~= "table" then return end
-            for _, b in ipairs(list) do
-                if type(b) == "table" and b.type == "spell" and not b.hovercast then
-                    b.hoverFriendly = true
-                    b.hoverEnemy    = true
-                end
-            end
-        end
-        seed(cc.globals)
-        if type(cc.specs) == "table" then
-            for _, list in pairs(cc.specs) do seed(list) end
-        end
-    end,
-})
-
--- Before frame casts honored Friendly/Enemy, a "Frames + Hovercast" spell
--- could have a reaction filter for hovercast while remaining unrestricted on
--- frames. Preserve that split behavior as two bindings now that both paths
--- share the same checkbox fields.
-EllesmereUI.RegisterMigration({
-    id          = "clickcast_frame_spell_reaction_v2",
-    scope       = "profile",
-    description = "Split legacy Frames + Hovercast spells to preserve their separate reaction behavior",
-    body        = function(ctx)
-        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
-        local cc = rf and rf.clickCast
-        if type(cc) ~= "table" then return end
-        local function split(list)
+        local function migrate(list)
             if type(list) ~= "table" then return end
             local count = #list
             for i = 1, count do
                 local b = list[i]
-                if type(b) == "table" and b.type == "spell" and b.hovercast == "both" then
-                    local frameBinding = {}
-                    for key, value in pairs(b) do frameBinding[key] = value end
-                    frameBinding.hovercast = false
-                    frameBinding.hoverFriendly = true
-                    frameBinding.hoverEnemy = true
-                    b.hovercast = true
-                    list[#list + 1] = frameBinding
+                if type(b) == "table" and (b.type == "spell" or b.type == "item") then
+                    -- Both flags previously meant unrestricted. They now mean
+                    -- inactive, so preserve the old behavior before enabling
+                    -- the new disable state.
+                    if b.hoverFriendly == false and b.hoverEnemy == false then
+                        b.hoverFriendly = true
+                        b.hoverEnemy = true
+                    end
+                    if not b.hovercast then
+                        b.hoverFriendly = true
+                        b.hoverEnemy    = true
+                    elseif b.hovercast == "both" then
+                        local frameBinding = {}
+                        for key, value in pairs(b) do frameBinding[key] = value end
+                        frameBinding.hovercast = false
+                        frameBinding.hoverFriendly = true
+                        frameBinding.hoverEnemy = true
+                        b.hovercast = true
+                        list[#list + 1] = frameBinding
+                    end
                 end
             end
         end
-        split(cc.globals)
+        migrate(cc.globals)
         if type(cc.specs) == "table" then
-            for _, list in pairs(cc.specs) do split(list) end
+            for _, list in pairs(cc.specs) do migrate(list) end
         end
     end,
 })
