@@ -2298,6 +2298,21 @@ ns.ResolveUnitNameColor = function(unit)
     return nil
 end
 
+-- Shared secret-class-color recovery for identity-restricted units (ToT, focus-target):
+-- the user's custom color for a matching group member, else Blizzard's shade. Used by
+-- ResolveBgClassColor and ApplyClassColor; ResolveUnitNameColor does NOT use this, since
+-- its result also feeds the [eui-tgtcol] hex-escape tag, which cannot accept a secret.
+-- Returns ok, r, g, b -- ok is a PLAIN boolean, r/g/b may be SECRET, only safe as setter args.
+local function ResolveRestrictedClassColor(unit, class)
+    local ok, r, g, b = EllesmereUI.GetClassColorForRestrictedUnit(unit, class)
+    if ok then return true, r, g, b end
+    if C_ClassColor and C_ClassColor.GetClassColor then
+        local c = C_ClassColor.GetClassColor(class)
+        if c then return true, c.r, c.g, c.b end
+    end
+    return false
+end
+
 -- Background class-color source, enemy-aware. UnitClass() reports WARRIOR for NPCs
 -- rather than nil, so a bare lookup paints every mob Warrior tan. Players (and AI
 -- party members) keep EllesmereUI.GetClassColor (custom colors + Class Color Darken
@@ -2311,15 +2326,7 @@ ns.ResolveBgClassColor = function(classUnit)
     if UnitIsPlayer(classUnit) or (UnitInPartyIsAI and UnitInPartyIsAI(classUnit)) then
         local _, ct = UnitClass(classUnit)
         if issecretvalue(ct) then
-            -- Same recovery as ApplyClassColor/UF_SecretSafeHealthColor: the user's
-            -- custom color for a matching group member, else Blizzard's shade.
-            local ok, r, g, b = EllesmereUI.GetClassColorForRestrictedUnit(classUnit, ct)
-            if ok then return true, r, g, b end
-            if C_ClassColor and C_ClassColor.GetClassColor then
-                local c = C_ClassColor.GetClassColor(ct)
-                if c then return true, c.r, c.g, c.b end
-            end
-            return false
+            return ResolveRestrictedClassColor(classUnit, ct)
         end
         local cc = ct and EllesmereUI.GetClassColor(ct)
         if cc then return true, cc.r, cc.g, cc.b end
@@ -3172,13 +3179,8 @@ local function ApplyClassColor(fs, unit, useClassColor, customR, customG, custom
         if UnitIsPlayer(unit) or (UnitInPartyIsAI and UnitInPartyIsAI(unit)) then
             local _, class = UnitClass(unit)
             if issecretvalue(class) then
-                local ok, sr, sg, sb = EllesmereUI.GetClassColorForRestrictedUnit(unit, class)
-                if ok then
-                    fs:SetTextColor(sr, sg, sb); return
-                elseif C_ClassColor and C_ClassColor.GetClassColor then
-                    local c = C_ClassColor.GetClassColor(class)
-                    if c then fs:SetTextColor(c.r, c.g, c.b); return end
-                end
+                local ok, sr, sg, sb = ResolveRestrictedClassColor(unit, class)
+                if ok then fs:SetTextColor(sr, sg, sb); return end
             end
         end
     end
