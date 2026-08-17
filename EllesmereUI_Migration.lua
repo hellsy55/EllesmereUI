@@ -164,6 +164,34 @@ end
 --  Registered migrations
 --------------------------------------------------------------------------------
 
+-- Hovercast macro bindings ignored their Friendly/Enemy toggles (filter applied
+-- only to spell bindings). Now honored: creation defaults (hoverFriendly=true,
+-- hoverEnemy=false) would silently break enemy macros, so seed both flags true
+-- on existing bindings to stay unfiltered; toggles apply going forward.
+EllesmereUI.RegisterMigration({
+    id          = "clickcast_macro_hover_reaction_v1",
+    scope       = "profile",
+    description = "Keep existing hovercast macro bindings unfiltered now that Friendly/Enemy applies to them",
+    body        = function(ctx)
+        local rf = ctx.profile.addons and ctx.profile.addons.EllesmereUIRaidFrames
+        local cc = rf and rf.clickCast
+        if type(cc) ~= "table" then return end
+        local function seed(list)
+            if type(list) ~= "table" then return end
+            for _, b in ipairs(list) do
+                if type(b) == "table" and b.type == "macro" and b.hovercast then
+                    b.hoverFriendly = true
+                    b.hoverEnemy    = true
+                end
+            end
+        end
+        seed(cc.globals)
+        if type(cc.specs) == "table" then
+            for _, list in pairs(cc.specs) do seed(list) end
+        end
+    end,
+})
+
 -- Frame spell and item bindings historically ignored the Friendly/Enemy
 -- toggles, as did Hovercast item bindings. Seed those paths as unrestricted,
 -- and split legacy "Frames + Hovercast" bindings so their separate reaction
