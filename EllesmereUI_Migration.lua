@@ -2251,7 +2251,7 @@ EllesmereUI.RegisterMigration({
             "bagHideEmptyCategories", "bagSidebarCollapsed", "bankSidebarCollapsed",
             "bagShowPinnedItems", "bagShowRecentItems", "bagPinnedInOneBag",
             "bagRecentInOneBag", "bagShowPinRecentTips", "bagShowSortIcon",
-            "bagHideRandomize", "bagDefaultOneBag", "bagNestByExpansion",
+            "bagHideRandomize", "bagDefaultOneBag", "bagNestByExpansion", "bagArmoryGroupBySlot",
             "bagHideOneBagWarning", "bagHideAddCategory", "bagMoveNoShift",
             "enableGoldTracking", "detachReagentBag", "enhancedBags",
             "bagCategoryState", "bagCategoryOrder", "bagDisabledCategories",
