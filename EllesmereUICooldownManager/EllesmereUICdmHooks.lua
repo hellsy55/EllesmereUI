@@ -7973,7 +7973,7 @@ local function CollectAndReanchor()
                 if ns.QueueReanchor then ns.QueueReanchor() end
             end
         end
-        -- Automatic base-bar materialization (once per spec per session):
+        -- Automatic base-bar materialization (once per spec+layout per session):
         -- untouched default-bar spells render through the frames-as-truth fallback
         -- without ever being recorded in assignedSpells, so export strings shipped
         -- incomplete stores and the import ghost pass hid exactly those spells on
@@ -7983,11 +7983,19 @@ local function CollectAndReanchor()
         -- ghosting is pending (Reseed self-guards too), and buff-family bars
         -- excluded (cdUtilOnly: picker-authoritative). The session flag is wiped
         -- on talent/loadout changes so newly learned spells re-materialize.
+        -- Keyed by the active BLIZZARD CDM layout too, not spec alone: a spell
+        -- only tracked on a preset (e.g. an ST preset's Cobra Shot) that the
+        -- user switches to AFTER the first reseed of this spec was invisible
+        -- then and would otherwise spill over -- landing at Blizzard's raw
+        -- layoutIndex position instead of its assigned slot -- for the rest of
+        -- the session.
         if ns.ReseedAssignedSpellsFromLiveIcons and prof
            and prof._barFilterModelV6 and not prof._importGhostMode then
             ns._reseededSpecsSession = ns._reseededSpecsSession or {}
-            if not ns._reseededSpecsSession[specKey] then
-                ns._reseededSpecsSession[specKey] = true
+            local layoutID = ns.GetActiveCDMLayoutID and ns.GetActiveCDMLayoutID()
+            local reseedKey = specKey .. "|" .. tostring(layoutID or "?")
+            if not ns._reseededSpecsSession[reseedKey] then
+                ns._reseededSpecsSession[reseedKey] = true
                 ns.ReseedAssignedSpellsFromLiveIcons(true)
                 -- NO drop pass here, EVER (field data loss, 8.8.7 -> fixed
                 -- 8.8.8): this tail runs synchronously inside the spec-swap

@@ -8403,6 +8403,20 @@ local function _IsUsableSID(id)
     return id > 0 and id == math.floor(id)
 end
 
+-- Active BLIZZARD CDM layout id (the user's "preset"), not to be confused with
+-- ns.GetActiveLayoutName (EUI's own account-wide spell-layout system). Used to
+-- scope the automatic-reseed session gate by layout as well as spec: a spell
+-- only tracked on a preset the user switches to LATER in the session was
+-- invisible at the first reseed and must still get its own materialize pass.
+function ns.GetActiveCDMLayoutID()
+    if not (CooldownViewerSettings and CooldownViewerSettings.GetLayoutManager) then return nil end
+    local okLM, layoutManager = pcall(CooldownViewerSettings.GetLayoutManager, CooldownViewerSettings)
+    if not okLM or not layoutManager or not layoutManager.GetActiveLayoutID then return nil end
+    local okID, layoutID = pcall(layoutManager.GetActiveLayoutID, layoutManager)
+    if not okID then return nil end
+    return layoutID
+end
+
 -- GroupBuff (category 4) hidden check: getter-only on the layout manager, never
 -- WriteHiddenGroupBuffsToLayout. No active layout yet (fresh install, never
 -- customized) is not "nothing hidden" evidence -- treated as unreachable and kept
