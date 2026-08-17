@@ -14376,11 +14376,11 @@ end
 -- Registers EUI as a frame provider with any installed, supported tracker.
 -- Inert when none is present. Called once from OnEnable.
 ns._RegisterTrackerProviders = function()
-    -- MiniCC: stable public global MiniCCApi.v1, created at its file load and so
-    -- present by PLAYER_LOGIN whenever MiniCC is enabled.
-    if MiniCCApi and MiniCCApi.v1 and MiniCCApi.v1.RegisterFrameProvider then
+    -- MiniAuras: stable public global MiniAurasApi.v1, created at its file load and so
+    -- present by PLAYER_LOGIN whenever MiniAuras is enabled.
+    if MiniAurasApi and MiniAurasApi.v1 and MiniAurasApi.v1.RegisterFrameProvider then
         pcall(function()
-            MiniCCApi.v1:RegisterFrameProvider({
+            MiniAurasApi.v1:RegisterFrameProvider({
                 Name = "EllesmereUI",
                 GetFrames = ns._CollectTrackerFrames,
                 RegisterRefreshFrames = function(cb) ns._trackerRefreshCb = cb end,
@@ -14655,7 +14655,7 @@ function ERF:OnEnable()
 
 
     -- Expose EUI party frames to external trackers that support a provider
-    -- API (e.g. MiniCC). No-op when none is installed.
+    -- API (e.g. MiniAuras). No-op when none is installed.
     ns._RegisterTrackerProviders()
 
     -- Event frame: register global (non-unit) events
