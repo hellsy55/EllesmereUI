@@ -428,22 +428,48 @@ local function IsGearOnlyGroup(groupName)
     return true
 end
 
+-- Constants hoisted out of the per-item path (built once at load).
+local ARMORY_IDS = {
+    wand     = (Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Wand) or 19,
+    bow      = (Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Bow) or 2,
+    gun      = (Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Gun) or 3,
+    crossbow = (Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Crossbow) or 18,
+    cosmetic = Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Cosmetic,
+}
+-- equipSlot -> { sortKey, Blizzard global-string name for the label }
+local ARMORY_ARMOR_SLOTS = {
+    INVTYPE_HEAD      = { 10, "INVTYPE_HEAD" },
+    INVTYPE_NECK      = { 20, "INVTYPE_NECK" },
+    INVTYPE_SHOULDER  = { 30, "INVTYPE_SHOULDER" },
+    INVTYPE_CLOAK     = { 40, "INVTYPE_CLOAK" },
+    INVTYPE_CHEST     = { 50, "INVTYPE_CHEST" },
+    INVTYPE_ROBE      = { 50, "INVTYPE_CHEST" },
+    INVTYPE_BODY      = { 60, "INVTYPE_BODY" },
+    INVTYPE_TABARD    = { 70, "INVTYPE_TABARD" },
+    INVTYPE_WRIST     = { 80, "INVTYPE_WRIST" },
+    INVTYPE_HAND      = { 90, "INVTYPE_HAND" },
+    INVTYPE_WAIST     = { 100, "INVTYPE_WAIST" },
+    INVTYPE_LEGS      = { 110, "INVTYPE_LEGS" },
+    INVTYPE_FEET      = { 120, "INVTYPE_FEET" },
+    INVTYPE_FINGER    = { 140, "INVTYPE_FINGER" },
+    INVTYPE_TRINKET   = { 150, "INVTYPE_TRINKET" },
+}
+
+-- Sort key + label for one item's equip slot. Item facts are fetched lazily
+-- (GetItemInfoInstant, local client DB) and cached on the slot table -- the
+-- refresh pre-cache deliberately does not fill them, so this runs only for
+-- gear items and only while Group Armory by Slot is on.
 local function GetArmorySlotBucket(data)
     local equipSlot = data._equipSlot
     local classID = data._classID
     local subclassID = data._subclassID
     if data.itemLink and classID == nil then
+        local _
         _, _, _, equipSlot, _, classID, subclassID = GetItemInfoInstant(data.itemLink)
+        data._equipSlot, data._classID, data._subclassID = equipSlot, classID, subclassID
     end
 
-    local W = Enum.ItemWeaponSubclass or {}
-    local wandID = W.Wand or 19
-    local bowID = W.Bow or 2
-    local gunID = W.Gun or 3
-    local crossbowID = W.Crossbow or 18
-    local cosmeticID = Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Cosmetic
-
-    if classID == IC_ARMOR and cosmeticID and subclassID == cosmeticID then
+    if classID == IC_ARMOR and ARMORY_IDS.cosmetic and subclassID == ARMORY_IDS.cosmetic then
         return 130, EllesmereUI.L("Cosmetic")
     end
 
@@ -454,10 +480,10 @@ local function GetArmorySlotBucket(data)
     end
 
     if classID == IC_WEAPON then
-        if subclassID == wandID then
+        if subclassID == ARMORY_IDS.wand then
             return 170, EllesmereUI.L("1H")
         end
-        if subclassID == bowID or subclassID == gunID or subclassID == crossbowID then
+        if subclassID == ARMORY_IDS.bow or subclassID == ARMORY_IDS.gun or subclassID == ARMORY_IDS.crossbow then
             return 190, _G["INVTYPE_RANGED"] or EllesmereUI.L("Ranged")
         end
         if equipSlot == "INVTYPE_2HWEAPON" then
@@ -471,28 +497,9 @@ local function GetArmorySlotBucket(data)
         end
     end
 
-    local ARMOR_SLOTS = {
-        INVTYPE_HEAD      = { 10, "INVTYPE_HEAD" },
-        INVTYPE_NECK      = { 20, "INVTYPE_NECK" },
-        INVTYPE_SHOULDER  = { 30, "INVTYPE_SHOULDER" },
-        INVTYPE_CLOAK     = { 40, "INVTYPE_CLOAK" },
-        INVTYPE_CHEST     = { 50, "INVTYPE_CHEST" },
-        INVTYPE_ROBE      = { 50, "INVTYPE_CHEST" },
-        INVTYPE_BODY      = { 60, "INVTYPE_BODY" },
-        INVTYPE_TABARD    = { 70, "INVTYPE_TABARD" },
-        INVTYPE_WRIST     = { 80, "INVTYPE_WRIST" },
-        INVTYPE_HAND      = { 90, "INVTYPE_HAND" },
-        INVTYPE_WAIST     = { 100, "INVTYPE_WAIST" },
-        INVTYPE_LEGS      = { 110, "INVTYPE_LEGS" },
-        INVTYPE_FEET      = { 120, "INVTYPE_FEET" },
-        INVTYPE_FINGER    = { 140, "INVTYPE_FINGER" },
-        INVTYPE_TRINKET   = { 150, "INVTYPE_TRINKET" },
-    }
-
-    local entry = ARMOR_SLOTS[equipSlot]
+    local entry = ARMORY_ARMOR_SLOTS[equipSlot]
     if entry then
-        local label = _G[entry[2]] or equipSlot
-        return entry[1], label
+        return entry[1], _G[entry[2]] or equipSlot
     end
 
     return 999, EllesmereUI.L("Other")
@@ -5044,10 +5051,10 @@ function EUI_Bags:RefreshInventory()
                 -- Pre-cache per-item data for RenderButton (zero API calls at render time)
                 if itemLink then
                     local _, _, q, ilvl, _, _, _, _, _, _, _, _, _, bindType = GetItemInfo(itemLink)
-                    local _, _, _, equipSlot, _, classID, subclassID = GetItemInfoInstant(itemLink)
-                    d._equipSlot = equipSlot
-                    d._classID = classID
-                    d._subclassID = subclassID
+                    -- Slot-grouping fields (_equipSlot/_classID/_subclassID) are NOT
+                    -- pre-cached here: GetArmorySlotBucket fetches them lazily, only
+                    -- for gear items and only while Group Armory by Slot is on, so the
+                    -- feature costs nothing on the refresh path when disabled.
                     d._giQuality = q
                     d._giIlvl = ilvl
                     d._giBindType = bindType
