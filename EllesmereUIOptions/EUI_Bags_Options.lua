@@ -32,6 +32,15 @@ initFrame:SetScript("OnEvent", function(self)
             local y = yOffset
             local h, _
 
+            local function ResetAndRefreshBagLayout()
+                local bags = _G.EUI_Bags
+                if not bags then return end
+                bags._asCols = nil
+                bags._asMaxGridW = nil
+                bags._asMaxH = nil
+                if bags.RefreshInventory then bags:RefreshInventory() end
+            end
+
             -- Reposition info label
             do
                 local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("bags")) or "Fonts\\FRIZQT__.TTF"
@@ -837,8 +846,9 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Group Armory by Slot (left column only)
-            _, h = W:DualRow(parent, y,
+            -- Group Armory by Slot (+ inline cog: Compact Slot Groups)
+            local armoryRow
+            armoryRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Group Armory by Slot",
                   tooltip="In The Armory and the Weapons / Trinkets, Armor, and Item Set Gear category views, group items under equip-slot sub-headers (Head, Shoulders, Chest, Cosmetic, ...). Does not add sidebar views.",
                   disabled=function()
@@ -849,10 +859,67 @@ initFrame:SetScript("OnEvent", function(self)
                   getValue=function() return db.profile.bagArmoryGroupBySlot == true end,
                   setValue=function(v)
                       db.profile.bagArmoryGroupBySlot = v and true or false
-                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                      ResetAndRefreshBagLayout()
+                      EllesmereUI:RefreshPage()
                   end },
                 { type="label", text="" }
             ); y = y - h
+
+            -- Inline cog for Group Armory by Slot: compact layout
+            if not EllesmereUI._prebuilding then
+                local _, armoryCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Armory Slot Group Options",
+                    rows = {
+                        { type="toggle", label="Compact Slot Groups",
+                          tooltip="Place smaller Armory slot groups beside each other and fill the unused end of each row with empty-slot blocks. Large groups still use full rows.",
+                          get=function() return db.profile.bagCompactArmorySlotGroups == true end,
+                          set=function(v)
+                              db.profile.bagCompactArmorySlotGroups = v and true or false
+                              ResetAndRefreshBagLayout()
+                          end },
+                    },
+                })
+                local leftRgn = armoryRow._leftRegion
+                local armoryCog = CreateFrame("Button", nil, leftRgn)
+                armoryCog:SetSize(26, 26)
+                armoryCog:SetPoint("RIGHT", leftRgn._control, "LEFT", -8, 0)
+                armoryCog:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+                local armoryCogTex = armoryCog:CreateTexture(nil, "OVERLAY")
+                armoryCogTex:SetAllPoints()
+                armoryCogTex:SetTexture(EllesmereUI.COGS_ICON)
+                local function ArmoryCogOff()
+                    local dc = db.profile.bagDisabledCategories
+                    return db.profile.bagArmoryGroupBySlot ~= true or (dc and dc["Armor"] == true)
+                end
+                local function ArmoryCogRequirement()
+                    local dc = db.profile.bagDisabledCategories
+                    return (dc and dc["Armor"] == true) and "Armor" or "Group Armory by Slot"
+                end
+                armoryCog:SetAlpha(ArmoryCogOff() and 0.15 or 0.4)
+                armoryCog:SetScript("OnEnter", function(self)
+                    if ArmoryCogOff() then
+                        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.DisabledTooltip(ArmoryCogRequirement()))
+                    else self:SetAlpha(0.7) end
+                end)
+                armoryCog:SetScript("OnLeave", function(self)
+                    self:SetAlpha(ArmoryCogOff() and 0.15 or 0.4)
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+                armoryCog:SetScript("OnClick", function(self)
+                    if not ArmoryCogOff() then armoryCogShow(self) end
+                end)
+                local armoryBlock = CreateFrame("Frame", nil, armoryCog)
+                armoryBlock:SetAllPoints(); armoryBlock:SetFrameLevel(armoryCog:GetFrameLevel() + 10); armoryBlock:EnableMouse(true)
+                armoryBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(armoryCog, EllesmereUI.DisabledTooltip(ArmoryCogRequirement()))
+                end)
+                armoryBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                if ArmoryCogOff() then armoryBlock:Show() else armoryBlock:Hide() end
+                EllesmereUI.RegisterWidgetRefresh(function()
+                    if ArmoryCogOff() then armoryCog:SetAlpha(0.15); armoryBlock:Show()
+                    else armoryCog:SetAlpha(0.4); armoryBlock:Hide() end
+                end)
+            end
 
             _, h = W:Spacer(parent, y, 20); y = y - h
             return math.abs(y)
