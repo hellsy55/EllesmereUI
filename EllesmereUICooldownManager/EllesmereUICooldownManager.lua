@@ -8006,8 +8006,17 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                             local racialBlocked = anyRacialOwned and ALL_RACIAL_SPELLS[sid]
                             if not ghosted and not racialBlocked and not (owner and owner ~= barData.key) then
                                 -- Store the BASE form, matching what the options normalize pass writes -- otherwise this pass persists the talent-override form and the two writers diverge (exports could ship either).
+                                -- Only trust that substitution when Blizzard's OWN cooldownInfo already
+                                -- recorded a base/display split for THIS icon (fc.baseSpellID ~= fc.resolvedSid,
+                                -- e.g. a Wither slot whose base is Immolate). GetBaseSpell can also tie
+                                -- together spells with no override relationship at all -- field-confirmed
+                                -- for Cobra Shot -> Arcane Shot, and #842 saw the same API do it to SV Kill
+                                -- Command -- and substituting on that spurious tie stores an id the live
+                                -- spell never actually shares a slot with, orphaning it as a permanent spillover.
                                 local nsid = sid
-                                if C_Spell and C_Spell.GetBaseSpell then
+                                if C_Spell and C_Spell.GetBaseSpell
+                                   and fc and fc.baseSpellID and fc.resolvedSid
+                                   and fc.baseSpellID ~= fc.resolvedSid then
                                     local b = C_Spell.GetBaseSpell(sid)
                                     if b and b > 0 then nsid = b end
                                 end
