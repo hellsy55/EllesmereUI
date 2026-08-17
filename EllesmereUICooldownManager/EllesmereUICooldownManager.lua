@@ -9276,6 +9276,10 @@ function ECME:OnEnable()
             if CheckCDMDataLoaded() then
                 self:UnregisterAllEvents()
                 self:SetScript("OnEvent", nil)
+                -- SetupViewerHooks' own 0.2/1/3/6s reanchor retries can all fire before
+                -- Blizzard's data actually becomes ready on a slow login and never try
+                -- again. Catch up now.
+                if ns.QueueReanchor then ns.QueueReanchor() end
             end
         end)
     end

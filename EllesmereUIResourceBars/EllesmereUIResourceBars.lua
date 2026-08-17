@@ -7452,9 +7452,15 @@ end
 -- equality test rejects real stops. Blizzard's own CastingBarFrame matches a
 -- castID for plain casts only and accepts any channel/empower stop, which is
 -- what OnEmpowerStop below already does.
+
+-- A channel that gets instantly restarted can have this STOP event arrive
+-- after the new channel's START. Check if a channel is still active before
+-- hiding, so a late stop for an already-replaced channel is ignored.
+
 local function OnChannelStop()
     if not castBarFrame then return end
     if not castBarFrame._channeling then return end
+	if UnitChannelInfo("player") then return end
     castBarFrame._channeling = false
     castBarFrame._castID = nil
     ns.ShowIdleCastBar()
