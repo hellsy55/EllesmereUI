@@ -437,32 +437,21 @@ end
 local function GetActiveBindings()
     local cc = GetClickCastDB()
     if not cc or not cc.enabled then return {} end
-    local result, usedKeys, specBindings, specReactions = {}, {}, {}, {}
+    local result, usedKeys, specBindings = {}, {}, {}
     for _, b in ipairs(GetSpecBindings()) do
         if IsBindingActive(b) and b.key and MatchesGroupCtx(b) then
             result[#result + 1] = b
             specBindings[#specBindings + 1] = b
             usedKeys[b.key] = true
-            if b.type == "spell" then
-                local reaction = ns.CC_GetBindingUnitType(b)
-                if reaction ~= "both" then
-                    specReactions[b.key] = specReactions[b.key] or {}
-                    specReactions[b.key][reaction] = true
-                end
-            end
         end
     end
     for _, b in ipairs(cc.globals) do
         local keepGlobal = not usedKeys[b.key]
         if not keepGlobal then
-            local reaction = b.type == "spell" and ns.CC_GetBindingUnitType(b) or nil
-            local reactions = specReactions[b.key]
-            if reaction and reaction ~= "both" and not (reactions and reactions[reaction]) then
-                for _, specBinding in ipairs(specBindings) do
-                    if ns.CC_AreComplementarySpellBindings(specBinding, b) then
-                        keepGlobal = true
-                        break
-                    end
+            for _, specBinding in ipairs(specBindings) do
+                if ns.CC_AreComplementaryReactionBindings(specBinding, b) then
+                    keepGlobal = true
+                    break
                 end
             end
         end

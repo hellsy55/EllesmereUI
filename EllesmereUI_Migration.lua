@@ -164,37 +164,10 @@ end
 --  Registered migrations
 --------------------------------------------------------------------------------
 
--- Hovercast macro bindings ignored their Friendly/Enemy toggles (filter applied
--- only to spell bindings). Now honored: creation defaults (hoverFriendly=true,
--- hoverEnemy=false) would silently break enemy macros, so seed both flags true
--- on existing bindings to stay unfiltered; toggles apply going forward.
-EllesmereUI.RegisterMigration({
-    id          = "clickcast_macro_hover_reaction_v1",
-    scope       = "global",
-    description = "Keep existing hovercast macro bindings unfiltered now that Friendly/Enemy applies to them",
-    body        = function(ctx)
-        local cc = ctx.db.clickCast
-        if type(cc) ~= "table" then return end
-        local function seed(list)
-            if type(list) ~= "table" then return end
-            for _, b in ipairs(list) do
-                if type(b) == "table" and b.type == "macro" and b.hovercast then
-                    b.hoverFriendly = true
-                    b.hoverEnemy    = true
-                end
-            end
-        end
-        seed(cc.globals)
-        if type(cc.specs) == "table" then
-            for _, list in pairs(cc.specs) do seed(list) end
-        end
-    end,
-})
-
 -- Frame spell and item bindings historically ignored the Friendly/Enemy
--- toggles. Seed frame-only bindings as unrestricted, and split legacy
--- "Frames + Hovercast" spell bindings so their separate reaction behavior is
--- preserved.
+-- toggles, as did Hovercast item bindings. Seed those paths as unrestricted,
+-- and split legacy "Frames + Hovercast" bindings so their separate reaction
+-- behavior is preserved.
 EllesmereUI.RegisterMigration({
     id          = "clickcast_frame_spell_reaction_v1",
     scope       = "global",
@@ -215,7 +188,10 @@ EllesmereUI.RegisterMigration({
                         b.hoverFriendly = true
                         b.hoverEnemy = true
                     end
-                    if not b.hovercast then
+                    if b.type == "item" and b.hovercast then
+                        b.hoverFriendly = true
+                        b.hoverEnemy = true
+                    elseif not b.hovercast then
                         b.hoverFriendly = true
                         b.hoverEnemy    = true
                     elseif b.hovercast == "both" then
