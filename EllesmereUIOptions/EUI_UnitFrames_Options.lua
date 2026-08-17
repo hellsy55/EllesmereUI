@@ -10751,6 +10751,17 @@ initFrame:SetScript("OnEvent", function(self)
                     if ns.PAB_ImportBM2Filters then ns.PAB_ImportBM2Filters() end
                     local ps = UNIT_DB_MAP[selectedUnit]()
                     local ALL_KEY, DUR_KEY = "__allBuffs", "__hasDuration"
+                    -- Hovering a dimmed Show box explains the dim (the lane is inert
+                    -- while a broad mode already shows everything), same wording as
+                    -- the Debuff Filter.
+                    local lockedTip = EllesmereUI.L("All Buffs or Has Duration is selected, so every buff already shows. Use the red Hide box to exclude these instead.")
+                    -- Any Show-lane filter, or a direct Extra Spell, counts as a
+                    -- content source once neither broad mode is on.
+                    local function OtherContent()
+                        if ps.buffFilters and next(ps.buffFilters) then return true end
+                        if ps.buffSpells and #ps.buffSpells > 0 then return true end
+                        return false
+                    end
                     local function FilterItems()
                         local items = {
                             { isTopAction = true, label = "Edit Filters", onClick = function()
@@ -10819,11 +10830,12 @@ initFrame:SetScript("OnEvent", function(self)
                         end)
                         for i = 1, #sorted do
                             items[#items + 1] = { key = sorted[i].id, label = sorted[i].name,
-                                dual = true, showLockedFn = BroadOn }
+                                dual = true, showLockedFn = BroadOn, showLockedTooltip = lockedTip }
                         end
                         return items
                     end
                     if ns.UF_EnsurePlayerAuraLanes then ns.UF_EnsurePlayerAuraLanes(ps) end
+                    local warnClosed
                     cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                         rgn, 210, rgn:GetFrameLevel() + 2,
                         FilterItems,
@@ -10837,19 +10849,12 @@ initFrame:SetScript("OnEvent", function(self)
                             return ps.buffFilters and ps.buffFilters[k] == true
                         end,
                         function(k, v, neg)
-                            -- No-empty rule (Player Aura Bars parity): the frame's
-                            -- buff filter always keeps a content source. Sources
-                            -- besides the broad modes: Show-lane filters + direct
-                            -- spells.
-                            local function OtherContent()
-                                if ps.buffFilters and next(ps.buffFilters) then return true end
-                                if ps.buffSpells and #ps.buffSpells > 0 then return true end
-                                return false
-                            end
                             if k == ALL_KEY then
-                                -- Silent block: the last content source cannot be
-                                -- unchecked (use Buff Display None to blank the frame).
-                                if not v and not OtherContent() then return end
+                                -- Written unconditionally (Player Aura Bars parity): the
+                                -- Show lane is locked while a broad mode is on, so a
+                                -- no-empty guard here would make the toggle impossible to
+                                -- turn off. AttachEmptyFilterWarn below owns the feedback
+                                -- for the resulting empty selection instead.
                                 ps.buffShowAll = v
                                 -- Mutually exclusive with Has Duration (both are broad-content
                                 -- modes). Lanes persist across mode flips (the hide lane
@@ -10860,7 +10865,6 @@ initFrame:SetScript("OnEvent", function(self)
                                 return
                             end
                             if k == DUR_KEY then
-                                if not v and not OtherContent() then return end
                                 ps.buffHasDuration = v or nil
                                 -- Mutually exclusive with All Buffs (its own broad-content
                                 -- mode); lanes persist.
@@ -10885,14 +10889,19 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end
                             if ps.buffFilters and not next(ps.buffFilters) then ps.buffFilters = nil end
-                            -- Removing the last add-mode source falls back to All Buffs.
-                            if ps.buffShowAll == false and ps.buffHasDuration ~= true
-                                and not OtherContent() then
-                                ps.buffShowAll = nil
-                            end
                             ReloadAndUpdate()
+                            -- Non-force: runs only the registered lightweight refresh
+                            -- callbacks (the empty-selection warning below) in place,
+                            -- without closing this open dropdown.
+                            EllesmereUI:RefreshPage()
                         end,
-                        nil, 12)
+                        nil, 12, nil, nil, function() if warnClosed then warnClosed() end end)
+                    -- Empty-selection warning (Player Aura Bars parity): replaces the
+                    -- old silent block. A Buff Display of None already dims the whole
+                    -- control, so it is not warned about a second time.
+                    warnClosed = EllesmereUI.AttachEmptyFilterWarn(rgn, cbDD,
+                        EllesmereUI.L("You are displaying NO buffs at all."),
+                        function() return BuffDisabled() or ps.buffShowAll ~= false or ps.buffHasDuration == true or OtherContent() end)
                 else
                     cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                         rgn, 210, rgn:GetFrameLevel() + 2, buffFilterItems,
