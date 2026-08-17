@@ -8779,6 +8779,41 @@ do
 end
 
 
+-- Login race on the primary power type. GetPrimaryPowerType branches on
+-- GetSpecialization(), which can still read nil half a second after
+-- PLAYER_ENTERING_WORLD on a slow login (heavy addon load). Every class whose spec
+-- power differs from its class base falls through to MANA on a nil spec -- Shadow
+-- loses Insanity, Guardian loses Rage, Augmentation loses Ebon Might -- and
+-- PLAYER_SPECIALIZATION_CHANGED fires only on a CHANGE, never at login, so the
+-- wrong value stayed cached for the whole session. Reported as "power type resets
+-- to mana every time I log in".
+--
+-- Retry until the spec reads, then re-resolve exactly what the spec-change branch
+-- does. Costs one call and no timer when the spec is already available, which is
+-- the common case. The attempt cap matters: a character with no specialization
+-- chosen reads nil forever, so an uncapped retry would arm timers for the session.
+local _specResolveTries = 0
+local ScheduleSpecResolve
+ScheduleSpecResolve = function()
+    if GetSpecialization() then _specResolveTries = 0; return end
+    if _specResolveTries >= 40 then return end   -- ~20s, then stop rather than spin
+    _specResolveTries = _specResolveTries + 1
+    C_Timer.After(0.5, function()
+        if not GetSpecialization() then
+            ScheduleSpecResolve()
+            return
+        end
+        _specResolveTries = 0
+        ns.InvalidateThresholdCaches()
+        cachedPrimary = GetPrimaryPowerType()
+        cachedSecondary = GetSecondaryResource()
+        BuildBars()
+        UpdatePrimaryBar()
+        UpdateSecondaryResource()
+        UpdateVisibility()
+    end)
+end
+
 -- Event handling
 local function OnEvent(self, event, ...)
     if event == "UNIT_HEALTH" then
@@ -8963,6 +8998,9 @@ local function OnEvent(self, event, ...)
         C_Timer.After(0.5, function()
             ERB:ApplyAll()
             RegisterUnlockElements()
+            -- ApplyAll just cached the power type off a spec that may not have
+            -- loaded yet; correct it once it does.
+            ScheduleSpecResolve()
         end)
     elseif event == "UNIT_SPELLCAST_START" then
         local unit = ...
