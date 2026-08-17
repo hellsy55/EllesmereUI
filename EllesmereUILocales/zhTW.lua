@@ -163,6 +163,14 @@ L["Anchor Direction"]         = "錨定方向"
 L["Anchor to %1$s"]           = "錨定至 %1$s"
 L["Anchored"]                 = "已錨定"
 L["Bonus Roll"]               = "額外戰利品"
+-- Unlock Mode mover labels are looked up as ONE composite string: the owning
+-- module concatenates "PREFIX: " with the bar name, then UnlockMode calls L on
+-- the whole result. A bare-prefix key (L["CDM: "], L["Damage Meter "]) therefore
+-- never matches anything -- only the full composites below do. Bars the user
+-- renamed fall through to their own name, which is what we want.
+L["CDM: Buffs"]               = "冷卻管理器：增益效果"
+L["CDM: Cooldowns"]           = "冷卻管理器：冷卻"
+L["CDM: Utility"]             = "冷卻管理器：輔助"
 L["Center on Screen"]         = "螢幕置中"
 L["Click any element\nto anchor to it"] = "點擊任一元素\n以錨定至該元素"
 L["Click any element\nto match its height"] = "點擊任一元素\n以符合其高度"
@@ -211,6 +219,12 @@ L["Move in Unlock Mode"]      = "於解鎖模式中移動"
 L["Move via Blizz Edit Mode"] = "透過暴雪編輯模式移動"
 L["Other"]                    = "其他"
 L["Override Anchor Direction"] = "覆寫錨點方向"
+-- Composite mover labels; see the note above L["CDM: Buffs"].
+L["PAB: Buff Bar"]            = "玩家光環條：增益效果條"
+L["PAB: Debuff Bar"]          = "玩家光環條：減益效果列"
+L["PAB: External Defensives"] = "玩家光環條：外部防禦技能"
+L["PAB: New Buff Bar"]        = "玩家光環條：新的增益效果條"
+L["PAB: New Debuff Bar"]      = "玩家光環條：新的減益效果列"
 L["Party"]                    = "小隊"
 L["Raid"]                     = "團隊"
 L["Remove Anchor"]            = "移除錨點"
@@ -1689,6 +1703,9 @@ L["Max Rows"]                      = "最大列數"
 L["Max Total"]                     = "總數上限"
 L["Name > Target"]                 = "名稱 > 目標"
 L["Name | Level"]                  = "名稱 | 等級"
+-- Default names for a custom PAB bar created without typing one (PAB_AddCustom*Bar).
+L["New Buff Bar"]                  = "新的增益效果條"
+L["New Debuff Bar"]                = "新的減益效果列"
 L["No Border on Debuffs"]          = "減益效果無邊框"
 L["None shape requires 3D Art Style"] = "無形狀需要 3D 美術風格"
 L["Not available for this combat indicator style."] = "此戰鬥指示器樣式不支援此選項。"
