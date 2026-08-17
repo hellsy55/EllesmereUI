@@ -982,6 +982,130 @@ ns.SpecPositionName = function(index)
 end
 
 -------------------------------------------------------------------------------
+--  Dynamic Profession
+--
+--  "Profession 1" and "Profession 2" name a POSITION rather than an
+--  identity, the same trick as dynamicspec above: the entry that opens
+--  whatever this character's first primary profession is, so a palette
+--  carried from a skinner/leatherworker to a herbalist/miner shows Herbalism
+--  and Mining without being rebuilt. Cooking, Fishing and Archaeology are
+--  fixed identities instead -- every character has at most one of each, so
+--  there is nothing to be the "first" or "second" of -- but they resolve the
+--  same way, live, and go dark under Hide Unusable Entries exactly like a
+--  position this character's professions do not reach.
+--
+--  slot.extra on any position names that position's second ability instead
+--  of its opener -- Smelting, Prospecting, Milling, and the like. It goes
+--  dark the same way, and for a second reason beyond not being learned: a
+--  profession simply without one, Alchemy among them. Every position is
+--  offered one on equal terms even though only the two primary professions
+--  grant one today -- Cooking, Fishing and Archaeology stay dark rather
+--  than absent, so a future one that gains a second ability needs no code
+--  change here to pick it up.
+--
+--  Both resolvers are assigned onto ns rather than kept as chunk-level
+--  locals, the same reason as ns.SpecPositionName just above: this file's
+--  main chunk is at Lua's ceiling of 200 locals, and a field costs nothing
+--  extra where a local would not fit.
+--
+--  Memoized, unlike SpecIndexFor above: resolving one position walks a
+--  profession's whole spellbook block rather than doing index arithmetic,
+--  and every one of SlotUsable, ResolveAction and SlotDisplay asks for the
+--  same slot on every push, so an unmemoized version would walk it three
+--  times over -- more again for the same position repeated across palettes.
+--  Only ten combinations of index and extra ever exist, so the cache never
+--  holds more than ten entries.
+--
+--  Cleared from PushAllPalettes in the same breath as usableMemo (see
+--  ns.WipeProfessionCache below and the call beside wipe(usableMemo)), which
+--  is exactly "when the player learns or unlearns a profession": that push
+--  is itself requested by SPELLS_CHANGED, the event a profession's own
+--  spellbook entry appearing or disappearing fires.
+-------------------------------------------------------------------------------
+do
+    local cache = {}
+
+    -- The profession-book index and the resolved spell together, for one
+    -- (index, extra) combination -- computed once per push no matter how
+    -- many times or from where it is asked for.
+    local function Resolve(slot)
+        if not slot or slot.kind ~= "dynamicprofession" then return nil, nil end
+        local i = tonumber(slot.index)
+        if not i then return nil, nil end
+        local key = i * 2 + (slot.extra and 1 or 0)
+        local hit = cache[key]
+        if hit then return hit.book, hit.spell end
+
+        -- The profession-book index for a fixed position: 1 and 2 are this
+        -- character's two primary professions, in GetProfessions' own
+        -- order; 3, 4 and 5 are always Cooking, Fishing and Archaeology.
+        -- Nil for a position this character has not got, the same as a
+        -- spec position beyond this class's count.
+        local prof1, prof2, arch, fish, cook = GetProfessions()
+        local book
+        if i == 1 then book = prof1
+        elseif i == 2 then book = prof2
+        elseif i == 3 then book = cook
+        elseif i == 4 then book = fish
+        elseif i == 5 then book = arch
+        end
+
+        -- The Nth non-passive spell in that book index's own spellbook
+        -- block: N=1 is the opener every profession has, the same spell its
+        -- spellbook icon casts to open its window; N=2 (slot.extra) is the
+        -- second ability only some professions grant -- Smelting for
+        -- Mining, Prospecting for Jewelcrafting, Milling for Inscription.
+        -- Left nil when the profession has no spell at that position,
+        -- whether because it was never learned or because it simply has no
+        -- second ability.
+        local spell
+        if book then
+            local _, _, _, _, numSpells, spellOffset = GetProfessionInfo(book)
+            local which = slot.extra and 2 or 1
+            local seen = 0
+            for n = 1, (numSpells or 0) do
+                local info = C_SpellBook.GetSpellBookItemInfo(
+                    n + (spellOffset or 0), Enum.SpellBookSpellBank.Player)
+                if info and info.spellID and not info.isPassive then
+                    seen = seen + 1
+                    if seen == which then spell = info.spellID; break end
+                end
+            end
+        end
+
+        cache[key] = { book = book, spell = spell }
+        return book, spell
+    end
+
+    ns.ProfessionBookIndexFor = function(slot) return (Resolve(slot)) end
+    ns.ProfessionSpellFor = function(slot) return (select(2, Resolve(slot))) end
+    ns.WipeProfessionCache = function() wipe(cache) end
+end
+
+-- What a dynamicprofession entry is CALLED when it is being picked, and on
+-- the character that cannot resolve it -- the same job ns.SpecPositionName
+-- does for a spec position. 1 and 2 read as "Profession 1" / "Profession 2"
+-- since they name a position; 3 through 5 read as the fixed skill they
+-- always are, in the client's own localized string. extra names the SAME
+-- position's second ability instead of its opener -- Cooking, Fishing and
+-- Archaeology have none on live, but nothing here assumes that stays true,
+-- since ns.ProfessionSpellFor walks every position's spellbook block the
+-- same way regardless of which one it is.
+ns.ProfessionPositionName = function(index, extra)
+    index = tonumber(index)
+    local base
+    if index == 3 then base = COOKING or "Cooking"
+    elseif index == 4 then base = FISHING or "Fishing"
+    elseif index == 5 then base = ARCHAEOLOGY or "Archaeology"
+    else base = EllesmereUI.Lf("Profession %1$d", index or 0)
+    end
+    if extra then
+        return EllesmereUI.Lf("%1$s Extra Ability", base)
+    end
+    return base
+end
+
+-------------------------------------------------------------------------------
 --  Dynamic Rez
 --
 --  One entry that is whichever resurrection spell this character has, so a
@@ -1183,14 +1307,17 @@ end
 
 -- Can this character do anything with the slot? Only the kinds that resolve
 -- against one character's own kit are tested -- another class's
--- specialization, a spell no book here holds, a macro this character does
--- not have, a resurrection this class has none of. Everything else (items,
--- toys, mounts, pets, markers, nested menus) is account-wide or
--- self-resolving and stays.
+-- specialization, a profession position this character does not reach, a
+-- spell no book here holds, a macro this character does not have, a
+-- resurrection this class has none of. Everything else (items, toys,
+-- mounts, pets, markers, nested menus) is account-wide or self-resolving
+-- and stays.
 local function SlotUsable(slot)
     local k = slot and slot.kind
     if k == "spec" or k == "dynamicspec" then
         return SpecIndexFor(slot) ~= nil
+    elseif k == "dynamicprofession" then
+        return ns.ProfessionSpellFor(slot) ~= nil
     elseif k == "spell" then
         return SpellKnownHere(tonumber(slot.id))
     elseif k == "macro" then
@@ -1256,6 +1383,15 @@ local function ResolveAction(slot, p)
     if k == "spell" then
         if type(slot.id) ~= "number" then return nil end
         return "spell", "spell", slot.id
+
+    elseif k == "dynamicprofession" then
+        -- Resolved to the CURRENT position's spell every time the
+        -- attributes are written, then fired the same way any other spell
+        -- slot is -- see ns.ProfessionSpellFor above for what makes the
+        -- position current.
+        local spellID = ns.ProfessionSpellFor(slot)
+        if not spellID then return nil end
+        return "spell", "spell", spellID
 
     elseif k == "item" then
         if type(slot.id) ~= "number" then return nil end
@@ -1607,6 +1743,31 @@ local function SlotDisplay(slot)
             end
         end
         return QUESTION_MARK, slot.name
+
+    elseif k == "dynamicprofession" then
+        if slot.extra then
+            -- The ABILITY's own name and icon -- Smelting, Prospecting,
+            -- Milling -- rather than the profession's: unlike the opener,
+            -- which is the profession by another name, the second ability
+            -- is its own spell and reads as one.
+            local spellID = ns.ProfessionSpellFor(slot)
+            if spellID then
+                local info = C_Spell.GetSpellInfo(spellID)
+                if info then return info.iconID or QUESTION_MARK, info.name or slot.name end
+            end
+        else
+            local bookIndex = ns.ProfessionBookIndexFor(slot)
+            if bookIndex then
+                -- The profession's own name and icon, not the opener
+                -- spell's -- the same skill icon its spellbook entry shows.
+                local name, icon = GetProfessionInfo(bookIndex)
+                return icon or QUESTION_MARK, name or slot.name
+            end
+        end
+        -- A position this character does not reach, or (on slot.extra) a
+        -- profession with no second ability. Names the seat rather than an
+        -- occupant, same as an empty dynamicspec position.
+        return QUESTION_MARK, ns.ProfessionPositionName(tonumber(slot.index), slot.extra)
 
     elseif k == "battlepet" then
         if type(slot.guid) ~= "string" then return QUESTION_MARK, slot.name end
@@ -8653,6 +8814,8 @@ local function PushAllPalettes()
     pushDirty = false
     -- The one place usability answers are allowed to change -- see usableMemo.
     wipe(usableMemo)
+    -- Same lifecycle, same reason -- see the Dynamic Profession section.
+    if ns.WipeProfessionCache then ns.WipeProfessionCache() end
     for i = 1, PaletteCount() do PushPalette(i) end
 end
 

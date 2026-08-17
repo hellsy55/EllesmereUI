@@ -1095,6 +1095,11 @@ L["Last Used Mount"] = "Última Montaria Usada"
 L["Action Menu"] = "Menu de ações"
 L["Bigger Menus & New Presets"] = "Menus Maiores e Novas Predefinições"
 L["Menus hold up to 16 entries, plus Quest Items and Professions presets, a Last Used Mount entry, and a Menu Cancel Action keybind"] = "Os menus comportam até 16 entradas, além de predefinições de itens de missão e profissões, uma entrada de Última Montaria Usada e um atalho de Ação de cancelamento do menu"
+L["specialization, by position on this character"] = "especialização, por posição neste personagem"
+L["Profession %1$d"] = "Profissão %1$d"
+L["%1$s Extra Ability"] = "Habilidade Extra de %1$s"
+L["profession, by position on this character"] = "profissão, por posição neste personagem"
+L["profession's second ability, by position on this character"] = "segunda habilidade da profissão, por posição neste personagem"
 
 -- == Video Guides ============================================================
 L["VIDEO GUIDE"] = "GUIA EM VÍDEO"
