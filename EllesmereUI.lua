@@ -4457,6 +4457,18 @@ end
 --      the REAL color in altR/altG/altB (what oUF paints the bar with), so use it.
 --   3) Token unmatched, no alt color, standard integer type -> custom color (safety net).
 function EllesmereUI.ResolveUnitPowerColor(unit)
+    -- Color by the forced display power type, if one is set, not the
+    -- unit's real current power type. Computed fresh each call, not read
+    -- from a cache, so it can't lag behind a setting or spec change.
+    if unit == "player" and EllesmereUI.GetPlayerPowerOverride then
+        local override = EllesmereUI.GetPlayerPowerOverride()
+        if override ~= nil then
+            local overrideKey = EllesmereUI.POWER_ENUM_TO_KEY[override]
+            local overrideInfo = overrideKey and EllesmereUI.GetPowerColor(overrideKey)
+            if overrideInfo then return overrideInfo.r, overrideInfo.g, overrideInfo.b end
+        end
+    end
+    
     local pType, pToken, altR, altG, altB = UnitPowerType(unit)
     local info = EllesmereUI.GetPowerColor(pToken)
     if info then return info.r, info.g, info.b end
@@ -9777,6 +9789,13 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
         return nil
     end
 
+    -- First-open split (see _SplitFirstOpen): Show() below returns without
+    -- building the panel on the session's first open, so run the whole deep
+    -- link next frame rather than navigating a panel that does not exist yet.
+    if self:_SplitFirstOpen(function()
+        EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName, preSelectFn, highlightText)
+    end) then return end
+
     self:Show()
     self:SelectModule(moduleName)
     self:SelectPage(pageName)
@@ -10719,6 +10738,13 @@ end
 
 function EllesmereUI:SelectModule(folderName)
     if not modules[folderName] then return end
+    -- The panel is not always built when we get here: on the session's first
+    -- open the first-open split (see _SplitFirstOpen) makes Show()/Toggle()
+    -- return BEFORE CreateMainFrame, so a caller that opens the panel and
+    -- selects a module in the same execution arrives with headerFrame nil.
+    -- Bail before activeModule is written -- a half-applied selection also
+    -- suppresses CreateMainFrame's default-module pick, leaving a blank panel.
+    if not headerFrame then return end
     if folderName == activeModule then return end
     -- Excluded modules are locked while an override editing session is
     -- active; blocking at the choke point covers every navigation path
@@ -11223,7 +11249,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.8.9"
+EllesmereUI.VERSION = "8.9.0"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end

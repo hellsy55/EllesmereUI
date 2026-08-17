@@ -12,6 +12,7 @@
 %1$d Deaths  -%2$s
 %1$d did not fit
 %1$s (max %2$s)
+%1$s Extra Ability
 %1$s Font
 %1$s Module
 %1$s Options
@@ -496,6 +497,7 @@ Preview Mode
 Previewing Override: %1$s
 Previewing Overrides: %1$s, %2$s
 Processing
+Profession %1$d
 Profile
 Profile Imported
 Profile Name

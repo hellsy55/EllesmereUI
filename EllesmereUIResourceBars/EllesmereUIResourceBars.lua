@@ -202,6 +202,10 @@ local CHANNEL_TICK_DATA = {
     [205021]  = { ticks = 5 },                                     -- Ray of Frost
     -- Druid
     [740]     = { ticks = 4 },                                     -- Tranquility
+    -- Hunter
+    -- Rapid Fire shoots once at channel start and once at channel end. Quick
+    -- Draw (459794) adds three shots without changing the channel duration.
+    [257044]  = { missiles = 7, addMissiles = { [459794] = 3 } },  -- Rapid Fire
     -- Demon Hunter
     [198013]  = { tickInterval = 0.2 },                            -- Eye Beam
     [473728]  = { tickInterval = 0.2 },                            -- Void Ray (Devourer)
@@ -7448,9 +7452,15 @@ end
 -- equality test rejects real stops. Blizzard's own CastingBarFrame matches a
 -- castID for plain casts only and accepts any channel/empower stop, which is
 -- what OnEmpowerStop below already does.
+
+-- A channel that gets instantly restarted can have this STOP event arrive
+-- after the new channel's START. Check if a channel is still active before
+-- hiding, so a late stop for an already-replaced channel is ignored.
+
 local function OnChannelStop()
     if not castBarFrame then return end
     if not castBarFrame._channeling then return end
+	if UnitChannelInfo("player") then return end
     castBarFrame._channeling = false
     castBarFrame._castID = nil
     ns.ShowIdleCastBar()

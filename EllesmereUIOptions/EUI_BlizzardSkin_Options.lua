@@ -1474,29 +1474,6 @@ initFrame:SetScript("OnEvent", function(self)
         return y
     end
 
-    local function BuildReadyCheckContent(parent, y)
-        local W = EllesmereUI.Widgets
-        local _, h
-
-        _, h = WSCardSection(parent, "QUALITY OF LIFE", y);  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Portrait",
-              tooltip="Hides the ready check glyph above the prompt, leaving just the question and the Yes / No buttons. Applies while the Ready Check reskin is enabled.",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.readyCheckHidePortrait == true
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.readyCheckHidePortrait = v
-                  if EllesmereUI._ReadyCheck_Refresh then EllesmereUI._ReadyCheck_Refresh() end
-              end },
-            { type="label", text="" }
-        ); y = y - h
-
-        return y
-    end
-
     ---------------------------------------------------------------------------
     --  Blizzard Window Skins page: one expandable card per reskinned window.
     --  Card headers are custom chrome, but every sub-setting ROW is a standard
@@ -1861,13 +1838,12 @@ initFrame:SetScript("OnEvent", function(self)
         {
             key   = "readycheck",
             title = "Ready Check",
-            desc  = "The ready check prompt with its Yes / No buttons, plus the initiator's response list.",
+            desc  = "The ready check prompt with its Yes / No buttons.",
             reloadMsg = "Changing the Ready Check reskin requires a UI reload to fully swap between Blizzard and Ellesmere styles.",
             setEnabled = function(v)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.reskinReadyCheck = v
             end,
-            buildContent = BuildReadyCheckContent,
         },
         {
             key   = "housing",
@@ -3036,8 +3012,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.reskinLootHistory = nil
                 EllesmereUIDB.reskinGroupInvite = nil
                 EllesmereUIDB.reskinReadyCheck = nil
-                EllesmereUIDB.readyCheckHidePortrait = nil
-                if EllesmereUI._ReadyCheck_Refresh then EllesmereUI._ReadyCheck_Refresh() end
                 EllesmereUIDB.reskinMicroMenu = nil
                 EllesmereUIDB.reskinHousing = nil
                 EllesmereUIDB.reskinProfessions = nil

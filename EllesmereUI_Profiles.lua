@@ -1854,7 +1854,7 @@ do
         "reskinItemUpgrade", "reskinLoot", "reskinLootToast", "lootToastQualityStrip",
         "lootToastQualityStripMoney", "lootToastScale",
         "reskinLootRoll", "reskinLootHistory", "reskinGroupInvite",
-        "reskinReadyCheck", "readyCheckHidePortrait",
+        "reskinReadyCheck",
         "reskinMicroMenu", "reskinHousing", "reskinDressUp", "reskinTransmog",
         "reskinMerchant", "reskinAuctionHouse", "reskinMacros",
         "reskinSettings", "reskinAddonList", "reskinCraftOrders",
@@ -5093,6 +5093,15 @@ function EllesmereUI.ImportProfileInteractive(opts)
     if existing and existing.state ~= "done" then
         return false, "an interactive import is already pending"
     end
+
+    -- First-open split (see _SplitFirstOpen): on the session's first open the
+    -- navigation below only LOADS and the panel builds next frame, so the
+    -- Profiles page -- and with it _ProfilesConsumeApiImport -- does not exist
+    -- yet. Re-run the whole call next frame instead; the session is not created
+    -- until then, so the re-entry is not blocked as "already pending".
+    if EllesmereUI:_SplitFirstOpen(function()
+        EllesmereUI.ImportProfileInteractive(opts)
+    end) then return true end
 
     EllesmereUI._apiImportSession = {
         str      = opts.importString,
