@@ -1874,7 +1874,8 @@ do
         "showEnchants", "showPvpItemLevel", "charSheetSocketPanel",
         "charSheetIconZoom", "charSheetEnchantNames", "charSheetEnchantSize",
 		"charSheetItemLevelIgnoreTrack",
-        "flyoutItemLevels", "showSecondaryRaw", "showSecondaryBoth",
+        "flyoutItemLevels", "showCharSheetDurability", "charSheetDurabilityLocation",
+        "charSheetDurabilityShowLabel", "showSecondaryRaw", "showSecondaryBoth",
         "showTertiaryRaw", "showTertiaryBoth", "showAdjustedStats",
         "showManaStat",
         -- Inspect card
