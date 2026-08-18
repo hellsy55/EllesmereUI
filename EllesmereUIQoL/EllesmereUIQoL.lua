@@ -3450,14 +3450,23 @@ do
     end
 
     local weSetCVar = false
-    local function ApplyHideTutorials()
+    -- doSweep defaults to true (the options checkbox needs it, to catch panels
+    -- already open when the player flips the setting on mid-session). PLAYER_LOGIN
+    -- passes false: nothing has had a chance to be open yet at that point, so the
+    -- full frame-registry walk there was pure wasted work landing right in the
+    -- middle of the already CPU-heavy login/reload burst -- that's what was
+    -- causing the FPS drop, not just the walk's cost by itself. The reactive
+    -- hooks (HelpTip.Show + ShowUIPanel) installed below cover everything that
+    -- opens from PLAYER_LOGIN onward regardless.
+    local function ApplyHideTutorials(doSweep)
+        if doSweep == nil then doSweep = true end
         if Enabled() then
             InstallCoreHooks()
             InstallTooltipHook()
             pcall(SetCVar, "hideHelptips", "1")
             pcall(SetCVar, "showTutorials", "0")
             weSetCVar = true
-            SweepAll()
+            if doSweep then SweepAll() end
             HideOpenTips()
         else
             if weSetCVar then
@@ -3481,7 +3490,7 @@ do
             end
             return
         end
-        ApplyHideTutorials()  -- PLAYER_LOGIN
+        ApplyHideTutorials(false)  -- PLAYER_LOGIN: skip the sweep, see comment above
     end)
 end
 
