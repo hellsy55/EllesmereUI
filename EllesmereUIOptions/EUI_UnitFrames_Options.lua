@@ -10412,6 +10412,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Offset Y", min=-100, max=100, step=1,
                       get=function() return SValSupported("buffCooldownTextOffsetY", 0) end,
                       set=function(v) SSetSupported("buffCooldownTextOffsetY", v) end },
+                    { type="slider", label="Precise Below (minutes, 0 = off)", min=0, max=60, step=1,
+                      get=function() local v=SValSupported("buffCooldownTextPrecision", nil); return v and v/60 or 0 end,
+                      set=function(v) SSetSupported("buffCooldownTextPrecision", v > 0 and v*60 or nil) end },
                 },
             })
             MakeCogBtn(leftRgn, buffDurCogShow, nil, EllesmereUI.DIRECTIONS_ICON, buffDurOff)
@@ -10548,6 +10551,9 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Offset Y", min=-100, max=100, step=1,
                       get=function() return SValSupported("debuffCooldownTextOffsetY", 0) end,
                       set=function(v) SSetSupported("debuffCooldownTextOffsetY", v) end },
+                    { type="slider", label="Precise Below (minutes, 0 = off)", min=0, max=60, step=1,
+                      get=function() local v=SValSupported("debuffCooldownTextPrecision", nil); return v and v/60 or 0 end,
+                      set=function(v) SSetSupported("debuffCooldownTextPrecision", v > 0 and v*60 or nil) end },
                 },
             })
             MakeCogBtn(leftRgn, debuffDurCogShow, nil, EllesmereUI.DIRECTIONS_ICON, debuffDurOff)
