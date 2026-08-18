@@ -16,6 +16,34 @@ local function GetFFD(frame)
     return d
 end
 
+local function GetTotalDurabilityPercent()
+    local curTotal, maxTotal = 0, 0
+    for slotId = 1, 18 do
+        local cur, mx = GetInventoryItemDurability(slotId)
+        if cur and mx and mx > 0 then
+            curTotal = curTotal + cur
+            maxTotal = maxTotal + mx
+        end
+    end
+    if maxTotal <= 0 then return 100 end
+    return curTotal / maxTotal * 100
+end
+
+local function GetDurabilityTextColor(pct)
+    if pct > 50 then
+        return (100 - pct) / 50, 1, 0
+    end
+    return 1, pct / 50, 0
+end
+
+local function FormatDurabilityText(pct, showLabel)
+    local pctStr = string.format("%d%%", math.floor(pct + 0.5))
+    if showLabel then
+        return L("Durability") .. ": " .. pctStr
+    end
+    return pctStr
+end
+
 -- "gear" = the 16 slots with ilvl/enchants/sockets.
 -- "all"  = gear + shirt + tabard (cosmetic), for full-character loops.
 local EUI_GEAR_SLOTS = {
@@ -224,6 +252,9 @@ do
             showStatCategory_PvP         = true,
             showAdjustedStats            = false,
             showManaStat                 = false,
+            showCharSheetDurability      = false,
+            charSheetDurabilityLocation  = "model",
+            charSheetDurabilityShowLabel = true,
         }
         for k, v in pairs(defaults) do
             if EllesmereUIDB[k] == nil then
@@ -723,6 +754,26 @@ local function SkinCharacterSheet()
     local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
 
+    do
+        local modelScene = GetFFD(frame).modelScene
+        if modelScene and not GetFFD(frame).durabilityModelLabel then
+            local durOverlay = CreateFrame("Frame", nil, frame)
+            durOverlay:SetFrameLevel(5)
+            durOverlay:EnableMouse(false)
+            GetFFD(frame).durabilityOverlay = durOverlay
+
+            local durabilityModelLabel = durOverlay:CreateFontString(nil, "OVERLAY")
+            durabilityModelLabel:SetFont(fontPath, 12, "")
+            durabilityModelLabel:SetPoint("TOP", modelScene, "TOP", 0, -8)
+            GetFFD(frame).durabilityModelLabel = durabilityModelLabel
+        end
+        if not GetFFD(frame).durabilityFooterLabel then
+            local durabilityFooterLabel = frame:CreateFontString(nil, "OVERLAY")
+            durabilityFooterLabel:SetFont(fontPath, 12, "")
+            GetFFD(frame).durabilityFooterLabel = durabilityFooterLabel
+        end
+    end
+
     local charTabs = {}
     for i = 1, 3 do
         local tab = _G["CharacterFrameTab" .. i]
@@ -916,6 +967,7 @@ local function SkinCharacterSheet()
 
         if GetFFD(frame).modelScene   then GetFFD(frame).modelScene:SetShown(isCharacterTab)   end
         if GetFFD(frame).modelBgFrame then GetFFD(frame).modelBgFrame:SetShown(isCharacterTab) end
+        if EllesmereUI._updateCharSheetDurability then EllesmereUI._updateCharSheetDurability() end
     end
 
     local function _hookPaneOnShow(pane, isChar)
@@ -1299,6 +1351,98 @@ local function SkinCharacterSheet()
     -- M+ Score sits below PvP ilvl (or iLvl if PvP is hidden).
     mythicRatingLabel:SetPoint("TOP", pvpIlvlText, "BOTTOM", 0, -4)
 
+    local durabilityHeaderLabel = statsPanel:CreateFontString(nil, "OVERLAY")
+    durabilityHeaderLabel:SetFont(fontPath, 12, "")
+    durabilityHeaderLabel:Hide()
+    GetFFD(frame).durabilityHeaderLabel = durabilityHeaderLabel
+
+    local function GetDurabilityHeaderAnchor()
+        local ffd = GetFFD(frame)
+        if ffd.mythicRatingLabel and ffd.mythicRatingLabel:IsShown() then
+            return ffd.mythicRatingLabel
+        end
+        if ffd.pvpIlvlText and ffd.pvpIlvlText:IsShown() then
+            return ffd.pvpIlvlText
+        end
+        return ffd.iLvlText
+    end
+
+    local function AnchorDurabilityFooterLabel(footerLabel)
+        if not footerLabel then return end
+        footerLabel:ClearAllPoints()
+        local socketPanel = _G.EUI_CharSheet_SocketPanel
+        if socketPanel and socketPanel:IsShown() then
+            footerLabel:SetPoint("RIGHT", socketPanel, "LEFT", -8, 0)
+        else
+            footerLabel:SetPoint("RIGHT", frame, "BOTTOMRIGHT", -10, 6)
+        end
+    end
+
+    local function UpdateDurabilityDisplay()
+        local ffd = GetFFD(frame)
+        local modelLabel = ffd.durabilityModelLabel
+        local headerLabel = ffd.durabilityHeaderLabel
+        local footerLabel = ffd.durabilityFooterLabel or ffd.durabilityTitleLabel
+        local overlay = ffd.durabilityOverlay
+
+        local function HideAllDurabilityLabels()
+            if modelLabel then modelLabel:Hide() end
+            if headerLabel then headerLabel:Hide() end
+            if footerLabel then footerLabel:Hide() end
+            if overlay then overlay:Hide() end
+        end
+
+        local enabled = EllesmereUIDB and EllesmereUIDB.showCharSheetDurability
+        local isCharTab = PaperDollFrame and PaperDollFrame:IsShown()
+        if not enabled or not isCharTab then
+            HideAllDurabilityLabels()
+            return
+        end
+
+        local location = (EllesmereUIDB and EllesmereUIDB.charSheetDurabilityLocation) or "model"
+        if location == "title" then location = "footer" end
+        local showLabel = not EllesmereUIDB or EllesmereUIDB.charSheetDurabilityShowLabel ~= false
+        local pct = GetTotalDurabilityPercent()
+        local r, g, b = GetDurabilityTextColor(pct)
+        local text = FormatDurabilityText(pct, showLabel)
+
+        HideAllDurabilityLabels()
+
+        if location == "header" and headerLabel then
+            local anchor = GetDurabilityHeaderAnchor()
+            if anchor then
+                headerLabel:ClearAllPoints()
+                headerLabel:SetPoint("TOP", anchor, "BOTTOM", 0, -4)
+            end
+            headerLabel:SetText(text)
+            headerLabel:SetTextColor(r, g, b, 1)
+            headerLabel:Show()
+        elseif location == "footer" and footerLabel then
+            AnchorDurabilityFooterLabel(footerLabel)
+            footerLabel:SetText(text)
+            footerLabel:SetTextColor(r, g, b, 1)
+            footerLabel:Show()
+        elseif modelLabel then
+            modelLabel:SetText(text)
+            modelLabel:SetTextColor(r, g, b, 1)
+            modelLabel:Show()
+            if overlay then overlay:Show() end
+        end
+    end
+
+    EllesmereUI._updateCharSheetDurability = UpdateDurabilityDisplay
+
+    if not GetFFD(frame).durabilityEvents then
+        local durEvents = CreateFrame("Frame")
+        durEvents:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
+        durEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+        durEvents:SetScript("OnEvent", UpdateDurabilityDisplay)
+        GetFFD(frame).durabilityEvents = durEvents
+        frame:HookScript("OnShow", UpdateDurabilityDisplay)
+    end
+
+    UpdateDurabilityDisplay()
+
     -- Button overlay for itemlevel tooltip
     local iLvlButton = CreateFrame("Button", nil, statsPanel)
     iLvlButton:SetPoint("TOPLEFT",     iLvlText, "TOPLEFT",     -10, 4)
@@ -1405,6 +1549,10 @@ local function SkinCharacterSheet()
             end
         elseif GetFFD(frame).mythicRatingLabel then
             GetFFD(frame).mythicRatingLabel:Hide()
+        end
+
+        if EllesmereUI._updateCharSheetDurability then
+            EllesmereUI._updateCharSheetDurability()
         end
     end
 
@@ -1622,6 +1770,9 @@ local function SkinCharacterSheet()
         local h = HEADER_H
         if not showMP then h = h - 16 end
         if showPvP then h = h + 16 end
+        local showDurHeader = EllesmereUIDB and EllesmereUIDB.showCharSheetDurability
+            and ((EllesmereUIDB.charSheetDurabilityLocation or "model") == "header")
+        if showDurHeader then h = h + 16 end
         scrollFrame:ClearAllPoints()
         scrollFrame:SetPoint("TOPLEFT",     statsPanel, "TOPLEFT",     0,  -h)
         scrollFrame:SetPoint("BOTTOMRIGHT", statsPanel, "BOTTOMRIGHT", -12, 2)
