@@ -2241,8 +2241,16 @@ function EllesmereUI.GetPlayerPowerOverride()
     if not (classDef or classAlt) then return nil end
     local spec = GetSpecialization and GetSpecialization()
     if not spec then return nil end
+    -- powerTypeOverride is keyed by SPEC ID, never the GetSpecialization() index:
+    -- the set is profile-wide, so an index key collides across classes (slot 3 is
+    -- Guardian, Shadow AND Augmentation). classAlt/classDef stay index-keyed --
+    -- they are nested per class already, so they cannot collide. Resource Bars may
+    -- be disabled, hence the direct fallback.
+    local sid = (_G._ERB_ResolveSpecIDCached and _G._ERB_ResolveSpecIDCached())
+        or (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(spec))
+        or nil
     local ov = db.profile.player and db.profile.player.powerTypeOverride
-    if ov and ov[spec] and classAlt then
+    if sid and ov and ov[sid] and classAlt then
         return classAlt[spec]
     elseif classDef and classDef[spec] ~= nil then
         return classDef[spec]

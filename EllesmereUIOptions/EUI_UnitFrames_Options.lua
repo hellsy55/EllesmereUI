@@ -7923,22 +7923,32 @@ initFrame:SetScript("OnEvent", function(self)
                 sharedPowerRow5, h = W:DualRow(parent, y,
                     { type="dropdown", text="Power Type",
                       values = ptValues, order = ptOrder,
+                      -- Stored by SPEC ID, not the GetSpecialization() index: one
+                      -- profile holds one set, so an index key collides across
+                      -- classes (slot 3 is Guardian, Shadow AND Augmentation).
+                      -- classAlts stays index-keyed, it is already per class.
                       getValue = function()
                           local s = GetSpecialization and GetSpecialization()
                           if not s or not classAlts[s] then return "default" end
+                          local sid = C_SpecializationInfo
+                              and C_SpecializationInfo.GetSpecializationInfo(s)
+                          if not sid then return "default" end
                           local ov = UNIT_DB_MAP["player"]().powerTypeOverride
-                          if ov and ov[s] then return "alt" end
+                          if ov and ov[sid] then return "alt" end
                           return "default"
                       end,
                       setValue = function(v)
                           local s = GetSpecialization and GetSpecialization()
                           if not s then return end
+                          local sid = C_SpecializationInfo
+                              and C_SpecializationInfo.GetSpecializationInfo(s)
+                          if not sid then return end
                           local pdb = UNIT_DB_MAP["player"]()
                           if v == "alt" then
                               if not pdb.powerTypeOverride then pdb.powerTypeOverride = {} end
-                              pdb.powerTypeOverride[s] = true
+                              pdb.powerTypeOverride[sid] = true
                           else
-                              if pdb.powerTypeOverride then pdb.powerTypeOverride[s] = nil end
+                              if pdb.powerTypeOverride then pdb.powerTypeOverride[sid] = nil end
                           end
                           ReloadAndUpdate()
                       end },
