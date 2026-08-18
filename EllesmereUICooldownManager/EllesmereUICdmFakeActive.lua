@@ -162,6 +162,13 @@ end
 -- shrinks this window to the brief login gap it was written for.
 local _slotKeyNextTry = 0
 local function KeyMatches(ruleKey, frameKey)
+    -- An icon with no resolved identity matches NO rule. fc.spellID is nil for a
+    -- window on every rebuild: BuildAllCDMBars clears it on each live icon, and
+    -- FullCDMRebuild re-arms (which evaluates every rule) before the reanchor
+    -- re-stamps it. Without this guard both lookups below fall through to
+    -- nil == nil, so EVERY user rule claimed EVERY identity-less icon and any
+    -- Hidden (CD Ready / On CD) rule alpha-0'd unrelated potions and trinkets.
+    if ruleKey == nil or frameKey == nil then return false end
     if ruleKey == frameKey then return true end
     if not next(_slotItemKey) then
         local now = GetTime()
@@ -1138,6 +1145,11 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
         return
     end
     -- Glow modes: glow while the ability is READY (off cooldown). Not a hide.
+    -- Restore the alpha as well as the flag, exactly as the appearance refresh
+    -- does on this transition: once a bar has settled nothing else re-asserts a
+    -- preset frame's alpha, so clearing the flag alone leaves a hide from an
+    -- earlier state painted for good.
+    if fc._cdStateHidden then frame:SetAlpha(FrameBaseAlpha(fc)) end
     fc._cdStateHidden = false
     if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
     local glow = fd and fd.glowOverlay
