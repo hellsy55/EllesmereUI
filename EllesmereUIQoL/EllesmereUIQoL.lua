@@ -3363,15 +3363,46 @@ do
         if root.GetChildren then pcall(ScanFrame, root) end
     end
 
-    -- One-time full walk (no allocation, no timer) to catch panels already open when the feature is switched on.
+    -- One-time full walk to catch panels already open when the feature is switched on.
+    -- EnumerateFrames() walks the ENTIRE global frame registry (often several thousand
+    -- frames, including ones from every other loaded addon). Doing that in a single
+    -- synchronous pass can exceed the client's script execution time limit ("script
+    -- ran too long"), especially right at PLAYER_LOGIN. To avoid that, the walk is
+    -- chunked across a few C_Timer.After(0, ...) ticks via a coroutine.
+    local sweepInProgress = false
     local function SweepAll()
+        if sweepInProgress then return end
         local fp = GetFingerprint()
         if not fp then return end
-        local frame = EnumerateFrames()
-        while frame do
-            if frame.ShowTooltip == fp then HideButton(frame) end
-            frame = EnumerateFrames(frame)
+        sweepInProgress = true
+
+        local co
+        co = coroutine.create(function()
+            local n = 0
+            local frame = EnumerateFrames()
+            while frame do
+                if frame.ShowTooltip == fp then HideButton(frame) end
+                frame = EnumerateFrames(frame)
+                n = n + 1
+                if n % 200 == 0 then
+                    coroutine.yield()
+                end
+            end
+        end)
+
+        local function Step()
+            local ok, err = coroutine.resume(co)
+            if not ok then
+                sweepInProgress = false
+                return
+            end
+            if coroutine.status(co) == "dead" then
+                sweepInProgress = false
+            else
+                C_Timer.After(0, Step)
+            end
         end
+        Step()
     end
 
     local function RestoreButtons()
