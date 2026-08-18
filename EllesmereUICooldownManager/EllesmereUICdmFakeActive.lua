@@ -1155,7 +1155,14 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
     local glow = fd and fd.glowOverlay
     if not glow then return end
     if not onCD then
-        if not fd._presetCdGlowOn then
+        -- Re-assert against the overlay's REAL state (overlay._glowActive), not
+        -- our flag alone. fd.glowOverlay is shared with the proc-glow and
+        -- appearance passes, and twelve of the thirteen sites that stop it never
+        -- tell this engine -- so the flag said "lit" while the overlay was dark
+        -- and a ready preset stayed unglowed until the next re-arm. Only ever
+        -- starts a glow when nothing is running, so it cannot stomp another
+        -- owner's.
+        if not fd._presetCdGlowOn or not glow._glowActive then
             local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(cas or {})
             ns.StartNativeGlow(glow, eff == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
             fd._presetCdGlowOn = true
