@@ -8024,7 +8024,7 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                                 -- spell never actually shares a slot with, orphaning it as a permanent spillover.
                                 local nsid = sid
                                 if C_Spell and C_Spell.GetBaseSpell
-                                   and fc and fc.baseSpellID and fc.resolvedSid
+                                   and fc.baseSpellID and fc.resolvedSid
                                    and fc.baseSpellID ~= fc.resolvedSid then
                                     local b = C_Spell.GetBaseSpell(sid)
                                     if b and b > 0 then nsid = b end
