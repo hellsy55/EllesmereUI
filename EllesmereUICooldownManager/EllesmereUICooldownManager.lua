@@ -7887,6 +7887,15 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
     -- spells spill onto default bars until the migration ghosts them, and materializing those spills would defeat the import-authoritative hide.
     if aprof and aprof._importGhostMode then return end
 
+    -- Unlike every other assignedSpells mutation site (the picker's add/remove/move calls,
+    -- BuildAllCDMBars), this one never marked the cached render-order map (spellOrder,
+    -- CdmHooks.lua ~7000) dirty -- so a spell this pass just materialized had no key in the
+    -- STALE cache, fell through every OrderKeyFor match probe, and rendered via the raw
+    -- layoutIndex spillover fallback (the same imprecise path #1211/#1420 already fixed once)
+    -- instead of the position it was just given. Field-confirmed: Cobra Shot's assignedSpells
+    -- entry was correct and it still rendered first. Set once, only when something actually inserted.
+    local didInsert = false
+
     -- Spell -> owning bar (variant-aware), built once. A live icon whose stored owner is a DIFFERENT bar is a transient spillover we must not materialize.
     local ownerOf
     -- One-racial-total invariant (see NormalizeRacialAssignments): while ANY
@@ -8023,6 +8032,7 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
                                 local pos = insertPos and (insertPos + 1) or 1
                                 table.insert(sd.assignedSpells, pos, nsid)
                                 insertPos = pos
+                                didInsert = true
                             end
                         end
                     end
@@ -8030,6 +8040,7 @@ function ns.ReseedAssignedSpellsFromLiveIcons(cdUtilOnly)
             end
         end
     end
+    if didInsert then ns._spellOrderDirty = true end
 end
 
 -- Parent-facing bridge for the automatic/export-time reconcile: cd and utility bars only
