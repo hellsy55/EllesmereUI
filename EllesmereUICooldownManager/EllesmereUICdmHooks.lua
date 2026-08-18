@@ -854,30 +854,30 @@ function ns.ResetVariantBaseStore()
     if sv then sv._variantBase = nil end
 end
 
--- Public equivalence check for the picker/list helpers.  The ordinary spell
--- APIs cannot always walk both directions of a rotating override (notably
--- Sacred Weapon/Holy Bulwark), while this spec-scoped ledger remembers the
--- stable base observed from the viewer.  Following the short chain also keeps
--- the helper correct if Blizzard reports an override of an override.
+-- Equivalence check for the picker/list helpers: true when both ids reach the
+-- same root through the learned variant -> base ledger. The live spell APIs
+-- are blind to a rotating override's inactive form (Sacred Weapon/Holy
+-- Bulwark), while the ledger keeps the pair. Called from FindVariantIndex
+-- loops, so no per-call closure: the two root walks are inlined. The hop cap
+-- guards a cyclic pair.
 function ns.IsLearnedVariantOf(a, b)
-    if type(a) ~= "number" or type(b) ~= "number" then
-        return false
-    end
-    if (issecretvalue and (issecretvalue(a) or issecretvalue(b))) then
-        return false
-    end
+    if type(a) ~= "number" or type(b) ~= "number" then return false end
+    if issecretvalue and (issecretvalue(a) or issecretvalue(b)) then return false end
     if a <= 0 or b <= 0 then return false end
     _loadVariantBases()
-    local function Root(id)
-        local hops = 0
-        while _variantBaseLearned[id] and _variantBaseLearned[id] ~= id
-              and hops < 8 do
-            id = _variantBaseLearned[id]
-            hops = hops + 1
-        end
-        return id
+    local hops = 0
+    while hops < 8 do
+        local nxt = _variantBaseLearned[a]
+        if not nxt or nxt == a then break end
+        a = nxt; hops = hops + 1
     end
-    return Root(a) == Root(b)
+    hops = 0
+    while hops < 8 do
+        local nxt = _variantBaseLearned[b]
+        if not nxt or nxt == b then break end
+        b = nxt; hops = hops + 1
+    end
+    return a == b
 end
 ns._divertedSpellsBuff = _divertedSpellsBuff
 ns._divertedSpellsCD   = _divertedSpellsCD
@@ -1046,43 +1046,42 @@ function ns.RebuildSpellRouteMap()
             end
         end
     end
-    -- Build the visible CD-family closure before ghosts are collected.  The
-    -- normal add path removes a spell from the ghost when it is placed, but a
-    -- rotating override can be stored under IDs whose relationship is only
-    -- observable in the other form.  That produced a stale both-state such as
-    -- visible Divine Toll/base 375576 + ghost Holy Bulwark 432459: the ghost's
-    -- exact-ID claim won and Sacred Weapon vanished from the live bar even
-    -- though it remained in the options.  Current API-derived keys are already
-    -- in _divertedSpellsCD; extend that set with the persisted, spec-scoped
-    -- variant/base ledger so a visible family always suppresses its stale ghost
-    -- alias.  This is routing-only--the saved ghost entry remains available if
-    -- the visible assignment is later removed.
-    local visibleCDClaims = {}
-    for sid in pairs(_divertedSpellsCD) do visibleCDClaims[sid] = true end
+    -- Stale ghost ALIASES of a visible family: a rotating override can sit in
+    -- the ghost under one form (Holy Bulwark 432459) while its base (375576)
+    -- is visibly assigned -- the add path could not remove the ghost entry
+    -- because the live APIs are blind to the inactive form. Close the visible
+    -- CD keys over the learned variant/base ledger, then drop from that set
+    -- every id that is EXACTLY assigned to a visible bar: what remains are
+    -- pure aliases, and only those ghost entries are skipped below. Routing
+    -- only -- the ghost entry itself is untouched.
+    local ghostAliasSkip = {}
+    for sid in pairs(_divertedSpellsCD) do ghostAliasSkip[sid] = true end
     local expanded
     repeat
         expanded = false
         for variant, base in pairs(_variantBaseLearned) do
-            if visibleCDClaims[variant] or visibleCDClaims[base] then
-                if not visibleCDClaims[variant] then
-                    visibleCDClaims[variant] = true
+            if ghostAliasSkip[variant] or ghostAliasSkip[base] then
+                if not ghostAliasSkip[variant] then
+                    ghostAliasSkip[variant] = true
                     expanded = true
                 end
-                if not visibleCDClaims[base] then
-                    visibleCDClaims[base] = true
+                if not ghostAliasSkip[base] then
+                    ghostAliasSkip[base] = true
                     expanded = true
                 end
             end
         end
     until not expanded
+    for sid in pairs(_divertedDirectCD) do ghostAliasSkip[sid] = nil end
 
-    -- Pass 4: ghost bars remain highest priority for genuinely hidden spells.
-    -- A stale alternate-ID ghost of a visible rotating spell is skipped using
-    -- the closure above; otherwise it would defeat the one-spell/one-home
-    -- invariant that the picker enforces.
+    -- Pass 4: ghost bars LAST = HIGHEST priority. A spell the user HID stays
+    -- hidden even if the same id also sits on a visible bar ("both-state");
+    -- ns.AddSpellToBar removes it from the ghost, so this never hides a
+    -- deliberate placement. Only a ghost entry that is a pure ALIAS of a
+    -- visible family (set above) is skipped.
     for _, bd in ipairs(p.cdmBars.bars) do
         if bd.enabled and bd.isGhostBar then
-            CollectDiversionsFor(bd, visibleCDClaims)
+            CollectDiversionsFor(bd, ghostAliasSkip)
         end
     end
 
