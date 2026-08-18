@@ -1246,6 +1246,11 @@ end
 function ns.PresetHasCdState(frame)
     local fc = ns._ecmeFC and ns._ecmeFC[frame]
     if not fc or not fc.spellID then return false end
+    -- Only frames WE inject can own a custom active state -- same gate the
+    -- Fake-Active engine applies before honoring one. Without it an orphaned
+    -- profile-level entry both hid a plain tracked spell and stopped the
+    -- appearance refresh from ever clearing the flag it set.
+    if ns.CdmIsInjectedFrame and not ns.CdmIsInjectedFrame(frame) then return false end
     local cas = ns.GetEffectiveCustomActiveState(fc.spellID)
     local eff = cas and cas.cdStateEffect
     if eff == false then eff = nil end  -- blocking-false = no effect

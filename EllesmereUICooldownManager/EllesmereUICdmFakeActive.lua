@@ -1181,6 +1181,19 @@ RestoreAllCdState = function()
     end
 end
 
+-- Is this frame one WE inject? customActiveStates is only editable from the
+-- per-icon menu's "Custom Active State" section, offered for exactly these
+-- frames (EUI_CooldownManager_Options.lua isCustomInjected). A Blizzard viewer
+-- frame carries none of the flags, so a user rule reaching one is an orphan:
+-- removing a custom spell clears customSpellIDs but not the profile-level
+-- active state, and no menu can then show or clear it -- which hid a plainly
+-- tracked spell with nothing to explain why.
+local function IsInjectedFrame(f)
+    return (f._isCustomSpellFrame or f._isRacialFrame or f._isPresetFrame
+            or f._isItemPresetFrame or f._isTrinketFrame) and true or false
+end
+ns.CdmIsInjectedFrame = IsInjectedFrame
+
 -- One full evaluation pass. Driven by the ticker (continuous) AND called
 -- synchronously at the end of a re-arm, so a settings change does not leave the
 -- icon shown for a tick before the next poll re-hides it.
@@ -1209,7 +1222,11 @@ EvalCdStateNow = function()
                 for i = 1, #list do
                     local f = list[i]
                     local fc = f and FCt[f]
-                    if fc and KeyMatches(sid, fc.spellID) then
+                    -- rule.user rules come from the profile store; built-in rules
+                    -- (FAKE_ACTIVE_RULES) deliberately decorate Blizzard icons and
+                    -- keep their reach.
+                    if fc and KeyMatches(sid, fc.spellID)
+                       and (not rule.user or IsInjectedFrame(f)) then
                         hasIcon = true
                         if eff then ApplyCdState(f, fc, cas, eff, onCD, ready) end
                     end
