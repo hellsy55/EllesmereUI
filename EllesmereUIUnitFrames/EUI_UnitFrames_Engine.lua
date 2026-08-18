@@ -61,7 +61,13 @@ local CHANNEL_EVENTS = {
     -- (UNIT_HEAL_PREDICTION deliberately absent: the absorb painter never
     -- rendered incoming heals and early-returned on it; not delivering it at
     -- all is the same behavior for less dispatch.)
-    absorb   = { "UNIT_HEALTH", "UNIT_MAXHEALTH",
+    -- UNIT_AURA: an aura-granted shield that expires on its TIMER rather than
+    -- being spent drops off without UNIT_ABSORB_AMOUNT_CHANGED, stranding the
+    -- overlay at its last width until something else repaints (field report,
+    -- VDH Infernal Strike). Raid Frames already refreshes its absorb overlay on
+    -- UNIT_AURA for this reason. Same-frame dedupe collapses this with the
+    -- health paint when both land together.
+    absorb   = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_AURA",
                  "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED",
                  "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" },
     portrait = { "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_CONNECTION" },
