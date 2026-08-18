@@ -6773,6 +6773,18 @@ local function UpdateAllCDMBars(dt) end
 --  Bar Visibility (always / in combat / never) + Housing
 -------------------------------------------------------------------------------
 
+-- Does this cd/utility bar draw any frame out of the BuffIcon viewer? True for a
+-- hosted buff (spellID-keyed) and for a cd-claimed collided buff slot. Called
+-- only for the BuffIcon viewer's vote below, so bars pay nothing in the common
+-- case where nothing is hosted. On ns, not a file local: this file sits at
+-- Lua's 200-local cap.
+function ns.BarUsesBuffViewer(barKey)
+    local sd = ns.GetBarSpellData and ns.GetBarSpellData(barKey)
+    if not sd then return false end
+    if sd.hostedBuffSpellIDs and next(sd.hostedBuffSpellIDs) then return true end
+    return (ns.CollectCdClaimSet and ns.CollectCdClaimSet(sd)) and true or false
+end
+
 _CDMApplyVisibility = function()
     local p = ECME.db and ECME.db.profile
     if not p then return end
@@ -6935,6 +6947,16 @@ _CDMApplyVisibility = function()
                             if bt == "buffs" and viewerBarKey == "buffs" then
                                 anyVisible = true; break
                             elseif bt ~= "buffs" and (viewerBarKey == "cooldowns" or viewerBarKey == "utility") then
+                                anyVisible = true; break
+                            -- A HOSTED buff renders on a cd/utility bar but its frame
+                            -- still comes out of the BuffIcon viewer pool and is never
+                            -- reparented, so it inherits that viewer's alpha. Without
+                            -- this vote a visible cd/utility bar hosting a buff went
+                            -- dark the moment the buffs bar was hidden: the aura-down
+                            -- placeholder (our own frame, parented to UIParent) kept
+                            -- rendering while the live buff did not.
+                            elseif bt ~= "buffs" and viewerBarKey == "buffs"
+                                   and ns.BarUsesBuffViewer(barData.key) then
                                 anyVisible = true; break
                             end
                         end
