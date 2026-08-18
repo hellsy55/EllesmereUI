@@ -20,6 +20,7 @@
 %1$s Removed in 12.1 Unless API Changes
 %1$s Settings
 %1$s Slot Settings
+%1$s Specialization Ability
 %1$s Sync
 %1$s is bound to \
 %1$s is not available to import for that resolution yet.
