@@ -55,8 +55,12 @@ end
 local CHANNEL_EVENTS = {
     health   = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_CONNECTION", "UNIT_FACTION" },
     power    = { "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER", "UNIT_POWER_BAR_SHOW", "UNIT_POWER_BAR_HIDE", "UNIT_CONNECTION" },
+    -- UNIT_AURA for the same reason as the absorb channel below: the long-form
+    -- Absorb / Heal Absorb text zones render from PaintText, so a shield lost to
+    -- its timer leaves them stale. (The "Short" variants ride the Override's
+    -- _absGate lockstep instead, which the absorb channel already covers.)
     text     = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER",
-                 "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_CONNECTION",
+                 "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_CONNECTION", "UNIT_AURA",
                  "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" },
     -- (UNIT_HEAL_PREDICTION deliberately absent: the absorb painter never
     -- rendered incoming heals and early-returned on it; not delivering it at
