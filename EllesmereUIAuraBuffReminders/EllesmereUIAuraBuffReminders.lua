@@ -1110,7 +1110,7 @@ local SHAMAN_IMBUES = {
     { key="flametongue", name="Flametongue Weapon", castSpell=318038, buffIDs={319778}, wepEnchID={5400} },
     { key="windfury",    name="Windfury Weapon",    castSpell=33757,  buffIDs={319773},  wepEnchID={5401} },
     { key="earthliving", name="Earthliving Weapon", castSpell=382021, buffIDs={382021, 382022}, wepEnchID={6498} },
-    { key="tidecaller",  name="Tidecaller's Guard", castSpell=457481, knownSpell=445033, buffIDs={457496, 457481}, wepEnchID={7528}, requireShield=true },
+    { key="tidecaller",  name="Tidecaller's Guard", castSpell=457481, buffIDs={457496, 457481}, wepEnchID={7528}, requireShield=true },
     { key="tstrike",     name="Thunderstrike Ward", castSpell=462757, buffIDs={462757, 462742}, wepEnchID={7587} },
 }
 
@@ -3265,7 +3265,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
             if playerClass == "SHAMAN" then
                 local hasMH, mhExpire, _, mhEnchID, hasOH, ohExpire, _, ohEnchID = EABR.WeaponEnchants()
                 for _, imbue in ipairs(SHAMAN_IMBUES) do
-                    if co.enabled[imbue.key] and Known(imbue.knownSpell or imbue.castSpell)
+                    if co.enabled[imbue.key] and Known(imbue.castSpell)
                        and (not imbue.requireShield or EABR.HasShieldEquipped()) then
                         local found = false
                         if imbue.wepEnchID then
