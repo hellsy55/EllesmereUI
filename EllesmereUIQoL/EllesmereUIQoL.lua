@@ -3363,17 +3363,6 @@ do
         if root.GetChildren then pcall(ScanFrame, root) end
     end
 
-    -- One-time full walk (no allocation, no timer) to catch panels already open when the feature is switched on.
-    local function SweepAll()
-        local fp = GetFingerprint()
-        if not fp then return end
-        local frame = EnumerateFrames()
-        while frame do
-            if frame.ShowTooltip == fp then HideButton(frame) end
-            frame = EnumerateFrames(frame)
-        end
-    end
-
     local function RestoreButtons()
         for btn in pairs(hiddenByUs) do
             btn:SetAlpha(1)
@@ -3426,7 +3415,10 @@ do
             pcall(SetCVar, "hideHelptips", "1")
             pcall(SetCVar, "showTutorials", "0")
             weSetCVar = true
-            SweepAll()
+            -- Avoid a global EnumerateFrames walk here. Addon-heavy UIs can
+            -- contain enough frames for that scan to block PLAYER_LOGIN for
+            -- several seconds. ShowUIPanel scans each relevant panel when it
+            -- opens, preserving normal behavior without the reload spike.
             HideOpenTips()
         else
             if weSetCVar then
