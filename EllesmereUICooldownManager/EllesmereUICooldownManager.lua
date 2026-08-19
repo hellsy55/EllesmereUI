@@ -5510,9 +5510,14 @@ local function RefreshCDMIconAppearance(barKey)
             -- decimals/a color change below the spell's Threshold Seconds. Gated by the session
             -- flag, so zero cost/zero behavior change unless at least one spell arms it. Resolution
             -- order matches Reverse Swipe above: family store (variant-aware via the frame) first, then the preset/custom customActiveStates entry.
+            -- sid resolves canon-first like sidb above -- fc.spellID alone is the cooldownInfo
+            -- BASE, which for a hosted buff/debuff can be a generic id shared across icons (or
+            -- simply not the id the options menu wrote the entry under), so it misses the armed
+            -- per-spell entry entirely.
             if ns._cdmAnyThresholdText and ns.ApplyThresholdFormatter then
                 local ttFc = _ecmeFC[icon]
-                local ttSid = ttFc and ttFc.spellID
+                local ttSid = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
+                    or (ttFc and ttFc.spellID)
                 local tt
                 if ttSid and ns.ResolveThresholdTextSettings then
                     tt = ns.ResolveThresholdTextSettings(icon, ttSid, ns.GetBarSpellData(barKey), barKey)
