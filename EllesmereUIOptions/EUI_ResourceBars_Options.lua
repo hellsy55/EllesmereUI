@@ -7544,7 +7544,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Shift Offset",
                 rows = {
-                    { type = "slider", label = "Extra Y Offset", min = -50, max = 50, step = 1,
+                    { type = "slider", pixel = true, label = "Extra Y Offset", min = -50, max = 50, step = 1,
                       get = function() local p = DB(); return (p and p.secondary.shiftElementsIfNoResourceExtraY) or 0 end,
                       set = function(v)
                           local p = DB(); if not p then return end
@@ -7589,7 +7589,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Shift Offset",
                 rows = {
-                    { type = "slider", label = "Extra Y Offset", min = -50, max = 50, step = 1,
+                    { type = "slider", pixel = true, label = "Extra Y Offset", min = -50, max = 50, step = 1,
                       get = function() local p = DB(); return (p and p.primary.shiftElementsIfNoPowerExtraY) or 0 end,
                       set = function(v)
                           local p = DB(); if not p then return end
