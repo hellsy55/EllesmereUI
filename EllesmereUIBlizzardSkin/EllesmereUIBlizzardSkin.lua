@@ -3257,6 +3257,9 @@ end
         -- Set at PLAYER_LOGIN only when the setting is on. Nothing here has
         -- run while this is false.
         installed = false,
+        -- Minimum on-screen bar height, cached from the setting. Seeded at
+        -- login and re-read only when the options cog writes it.
+        minPx = 12,
     }
 
     local NAMED_CONTAINERS = {
@@ -3436,12 +3439,108 @@ end
         occ:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", COVER_PAD_X, -grow)
     end
 
+    -- Smallest HEIGHT, in real screen pixels, a cover is allowed to render at.
+    --
+    -- The cover sits exactly on Blizzard's bar rect, and that is correct for
+    -- every bar that lives in a panel. A NAMEPLATE carries its own scale,
+    -- though, and a plate scaled down -- a small or trivial unit, a lowered
+    -- nameplate scale, a global scale below 1 -- drags its widget bar and the
+    -- label inside it down with it. Mirroring the rect faithfully then means
+    -- reproducing something unreadable, which is what "the bars come out VERY
+    -- small on smaller units" is.
+    --
+    -- This is only newly POSSIBLE because HideBarArt alphas Blizzard's own
+    -- art. The long-standing rule was that a cover can never be SMALLER than
+    -- their bar without exposing the art it exists to hide; nothing ever
+    -- stopped it being BIGGER, because once their BG, border, spark and glow
+    -- are at alpha 0 there is nothing left underneath to expose. The old
+    -- "hard floor: Blizzard's own bar height" note is about the other
+    -- direction and still stands.
+    -- USER-FACING, via the cog on "Reskin Widget Bars". This is the number to
+    -- move if the bars read wrong -- everything else about the correction is
+    -- derived from it.
+    local DEFAULT_MIN_BAR_PX = 12
+    -- Slider ceiling. Well past anything readable; the cap exists so a stray
+    -- value cannot ask for a bar taller than the nameplate it belongs to.
+    local MAX_MIN_BAR_PX = 24
+    -- Ceiling on the correction. A bar rendering at 1px (a plate mid-fade, a
+    -- scale still settling) would otherwise ask for 12x and drop a slab across
+    -- the screen -- the same failure mode the border-texture anchoring used to
+    -- produce. Past this, small is the better wrong answer.
+    local MAX_UPSCALE = 3
+
+    -- Resolved ONCE and cached on HUD, not read per bar per pass. SyncCover
+    -- runs for every covered bar on every sweep, and a sweep can run every
+    -- frame while a fill animates; a settings read in there is the kind of
+    -- per-frame cost this system was rebuilt to remove. The options cog calls
+    -- the seam below when it changes, which is the only time it can.
+    --
+    -- 0 is a real value and means OFF: mirror Blizzard's rect exactly, whatever
+    -- size that turns out to be. That is the behaviour before the floor
+    -- existed, so the slider bottoms out at "as it was".
+    local function ReadMinPx()
+        local v = EllesmereUIDB and EllesmereUIDB.widgetBarMinSize
+        if type(v) ~= "number" then return DEFAULT_MIN_BAR_PX end
+        if v < 0 then return 0 end
+        if v > MAX_MIN_BAR_PX then return MAX_MIN_BAR_PX end
+        return v
+    end
+
+    -- How much to enlarge a cover so it clears MIN_BAR_PX. 1 = leave it alone,
+    -- which is the answer for every panel bar (they are 12-15px at scale 1) and
+    -- for any nameplate at normal scale.
+    --
+    -- Deliberately a SCALE and not a taller rect: the label is a child of the
+    -- cover, so scaling brings the text up with the bar. Growing only the
+    -- height would leave the same unreadable caption inside a fatter bar,
+    -- which is not what was being complained about.
+    local function CoverScale(bar)
+        local min = HUD.minPx
+        if not (type(min) == "number" and min > 0) then return 1 end
+        local okH, h = pcall(bar.GetHeight, bar)
+        if not okH or type(h) ~= "number" or h <= 0 then return 1 end
+        local okE, es = pcall(bar.GetEffectiveScale, bar)
+        if not okE or type(es) ~= "number" or es <= 0 then return 1 end
+        local px = h * es
+        if px <= 0 or px >= min then return 1 end
+        local s = min / px
+        if s > MAX_UPSCALE then s = MAX_UPSCALE end
+        return s
+    end
+
     local function AnchorCover(c, bar, pad)
+        local s = CoverScale(bar)
         c:ClearAllPoints()
-        -- EXACTLY the bar's rect. With their art hidden there is nothing to
-        -- reach past, so no pad, no overhang, no slab.
-        c:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-        c:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+        if s <= 1 then
+            -- EXACTLY the bar's rect. With their art hidden there is nothing to
+            -- reach past, so no pad, no overhang, no slab.
+            if c.euiScale ~= 1 then c:SetScale(1); c.euiScale = 1 end
+            c.euiMin = HUD.minPx
+            c:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+            c:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+            return
+        end
+        -- Scaled: CENTER to CENTER with an explicit size, never the two-corner
+        -- anchor. Corner anchors DERIVE the size from the bar, so they would
+        -- undo the scale as fast as it was applied -- the cover would render
+        -- the same size as before with a bigger font in it. CENTER with zero
+        -- offsets is the one anchor that needs no scale conversion, so the
+        -- cover stays centred on the bar it mirrors and grows symmetrically.
+        local okW, w = pcall(bar.GetWidth, bar)
+        local okH, h = pcall(bar.GetHeight, bar)
+        if not (okW and okH) or type(w) ~= "number" or type(h) ~= "number"
+           or w <= 0 or h <= 0 then
+            if c.euiScale ~= 1 then c:SetScale(1); c.euiScale = 1 end
+            c.euiMin = HUD.minPx
+            c:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+            c:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+            return
+        end
+        c:SetScale(s)
+        c.euiScale = s
+        c.euiMin = HUD.minPx
+        c:SetSize(w, h)
+        c:SetPoint("CENTER", bar, "CENTER", 0, 0)
     end
 
     local function BuildCover(bar)
@@ -3462,6 +3561,7 @@ end
         -- Anchored, never re-parented: position needs no polling because the
         -- anchor does it, including when a nameplate moves.
         c.euiPad = VPad(bar)
+        c.euiScale = 1
         AnchorCover(c, bar, c.euiPad)
         c:SetStatusBarTexture(FLAT)
         -- OPAQUE trough, not the usual 0.85: this one has to hide Blizzard's
@@ -3615,8 +3715,21 @@ end
             pad = VPad(bar)
             c.euiPadH = hOk and curH or nil
         end
-        if pad ~= c.euiPad then
+        -- The bar's EFFECTIVE scale is the second re-anchor trigger, and it
+        -- moves without the height moving at all: a nameplate's scale lives on
+        -- the plate, so the bar's own local height reads the same before and
+        -- after. Watching only the height therefore leaves a cover stuck at
+        -- whatever size the plate happened to be when it was built.
+        local esOk, curES = pcall(bar.GetEffectiveScale, bar)
+        local es = esOk and type(curES) == "number" and curES or nil
+        -- ...and the FLOOR ITSELF is the third trigger. Dragging the cog's
+        -- slider changes neither the bar's height nor the plate's scale, so
+        -- without this the covers already on screen keep whatever size they
+        -- were built at and the slider looks like it does nothing until the
+        -- next zone change.
+        if pad ~= c.euiPad or es ~= c.euiES or c.euiMin ~= HUD.minPx then
             c.euiPad = pad
+            c.euiES = es
             AnchorCover(c, bar, pad)
         end
 
@@ -3936,6 +4049,16 @@ end
             -- something else happened to fire.
             self:RegisterEvent("UPDATE_ALL_UI_WIDGETS")
             EllesmereUI._HUDWidgetAdopt = HUDWidgetAdopt
+            -- The options cog's write-through. Published on the same terms as
+            -- the adopt seam -- at login, only with the feature on -- so with
+            -- the reskin off it is nil and the cog is greyed out anyway.
+            -- Re-reads the setting and books one refresh; SyncCover notices the
+            -- floor moved and re-anchors every live cover.
+            HUD.minPx = ReadMinPx()
+            EllesmereUI._HUDWidgetSetMinSize = function()
+                HUD.minPx = ReadMinPx()
+                Refresh()
+            end
             -- Looks redundant next to PLAYER_ENTERING_WORLD, which follows
             -- login and does the same two calls. Kept because it makes the
             -- install complete on its own: if the event order ever surprises
@@ -4019,6 +4142,37 @@ end
     --  on a short sweep after each. It CLEARS rather than alphas, because the
     --  button's flash animation drives alpha and would restore it.
     ---------------------------------------------------------------------------
+    -- Detach every mask from a texture.
+    --
+    -- ExtraActionButtonTemplate declares an IconMask
+    -- (UI-HUD-ActionBar-IconFrame-Mask) bound to the icon via
+    -- <MaskedTexture childKey="icon"/>, and a MASKED TEXTURE REJECTS
+    -- SetTexCoord OUTRIGHT -- a hard Lua error, which is exactly why
+    -- WSkin.SquareIcon refuses masked icons rather than cropping them.
+    --
+    -- The crop below was pcall'd, so that error has been swallowed silently
+    -- since the button was first skinned: the icon kept its FULL uncropped
+    -- art while every other icon in this skin is cropped to 0.08-0.92. How
+    -- obvious that is depends entirely on how much dead border the granted
+    -- spell's own icon carries -- which is what "sometimes, unless this is
+    -- just spell specific" describes.
+    --
+    -- Removing the mask writes to the ICON's own mask list, not to the secure
+    -- button, and it is the same call Blizzard's map canvas makes on its own
+    -- pins. GetNumMaskTextures is declared with SecretReturnsForAspect, so the
+    -- count is rejected as secret before it can be used as a loop bound.
+    local function Unmask(tex)
+        if not tex or type(tex.GetNumMaskTextures) ~= "function" then return end
+        local okN, n = pcall(tex.GetNumMaskTextures, tex)
+        if not okN then return end
+        if _isSecretV and n ~= nil and _isSecretV(n) then return end
+        if type(n) ~= "number" or n <= 0 then return end
+        for i = n, 1, -1 do
+            local okM, m = pcall(tex.GetMaskTexture, tex, i)
+            if okM and m then pcall(tex.RemoveMaskTexture, tex, m) end
+        end
+    end
+
     local function StripExtraAction()
         local btn = _G.ExtraActionButton1
         if not btn or btn:IsForbidden() then return end
@@ -4044,12 +4198,20 @@ end
             -- ring gone the 52px art would otherwise float inside a ~256px
             -- frame. These are writes on the icon TEXTURE, never on the secure
             -- button.
-            if not d.iconAnchored then
-                d.iconAnchored = true
-                btn.icon:ClearAllPoints()
-                btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
-                btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
-            end
+            --
+            -- RE-ASSERTED EVERY PASS rather than guarded by a one-shot flag.
+            -- Blizzard re-arts this button for every ability it grants, and a
+            -- one-shot anchor that one of those paths clobbers fails with NO
+            -- visible change at the moment it is applied -- the same trap the
+            -- PlayerChoice close button cost several rounds to find. Two
+            -- SetPoints on a texture, on a path that runs when an ability is
+            -- granted, is not worth a guard.
+            btn.icon:ClearAllPoints()
+            btn.icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+            btn.icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 0, 0)
+            -- Before the crop, never after: SetTexCoord on a masked texture
+            -- throws, and the pcall around it would hide that it did nothing.
+            Unmask(btn.icon)
             pcall(btn.icon.SetTexCoord, btn.icon, 0.08, 0.92, 0.08, 0.92)
         end
         if not d.border then
@@ -4068,6 +4230,7 @@ end
     end
 
     local eabEv = CreateFrame("Frame")
+    local _eabUpdateHooked = false
     eabEv:RegisterEvent("PLAYER_LOGIN")
     eabEv:RegisterEvent("UPDATE_EXTRA_ACTIONBAR")
     eabEv:SetScript("OnEvent", function()
@@ -4078,6 +4241,18 @@ end
         if btn and not GetFFD(btn).showHook then
             GetFFD(btn).showHook = true
             btn:HookScript("OnShow", StripExtraAction)
+        end
+        -- THE AUTHORITATIVE PATH. ExtraActionBar_Update is the one place
+        -- Blizzard re-arts this button -- it re-assigns bar.button.style from
+        -- C_ActionBar.GetOverrideBarSkin() on every grant -- and it runs from
+        -- ActionBarController's own UPDATE_EXTRA_ACTIONBAR handler. Reacting
+        -- to the same EVENT means racing that handler for registration order;
+        -- hooking the function means running after it by construction. This
+        -- is the shape the zone ability button already uses with
+        -- UpdateDisplayedZoneAbilities.
+        if not _eabUpdateHooked and type(_G.ExtraActionBar_Update) == "function" then
+            _eabUpdateHooked = true
+            hooksecurefunc("ExtraActionBar_Update", StripExtraAction)
         end
         if not (EllesmereUIDB and EllesmereUIDB.reskinExtraActionButton == true) then return end
         StripExtraAction()
