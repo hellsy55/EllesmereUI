@@ -695,7 +695,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- a row in half; topInset is the space above row 1 (matches gridStartY).
                 local topInset = Snap(10) + bgTopInset
                 local rowStep = scaledBtnH + scaledPad
-                local visibleRows = math.max(1, math.floor((maxH / self._previewScale - topInset + scaledPad) / rowStep))
+                local visibleRows = math.max(1, math.floor((maxH / self._previewScale - topInset + scaledPad) / rowStep + 0.001))
                 visibleRows = math.min(visibleRows, gridRows)
                 local cappedLocalH = Snap(topInset + visibleRows * scaledBtnH + (visibleRows - 1) * scaledPad)
                 self._wrapper:SetHeight(math.min(maxH, cappedLocalH * self._previewScale))
