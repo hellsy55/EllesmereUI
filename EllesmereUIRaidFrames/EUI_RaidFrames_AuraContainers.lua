@@ -406,12 +406,10 @@ end
 -- anchored edge; other growth directions anchor directly at the corner.
 local function ResolveFlowAnchor(pos, corner, grow, wrap)
     if grow == "CENTER" then
-        local topish = pos:find("top", 1, true) ~= nil
-        local bottomish = pos:find("bottom", 1, true) ~= nil
-        local point = topish and "TOP" or (bottomish and "BOTTOM" or ((wrap == "DOWN") and "TOP" or "BOTTOM"))
-        local anchorPoint = topish and "TOPLEFT" or (bottomish and "BOTTOMLEFT" or ((wrap == "DOWN") and "TOPLEFT" or "BOTTOMLEFT"))
-        local gV = topish and "DOWN" or (bottomish and "UP" or wrap)
-        return point, anchorPoint, "RIGHT", gV
+        local edge = (pos:find("top", 1, true) and "TOP")
+            or (pos:find("bottom", 1, true) and "BOTTOM")
+            or ((wrap == "DOWN") and "TOP" or "BOTTOM")
+        return edge, edge .. "LEFT", "RIGHT", (edge == "TOP") and "DOWN" or "UP"
     elseif grow == "UP" or grow == "DOWN" then
         -- Vertical primary growth renders as a single column per row-width;
         -- multi-column vertical fill order differs from legacy (row-major).
