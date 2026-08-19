@@ -792,19 +792,9 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
-        -----------------------------------------------------------------------
-        --  Minimum widget bar size, as a cog on "Reskin Widget Bars".
-        --
-        --  A cog rather than a third toggle in the row above: W:DualRow takes
-        --  exactly two configs and SILENTLY DROPS a third, and this is a
-        --  sub-setting of the widget bar reskin rather than a peer of it.
-        --
-        --  The cover mirrors Blizzard's bar rect exactly, which is right in a
-        --  panel and wrong on a nameplate -- a plate scaled down for a small
-        --  unit drags its bar, and the label inside it, down with it. This is
-        --  the floor below which the cover scales itself up instead. 0 turns
-        --  the correction off entirely and mirrors the rect whatever its size.
-        -----------------------------------------------------------------------
+        -- Minimum widget bar size (plate-hosted covers), a cog on "Reskin Widget
+        -- Bars": the floor below which a shrunken nameplate's bar scales itself
+        -- up. 0 = off (default, mirror Blizzard's rect exactly).
         if hudRow and hudRow._leftRegion and not EllesmereUI._prebuilding then
             local PP    = EllesmereUI.PanelPP
             local lrgn  = hudRow._leftRegion
@@ -815,17 +805,13 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function()
                           local v = EllesmereUIDB and EllesmereUIDB.widgetBarMinSize
                           if type(v) == "number" then return v end
-                          return 12
+                          return 0
                       end,
                       set=function(v)
                           if not EllesmereUIDB then EllesmereUIDB = {} end
                           EllesmereUIDB.widgetBarMinSize = v
-                          -- Live, no reload. The seam re-reads the setting and
-                          -- books one refresh, which re-anchors every cover
-                          -- already on screen. It is only published when the
-                          -- reskin is on -- and the cog is greyed out then, so
-                          -- the nil case is unreachable from here rather than
-                          -- merely guarded.
+                          -- Live: the seam re-reads and books one refresh; nil
+                          -- only while the reskin is off (cog greyed then).
                           if EllesmereUI._HUDWidgetSetMinSize then
                               EllesmereUI._HUDWidgetSetMinSize()
                           end

@@ -1062,16 +1062,10 @@ end
 -- it, and NameFrame is the parchment plate behind the label.
 local REWARD_ART = { "IconBorder", "IconOverlay", "IconOverlay2", "IconBorder2", "NameFrame" }
 
--- Rarity color for one reward tile, or nil for "no rarity" -- which the border
--- draws black rather than skipping.
---
--- The color has to be derived HERE, unlike on quest rewards where the square
--- border reads it straight off Blizzard's own IconBorder ring.
--- LFGRewardsFrame_SetItemButton only ever calls SetItemButtonTexture and
--- SetItemButtonCount, never SetItemButtonQuality, so on these tiles that ring
--- stays hidden and carries no color at all. Each tile does record what it is
--- showing though (SetID(rewardIndex) plus .dungeonID / .shortageIndex), so the
--- quality reads back out of the same API Blizzard filled the tile from.
+-- Rarity color for one reward tile, or nil for "no rarity" (border draws black).
+-- Derived from the LFG reward API rather than the IconBorder ring: these tiles
+-- never get SetItemButtonQuality, so the ring carries no color; the tile's
+-- SetID(rewardIndex) + .dungeonID / .shortageIndex identify the reward.
 local function RewardQualityColor(btn)
     local did, si = btn.dungeonID, btn.shortageIndex
     local id = btn.GetID and btn:GetID()
@@ -1163,14 +1157,10 @@ local function SkinRewardsFrame(parentFrame)
     SkinRewardTile(parentFrame.MoneyReward)
 end
 
--- The M+ dungeon icon row.
---
--- ChallengesDungeonIconFrameTemplate puts its Icon on the BACKGROUND layer and a
--- ChallengeMode-DungeonIconFrame atlas on BORDER -- a ROUNDED frame drawn OVER
--- the icon. Cropping alone therefore looks like it did nothing: the round thing
--- on top is the entire visible result. That texture is declared inline with no
--- name and no parentKey, so the only way to reach it is to walk the frame's
--- regions, which is what FadeRegions with the Icon kept does.
+-- The M+ dungeon icon row. The template draws a ROUNDED DungeonIconFrame atlas
+-- over the icon as an unnamed BORDER-layer region, so cropping alone shows no
+-- change: FadeRegions (icon kept) is the only way to reach it.
+local _iconKeep = {}
 local function SquareDungeonIcons()
     local cf = _G.ChallengesFrame
     local icons = cf and cf.DungeonIcons
@@ -1178,7 +1168,8 @@ local function SquareDungeonIcons()
     for i = 1, #icons do
         local f = icons[i]
         if f and not f:IsForbidden() and f.Icon then
-            FadeRegions(f, { [f.Icon] = true })
+            wipe(_iconKeep); _iconKeep[f.Icon] = true
+            FadeRegions(f, _iconKeep)
             f.Icon:ClearAllPoints()
             f.Icon:SetAllPoints(f)
             local wsk = ns.WSkin
@@ -1198,13 +1189,9 @@ local _challengesHooked = false
 local function Skin_Challenges()
     if not _G.ChallengesFrame then return end
     local cf = _G.ChallengesFrame
-    -- ChallengesFrameMixin:Update REBUILDS the icon row -- CreateFrames grows
-    -- the array, LineUpFrames re-lays it out -- and it runs on show and on every
-    -- C_MythicPlus data refresh. Squaring only at panel-skin time therefore
-    -- catches whichever icons happened to exist at that instant: the first visit
-    -- of a session usually lands before the map list has arrived, so the rest
-    -- are created afterwards and stay round. That is the "sometimes they don't
-    -- square" shape, and this hook is the fix for it.
+    -- ChallengesFrameMixin:Update rebuilds the icon row on show and on every
+    -- C_MythicPlus data refresh (icons created after the panel-skin pass would
+    -- otherwise stay round), so square from the updater.
     if not _challengesHooked and type(cf.Update) == "function" then
         _challengesHooked = true
         hooksecurefunc(cf, "Update", function()

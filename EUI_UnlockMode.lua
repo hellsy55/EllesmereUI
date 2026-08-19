@@ -7483,9 +7483,7 @@ local function CreateMover(barKey)
                 if type(pos) == "table" and pos.point == "CENTER"
                    and (pos.relPoint or "CENTER") == "CENTER"
                    and pos.x and pos.y then
-                    -- Dim-aware, matching the live-geometry branch below: an odd-pixel-
-                    -- dimension bar's stored center sits on a half pixel, and plain
-                    -- ToPixels reads that back one pixel high.
+                    -- Parity-aware like the live branch below (odd dims store a half-pixel center).
                     local sb = GetBarFrame(bk)
                     local c2pS = PPi and PPi.CenterToPixels
                     local px, py
@@ -9467,10 +9465,7 @@ local function CreateMover(barKey)
                         if type(pos) == "table" and pos.point == "CENTER"
                            and (pos.relPoint or "CENTER") == "CENTER"
                            and pos.x and pos.y then
-                            -- Dim-aware, matching the live-geometry conversion below: an
-                            -- odd-pixel-dimension bar stores its center on a half pixel, and
-                            -- plain ToPixels reads that back one pixel high (the same misread
-                            -- the comment above the live branch describes).
+                            -- Parity-aware like the live conversion below (odd dims store a half-pixel center).
                             local sb = GetBarFrame(barKey)
                             local c2pS = PPi.CenterToPixels
                             if ax == "X" then
@@ -9714,8 +9709,7 @@ local function CreateMover(barKey)
                 if type(pos) == "table" and pos.point == "CENTER"
                    and (pos.relPoint or "CENTER") == "CENTER"
                    and pos.x and pos.y then
-                    -- Dim-aware, matching the cog X box and coordinate readout: an
-                    -- odd-pixel-width bar's stored center sits on a half pixel.
+                    -- Parity-aware like the cog X box and readout (odd dims store a half-pixel center).
                     local c2pC = PPc.CenterToPixels
                     curPx = (c2pC and c2pC(pos.x, b:GetWidth(), b:GetEffectiveScale())) or PPc.ToPixels(pos.x)
                 end
