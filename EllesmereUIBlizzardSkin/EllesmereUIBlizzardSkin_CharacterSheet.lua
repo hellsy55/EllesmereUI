@@ -4507,9 +4507,6 @@ local function SkinCharacterSheet()
         local itemQuality = nil
         local slotID = slot:GetID()
         local canHaveEnchant = ENCHANT_SLOTS[slotID]
-        -- Off-hand only takes a weapon enchant when it's actually holding a weapon
-        -- (dual-wield); shields and held items (tomes, etc.) can't be enchanted, so
-        -- the slot alone can't gate this like the other static slots above.
         if slotID == INVSLOT_OFFHAND and itemLink then
             local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
             canHaveEnchant = (classID == Enum.ItemClass.Weapon)
