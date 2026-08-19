@@ -7483,7 +7483,19 @@ local function CreateMover(barKey)
                 if type(pos) == "table" and pos.point == "CENTER"
                    and (pos.relPoint or "CENTER") == "CENTER"
                    and pos.x and pos.y then
-                    fs:SetText(format("%.0f, %.0f", toPx(pos.x), toPx(pos.y)))
+                    -- Dim-aware, matching the live-geometry branch below: an odd-pixel-
+                    -- dimension bar's stored center sits on a half pixel, and plain
+                    -- ToPixels reads that back one pixel high.
+                    local sb = GetBarFrame(bk)
+                    local c2pS = PPi and PPi.CenterToPixels
+                    local px, py
+                    if c2pS and sb then
+                        px = c2pS(pos.x, sb:GetWidth(), sb:GetEffectiveScale())
+                        py = c2pS(pos.y, sb:GetHeight(), sb:GetEffectiveScale())
+                    else
+                        px, py = toPx(pos.x), toPx(pos.y)
+                    end
+                    fs:SetText(format("%.0f, %.0f", px, py))
                     fs:Show()
                     return
                 end
@@ -9455,7 +9467,17 @@ local function CreateMover(barKey)
                         if type(pos) == "table" and pos.point == "CENTER"
                            and (pos.relPoint or "CENTER") == "CENTER"
                            and pos.x and pos.y then
-                            if ax == "X" then return PPi.ToPixels(pos.x) end
+                            -- Dim-aware, matching the live-geometry conversion below: an
+                            -- odd-pixel-dimension bar stores its center on a half pixel, and
+                            -- plain ToPixels reads that back one pixel high (the same misread
+                            -- the comment above the live branch describes).
+                            local sb = GetBarFrame(barKey)
+                            local c2pS = PPi.CenterToPixels
+                            if ax == "X" then
+                                if c2pS and sb then return c2pS(pos.x, sb:GetWidth(), sb:GetEffectiveScale()) end
+                                return PPi.ToPixels(pos.x)
+                            end
+                            if c2pS and sb then return c2pS(pos.y, sb:GetHeight(), sb:GetEffectiveScale()) end
                             return PPi.ToPixels(pos.y)
                         end
                     end
@@ -9692,7 +9714,10 @@ local function CreateMover(barKey)
                 if type(pos) == "table" and pos.point == "CENTER"
                    and (pos.relPoint or "CENTER") == "CENTER"
                    and pos.x and pos.y then
-                    curPx = PPc.ToPixels(pos.x)
+                    -- Dim-aware, matching the cog X box and coordinate readout: an
+                    -- odd-pixel-width bar's stored center sits on a half pixel.
+                    local c2pC = PPc.CenterToPixels
+                    curPx = (c2pC and c2pC(pos.x, b:GetWidth(), b:GetEffectiveScale())) or PPc.ToPixels(pos.x)
                 end
             end
             if curPx == nil then
