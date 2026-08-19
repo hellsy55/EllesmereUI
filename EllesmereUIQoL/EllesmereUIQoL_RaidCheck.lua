@@ -179,6 +179,12 @@ local CHECKS = {
       prefix = VantusPrefix, raidOnly = true },
 }
 
+-- Temporarily off: the column is only ever answered for players also
+-- running EllesmereUIQoL (see selfRead/Comms note below), which reads as
+-- broken to anyone who doesn't know that. Flip back to true to bring the
+-- column back -- nothing else needs to change.
+local SHOW_WENCHANT_COLUMN = false
+
 local DURABILITY_KEY = "durability"
 local WENCHANT_KEY   = "wenchant"
 local MSG_REPORT     = "rc"    -- a client describing itself
@@ -259,10 +265,12 @@ local function EnsureColumns()
     -- your own row from your own client, so it is filled solo, filled before
     -- any reply could arrive, and never wrong because a message was dropped.
     -- Comms only ever fills OTHER people's rows.
-    COLUMNS[#COLUMNS + 1] = { key = WENCHANT_KEY, label = "Weapon Enchant",
-                              selfRead = function() return EnchantOK(MyEnchantID()) end,
-                              note = "Oil or sharpening stone on the main hand. Other players' rows need them to be running EllesmereUI.",
-                              icon = "Interface\\Icons\\INV_Stone_SharpeningStone_05" }
+    if SHOW_WENCHANT_COLUMN then
+        COLUMNS[#COLUMNS + 1] = { key = WENCHANT_KEY, label = "Weapon Enchant",
+                                  selfRead = function() return EnchantOK(MyEnchantID()) end,
+                                  note = "Oil or sharpening stone on the main hand. Other players' rows need them to be running EllesmereUI.",
+                                  icon = "Interface\\Icons\\INV_Stone_SharpeningStone_05" }
+    end
 
     -- Only offered when the library is embedded: a column nobody can ever
     -- answer is worse than none.
