@@ -13102,7 +13102,12 @@ initFrame:SetScript("OnEvent", function(self)
         if unitKey == "boss" then
             local bossStrataValues = EllesmereUI.FRAME_STRATA_LABELS
             local bossStrataOrder = EllesmereUI.FRAME_STRATA_ORDER_BASE
-            _, h = W:DualRow(parent, y,
+            -- Forward declare so the toggle's setValue (built below, inside the
+            -- DualRow call) can reach the swatch dimmer that is only assigned after
+            -- the swatch itself is built.
+            local UpdateBossFillSwatchVis
+            local bossStrataRow
+            bossStrataRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Strata",
                   tooltip="Overrides the Frame Strata set in the main frames for this frame only. Controls the order that overlapping frames display in; set higher to show above other frames.",
                   values = bossStrataValues, order = bossStrataOrder,
@@ -13111,7 +13116,44 @@ initFrame:SetScript("OnEvent", function(self)
                       settingsTable.frameStrata = v
                       ReloadAndUpdate()
                   end },
-                { type="label", text="" });  y = y - h
+                -- Target Fill Color: boss-frame-only. Recolors the health bar FILL
+                -- (not the border -- that's the separate Hover/Target Border option
+                -- above) with the chosen color while this boss frame is targeted.
+                { type="toggle", text="Target Fill Color",
+                  tooltip="Recolors this boss frame's health bar fill with the color chosen below while it is your current target. Boss frames only.",
+                  getValue=function() return settingsTable.bossTargetFillColorEnabled or false end,
+                  setValue=function(v)
+                      settingsTable.bossTargetFillColorEnabled = v
+                      ReloadAndUpdate()
+                      if UpdateBossFillSwatchVis then UpdateBossFillSwatchVis() end
+                  end });  y = y - h
+
+            -- Inline color swatch for Target Fill Color, anchored to the toggle.
+            if not EllesmereUI._prebuilding then
+                local PP = EllesmereUI.PP
+                local rightRgn = bossStrataRow._rightRegion
+                local fillSwatch, updFillSwatch = EllesmereUI.BuildColorSwatch(
+                    rightRgn, bossStrataRow:GetFrameLevel() + 3,
+                    function()
+                        local c = settingsTable.bossTargetFillColor or { r = 1, g = 0, b = 0 }
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        settingsTable.bossTargetFillColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate()
+                    end, false, 20)
+                PP.Point(fillSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+                rightRgn._lastInline = fillSwatch
+                fillSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(fillSwatch, "Target Fill Color") end)
+                fillSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                -- Dim the swatch while the toggle is off (still clickable so the
+                -- color can be pre-set), matching the Hover/Target Border swatches.
+                UpdateBossFillSwatchVis = function()
+                    fillSwatch:SetAlpha(settingsTable.bossTargetFillColorEnabled and 1 or 0.3)
+                end
+                EllesmereUI.RegisterWidgetRefresh(function() updFillSwatch(); UpdateBossFillSwatchVis() end)
+                UpdateBossFillSwatchVis()
+            end
         end
 
         -- DISPLAY bottom row: per-frame Border Size override for ToT/Focus Target/Pet.
