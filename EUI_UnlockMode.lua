@@ -10472,16 +10472,28 @@ local function CreateHUD(parent)
     ---------------------------------------------------------------
     --  Exit (left) and Save & Exit (right) buttons
     --  Vertically centered in the 58px visible banner area.
-    --  Positioned ~50px from left/right edges of the banner.
+    --  Positioned ~50px from left/right edges of the banner, but pulled in
+    --  further when localized toggle labels run wide enough to reach them
+    --  (German especially runs longer than English and used to overlap them).
     ---------------------------------------------------------------
     local BTN_H = 26
     local BTN_FONT = 10
     local btnCenterY = iconCenterY  -- same vertical center as icons
+    local CHAIN_GAP = 15  -- minimum clearance from the icon-toggle chain
 
-    -- Exit button (left side, 90px from left edge)
+    -- Outer edges of the left (grid/darkOverlay/flash) and right
+    -- (magnet/coord/hover) toggle chains, center-relative -- re-derives the
+    -- same offsets used to anchor them above, so keep these in sync with
+    -- those SetPoint calls if the chain spacing ever changes.
+    local flashLeftEdge = (-80 + iconSz / 2) - gridBtn:GetWidth() - 20 - darkOverlayBtn:GetWidth() - 20 - flashBtn:GetWidth()
+    local hoverRightEdge = (76 - iconSz / 2) + magnetBtn:GetWidth() + 7 + coordBtn:GetWidth() + 2 + hoverBtn:GetWidth()
+
+    -- Exit button (left side, 85px from left edge by default)
     local exitBtn = CreateFrame("Button", nil, hudFrame)
-    exitBtn:SetSize(60, BTN_H)
-    exitBtn:SetPoint("LEFT", hudFrame, "TOPLEFT", 85, btnCenterY)
+    local EXIT_BTN_W = 60
+    exitBtn:SetSize(EXIT_BTN_W, BTN_H)
+    local exitLeftEdge = min(-BANNER_PX_W / 2 + 85, flashLeftEdge - CHAIN_GAP - EXIT_BTN_W)
+    exitBtn:SetPoint("LEFT", hudFrame, "TOPLEFT", exitLeftEdge + BANNER_PX_W / 2, btnCenterY)
     EllesmereUI.MakeStyledButton(exitBtn, "Exit", BTN_FONT,
         EllesmereUI.RB_COLOURS, function() ns.RequestClose(false) end)
     hudFrame._exitBtn = exitBtn
@@ -10489,8 +10501,10 @@ local function CreateHUD(parent)
     -- Save & Exit button (right side, 50px from right edge, green "Done" style)
     do
         local btn = CreateFrame("Button", nil, hudFrame)
-        btn:SetSize(90, BTN_H)
-        btn:SetPoint("RIGHT", hudFrame, "TOPRIGHT", -85, btnCenterY)
+        local SAVE_BTN_W = 90
+        btn:SetSize(SAVE_BTN_W, BTN_H)
+        local saveRightEdge = max(BANNER_PX_W / 2 - 85, hoverRightEdge + CHAIN_GAP + SAVE_BTN_W)
+        btn:SetPoint("RIGHT", hudFrame, "TOPRIGHT", saveRightEdge - BANNER_PX_W / 2, btnCenterY)
         btn:SetFrameLevel(hudFrame:GetFrameLevel() + 2)
 
         local eg = EllesmereUI.ELLESMERE_GREEN or { r = 12/255, g = 210/255, b = 157/255 }
