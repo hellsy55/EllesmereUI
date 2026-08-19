@@ -5360,6 +5360,9 @@ local function RefreshCDMIconAppearance(barKey)
         -- Glow + Duration Text + Charge/Stack below; nil = inherit the bar's value. Variant-aware:
         -- a setting stored under any spell in the icon's family (base/talent-override) resolves here -- options keys off the live/canonical id, which may differ from fc.spellID.
         local ssb
+        -- Canonical id for buff-family icons, hoisted so the Threshold Text block below can
+        -- reuse it instead of re-walking GetCanonicalSpellIDForFrame a second time this pass.
+        local sidb
         local isBuffFamilyBar = (barData.barType == "buffs" or barKey == "buffs")
         -- Login/refresh coverage for Max Stacks Glow: a charge spell at max never fires the swipe hook, so register here too. Gated on the feature flag so non-users skip the call entirely.
         if ns._cdmAnyMaxStacksGlow and not isBuffFamilyBar and ns.WatchMaxStacksIfEnabled then
@@ -5398,7 +5401,7 @@ local function RefreshCDMIconAppearance(barKey)
             -- whose base is a generic spec spell shared across icons (Consecration's standing-in
             -- aura -> Prot Paladin 137028), keying off the base misses the real buff AND lets one
             -- icon's setting shadow another's. canon as primary makes settings[canon] the fast path. Own placeholder/custom frames have no live spell -> fc.spellID.
-            local sidb = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
+            sidb = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
                 or (fcb and fcb.spellID)
             if sidb then
                 local sdb = ns.GetBarSpellData(barKey)
@@ -5513,10 +5516,11 @@ local function RefreshCDMIconAppearance(barKey)
             -- sid resolves canon-first like sidb above -- fc.spellID alone is the cooldownInfo
             -- BASE, which for a hosted buff/debuff can be a generic id shared across icons (or
             -- simply not the id the options menu wrote the entry under), so it misses the armed
-            -- per-spell entry entirely.
+            -- per-spell entry entirely. Reuse sidb when the buff block above already computed it.
             if ns._cdmAnyThresholdText and ns.ApplyThresholdFormatter then
                 local ttFc = _ecmeFC[icon]
-                local ttSid = (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
+                local ttSid = sidb
+                    or (ns.GetCanonicalSpellIDForFrame and ns.GetCanonicalSpellIDForFrame(icon))
                     or (ttFc and ttFc.spellID)
                 local tt
                 if ttSid and ns.ResolveThresholdTextSettings then
