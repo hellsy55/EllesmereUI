@@ -1141,6 +1141,11 @@ local defaults = {
             bossTargetBorderEnabled = false,
             bossTargetBorderColor = { r = 1, g = 1, b = 1 },
             bossTargetBorderAlpha = 1,
+            -- Boss Target Fill Color: recolors the health bar FILL (not the border)
+            -- while a given boss frame is the player's current target. Boss-only,
+            -- independent from Hover/Target Border above. Default off.
+            bossTargetFillColorEnabled = false,
+            bossTargetFillColor = { r = 1, g = 0, b = 0 },
             raidMarkerEnabled = true,
             raidMarkerSize = 28,
             raidMarkerAlign = "left",
@@ -1779,7 +1784,6 @@ local SECRET_CLASS_COLOR = CreateColor(1, 1, 1, 1)
 local function UF_SecretSafeHealthColor(self, event, unit)
     if not unit or self.unit ~= unit then return end
     local element = self.Health
-
     local color
     if element.colorDisconnected and not UnitIsConnected(unit) then
         color = self.colors.disconnected
@@ -1834,6 +1838,7 @@ local function UF_SecretSafeHealthColor(self, event, unit)
         element:PostUpdateColor(unit, color)
     end
 end
+ns.UF_SecretSafeHealthColor = UF_SecretSafeHealthColor
 
 -- `unit` is optional and used only to converge the setup paint with the repaint
 -- paint (see the PostUpdateColor call at the tail of the non-dark branch). It is
@@ -4585,6 +4590,32 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
     health.colorTapped = true
     health.colorDisconnected = true
     health._euiUnitKey = UnitToSettingsKey(unit)
+
+    -- Boss Target Fill Color: wrap SetStatusBarColor itself so this frame's fill
+    -- is ALWAYS force-corrected to the chosen color while it is the player's
+    -- current target, no matter which code path (oUF's class/reaction repaint,
+    -- gradient, dynamic health color, ApplyDarkTheme's PostUpdateColor, a
+    -- health-tick repaint mid-fight, etc.) just tried to paint a different
+    -- color. Wrapping the setter -- rather than reasserting on a timer, which
+    -- visibly flickered against the natural repaints -- removes the race
+    -- entirely: every color write is corrected synchronously, in place.
+    -- Reads `frame` (this function's own parameter) directly instead of
+    -- self:GetParent() -- ReparentBarsToClip later reparents the health bar
+    -- onto an intermediate clip frame for absorb/heal-prediction clipping, so
+    -- GetParent() would return that clip frame (which never carries
+    -- _isTarget) instead of the actual boss unit frame, silently never firing.
+    -- Boss-only; every other unit frame's SetStatusBarColor is untouched.
+    if unit and unit:match("^boss%d$") then
+        local origSetStatusBarColor = health.SetStatusBarColor
+        health.SetStatusBarColor = function(self, r, g, b, a)
+            local s = db.profile.boss
+            if s and s.bossTargetFillColorEnabled and frame._isTarget then
+                local tc = s.bossTargetFillColor or { r = 1, g = 0, b = 0 }
+                r, g, b = tc.r, tc.g, tc.b
+            end
+            origSetStatusBarColor(self, r, g, b, a)
+        end
+    end
 
     ApplyHealthBarTexture(health, UnitToSettingsKey(unit))
     ApplyHealthBarAlpha(health, UnitToSettingsKey(unit))
@@ -12550,6 +12581,10 @@ local function ReloadFrames()
                 local isT = UnitIsUnit(unit, "target")
                 frame._isTarget = (not issecretvalue(isT) and isT) and true or false
                 ns.ApplyBossBorderState(frame)
+                -- Boss Target Fill Color: force one real repaint so a toggle flip in
+                -- Options (which routes through here, not through
+                -- UpdateBossTargetBorders) applies/releases the override immediately.
+                if ns.ForceBossHealthRepaint then ns.ForceBossHealthRepaint(frame, unit) end
             end
             frame.Health:SetReverseFill(settings.healthReverseFill and true or false)
             ns.ApplyHealthOrientation(frame.Health, settings)
@@ -14724,21 +14759,53 @@ function InitializeFrames()
         end
     end)
 
+    -- Boss Target Fill Color: recolors a boss frame's health bar FILL while
+    -- that specific frame is the player's current target. The actual override
+    -- lives in CreateHealthBar, which wraps the boss health bar's own
+    -- SetStatusBarColor so every color write -- from oUF's class/reaction
+    -- repaint, gradient, dynamic health color, a mid-fight health tick,
+    -- whatever -- is corrected synchronously and in place; no separate paint
+    -- path to fall out of sync with (an earlier ticker-based reassert caused
+    -- visible flicker racing against the natural repaints, which is why this
+    -- is a wrap instead). ForceBossHealthRepaint below just needs to trigger
+    -- ONE real repaint on a target change so the wrapped setter gets called
+    -- and can apply/release the override immediately, rather than waiting for
+    -- the next incidental health event. Boss-only; independent of Hover/Target
+    -- Border (which recolors the border, not the fill) above.
+    local function ForceBossHealthRepaint(f, bUnit)
+        if f and f.Health and ns.UF_SecretSafeHealthColor then
+            ns.UF_SecretSafeHealthColor(f, nil, bUnit)
+        end
+    end
+    ns.ForceBossHealthRepaint = ForceBossHealthRepaint
+
     -- Boss Hover/Target border: refresh each boss frame's target state when the
     -- player's target changes or boss units (dis)appear. Hover is handled by the
     -- OnEnter/OnLeave hooks; this only tracks target. Both borders default off, so
     -- this is a cheap no-op unless the user enabled one. On ns for the 200-local cap.
     ns.UpdateBossTargetBorders = function()
         local s = db.profile.boss
+        -- Boss Preview (Options > Unit Frames > Boss) swaps each boss frame's real
+        -- unit to "player" so it can show live data with no boss fight running (see
+        -- SetBossPreview below) -- so the real "boss1" token never exists while it's
+        -- active, and Target Fill Color would never light up for testing. Standing
+        -- in "are you your own target?" for "is this boss frame targeted?" lets the
+        -- whole feature -- including this ForceBossHealthRepaint -- be exercised by
+        -- just activating Preview and /targeting yourself, no encounter required.
+        local previewActive = ns._bossPreviewActive
         for i = 1, 5 do
             local bUnit = "boss" .. i
             local f = frames[bUnit]
             if f then
+                local isT = previewActive and UnitIsUnit("player", "target") or UnitIsUnit(bUnit, "target")
+                f._isTarget = (not issecretvalue(isT) and isT) and true or false
                 if f.unifiedBorder then
-                    local isT = UnitIsUnit(bUnit, "target")
-                    f._isTarget = (not issecretvalue(isT) and isT) and true or false
                     ns.ApplyBossBorderState(f)
                 end
+                -- Preview reassigns f.unit to "player"; UF_SecretSafeHealthColor
+                -- guards on self.unit == unit, so the repaint must target whatever
+                -- f.unit currently is, not always the literal boss token.
+                ForceBossHealthRepaint(f, previewActive and f.unit or bUnit)
                 if s then
                     if f.LeftText and s.leftTextClassColor ~= nil then
                         ApplyClassColor(f.LeftText, bUnit, s.leftTextClassColor, s.leftTextColorR, s.leftTextColorG, s.leftTextColorB)
@@ -15512,6 +15579,12 @@ function SetupOptionsPanel()
             -- Restore the real Buffs/Debuffs elements (and their anchors/counts)
             -- that the fake overlay disabled while preview was active.
             if ns.ReloadFrames then ns.ReloadFrames() end
+        else
+            -- Immediately reflect whatever you're already targeting (e.g. you had
+            -- yourself targeted before turning Preview on) instead of waiting for
+            -- the next PLAYER_TARGET_CHANGED. See UpdateBossTargetBorders for how
+            -- Preview substitutes "targeting yourself" for "targeting this boss".
+            if ns.UpdateBossTargetBorders then ns.UpdateBossTargetBorders() end
         end
         return true
     end
