@@ -7000,8 +7000,6 @@ L["Colors the enemy nameplate name text to match the unit's reaction (Hostile or
 --오라/강화 효과 알림
 L["Pick which content the class-special reminders (poisons/rites/imbues/shields) appear in.\nRested areas (cities and inns) always stay hidden."] = "직업 전용 알림(독/의식/무기 부여/보호막)을 표시할 콘텐츠를 선택합니다. 휴식 지역(도시 및 여관)에서는 항상 숨겨집니다."
 
-
-
 -- == Chat prints (채팅창 print 출력 - 소스 엘키(L/Lf) 삽입 대기) ==================
 -- 원본이 print() 에 영문 리터럴을 직접 쓰는 곳들. 엔진 자동번역 밖이라 소스에서
 -- L()/Lf() 래핑이 들어가야 적용된다 (보류 목록: project_pending_bags_lwrap 참고).
