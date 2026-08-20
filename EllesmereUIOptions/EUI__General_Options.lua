@@ -955,6 +955,21 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "8.9.6",
+        mini = true,
+        fixes = {
+            { module = "AuraBuff Reminders", text = "Your own raid buff reminder now appears when it first goes missing mid-combat, such as after a combat res." },
+            { module = "AuraBuff Reminders", text = "Fixed an invisible reminder icon that could stay stuck on screen after combat." },
+            { module = "AuraBuff Reminders", text = "Reminders disabled for a location no longer flash briefly when entering it through a loading screen." },
+            { module = "Bags", text = "Recent Items now flags pickups that merge into an existing stack." },
+            { module = "Damage Meters", text = "Disable Snapping on a meter window now persists across reloads." },
+            { module = "Raid Frames", text = "The incoming-res icon no longer stays stuck on a player after they revive (8.9.5 regression)." },
+            { module = "Resource Bars", text = "The multi-band Amount/Percent toggle no longer showed Amount on fresh entries that were still capped as Percent, which made values above 100 snap back." },
+            { module = "Unit Frames", text = "The Blizzard-style class power bar no longer turns invisible after portals, cutscenes or spec changes." },
+            { module = "Unit Frames", text = "Player Aura Bars no longer stick showing every buff after a cinematic; the bars hide during the transition and repaint clean when it ends." },
+        },
+    },
+    {
         version = "8.9.5",
         mini = true,
         fixes = {

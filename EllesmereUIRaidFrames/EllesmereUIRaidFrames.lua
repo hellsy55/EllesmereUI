@@ -4293,6 +4293,11 @@ ns._rezPend = {}
 -- Shared predicate for the rez icon and the DEAD-text suppression at all paint
 -- sites. Writes the casting mark itself so a cast already in flight at paint
 -- time (login, roster reassignment) still latches when its completion edge fires.
+-- PURE otherwise: it must NEVER clear the latch -- many painters call it (status
+-- text, Extra Frames duplicates, full passes) and whichever read first would
+-- consume the entry before the icon's own repaint, stranding the icon shown.
+-- Clearing belongs to the owners: the INCOMING edges, the UNIT_HEALTH alive
+-- edge, the expiry timer, and the roster wipe -- each repaints what it clears.
 ns._RFRezShown = function(unit)
     if UnitHasIncomingResurrection(unit) then
         ns._rezPend[unit] = true
@@ -4301,7 +4306,6 @@ ns._RFRezShown = function(unit)
     local exp = ns._rezPend[unit]
     if type(exp) ~= "number" then return false end
     if GetTime() >= exp or not UnitIsDeadOrGhost(unit) then
-        ns._rezPend[unit] = nil
         return false
     end
     return true
@@ -8190,16 +8194,30 @@ local function OnEvent(self, event, arg1, ...)
     elseif event == "UNIT_HEALTH" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then
-            ns._UpdateButtonHealth(btn)
             -- Latched rez offer: the accept lands as a health edge (no further
-            -- INCOMING_RESURRECT_CHANGED), so re-evaluate the icon; the predicate
-            -- clears the latch on the alive read. Nil lookup for everyone else.
-            if ns._rezPend[arg1] then UpdateReadyCheck(btn, arg1) end
+            -- INCOMING_RESURRECT_CHANGED). This edge OWNS the alive-clear (the
+            -- predicate is deliberately pure), then repaints the shared icon.
+            -- Clearing here also stops a lingering offer window from painting a
+            -- fresh, unrezzed corpse if the unit dies again. Nil lookup for
+            -- everyone else.
+            local hadRez = ns._rezPend[arg1]
+            if hadRez ~= nil and hadRez ~= true and not UnitIsDeadOrGhost(arg1) then
+                ns._rezPend[arg1] = nil
+            end
+            ns._UpdateButtonHealth(btn)
+            if hadRez then UpdateReadyCheck(btn, arg1) end
         end
     elseif event == "UNIT_MAXHEALTH" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then
+            -- Same latch ownership as UNIT_HEALTH: on accept both fire in
+            -- unguaranteed order, and whichever runs first must fix the icon.
+            local hadRez = ns._rezPend[arg1]
+            if hadRez ~= nil and hadRez ~= true and not UnitIsDeadOrGhost(arg1) then
+                ns._rezPend[arg1] = nil
+            end
             ns._UpdateButtonHealth(btn)
+            if hadRez then UpdateReadyCheck(btn, arg1) end
         end
     elseif event == "UNIT_POWER_UPDATE" then
         -- Healer Mana Display rides the same per-unit registration: one hash
