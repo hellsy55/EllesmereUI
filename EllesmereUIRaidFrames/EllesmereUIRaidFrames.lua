@@ -1969,7 +1969,7 @@ ns.ApplyHealAbsorbStyle = function(haBar, style, settings)
     if style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then hc = { r = 1, g = 1, b = 1 } end
     local mask = haBar._absorbMask
     haBar:SetStatusBarTexture(tex)
-    haBar:SetStatusBarColor(hc.r, hc.g, hc.b, alpha)
+    haBar:SetStatusBarColor(hc.r or 0.8, hc.g or 0.15, hc.b or 0.15, alpha)
     local tiled = (style == "striped" or style == "stripedReversed" or style == "stripedThick" or style == "stripedThickR" or style == "largeStripes" or style == "largeStripesR" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR")
     local fill = haBar:GetStatusBarTexture()
     if fill then
@@ -1999,7 +1999,7 @@ ns.ApplyMaxHealthStyle = function(bar, style, settings)
     local mc = settings and settings.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
     if style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then mc = { r = 1, g = 1, b = 1 } end
     bar:SetStatusBarTexture(tex)
-    bar:SetStatusBarColor(mc.r, mc.g, mc.b, alpha)
+    bar:SetStatusBarColor(mc.r or 0.7, mc.g or 0.1, mc.b or 0.1, alpha)
     local fill = bar:GetStatusBarTexture()
     if fill then
         fill:SetDrawLayer("ARTWORK", 3)
@@ -2682,7 +2682,8 @@ local function UpdateAbsorb(button, unit)
             ha._styleNone = (haStyle == "none")
             if not ha._styleNone then
                 local hc = s.healAbsorbColor or { r = 0.8, g = 0.15, b = 0.15 }
-                local haKey = (haStyle or "") .. (s.healAbsorbOpacity or 75) .. hc.r .. hc.g .. hc.b
+                local hcR, hcG, hcB = hc.r or 0.8, hc.g or 0.15, hc.b or 0.15
+                local haKey = (haStyle or "") .. (s.healAbsorbOpacity or 75) .. hcR .. hcG .. hcB
                 if ha._lastHaKey ~= haKey then
                     ha._lastHaKey = haKey
                     ns.ApplyHealAbsorbStyle(ha, haStyle, s)
