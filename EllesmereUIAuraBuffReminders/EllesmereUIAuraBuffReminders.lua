@@ -4781,8 +4781,9 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         wipe(_dismissedUntilLoad)
         EABR.ScanEatingState()
         if not InCombatLockdown() then EABR.SyncProviderCastSpell() end
-        RequestRefresh()
-        -- Deferred refresh: GetInstanceInfo() can return stale data on the first frame after a loading screen; a second refresh at 0.5s picks up the correct zone.
+        -- GetInstanceInfo() can return stale data on the first frame after a loading screen (e.g. still
+        -- reporting the previous zone on delve entry), which would show a reminder that "Where to Show"
+        -- disables for the new location. Skip the immediate refresh and wait for the corrected one.
         C_Timer.After(0.5, RequestRefresh)
         return
     end
