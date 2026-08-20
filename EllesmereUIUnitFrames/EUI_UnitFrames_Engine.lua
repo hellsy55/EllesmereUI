@@ -434,6 +434,18 @@ EllesmereUI._UFEngineForceAll = Engine.ForceAll
 -------------------------------------------------------------------------------
 --  Event routing
 -------------------------------------------------------------------------------
+-- A max-health change lands in two steps: the max moves first, the health
+-- value follows. A paint driven by UNIT_MAXHEALTH can run between them and
+-- render the new max against the pre-change value, and same-frame dedupe drops
+-- the UNIT_HEALTH that would have corrected it. At full health nothing else
+-- fires afterwards, so the frame keeps the mid-transition numbers -- a druid
+-- shifting form with a stamina talent sat at "600K | 96%" indefinitely (field
+-- report, Lycara's Inspiration). One next-frame repaint reads settled values.
+local RESETTLE_EVENTS = {
+    UNIT_MAXHEALTH = true,
+    UNIT_MAX_HEALTH_MODIFIERS_CHANGED = true,
+}
+
 -- tracker.channelsByEvent: event -> { channelName, ... } for its frame.
 local function TrackerOnEvent(self, event, unitToken, ...)
     local frame = self._euiFrame
@@ -451,6 +463,16 @@ local function TrackerOnEvent(self, event, unitToken, ...)
         else
             Paint(frame, ch, event)
         end
+    end
+
+    if RESETTLE_EVENTS[event] and not self._euiResettle then
+        self._euiResettle = true
+        C_Timer.After(0, function()
+            self._euiResettle = nil
+            local f = self._euiFrame
+            if not f or not f:IsShown() then return end
+            for i = 1, #chans do Paint(f, chans[i], "Resettle") end
+        end)
     end
 end
 
