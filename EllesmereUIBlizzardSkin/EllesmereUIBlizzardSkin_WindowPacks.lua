@@ -5376,16 +5376,6 @@ local function SkinRCRow(child, isCurrency)
         end
         cd.styleRight()
     end
-    -- Reputation bar fill color: pooled rows are re-initialized by Blizzard on
-    -- every list update, which re-applies its own standing color (green/blue/etc)
-    -- to the bar. Must re-assert here every pass, same as the strip keys and
-    -- toggle glyph above, or the accent color only survives the row's first-ever
-    -- skin and reverts to stock on the next open/refresh.
-    local rcContent = child.Content
-    local rcBar = rcContent and rcContent.ReputationBar
-    if rcBar and rcBar.SetStatusBarColor then
-        WSkin.ApplyBarFill(rcBar)
-    end
     if d.rcSkinned then return end
     d.rcSkinned = true
     -- Header rows (those carrying the band art) get a subtle house plate and a
