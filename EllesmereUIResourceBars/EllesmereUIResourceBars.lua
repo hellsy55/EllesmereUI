@@ -6404,7 +6404,15 @@ BuildCastBar = function()
                 local ah = castBarFrame["_barAnim_h"] or h
                 castBarFrame:SetSize(aw, ah)
                 castBarFrame:ClearAllPoints()
-                castBarFrame:SetPoint(cb.unlockPos.point, UIParent, rp, px, py)
+                -- Snap the stored CENTER/CENTER position to the pixel grid, dimension-
+                -- aware (SnapXY -> SnapCenterForDim): an odd-pixel-height frame needs a
+                -- +0.5px center offset for BOTH top and bottom edges to land on whole
+                -- pixels. The unlock-mode drag path (castApply, near ERB_CastBar's MK()
+                -- registration above) already does this; this normal-build path never
+                -- did, so a raw stored position landed the center off-grid, and the
+                -- border rendered thicker on one edge and missing on the opposite one.
+                local sx, sy = SnapXY(px, py, castBarFrame, cb.unlockPos)
+                castBarFrame:SetPoint(cb.unlockPos.point, UIParent, rp, sx, sy)
             end
             SmoothBarAnimate(castBarFrame, "w", totalW, function() ApplyCastUnlockTransform() end)
             SmoothBarAnimate(castBarFrame, "h", h, function() ApplyCastUnlockTransform() end)
@@ -8046,7 +8054,12 @@ BuildGCDBar = function()
             if not (anchored and gcdBarFrame:GetLeft()) then
                 local rp = g.unlockPos.relPoint or g.unlockPos.point
                 gcdBarFrame:ClearAllPoints()
-                gcdBarFrame:SetPoint(g.unlockPos.point, UIParent, rp, g.unlockPos.x or 0, g.unlockPos.y or 0)
+                -- Same dimension-aware snap as the cast bar above: the unlock-mode
+                -- drag path (gcdApply, near ERB_GCDBar's MK() registration) already
+                -- snaps; this normal-build path didn't, leaving the stored center
+                -- off-grid on odd-pixel heights.
+                local sx, sy = SnapXY(g.unlockPos.x or 0, g.unlockPos.y or 0, gcdBarFrame, g.unlockPos)
+                gcdBarFrame:SetPoint(g.unlockPos.point, UIParent, rp, sx, sy)
             end
         end
     else
