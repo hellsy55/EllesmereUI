@@ -4,12 +4,24 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --
 --  Eight group columns, five slots each, and a member is moved by dragging it
 --  onto another slot. Opened from the cog on the Raid Tools Group & Pull
---  window; that cog exists only for a raid leader or assistant, since nobody
---  else can act on what this shows.
+--  window. The cog itself is never gated -- anyone can open this and read the
+--  roster -- but moving a member is: without lead or assist the window comes
+--  up (or drops back to) a read-only, greyed-out state, an explanatory line
+--  in place of the usual title-area space, and every slot refusing to pick up
+--  a drag. The instant assist or lead is granted or lost -- promotion,
+--  demotion, a leader swap, joining or leaving the raid -- GROUP_ROSTER_UPDATE
+--  and PARTY_LEADER_CHANGED flip that state live, window open or not, so
+--  nobody has to close and reopen it to find out it now works.
 --
 --  WHY IT EXISTS. Blizzard's own raid frames let a leader drag a member
 --  between groups. The suite hides Blizzard's raid manager and replaces its
 --  frames, so it currently takes that away; this gives it back.
+--
+--  RIGHT-CLICK CLOSES IT, same as any other panel in the suite, but only away
+--  from an actual player: right-clicking an occupied slot is left alone (in
+--  case a click-cast or context-menu convention ever wants that spot), while
+--  the window's own background, its title/padding, and any EMPTY slot all
+--  close it -- see SlotOnMouseUp and win's own OnMouseUp below.
 --
 --  NOT A SECURE FRAME, BUT NOT COMBAT-FREE EITHER: SetRaidSubgroup and
 --  SwapRaidSubgroup are protected functions -- calling either while
@@ -61,6 +73,8 @@ local win                       -- built once, on first open
 local slots = {}                -- flat list of every slot frame
 local dragSlot                  -- the slot a member was lifted from, while dragging
 local ghost                     -- the label that follows the cursor
+local lockLabel                 -- "you need lead/assist" line, shown only while locked
+local NO_PERM_ALPHA = 0.4       -- slot dimming while nobody can act on them
 
 -- Our own slice of the shared QoL profile, the arrangement every QoL feature
 -- uses: each merges its own defaults into the SAME profile table under its own
@@ -253,6 +267,17 @@ local function SlotOnLeave(s)
     SetSlotHover(s, false)
 end
 
+-- Right-click closes the window, but only away from an actual player: a slot
+-- holding a member swallows the click instead (Blizzard's own raid frames
+-- reserve right-click-on-a-unit for their context menu, and this window sits
+-- in front of nothing else that would want it). An empty slot has no such
+-- claim on the click, so it closes same as the bare window background does.
+local function SlotOnMouseUp(s, button)
+    if button == "RightButton" and not s._member then
+        win:Hide()
+    end
+end
+
 local function MakeSlot(parent, group)
     local s = CreateFrame("Button", nil, parent)
     s:SetSize(SLOT_W, SLOT_H)
@@ -274,7 +299,7 @@ local function MakeSlot(parent, group)
     s._lbl:SetPoint("RIGHT", s, "RIGHT", -6, 0)
     s._lbl:SetJustifyH("LEFT")
 
-    -- All four handlers are module-level: they take `self`, so building them
+    -- All five handlers are module-level: they take `self`, so building them
     -- per slot would allocate 120 identical closures at first open.
     s:RegisterForDrag("LeftButton")
     s:SetScript("OnEnter", SlotOnEnter)
@@ -283,6 +308,10 @@ local function MakeSlot(parent, group)
     -- Fires on the frame the drag STARTED from, wherever it is released, which
     -- is what makes one handler enough to resolve any destination.
     s:SetScript("OnDragStop", DropDrag)
+    -- OnMouseUp fires on release regardless of RegisterForClicks (that only
+    -- gates OnClick), so this alone is enough to catch the right-click -- no
+    -- need to register the button for right-click clicks as well.
+    s:SetScript("OnMouseUp", SlotOnMouseUp)
 
     slots[#slots + 1] = s
     return s
@@ -328,6 +357,16 @@ local function Build()
         title:SetTextColor(EllesmereUI.GetAccentColor())
     end })
 
+    -- Sits beside the title rather than over the grid: it has to be readable
+    -- the moment the window opens without lead/assist, but must not shift any
+    -- slot when it shows or hides.
+    lockLabel = EllesmereUI.MakeFont(win, 11, nil, 1, 0.55, 0.2)
+    lockLabel:SetPoint("LEFT", title, "RIGHT", 8, 0)
+    lockLabel:SetPoint("RIGHT", win, "TOPRIGHT", -PAD - 16, 0)
+    lockLabel:SetJustifyH("RIGHT")
+    lockLabel:SetText(EllesmereUI.L("Read-only -- need raid lead or assist to move players"))
+    lockLabel:Hide()
+
     -- Dragging the window itself, from anywhere that is not a slot. The spot
     -- is remembered: someone who sizes this window will place it too, and
     -- re-centring on every open would undo that each time.
@@ -340,6 +379,14 @@ local function Build()
         local point, _, relPoint, x, y = self:GetPoint()
         p.pos = { point = point, relPoint = relPoint, x = x, y = y }
     end)
+    -- Right-click anywhere on the window's own surface closes it -- title bar,
+    -- padding, the gaps between columns/rows, an empty slot (see
+    -- SlotOnMouseUp). A slot's own frame sits above this one and swallows the
+    -- click before it reaches here, so an occupied slot is the only surface
+    -- that does NOT close on right-click.
+    win:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then self:Hide() end
+    end)
 
     local close = CreateFrame("Button", nil, win)
     close:SetSize(16, 16)
@@ -351,6 +398,13 @@ local function Build()
     close:SetScript("OnEnter", function() closeLbl:SetAlpha(1) end)
     close:SetScript("OnLeave", function() closeLbl:SetAlpha(0.7) end)
     close:SetScript("OnClick", function() win:Hide() end)
+    -- Not a player either, so right-click closes it same as left-click does --
+    -- it would otherwise be a dead zone that swallows the right-click and
+    -- does nothing, the one spot on the window that would disagree with the
+    -- "anywhere but a player" rule.
+    close:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then win:Hide() end
+    end)
 
     for g = 1, NUM_GROUPS do
         local col, row = (g - 1) % COLS, math.floor((g - 1) / COLS)
@@ -367,6 +421,21 @@ local function Build()
             s:SetPoint("TOPLEFT", win, "TOPLEFT",
                 x, y - HEADER_H - (slotIdx - 1) * (SLOT_H + SLOT_GAP))
         end
+    end
+end
+
+-- Greys the grid and surfaces the explanatory line the instant lead/assist is
+-- gone, and lifts both the instant it is back -- called from Refresh so every
+-- path that repaints the roster (open, roster event, permission change) stays
+-- in lockstep with what the window will actually let you do. Split out of
+-- Refresh rather than folded into its loop: it touches every slot exactly
+-- once regardless of roster size, where Refresh's loop is per-member.
+local function ApplyLockState()
+    local permitted = ns.RaidGroupsPermitted()
+    lockLabel:SetShown(not permitted)
+    local alpha = permitted and 1 or NO_PERM_ALPHA
+    for _, s in ipairs(slots) do
+        s:SetAlpha(alpha)
     end
 end
 
@@ -389,6 +458,7 @@ function Refresh()
             end
         end
     end
+    ApplyLockState()
 end
 
 -- Panel scale times this window's own multiplier. Called on open, from the
@@ -449,6 +519,7 @@ end)
 
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("GROUP_ROSTER_UPDATE")
+ev:RegisterEvent("PARTY_LEADER_CHANGED")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:SetScript("OnEvent", function(_, event)
     -- Combat starting mid-drag: cancelled right here rather than left to
@@ -462,13 +533,14 @@ ev:SetScript("OnEvent", function(_, event)
     -- bursts through a raid night.
     if not win or not win:IsShown() then return end
     -- A drag in flight is abandoned rather than resolved against a roster that
-    -- has just moved underneath it. Guarded: without a drag the teardown would
-    -- sweep all forty slots for nothing, on an event that bursts.
+    -- has just moved underneath it -- including losing assist/lead mid-drag,
+    -- which this same event also carries. Guarded: without a drag the
+    -- teardown would sweep all forty slots for nothing, on an event that
+    -- bursts.
     if dragSlot then StopDrag() end
-    -- Losing rank mid-session leaves nothing actionable on screen.
-    if not ns.RaidGroupsPermitted() then
-        win:Hide()
-        return
-    end
+    -- No more hiding the window on a lost rank: it stays open and Refresh's
+    -- own ApplyLockState greys it right back out, then lights back up the
+    -- moment GROUP_ROSTER_UPDATE reports assist or lead again -- gained or
+    -- lost, the window never has to be closed and reopened to catch up.
     Refresh()
 end)
