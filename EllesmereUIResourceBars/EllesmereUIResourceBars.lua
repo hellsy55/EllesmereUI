@@ -8893,8 +8893,20 @@ local function OnEvent(self, event, ...)
             UpdatePrimaryBar()
             UpdateSecondaryResource()
         end
-    elseif event == "UNIT_MAXHEALTH" then
+    elseif event == "UNIT_MAXHEALTH" or event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
         UpdateHealthBar()
+        -- A max-health change lands in two steps, the max first and the value
+        -- after, so this pass renders the new max against the pre-change value.
+        -- At full health nothing fires afterwards, leaving the mid-transition
+        -- numbers up (druid form stamina talents). One next-frame re-read
+        -- settles it.
+        if not self._erbHpResettle then
+            self._erbHpResettle = true
+            C_Timer.After(0, function()
+                self._erbHpResettle = nil
+                UpdateHealthBar()
+            end)
+        end
         -- Stagger / Ignore Pain max derives from player max health
         if cachedSecondary and (cachedSecondary.power == "BREWMASTER_STAGGER"
            or cachedSecondary.power == "IGNOREPAIN_BAR") then
@@ -9263,6 +9275,7 @@ function ERB:OnEnable()
     local eventFrame = _erbEventFrame
     eventFrame:RegisterUnitEvent("UNIT_HEALTH", "player")
     eventFrame:RegisterUnitEvent("UNIT_MAXHEALTH", "player")
+    eventFrame:RegisterUnitEvent("UNIT_MAX_HEALTH_MODIFIERS_CHANGED", "player")
     eventFrame:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
     eventFrame:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     eventFrame:RegisterUnitEvent("UNIT_MAXPOWER", "player")
