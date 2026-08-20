@@ -1215,7 +1215,7 @@ initFrame:SetScript("OnEvent", function(self)
             height    = 22,
             getChecked = function(key)
                 local ent = CurrentBandEntry()
-                local isPercent = (_bandLockPercent or (ent and ent.bandMode == "percent")) or false
+                local isPercent = _bandLockPercent or not (ent and ent.bandMode == "value")
                 if key == "percent" then return isPercent else return not isPercent end
             end,
             isDisabled = function() return _bandLockPercent and true or false end,
