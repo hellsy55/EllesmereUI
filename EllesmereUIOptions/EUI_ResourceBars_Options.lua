@@ -1215,7 +1215,7 @@ initFrame:SetScript("OnEvent", function(self)
             height    = 22,
             getChecked = function(key)
                 local ent = CurrentBandEntry()
-                local isPercent = (_bandLockPercent or (ent and ent.bandMode == "percent")) or false
+                local isPercent = _bandLockPercent or not (ent and ent.bandMode == "value")
                 if key == "percent" then return isPercent else return not isPercent end
             end,
             isDisabled = function() return _bandLockPercent and true or false end,
@@ -1336,7 +1336,7 @@ initFrame:SetScript("OnEvent", function(self)
             local val = tonumber(self:GetText())
             if val then
                 local pctMax = _bandPercentMax or 100
-                local hi = _bandCountBased and 100 or ((not _bandLockPercent and ent.bandMode ~= "percent") and 1000000 or pctMax)
+                local hi = _bandCountBased and 100 or ((not _bandLockPercent and ent.bandMode == "value") and 1000000 or pctMax)
                 val = math.max(1, math.min(hi, math.floor(val + 0.5)))
                 band.to = val
                 SortBands(ent.bands)
