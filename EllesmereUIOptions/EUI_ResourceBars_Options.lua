@@ -1336,7 +1336,7 @@ initFrame:SetScript("OnEvent", function(self)
             local val = tonumber(self:GetText())
             if val then
                 local pctMax = _bandPercentMax or 100
-                local hi = _bandCountBased and 100 or ((not _bandLockPercent and ent.bandMode == "value") and 1000000 or pctMax)
+                local hi = _bandCountBased and 100 or ((not _bandLockPercent and ent.bandMode ~= "percent") and 1000000 or pctMax)
                 val = math.max(1, math.min(hi, math.floor(val + 0.5)))
                 band.to = val
                 SortBands(ent.bands)
