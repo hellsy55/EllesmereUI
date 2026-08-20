@@ -4098,7 +4098,7 @@ local function UpdateButton(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        elseif s.showIncomingRez and UnitHasIncomingResurrection(unit) then
+        elseif s.showIncomingRez and ns._RFRezShown(unit) then
             -- Being resurrected: hide status text so the incoming-rez icon (same spot) isn't covered.
             d.statusText:Hide()
         elseif not UnitIsConnected(unit) then
@@ -4242,6 +4242,33 @@ end
 -------------------------------------------------------------------------------
 local readyCheckActive = false
 
+-- Incoming-rez indicator state. UnitHasIncomingResurrection covers only the CAST
+-- window: it drops to false the moment the cast lands, while the target still has
+-- the accept dialog up. ns._rezPend carries the unit across that edge: true while
+-- a cast has been seen, then a GetTime() expiry latched when the flag falls on a
+-- still-dead unit (the offer window). Cleared on accept (alive read), a fresh
+-- cast, roster shifts (unit tokens move), or the 60s offer expiry. A cancelled
+-- cast latches too -- the completion and cancel edges are indistinguishable
+-- without a combat log; the alive-clear and expiry bound the miss.
+ns._rezPend = {}
+
+-- Shared predicate for the rez icon and the DEAD-text suppression at all paint
+-- sites. Writes the casting mark itself so a cast already in flight at paint
+-- time (login, roster reassignment) still latches when its completion edge fires.
+ns._RFRezShown = function(unit)
+    if UnitHasIncomingResurrection(unit) then
+        ns._rezPend[unit] = true
+        return true
+    end
+    local exp = ns._rezPend[unit]
+    if type(exp) ~= "number" then return false end
+    if GetTime() >= exp or not UnitIsDeadOrGhost(unit) then
+        ns._rezPend[unit] = nil
+        return false
+    end
+    return true
+end
+
 -- d.readyCheck is shared by the ready-check, incoming-summon and incoming-rez indicators (rez only
 -- on dead units). Priority: active ready check > pending summon > incoming rez.
 local function UpdateReadyCheck(button, unit)
@@ -4296,8 +4323,9 @@ local function UpdateReadyCheck(button, unit)
         end
     end
 
-    -- Incoming resurrection (being cast / waiting to accept). Lowest priority; shows a body is already being picked up.
-    if s.showIncomingRez and unit and UnitHasIncomingResurrection(unit) then
+    -- Incoming resurrection (cast in flight, or the latched unaccepted-offer window
+    -- -- see ns._RFRezShown). Lowest priority; shows a body is already being picked up.
+    if s.showIncomingRez and unit and ns._RFRezShown(unit) then
         tex:SetTexCoord(0, 1, 0, 1)
         tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
         tex:Show()
@@ -4623,7 +4651,7 @@ ns._UpdateButtonHealth = function(button)
         local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
         if s.statusTextPosition == "none" then
             d.statusText:Hide()
-        elseif s.showIncomingRez and UnitHasIncomingResurrection(unit) then
+        elseif s.showIncomingRez and ns._RFRezShown(unit) then
             -- Being resurrected: hide the status text so the incoming-rez icon isn't covered.
             d.statusText:Hide()
         elseif not UnitIsConnected(unit) then
@@ -4645,6 +4673,10 @@ ns._UpdateButtonHealth = function(button)
 
     -- Background + dead/offline tint. This path owns death/resurrect transitions arriving via UNIT_HEALTH, so it restores the bg when alive.
     ns._ApplyHealthBg(d, health, s, unit)
+
+    -- Debuff Manager dead-corpse swap rides the same ownership: one field read
+    -- for every button without a qualifying config.
+    if d.dmDeadSwap then ns.DM_DeadEdge(d, unit) end
 end
 
 -------------------------------------------------------------------------------
@@ -7847,6 +7879,9 @@ local function OnEvent(self, event, arg1, ...)
             ns._LayoutPartyFrames()
         end
     elseif event == "GROUP_ROSTER_UPDATE" or event == "PARTY_LEADER_CHANGED" then
+        -- Unit tokens reindex on roster changes; a latched rez offer keyed by the
+        -- old token would paint on the wrong player, so drop them all.
+        if event == "GROUP_ROSTER_UPDATE" then wipe(ns._rezPend) end
         if inCombat then
             ns._rosterDirtyInCombat = true
             -- Check if size tier changed during combat (deferred to REGEN)
@@ -7999,6 +8034,10 @@ local function OnEvent(self, event, arg1, ...)
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then
             ns._UpdateButtonHealth(btn)
+            -- Latched rez offer: the accept lands as a health edge (no further
+            -- INCOMING_RESURRECT_CHANGED), so re-evaluate the icon; the predicate
+            -- clears the latch on the alive read. Nil lookup for everyone else.
+            if ns._rezPend[arg1] then UpdateReadyCheck(btn, arg1) end
         end
     elseif event == "UNIT_MAXHEALTH" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
@@ -8166,9 +8205,34 @@ local function OnEvent(self, event, arg1, ...)
             if u and btn:IsVisible() then UpdateReadyCheck(btn, u) end
         end
     elseif event == "INCOMING_RESURRECT_CHANGED" then
-        -- Fires with a unit payload when a rez starts/stops on that unit. Refresh the
-        -- status text (so DEAD hides while rezzing / reappears after) as well as the
-        -- shared rez icon.
+        -- Fires with a unit payload when a rez starts/stops on that unit. The stop
+        -- edge on a still-dead unit that was being cast on latches the offer window
+        -- (ns._RFRezShown keeps the icon up until accept/expiry); the single-shot
+        -- timer is the only thing that repaints an untouched corpse at expiry.
+        if arg1 then
+            if UnitHasIncomingResurrection(arg1) then
+                ns._rezPend[arg1] = true
+            elseif ns._rezPend[arg1] == true then
+                if UnitIsDeadOrGhost(arg1) then
+                    local exp = GetTime() + 60
+                    ns._rezPend[arg1] = exp
+                    local unit = arg1
+                    C_Timer.After(60.1, function()
+                        if ns._rezPend[unit] ~= exp then return end
+                        ns._rezPend[unit] = nil
+                        local b = unitToButton[unit] or ns._partyUnitToButton[unit]
+                        if b and b:IsVisible() then
+                            if ns._UpdateButtonHealth then ns._UpdateButtonHealth(b) end
+                            UpdateReadyCheck(b, unit)
+                        end
+                    end)
+                else
+                    ns._rezPend[arg1] = nil
+                end
+            end
+        end
+        -- Refresh the status text (so DEAD hides while rezzing / reappears after)
+        -- as well as the shared rez icon.
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn and btn:IsVisible() then
             if ns._UpdateButtonHealth then ns._UpdateButtonHealth(btn) end

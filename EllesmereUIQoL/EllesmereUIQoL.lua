@@ -3415,10 +3415,8 @@ do
             pcall(SetCVar, "hideHelptips", "1")
             pcall(SetCVar, "showTutorials", "0")
             weSetCVar = true
-            -- Avoid a global EnumerateFrames walk here. Addon-heavy UIs can
-            -- contain enough frames for that scan to block PLAYER_LOGIN for
-            -- several seconds. ShowUIPanel scans each relevant panel when it
-            -- opens, preserving normal behavior without the reload spike.
+            -- No global EnumerateFrames walk here (runs inside PLAYER_LOGIN): already-open
+            -- panels pick up their "i" buttons on the next ShowUIPanel.
             HideOpenTips()
         else
             if weSetCVar then

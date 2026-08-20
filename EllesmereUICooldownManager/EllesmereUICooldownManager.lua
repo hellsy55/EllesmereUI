@@ -2101,7 +2101,7 @@ local function UpdateAllCDMBorders()
                     border:Show()
                     if slot.__ECMEIcon then slot.__ECMEIcon:SetTexCoord(crop, 1 - crop, crop, 1 - crop) end
                     if slot.__ECMECooldown then
-                        slot.__ECMECooldown:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
+                        slot.__ECMECooldown:SetSwipeTexture("Interface\\AddOns\\EllesmereUI\\media\\white-square.png")
                     end
                     for _, h in ipairs(slot.__ECMEHidden) do
                         if h and h.Hide then h:Hide() end
@@ -4909,7 +4909,7 @@ ApplyShapeToCDMIcon = function(icon, shape, barData, ssb)
         if cd then
             cd:ClearAllPoints()
             cd:SetAllPoints(icon)
-            pcall(cd.SetSwipeTexture, cd, "Interface\\Buttons\\WHITE8x8")
+            pcall(cd.SetSwipeTexture, cd, "Interface\\AddOns\\EllesmereUI\\media\\white-square.png")
             if cd.SetUseCircularEdge then pcall(cd.SetUseCircularEdge, cd, false) end
         end
 
@@ -5055,7 +5055,7 @@ function ns.ApplyShapeToOverlay(icon, oIcon, oCd, barData)
         -- Square overlay. IconTexture already copied the underlying texcoords.
         if oIcon then oIcon:ClearAllPoints(); oIcon:SetAllPoints(oIcon:GetParent()) end
         if oCd then
-            pcall(oCd.SetSwipeTexture, oCd, "Interface\\Buttons\\WHITE8x8")
+            pcall(oCd.SetSwipeTexture, oCd, "Interface\\AddOns\\EllesmereUI\\media\\white-square.png")
             if oCd.SetUseCircularEdge then pcall(oCd.SetUseCircularEdge, oCd, false) end
         end
         return
