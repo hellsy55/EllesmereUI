@@ -12885,6 +12885,9 @@ function InitializeFrames()
         if unit ~= "player" then return end
         if not cpSpecInitDone then return end
         DestroyCustomClassPower()
+        if frames._classPowerBar then
+            frames._classPowerBar.ignoreFramePositionManager = nil
+        end
         frames._classPowerBar = nil
         C_Timer.After(0.1, function()
             if ns.ReloadFrames then ns.ReloadFrames() end
