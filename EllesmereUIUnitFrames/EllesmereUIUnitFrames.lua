@@ -9391,6 +9391,11 @@ local function CreateCustomClassPower(playerFrame, style)
     end
 
     local pips = {}
+    -- Tracks how many pips are CURRENTLY shown, separate from #pips: pip frames
+    -- are only ever Hide()'d when the resource max drops (never removed from the
+    -- table), so #pips is a high-water mark that stops matching a shrunk-then-
+    -- regrown max and silently skips the rebuild below.
+    local shownPipCount = 0
     local staggerBar  -- set only in bar mode
     if isBarMode then
         -- Single StatusBar filling the container; color updates per-tier.
@@ -9408,6 +9413,7 @@ local function CreateCustomClassPower(playerFrame, style)
         for i = 1, maxPower do
             pips[i] = MakePip(container, i)
         end
+        shownPipCount = maxPower
     end
 
     -- Update function
@@ -9506,8 +9512,11 @@ local function CreateCustomClassPower(playerFrame, style)
             end
         end
 
-        -- Rebuild pips if max changed
-        if max ~= #pips and max > 0 then
+        -- Rebuild pips if max changed. Compare against shownPipCount, not #pips:
+        -- #pips only ever grows (hidden pips stay in the table), so it stops
+        -- matching once max shrinks and regrows to a previously-seen value,
+        -- leaving the high pips stuck hidden and the container stuck narrow.
+        if max ~= shownPipCount and max > 0 then
             for _, p in ipairs(pips) do p:Hide() end
             local newTotalW = max * pipSize + (max - 1) * gap + pad
             container:SetWidth(newTotalW)
@@ -9521,6 +9530,7 @@ local function CreateCustomClassPower(playerFrame, style)
                 PP.Size(pips[i], pipSize, pipH)
                 pips[i]:Show()
             end
+            shownPipCount = max
             -- Re-stretch pips if in "above" position
             if container._repositionForWidth then
                 local fw = db and db.profile and db.profile.player and db.profile.player.frameWidth or 181
