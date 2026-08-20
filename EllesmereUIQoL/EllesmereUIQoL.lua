@@ -3363,48 +3363,6 @@ do
         if root.GetChildren then pcall(ScanFrame, root) end
     end
 
-    -- One-time full walk to catch panels already open when the feature is switched on.
-    -- EnumerateFrames() walks the ENTIRE global frame registry (often several thousand
-    -- frames, including ones from every other loaded addon). Doing that in a single
-    -- synchronous pass can exceed the client's script execution time limit ("script
-    -- ran too long"), especially right at PLAYER_LOGIN. To avoid that, the walk is
-    -- chunked across a few C_Timer.After(0, ...) ticks via a coroutine.
-    local sweepInProgress = false
-    local function SweepAll()
-        if sweepInProgress then return end
-        local fp = GetFingerprint()
-        if not fp then return end
-        sweepInProgress = true
-
-        local co
-        co = coroutine.create(function()
-            local n = 0
-            local frame = EnumerateFrames()
-            while frame do
-                if frame.ShowTooltip == fp then HideButton(frame) end
-                frame = EnumerateFrames(frame)
-                n = n + 1
-                if n % 200 == 0 then
-                    coroutine.yield()
-                end
-            end
-        end)
-
-        local function Step()
-            local ok, err = coroutine.resume(co)
-            if not ok then
-                sweepInProgress = false
-                return
-            end
-            if coroutine.status(co) == "dead" then
-                sweepInProgress = false
-            else
-                C_Timer.After(0, Step)
-            end
-        end
-        Step()
-    end
-
     local function RestoreButtons()
         for btn in pairs(hiddenByUs) do
             btn:SetAlpha(1)
@@ -3450,23 +3408,15 @@ do
     end
 
     local weSetCVar = false
-    -- doSweep defaults to true (the options checkbox needs it, to catch panels
-    -- already open when the player flips the setting on mid-session). PLAYER_LOGIN
-    -- passes false: nothing has had a chance to be open yet at that point, so the
-    -- full frame-registry walk there was pure wasted work landing right in the
-    -- middle of the already CPU-heavy login/reload burst -- that's what was
-    -- causing the FPS drop, not just the walk's cost by itself. The reactive
-    -- hooks (HelpTip.Show + ShowUIPanel) installed below cover everything that
-    -- opens from PLAYER_LOGIN onward regardless.
-    local function ApplyHideTutorials(doSweep)
-        if doSweep == nil then doSweep = true end
+    local function ApplyHideTutorials()
         if Enabled() then
             InstallCoreHooks()
             InstallTooltipHook()
             pcall(SetCVar, "hideHelptips", "1")
             pcall(SetCVar, "showTutorials", "0")
             weSetCVar = true
-            if doSweep then SweepAll() end
+            -- No global EnumerateFrames walk here (runs inside PLAYER_LOGIN): already-open
+            -- panels pick up their "i" buttons on the next ShowUIPanel.
             HideOpenTips()
         else
             if weSetCVar then
@@ -3490,7 +3440,7 @@ do
             end
             return
         end
-        ApplyHideTutorials(false)  -- PLAYER_LOGIN: skip the sweep, see comment above
+        ApplyHideTutorials()  -- PLAYER_LOGIN
     end)
 end
 
