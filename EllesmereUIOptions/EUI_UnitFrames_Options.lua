@@ -13128,6 +13128,29 @@ initFrame:SetScript("OnEvent", function(self)
                       if UpdateBossFillSwatchVis then UpdateBossFillSwatchVis() end
                   end });  y = y - h
 
+            -- Cog: gate Target Fill Color to only kick in during multi-boss phases
+            -- (2+ boss frames active at once); a lone boss frame keeps its normal
+            -- color even while targeted. Off by default -- always active, matching
+            -- the feature's original always-on behavior -- so this stays purely
+            -- opt-in. Counting active boss frames only needs UnitExists, which
+            -- isn't combat/secure-restricted, so this check is safe to run anytime.
+            if not EllesmereUI._prebuilding then
+                local rightRgn = bossStrataRow._rightRegion
+                local _, fillCogShow = EllesmereUI.BuildCogPopup({
+                    title = "Target Fill Color",
+                    rows = {
+                        { type="toggle", label="Only With Multiple Boss Frames",
+                          tooltip="Only recolor the fill when more than one boss frame is active at once (a multi-boss phase). With a single boss frame up, it keeps its normal color even while targeted. Off (default) recolors regardless of how many boss frames are active.",
+                          get=function() return settingsTable.bossTargetFillColorMultiOnly or false end,
+                          set=function(v)
+                              settingsTable.bossTargetFillColorMultiOnly = v
+                              ReloadAndUpdate()
+                          end },
+                    },
+                })
+                MCogBtn(rightRgn, fillCogShow)
+            end
+
             -- Inline color swatch for Target Fill Color, anchored to the toggle.
             if not EllesmereUI._prebuilding then
                 local PP = EllesmereUI.PP
