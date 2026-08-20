@@ -1752,6 +1752,13 @@ local function MakePixelBorder(parent, r, g, b, a, size, textureKey, texOffset, 
             if shown then PP.ShowBorder(bf) else PP.HideBorder(bf) end
         end,
         ApplyStyle = function(self, newSz, cr, cg, cb, ca, texKey, texOff, texOffY, sX, sY, addonKey, sizeKey)
+            -- A bar repositioned by the unlock anchor system loses this frame's
+            -- SetAllPoints edge: GetPoint still reports TOPLEFT/BOTTOMRIGHT to the bar,
+            -- but the rect stops resolving (GetLeft() nil, GetWidth() 0). The strips are
+            -- anchored here, so each one falls back to WHITE8X8's natural 8px on the
+            -- dimension it takes from anchors and the border disappears until the border
+            -- SIZE changes. Re-issuing the same SetAllPoints restores it.
+            if not bf:GetLeft() then bf:SetAllPoints(parent) end
             EllesmereUI.ApplyBorderStyle(bf, newSz, cr, cg, cb, ca or 1, texKey or "solid", texOff, texOffY, sX, sY, addonKey, sizeKey)
         end,
     }
