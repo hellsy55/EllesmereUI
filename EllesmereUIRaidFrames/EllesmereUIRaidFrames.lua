@@ -711,6 +711,7 @@ local separatedHdrs  = {}   -- [1..8] group headers
 local containerFrame = nil  -- top-level positioning frame
 ns._flatButtons      = {}   -- buttons owned by the flat (merged) header
 ns._flatHeader       = nil  -- single header for merge-groups mode
+ns._flatGfStr        = nil  -- merged groupFilter LayoutGroups would write (Self Position fallback)
 local eventFrame     = CreateFrame("Frame")
 local unitTrackers   = {}  -- [unitToken] = tracker frame
 local inCombat       = false
@@ -6054,7 +6055,8 @@ end -- XF scope block
 --  per-group nameList listing every member with the player first, so the
 --  secure header orders natively -- no SetPoint override, no flicker.
 --  showPlayer can't exclude the player in a raid, so the party-style self
---  button doesn't apply here. Non-merged only (ignored when Merge Groups on).
+--  button doesn't apply here. Merged mode pins the player via a whole-raid
+--  nameList instead (ns._BuildMergedSelfNameList below).
 -------------------------------------------------------------------------------
 -- Player's raid subgroup (1-8). Party/solo collapses to group 1.
 function ns._GetPlayerSubgroup()
@@ -6229,10 +6231,54 @@ function ns._BuildArenaNameList(hideSelf, selfFirst, selfLast, sortByRole, roleO
     return table.concat(names, ",")
 end
 
+-- Whole-raid nameList for Merge Groups + Self Position: player pinned first
+-- (or last), everyone else in the active sort (role blocks in ROLE mode, raid
+-- index otherwise). Replaces the flat header's groupFilter, so members of
+-- groups hidden via Show Groups are simply not listed. Bails to nil while any
+-- name is unresolved (a nameList missing a member HIDES that frame); the
+-- caller falls back to the engine path until names resolve.
+function ns._BuildMergedSelfNameList(sortByRole, roleOrder, selfLast, visibleGroups)
+    if not IsInRaid() then return nil end
+    local pri
+    if sortByRole then
+        pri = {}
+        for p, r in ipairs(roleOrder) do pri[r] = p end
+    end
+    local members = {}
+    local n = GetNumGroupMembers()
+    for i = 1, n do
+        local name, _, subgroup = GetRaidRosterInfo(i)
+        if not name or name == UNKNOWNOBJECT then return nil end
+        if not visibleGroups or visibleGroups[subgroup] ~= false then
+            local unit = "raid" .. i
+            local rp = 99
+            if pri then rp = pri[UnitGroupRolesAssigned(unit)] or 99 end
+            members[#members + 1] = {
+                name = name,
+                isPlayer = UnitIsUnit(unit, "player"),
+                rolePri = rp,
+                index = i,
+            }
+        end
+    end
+    if #members == 0 then return nil end
+    table.sort(members, function(a, b)
+        -- Player to top (self-first) or bottom (self-last); exactly one of a/b
+        -- is the player in this branch, so the XOR with selfLast flips it.
+        if a.isPlayer ~= b.isPlayer then return a.isPlayer ~= selfLast end
+        if sortByRole and a.rolePri ~= b.rolePri then return a.rolePri < b.rolePri end
+        return a.index < b.index
+    end)
+    local names = {}
+    for _, m in ipairs(members) do names[#names + 1] = m.name end
+    return table.concat(names, ",")
+end
+
 -------------------------------------------------------------------------------
 --  Apply sort attributes to all headers. Show Self First (raid) uses the
---  per-group nameList (see the Show Self First banner above). Non-merged,
---  in-raid only. Expensive Hide/Show runs only when an attribute actually changed.
+--  per-group nameList (see the Show Self First banner above); merged mode
+--  uses the whole-raid nameList (ns._BuildMergedSelfNameList). Expensive
+--  Hide/Show runs only when an attribute actually changed.
 -------------------------------------------------------------------------------
 local function ApplySortToHeaders()
     if not containerFrame or InCombatLockdown() then return end
@@ -6274,9 +6320,22 @@ local function ApplySortToHeaders()
     end
 
     if s.mergeGroups and ns._flatHeader then
-        -- Flat header's groupFilter is managed by LayoutGroups; pass it through.
-        applySortTo(ns._flatHeader, baseGroupBy, baseSortMethod, baseGroupingOrder, nil,
-            ns._flatHeader:GetAttribute("groupFilter"))
+        -- Self Position in merged mode: a whole-raid nameList owns the order
+        -- (player pinned, rest by the active sort), so groupFilter must be
+        -- CLEARED -- the list itself only names visible groups' members --
+        -- and groupBy nil so the list order is what the header uses (same
+        -- combo as the non-merged player's-group path). While names are
+        -- unresolved (builder bailed) the engine path runs instead, with
+        -- LayoutGroups' groupFilter restored from ns._flatGfStr.
+        local mergedSelf = (s.showSelfFirst or s.showSelfLast) and IsInRaid()
+        local mergedList = mergedSelf
+            and ns._BuildMergedSelfNameList(sortByRole, roleOrder, selfLast, s.visibleGroups) or nil
+        if mergedList then
+            applySortTo(ns._flatHeader, nil, "NAMELIST", "", mergedList, nil)
+        else
+            applySortTo(ns._flatHeader, baseGroupBy, baseSortMethod, baseGroupingOrder, nil,
+                ns._flatGfStr or ns._flatHeader:GetAttribute("groupFilter"))
+        end
     else
         for group = 1, 8 do
             local hdr = separatedHdrs[group]
@@ -6632,7 +6691,14 @@ ns._LayoutGroupsImpl = function()
             ns._flatHeader:ClearAllPoints()
             ns._flatHeader:SetPoint("TOPLEFT", containerFrame, "TOPLEFT", 0, 0)
             local layoutChanged = false
-            if ns._flatHeader:GetAttribute("groupFilter") ~= gfStr then
+            -- While Self Position owns the merged header (whole-raid nameList,
+            -- applied by ApplySortToHeaders at the end of this pass), a
+            -- groupFilter write here would fight its clear on every pass. Cache
+            -- the string instead -- ApplySortToHeaders restores it whenever the
+            -- nameList bails on unresolved names.
+            ns._flatGfStr = gfStr
+            local selfOwnsHeader = (s.showSelfFirst or s.showSelfLast) and IsInRaid()
+            if not selfOwnsHeader and ns._flatHeader:GetAttribute("groupFilter") ~= gfStr then
                 ns._flatHeader:SetAttribute("groupFilter", gfStr)
             end
             if ns._flatHeader:GetAttribute("point") ~= hdrPoint
@@ -11418,10 +11484,13 @@ local function BuildPreviewRoles()
 
     -- Sort within each group based on sort settings
     local sortMode = db.profile.sortMode or "INDEX"
-    -- Self ordering is non-merged only (ignored when Merge Groups is enabled).
-    -- showSelfFirst here means "self ordering active"; selfLast picks the end.
-    local selfLast = db.profile.showSelfLast and not db.profile.mergeGroups
-    local showSelfFirst = (db.profile.showSelfFirst or db.profile.showSelfLast) and not db.profile.mergeGroups
+    -- Self ordering pins the player first (or last). Separated mode moves the
+    -- player within each preview group; merged mode flows the whole grid in
+    -- one sort, which the per-group preview approximates with the player at
+    -- the first cell. showSelfFirst here means "self ordering active";
+    -- selfLast picks the end.
+    local selfLast = db.profile.showSelfLast
+    local showSelfFirst = db.profile.showSelfFirst or db.profile.showSelfLast
     previewRoles._playerSlot = 1  -- default: player is slot 1
 
     if sortMode == "ROLE" or showSelfFirst then
