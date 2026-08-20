@@ -1274,6 +1274,7 @@ local DEFAULTS = {
             alwaysShow    = false,  -- keep the bar on screen (sitting empty) while nothing is being cast
             showIcon      = true,
             iconOnRight   = false,  -- attach the spell icon to the right of the bar instead of the left
+            showIconDivider = false,  -- draw a 1px divider at the icon/bar seam (interior seam has no border otherwise)
             width         = 220,
             height        = 20,
             anchorX       = 0,
@@ -6343,6 +6344,21 @@ BuildCastBar = function()
         castBarFrame._iconFrame = iconFrame
         castBarFrame._icon = icon
 
+        -- Optional 1px divider at the icon/bar seam (opt-in: "Show Icon Divider").
+        -- That seam is otherwise interior with no border by design (see the clip-inset
+        -- comment below). Parented to the border frame (pl+5), not castBarFrame itself
+        -- (pl+15): a texture drawn directly on castBarFrame renders at castBarFrame's
+        -- own frame level, which sits BELOW the icon and bar/clip child frames -- it
+        -- would be invisible under them regardless of draw layer, since draw layer only
+        -- orders content within the SAME frame, not across frames.
+        local iconDivider = castBarFrame._border:CreateTexture(nil, "OVERLAY", nil, 7)
+        iconDivider:Hide()
+        if iconDivider.SetSnapToPixelGrid then
+            iconDivider:SetSnapToPixelGrid(false)
+            iconDivider:SetTexelSnappingBias(0)
+        end
+        castBarFrame._iconDivider = iconDivider
+
         -- Text overlay frame (above all bar borders)
         local textFrame = CreateFrame("Frame", nil, castBarFrame)
         textFrame:SetAllPoints(bar)
@@ -6452,6 +6468,31 @@ BuildCastBar = function()
         iconFrame:Show()
     else
         iconFrame:Hide()
+    end
+
+    -- Optional icon/bar seam divider (opt-in "Show Icon Divider"). Same
+    -- onePixel math as the perimeter border (SnapBorderTextures) so it reads
+    -- as the same thickness. Anchored to iconFrame's inner edge and given
+    -- only a width (both vertical anchor points already match iconFrame's
+    -- own top/bottom, so it inherits the full bar height automatically).
+    local iconDivider = castBarFrame._iconDivider
+    if hasIcon and cb.showIconDivider then
+        local des = castBarFrame:GetEffectiveScale()
+        local onePixel = des > 0 and (PP.perfect / des) or PP.mult
+        local dbs = cb.borderSize or 1
+        iconDivider:ClearAllPoints()
+        iconDivider:SetWidth(math.max(onePixel, math.floor(dbs + 0.5) * onePixel))
+        if iconOnRight then
+            iconDivider:SetPoint("TOPRIGHT", iconFrame, "TOPLEFT", 0, 0)
+            iconDivider:SetPoint("BOTTOMRIGHT", iconFrame, "BOTTOMLEFT", 0, 0)
+        else
+            iconDivider:SetPoint("TOPLEFT", iconFrame, "TOPRIGHT", 0, 0)
+            iconDivider:SetPoint("BOTTOMLEFT", iconFrame, "BOTTOMRIGHT", 0, 0)
+        end
+        iconDivider:SetColorTexture(cb.borderR or 0, cb.borderG or 0, cb.borderB or 0, cb.borderA or 1)
+        iconDivider:Show()
+    else
+        iconDivider:Hide()
     end
 
     -- Clip frame + bar: beside the icon (or full width), full height
