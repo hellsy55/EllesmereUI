@@ -2040,9 +2040,12 @@ local function CreateAbsorbBar(button, healthBar)
     -- CLAMPTOBLACKADDITIVE is what makes the mask a BOUND: the default wrap
     -- extends the white edge pixels past the mask's rect, so the backfill
     -- rendered unmasked over missing health (doubled onto the forward bar).
+    -- NEAREST because WHITE8X8 is 8x8: stretched over the rect, bilinear blends
+    -- the edge texel with the black border across the outer 1/16 of each side,
+    -- and that alpha ramp read as a shadow along the overshield's edges.
     local curMask = healthBar:CreateMaskTexture()
     curMask:SetAllPoints(curClip)
-    curMask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    curMask:SetTexture("Interface\\Buttons\\WHITE8X8", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE", "NEAREST")
 
     -- Backfill bar (overflow): grows into filled health from the right edge.
     -- Child of the HEALTH BAR, not curClip -- the filled-region bound rides
