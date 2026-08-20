@@ -1146,6 +1146,10 @@ local defaults = {
             -- independent from Hover/Target Border above. Default off.
             bossTargetFillColorEnabled = false,
             bossTargetFillColor = { r = 1, g = 0, b = 0 },
+            -- Cog on Target Fill Color: when true, only recolor while 2+ boss
+            -- frames are active at once (a multi-boss phase); a lone boss frame
+            -- keeps its normal color even while targeted. Off by default.
+            bossTargetFillColorMultiOnly = false,
             raidMarkerEnabled = true,
             raidMarkerSize = 28,
             raidMarkerAlign = "left",
@@ -4556,6 +4560,21 @@ function ns.ApplyHealthOrientation(bar, settings)
     return vert
 end
 
+-- Boss Target Fill Color's "Only With Multiple Boss Frames" gate. UnitExists is
+-- a plain read with no combat-lockdown or secure-execution restriction, so this
+-- is safe to call at any time, including mid-repaint from the SetStatusBarColor
+-- wrap below. During Boss Preview (no real boss1-5 exist) all 3 preview frames
+-- are shown at once anyway, so that's treated as "multiple" too -- otherwise the
+-- gate would silently block testing whenever it's turned on.
+local function CountActiveBossUnits()
+    if ns._bossPreviewActive then return 3 end
+    local n = 0
+    for i = 1, (_G.MAX_BOSS_FRAMES or 5) do
+        if UnitExists("boss" .. i) then n = n + 1 end
+    end
+    return n
+end
+
 local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInset)
     height = height or settings.healthHeight
     xOffset = xOffset or 0
@@ -4609,7 +4628,8 @@ local function CreateHealthBar(frame, unit, height, xOffset, settings, rightInse
         local origSetStatusBarColor = health.SetStatusBarColor
         health.SetStatusBarColor = function(self, r, g, b, a)
             local s = db.profile.boss
-            if s and s.bossTargetFillColorEnabled and frame._isTarget then
+            if s and s.bossTargetFillColorEnabled and frame._isTarget
+               and (not s.bossTargetFillColorMultiOnly or CountActiveBossUnits() > 1) then
                 local tc = s.bossTargetFillColor or { r = 1, g = 0, b = 0 }
                 r, g, b = tc.r, tc.g, tc.b
             end
