@@ -1034,12 +1034,11 @@ local function RefreshPermissions(force)
         RefreshAssistCheckbox()
     end
 
-    -- Same rule the Raid Groups window enforces on itself (ns.RaidGroupsPermitted):
-    -- nobody but a raid leader or assistant can act on what it shows.
-    if raidGroupsCogBtn then
-        local on = ns.RaidGroupsPermitted and ns.RaidGroupsPermitted() or false
-        SetButtonEnabled(raidGroupsCogBtn, on)
-    end
+    -- The cog itself is never gated here anymore: it always opens the window,
+    -- lead/assist or not, so someone can see the roster and have it come alive
+    -- the instant they are handed assist. The window enforces its own gate on
+    -- what it lets you DO (see ns.RaidGroupsPermitted and the grey-out inside
+    -- EllesmereUIQoL_RaidGroups.lua) rather than on whether it can be opened.
 end
 
 -------------------------------------------------------------------------------
@@ -1483,8 +1482,12 @@ end
 -- The cog that opens EllesmereUIQoL_RaidGroups.lua's group-composition
 -- window. Plain (not secure) and NOT combat-gated: SetRaidSubgroup/
 -- SwapRaidSubgroup carry no lockdown restriction, and that other window is
--- what actually acts on the roster -- this is just its door. Shown only for
--- a raid leader or assistant, since nobody else can act on what it opens.
+-- what actually acts on the roster -- this is just its door. Always clickable,
+-- lead/assist or not: the window itself opens read-only without either and
+-- greys itself in the instant it is lost, then lights back up the instant it
+-- is gained (see ns.RaidGroupsPermitted in EllesmereUIQoL_RaidGroups.lua) --
+-- so gating the door as well would only hide the one place that shows it is
+-- about to become usable.
 -- Same chrome and size as the shell's own close button (14x14, SkinButtonChrome,
 -- a single font glyph) so the two read as one matched pair riding the same
 -- corner -- "+" opens the roster, "-" right beside it closes the panel.
