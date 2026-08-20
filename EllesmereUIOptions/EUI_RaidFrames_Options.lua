@@ -4850,8 +4850,6 @@ initFrame:SetScript("OnEvent", function(self)
                       if SVal("showSelfFirst", false) then return "first" end
                       return "none"
                   end,
-                  disabled=function() return SVal("mergeGroups", false) end,
-                  disabledTooltip="Not available with Merge Groups enabled", rawTooltip=true,
                   setValue=function(v)
                       SSet("showSelfFirst", v == "first")
                       SSet("showSelfLast", v == "last")
