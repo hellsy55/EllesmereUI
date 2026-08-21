@@ -865,6 +865,35 @@ local hiddenParent = CreateFrame("Frame", "EABHiddenParent", UIParent)
 hiddenParent:SetAllPoints(UIParent)
 hiddenParent:Hide()
 
+-- Quietly hide a Blizzard action button without ever calling a protected
+-- Hide()/SetShown(): Blizzard's own UpdateShownButtons (ActionBar.lua) reads
+-- the statehidden attribute on its next pass and calls SetShown(false)
+-- itself. That next pass is not immediate, so this alone does not guarantee
+-- the button reports Hidden right away -- every caller already reparents or
+-- hides the button's bar ancestor first, which is what keeps it invisible
+-- in the meantime. On ns: file is at the 200-local ceiling.
+function ns.QuietlyHideBlizzButton(btn)
+    btn:UnregisterAllEvents()
+    btn:SetAttributeNoHandler("statehidden", true)
+end
+
+-- Re-hide a stock bar Blizzard just re-Show()'d, without calling Hide() or
+-- HideBase(): both route through a protected setter (SetShownBase, reached
+-- either directly or via Edit Mode's HideOverride/UpdateVisibility) from
+-- addon-context Lua, and the next combat-transition SetShownBase call then
+-- hits ADDON_ACTION_BLOCKED -- the confirmed cause of the
+-- MultiBarBottomLeftButton1 SetShown crash reported from Cooldown Manager
+-- play. Reparenting under hiddenParent needs no protected call and achieves
+-- the same result: the bar stays effectively invisible regardless of its
+-- own Shown state. On ns: file is at the 200-local ceiling.
+function ns.ReassertHiddenOnShow(bar)
+    bar:HookScript("OnShow", function(self)
+        if not InCombatLockdown() then
+            self:SetParent(hiddenParent)
+        end
+    end)
+end
+
 -- Kill Blizzard's event broadcasters at file load (before any button exists):
 -- both dispatch to ALL registered buttons, causing mass redraws. Our central
 -- dispatcher handles the needed events with HasAction() filtering (GCD swipes
@@ -1132,28 +1161,19 @@ do
                 -- No Hide()/HideBase() here: reparenting to hiddenParent (kept
                 -- permanently Hidden) already makes the bar effectively invisible
                 -- regardless of its own Shown state, so there is nothing to gain
-                -- from also calling a hide-flavored method. There is something to
-                -- lose -- HideBase() bypasses Edit Mode's HideOverride when that
-                -- override is already installed, so isShownExternal never updates;
-                -- the next combat-transition UpdateVisibility pass (PLAYER_REGEN_
-                -- ENABLED/DISABLED) then tries its own SetShownBase and hits
-                -- ADDON_ACTION_BLOCKED, same mechanism as the MainActionBar note
-                -- above, just on a bar with no hooksecurefunc(Show) catching it.
-                -- This is the confirmed cause of the MultiBarBottomLeftButton1
-                -- SetShown crash reported from Cooldown Manager play.
+                -- from also calling a hide-flavored method, and something to
+                -- lose -- see the ReassertHiddenOnShow note above hiddenParent's
+                -- creation for the taint mechanism this avoids. This file-load
+                -- pass is one of several places that used to make this same call
+                -- on these bars; PLAYER_TALENT_UPDATE and the OnShow safety net
+                -- further down carried the identical risk and are fixed the same
+                -- way.
                 frame:SetParent(hiddenParent)
             end
 
             if frame.actionButtons and type(frame.actionButtons) == "table" then
                 for _, button in pairs(frame.actionButtons) do
-                    button:UnregisterAllEvents()
-                    -- statehidden alone is sufficient: Blizzard's own
-                    -- UpdateShownButtons (ActionBar.lua) reads this attribute and
-                    -- calls SetShown(false) itself, so nothing here needs to touch
-                    -- the button's protected shown state directly. An explicit
-                    -- Hide() was the other half of the same taint this block now
-                    -- avoids for the bar frame above.
-                    button:SetAttributeNoHandler("statehidden", true)
+                    ns.QuietlyHideBlizzButton(button)
                 end
             end
         end
@@ -1705,13 +1725,7 @@ local function HideBlizzardBars()
                     -- Leaving them under their real bar costs no visibility:
                     -- every stock bar is in STOCK_BAR_DISPOSAL, hidden with an
                     -- OnShow re-hide, so a child of one is never drawn.
-                    -- No Hide() here: Blizzard's own UpdateShownButtons already
-                    -- reads statehidden and calls SetShown(false) itself, so
-                    -- addon code never needs a protected call on this button at
-                    -- all. Same taint mechanism and same fix as the disposal
-                    -- loop above.
-                    btn:UnregisterAllEvents()
-                    btn:SetAttributeNoHandler("statehidden", true)
+                    ns.QuietlyHideBlizzButton(btn)
                 end
             end
         end
@@ -1723,19 +1737,16 @@ local function HideBlizzardBars()
         local bar = _G[name]
         if bar then
             bar:UnregisterAllEvents()
-            local safeHide = bar.HideBase or bar.Hide
-            safeHide(bar)
+            -- No Hide()/HideBase() call: SetParent(hiddenParent) below already
+            -- makes the bar effectively invisible taint-free (see the note on
+            -- ReassertHiddenOnShow above hiddenParent's creation).
             bar:SetParent(hiddenParent)
             -- Prevent Blizzard re-showing it (spell transforms like Ascendance
             -- can trigger ValidateActionBarTransition, creating invisible dead zones)
-            bar:HookScript("OnShow", function(self)
-                self:Hide()
-            end)
+            ns.ReassertHiddenOnShow(bar)
             if bar.actionButtons and type(bar.actionButtons) == "table" then
                 for _, child in pairs(bar.actionButtons) do
-                    child:UnregisterAllEvents()
-                    child:SetAttributeNoHandler("statehidden", true)
-                    child:Hide()
+                    ns.QuietlyHideBlizzButton(child)
                 end
             end
         end
@@ -14078,8 +14089,9 @@ function EAB:FinishSetup()
                 if not entry.retainEvents then
                     bar:UnregisterAllEvents()
                 end
+                -- No Hide(): see ReassertHiddenOnShow's note above
+                -- hiddenParent's creation. Reparenting alone is enough.
                 bar:SetParent(hiddenParent)
-                bar:Hide()
             end
         end
         -- Both event broadcasters are killed at file-load time (top of file).
@@ -14094,19 +14106,13 @@ function EAB:FinishSetup()
     end)
 
     -- Hook Show on stock bars so they can never re-appear regardless
-    -- of what fires them (talent changes, spec swaps, zone transitions, etc.)
-    -- Guarded with InCombatLockdown: calling Hide() on a protected frame
-    -- from addon code during combat is blocked (ADDON_ACTION_BLOCKED).
-    -- Since these bars are reparented to hiddenParent, they are invisible
-    -- regardless of their shown state, so skipping Hide() in combat is safe.
+    -- of what fires them (talent changes, spec swaps, zone transitions, etc.).
+    -- ReassertHiddenOnShow reparents rather than Hide()s -- see its note above
+    -- hiddenParent's creation.
     for _, entry in ipairs(STOCK_BAR_DISPOSAL) do
         local bar = _G[entry.name]
         if bar then
-            bar:HookScript("OnShow", function(self)
-                if not InCombatLockdown() then
-                    self:Hide()
-                end
-            end)
+            ns.ReassertHiddenOnShow(bar)
         end
     end
 
