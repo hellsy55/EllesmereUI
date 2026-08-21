@@ -11273,6 +11273,25 @@ initFrame:SetScript("OnEvent", function(self)
                                             end
                                         end } })
 
+                        -- CD Ready Glow Timing (presets): same "Only in Combat" restriction as
+                        -- the regular per-spell panel, applied here via the customActiveStates
+                        -- entry (cas.cdStateCombatOnly). Engine gate: ApplyCdState in
+                        -- EllesmereUICdmFakeActive.lua.
+                        local CD_STATE_COMBAT_ITEMS = {
+                            { val = nil,  label = "Always" },
+                            { val = true, label = "Only in Combat" },
+                        }
+                        MakeSubnavRow("CD Ready Glow Timing", CD_STATE_COMBAT_ITEMS,
+                            function() return (cas and cas.cdStateCombatOnly) and true or nil end,
+                            function(v)
+                                SetCasOwn("cdStateCombatOnly", v)
+                                if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                            end,
+                            function() return not (cas and cas.cdStateCombatOnly) end,
+                            nil,
+                            { apply = { keys = { "cdStateCombatOnly" },
+                                        write = function(t, v) t.cdStateCombatOnly = v or false end } })
+
                         -- Remove Active State (clears only the cast-triggered overlay; any Cooldown State Effect stays).
                         if hasActive then
                             MakeActionRow(EllesmereUI.L("Remove Active State") .. " (" .. (cas.duration or 0) .. "s)", function()
@@ -11891,6 +11910,38 @@ initFrame:SetScript("OnEvent", function(self)
                                             t.glowColorB = nil
                                         end
                                     end } })
+
+                    -- 5a. CD Ready Glow Timing: restricts the "Cooldown State Effect" Ready
+                    -- glow (Pixel/Button Glow, plain or Resource Aware) to combat only, so it
+                    -- doesn't light up while out of combat. Has no effect on the Hidden or
+                    -- Lower Alpha cdState modes. Stored as ss.cdStateCombatOnly; the runtime
+                    -- gate lives in CdStateGlowCombatOK (EllesmereUICooldownManager.lua) and
+                    -- the combat-transition watch in EllesmereUICdmHooks.lua.
+                    local CD_STATE_COMBAT_ITEMS = {
+                        { val = nil,  label = "Always" },
+                        { val = true, label = "Only in Combat" },
+                    }
+                    local cdStateCombatRow = MakeSubnavRow("CD Ready Glow Timing", CD_STATE_COMBAT_ITEMS,
+                        function() return ss.cdStateCombatOnly and true or nil end,
+                        function(v)
+                            EnsureSS(); SetOwn("cdStateCombatOnly", v or nil)
+                            if ns.RefreshCDMIconAppearance then ns.RefreshCDMIconAppearance(barKey) end
+                        end,
+                        function() return ss.cdStateCombatOnly == nil end,
+                        nil,
+                        { apply = { keys = { "cdStateCombatOnly" },
+                                    write = function(t, v) t.cdStateCombatOnly = v or false end } })
+                    if isCustomInjected and cdStateCombatRow then
+                        cdStateCombatRow:SetAlpha(0.35)
+                        cdStateCombatRow:SetScript("OnEnter", function()
+                            if EllesmereUI.ShowWidgetTooltip then
+                                EllesmereUI.ShowWidgetTooltip(cdStateCombatRow, customDisabledTip)
+                            end
+                        end)
+                        cdStateCombatRow:SetScript("OnLeave", function()
+                            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                        end)
+                    end
 
                     end  -- not isCustomInjected
                     end  -- isBuffBar per-icon rows

@@ -3760,8 +3760,13 @@ local function DecorateFrame(frame, barData)
                     -- cooldown. Register just those for the event-driven cooldown
                     -- watch (its loop handles plain variants too); Blizzard frames
                     -- keep the zero-event path.
-                    if (frame._isRacialFrame or frame._isTrinketFrame or frame._isPresetFrame
+                    -- "Only Glow in Combat" needs a re-evaluation on combat transitions too
+                    -- (a plain CD Ready glow has no cooldown transition to re-fire this hook
+                    -- when the player simply enters/leaves combat), so watch it like the
+                    -- special frame types below.
+                    if ((frame._isRacialFrame or frame._isTrinketFrame or frame._isPresetFrame
                         or frame._isItemPresetFrame or frame._isCustomSpellFrame)
+                        or (ss2 and ss2.cdStateCombatOnly))
                         and ns.CDGlowWatch then
                         ns.CDGlowWatch(frame)
                     end
@@ -3774,7 +3779,7 @@ local function DecorateFrame(frame, barData)
                             fd._cdStateGlowOn = false
                         end
                     end
-                    if not onCD then
+                    if not onCD and ns.CdStateGlowCombatOK(ss2) then
                         -- procGlowActive gate: the proc glow shares this
                         -- overlay and has priority -- never start over it
                         -- (ShowProcGlow clears the memo, so this is the
@@ -3838,6 +3843,7 @@ local function DecorateFrame(frame, barData)
                                 isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(self.sid)
                             end
                             local shouldGlow = (not pOnCD) and (isUsable == true)
+                                and ns.CdStateGlowCombatOK(self.ss2)
                             if shouldGlow then
                                 -- procGlowActive: proc owns the shared
                                 -- overlay -- never start over a live proc.
@@ -4428,6 +4434,9 @@ do
                     else
                         -- Plain: cooldown state only.
                         shouldGlow = true
+                    end
+                    if shouldGlow and not (ns.CdStateGlowCombatOK and ns.CdStateGlowCombatOK(ss2)) then
+                        shouldGlow = false
                     end
                     if shouldGlow then
                         -- procGlowActive: proc owns the shared overlay --

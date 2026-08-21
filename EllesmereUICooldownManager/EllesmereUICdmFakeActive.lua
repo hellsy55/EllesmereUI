@@ -1161,7 +1161,7 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
     if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
     local glow = fd and fd.glowOverlay
     if not glow then return end
-    if not onCD then
+    if not onCD and ns.CdStateGlowCombatOK(cas) then
         -- Re-assert against the overlay's REAL state (overlay._glowActive), not
         -- our flag alone. fd.glowOverlay is shared with the proc-glow and
         -- appearance passes, and twelve of the thirteen sites that stop it never
