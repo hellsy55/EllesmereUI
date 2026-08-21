@@ -4058,20 +4058,20 @@ local function SkinEditBox(cf)
             eb:HookScript("OnKeyDown", function(self, key)
                 if key ~= "UP" and key ~= "DOWN" then return end
                 if IsAltKeyDown() then return end
-                -- Restriction guards. InChatMessagingLockdown is a deliberately
-                -- CONSERVATIVE SUPERSET: SetText plants addon-tainted text, and
-                -- while the lockdown is up C_ChatInfo.SendChatMessage refuses a
-                -- tainted caller, so recalling a line there would silently
-                -- swallow the very message the user is trying to re-send. The
-                -- visible cost is that plain Up/Down recall does nothing in
-                -- dungeons, raids, M+ and PvP matches. The two older clauses
-                -- stay -- dropping either would be an unverified behaviour
-                -- change riding along on a taint fix.
+                -- Restriction guards. Deliberately NOT gated on
+                -- C_ChatInfo.InChatMessagingLockdown: that clause was tried and
+                -- it kills plain Up/Down recall in every dungeon, raid, M+ and
+                -- PvP match, which is where people re-send most. It is not
+                -- needed. SendChatMessage is SecretArguments =
+                -- "AllowedWhenUntainted" (ChatInfoDocumentation.lua:564-568), so
+                -- the lockdown refuses a tainted CALLER; SendText becomes that
+                -- tainted caller by reading the chatType ATTRIBUTE, which is the
+                -- taint-propagating channel, not by carrying text an addon
+                -- planted with SetText. Removing the chat-state hooks above is
+                -- what fixes the send; suppressing recall never did.
                 local restricted = GetCVarBool("addonChatRestrictionsForced")
                     or (C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
                         and C_ChallengeMode.IsChallengeModeActive())
-                    or (C_ChatInfo and C_ChatInfo.InChatMessagingLockdown
-                        and C_ChatInfo.InChatMessagingLockdown())
                 if restricted then return end
                 local d = CFD(self)
                 local h = d.history
