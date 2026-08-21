@@ -3788,7 +3788,7 @@ initFrame:SetScript("OnEvent", function(self)
         local powerSizeRow
         powerSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Height",
-              min = 1, max = 30, step = 1,
+              min = 1, max = 100, step = 1,
               disabled = phDis, disabledTooltip = phTip, rawTooltip = phRaw,
               getValue = function() local c = cfg(); return c and c.height or 16 end,
               setValue = function(v)
