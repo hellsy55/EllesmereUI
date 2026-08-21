@@ -53,7 +53,14 @@ end
 --  absorb covers both absorb kinds plus heal prediction.)
 -------------------------------------------------------------------------------
 local CHANNEL_EVENTS = {
-    health   = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_CONNECTION", "UNIT_FACTION" },
+    -- UNIT_MAX_HEALTH_MODIFIERS_CHANGED on health/text: a max-health modifier
+    -- (druid form stamina talents, temp max health loss) moves the health value
+    -- and the effective max with no UNIT_HEALTH or UNIT_MAXHEALTH behind it, so
+    -- the bar and the value/percent text hold the pre-shift numbers until some
+    -- unrelated event repaints them. Blizzard's UnitFrame_OnEvent calls
+    -- UnitFrameHealthBar_OnUpdate from this event for the same reason.
+    health   = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_CONNECTION", "UNIT_FACTION",
+                 "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" },
     power    = { "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER", "UNIT_POWER_BAR_SHOW", "UNIT_POWER_BAR_HIDE", "UNIT_CONNECTION" },
     -- UNIT_AURA for the same reason as the absorb channel below: the long-form
     -- Absorb / Heal Absorb text zones render from PaintText, so a shield lost to
@@ -61,7 +68,8 @@ local CHANNEL_EVENTS = {
     -- _absGate lockstep instead, which the absorb channel already covers.)
     text     = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER",
                  "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_CONNECTION", "UNIT_AURA",
-                 "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" },
+                 "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED",
+                 "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" },
     -- (UNIT_HEAL_PREDICTION deliberately absent: the absorb painter never
     -- rendered incoming heals and early-returned on it; not delivering it at
     -- all is the same behavior for less dispatch.)
@@ -426,6 +434,18 @@ EllesmereUI._UFEngineForceAll = Engine.ForceAll
 -------------------------------------------------------------------------------
 --  Event routing
 -------------------------------------------------------------------------------
+-- A max-health change lands in two steps: the max moves first, the health
+-- value follows. A paint driven by UNIT_MAXHEALTH can run between them and
+-- render the new max against the pre-change value, and same-frame dedupe drops
+-- the UNIT_HEALTH that would have corrected it. At full health nothing else
+-- fires afterwards, so the frame keeps the mid-transition numbers -- a druid
+-- shifting form with a stamina talent sat at "600K | 96%" indefinitely (field
+-- report, Lycara's Inspiration). One next-frame repaint reads settled values.
+local RESETTLE_EVENTS = {
+    UNIT_MAXHEALTH = true,
+    UNIT_MAX_HEALTH_MODIFIERS_CHANGED = true,
+}
+
 -- tracker.channelsByEvent: event -> { channelName, ... } for its frame.
 local function TrackerOnEvent(self, event, unitToken, ...)
     local frame = self._euiFrame
@@ -443,6 +463,16 @@ local function TrackerOnEvent(self, event, unitToken, ...)
         else
             Paint(frame, ch, event)
         end
+    end
+
+    if RESETTLE_EVENTS[event] and not self._euiResettle then
+        self._euiResettle = true
+        C_Timer.After(0, function()
+            self._euiResettle = nil
+            local f = self._euiFrame
+            if not f or not f:IsShown() then return end
+            for i = 1, #chans do Paint(f, chans[i], "Resettle") end
+        end)
     end
 end
 

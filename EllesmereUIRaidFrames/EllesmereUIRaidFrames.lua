@@ -4685,6 +4685,20 @@ ns._UpdateButtonHealth = function(button)
     if d.dmDeadSwap then ns.DM_DeadEdge(d, unit) end
 end
 
+-- A max-health change lands in two steps, the max first and the value after, so
+-- a health pass driven by it renders the new max against the pre-change value.
+-- At full health nothing fires afterwards, leaving the mid-transition numbers up
+-- (druid form stamina talents). One next-frame re-read settles it; the flag
+-- collapses a raid-wide change to one pass per button.
+ns._ResettleButtonHealth = function(button)
+    if button._euiHpResettle then return end
+    button._euiHpResettle = true
+    C_Timer.After(0, function()
+        button._euiHpResettle = nil
+        if button:IsVisible() then ns._UpdateButtonHealth(button) end
+    end)
+end
+
 -------------------------------------------------------------------------------
 --  Friendly Boss Frames (any group): five standalone secure unit buttons for
 --  boss1-boss5. A secure visibility driver on [@bossN,help] is the entire
@@ -5824,6 +5838,7 @@ XF.EnsureBuilt = function(count)
             if not b:IsVisible() then return end
             if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
                 ns._UpdateButtonHealth(b)
+                if event == "UNIT_MAXHEALTH" then ns._ResettleButtonHealth(b) end
             elseif event == "UNIT_AURA" then
                     -- Aura displays are engine containers; only the absorb
                     -- overlay is event-driven here.
@@ -5852,6 +5867,10 @@ XF.EnsureBuilt = function(count)
                 or event == "UNIT_HEAL_PREDICTION" or event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
                 UpdateAbsorb(b, unit)
                 if event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then ns.UpdateHealAbsorbTextFor(b, unit) end
+                if event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
+                    ns._UpdateButtonHealth(b)
+                    ns._ResettleButtonHealth(b)
+                end
             elseif event == "UNIT_THREAT_LIST_UPDATE" or event == "UNIT_THREAT_SITUATION_UPDATE" then
                 local d = GetFFD(b)
                 if d.threatFrame then
@@ -8127,6 +8146,7 @@ local function OnEvent(self, event, arg1, ...)
                 ns._rezPend[arg1] = nil
             end
             ns._UpdateButtonHealth(btn)
+            ns._ResettleButtonHealth(btn)
             if hadRez then UpdateReadyCheck(btn, arg1) end
         end
     elseif event == "UNIT_POWER_UPDATE" then
@@ -8168,6 +8188,10 @@ local function OnEvent(self, event, arg1, ...)
         if btn then
             UpdateAbsorb(btn, arg1)
             if event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then ns.UpdateHealAbsorbTextFor(btn, arg1) end
+            if event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
+                ns._UpdateButtonHealth(btn)
+                ns._ResettleButtonHealth(btn)
+            end
         end
     elseif event == "UNIT_NAME_UPDATE" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
