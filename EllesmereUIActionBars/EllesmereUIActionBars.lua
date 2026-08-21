@@ -3910,6 +3910,17 @@ do
             local action = btn:GetAttribute("action")
             if not action or not HasAction(action) then return end
             local fd = EFD(btn)
+            -- Assist host: its slot cooldown mirrors whatever the engine is
+            -- suggesting at the instant it is read, so a slot-fed push here can
+            -- land on a different ability than the icon the assist ticker
+            -- painted -- the same split ns.PaintAssistCooldown closes. Every
+            -- cooldown event (any cast, any bar) reaches this function, so the
+            -- ticker's fix must own this path too. The spinner read keeps the
+            -- check a raw table lookup for every other button.
+            if fd.assistSpin and C_ActionBar.IsAssistedCombatAction
+               and C_ActionBar.IsAssistedCombatAction(action) then
+                return ns.PaintAssistCooldown(btn, ns._assistLastSuggest)
+            end
             local cd = btn.cooldown
             local durObj = gDur
             local cdInfo = ci or C_ActionBar.GetActionCooldown(action)
@@ -4134,7 +4145,14 @@ do
                         local ci = C_ActionBar.GetActionCooldown(action)
                         local cdReal = (ci and ci.isActive and not ci.isOnGCD) and true or false
                         if cdReal ~= (fd.cdWasReal or false) then
-                            ForceCooldownPaint(btn)
+                            -- Assist host: swipe follows the ticker's sample,
+                            -- never the slot (see PushButtonCooldown).
+                            if fd.assistSpin and C_ActionBar.IsAssistedCombatAction
+                               and C_ActionBar.IsAssistedCombatAction(action) then
+                                ns.PaintAssistCooldown(btn, ns._assistLastSuggest)
+                            else
+                                ForceCooldownPaint(btn)
+                            end
                             fd.cdWasReal = cdReal
                         end
                         local chargeCd = btn.chargeCooldown
