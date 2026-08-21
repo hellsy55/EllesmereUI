@@ -2609,6 +2609,17 @@ end
 
 ns.ResolveGlowColor = ResolveGlowColor
 
+-- Gate for the CD Ready glow's "Only Glow in Combat" option (ss.cdStateCombatOnly).
+-- True when the option is off, or on and the player is currently in combat.
+-- ns.CDMInCombat() is the debounced combat state (see the PLAYER_REGEN_DISABLED /
+-- PLAYER_REGEN_ENABLED handler below), not raw InCombatLockdown(), so a brief
+-- out-of-combat blip mid-fight doesn't flicker the glow off and back on.
+-- Not a file-scope local: this file rides the Lua 5.1 200-local main-chunk cap.
+function ns.CdStateGlowCombatOK(ss)
+    if not (ss and ss.cdStateCombatOnly) then return true end
+    return ns.CDMInCombat and ns.CDMInCombat() or false
+end
+
 -- Show proc glow on one of our icons. Uses per-spell settings if available.
 local function ShowProcGlow(icon, cr, cg, cb)
     if not icon then return end
@@ -5711,12 +5722,18 @@ local function RefreshCDMIconAppearance(barKey)
                                 isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(glowLive)
                             end
                         end
-                        if isUsable == true then
+                        if isUsable == true and ns.CdStateGlowCombatOK(ss) then
                             local gr, gg, gb = ResolveGlowColor(ss)
                             local isPixel = (cse == "pixelGlowReady" or cse == "pixelGlowReadyUsable")
                             StartNativeGlow(glowOv, isPixel and 1 or 3, gr or 1, gg or 1, gb or 1)
                             ifd._cdStateGlowOn = true
                         end
+                    end
+                    -- "Only Glow in Combat": watch this frame so a PLAYER_REGEN_DISABLED /
+                    -- PLAYER_REGEN_ENABLED transition re-evaluates it even without a cooldown
+                    -- or resource event (see the CDGlowWatch combat handling in EllesmereUICdmHooks.lua).
+                    if ss and ss.cdStateCombatOnly and ns.CDGlowWatch then
+                        ns.CDGlowWatch(icon)
                     end
                     -- Event-driven re-evaluation: Resource Aware glows always, plus plain glows on
                     -- EUI custom frames (their SetDesaturation never fires the SetDesaturated hook that would re-evaluate them). Fake-Active-owned frames (PresetHasCdState) excluded.
@@ -5805,13 +5822,16 @@ local function RefreshCDMIconAppearance(barKey)
                                     isUsable = C_Spell.IsSpellUsable and C_Spell.IsSpellUsable(csLive)
                                 end
                             end
-                            if isUsable == true then
+                            if isUsable == true and ns.CdStateGlowCombatOK(csSs) then
                                 local gr, gg, gb = ResolveGlowColor(csSs)
                                 local isPixel = (cse == "pixelGlowReady" or cse == "pixelGlowReadyUsable")
                                 StartNativeGlow(glowOv, isPixel and 1 or 3, gr or 1, gg or 1, gb or 1)
                                 if ifd then ifd._cdStateGlowOn = true end
                             end
                         end
+                    end
+                    if csSs and csSs.cdStateCombatOnly and ns.CDGlowWatch then
+                        ns.CDGlowWatch(icon)
                     end
                     -- Resource Aware glows always watch cooldown events. Plain glows normally
                     -- re-evaluate through the SetDesaturated hook, but EUI's custom frames
@@ -10091,6 +10111,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
             _inCombat = true
             _CDMApplyVisibility()
             ns.RefreshItemCountOOCBars()
+            -- Re-evaluate any "Only Glow in Combat" CD Ready glows now that we're in combat.
+            if ns.QueueCDGlowResourceCheck then ns.QueueCDGlowResourceCheck() end
         elseif event == "PLAYER_REGEN_ENABLED" then
             -- Buffer combat exit: brief out-of-combat blips (mob dies, re-aggro) shouldn't flash visibility changes.
             C_Timer.After(0.1, function()
@@ -10098,6 +10120,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
                     _inCombat = false
                     _CDMApplyVisibility()
                     ns.RefreshItemCountOOCBars()
+                    -- Turn off any "Only Glow in Combat" glows now that combat has ended.
+                    if ns.QueueCDGlowResourceCheck then ns.QueueCDGlowResourceCheck() end
                 end
             end)
         else
