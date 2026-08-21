@@ -129,6 +129,7 @@ function ns._appendDisplayPresetKeys(t)
         "auraDurationTextSize", "auraDurationTextColor",
         "debuffCropIcons", "buffCropIcons", "ccCropIcons",
         "debuffCropPercent", "buffCropPercent", "ccCropPercent",
+        "hideCastIconBorder", "hideDebuffIconBorder", "hideBuffIconBorder", "hideCCIconBorder",
         "showCastLockoutAsCrowdControl",
         "castIconOffsetX", "castIconOffsetY",
         "targetGlowEllesmereUI", "targetGlowBorderColor", "targetGlowHighlight", "targetBorderColor",
@@ -290,6 +291,9 @@ local defaults = {
     debuffCropPercent = 10,  -- per-side trim % for cropped mode (5-25); 10 == the fixed 80%-of-width crop
     buffCropPercent = 10,
     ccCropPercent = 10,
+    hideDebuffIconBorder = false,
+    hideBuffIconBorder = false,
+    hideCCIconBorder = false,
     debuffIconSize = 26,
     buffIconSize = 24,
     buffTextSize = 12,
@@ -399,6 +403,7 @@ local defaults = {
     castIconOnRight = false,
     castIconFullSize = false,
     castIconTargetBorder = false,
+    hideCastIconBorder = false,
     bgAlpha = 1.0,
     bgColor = { r = 0.12, g = 0.12, b = 0.12 },
     hoverColor = { r = 1, g = 1, b = 1 },
@@ -1371,6 +1376,36 @@ local function IsBorderEnabled()
     return v
 end
 ns.IsBorderEnabled = IsBorderEnabled
+-- Per-icon 1px borders (cast / buff / debuff / CC). nil = border shown
+-- (old profiles without the key keep their borders). Setting a hide key
+-- to true hides the border; false shows it.
+function ns.GetIconBorderEnabled(kind)
+    local key
+    if kind == "cast" then
+        key = "hideCastIconBorder"
+    elseif kind == "debuffs" then
+        key = "hideDebuffIconBorder"
+    elseif kind == "buffs" then
+        key = "hideBuffIconBorder"
+    else
+        key = "hideCCIconBorder"
+    end
+    local v = p and p[key]
+    if v == nil then
+        v = defaults[key]
+        if v == nil then return false end  -- nil default → border shown
+    end
+    return not v
+end
+function ns.ApplyFrameIconBorder(frame, enabled)
+    local PP = EllesmereUI and EllesmereUI.PP
+    if not (frame and PP and PP.GetBorders and PP.GetBorders(frame)) then return end
+    if enabled then
+        if PP.ShowBorder then PP.ShowBorder(frame) end
+    elseif PP.HideBorder then
+        PP.HideBorder(frame)
+    end
+end
 local function GetBorderColor()
     local c = (p and p.borderColor) or defaults.borderColor
     return c.r, c.g, c.b
@@ -2764,6 +2799,9 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
             plate:ApplyCastBorder()
             plate:ApplyCastBorderColor()
         end
+        if plate.castIconFrame then
+            ns.ApplyFrameIconBorder(plate.castIconFrame, ns.GetIconBorderEnabled("cast"))
+        end
     end
     plate:ApplyCastBorder()
     plate.castLeftBorder = plate.cast:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -2778,6 +2816,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.castIconFrame:SetFrameLevel(plate.health:GetFrameLevel() + 1)
     ns.LayoutCastIcon(plate, CAST_H)
     AddBorder(plate.castIconFrame)
+    ns.ApplyFrameIconBorder(plate.castIconFrame, ns.GetIconBorderEnabled("cast"))
     plate.castIcon = plate.castIconFrame:CreateTexture(nil, "ARTWORK")
     -- Fill the frame (inset 0) so the 1px OVERLAY border draws ON TOP of the icon's rim: the
     -- visible edge IS the border's inner edge, no bare frame gap. DisablePixelSnap matches the
@@ -2948,6 +2987,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         PP.Size(d, 26, 26)
         PP.Point(d, "BOTTOM", plate.name, "TOP", (i - (maxDbf + 1) / 2) * 30, 2)
         AddBorder(d)
+        ns.ApplyFrameIconBorder(d, ns.GetIconBorderEnabled("debuffs"))
         d.icon = d:CreateTexture(nil, "ARTWORK")
         PP.Point(d.icon, "TOPLEFT", d, "TOPLEFT", 1, -1)
         PP.Point(d.icon, "BOTTOMRIGHT", d, "BOTTOMRIGHT", -1, 1)
@@ -2997,6 +3037,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         PP.Size(b, 24, 24)
         PP.Point(b, "RIGHT", plate.health, "LEFT", -2 - (i - 1) * 26, 0)
         AddBorder(b)
+        ns.ApplyFrameIconBorder(b, ns.GetIconBorderEnabled("buffs"))
         b.icon = b:CreateTexture(nil, "ARTWORK")
         PP.Point(b.icon, "TOPLEFT", b, "TOPLEFT", 1, -1)
         PP.Point(b.icon, "BOTTOMRIGHT", b, "BOTTOMRIGHT", -1, 1)
@@ -3041,6 +3082,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         PP.Size(c, 24, 24)
         PP.Point(c, "LEFT", plate.health, "RIGHT", 2 + (i - 1) * 26, 0)
         AddBorder(c)
+        ns.ApplyFrameIconBorder(c, ns.GetIconBorderEnabled("ccs"))
         c.icon = c:CreateTexture(nil, "ARTWORK")
         PP.Point(c.icon, "TOPLEFT", c, "TOPLEFT", 1, -1)
         PP.Point(c.icon, "BOTTOMRIGHT", c, "BOTTOMRIGHT", -1, 1)
@@ -5454,6 +5496,7 @@ function NameplateFrame:ApplyAppearance()
     self._ovTgtTex, self._ovFocTex, self._ovHoverTex = nil, nil, nil
     ns.LayoutCastBar(self, ns.GetHealthBarWidth(), castH)
     ns.LayoutCastIcon(self, castH)
+    ns.ApplyFrameIconBorder(self.castIconFrame, ns.GetIconBorderEnabled("cast"))
     local showIcon = GetShowCastIcon()
     if showIcon then
         self.castIconFrame:Show()
@@ -5653,9 +5696,11 @@ function NameplateFrame:ApplyAppearance()
     local debuffSlot, buffSlot, ccSlot = GetAuraSlots()
     for i = 1, #self.debuffs do
         ns.ApplyAuraSlotCrop(self.debuffs[i], debuffCrop, debuffSz)
+        ns.ApplyFrameIconBorder(self.debuffs[i], ns.GetIconBorderEnabled("debuffs"))
     end
     for i = 1, 4 do
         ns.ApplyAuraSlotCrop(self.buffs[i], buffCrop, buffSz)
+        ns.ApplyFrameIconBorder(self.buffs[i], ns.GetIconBorderEnabled("buffs"))
         if self.buffs[i].cd and self.buffs[i].cd.text then
             SetFSFont(self.buffs[i].cd.text, buffDur.size, "OUTLINE, SLUG")
             self.buffs[i].cd.text:SetTextColor(buffDur.color.r, buffDur.color.g, buffDur.color.b, 1)
@@ -5670,6 +5715,7 @@ function NameplateFrame:ApplyAppearance()
     PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffH, GetAuraSpacing("buffs"), GetAuraSlotOffsets("buffSlot"))
     for i = 1, 2 do
         ns.ApplyAuraSlotCrop(self.cc[i], ccCrop, ccSz)
+        ns.ApplyFrameIconBorder(self.cc[i], ns.GetIconBorderEnabled("ccs"))
         if self.cc[i].cd and self.cc[i].cd.text then
             SetFSFont(self.cc[i].cd.text, ccDur.size, "OUTLINE, SLUG")
             self.cc[i].cd.text:SetTextColor(ccDur.color.r, ccDur.color.g, ccDur.color.b, 1)
