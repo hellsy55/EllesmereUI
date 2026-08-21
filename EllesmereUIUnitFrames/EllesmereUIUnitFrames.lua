@@ -15520,13 +15520,23 @@ do
     local RACIAL_DISPEL_TYPES = {
         bleed = { Dwarf = true },  -- Stoneform
     }
+    -- The token is equally blind to talent dispels: a shaman's poison removal is
+    -- Poison Cleansing Totem, so Poison never passes for them. Raid Frames applies
+    -- the same rule to its group-wide dispel slots (EUI_RaidFrames_AuraContainers.lua).
+    local POISON_CLEANSING_TOTEM = 383013
     -- Shared with the 12.1 container slots (EUI_UnitFrames_AuraContainers.lua),
     -- which apply the same rule by choosing which slot style stays visible.
-    function ns.UF_RacialClearsDispel(typeKey)
+    function ns.UF_TokenBlindDispel(typeKey)
         local races = RACIAL_DISPEL_TYPES[typeKey]
-        if not races then return false end
-        local _, raceToken = UnitRace("player")
-        return raceToken ~= nil and races[raceToken] == true
+        if races then
+            local _, raceToken = UnitRace("player")
+            return raceToken ~= nil and races[raceToken] == true
+        end
+        if typeKey == "poison" then
+            local _, class = UnitClass("player")
+            return class == "SHAMAN" and IsPlayerSpell(POISON_CLEANSING_TOTEM)
+        end
+        return false
     end
 
     local function RebuildCurve()

@@ -524,11 +524,31 @@ end
 local GRADIENT_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-tb.tga"
 local GRADIENT_SHARP_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-sharp.tga"
 
-local function DispelSlotFilter(s)
-    if s.dispelShowAll == false then
+-- RAID_PLAYER_DISPELLABLE knows class and spec dispels only, so it never matches
+-- Poison for a shaman whose poison removal is Poison Cleansing Totem (a talent).
+-- That slot keeps the plain filter in only-dispellable mode; its include-Poison
+-- candidate already narrows it to poison debuffs.
+local POISON_CLEANSING_TOTEM = 383013
+local _, rfcPlayerClass = UnitClass("player")
+
+local function TokenBlindDispel(token)
+    return token == "Poison" and rfcPlayerClass == "SHAMAN"
+        and IsPlayerSpell(POISON_CLEANSING_TOTEM)
+end
+
+local function DispelSlotFilter(s, token)
+    if s.dispelShowAll == false and not TokenBlindDispel(token) then
         return { "HARMFUL", "RAID_PLAYER_DISPELLABLE" }
     end
     return { "HARMFUL" }
+end
+
+local function DispelFilterFP(s)
+    local parts = {}
+    for i = 1, #DISPEL_SLOTS do
+        parts[i] = AK.Filter(unpack(DispelSlotFilter(s, DISPEL_SLOTS[i].token)))
+    end
+    return table.concat(parts, ";")
 end
 
 -- applyExtra for dispel slots. Per-button refs (health, slot definition) come from the
@@ -744,7 +764,7 @@ local function PrimeClassFP(styleKey, s)
     st.dispLocStyle = DispLocStyleFP(s, font)
     st.dispLocCfg = DispLocCfgFP(s)
     st.dispelStyle = DispelStyleFP(s)
-    st.dispelFilter = AK.Filter(unpack(DispelSlotFilter(s)))
+    st.dispelFilter = DispelFilterFP(s)
 end
 
 local function ApplyDebuffConfig(container, d, s)
@@ -2818,12 +2838,11 @@ local function CreateButtonShells(button, health, d)
             local dispelStyleKey = StyleKeyFor(d):gsub("debuff", "dispel")
             AK.styles[dispelStyleKey] = AK.styles[dispelStyleKey] or BuildDispelStyle(s)
             local c = AK.CreateContainerShell(button, { point = { "CENTER", health, "CENTER" } })
-            local dispelFilter = DispelSlotFilter(s)
             for i = 1, #DISPEL_SLOTS do
                 local def = DISPEL_SLOTS[i]
                 AK.AddSlotToContainer(c, {
                     key = def.key,
-                    filter = dispelFilter,
+                    filter = DispelSlotFilter(s, def.token),
                     candidateFilters = { includeDispelTypes = { [def.token] = true } },
                     style = dispelStyleKey,
                     extraInit = function(slotButton, dd)
@@ -3269,10 +3288,10 @@ local function ComputeClassFlags(styleKey, s)
         AK.styles[dispelStyleKey] = BuildDispelStyle(s)
         AK.RestyleSoon(dispelStyleKey)
     end
-    local dispelFilter = AK.Filter(unpack(DispelSlotFilter(s)))
+    local dispelFilter = DispelFilterFP(s)
     if st.dispelFilter ~= dispelFilter then
         st.dispelFilter = dispelFilter
-        flags.dispelFilter = dispelFilter
+        flags.dispelFilter = true
     end
 
     return flags
@@ -3349,7 +3368,9 @@ function ns.RFC_ReloadAll()
                 if d.rfcDispel then
                     if flags.dispelFilter then
                         for j = 1, #DISPEL_SLOTS do
-                            d.rfcDispel:SetAuraSlotFilterString(DISPEL_SLOTS[j].key, flags.dispelFilter)
+                            local def = DISPEL_SLOTS[j]
+                            d.rfcDispel:SetAuraSlotFilterString(def.key,
+                                AK.Filter(unpack(DispelSlotFilter(s, def.token))))
                         end
                     end
                     d.rfcDispel:SetShown(d.rfcAssist ~= false and DispelVisible(s))
@@ -3386,9 +3407,17 @@ local bmRegen = CreateFrame("Frame")
 bmRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
 bmRegen:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 bmRegen:RegisterEvent("PLAYER_ENTERING_WORLD")
+-- The poison dispel-slot filter depends on Poison Cleansing Totem being talented
+-- (see DispelSlotFilter); talent edits fire no spec event, so shamans re-drive
+-- the fingerprinted reload on trait apply.
+if rfcPlayerClass == "SHAMAN" then bmRegen:RegisterEvent("TRAIT_CONFIG_UPDATED") end
 bmRegen:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         if arg1 == "player" and not InCombatLockdown() then ns.RFC_ReloadAll() end
+        return
+    end
+    if event == "TRAIT_CONFIG_UPDATED" then
+        if not InCombatLockdown() then ns.RFC_ReloadAll() end
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
