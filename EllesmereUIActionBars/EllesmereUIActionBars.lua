@@ -1101,12 +1101,10 @@ do
                 frame:UnregisterAllEvents()
             end
 
-            (frame.HideBase or frame.Hide)(frame)
             -- MainActionBar stays in Blizzard's parent chain so pet battle
             -- restoration of MicroMenu works; all others safely reparent.
-            if frameName ~= "MainActionBar" then
-                frame:SetParent(hiddenParent)
-            else
+            if frameName == "MainActionBar" then
+                (frame.HideBase or frame.Hide)(frame)
                 -- Keep MainActionBar invisible when Blizzard re-shows it on
                 -- spec/zone/vehicle/bonus-bar transitions WITHOUT touching its
                 -- protected shown state: Hide() from this insecure hook taints the
@@ -1130,13 +1128,32 @@ do
                 if frame.EndCaps then frame.EndCaps:Hide() end -- artwork (gryphons/endcaps/border)
                 if frame.BorderArt then frame.BorderArt:Hide() end
                 frame:SetAlpha(0)
+            else
+                -- No Hide()/HideBase() here: reparenting to hiddenParent (kept
+                -- permanently Hidden) already makes the bar effectively invisible
+                -- regardless of its own Shown state, so there is nothing to gain
+                -- from also calling a hide-flavored method. There is something to
+                -- lose -- HideBase() bypasses Edit Mode's HideOverride when that
+                -- override is already installed, so isShownExternal never updates;
+                -- the next combat-transition UpdateVisibility pass (PLAYER_REGEN_
+                -- ENABLED/DISABLED) then tries its own SetShownBase and hits
+                -- ADDON_ACTION_BLOCKED, same mechanism as the MainActionBar note
+                -- above, just on a bar with no hooksecurefunc(Show) catching it.
+                -- This is the confirmed cause of the MultiBarBottomLeftButton1
+                -- SetShown crash reported from Cooldown Manager play.
+                frame:SetParent(hiddenParent)
             end
 
             if frame.actionButtons and type(frame.actionButtons) == "table" then
                 for _, button in pairs(frame.actionButtons) do
                     button:UnregisterAllEvents()
+                    -- statehidden alone is sufficient: Blizzard's own
+                    -- UpdateShownButtons (ActionBar.lua) reads this attribute and
+                    -- calls SetShown(false) itself, so nothing here needs to touch
+                    -- the button's protected shown state directly. An explicit
+                    -- Hide() was the other half of the same taint this block now
+                    -- avoids for the bar frame above.
                     button:SetAttributeNoHandler("statehidden", true)
-                    button:Hide()
                 end
             end
         end
@@ -1688,9 +1705,13 @@ local function HideBlizzardBars()
                     -- Leaving them under their real bar costs no visibility:
                     -- every stock bar is in STOCK_BAR_DISPOSAL, hidden with an
                     -- OnShow re-hide, so a child of one is never drawn.
+                    -- No Hide() here: Blizzard's own UpdateShownButtons already
+                    -- reads statehidden and calls SetShown(false) itself, so
+                    -- addon code never needs a protected call on this button at
+                    -- all. Same taint mechanism and same fix as the disposal
+                    -- loop above.
                     btn:UnregisterAllEvents()
                     btn:SetAttributeNoHandler("statehidden", true)
-                    btn:Hide()
                 end
             end
         end
