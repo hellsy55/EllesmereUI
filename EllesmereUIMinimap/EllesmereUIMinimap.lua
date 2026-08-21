@@ -3317,8 +3317,8 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         -- with Blizzard's difficulty tooltip at the top-right corner.
         local suppressed = p.hideRaidDifficulty or p.diffTextEnabled
         diffFrame:SetAlpha(suppressed and 0 or 1)
-        diffFrame:EnableMouse(not suppressed)
-        if diffFrame.Guild then diffFrame.Guild:EnableMouse(not suppressed) end
+        diffFrame:EnableMouseMotion(not suppressed)
+        if diffFrame.Guild then diffFrame.Guild:EnableMouseMotion(not suppressed) end
     end
     if not minimap.Layout then minimap.Layout = function() end end
 
