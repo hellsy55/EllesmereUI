@@ -639,7 +639,11 @@ end
                     pcall(ns.StyleOverlayCooldownText, cd, bd, ss, scale)
                 end
                 if ns.ApplyThresholdFormatter then
-                    pcall(ns.ApplyThresholdFormatter, cd, ThresholdFor(st.srcFrame, rule, ss))
+                    -- Resolve INSIDE the protection: an argument expression evaluates before pcall
+                    -- is entered, and a throw in this creation window takes the whole slot down
+                    -- (its swipe with it), not just the countdown text.
+                    local okT, ttB = pcall(ThresholdFor, st.srcFrame, rule, ss)
+                    pcall(ns.ApplyThresholdFormatter, cd, okT and ttB or ss)
                 end
                 if ns.ApplyShapeToOverlay and st.srcFrame then
                     pcall(ns.ApplyShapeToOverlay, st.srcFrame, tex, cd, bd)
