@@ -2071,7 +2071,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local haTiled = (haStyle == "stripedReversed" or haStyle == "stripedThick" or haStyle == "stripedThickR" or haStyle == "largeStripes" or haStyle == "largeStripesR" or haStyle == "largeOutlinedStripes" or haStyle == "largeOutlinedStripesR")
                 haFillTex:SetHorizTile(haTiled); haFillTex:SetVertTile(haTiled)
             end
-            healAbsorbBar:SetStatusBarColor(hc.r, hc.g, hc.b, haAlpha)
+            healAbsorbBar:SetStatusBarColor(hc.r or 0.8, hc.g or 0.15, hc.b or 0.15, haAlpha)
             PositionPreviewAbsorb(healAbsorbBar, settings.healAbsorbEdgeMode or "overlay", settings.healthReverseFill, settings.healthVerticalFill)
             PP.Width(healAbsorbBar, frameW)
             PP.Height(healAbsorbBar, healthH)
@@ -3160,7 +3160,7 @@ initFrame:SetScript("OnEvent", function(self)
                         local _haTiled = (haS == "stripedReversed" or haS == "stripedThick" or haS == "stripedThickR" or haS == "largeStripes" or haS == "largeStripesR" or haS == "largeOutlinedStripes" or haS == "largeOutlinedStripesR")
                         _haFill:SetHorizTile(_haTiled); _haFill:SetVertTile(_haTiled)
                     end
-                    healAbsorbBar:SetStatusBarColor(_haC.r, _haC.g, _haC.b, _haA)
+                    healAbsorbBar:SetStatusBarColor(_haC.r or 0.8, _haC.g or 0.15, _haC.b or 0.15, _haA)
                     PositionPreviewAbsorb(healAbsorbBar, s.healAbsorbEdgeMode or "overlay", s.healthReverseFill, s.healthVerticalFill)
                     healAbsorbBar:SetWidth(fw)
                     healAbsorbBar:SetHeight(hh)
@@ -11529,7 +11529,7 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn, healAbsorbRow:GetFrameLevel() + 3,
                 function()
                     local c = SGetSupported("healAbsorbColor")
-                    if c then return c.r, c.g, c.b, 1 end
+                    if c then return c.r or 0.8, c.g or 0.15, c.b or 0.15, 1 end
                     return 0.8, 0.15, 0.15, 1
                 end,
                 function(r, g, b)

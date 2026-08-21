@@ -1159,15 +1159,9 @@ do
                 frame:SetAlpha(0)
             else
                 -- No Hide()/HideBase() here: reparenting to hiddenParent (kept
-                -- permanently Hidden) already makes the bar effectively invisible
-                -- regardless of its own Shown state, so there is nothing to gain
-                -- from also calling a hide-flavored method, and something to
-                -- lose -- see the ReassertHiddenOnShow note above hiddenParent's
-                -- creation for the taint mechanism this avoids. This file-load
-                -- pass is one of several places that used to make this same call
-                -- on these bars; PLAYER_TALENT_UPDATE and the OnShow safety net
-                -- further down carried the identical risk and are fixed the same
-                -- way.
+                -- permanently Hidden) makes the bar effectively invisible
+                -- regardless of its own Shown state -- see ReassertHiddenOnShow's
+                -- note above hiddenParent's creation for the taint this avoids.
                 frame:SetParent(hiddenParent)
             end
 

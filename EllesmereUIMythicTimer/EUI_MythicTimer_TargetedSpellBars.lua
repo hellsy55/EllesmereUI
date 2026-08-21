@@ -437,11 +437,9 @@ local PROBE_EVENTS = {
     UNIT_SPELLCAST_STOP = true,
     UNIT_SPELLCAST_FAILED = true,
 }
--- CHANNEL_STOP releases directly instead of re-probing: in restricted
--- execution UnitCastingInfo can return secret values (not nil) for a stale
--- channel, making a probe think it is still active (nameplate lesson).
--- Release directly for these instead of re-probing: a stale channel or
--- empowered cast can read back as a secret, non-nil value in PvP.
+-- These release directly instead of re-probing: in restricted execution the
+-- cast-info reads can return secret values (not nil) for a stale channel or
+-- empowered cast, making a probe think it is still active (nameplate lesson).
 local RELEASE_EVENTS = {
     UNIT_SPELLCAST_CHANNEL_STOP = true,
     UNIT_SPELLCAST_EMPOWER_STOP = true,

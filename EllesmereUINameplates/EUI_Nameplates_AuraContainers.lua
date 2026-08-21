@@ -1481,7 +1481,10 @@ local function StyleFPFor(kind, idx)
     local stkFP = FP(stk.size, stk.x, stk.y, stk.pos, stk.color.r, stk.color.g, stk.color.b)
     return FP(kind, size, height, durFP, stkFP, purge,
         EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates") or "",
-        ns.GetIconBorderEnabled and ns.GetIconBorderEnabled(kind) or true)
+        -- NOT `fn(kind) or true`: the getter legitimately returns false, and
+        -- `false or true` would pin this fingerprint input to a constant so
+        -- the toggle never restyles (the ternary-falsy trap).
+        (not ns.GetIconBorderEnabled) or ns.GetIconBorderEnabled(kind))
 end
 
 local function GeoFP()

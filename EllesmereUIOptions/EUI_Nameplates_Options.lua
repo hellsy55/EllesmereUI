@@ -3395,8 +3395,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- -- it is just the style the dispellable group wears, so every shown
         -- dispellable buff glows when a style is set.
         local buffFilterDropdown = { type="dropdown", text="Enemy Buff Filter",
-            tooltip = "Which enemy buffs show on nameplates. Important shows the buffs Blizzard flags for enemy nameplates plus anything dispellable; Dispellable shows only buffs that can be dispelled, purged or soothed. With a Dispel Glow style set, every dispellable buff shown glows.",
-            values = { important = "Important", dispellable = "Dispellable" },
+            tooltip = "Which enemy buffs show on nameplates. Important shows the buffs Blizzard flags for enemy nameplates plus anything dispellable; Only Dispellable shows just the buffs that can be dispelled, purged or soothed. With a Dispel Glow style set, every dispellable buff shown glows.",
+            values = { important = "Important", dispellable = "Only Dispellable" },
             order = { "important", "dispellable" },
             getValue = function()
                 local m = DBVal("npEnemyBuffFilter")
@@ -6239,6 +6239,11 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     opts.toggleSet = function(v)
                         DB()[borderKey] = v and true or false
+                        -- Full settings pass: RefreshAllSlots repositions but
+                        -- never re-runs ApplyAppearance, so without this the
+                        -- live slot borders only catch up on plate recycle
+                        -- (and the container styles ride NPC_ReloadAll).
+                        if ns.RefreshAllSettings then ns.RefreshAllSettings() end
                         RefreshAllSlots()
                         UpdatePreview()
                     end

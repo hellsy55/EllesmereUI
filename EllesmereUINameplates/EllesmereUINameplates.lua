@@ -1393,17 +1393,27 @@ function ns.GetIconBorderEnabled(kind)
     local v = p and p[key]
     if v == nil then
         v = defaults[key]
-        if v == nil then return false end  -- nil default → border shown
+        if v == nil then return true end  -- no default at all: border shown
     end
     return not v
 end
-function ns.ApplyFrameIconBorder(frame, enabled)
+function ns.ApplyFrameIconBorder(frame, enabled, adjustIconInset)
     local PP = EllesmereUI and EllesmereUI.PP
     if not (frame and PP and PP.GetBorders and PP.GetBorders(frame)) then return end
     if enabled then
         if PP.ShowBorder then PP.ShowBorder(frame) end
     elseif PP.HideBorder then
         PP.HideBorder(frame)
+    end
+    -- Aura slots keep a 1px icon inset for the border; borderless fills the
+    -- icon to the edge so no bare rim shows (matches the options preview).
+    -- OPT-IN: the cast icon (inset 0 by design, border draws on top) and the
+    -- lockout icon own their geometry and must not be re-anchored here.
+    if adjustIconInset and frame.icon then
+        local px = enabled and 1 or 0
+        frame.icon:ClearAllPoints()
+        PP.Point(frame.icon, "TOPLEFT", frame, "TOPLEFT", px, -px)
+        PP.Point(frame.icon, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -px, px)
     end
 end
 local function GetBorderColor()
@@ -2987,7 +2997,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         PP.Size(d, 26, 26)
         PP.Point(d, "BOTTOM", plate.name, "TOP", (i - (maxDbf + 1) / 2) * 30, 2)
         AddBorder(d)
-        ns.ApplyFrameIconBorder(d, ns.GetIconBorderEnabled("debuffs"))
+        ns.ApplyFrameIconBorder(d, ns.GetIconBorderEnabled("debuffs"), true)
         d.icon = d:CreateTexture(nil, "ARTWORK")
         PP.Point(d.icon, "TOPLEFT", d, "TOPLEFT", 1, -1)
         PP.Point(d.icon, "BOTTOMRIGHT", d, "BOTTOMRIGHT", -1, 1)
@@ -3037,7 +3047,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         PP.Size(b, 24, 24)
         PP.Point(b, "RIGHT", plate.health, "LEFT", -2 - (i - 1) * 26, 0)
         AddBorder(b)
-        ns.ApplyFrameIconBorder(b, ns.GetIconBorderEnabled("buffs"))
+        ns.ApplyFrameIconBorder(b, ns.GetIconBorderEnabled("buffs"), true)
         b.icon = b:CreateTexture(nil, "ARTWORK")
         PP.Point(b.icon, "TOPLEFT", b, "TOPLEFT", 1, -1)
         PP.Point(b.icon, "BOTTOMRIGHT", b, "BOTTOMRIGHT", -1, 1)
@@ -3082,7 +3092,7 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         PP.Size(c, 24, 24)
         PP.Point(c, "LEFT", plate.health, "RIGHT", 2 + (i - 1) * 26, 0)
         AddBorder(c)
-        ns.ApplyFrameIconBorder(c, ns.GetIconBorderEnabled("ccs"))
+        ns.ApplyFrameIconBorder(c, ns.GetIconBorderEnabled("ccs"), true)
         c.icon = c:CreateTexture(nil, "ARTWORK")
         PP.Point(c.icon, "TOPLEFT", c, "TOPLEFT", 1, -1)
         PP.Point(c.icon, "BOTTOMRIGHT", c, "BOTTOMRIGHT", -1, 1)
@@ -5696,11 +5706,11 @@ function NameplateFrame:ApplyAppearance()
     local debuffSlot, buffSlot, ccSlot = GetAuraSlots()
     for i = 1, #self.debuffs do
         ns.ApplyAuraSlotCrop(self.debuffs[i], debuffCrop, debuffSz)
-        ns.ApplyFrameIconBorder(self.debuffs[i], ns.GetIconBorderEnabled("debuffs"))
+        ns.ApplyFrameIconBorder(self.debuffs[i], ns.GetIconBorderEnabled("debuffs"), true)
     end
     for i = 1, 4 do
         ns.ApplyAuraSlotCrop(self.buffs[i], buffCrop, buffSz)
-        ns.ApplyFrameIconBorder(self.buffs[i], ns.GetIconBorderEnabled("buffs"))
+        ns.ApplyFrameIconBorder(self.buffs[i], ns.GetIconBorderEnabled("buffs"), true)
         if self.buffs[i].cd and self.buffs[i].cd.text then
             SetFSFont(self.buffs[i].cd.text, buffDur.size, "OUTLINE, SLUG")
             self.buffs[i].cd.text:SetTextColor(buffDur.color.r, buffDur.color.g, buffDur.color.b, 1)
@@ -5715,7 +5725,7 @@ function NameplateFrame:ApplyAppearance()
     PositionAuraSlot(self.buffs, 4, buffSlot, self, buffSz, buffH, GetAuraSpacing("buffs"), GetAuraSlotOffsets("buffSlot"))
     for i = 1, 2 do
         ns.ApplyAuraSlotCrop(self.cc[i], ccCrop, ccSz)
-        ns.ApplyFrameIconBorder(self.cc[i], ns.GetIconBorderEnabled("ccs"))
+        ns.ApplyFrameIconBorder(self.cc[i], ns.GetIconBorderEnabled("ccs"), true)
         if self.cc[i].cd and self.cc[i].cd.text then
             SetFSFont(self.cc[i].cd.text, ccDur.size, "OUTLINE, SLUG")
             self.cc[i].cd.text:SetTextColor(ccDur.color.r, ccDur.color.g, ccDur.color.b, 1)

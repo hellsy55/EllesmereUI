@@ -8902,11 +8902,8 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "UNIT_MAXHEALTH" or event == "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" then
         UpdateHealthBar()
-        -- A max-health change lands in two steps, the max first and the value
-        -- after, so this pass renders the new max against the pre-change value.
-        -- At full health nothing fires afterwards, leaving the mid-transition
-        -- numbers up (druid form stamina talents). One next-frame re-read
-        -- settles it.
+        -- Two-step max-health landing (max first, value after): one next-frame
+        -- re-read settles torn numbers (canonical story: UF engine RESETTLE_EVENTS).
         if not self._erbHpResettle then
             self._erbHpResettle = true
             C_Timer.After(0, function()

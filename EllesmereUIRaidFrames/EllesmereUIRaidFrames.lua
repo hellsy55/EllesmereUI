@@ -2884,7 +2884,8 @@ local function UpdateAbsorb(button, unit)
             rmh._styleNone = (rmhStyle == "none")
             if not rmh._styleNone then
                 local mc = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
-                local rmhKey = rmhStyle .. (s.maxHealthOpacity or 100) .. mc.r .. mc.g .. mc.b
+                local mcR, mcG, mcB = mc.r or 0.7, mc.g or 0.1, mc.b or 0.1
+                local rmhKey = rmhStyle .. (s.maxHealthOpacity or 100) .. mcR .. mcG .. mcB
                 if rmh._lastRmhKey ~= rmhKey then
                     rmh._lastRmhKey = rmhKey
                     ns.ApplyMaxHealthStyle(rmh, rmhStyle, s)
@@ -3768,21 +3769,17 @@ ns._StyleButtonSecure = function(button)
         button:SetAttribute("*type2", "togglemenu")
     end
 
-    -- Hover ping support: without it a mouseover ping falls through to the 3D world (the ping system
-    -- only targets units on frames flagged as ping receivers). Mix in the pingable-unit type, set
-    -- the secure "ping-receiver" attribute, and resolve the target GUID live from our "unit"
-    -- attribute so it tracks the current occupant after sorts/roster changes; returning nil lets the
-    -- ping fall through. The GUID can be SECRET: hand it over raw, never guard or stringify it.
-    -- Writes are safe -- our own spawned secure template, once per button, out of combat.
+    -- Hover ping support, MIXIN-PURE: Blizzard's mixin methods run untouched
+    -- (its GetTargetInfo resolves the unit from our "unit" attribute, which
+    -- tracks the current occupant across sorts). Never override
+    -- GetIsPingable/GetTargetInfo -- addon Lua in the ping path makes a
+    -- secret GUID "inaccessible" to PingManager's securecopy (hard error +
+    -- wedged listener), and a secrecy-guarded override deadens pings in all
+    -- restricted content (both field-failed 2026-08-20). Writes are safe --
+    -- our own spawned secure template, once per button, out of combat.
     if PingableType_UnitFrameMixin then
         Mixin(button, PingableType_UnitFrameMixin)
         button:SetAttribute("ping-receiver", true)
-        button.GetTargetPingGUID = function(self)
-            local u = self:GetAttribute("unit")
-            if u and UnitExists(u) then
-                return UnitGUID(u)
-            end
-        end
     end
 
     -- Register for click-casting (EUI built-in system)
@@ -4685,16 +4682,16 @@ ns._UpdateButtonHealth = function(button)
     if d.dmDeadSwap then ns.DM_DeadEdge(d, unit) end
 end
 
--- A max-health change lands in two steps, the max first and the value after, so
--- a health pass driven by it renders the new max against the pre-change value.
--- At full health nothing fires afterwards, leaving the mid-transition numbers up
--- (druid form stamina talents). One next-frame re-read settles it; the flag
--- collapses a raid-wide change to one pass per button.
+-- Two-step max-health landing (max first, value after): one next-frame re-read
+-- settles torn numbers; the flag collapses a raid-wide change to one pass per
+-- button (canonical story: UF engine RESETTLE_EVENTS). Flag lives in FFD --
+-- header children never carry insecure keys.
 ns._ResettleButtonHealth = function(button)
-    if button._euiHpResettle then return end
-    button._euiHpResettle = true
+    local d = GetFFD(button)
+    if d.hpResettle then return end
+    d.hpResettle = true
     C_Timer.After(0, function()
-        button._euiHpResettle = nil
+        d.hpResettle = nil
         if button:IsVisible() then ns._UpdateButtonHealth(button) end
     end)
 end
@@ -12110,7 +12107,7 @@ local function ApplyPreviewData(f, index)
             local hpH = healthH
             local mask = f._healAbsorbBar._mask
             f._healAbsorbBar:SetStatusBarTexture(haTex)
-            f._healAbsorbBar:SetStatusBarColor(hc.r, hc.g, hc.b, haAlpha)
+            f._healAbsorbBar:SetStatusBarColor(hc.r or 0.8, hc.g or 0.15, hc.b or 0.15, haAlpha)
             f._healAbsorbBar:SetWidth(hpW)
             f._healAbsorbBar:SetHeight(hpH)
             local haFillPv = f._healAbsorbBar:GetStatusBarTexture()

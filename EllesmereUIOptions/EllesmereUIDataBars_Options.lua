@@ -2065,7 +2065,9 @@ initFrame:SetScript("OnEvent", function(self)
               end });  y = y - h
 
         _, h = W:DualRow(parent, y, scaleCfg, hoverBlocksCfg);  y = y - h
-        _, h = W:DualRow(parent, y, showBorderCfg);  y = y - h
+        -- Odd last slot: blank right label per the DualRow rules (a nil right
+        -- config would stretch the toggle across the full row).
+        _, h = W:DualRow(parent, y, showBorderCfg, { type = "label", text = "" });  y = y - h
 
         -- Bar deletion lives in the selector dropdown's inline delete -- no
         -- body row. Visibility moved to the top of the section; rename =
