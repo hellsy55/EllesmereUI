@@ -8723,6 +8723,45 @@ initFrame:SetScript("OnEvent", function(self)
                         thresholdColorEnabled = true, thresholdColorR = true,
                         thresholdColorG = true, thresholdColorB = true,
                     }
+                    -- Keys a bar apply also stamps onto the bar's HOSTED buffs. A hosted buff
+                    -- never chains to the bar tiers -- the tier carries cd-bar meaning for shared
+                    -- keys (Duration Text, Border) and its entry is the same one the spell uses on
+                    -- a buffs bar -- so a bar apply otherwise skips it entirely. These keys read
+                    -- the same on any icon, so they stamp directly, like preset icons do through
+                    -- StampMemberCas. Only rows whose keys are ALL in here stamp.
+                    AB.HOSTED_KEYS = {
+                        thresholdSeconds = true, thresholdDecimals = true,
+                        thresholdColorEnabled = true, thresholdColorR = true,
+                        thresholdColorG = true, thresholdColorB = true,
+                    }
+                    -- Hosted buffs keep their entries in the BUFF family store whatever family the host bar belongs to.
+                    AB.hostedFamKey = ns.SettingsFamilyKey("buffs")
+                    AB.TouchesHosted = function(keys)
+                        if not keys or #keys == 0 then return false end
+                        for _, k in ipairs(keys) do
+                            if not AB.HOSTED_KEYS[k] then return false end
+                        end
+                        return true
+                    end
+                    -- Stamp one spec profile's hosted buffs on this bar. Blocking-false has nothing
+                    -- to block here (hosted entries chain to no tier), so an "off" apply clears the
+                    -- keys instead, and an entry left empty is dropped.
+                    AB.StampHostedBuffs = function(prof, bsX, applyWrite, val)
+                        local hosted = bsX and bsX.hostedBuffSpellIDs
+                        if type(hosted) ~= "table" then return end
+                        local st = ns.GetSpellSettingsStoreForProf
+                            and ns.GetSpellSettingsStoreForProf(prof, AB.hostedFamKey, true)
+                        if not st then return end
+                        for hsid in pairs(hosted) do
+                            local e = st[hsid]
+                            if not e then e = {}; st[hsid] = e end
+                            applyWrite(e, val)
+                            for k in pairs(AB.HOSTED_KEYS) do
+                                if rawget(e, k) == false then e[k] = nil end
+                            end
+                            if next(e) == nil then st[hsid] = nil end
+                        end
+                    end
                     AB.StampMemberCas = function(bsX, applyWrite, val, keys)
                         if not (bsX and type(bsX.assignedSpells) == "table") then return end
                         if not (ns.GetCustomActiveState and ns.ResolveCustomActiveKey) then return end
@@ -8783,6 +8822,7 @@ initFrame:SetScript("OnEvent", function(self)
                         for _, k in ipairs(keys) do
                             if AB.CAS_KEYS[k] then touchesCas = true; break end
                         end
+                        local touchesHosted = AB.TouchesHosted(keys)
                         local count = 0
                         local CAS_FALSE_STRIPPED = {
                             cdStateEffect = true, thresholdSeconds = true,
@@ -8828,6 +8868,18 @@ initFrame:SetScript("OnEvent", function(self)
                                     end
                                 end
                             end
+                            -- Hosted buffs stamp their own entries (StampHostedBuffs), under the same blocking-false normalization the cas stamps use.
+                            if touchesHosted and bsX and type(bsX.hostedBuffSpellIDs) == "table" then
+                                local st = prof[AB.hostedFamKey]
+                                if st then
+                                    for hsid in pairs(bsX.hostedBuffSpellIDs) do
+                                        local e = st[hsid]
+                                        if type(e) == "table" and entryLoses(e, true) then
+                                            count = count + 1
+                                        end
+                                    end
+                                end
+                            end
                         end
                         local spAll = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
                         if allSpecs then
@@ -8852,6 +8904,7 @@ initFrame:SetScript("OnEvent", function(self)
                         for _, k in ipairs(keys) do
                             if AB.CAS_KEYS[k] then touchesCas = true; break end
                         end
+                        local touchesHosted = AB.TouchesHosted(keys)
                         local function sweepProf(prof)
                             if type(prof) ~= "table" then return end
                             -- Sweeps can delete emptied member entries and the per-spec tier: retire memoized resolution results.
@@ -8870,6 +8923,9 @@ initFrame:SetScript("OnEvent", function(self)
                             end)
                             if touchesCas then
                                 AB.StampMemberCas(bsX, applyWrite, val, keys)
+                            end
+                            if touchesHosted then
+                                AB.StampHostedBuffs(prof, bsX, applyWrite, val)
                             end
                         end
                         if allSpecs then
@@ -8967,6 +9023,7 @@ initFrame:SetScript("OnEvent", function(self)
                             removed[k] = rawget(t, k)
                             rawset(t, k, nil)
                         end
+                        local touchesHosted = AB.TouchesHosted(keys)
                         if next(t) == nil then
                             if allSpecs then
                                 if bdSel then bdSel.barSpellSettings = nil end
@@ -8994,7 +9051,15 @@ initFrame:SetScript("OnEvent", function(self)
                                     if rv ~= nil and rawget(e, k) == rv then e[k] = nil end
                                 end
                             end
-                            local function unstamp(bsX)
+                            local function unstamp(prof, bsX)
+                                if touchesHosted and bsX and type(bsX.hostedBuffSpellIDs) == "table" then
+                                    local st = prof and prof[AB.hostedFamKey]
+                                    if st then
+                                        for hsid in pairs(bsX.hostedBuffSpellIDs) do
+                                            unstampEntry(st[hsid])
+                                        end
+                                    end
+                                end
                                 if not (bsX and type(bsX.assignedSpells) == "table") then return end
                                 for _, sid2 in ipairs(bsX.assignedSpells) do
                                     local isInj = ((type(sid2) == "number" and sid2 < 0)
@@ -9021,14 +9086,14 @@ initFrame:SetScript("OnEvent", function(self)
                                 if spAll then
                                     for _, prof in pairs(spAll) do
                                         if type(prof) == "table" then
-                                            unstamp(prof.barSpells and prof.barSpells[barKey])
+                                            unstamp(prof, prof.barSpells and prof.barSpells[barKey])
                                         end
                                     end
                                 end
                             else
                                 local specKeyA = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
                                 local prof = spAll and specKeyA and spAll[specKeyA]
-                                if prof then unstamp(prof.barSpells and prof.barSpells[barKey]) end
+                                if prof then unstamp(prof, prof.barSpells and prof.barSpells[barKey]) end
                             end
                             if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
                         end
