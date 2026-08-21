@@ -6177,6 +6177,8 @@ L["Include your Blizz UI Enhanced settings from the Window Skins and Tooltips, M
 L["A quick view of every font setting in one place."] = "Uma visão rápida de todas as configurações de fonte, em um só lugar."
 L["A quick view of every texture setting in one place."] = "Uma visão rápida de todas as configurações de textura, em um só lugar."
 L["Combat & World Text"] = "Texto de Combate e Mundo"
+L["Enable %1$s to edit its text settings."] = "Ative %1$s para editar as configurações de texto."
+L["Enable %1$s to edit its texture settings."] = "Ative %1$s para editar as configurações de textura."
 L["Enable %1$s to edit these settings."] = "Ative %1$s para editar estas configurações."
 L["EUI Global Font"] = "Fonte Global da EUI"
 L["Floating combat text and world name text (engine settings)"] = "Texto de combate flutuante e texto de nome no mundo (configurações do motor)"
