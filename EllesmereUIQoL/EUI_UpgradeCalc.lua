@@ -639,9 +639,7 @@ local function DockToCharacterFrame()
     local leftFits = leftRoom >= minRoom
     local rightFits = rightRoom >= minRoom
     local dockLeft
-    if leftFits and rightFits then
-        dockLeft = false
-    elseif rightFits then
+    if rightFits then
         dockLeft = false
     elseif leftFits then
         dockLeft = true
@@ -1754,6 +1752,7 @@ f:SetScript("OnShow", function()
     if IsLocked() then f:Hide(); return end
     Calc.ApplyBgOpacity()
     Calc.ApplyScale()
+    InstallCharacterFrameSnapHooks()
     TrySnapToCharacterFrame()
     -- Reload persisted crest manual-add offsets each time the frame opens,
     -- so that values the user set before logging out are visible immediately.
@@ -1930,7 +1929,6 @@ local function HookCharacterSheet()
     if _charSheetHooked then return end
     if not CharacterFrame then return end
     _charSheetHooked = true
-    InstallCharacterFrameSnapHooks()
     CharacterFrame:HookScript("OnShow", function()
         if Opts().openWithCharSheet then
             local fr = _G["EUIUpgCalcFrame"]
@@ -1950,5 +1948,4 @@ loginFrame:RegisterEvent("PLAYER_LOGIN")
 loginFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     HookCharacterSheet()
-    InstallCharacterFrameSnapHooks()
 end)
