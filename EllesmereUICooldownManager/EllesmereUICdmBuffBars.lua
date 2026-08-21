@@ -2919,6 +2919,7 @@ local _tbbAssignment   = {}
 local _tbbFrameScratch = {}
 local _tbbConsumed     = {}
 local _tbbFrameSID     = {}  -- frame -> canonical spell id, computed once per call
+local _tbbFrameMember  = {}  -- frame -> live linked-family member, computed once per call
 
 local function CfgWantsSID(cfg, sid)
     -- Cooldown-tracking bars NEVER match buff-viewer frames or buff coverage.
@@ -2968,6 +2969,31 @@ local function TbbFrameNameFamily(frame)
     return TbbNameFamily(nm)
 end
 
+-- Which member of a LINKED FAMILY a buff slot is mirroring right now. Blizzard
+-- binds ONE cooldownID to whichever of its linkedSpellIDs is on the player and
+-- publishes the answer as cooldownInfo.linkedSpellID, maintained on the aura
+-- edges (CooldownViewerItemMixin:NeedsAddedAuraUpdate / OnUnitAuraRemovedEvent),
+-- so Roll the Bones cycles a single slot through every outcome and the hint
+-- follows. Needed because GetSpellID()/GetAuraSpellID() read secret while the
+-- slot is active, leaving the canonical resolver to answer from the clean-read
+-- memo keyed on cooldownID, which still names the member that was up at the last
+-- CLEAN read: the previous outcome keeps the frame and mirrors the new outcome's
+-- timer while the new outcome draws a second bar off the per-spell aura fallback.
+local function TbbLinkedMemberSID(frame)
+    local info = frame.cooldownInfo
+    if not info then
+        local fnGetInfo = frame.GetCooldownInfo
+        if type(fnGetInfo) ~= "function" then return nil end
+        info = fnGetInfo(frame)
+    end
+    local linked = info and info.linkedSpellIDs
+    if type(linked) ~= "table" or #linked < 2 then return nil end
+    -- Set from the added aura's spellId, so it can be secret in restricted content.
+    local sid = info.linkedSpellID
+    if type(sid) ~= "number" or (issecretvalue and issecretvalue(sid)) then return nil end
+    return sid
+end
+
 local function AssignFramesToConfigs(bars)
     local assignment = _tbbAssignment
     -- Memo: pairing moves only on composition edges (player aura events, pool
@@ -2994,9 +3020,28 @@ local function AssignFramesToConfigs(bars)
     local frames = _tbbFrameScratch
     wipe(frames)
     wipe(_tbbFrameSID)
+    wipe(_tbbFrameMember)
     for frame in viewer.itemFramePool:EnumerateActive() do
         frames[#frames + 1] = frame
         _tbbFrameSID[frame] = GetCanonical and GetCanonical(frame) or nil
+        if frame.IsActive and frame:IsActive() then
+            _tbbFrameMember[frame] = TbbLinkedMemberSID(frame)
+        end
+    end
+
+    -- The family hint overrides the canonical memo only where it is UNIQUE among the
+    -- active slots: collided slots each list the whole family (Eclipse Solar and Lunar,
+    -- both up), so an added aura stamps the same member on BOTH and only their
+    -- per-slot memos still tell them apart.
+    for i = 1, #frames do
+        local m = _tbbFrameMember[frames[i]]
+        if m then
+            local unique = true
+            for j = 1, #frames do
+                if j ~= i and _tbbFrameMember[frames[j]] == m then unique = false; break end
+            end
+            if unique then _tbbFrameSID[frames[i]] = m end
+        end
     end
 
     local consumed = _tbbConsumed
