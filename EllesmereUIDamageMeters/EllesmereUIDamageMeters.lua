@@ -517,14 +517,24 @@ ns.RegisterDMUnlock = function()
     if DB().standaloneTimer and ns.MakeSATimerUnlockElement then
         elements[#elements + 1] = ns.MakeSATimerUnlockElement(MK)
     end
+    -- Icon History is owned by the spell-history file, but participates in the
+    -- same first-class unlock system as the meter windows and combat timer.
+    local spellHistory = DB().spellHistory
+    if spellHistory and spellHistory.iconEnabled and ns.MakeIconHistoryUnlockElement then
+        elements[#elements + 1] = ns.MakeIconHistoryUnlockElement(MK)
+    end
     EUI:RegisterUnlockElements(elements, "EllesmereUIDamageMeters")
-    -- Drop registrations for window slots beyond the live count and the timer while disabled (symmetric across profile swaps)
+    -- Drop registrations for window slots beyond the live count and optional
+    -- elements while disabled (symmetric across profile swaps).
     if EUI.UnregisterUnlockElement then
         for i = #_windows + 1, MAX_WINDOWS do
             EUI:UnregisterUnlockElement("EDM_Win" .. i)
         end
         if not DB().standaloneTimer then
             EUI:UnregisterUnlockElement("EDM_CombatTimer")
+        end
+        if not (spellHistory and spellHistory.iconEnabled) then
+            EUI:UnregisterUnlockElement("EDM_IconHistory")
         end
     end
 end
@@ -5182,6 +5192,9 @@ initFrame:SetScript("OnEvent", function(self)
             _windows[i] = CreateDMWindow(i)
             ns.ApplyWindowBorder()
         end
+        -- Spell History caches its profile table; refresh it before rebuilding
+        -- optional unlock registrations so enable state and positions agree.
+        if ns.RefreshSpellHistoryProfile then ns.RefreshSpellHistoryProfile() end
         -- Refresh unlock registrations for the new profile's window count
         ns.RegisterDMUnlock()
         -- Recreate standalone timer if enabled

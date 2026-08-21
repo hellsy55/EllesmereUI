@@ -1619,6 +1619,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return SHDB().iconEnabled end,
               setValue = function(v)
                   SHDB().iconEnabled = v; RefreshSH()
+                  if ns.RegisterDMUnlock then ns.RegisterDMUnlock() end
                   EllesmereUI:RefreshPage()
               end },
             { type = "label", text = "Hold Shift+Click to Freely Move Icons" }
