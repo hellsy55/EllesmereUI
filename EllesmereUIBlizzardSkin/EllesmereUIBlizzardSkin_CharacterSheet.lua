@@ -3838,8 +3838,6 @@ local function SkinCharacterSheet()
     -- Calc toggle tab: fake bottom tab on the right side of the character
     -- sheet, visually identical to the Blizzard Character/Rep/Currency tabs.
     do
-        local calcDb = EUIUpgCalc and EUIUpgCalc.GetOptsDB and EUIUpgCalc.GetOptsDB()
-        if calcDb and calcDb.showCalcButton then
             -- Match Blizzard tab dimensions from CharacterFrameTab1
             local refTab = _G["CharacterFrameTab1"]
             local tabW = refTab and refTab:GetWidth() or 80
@@ -3925,7 +3923,9 @@ local function SkinCharacterSheet()
             end
             GetFFD(frame).calcToggleBtn = calcTab
             GetFFD(frame).updateCalcBtnColor = RefreshCalcTab
-        end
+            if EllesmereUI.ApplyCharSheetCalcTab then
+                EllesmereUI.ApplyCharSheetCalcTab()
+            end
     end
 
     -- Left column slots (show itemlevel on right)
@@ -4775,6 +4775,19 @@ local function SkinCharacterSlot(slotName, slotID)
     end
 end
 
+-- Show/hide the Upgrades calc tab from upgradeCalcOpts.showCalcButton (live toggle).
+local function ApplyCharSheetCalcTab()
+    if not CharacterFrame then return end
+    local calcTab = GetFFD(CharacterFrame).calcToggleBtn
+    if not calcTab then return end
+    local show = false
+    if EUIUpgCalc and EUIUpgCalc.GetOptsDB then
+        local calcDb = EUIUpgCalc.GetOptsDB()
+        show = calcDb and calcDb.showCalcButton or false
+    end
+    calcTab:SetShown(show)
+end
+
 -- Entry point: apply the themed character sheet.
 local function ApplyThemedCharacterSheet()
     if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then
@@ -4788,6 +4801,7 @@ end
 
 if EllesmereUI then
     EllesmereUI.ApplyThemedCharacterSheet = ApplyThemedCharacterSheet
+    EllesmereUI.ApplyCharSheetCalcTab = ApplyCharSheetCalcTab
 
     -- Setup at PLAYER_LOGIN to register drag hooks early
     local initFrame = CreateFrame("Frame")
