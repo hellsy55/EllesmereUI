@@ -3939,14 +3939,23 @@ local function EnsureChatStateCallbacks()
         local h = d.history
         if not h then return end
         local text = eb:GetText()
-        if not text or text == "" then return end
+        -- type() and issecretvalue() BEFORE any comparison. `text == ""` on a
+        -- secret string THROWS ("attempt to compare ... a secret string
+        -- value"), and this callback runs inside SendText one line before
+        -- SendChatMessage, so the throw would swallow the message and read as
+        -- the very bug this file is fixing. A BN-whisper reply produces one.
+        if type(text) ~= "string" then return end
         if issecretvalue and issecretvalue(text) then return end
-        -- KNOWN, ACCEPTED NARROWING vs the old OnTextChanged shadow: a
-        -- non-secure slash command ("/dance", "/pull 10") is already gone by
-        -- here, because ParseText runs it and ClearChat empties the box, so
-        -- this callback sees "" and bails. Plain Up/Down recall is chat lines
-        -- only now; Blizzard's own AddHistoryLine still holds the commands,
-        -- so Alt+Up/Down (untouched, see rule 2 below) recalls them as before.
+        if text == "" then return end
+        -- KNOWN, ACCEPTED NARROWING vs the old OnTextChanged shadow: most
+        -- non-secure slash commands ("/dance", "/pull 10") are already gone by
+        -- here, because ParseText runs them and ClearChat empties the box, so
+        -- this callback sees "" and bails. Blizzard's own AddHistoryLine still
+        -- holds them, so Alt+Up/Down (untouched, see rule 2 below) recalls them
+        -- as before. NOT universal: ExtractChannel returns without SetText or
+        -- ClearChat when the channel is not joined (ChatFrameEditBox.lua
+        -- :123-125), so "/c <name> msg" does survive to here and enters the
+        -- history. Harmless -- recalling it re-sends what the user typed.
         local cmd = text:match("^%s*(/%S+)")
         if cmd and IsSecureCmd and IsSecureCmd(cmd) then return end
         if h[#h] ~= text then
