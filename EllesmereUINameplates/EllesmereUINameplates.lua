@@ -7915,7 +7915,30 @@ function NameplateFrame:UNIT_SPELLCAST_EMPOWER_UPDATE()
     self:UpdateCast()
 end
 function NameplateFrame:UNIT_SPELLCAST_EMPOWER_STOP()
-    self:UpdateCast()
+    -- Stop directly. Re-checking cast info here can return a stale secret
+    -- value in PvP and look like the cast is still going.
+    local wasCasting = self.isCasting
+    self.isCasting = false
+    self:HideKickTick()
+    self:ClearImportantCastGlow()
+    self:ApplyScale()
+    if not self._interrupted then
+        self.cast:Hide()
+    end
+    self:ApplyNameVisibility()
+    self.castTimer:SetText("")
+    if wasCasting then
+        if self._castFallback then
+            self._castFallback = nil
+            _fallbackPlates[self] = nil
+            fallbackCastCount = math.max(0, fallbackCastCount - 1)
+            if fallbackCastCount == 0 then castFallbackFrame:Hide() end
+        end
+        NotifyCastEnded(self)
+    end
+    if GetShowClassPower() and classPowerType and self._cpPips and self.unit and UnitIsUnit(self.unit, "target") then
+        UpdateClassPowerOnPlate(self)
+    end
 end
 
 -------------------------------------------------------------------------------
