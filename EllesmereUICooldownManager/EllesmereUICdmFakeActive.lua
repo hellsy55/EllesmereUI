@@ -1171,7 +1171,7 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
         -- owner's.
         if not fd._presetCdGlowOn or not glow._glowActive then
             local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(cas or {})
-            ns.StartNativeGlow(glow, eff == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
+            ns.StartNativeGlow(glow, ns.CD_GLOW_PLAIN_STYLE[eff] or 1, gr or 1, gg or 1, gb or 1)
             fd._presetCdGlowOn = true
         end
     elseif fd._presetCdGlowOn then

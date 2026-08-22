@@ -2144,6 +2144,31 @@ local GLOW_STYLES = {
 }
 ns.GLOW_STYLES = GLOW_STYLES
 
+-- Cooldown State Effect "Ready" glow catalog: maps each cdStateEffect enum value to
+-- the GLOW_STYLES index it renders with (see GLOW_STYLES above -- Pixel/Shape/Button/
+-- Auto-Cast/GCD/Modern WoW/Classic WoW). Plain variants glow purely from cooldown
+-- state; Usable (Resource Aware) variants also gate on castability. Every call site
+-- that used to hardcode "pixelGlowReady"/"buttonGlowReady" reads through these maps
+-- instead, so adding a style here is the only change needed to expose it everywhere.
+ns.CD_GLOW_PLAIN_STYLE = {
+    pixelGlowReady    = 1,
+    shapeGlowReady    = 2,
+    buttonGlowReady   = 3,
+    autocastGlowReady = 4,
+    gcdGlowReady      = 5,
+    modernGlowReady   = 6,
+    classicGlowReady  = 7,
+}
+ns.CD_GLOW_USABLE_STYLE = {
+    pixelGlowReadyUsable    = 1,
+    shapeGlowReadyUsable    = 2,
+    buttonGlowReadyUsable   = 3,
+    autocastGlowReadyUsable = 4,
+    gcdGlowReadyUsable      = 5,
+    modernGlowReadyUsable   = 6,
+    classicGlowReadyUsable  = 7,
+}
+
 -------------------------------------------------------------------------------
 --  Cross-surface Pandemic Glow sync (CDM bars + Nameplates) -- BEST EFFORT
 --  Glow styles are identified by NAME, never raw index: CDM, Nameplates and the shared
@@ -5703,9 +5728,10 @@ local function RefreshCDMIconAppearance(barKey)
                 -- Shared resolver: direct hit + full identity/override matching against the family store, with bar-tier fallback.
                 local ss = ns.ResolveSpellSettings and ns.ResolveSpellSettings(icon, sid, sd, bk)
                 local cse = ss and ss.cdStateEffect
-                if (cse == "pixelGlowReady" or cse == "buttonGlowReady"
-                    or cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable") and glowOv then
-                    local glowUsable = (cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable")
+                local glowStylePlain = ns.CD_GLOW_PLAIN_STYLE[cse]
+                local glowStyleUsable = ns.CD_GLOW_USABLE_STYLE[cse]
+                if (glowStylePlain or glowStyleUsable) and glowOv then
+                    local glowUsable = glowStyleUsable ~= nil
                     local glowLive = sid
                     if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
                         glowLive = C_SpellBook.FindSpellOverrideByID(sid) or sid
@@ -5724,8 +5750,7 @@ local function RefreshCDMIconAppearance(barKey)
                         end
                         if isUsable == true and ns.CdStateGlowCombatOK(ss) then
                             local gr, gg, gb = ResolveGlowColor(ss)
-                            local isPixel = (cse == "pixelGlowReady" or cse == "pixelGlowReadyUsable")
-                            StartNativeGlow(glowOv, isPixel and 1 or 3, gr or 1, gg or 1, gb or 1)
+                            StartNativeGlow(glowOv, glowStylePlain or glowStyleUsable, gr or 1, gg or 1, gb or 1)
                             ifd._cdStateGlowOn = true
                         end
                     end
@@ -5810,12 +5835,13 @@ local function RefreshCDMIconAppearance(barKey)
                         ns.SetCdStateShiftHidden(fc, false)
                     end
                     if not ifd or not ifd._cdStateGlowOn then
-                        if (cse == "pixelGlowReady" or cse == "buttonGlowReady"
-                            or cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable")
+                        local csGlowStylePlain = ns.CD_GLOW_PLAIN_STYLE[cse]
+                        local csGlowStyleUsable = ns.CD_GLOW_USABLE_STYLE[cse]
+                        if (csGlowStylePlain or csGlowStyleUsable)
                            and not onCD and glowOv then
                             -- Plain variants glow purely from cooldown state (legacy). Resource Aware variants also require usability outside the loading-screen settle window.
                             local isUsable = true
-                            if cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable" then
+                            if csGlowStyleUsable then
                                 if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then
                                     isUsable = true
                                 else
@@ -5824,8 +5850,7 @@ local function RefreshCDMIconAppearance(barKey)
                             end
                             if isUsable == true and ns.CdStateGlowCombatOK(csSs) then
                                 local gr, gg, gb = ResolveGlowColor(csSs)
-                                local isPixel = (cse == "pixelGlowReady" or cse == "pixelGlowReadyUsable")
-                                StartNativeGlow(glowOv, isPixel and 1 or 3, gr or 1, gg or 1, gb or 1)
+                                StartNativeGlow(glowOv, csGlowStylePlain or csGlowStyleUsable, gr or 1, gg or 1, gb or 1)
                                 if ifd then ifd._cdStateGlowOn = true end
                             end
                         end
@@ -5838,8 +5863,8 @@ local function RefreshCDMIconAppearance(barKey)
                     -- (racial/trinket/potion/custom) drive desaturation via SetDesaturation(float),
                     -- which never fires that hook -- without a watch their glow stays lit for the
                     -- whole cooldown. Frames owned by the Fake-Active preset path (PresetHasCdState) are excluded; that engine glows them.
-                    local watchGlow = cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable"
-                    if not watchGlow and (cse == "pixelGlowReady" or cse == "buttonGlowReady")
+                    local watchGlow = ns.CD_GLOW_USABLE_STYLE[cse] ~= nil
+                    if not watchGlow and ns.CD_GLOW_PLAIN_STYLE[cse]
                         and (icon._isRacialFrame or icon._isTrinketFrame or icon._isPresetFrame
                              or icon._isItemPresetFrame or icon._isCustomSpellFrame)
                         and not (ns.PresetHasCdState and ns.PresetHasCdState(icon)) then

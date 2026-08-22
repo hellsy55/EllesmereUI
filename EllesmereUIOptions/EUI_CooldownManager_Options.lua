@@ -8688,7 +8688,7 @@ initFrame:SetScript("OnEvent", function(self)
                     AB.AnyResourceAwareGlowSaved = function()
                         local function hit(b)
                             local e2 = b and b.cdStateEffect
-                            return e2 == "pixelGlowReadyUsable" or e2 == "buttonGlowReadyUsable"
+                            return ns.CD_GLOW_USABLE_STYLE[e2] ~= nil
                         end
                         local st = ns.GetSpellSettingsStore and ns.GetSpellSettingsStore(barKey)
                         if st then
@@ -9495,14 +9495,29 @@ initFrame:SetScript("OnEvent", function(self)
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
+                        { val = "shapeGlowReady",  label = "Shape Glow (CD Ready)" },
                         { val = "buttonGlowReady", label = "Button Glow (CD Ready)" },
+                        { val = "autocastGlowReady", label = "Auto-Cast Shine (CD Ready)" },
+                        { val = "gcdGlowReady",      label = "GCD (CD Ready)" },
+                        { val = "modernGlowReady",   label = "Modern WoW Glow (CD Ready)" },
+                        { val = "classicGlowReady",  label = "Classic WoW Glow (CD Ready)" },
                         -- Resource Aware variants: also require the spell to be castable
                         -- (resources/form) via the event-driven usability watcher. That watcher has
                         -- a small cost, so these are separate opt-in values (with a confirm popup) and the plain variants above stay cost-free.
                         { val = "pixelGlowReadyUsable",  label = "Pixel Glow CD Ready (Resource Aware)",
                           tooltip = "Pixel Glow CD Ready (Resource Aware)" },
+                        { val = "shapeGlowReadyUsable",  label = "Shape Glow CD Ready (Resource Aware)",
+                          tooltip = "Shape Glow CD Ready (Resource Aware)" },
                         { val = "buttonGlowReadyUsable", label = "Button Glow CD Ready (Resource Aware)",
                           tooltip = "Button Glow CD Ready (Resource Aware)" },
+                        { val = "autocastGlowReadyUsable", label = "Auto-Cast Shine CD Ready (Resource Aware)",
+                          tooltip = "Auto-Cast Shine CD Ready (Resource Aware)" },
+                        { val = "gcdGlowReadyUsable",      label = "GCD CD Ready (Resource Aware)",
+                          tooltip = "GCD CD Ready (Resource Aware)" },
+                        { val = "modernGlowReadyUsable",   label = "Modern WoW Glow CD Ready (Resource Aware)",
+                          tooltip = "Modern WoW Glow CD Ready (Resource Aware)" },
+                        { val = "classicGlowReadyUsable",  label = "Classic WoW Glow CD Ready (Resource Aware)",
+                          tooltip = "Classic WoW Glow CD Ready (Resource Aware)" },
                     }
                     -- Reverse Swipe single-select (per-spell / per-preset), shared by both the regular-spell (ss) and preset/custom (cas) menus below.
                     local REVERSE_SWIPE_ITEMS = {
@@ -9803,8 +9818,7 @@ initFrame:SetScript("OnEvent", function(self)
                                                 return item.val
                                             end,
                                             confirmRA = rowApply and rowApply.confirmRA
-                                                and (item.val == "pixelGlowReadyUsable"
-                                                  or item.val == "buttonGlowReadyUsable"),
+                                                and (ns.CD_GLOW_USABLE_STYLE[item.val] ~= nil),
                                             -- No flyout rebuild here: rebuilding would destroy the strip's
                                             -- owner item and hide the strip mid-interaction (e.g. between "Apply
                                             -- to Bar" and "(All Specs)"). Flyout re-renders fresh on its next open; only the row's accent cue updates now.
@@ -10943,7 +10957,12 @@ initFrame:SetScript("OnEvent", function(self)
                             { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                             { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                             { val = "pixelGlowReady",  label = "Pixel Glow (CD Ready)" },
+                            { val = "shapeGlowReady",  label = "Shape Glow (CD Ready)" },
                             { val = "buttonGlowReady", label = "Button Glow (CD Ready)" },
+                            { val = "autocastGlowReady", label = "Auto-Cast Shine (CD Ready)" },
+                            { val = "gcdGlowReady",      label = "GCD (CD Ready)" },
+                            { val = "modernGlowReady",   label = "Modern WoW Glow (CD Ready)" },
+                            { val = "classicGlowReady",  label = "Classic WoW Glow (CD Ready)" },
                         }
                         local KEEP_COLORED_ITEMS = {
                             { val = nil,  label = "None" },
@@ -11324,8 +11343,7 @@ initFrame:SetScript("OnEvent", function(self)
                         function(si, item)
                             local isGlow = item.val and item.val > 0
                             local cse = ss.cdStateEffect
-                            if isGlow and (cse == "pixelGlowReady" or cse == "buttonGlowReady"
-                               or cse == "pixelGlowReadyUsable" or cse == "buttonGlowReadyUsable") then
+                            if isGlow and (ns.CD_GLOW_PLAIN_STYLE[cse] or ns.CD_GLOW_USABLE_STYLE[cse]) then
                                 si:SetAlpha(0.35)
                                 si:SetScript("OnClick", function() end)
                                 si:SetScript("OnEnter", function()
@@ -11659,7 +11677,7 @@ initFrame:SetScript("OnEvent", function(self)
                             -- FIRST enable in the current spec pays the cost. Prompt only when no
                             -- spell on any bar in this spec already has a Resource Aware glow (a
                             -- spell's own current value counts, so pixel<->button switches and re-selects never prompt). Plain CD Ready glows are cost-free and never prompt.
-                            local isGlow = (v == "pixelGlowReadyUsable" or v == "buttonGlowReadyUsable")
+                            local isGlow = ns.CD_GLOW_USABLE_STYLE[v] ~= nil
                             if isGlow and not AB.AnyResourceAwareGlowSaved() then
                                 menu:Hide()
                                 EllesmereUI:ShowConfirmPopup({
@@ -11694,8 +11712,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end)
                                 return
                             end
-                            local isGlow = (item.val == "pixelGlowReady" or item.val == "buttonGlowReady"
-                                or item.val == "pixelGlowReadyUsable" or item.val == "buttonGlowReadyUsable")
+                            local isGlow = (ns.CD_GLOW_PLAIN_STYLE[item.val] or ns.CD_GLOW_USABLE_STYLE[item.val]) ~= nil
                             if isGlow and ss.procGlow and ss.procGlow > 0 then
                                 si:SetAlpha(0.35)
                                 si:SetScript("OnClick", function() end)
