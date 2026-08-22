@@ -87,6 +87,7 @@ local InCombatLockdown = InCombatLockdown
 local GetShapeshiftFormID = GetShapeshiftFormID
 local IsPlayerSpell = IsPlayerSpell
 local UnitSpellHaste = UnitSpellHaste
+local GetInventoryItemID = GetInventoryItemID
 
 -------------------------------------------------------------------------------
 --  Constants
@@ -6709,6 +6710,32 @@ end
     end
 end
 
+-- Some set bonuses never register via IsPlayerSpell or a player aura.
+-- Count equipped items whose set-bonus data lists this spellID; two or
+-- more equipped means the 2pc bonus is up.
+local function IsSetBonusSpellActive(spellID)
+    if not (C_Item and C_Item.GetSetBonusesForSpecializationByItemID) then
+        return false
+    end
+    local specID = _G._ERB_ResolveSpecIDCached and _G._ERB_ResolveSpecIDCached()
+    if not specID then return false end
+    local matches = 0
+    for slot = 1, 19 do
+        local itemID = GetInventoryItemID and GetInventoryItemID("player", slot)
+        if itemID then
+            local ok, bonusSpellIDs = pcall(C_Item.GetSetBonusesForSpecializationByItemID, specID, itemID)
+            if ok and type(bonusSpellIDs) == "table" then
+                for _, id in ipairs(bonusSpellIDs) do
+                    if id == spellID then
+                        matches = matches + 1
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return matches >= 2
+end
 
 -- Channel tick marks: vertical marks on the cast bar for channeled spells
 -- listed in CHANNEL_TICK_DATA. The penultimate tick (last safe chain/clip
@@ -6819,11 +6846,11 @@ ShowChannelTicks = function(spellID)
             local M = tickData.missiles
             if tickData.addMissiles then
                 for id, extra in pairs(tickData.addMissiles) do
-                    -- Talents answer IsPlayerSpell; set bonuses may only
-                    -- surface as a hidden player aura. Either counts.
+                    -- Talent, player aura, or item set bonus -- any counts.
                     if IsPlayerSpell(id)
                         or (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
-                            and C_UnitAuras.GetPlayerAuraBySpellID(id)) then
+                            and C_UnitAuras.GetPlayerAuraBySpellID(id))
+                        or IsSetBonusSpellActive(id) then
                         M = M + extra
                     end
                 end
