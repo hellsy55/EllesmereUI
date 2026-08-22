@@ -7200,6 +7200,7 @@ L["Outline style override for all Action Bars text. EUI Global Outline follows t
 L["Outline style override for all Nameplates text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 이름표 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
 L["Outline style override for all Bags text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 가방 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
 L["Outline style override for all Quickdraw text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 퀵드로우 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Resource & Cast Bars text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 자원 및 시전 바 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
 
 -- == Chat prints (채팅창 print 출력 - 소스 엘키(L/Lf) 삽입 대기) ==================
 -- 원본이 print() 에 영문 리터럴을 직접 쓰는 곳들. 엔진 자동번역 밖이라 소스에서
