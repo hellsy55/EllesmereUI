@@ -2350,9 +2350,10 @@ end
 -- On ns for the Lua 5.1 200-local ceiling.
 ns.NICK_ADDON = addonName:find("Standalone") and addonName or "EllesmereUI"
 
--- Resolve a unit's display name via nickname providers in order: NSAPI ->
--- EasyNicknameAPI -> TimelineReminders -> LiquidAPI, then the raw unit name. Each is
--- pcall-wrapped so a misbehaving external API can never break names.
+-- Resolve a unit's display name through MethodInternal's authoritative surface
+-- choice for known Method players, then the normal provider order: NSAPI ->
+-- TimelineReminders -> LiquidAPI, then the raw unit name. Each
+-- external call is pcall-wrapped so a misbehaving API can never break names.
 --
 -- SECRET-SAFE: an enemy unit's UnitName is secret in protected content and any Lua op
 -- on it (==, .., format) throws. Nicknames only apply to your own group, so: non-players
@@ -2364,22 +2365,30 @@ ns.NICK_ADDON = addonName:find("Standalone") and addonName or "EllesmereUI"
 function ns.ResolveUnitNickname(unit)
     local name = UnitName(unit)
     if not name then return "" end
-    -- Master toggle (Unit Frames > main frames > Display, default OFF): when off,
-    -- skip every provider lookup and show the raw unit name (display-safe).
-    if not (db and db.profile and db.profile.showNicknames) then return name end
     -- Nicknames are player-only; NPCs (bosses, etc.) keep their name.
     if not UnitIsPlayer(unit) then return name end
     local nameSecret = issecretvalue and issecretvalue(name)
     local display
-    if not nameSecret and NSAPI and NSAPI.GetName then
-        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
-        if ok and type(dn) == "string"
-           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
-            display = dn
+    -- MethodInternal's surface choice is authoritative for known Method players,
+    -- including Character Name (which deliberately equals the raw name). It sits
+    -- ahead of the EUI master toggle so the MethodInternal-owned setting works on
+    -- its selected surface; unknown players continue through EUI's normal chain.
+    if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok, dn, handled = pcall(
+            EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "unitFrames")
+        if ok and handled == true then
+            if type(dn) == "string"
+               and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+                return dn
+            end
+            return name
         end
     end
-    if not display and not nameSecret and EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnit then
-        local ok, dn = pcall(EasyNicknameAPI.GetNicknameForUnit, unit)
+    -- Master toggle (Unit Frames > main frames > Display, default OFF): when off,
+    -- skip the remaining provider lookups and show the raw unit name (display-safe).
+    if not (db and db.profile and db.profile.showNicknames) then return name end
+    if not nameSecret and NSAPI and NSAPI.GetName then
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
         if ok and type(dn) == "string"
            and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
             display = dn
@@ -2464,13 +2473,21 @@ do
     end)
 end
 
--- Provider callbacks. NSAPI and TimelineReminders may load after us, so registration
--- retries on PLAYER_LOGIN/PLAYER_ENTERING_WORLD until it sticks. Registrant key MUST
+-- Provider callbacks. MethodInternal uses the addon-loaded callback; NSAPI and
+-- TimelineReminders retry on PLAYER_LOGIN/PLAYER_ENTERING_WORLD. Registrant key MUST
 -- be "EllesmereUIUnitFrames", not "EllesmereUI": Raid Frames owns that key and
 -- CallbackHandler keys registrations by it, so reuse would clobber one module. The
 -- provider CHECKBOX key stays shared (ns.NICK_ADDON/"EUI") so one toggle drives raid AND unit frames.
 do
     local function RefreshNames() if ns.RefreshAllUnitNames then ns.RefreshAllUnitNames() end end
+    local function RegisterMethodInternal()
+        if ns._methodInternalSurfaceNickHooked then return end
+        if EasyNicknameAPI and EasyNicknameAPI.RegisterCallback then
+            EasyNicknameAPI.RegisterCallback(
+                "SurfaceNicknamesChanged", RefreshNames, "EllesmereUIUnitFrames")
+            ns._methodInternalSurfaceNickHooked = true
+        end
+    end
     local function RegisterNSRT()
         if ns._nsrtNickHooked then return true end
         if NSAPI and NSAPI.RegisterCallback then
@@ -2506,6 +2523,7 @@ do
             if (a and b) or event == "PLAYER_ENTERING_WORLD" then self:UnregisterAllEvents() end
         end)
     end
+    EventUtil.ContinueOnAddOnLoaded("MethodInternal", RegisterMethodInternal)
 end
 
 -- "Name > Target" is built from FOUR tags so the (possibly SECRET) target name is never
