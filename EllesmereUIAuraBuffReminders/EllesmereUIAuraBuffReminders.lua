@@ -4771,7 +4771,9 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         return
     end
 
-    if e == "PLAYER_REGEN_ENABLED" then
+    -- A fast encounter reset can end without a player combat transition, so
+    -- clear ENCOUNTER_START's synthetic flag when lockdown is already gone.
+    if e == "PLAYER_REGEN_ENABLED" or (e == "ENCOUNTER_END" and not InCombatLockdown()) then
         _eabrInCombat = false
         -- Restore broad UNIT_AURA for OOC group buff tracking
         if _needGroupAura then _setBroad(true) end
@@ -4924,6 +4926,7 @@ do
 end
 
 mainFrame:RegisterEvent("ENCOUNTER_START")
+mainFrame:RegisterEvent("ENCOUNTER_END")
 mainFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 mainFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 mainFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
