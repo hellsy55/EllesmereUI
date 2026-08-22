@@ -7020,6 +7020,7 @@ L["Auras with a dispel type you can dispel"] = "내가 해제할 수 있는 유�
 L["UNIT FRAME AURA FILTERS"] = "유닛 프레임 오라 필터"
 L["Target Tracked Auras"] = "대상 추적 오라"
 L["Copy Included/Excluded Spells From:"] = "포함/제외된 주문 복사 대상:"
+L["Debuffs Blizzard flags as important"] = "블리자드가 중요하다고 지정한 약화 효과"
 
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
