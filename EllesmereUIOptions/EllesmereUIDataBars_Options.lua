@@ -1352,8 +1352,10 @@ initFrame:SetScript("OnEvent", function(self)
                     if cfg.blocks[bi].type == t.key then onBar = true break end
                 end
                 -- Spacers are the one type meant to repeat on a bar, so the
-                -- already-on-bar dim cue never applies to them.
-                if t.key == "spacer" then onBar = false end
+                -- already-on-bar dim cue never applies to them. Broker blocks
+                -- repeat for the same reason: one per plugin is the normal setup,
+                -- so a second one is not the accident the dim cue warns about.
+                if t.key == "spacer" or t.key == "ldb" then onBar = false end
                 local baseA = tDimA
                 local hoverA = 1
                 if onBar then baseA = 0.28; hoverA = 0.55 end
@@ -1384,6 +1386,8 @@ initFrame:SetScript("OnEvent", function(self)
                         -- so aim at the picker itself: that target pulses until
                         -- it is filled in, instead of the one-shot section glow.
                         if typeKey == "currency" then navKey = navKey .. ":currency" end
+                        -- Same for a broker block: unusable until a plugin is picked.
+                        if typeKey == "ldb" then navKey = navKey .. ":ldb" end
                         C_Timer.After(0.05, function()
                             if _edbNavigateFn then _edbNavigateFn(navKey) end
                         end)
@@ -2519,6 +2523,7 @@ initFrame:SetScript("OnEvent", function(self)
                 profession = true, profession2 = true, currency = true,
                 greatvault = true, audio = true, location = true, coords = true,
                 ilvl = true,
+                ldb = true,
             }
             if ICON_COLOR_BLOCKS[b.type] then
                 local function IconFlagsOff()
@@ -3119,6 +3124,49 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       setValue = function(v) s.precision = v; Apply() end },
                 }
+            elseif b.type == "ldb" then
+                -- Rebuilt on every page draw, never cached: plugins register on
+                -- their own schedule and some only appear once their addon has
+                -- finished loading.
+                local lValues, lOrder = ns.BuildLDBList()
+                lValues._noLoc = true
+                lValues._menuOpts = { searchable = true, itemHeight = 26 }
+                lValues[""] = L("Select a plugin")
+                table.insert(lOrder, 1, "")
+                -- A source whose addon is not loaded this session still has to
+                -- read as the current pick: an empty-looking dropdown invites a
+                -- change the player never meant to make, and the block itself is
+                -- only collapsed, not unconfigured.
+                if s.source and not lValues[s.source] then
+                    lValues[s.source] = s.source .. " |cff808080(" .. L("not loaded") .. ")|r"
+                    lOrder[#lOrder + 1] = s.source
+                end
+                typeRows = {
+                    { type = "dropdown", text = "Plugin",
+                      tooltip = "Any LibDataBroker plugin registered right now. One block per plugin -- add the block again for a second one.",
+                      values = lValues, order = lOrder,
+                      getValue = function() return s.source or "" end,
+                      setValue = function(v)
+                          if v == "" then s.source = nil else s.source = v end
+                          Apply()
+                      end },
+                    MkToggleOn("Show Icon", "showIcon", "Shows the plugin's own icon next to its text."),
+                    MkToggleOn("Show Text", "showText",
+                        "Shows the plugin's text. Off leaves an icon-only block that still carries the plugin's tooltip and clicks."),
+                    MkToggle("Show Label", "showLabel", "Prefixes the plugin's own name to its text."),
+                    -- Default ON: broker text arrives carrying the plugin's color
+                    -- codes, which would otherwise silently beat the Text Color
+                    -- row above and the accent hover.
+                    MkToggleOn("Strip Colors", "stripColors",
+                        "Removes the color codes the plugin writes into its own text, so this block's Text Color applies. Off keeps the plugin's colors."),
+                    { type = "slider", pixel = true, text = "Max Width", min = 0, max = 400, step = 5,
+                      tooltip = "Holds the block at this width and clips longer text, so a plugin whose text keeps changing length never shifts the blocks beside it. Zero sizes the block to whatever the plugin currently says.",
+                      getValue = function() return s.maxWidth or 0 end,
+                      setValue = function(v)
+                          if v == 0 then s.maxWidth = nil else s.maxWidth = v end
+                          Apply()
+                      end },
+                }
             end
 
             local msIconRow
@@ -3152,6 +3200,14 @@ initFrame:SetScript("OnEvent", function(self)
                 -- never touched, so point at it and hold the pulse until they
                 -- do. k == 1 is the Width dropdown; the slider rides its right
                 -- slot. Released by the first drag (maxWidth stops being nil).
+                -- Same contract for a broker block with no plugin picked:
+                -- clicking its placeholder on the live bar lands on the picker,
+                -- which pulses until it is filled in.
+                if b.type == "ldb" and k == 1 then
+                    parent._edbClickTargets["block:" .. blockId .. ":ldb"] =
+                        { section = secHdr, target = row, slotSide = "left",
+                          holdWhile = function() return s.source == nil end }
+                end
                 if b.type == "location" and k == 1 then
                     parent._edbClickTargets["block:" .. blockId .. ":maxwidth"] =
                         { section = secHdr, target = row, slotSide = "right",
