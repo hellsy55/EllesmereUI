@@ -7029,6 +7029,10 @@ L["Per-bar text scale"] = "바별 텍스트 크기 비율"
 L["Font face and outline only"] = "글꼴 종류 및 외곽선 전용"
 L["Combat & World Text"] = "전투 및 월드 텍스트"
 L["Floating combat text and world name text (engine settings)"] = "떠오르는 전투 텍스트 및 월드 이름 텍스트 (엔진 설정)"
+L["Enable %1$s to edit these settings."] = "%1$s이(가) 이 설정을 편집할 수 있도록 허용합니다."
+L["Enable %1$s to edit its text settings."] = "%1$s이(가) 텍스트 설정을 편집할 수 있도록 허용합니다."
+L["Enable %1$s to edit its texture settings."] = "%1$s이(가) 텍스처 설정을 편집할 수 있도록 허용합니다."
+L["Module Disabled"] = "모듈 비활성화됨"
 
 -- 전체 설정 - 글꼴 - 옵션
 L["Module Outline"] = "모듈 외곽선"
@@ -7177,8 +7181,25 @@ L["Window & Bar Border Styles"] = "창 및 바 테두리 스타일"
 L["Bar Texture (per data bar)"] = "바 텍스처 (데이터 개별 바)"
 
 -- 전체 설정 - 글꼴 - 툴팁 
-L["Outline style override for all Unit Frames text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 유닛 프레임 텍스트의 외곽선 스타일을 덮어씁니다. 'EUI 전체 외곽선'은 위의 전체 외곽선 모드 설정을 따릅니다."
-L["Typeface for the quest tracker, This module-local pick wins over the module font override above."] = "퀘스트 추적기의 글꼴입니다. 이 모듈 자체 설정을 지정하면 위의 모듈 글꼴 덮어쓰기 설정보다 우선 적용됩니다."
+L["Outline style override for all Cooldown Manager text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 쿨다운 관리자 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all AuraBuff Reminders text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 오라/버프 리마인더 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Quality of Life text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 편의 기능 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Blizz UI Enhanced text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 Blizz UI Enhanced 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Friends List text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 친구 목록 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Mythic+ Tools text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 신화 쐐기돌 도구 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Quest Tracker text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 퀘스트 추적기 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Minimap text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 미니맵 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Chat text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 대화창 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Damage Meters text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 데미지 미터기 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all DataBars text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 정보 바 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Quickdraw text. EUI Global Outline follows the globalOutline Mode setting above."] = "모든 퀵드로우 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Typeface for the M+ timer clock. Every other Mythic+ text uses the module font."] = "신화 쐐기돌(M+) 타이머 시계의 글꼴을 설정합니다. 그 외의 모든 신화 쐐기돌 텍스트에는 모듈 글꼴이 적용됩니다."
+L["Typeface for the quest tracker. This module-local pick wins over the module font override above."] = "퀘스트 추적기의 글꼴을 설정합니다. 이 설정은 위의 모듈 글꼴 강제 설정을 무시하고 우선 적용됩니다."
+L["Outline style override for all Unit Frames text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 유닛 프레임 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Action Bars text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 행동 표시줄 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Nameplates text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 이름표 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Bags text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 가방 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
+L["Outline style override for all Quickdraw text. EUI Global Outline follows the global Outline Mode setting above."] = "모든 퀵드로우 텍스트의 외곽선 스타일을 강제로 설정합니다. EUI 전체 외곽선은 위의 전체 외곽선 모드 설정을 따릅니다."
 
 -- == Chat prints (채팅창 print 출력 - 소스 엘키(L/Lf) 삽입 대기) ==================
 -- 원본이 print() 에 영문 리터럴을 직접 쓰는 곳들. 엔진 자동번역 밖이라 소스에서
