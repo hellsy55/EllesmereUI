@@ -7014,6 +7014,12 @@ L["Enemy"] = "적군"
 
 --유닛 프레임 
 L["Hide these instead of showing them"] = "표시하는 대신 숨기기"
+L["Buffs you can spellsteal or purge"] = "마법 훔치기 또는 해제 가능한 강화 효과"
+L["Major defensive cooldowns"] = "주요 생존기"
+L["Auras with a dispel type you can dispel"] = "내가 해제할 수 있는 유형의 오라"
+L["UNIT FRAME AURA FILTERS"] = "유닛 프레임 오라 필터"
+L["Target Tracked Auras"] = "대상 추적 오라"
+L["Copy Included/Excluded Spells From:"] = "포함/제외된 주문 복사 대상:"
 
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
