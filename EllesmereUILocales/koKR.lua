@@ -7012,6 +7012,9 @@ L["Disabling both disables this binding."] = "둘 다 해제하면 이 단축키
 L["Friendly"] = "아군"
 L["Enemy"] = "적군"
 
+--유닛 프레임 
+L["Hide these instead of showing them"] = "표시하는 대신 숨기기"
+
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
 L["A quick view of every font setting in one place."] = "모든 글꼴 설정을 한눈에 확인할 수 있습니다."
