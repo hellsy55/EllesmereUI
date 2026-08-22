@@ -1611,14 +1611,22 @@ function ns.UF_ReloadPlayerDispelSlots()
 end
 
 -- The poison capability behind UF_TokenBlindDispel is a talent (Poison
--- Cleansing Totem); talent edits fire no spec event, so shamans re-drive the
--- fingerprinted reload on trait apply.
+-- Cleansing Totem). Talent edits fire no spec event, and IsPlayerSpell can lag
+-- the trait event itself (the spellbook grant lands with SPELLS_CHANGED), so
+-- shamans re-check on both; the reload runs only when the cached capability
+-- actually flips. No combat gate: the restyle routes through AK.RestyleSoon,
+-- whose worker defers secrecy-denied writes to the restriction-lift re-queue.
 do
     local _, class = UnitClass("player")
     if class == "SHAMAN" then
         local ev = CreateFrame("Frame")
         ev:RegisterEvent("TRAIT_CONFIG_UPDATED")
-        ev:SetScript("OnEvent", function() ns.UF_ReloadPlayerDispelSlots() end)
+        ev:RegisterEvent("SPELLS_CHANGED")
+        ev:SetScript("OnEvent", function()
+            if ns.UF_RefreshPoisonTotem and ns.UF_RefreshPoisonTotem() then
+                ns.UF_ReloadPlayerDispelSlots()
+            end
+        end)
     end
 end
 

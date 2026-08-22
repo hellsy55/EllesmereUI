@@ -15523,7 +15523,21 @@ do
     -- The token is equally blind to talent dispels: a shaman's poison removal is
     -- Poison Cleansing Totem, so Poison never passes for them. Raid Frames applies
     -- the same rule to its group-wide dispel slots (EUI_RaidFrames_AuraContainers.lua).
+    -- Cached: IsPlayerSpell can lag both addon load and the trait event that
+    -- announces a change; the shaman watcher in EUI_UnitFrames_AuraContainers.lua
+    -- calls UF_RefreshPoisonTotem on trait and spellbook events and reloads the
+    -- dispel slots when it reports a flip.
     local POISON_CLEANSING_TOTEM = 383013
+    local _, ufPlayerClass = UnitClass("player")
+    local poisonTotemKnown = ufPlayerClass == "SHAMAN"
+        and IsPlayerSpell(POISON_CLEANSING_TOTEM) or false
+    function ns.UF_RefreshPoisonTotem()
+        local known = ufPlayerClass == "SHAMAN"
+            and IsPlayerSpell(POISON_CLEANSING_TOTEM) or false
+        if known == poisonTotemKnown then return false end
+        poisonTotemKnown = known
+        return true
+    end
     -- Shared with the 12.1 container slots (EUI_UnitFrames_AuraContainers.lua),
     -- which apply the same rule by choosing which slot style stays visible.
     function ns.UF_TokenBlindDispel(typeKey)
@@ -15533,8 +15547,7 @@ do
             return raceToken ~= nil and races[raceToken] == true
         end
         if typeKey == "poison" then
-            local _, class = UnitClass("player")
-            return class == "SHAMAN" and IsPlayerSpell(POISON_CLEANSING_TOTEM)
+            return poisonTotemKnown
         end
         return false
     end

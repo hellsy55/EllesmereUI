@@ -528,12 +528,19 @@ local GRADIENT_SHARP_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\textures\
 -- Poison for a shaman whose poison removal is Poison Cleansing Totem (a talent).
 -- That slot keeps the plain filter in only-dispellable mode; its include-Poison
 -- candidate already narrows it to poison debuffs.
+-- The capability is CACHED: IsPlayerSpell can lag both addon load and the trait
+-- event that announces a change, so the shaman watcher on bmRegen (below)
+-- re-checks on trait and spellbook events and forces a reload on a flip.
+-- rfcTotemGen lets a button whose shells baked filters under the old value
+-- reconcile at finalize.
 local POISON_CLEANSING_TOTEM = 383013
 local _, rfcPlayerClass = UnitClass("player")
+local rfcTotemKnown = rfcPlayerClass == "SHAMAN"
+    and IsPlayerSpell(POISON_CLEANSING_TOTEM) or false
+local rfcTotemGen = 0
 
 local function TokenBlindDispel(token)
-    return token == "Poison" and rfcPlayerClass == "SHAMAN"
-        and IsPlayerSpell(POISON_CLEANSING_TOTEM)
+    return token == "Poison" and rfcTotemKnown
 end
 
 local function DispelSlotFilter(s, token)
@@ -543,12 +550,16 @@ local function DispelSlotFilter(s, token)
     return { "HARMFUL" }
 end
 
-local function DispelFilterFP(s)
+local function DispelSlotFilters(s)
     local parts = {}
     for i = 1, #DISPEL_SLOTS do
         parts[i] = AK.Filter(unpack(DispelSlotFilter(s, DISPEL_SLOTS[i].token)))
     end
-    return table.concat(parts, ";")
+    return parts
+end
+
+local function DispelFilterFP(s)
+    return table.concat(DispelSlotFilters(s), ";")
 end
 
 -- applyExtra for dispel slots. Per-button refs (health, slot definition) come from the
@@ -2859,6 +2870,7 @@ local function CreateButtonShells(button, health, d)
             -- NO unit yet: an unbound shell registers no events and parses
             -- nothing. The finish job binds the real unit.
             d.rfcDispelShell = c
+            d.rfcTotemGen = rfcTotemGen
         end
     end
 
@@ -3020,6 +3032,17 @@ local function QueueButtonGroups(button, health, d)
         local unit = button:GetAttribute("unit") or "player"
         CreateBmContainer(button, health, d, unit)
         d.rfcUnit = unit
+        -- Shells baked the dispel filters from rfcTotemKnown at build time; if a
+        -- totem flip landed mid-build, re-apply the current filters before the
+        -- fingerprint below is primed as current (which would otherwise latch the
+        -- stale filters as already-applied).
+        if d.rfcDispel and d.rfcTotemGen ~= rfcTotemGen then
+            local parts = DispelSlotFilters(ProxyFor(d) or s)
+            for i = 1, #DISPEL_SLOTS do
+                d.rfcDispel:SetAuraSlotFilterString(DISPEL_SLOTS[i].key, parts[i])
+            end
+        end
+        d.rfcTotemGen = nil
         -- Everything above was configured from current settings; prime the class
         -- fingerprints so the first reload doesn't re-drive it all (class resolved
         -- here, not at queue time -- party self button).
@@ -3288,10 +3311,11 @@ local function ComputeClassFlags(styleKey, s)
         AK.styles[dispelStyleKey] = BuildDispelStyle(s)
         AK.RestyleSoon(dispelStyleKey)
     end
-    local dispelFilter = DispelFilterFP(s)
+    local parts = DispelSlotFilters(s)
+    local dispelFilter = table.concat(parts, ";")
     if st.dispelFilter ~= dispelFilter then
         st.dispelFilter = dispelFilter
-        flags.dispelFilter = true
+        flags.dispelFilter = parts
     end
 
     return flags
@@ -3368,9 +3392,8 @@ function ns.RFC_ReloadAll()
                 if d.rfcDispel then
                     if flags.dispelFilter then
                         for j = 1, #DISPEL_SLOTS do
-                            local def = DISPEL_SLOTS[j]
-                            d.rfcDispel:SetAuraSlotFilterString(def.key,
-                                AK.Filter(unpack(DispelSlotFilter(s, def.token))))
+                            d.rfcDispel:SetAuraSlotFilterString(DISPEL_SLOTS[j].key,
+                                flags.dispelFilter[j])
                         end
                     end
                     d.rfcDispel:SetShown(d.rfcAssist ~= false and DispelVisible(s))
@@ -3408,16 +3431,34 @@ bmRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
 bmRegen:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 bmRegen:RegisterEvent("PLAYER_ENTERING_WORLD")
 -- The poison dispel-slot filter depends on Poison Cleansing Totem being talented
--- (see DispelSlotFilter); talent edits fire no spec event, so shamans re-drive
--- the fingerprinted reload on trait apply.
-if rfcPlayerClass == "SHAMAN" then bmRegen:RegisterEvent("TRAIT_CONFIG_UPDATED") end
+-- (see DispelSlotFilter). Talent edits fire no spec event, and IsPlayerSpell can
+-- lag the trait event itself (the spellbook grant lands with SPELLS_CHANGED), so
+-- shamans re-check on both; the reload runs only on an actual flip, and a flip
+-- seen in combat latches for the regen branch below.
+local function RecheckTotem()
+    local known = rfcPlayerClass == "SHAMAN"
+        and IsPlayerSpell(POISON_CLEANSING_TOTEM) or false
+    if known == rfcTotemKnown then return end
+    if InCombatLockdown() then ns._rfcTotemDirty = true; return end
+    ns._rfcTotemDirty = nil
+    rfcTotemKnown = known
+    rfcTotemGen = rfcTotemGen + 1
+    -- Stale by construction now: force the next compare to re-apply the slot
+    -- filters instead of trusting a fingerprint stamped under the old value.
+    for _, st in pairs(classFP) do st.dispelFilter = nil end
+    ns.RFC_ReloadAll()
+end
+if rfcPlayerClass == "SHAMAN" then
+    bmRegen:RegisterEvent("TRAIT_CONFIG_UPDATED")
+    bmRegen:RegisterEvent("SPELLS_CHANGED")
+end
 bmRegen:SetScript("OnEvent", function(_, event, arg1)
     if event == "PLAYER_SPECIALIZATION_CHANGED" then
         if arg1 == "player" and not InCombatLockdown() then ns.RFC_ReloadAll() end
         return
     end
-    if event == "TRAIT_CONFIG_UPDATED" then
-        if not InCombatLockdown() then ns.RFC_ReloadAll() end
+    if event == "TRAIT_CONFIG_UPDATED" or event == "SPELLS_CHANGED" then
+        RecheckTotem()
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
@@ -3427,6 +3468,7 @@ bmRegen:SetScript("OnEvent", function(_, event, arg1)
         AssistSweep()
         return
     end
+    if ns._rfcTotemDirty then RecheckTotem() end
     local any = false
     for i = 1, #registry do
         local d = ns.GetFFD and ns.GetFFD(registry[i])
