@@ -7004,6 +7004,14 @@ L["Pick which content the class-special reminders (poisons/rites/imbues/shields)
 
 --2026-08-21 신규
 
+--공격대/파티 
+L["Active In"] = "활성화 위치"
+L["Cast On"] = "시전 대상"
+L["    Unit Types"] = "대상 종류"
+L["Disabling both disables this binding."] = "둘 다 해제하면 이 단축키도 비활성화됩니다."
+L["Friendly"] = "아군"
+L["Enemy"] = "적군"
+
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
 L["A quick view of every font setting in one place."] = "모든 글꼴 설정을 한눈에 확인할 수 있습니다."
