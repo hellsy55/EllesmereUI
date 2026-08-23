@@ -3717,6 +3717,13 @@ local function StyleButton(button)
             -- landing after the roster-timer rebuild can never leave it blank or route live events
             -- to a stale button. Fires only for buttons whose unit changed, so bounded.
             local d = GetFFD(self)
+            -- Fires even on a same-unit re-confirm (see the private-aura note above), so only drop
+            -- the power-hide cache on a genuine occupant change -- else it forces an unconditional
+            -- Show/Hide/SetHeight repaint, reintroducing the pop the deferred-power fix removed.
+            if d._lastUnit ~= u then
+                d._lastUnit = u
+                d._appliedHidePower = nil
+            end
             -- Extra Frames duplicates never enter the real routing maps (one button per unit);
             -- XF_Apply owns ns._xfUnitToButton. The repaint/range/private-aura work below is 1:1.
             if d._isExtra then
@@ -3972,9 +3979,10 @@ local function UpdateButton(button)
         -- (role resync race, a GROUP_ROSTER_UPDATE storm at pull start) pop the whole button's
         -- content stack mid-fight. Only run the transition when hidePower actually changes, and
         -- defer it to combat end if combat is up; flushed from PLAYER_REGEN_ENABLED alongside
-        -- the existing _rosterDirtyInCombat/_sizeTierDirtyInCombat deferrals.
+        -- the existing _rosterDirtyInCombat/_sizeTierDirtyInCombat deferrals. nil (fresh occupant,
+        -- see the OnAttributeChanged reset) always applies immediately, never inheriting a stale layout.
         if d._appliedHidePower ~= hidePower then
-            if inCombat then
+            if inCombat and d._appliedHidePower ~= nil then
                 d._powerDirtyInCombat = true
                 ns._powerDirtyInCombat = true
             else
