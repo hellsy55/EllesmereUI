@@ -9667,8 +9667,13 @@ local function CreateCustomClassPower(playerFrame, style)
         end
 
         eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-
+        -- PLAYER_SPECIALIZATION_CHANGED is deliberately NOT registered here. It is owned
+        -- by cpSpecWatcher (see InitializeFrames), which lives OUTSIDE the container,
+        -- filters unit == "player", and rebuilds after tearing down. A copy of that
+        -- handler on this driver could only ever destroy WITHOUT rebuilding (the
+        -- teardown unregisters the driver mid-dispatch), and -- lacking the unit filter
+        -- -- would fire on any GROUP MEMBER's spec event, silently killing the bar until
+        -- the next /reload.
         if needsAura then
             eventFrame:RegisterUnitEvent("UNIT_AURA", "player")
         end
@@ -9682,14 +9687,7 @@ local function CreateCustomClassPower(playerFrame, style)
         end
 
         eventFrame:SetScript("OnEvent", function(_, event, ...)
-            if event == "PLAYER_SPECIALIZATION_CHANGED" then
-                DestroyCustomClassPower()
-                frames._classPowerBar = nil
-                -- Don't call ReloadFrames here: the profile system handles the full
-                -- rebuild via RefreshAllAddons -> _EUF_ReloadFrames. Width/height
-                -- matches re-apply after CDM clears _specProfileSwitching in ProcessSpecChange.
-                return
-            elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+            if event == "UNIT_SPELLCAST_SUCCEEDED" then
                 if not _G._ERB_AceDB and EllesmereUI then
                     local unit, castGUID, spellID = ...
                     if unit == "player" then
