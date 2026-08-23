@@ -482,6 +482,11 @@ local defaults = {
         procGlowUseClassColor = false,
         procGlowScale = 1.0,
         procGlowEnabled = false,
+        -- Assisted Highlight ring: extra pixels per side beyond the button
+        -- footprint. 0 = Blizzard's size (art sits exactly on the button).
+        -- Positive pushes the blue swirl outward so it reads apart from a proc
+        -- glow on the same edge; negative pulls it inward.
+        assistGlowOutset = 0,
         useBlizzardStyle = false,
         showBlizzIconBg = false,
         blizzIconBgAlpha = 1,
@@ -10462,6 +10467,23 @@ do
         hf:Hide()
     end
 
+    -- Scale that makes the 45px template art cover the button plus the user's
+    -- outset on every side. The frame is anchored CENTER, so scaling grows or
+    -- shrinks it symmetrically -- a positive outset pushes the blue swirl
+    -- outside the proc glow's edge, a negative one tucks it inside. Clamped
+    -- above zero: SetScale(0) is invalid, and a large negative outset on a
+    -- small button would otherwise reach it.
+    -- Stored on ns rather than as a local: this chunk is at the 200-local
+    -- ceiling (see _procState.GetButtonSpellID).
+    ns._AssistScale = function(btn)
+        local w = btn:GetWidth() or 45
+        local p = EAB.db and EAB.db.profile
+        local outset = (p and p.assistGlowOutset) or 0
+        local s = (w + outset * 2) / 45
+        if s < 0.05 then s = 0.05 end
+        return s
+    end
+
     local function AssistShow(btn)
         local fd = EFD(btn)
         local hf = fd.assistHL
@@ -10470,8 +10492,7 @@ do
             if not hf then return end
             fd.assistHL = hf
         end
-        local w = btn:GetWidth() or 45
-        hf:SetScale(w / 45)
+        hf:SetScale(ns._AssistScale(btn))
         -- Re-assert: bar layout can change the button's frame level after create.
         hf:SetFrameLevel(btn:GetFrameLevel() + 15)
         hf:Show()
@@ -10532,9 +10553,11 @@ do
                                         if bf and bf:IsShown() then
                                             AssistHide(btn)  -- Blizzard's covers it
                                             -- Scale Blizzard's lazily-created frame to
-                                            -- our button size (change-guarded).
+                                            -- our button size + outset (change-guarded),
+                                            -- so a hovered button's shine does not jump
+                                            -- back to the un-outset size.
                                             if EFD(btn).squared then
-                                                local s = (btn:GetWidth() or 45) / 45
+                                                local s = ns._AssistScale(btn)
                                                 if bf:GetScale() ~= s then bf:SetScale(s) end
                                             end
                                         else

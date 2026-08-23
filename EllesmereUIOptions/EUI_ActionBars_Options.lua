@@ -5773,6 +5773,22 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Assisted Highlight sits on the same button edge as the proc glow and
+        -- has no size control of its own; the outset pushes it clear so both
+        -- read as separate rings.
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Assisted Highlight Outset", min=-10, max=30, step=1,
+              tooltip="Moves Blizzard's blue Assisted Highlight ring outward (or inward at negative values) so it no longer overlaps the proc glow on the same button.",
+              disabled=function() return not (GetCVarBool and GetCVarBool("assistedCombatHighlight")) end,
+              disabledTooltip="This option requires Blizzard's Assisted Highlight to be enabled",
+              rawTooltip=true,
+              getValue=function() return p.assistGlowOutset or 0 end,
+              setValue=function(v)
+                  p.assistGlowOutset = v
+                  if ns.UpdateAssistHighlights then ns.UpdateAssistHighlights() end
+              end },
+            { type="spacer" });  y = y - h
+
         return math.abs(y)
     end
 
