@@ -487,6 +487,13 @@ local defaults = {
         -- Positive pushes the blue swirl outward so it reads apart from a proc
         -- glow on the same edge; negative pulls it inward.
         assistGlowOutset = 0,
+        -- How the Assisted Highlight is drawn: 1 = Blizzard's glow ring only
+        -- (default, unchanged behavior), 2 = flat tint over the whole button
+        -- instead, 3 = both. The overlay leaves the button edge free for the
+        -- proc glow, which is the point of offering it.
+        assistGlowStyle = 1,
+        assistGlowOverlayColor = { r = 0.15, g = 0.5, b = 1 },
+        assistGlowOverlayAlpha = 30,
         useBlizzardStyle = false,
         showBlizzIconBg = false,
         blizzIconBgAlpha = 1,
@@ -10460,11 +10467,70 @@ do
         return hf
     end
 
-    local function AssistHide(btn)
+    -- Ring teardown alone. Split out of AssistHide because AssistShow also
+    -- needs it on its own: with the overlay style picked, or with Blizzard
+    -- painting its own ring on a hovered button, our ring must go while the
+    -- overlay stays up.
+    ns._AssistRingHide = function(btn)
         local hf = EFD(btn).assistHL
         if not hf then return end
         if hf.Flipbook and hf.Flipbook.Anim then hf.Flipbook.Anim:Stop() end
         hf:Hide()
+    end
+
+    -- Flat tint over the whole button -- the alternative (or companion) to the
+    -- ring. Its own child frame at btn+14, one below the ring, so it draws over
+    -- the icon and the cooldown swipe deterministically instead of racing
+    -- draw-layer sublevels against Blizzard's own button textures. No texture,
+    -- no animation, no driver entry: strictly cheaper than the flipbook ring.
+    -- Created lazily, so nobody on the ring-only default pays for it.
+    ns._AssistOverlay = function(btn, show)
+        local fd = EFD(btn)
+        local ov = fd.assistOverlay
+        if not show then
+            if ov then ov:Hide() end
+            return
+        end
+        if not ov then
+            ov = CreateFrame("Frame", nil, btn)
+            ov:SetAllPoints(btn)
+            ov.tex = ov:CreateTexture(nil, "OVERLAY")
+            ov.tex:SetAllPoints(ov)
+            fd.assistOverlay = ov
+        end
+        -- Re-assert: bar layout can change the button's frame level after create.
+        ov:SetFrameLevel(btn:GetFrameLevel() + 14)
+        local p = EAB.db and EAB.db.profile
+        local c = (p and p.assistGlowOverlayColor) or { r = 0.15, g = 0.5, b = 1 }
+        local a = (p and p.assistGlowOverlayAlpha) or 30
+        ov.tex:SetColorTexture(c.r or 0.15, c.g or 0.5, c.b or 1, a / 100)
+        -- Custom button shapes: follow the shape mask, else the tint is a
+        -- square sitting on a round icon. Keyed on the mask OBJECT, not a
+        -- boolean: a shape change swaps the mask, and the stale one must be
+        -- removed before the new one goes on.
+        local ofd = EFD(ov)
+        if fd.shapeMask and fd.shapeApplied then
+            if ofd.shapeMasked ~= fd.shapeMask then
+                if ofd.shapeMasked then UnmaskFrameTextures(ov, ofd.shapeMasked) end
+                MaskFrameTextures(ov, fd.shapeMask)
+                ofd.shapeMasked = fd.shapeMask
+            end
+        elseif ofd.shapeMasked then
+            UnmaskFrameTextures(ov, ofd.shapeMasked)
+            ofd.shapeMasked = nil
+        end
+        ov:Show()
+    end
+
+    -- Full teardown of everything we paint for one button. Also un-fades
+    -- Blizzard's own ring: the overlay-only style parks it at alpha 0, and a
+    -- button that stops being the suggestion (or the CVar going off) must not
+    -- leave it invisible for whoever shows it next.
+    local function AssistHide(btn)
+        ns._AssistRingHide(btn)
+        ns._AssistOverlay(btn, false)
+        local bf = btn.AssistedCombatHighlightFrame
+        if bf and bf:GetAlpha() ~= 1 then bf:SetAlpha(1) end
     end
 
     -- Scale that makes the 45px template art cover the button plus the user's
@@ -10484,8 +10550,40 @@ do
         return s
     end
 
+    -- Paint the suggestion on one button in whatever style the user picked.
+    -- Owns the "Blizzard already draws its own ring here" case too (it used to
+    -- live at the call site): the overlay is ours either way, so the two
+    -- decisions have to be made together.
     local function AssistShow(btn)
         local fd = EFD(btn)
+        local p = EAB.db and EAB.db.profile
+        local style = (p and p.assistGlowStyle) or 1
+
+        -- Tint: always ours, Blizzard never paints one.
+        ns._AssistOverlay(btn, style ~= 1)
+
+        -- Blizzard may show its own ring on a hovered button (candidate
+        -- re-add). Defer to it so two identical shines never stack, but keep it
+        -- scaled to our button size + outset. With the overlay-only style we
+        -- fade it rather than Hide() it: their manager re-shows it, so a Hide
+        -- would just be undone. Alpha is re-asserted on every pass, so it
+        -- self-corrects when the style changes back.
+        local bf = btn.AssistedCombatHighlightFrame
+        if bf and bf:IsShown() then
+            ns._AssistRingHide(btn)
+            bf:SetAlpha(style == 2 and 0 or 1)
+            if fd.squared then
+                local s = ns._AssistScale(btn)
+                if bf:GetScale() ~= s then bf:SetScale(s) end
+            end
+            return
+        end
+
+        if style == 2 then
+            ns._AssistRingHide(btn)
+            return
+        end
+
         local hf = fd.assistHL
         if not hf then
             hf = AssistCreate(btn)
@@ -10549,20 +10647,9 @@ do
                                         match = GetBaseSpell(sid) == suggestedBase
                                     end
                                     if match then
-                                        local bf = btn.AssistedCombatHighlightFrame
-                                        if bf and bf:IsShown() then
-                                            AssistHide(btn)  -- Blizzard's covers it
-                                            -- Scale Blizzard's lazily-created frame to
-                                            -- our button size + outset (change-guarded),
-                                            -- so a hovered button's shine does not jump
-                                            -- back to the un-outset size.
-                                            if EFD(btn).squared then
-                                                local s = ns._AssistScale(btn)
-                                                if bf:GetScale() ~= s then bf:SetScale(s) end
-                                            end
-                                        else
-                                            AssistShow(btn)
-                                        end
+                                        -- AssistShow owns the style decision and
+                                        -- the defer-to-Blizzard's-own-ring case.
+                                        AssistShow(btn)
                                         newSet[btn] = true
                                     end
                                 end
