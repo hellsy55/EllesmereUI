@@ -4411,6 +4411,11 @@ local function EnableClassPowerWatcher()
         end
         classPowerWatcher:SetScript("OnEvent", function(_, event, ...)
             if event == "PLAYER_SPECIALIZATION_CHANGED" then
+                -- The event carries a unit and is delivered for GROUP MEMBERS too, so
+                -- without this filter a raid full of spec swaps rebuilds the watcher
+                -- (and every pip on the personal plate) over and over for nothing.
+                local specUnit = ...
+                if specUnit ~= "player" then return end
                 -- Spec changed: tear down and rebuild (spec may no longer have this resource)
                 DisableClassPowerWatcher()
                 ApplyClassPowerSetting()
@@ -4475,8 +4480,11 @@ local function EnableClassPowerWatcher()
         if classPowerType == Enum.PowerType.Runes then
             classPowerWatcher:RegisterEvent("RUNE_POWER_UPDATE")
         end
-        classPowerWatcher:SetScript("OnEvent", function(_, event)
+        classPowerWatcher:SetScript("OnEvent", function(_, event, unit)
             if event == "PLAYER_SPECIALIZATION_CHANGED" then
+                -- Group members' spec events land here too; see the filter note in the
+                -- string-resource branch above.
+                if unit ~= "player" then return end
                 DisableClassPowerWatcher()
                 ApplyClassPowerSetting()
             elseif event == "PLAYER_TARGET_CHANGED" or event == "UPDATE_SHAPESHIFT_FORM" then
