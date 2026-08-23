@@ -1078,7 +1078,7 @@ do
                 for i = 1, 6 do
                     local btn = _G["OverrideActionBarButton" .. i]
                     if btn then
-                        if btn.UpdateAction then btn:UpdateAction() end
+                        -- Cooldown-only refresh; avoids passing secret cooldown values through a tainted call.
                         ForceCooldownPaint(btn)
                         local hk = btn.HotKey
                         if hk then
@@ -3008,7 +3008,8 @@ local function SetupBar(info, skipProtected)
                     -- Force visual refresh; events are centrally dispatched
                     -- (per-button registration on 96 buttons caused mass
                     -- OnEvent->UpdateAction calls per tick -- screen blink).
-                    if btn.UpdateAction then btn:UpdateAction() end
+                    -- Taint-safe refresh; avoids passing secret cooldown values through a tainted call.
+                    EAB_VTABLE.ForceButtonRefresh(btn, slot)
                 end
                 if bindPrefix then
                     btn.commandName = bindPrefix .. i
@@ -4227,11 +4228,8 @@ do
                 local fd = EFD(btn)
                 if fd.lastIconTex ~= tex then
                     fd.lastIconTex = tex
-                    -- UpdateAction plus an explicit icon refresh: UpdateButtonArt is nooped, so texture alone would not repaint.
-                    if btn.UpdateAction then btn:UpdateAction() end
-                    if tex and btn.icon then
-                        btn.icon:SetTexture(tex)
-                    end
+                    -- Taint-safe refresh; avoids passing secret cooldown values through a tainted call.
+                    EAB_VTABLE.ForceButtonRefresh(btn, action)
                 end
             end
         end
@@ -5184,7 +5182,8 @@ do
                                 -- usable tri-state below can legitimately flip on a
                                 -- target swap, and it is memo-gated.
                                 if event ~= "PLAYER_TARGET_CHANGED" then
-                                    if btn.UpdateAction then btn:UpdateAction() end
+                                    -- Taint-safe refresh; avoids passing secret cooldown values through a tainted call.
+                                    EAB_VTABLE.ForceButtonRefresh(btn, btn:GetAttribute("action"))
                                     RefreshCooldownVisuals(btn)
                                 end
                                 local ufd = EFD(btn)
@@ -15205,7 +15204,7 @@ local function SetupBlizzardMovableFrame(barKey)
         local function RefreshExtraActionButton()
             local eab1 = ExtraActionButton1
             if not eab1 then return end
-            if eab1.UpdateAction then eab1:UpdateAction() end
+            -- Cooldown-only refresh below; avoids passing secret cooldown values through a tainted call.
             local hk = eab1.HotKey
             if hk then
                 local key1 = GetBindingKey("EXTRAACTIONBUTTON1")
