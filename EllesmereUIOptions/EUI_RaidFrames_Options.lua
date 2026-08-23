@@ -4849,18 +4849,13 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
 
-        -- Group Growth | Unit Growth both list all 4 directions. Separated groups
-        -- (Merge Groups off) support all 16 combinations -- the layout math steps
-        -- each group's own SetPoint along the literal groupGrowth axis. Merged
-        -- (Merge Groups on) goes through a single Blizzard flat header instead,
-        -- whose columnAnchorPoint can only be perpendicular to Unit Growth; a
-        -- same-axis pair there has no valid column direction, so KeepGrowthPerpendicular
-        -- bumps the other axis out of the way rather than letting the runtime
-        -- silently reinterpret it (see the colAnchor comment in EllesmereUIRaidFrames.lua).
-        -- Changing the base pair can also leave a per-tier override same-axis
-        -- (an override that only set ONE axis inherits the other from base, so
-        -- a base edit can silently break a tier that looked fine when it was
-        -- set) -- fix those up the same way the Merge Groups toggle does.
+        -- Group Growth | Unit Growth: separated groups (Merge Groups off) support all
+        -- 16 combinations, but merged mode's single Blizzard flat header can only make
+        -- its column direction perpendicular to Unit Growth, so a same-axis pair there
+        -- gets silently reinterpreted (see the colAnchor comment in EllesmereUIRaidFrames.lua)
+        -- -- KeepGrowthPerpendicular bumps the other axis instead. A base edit can also
+        -- leave a per-tier override same-axis (an override that only set one axis
+        -- inherits the other from base), so fix those up too.
         local function FixTierOverridesPerpendicular()
             local overrides = db.profile.raidSizeOverrides
             if type(overrides) ~= "table" then return end
@@ -4883,10 +4878,10 @@ initFrame:SetScript("OnEvent", function(self)
                           function() return SVal("unitGrowth", "DOWN") end,
                           function(nv) db.profile.unitGrowth = nv end)
                       FixTierOverridesPerpendicular()
+                      EllesmereUI:RefreshPage() -- the sibling dropdown may have just changed
                   end
                   if ns._BumpAbsorbGen then ns._BumpAbsorbGen() end
                   ReloadAndUpdate()
-                  EllesmereUI:RefreshPage()
               end },
             { type="dropdown", text="Unit Growth", values=growthValues, order=allGrowthOrder,
               getValue=function() return SVal("unitGrowth", "DOWN") end,
@@ -4897,10 +4892,10 @@ initFrame:SetScript("OnEvent", function(self)
                           function() return SVal("groupGrowth", "RIGHT") end,
                           function(nv) db.profile.groupGrowth = nv end)
                       FixTierOverridesPerpendicular()
+                      EllesmereUI:RefreshPage() -- the sibling dropdown may have just changed
                   end
                   if ns._BumpAbsorbGen then ns._BumpAbsorbGen() end
                   ReloadAndUpdate()
-                  EllesmereUI:RefreshPage()
               end });  y = y - h
 
         -- Row 4: Sort By (custom dropdown with drag-to-reorder roles) | Self Position
@@ -4947,11 +4942,12 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="toggle", text="Merge Groups",
                   getValue=function() return SVal("mergeGroups", false) end,
                   setValue=function(v)
-                      -- Fix up an already-saved same-axis Group/Unit Growth pair
-                      -- BEFORE flipping the mode, so the very first merged layout
-                      -- pass renders correctly instead of one frame behind. Covers
-                      -- both the base pair and every per-tier override, same as the
-                      -- per-tier cog dropdowns do while merge is already on.
+                      -- Fix up an already-saved same-axis Group/Unit Growth pair so the
+                      -- SAVED profile and the dropdowns stay honest about what's rendering
+                      -- (the runtime's own read-time backstop, ns._RFEffectiveGrowth, already
+                      -- makes the first merged render correct either way). Covers both the
+                      -- base pair and every per-tier override, same as the per-tier cog
+                      -- dropdowns do while merge is already on.
                       if v then
                           KeepGrowthPerpendicular(SVal("groupGrowth", "RIGHT"),
                               function() return SVal("unitGrowth", "DOWN") end,

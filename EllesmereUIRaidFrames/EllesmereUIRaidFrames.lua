@@ -7359,10 +7359,12 @@ ns._RFColAnchor = function(unitGrowth, groupGrowth)
 end
 
 -- Self-heals a same-axis Group/Unit Growth pair when Merge Groups is on (see
--- _RFColAnchor above) -- same rule as the options UI's write-time
--- KeepGrowthPerpendicular (Group Growth wins), applied as a read-time backstop
--- for a pair that reached here without a guarded write (a stale per-tier
--- override, a spec override, hand-edited SavedVariables). No-op if not merged.
+-- _RFColAnchor above), applied as a read-time backstop for a pair that reached
+-- here without a guarded write (a stale per-tier override, a spec override,
+-- hand-edited SavedVariables). Group Growth wins here; the options UI's
+-- write-time KeepGrowthPerpendicular uses the same resolution EXCEPT its Unit
+-- Growth dropdown, which deliberately lets Unit Growth win instead. No-op if
+-- not merged.
 ns._RFEffectiveGrowth = function(unitGrowth, groupGrowth, merged)
     if not merged then return unitGrowth, groupGrowth end
     if ns._RFGrowthIsVertical(unitGrowth) == ns._RFGrowthIsVertical(groupGrowth) then
@@ -7372,22 +7374,18 @@ ns._RFEffectiveGrowth = function(unitGrowth, groupGrowth, merged)
 end
 
 -- Pinned screen corner implied by a growth pair: frames grow AWAY from this corner, so
--- it stays fixed when a tier's footprint differs from the base. Matches the exact corner
--- Blizzard's header pins its first button to (the point where "point" and
--- "columnAnchorPoint" meet -- see ns._RFHeaderPoint/_RFColAnchor above), for every
--- growth pair including same-axis ones, not just an approximate tie-break -- separated
--- mode legitimately reaches same-axis pairs (all 16 combinations are valid there), and
--- merged mode's flat header anchor (ns._flatHeader's own SetPoint) relies on this
--- matching exactly, not just landing on "a" corner.
+-- it stays fixed when a tier's footprint differs from the base. Horizontal side = whichever
+-- growth is horizontal (RIGHT pins LEFT edge, LEFT pins RIGHT edge); vertical side likewise
+-- (DOWN pins TOP, UP pins BOTTOM). Every ns._RFEffectiveGrowth caller heals a same-axis pair
+-- before reaching here whenever merged is true, so this only ever sees one for separated mode
+-- (merged=false is a no-op for _RFEffectiveGrowth), where all 16 combinations are legitimate
+-- and this tie-break (UP beats BOTTOM, LEFT beats RIGHT, default TOP+LEFT) is what existing
+-- per-tier offsets are calibrated against -- matching Blizzard's own same-axis corner instead
+-- would be dead code here for merged and a silent position-shift regression for separated.
 ns._RFGrowthCorner = function(unitGrowth, groupGrowth)
-    local uVert = ns._RFGrowthIsVertical(unitGrowth)
-    local gPinsHigh = (groupGrowth == "UP" or groupGrowth == "LEFT")
-    if uVert then
-        local v = (unitGrowth == "UP") and "BOTTOM" or "TOP"
-        return v .. (gPinsHigh and "RIGHT" or "LEFT")
-    end
-    local v = gPinsHigh and "BOTTOM" or "TOP"
-    return v .. ((unitGrowth == "LEFT") and "RIGHT" or "LEFT")
+    local h = (unitGrowth == "LEFT" or groupGrowth == "LEFT") and "RIGHT" or "LEFT"
+    local v = (unitGrowth == "UP" or groupGrowth == "UP") and "BOTTOM" or "TOP"
+    return v .. h
 end
 
 -- Signed corner terms: how far a tier footprint's TOPLEFT shifts from the base
