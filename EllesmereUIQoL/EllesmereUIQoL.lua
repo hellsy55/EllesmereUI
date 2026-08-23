@@ -1617,6 +1617,10 @@ qolFrame:SetScript("OnEvent", function(self)
 
         local resetAnnounceFrame = CreateFrame("Frame")
         resetAnnounceFrame:SetScript("OnEvent", function(self, event, msg)
+            -- CHAT_MSG_SYSTEM fires for every system message all session (this frame
+            -- stays registered while the toggle is on, not just around /reset), and some
+            -- carry secret text in protected content. Bail before touching msg at all.
+            if issecretvalue and issecretvalue(msg) then return end
             if not (EllesmereUIDB and EllesmereUIDB.instanceResetAnnounce) then return end
 
             -- Instance group only: LE_PARTY_CATEGORY_INSTANCE covers party/raid; IsInGroup() is the older-API fallback.
