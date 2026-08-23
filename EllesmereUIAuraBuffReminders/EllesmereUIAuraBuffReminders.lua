@@ -511,6 +511,20 @@ local function GetStanceState(stanceSpellID)
     return false, false
 end
 
+-- Same idea, but checks a list of spellIDs instead of one fixed form index.
+local function IsAnyShapeshiftFormActive(spellIDs)
+    local numForms = GetNumShapeshiftForms()
+    for i = 1, numForms do
+        local _, isActive, _, spellID = GetShapeshiftFormInfo(i)
+        if isActive then
+            for _, id in ipairs(spellIDs) do
+                if spellID == id then return true end
+            end
+        end
+    end
+    return false
+end
+
 -- 12.1: aura restrictions apply in M+/raids even OOC, and index scans HARD-ERROR there (not just secret results). Every
 -- OOC-only scan checks AuraKit.AurasRestricted() inline (no helper local -- this chunk sits at the Lua 5.1 200-local cap).
 
@@ -1025,9 +1039,10 @@ local AURAS = {
       check="player", specs={72}, combatOk=false, isStance=true },
     { key="def_stance",  class="WARRIOR", name="Defensive Stance",  castSpell=386208, buffIDs={386208},
       check="player", specs={73}, combatOk=false, isStance=true },
-    -- Shadowform OOC only (Void Form 194249 also satisfies); shapeshiftIndex=1 is the PvP fallback where the aura API is restricted.
+    -- Shadowform OOC only (Void Form 194249 also satisfies); formSpellIDs lists every form that counts as active,
+    -- for the combat/PvP fallback where the aura API is restricted.
     { key="shadowform", class="PRIEST",  name="Shadowform",        castSpell=232698, buffIDs={232698, 194249},
-      check="player", specs={258}, combatOk=false, shapeshiftIndex=1 },
+      check="player", specs={258}, combatOk=false, formSpellIDs={232698, 194249, 185916} },
     -- Paladin Aura: only Devotion satisfies in dungeons/raids, any aura elsewhere; noPvP because Devotion Aura is ContextuallySecret in PvP even OOC.
     -- nameFallback: with a second Paladin's aura also active, the source is
     -- ambiguous and GetPlayerAuraBySpellID(465) can come back nil (fully
@@ -3077,7 +3092,7 @@ do
                 -- false flashes.
                 local canCheck = true
                 if inCombat then
-                    if aura.isStance or aura.shapeshiftIndex then
+                    if aura.isStance or aura.formSpellIDs then
                         canCheck = true
                     elseif aura.buffIDs and aura.buffIDs[1] then
                         for _, id in ipairs(aura.buffIDs) do
@@ -3114,11 +3129,10 @@ do
                         -- Use instance-specific buff list if available and in instance
                         local checkIDs = (inInstance and aura.instanceBuffIDs) or aura.buffIDs
                         -- When aura reads are restricted (PvP, combat, M+),
-                        -- fall back to the shapeshift form index for
-                        -- form-based auras (e.g. Shadowform) whose buff IDs
-                        -- are not readable.
-                        if aura.shapeshiftIndex and (inCombat or InPvPInstance()) then
-                            isMissing = (GetShapeshiftForm() ~= aura.shapeshiftIndex)
+                        -- fall back to scanning the shapeshift form bar for
+                        -- form-based auras whose buff IDs aren't readable.
+                        if aura.formSpellIDs and (inCombat or InPvPInstance()) then
+                            isMissing = not IsAnyShapeshiftFormActive(aura.formSpellIDs)
                         else
                             local hasIt = PlayerHasAuraByID(checkIDs, "aura")
                             -- Some auras (e.g. Devotion Aura) go fully secret
