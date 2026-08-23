@@ -71,7 +71,7 @@ local function BagsItemUnusable(bagID, slot, itemLink, itemID)
                     break
                 end
                 local rc = row.rightColor
-                if rc and rc.r == 1 and rc.g < 0.2 and rc.b < 0.2 then
+                if rc and rc.r > 0.9 and rc.g < 0.2 and rc.b < 0.2 then
                     unusable = true
                     break
                 end
