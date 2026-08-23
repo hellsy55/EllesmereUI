@@ -7021,6 +7021,8 @@ L["UNIT FRAME AURA FILTERS"] = "유닛 프레임 오라 필터"
 L["Target Tracked Auras"] = "대상 추적 오라"
 L["Copy Included/Excluded Spells From:"] = "포함/제외된 주문 복사 대상:"
 L["Debuffs Blizzard flags as important"] = "블리자드가 중요하다고 지정한 약화 효과"
+L["Fill Color Settings"] = "채우기 색상 설정"
+L["Dynamic Color"] = "동적 색상"
 
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
