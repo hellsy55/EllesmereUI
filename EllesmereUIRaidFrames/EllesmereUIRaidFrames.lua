@@ -6735,8 +6735,14 @@ ns._LayoutGroupsImpl = function()
 
         -- Configure flat header layout attributes
         if ns._flatHeader then
+            -- Blizzard's header anchors its first button at the corner where
+            -- "point" and "columnAnchorPoint" meet, then grows away from it --
+            -- same corner ns._RFGrowthCorner names for separated headers. A
+            -- fixed TOPLEFT here left the rendered grid offset from the
+            -- container/mover box whenever growth pinned a different corner.
+            local hdrCorner = ns._RFGrowthCorner(unitGrowth, groupGrowth)
             ns._flatHeader:ClearAllPoints()
-            ns._flatHeader:SetPoint("TOPLEFT", containerFrame, "TOPLEFT", 0, 0)
+            ns._flatHeader:SetPoint(hdrCorner, containerFrame, hdrCorner, 0, 0)
             local layoutChanged = false
             -- While Self Position owns the merged header (whole-raid nameList,
             -- applied by ApplySortToHeaders at the end of this pass), a
