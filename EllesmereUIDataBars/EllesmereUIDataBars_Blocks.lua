@@ -2364,8 +2364,29 @@ ns.BlockFactories.xprep = function(blockCfg, slot, content, barCtx)
                 r = 0.5, g = 0.5, b = 0.5, rested = 0,
             }
         end
+        -- Friendship factions (Captain Tokka, Cursed Angler ranks, etc.): the
+        -- watched-faction payload returns EQUAL reaction thresholds for these,
+        -- which collapsed the range to zero and rendered a permanent 0% with a
+        -- nonsense "8,400 / 8,401" tooltip (field report 2026-08-22). The
+        -- friendship API carries the real rank window -- same handling as the
+        -- Action Bars RepBar. Checked before renown, matching that code path.
+        local isFriendship = false
+        if factionID and C_GossipInfo and C_GossipInfo.GetFriendshipReputation then
+            local fi = C_GossipInfo.GetFriendshipReputation(factionID)
+            if fi and fi.friendshipFactionID and fi.friendshipFactionID > 0 then
+                isFriendship = true
+                minV = fi.reactionThreshold or 0
+                curV = fi.standing or minV
+                if fi.nextThreshold and fi.nextThreshold > minV then
+                    maxV = fi.nextThreshold
+                else
+                    -- Maxed friendship rank: render a full bar.
+                    minV, maxV, curV = 0, 1, 1
+                end
+            end
+        end
         -- Major Factions (renown progress)
-        if factionID and C_MajorFactions and C_MajorFactions.GetMajorFactionData then
+        if not isFriendship and factionID and C_MajorFactions and C_MajorFactions.GetMajorFactionData then
             local mfd = C_MajorFactions.GetMajorFactionData(factionID)
             if mfd and type(mfd.renownLevelThreshold) == "number" and mfd.renownLevelThreshold > 0 then
                 minV = 0; maxV = mfd.renownLevelThreshold; curV = mfd.renownReputationEarned or 0
