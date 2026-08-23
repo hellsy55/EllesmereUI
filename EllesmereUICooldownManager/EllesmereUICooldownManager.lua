@@ -6280,10 +6280,11 @@ do
         -- Entries are cleared BEFORE playing so a throw inside PlaySoundFile cannot
         -- strand one and have it cancel an unrelated edge on a later flush.
         for sid, key in pairs(_pendLoss) do
-            -- Paired with a gain this frame = replacement: the buff never left, so
-            -- NEITHER cue is real. A true gain fires in its own, earlier frame.
+            -- Paired with a gain this frame = replacement: the loss cue is spurious
+            -- (the buff never really left). The gain may still be real (e.g. a proc
+            -- landing the same tick a cast consumes the old stack), so it is left for
+            -- the gain loop below instead of being cancelled here too.
             local paired = _pendGain[sid] ~= nil
-            _pendGain[sid] = nil
             _pendLoss[sid] = nil
             if not paired then PlayThrottled(key, sid, _soundThrottleLost) end
         end
