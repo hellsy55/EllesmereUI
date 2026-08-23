@@ -442,6 +442,7 @@ local function CreateGCDCircle()
         local g2 = GCD_DB()
         if not g2.enabled then return end
         if g2.instanceOnly and not InRealInstancedContent() then return end
+        if g2.combatOnly and not InCombatLockdown() then return end
         -- On cancelled/failed/interrupted casts the GCD resets stop the ring
         if event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_STOP" then
             local cdData = GetSpellCooldown(61304)
@@ -506,6 +507,10 @@ local function ApplyGCDCircle()
     if g.instanceOnly and not InRealInstancedContent() then
         gcdRoot:Hide()
     end
+    -- Respect combat-only: hide if not in combat
+    if g.combatOnly and not InCombatLockdown() then
+        gcdRoot:Hide()
+    end
     if attached and not EllesmereUI._unlockActive then
         -- When the cursor circle is visible, anchor directly to it.
         -- When the cursor circle is hidden (e.g. instance-only outside an instance),
@@ -558,6 +563,11 @@ UpdateVisibility = function()
     if shouldShow and p.instanceOnly then
         shouldShow = InRealInstancedContent()
     end
+    -- "Combat Only": only show while the player is in combat. Driven by the
+    -- PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED registrations in OnEnable.
+    if shouldShow and p.combatOnly then
+        shouldShow = InCombatLockdown() and true or false
+    end
     -- Standard visibility options (returns true if should HIDE)
     if shouldShow and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(p) then
         shouldShow = false
@@ -609,11 +619,12 @@ UpdateVisibility = function()
         HideTrailDots()
     end
 
-    -- GCD circle instance-only check
+    -- GCD circle instance-only / combat-only check
     if gcdRoot then
         local g = GCD_DB()
         if g.enabled then
-            if g.instanceOnly and not InRealInstancedContent() then
+            if (g.instanceOnly and not InRealInstancedContent())
+                or (g.combatOnly and not InCombatLockdown()) then
                 gcdRoot:Hide()
                 gcdRoot:SetScript("OnUpdate", nil)
             else
@@ -638,11 +649,12 @@ UpdateVisibility = function()
         end
     end
 
-    -- Cast circle instance-only check
+    -- GCD circle instance-only / combat-only check
     if castRoot then
         local c = Cast_DB()
         if c.enabled then
-            if c.instanceOnly and not InRealInstancedContent() then
+            if (c.instanceOnly and not InRealInstancedContent())
+                or (c.combatOnly and not InCombatLockdown()) then
                 castRoot:Hide()
                 castRoot:SetScript("OnUpdate", nil)
             else
@@ -823,6 +835,7 @@ local function CreateCastCircle()
         local c2 = Cast_DB()
         if not c2.enabled then return end
         if c2.instanceOnly and not InRealInstancedContent() then return end
+        if c2.combatOnly and not InCombatLockdown() then return end
 
         if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_DELAYED" then
             local name, _, _, startMS, endMS, _, cID = UnitCastingInfo("player")
@@ -944,6 +957,10 @@ local function ApplyCastCircle()
     castRoot:Show()
     -- Respect instance-only: hide if not in instance
     if c.instanceOnly and not InRealInstancedContent() then
+        castRoot:Hide()
+    end
+    -- Respect combat-only: hide if not in combat
+    if c.combatOnly and not InCombatLockdown() then
         castRoot:Hide()
     end
     if attached and not EllesmereUI._unlockActive then
@@ -1174,6 +1191,7 @@ function ECL:OnInitialize()
                 enabled = true,
                 instanceOnly = false,
                 onlyWhenHidden = false,
+                combatOnly = false,
                 useClassColor = true,
                 hex = "0CD29D",
                 texture = "ring_normal",
@@ -1189,6 +1207,7 @@ function ECL:OnInitialize()
                     alpha = 80,
                     useClassColor = false,
                     instanceOnly = false,
+                    combatOnly = false,
                 },
                 castCircle = {
                     enabled = false,
@@ -1202,6 +1221,7 @@ function ECL:OnInitialize()
                     sparkHex = nil,
                     useClassColor = true,
                     instanceOnly = false,
+                    combatOnly = false,
                 },
                 trail = false,
                 visibility       = "always",
@@ -1307,4 +1327,6 @@ function ECL:OnEnable()
 
     self:RegisterEvent("PLAYER_ENTERING_WORLD", UpdateVisibility)
     self:RegisterEvent("ZONE_CHANGED_NEW_AREA", UpdateVisibility)
+    self:RegisterEvent("PLAYER_REGEN_DISABLED", UpdateVisibility)
+    self:RegisterEvent("PLAYER_REGEN_ENABLED", UpdateVisibility)
 end
