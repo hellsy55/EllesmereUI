@@ -4776,12 +4776,13 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         -- set our combat flag, so HideAllIcons guards on InCombatLockdown itself.
         HideAllIcons()
         HideCursorIcons()
-        _eabrInCombat = true
         -- Re-snapshots only if ENCOUNTER_START didn't just do it (fires ms before REGEN_DISABLED, producing a cleaner snapshot since the aura API is fully available pre-lockdown).
+        -- Must snapshot before marking combat, or the group-buff lookup treats itself as restricted and reports nothing found.
         if not _encounterSnapshotTime or (GetTime() - _encounterSnapshotTime) > 1 then
             SnapshotPlayerAuras()
             if _isEvokerOwnOnRaid then SnapshotOwnOnRaidBuffs() end
         end
+        _eabrInCombat = true
         _encounterSnapshotTime = nil
         RequestRefresh()
         return
