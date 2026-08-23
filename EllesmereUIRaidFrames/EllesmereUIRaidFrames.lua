@@ -7356,9 +7356,11 @@ end
 -- Pinned screen corner implied by a growth pair: frames grow AWAY from this corner, so
 -- it stays fixed when a tier's footprint differs from the base. Horizontal side = whichever
 -- growth is horizontal (RIGHT pins LEFT edge, LEFT pins RIGHT edge); vertical side likewise
--- (DOWN pins TOP, UP pins BOTTOM). The UI no longer restricts groupGrowth/unitGrowth to
--- perpendicular pairs, so a same-axis combination resolves deterministically here too
--- (UP beats BOTTOM, LEFT beats RIGHT, default TOP+LEFT).
+-- (DOWN pins TOP, UP pins BOTTOM). Separated groups still allow all 16 combinations,
+-- so a same-axis pair resolves deterministically here too (UP beats BOTTOM, LEFT beats
+-- RIGHT, default TOP+LEFT); merged mode's options UI keeps groupGrowth/unitGrowth
+-- perpendicular (see the LAYOUT dropdowns), so this only ever sees a same-axis pair
+-- there for a not-yet-migrated saved profile.
 ns._RFGrowthCorner = function(unitGrowth, groupGrowth)
     local h = (unitGrowth == "LEFT" or groupGrowth == "LEFT") and "RIGHT" or "LEFT"
     local v = (unitGrowth == "UP" or groupGrowth == "UP") and "BOTTOM" or "TOP"
