@@ -7011,7 +7011,11 @@ local function ReloadFrames(skipButtons)
             if d.ReanchorAbsorbToFill then d.ReanchorAbsorbToFill() end
         end
 
-        -- Power bar (always hide here; UpdateButton handles per-role show)
+        -- Power bar (always hide here; UpdateButton handles per-role show). This is a
+        -- second writer of health height alongside UpdateButton's own cached transition
+        -- (LayoutTopNameBar above sized health assuming power reserved), so drop the
+        -- cache or UpdateAllButtons below sees applied == computed and never corrects it.
+        d._appliedHidePower = nil
         if d.power then
             d.power:Hide()
             if powerH > 0 then
@@ -9375,7 +9379,11 @@ ns.ReloadPartyFrames = function(skipButtons)
             if d.ReanchorAbsorbToFill then d.ReanchorAbsorbToFill() end
         end
 
-        -- Power bar (always hide here; UpdateButton handles per-role show)
+        -- Power bar (always hide here; UpdateButton handles per-role show). This is a
+        -- second writer of health height alongside UpdateButton's own cached transition
+        -- (LayoutTopNameBar above sized health assuming power reserved), so drop the
+        -- cache or UpdateAllButtons below sees applied == computed and never corrects it.
+        d._appliedHidePower = nil
         if d.power then
             d.power:Hide()
             if powerH > 0 then
