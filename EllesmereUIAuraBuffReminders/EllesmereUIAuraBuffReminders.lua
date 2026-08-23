@@ -849,6 +849,7 @@ local BUFF_BENEFICIARIES = {
     intellect = {
         MAGE = true, WARLOCK = true, PRIEST = true, DRUID = true,
         SHAMAN = true, MONK = true, EVOKER = true, PALADIN = true,
+        DEMONHUNTER = true, -- Devourer (1480) is Intellect; Havoc/Vengeance are not
     },
     attackPower = {
         WARRIOR = true, ROGUE = true, HUNTER = true, DEATHKNIGHT = true,
@@ -901,13 +902,14 @@ EABR.SPEC_BENEFITS = {
         [262]=true, [264]=true,                   -- Shaman: Elemental, Restoration
         [270]=true,                               -- Monk: Mistweaver
         [65]=true,                                -- Paladin: Holy
+        [1480]=true,                               -- Demon Hunter: Devourer (Intellect, not Agility)
     },
     attackPower = {
         [71]=true, [72]=true, [73]=true,          -- Warrior
         [259]=true, [260]=true, [261]=true,       -- Rogue
         [253]=true, [254]=true, [255]=true,       -- Hunter
         [250]=true, [251]=true, [252]=true,       -- Death Knight
-        [577]=true, [581]=true, [1480]=true,      -- Demon Hunter (incl. Devourer)
+        [577]=true, [581]=true,                   -- Demon Hunter: Havoc, Vengeance
         [103]=true, [104]=true,                   -- Druid: Feral, Guardian
         [66]=true, [70]=true,                     -- Paladin: Protection, Retribution
         [268]=true, [269]=true,                   -- Monk: Brewmaster, Windwalker
