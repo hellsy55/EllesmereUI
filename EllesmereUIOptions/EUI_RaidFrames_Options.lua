@@ -4927,11 +4927,23 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       -- Fix up an already-saved same-axis Group/Unit Growth pair
                       -- BEFORE flipping the mode, so the very first merged layout
-                      -- pass renders correctly instead of one frame behind.
+                      -- pass renders correctly instead of one frame behind. Covers
+                      -- both the base pair and every per-tier override, same as the
+                      -- per-tier cog dropdowns do while merge is already on.
                       if v then
                           KeepGrowthPerpendicular(SVal("groupGrowth", "RIGHT"),
                               function() return SVal("unitGrowth", "DOWN") end,
                               function(nv) db.profile.unitGrowth = nv end)
+                          local overrides = db.profile.raidSizeOverrides
+                          if type(overrides) == "table" then
+                              for _, ov in pairs(overrides) do
+                                  if type(ov) == "table" then
+                                      KeepGrowthPerpendicular(ov.groupGrowth or SVal("groupGrowth", "RIGHT"),
+                                          function() return ov.unitGrowth or SVal("unitGrowth", "DOWN") end,
+                                          function(nv) ov.unitGrowth = nv end)
+                                  end
+                              end
+                          end
                       end
                       SSet("mergeGroups", v)
                       EllesmereUI:RefreshPage()
