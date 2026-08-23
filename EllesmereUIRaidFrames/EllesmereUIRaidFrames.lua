@@ -6869,14 +6869,31 @@ ns._LayoutGroupsImpl = function()
     -- Apply sort after all headers are positioned
     ApplySortToHeaders()
 
-    -- Container size based on 4 groups for unlock mode mover
+    -- Container size based on 4 groups for unlock mode mover. Merged mode's
+    -- columnAnchorPoint is always perpendicular to unitGrowth (colAnchor above),
+    -- so its actual render axis follows unitGrowth, not the literal groupGrowth
+    -- (which can share unitGrowth's axis; Blizzard's header can't express that as
+    -- a column direction). Keying the box off groupGrowth there mismatches the
+    -- box against what merged mode really renders. Separated mode has no such
+    -- header constraint and renders along groupGrowth literally, so it keeps the
+    -- original formula.
     local totalW, totalH
-    if groupGrowth == "DOWN" or groupGrowth == "UP" then
-        totalW = groupW
-        totalH = MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs
+    if merged then
+        if unitGrowth == "DOWN" or unitGrowth == "UP" then
+            totalW = MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs
+            totalH = groupH
+        else
+            totalW = groupW
+            totalH = MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs
+        end
     else
-        totalW = MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs
-        totalH = groupH
+        if groupGrowth == "DOWN" or groupGrowth == "UP" then
+            totalW = groupW
+            totalH = MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs
+        else
+            totalW = MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs
+            totalH = groupH
+        end
     end
     containerFrame:SetSize(PixelSnap(totalW), PixelSnap(totalH))
 
@@ -7339,9 +7356,9 @@ end
 -- Pinned screen corner implied by a growth pair: frames grow AWAY from this corner, so
 -- it stays fixed when a tier's footprint differs from the base. Horizontal side = whichever
 -- growth is horizontal (RIGHT pins LEFT edge, LEFT pins RIGHT edge); vertical side likewise
--- (DOWN pins TOP, UP pins BOTTOM). Growths are perpendicular (UI-enforced); degenerate
--- imported data still resolves deterministically (UP beats BOTTOM, LEFT beats RIGHT,
--- default TOP+LEFT). Merged-groups fills from the same corner, no special case.
+-- (DOWN pins TOP, UP pins BOTTOM). The UI no longer restricts groupGrowth/unitGrowth to
+-- perpendicular pairs, so a same-axis combination resolves deterministically here too
+-- (UP beats BOTTOM, LEFT beats RIGHT, default TOP+LEFT).
 ns._RFGrowthCorner = function(unitGrowth, groupGrowth)
     local h = (unitGrowth == "LEFT" or groupGrowth == "LEFT") and "RIGHT" or "LEFT"
     local v = (unitGrowth == "UP" or groupGrowth == "UP") and "BOTTOM" or "TOP"
