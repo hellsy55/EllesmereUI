@@ -3965,19 +3965,41 @@ local function UpdateButton(button)
         -- Extra Frames duplicates carry a per-group size offset (Extra Height), so the BUTTON is
         -- authoritative -- the shared setting would shrink health and leave a gap every update.
         local frameH = d._isExtra and button:GetHeight() or (s.frameHeight or 46)
-        if hidePower then
-            power:Hide()
-            if d.powerBorderFrame then d.powerBorderFrame:Hide() end
-            -- Expand health bar to full frame height (minus the Top Name Bar)
-            if d.health then
-                d.health:SetHeight(PixelSnap(frameH - tnbH))
+
+        -- power:Show()/Hide() and the two SetHeight branches below reflow every decoration
+        -- anchored to health (RF_AnchorHost anchors to the live health frame, not a stable
+        -- ref). Applying that transition on every call lets an in-combat identity/roster event
+        -- (role resync race, a GROUP_ROSTER_UPDATE storm at pull start) pop the whole button's
+        -- content stack mid-fight. Only run the transition when hidePower actually changes, and
+        -- defer it to combat end if combat is up; flushed from PLAYER_REGEN_ENABLED alongside
+        -- the existing _rosterDirtyInCombat/_sizeTierDirtyInCombat deferrals.
+        if d._appliedHidePower ~= hidePower then
+            if inCombat then
+                d._powerDirtyInCombat = true
+                ns._powerDirtyInCombat = true
+            else
+                d._appliedHidePower = hidePower
+                if hidePower then
+                    power:Hide()
+                    if d.powerBorderFrame then d.powerBorderFrame:Hide() end
+                    -- Expand health bar to full frame height (minus the Top Name Bar)
+                    if d.health then
+                        d.health:SetHeight(PixelSnap(frameH - tnbH))
+                    end
+                else
+                    -- Restore health bar height with power bar space (and Top Name Bar)
+                    local powerH = PixelSnap(s.powerHeight or 4)
+                    if d.health then
+                        d.health:SetHeight(PixelSnap(frameH - ns.RF_HealthPowerInset(s, powerH) - tnbH))
+                    end
+                end
             end
-        else
-            -- Restore health bar height with power bar space (and Top Name Bar)
-            local powerH = PixelSnap(s.powerHeight or 4)
-            if d.health then
-                d.health:SetHeight(PixelSnap(frameH - ns.RF_HealthPowerInset(s, powerH) - tnbH))
-            end
+        end
+
+        -- Value/color refresh for the power bar in its last APPLIED shown state (not the
+        -- freshly computed one), so a deferred transition keeps rendering the old state
+        -- instead of updating a bar whose show/hide hasn't actually changed yet.
+        if d._appliedHidePower == false then
             -- Smooth interpolation only animates correctly on a bar already shown last frame; on a
             -- fresh hidden->shown transition (profile swap replacing the fill texture) it leaves
             -- the fill at 0. Snap plainly on first show, smooth only after that.
@@ -7937,6 +7959,27 @@ local function OnEvent(self, event, arg1, ...)
             if ns._ApplyTierOffset then ns._ApplyTierOffset() end
             if ns._partyFramesVisible then
                 ns._LayoutPartyFrames()
+            end
+        end
+        -- Flush any power show/hide transitions deferred during combat (see UpdateButton);
+        -- only the buttons actually marked dirty get a repaint.
+        if ns._powerDirtyInCombat then
+            ns._powerDirtyInCombat = nil
+            for _, btn in ipairs(allButtons) do
+                local d = GetFFD(btn)
+                if d._powerDirtyInCombat then
+                    d._powerDirtyInCombat = nil
+                    UpdateButton(btn)
+                end
+            end
+            if ns._partyAllButtons then
+                for _, btn in ipairs(ns._partyAllButtons) do
+                    local d = GetFFD(btn)
+                    if d._powerDirtyInCombat then
+                        d._powerDirtyInCombat = nil
+                        UpdateButton(btn)
+                    end
+                end
             end
         end
         -- Restore child frame levels after a deferred strata change.
