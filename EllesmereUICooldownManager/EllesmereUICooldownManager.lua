@@ -6231,17 +6231,24 @@ ns.EnsureFocusCastProxy = EnsureFocusCastProxy
 -- the instance instead of refreshing it, and Blizzard checks its removed-alert triggers before
 -- the item frames adopt the new instance, so the drop edge fires while the buff is still up.
 -- Death and Decay does this on every entry into the circle, cueing a loss at the moment the
--- buff was GAINED. One frame is the whole window -- both alerts fire inside a single
--- ProcessUnitAuraEvent -- so both edges on one spell in one frame is that replacement.
+-- buff was GAINED. Both alerts for a replacement fire inside the SAME CooldownViewerMixin
+-- :OnUnitAura call, so edges are paired by that call, not merely by rendered frame -- a real
+-- drop and a real, unrelated gain (e.g. a proc landing the same tick a cast consumes the last
+-- one) can land in the same frame but different OnUnitAura calls and must not cancel out.
 do
     local _soundHooked = setmetatable({}, { __mode = "k" })
-    -- Edges seen this frame: [spellID] = sound key, or false for "edge happened,
-    -- configured silent". A silent edge MUST still be recorded or a replacement
-    -- whose gain has no sound (the usual setup -- loss cue only) never pairs.
+    -- Edges seen this frame: [spellID] = {key = sound key or false, batch = _auraBatch}.
+    -- A silent edge MUST still be recorded or a replacement whose gain has no sound
+    -- (the usual setup -- loss cue only) never pairs.
     local _pendGain = {}
     local _pendLoss = {}
     local _flushQueued = false
     local _pendStamp = 0                 -- GetTime() of the frame the pending edges belong to
+    -- Bumped by CooldownViewer_MarkAuraCacheDirty, the first line of every OnUnitAura call
+    -- (before either alert trigger runs) -- shared by all viewer groups, so edges recorded
+    -- during the SAME call always match and edges from different calls never do.
+    local _auraBatch = 0
+    local _batchHooked = false
     -- Overlap guard, NOT an edge filter: two cues for the same spell and edge closer
     -- together than this would talk over each other. Replacements are cancelled by the
     -- pairing above, so this no longer hides them.
@@ -6279,18 +6286,23 @@ do
         end
         -- Entries are cleared BEFORE playing so a throw inside PlaySoundFile cannot
         -- strand one and have it cancel an unrelated edge on a later flush.
-        for sid, key in pairs(_pendLoss) do
-            -- Paired with a gain this frame = replacement: the loss cue is spurious
-            -- (the buff never really left). The gain may still be real (e.g. a proc
-            -- landing the same tick a cast consumes the old stack), so it is left for
-            -- the gain loop below instead of being cancelled here too.
-            local paired = _pendGain[sid] ~= nil
+        for sid, loss in pairs(_pendLoss) do
+            -- Paired with a gain from the SAME OnUnitAura call = replacement: the buff
+            -- never really left, so neither cue is real. A gain from a DIFFERENT call
+            -- that happens to land in the same frame is a real, separate transition and
+            -- is left alone for the gain loop below.
+            local gain = _pendGain[sid]
+            local paired = gain and gain.batch == loss.batch
             _pendLoss[sid] = nil
-            if not paired then PlayThrottled(key, sid, _soundThrottleLost) end
+            if paired then
+                _pendGain[sid] = nil
+            else
+                PlayThrottled(loss.key, sid, _soundThrottleLost)
+            end
         end
-        for sid, key in pairs(_pendGain) do
+        for sid, gain in pairs(_pendGain) do
             _pendGain[sid] = nil
-            PlayThrottled(key, sid, _soundThrottle)
+            PlayThrottled(gain.key, sid, _soundThrottle)
         end
     end
 
@@ -6325,10 +6337,11 @@ do
             FlushBuffEdges()
             _pendStamp = now
         end
+        local edge = { key = key or false, batch = _auraBatch }
         if gainEdge then
-            _pendGain[sid] = key or false
+            _pendGain[sid] = edge
         else
-            _pendLoss[sid] = key or false
+            _pendLoss[sid] = edge
         end
         if not _flushQueued then
             _flushQueued = true
@@ -6337,6 +6350,14 @@ do
     end
 
     function ns.EnsureBuffSoundHook(frame)
+        if not _batchHooked then
+            _batchHooked = true
+            if type(CooldownViewer_MarkAuraCacheDirty) == "function" then
+                hooksecurefunc("CooldownViewer_MarkAuraCacheDirty", function()
+                    _auraBatch = _auraBatch + 1
+                end)
+            end
+        end
         if not frame or _soundHooked[frame] then return end
         -- Own placeholder/custom frames (and anything that isn't a Blizzard buff
         -- viewer item) have no aura alert -- mark hooked so we never retry.
