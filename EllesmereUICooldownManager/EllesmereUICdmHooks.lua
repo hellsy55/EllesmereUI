@@ -9149,6 +9149,8 @@ function ns.SetupViewerHooks()
                 -- becomes active/inactive. Run a full reanchor so new/removed
                 -- icons get collected and centered. Batched via C_Timer to
                 -- collapse the spam (fires many times per frame).
+                -- Use the throttled queue here, not a direct call, so bursts
+                -- of state changes can't stack up multiple full reanchors.
                 if frame.OnActiveStateChanged then
                     local _asDeferFrame = CreateFrame("Frame")
                     _asDeferFrame:Hide()
@@ -9158,7 +9160,7 @@ function ns.SetupViewerHooks()
                         if _asDeferTicks < 2 then return end
                         self:Hide()
                         _activeStateReanchorPending = false
-                        CollectAndReanchor()
+                        QueueReanchor()
                     end)
                     hooksecurefunc(frame, "OnActiveStateChanged", function()
                         ReapplyPositions()
