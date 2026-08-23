@@ -4397,12 +4397,17 @@ local function UpdateIronfurBar()
     local maxFrac = 0
     local shown = 0
 
+	-- Follow bar orientation instead of assuming horizontal.
+	local oriSb = secondaryBar._sb
+	local vert = (oriSb and oriSb.GetOrientation and oriSb:GetOrientation() == "VERTICAL") or false
+	local revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
+
     for i = 1, count do
         local t = ironfurTicks[i]
         local frac = (t.duration > 0) and ((t.endTime - now) / t.duration) or 0
         if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
         if frac > maxFrac then maxFrac = frac end
-        if showHash and overlay and barW > 0 then
+        if showHash and overlay and barW > 0 and barH > 0 then
             shown = shown + 1
             local tex = ironfurTickTex[shown]
             if not tex then
@@ -4412,12 +4417,24 @@ local function UpdateIronfurBar()
                 ironfurTickTex[shown] = tex
             end
             tex:SetColorTexture(1, 1, 1, 0.9)
-            local x = frac * barW
-            if x > barW - tickW then x = barW - tickW end
-            if x < 0 then x = 0 end
             tex:ClearAllPoints()
-            tex:SetSize(tickW, barH)
-            tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+			if vert then
+	         local y = frac * barH
+	         if y > barH - tickW then y = barH - tickW end
+	         if y < 0 then y = 0 end
+	         tex:SetSize(barW, tickW)
+	         if revFill then
+	           tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", 0, -y)
+	         else
+	           tex:SetPoint("BOTTOMLEFT", secondaryBar, "BOTTOMLEFT", 0, y)
+	         end
+	       else
+	         local x = frac * barW
+	         if x > barW - tickW then x = barW - tickW end
+	         if x < 0 then x = 0 end
+	         tex:SetSize(tickW, barH)
+	         tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+	       end
             tex:Show()
         end
     end
@@ -4522,12 +4539,28 @@ IP.UpdateHash = function()
     local tickW = PP and (2 * PP.mult) or 2
     local frac = remain / IP.DURATION
     if frac > 1 then frac = 1 end
-    local x = frac * barW
-    if x > barW - tickW then x = barW - tickW end
-    if x < 0 then x = 0 end
+    -- Follow bar orientation instead of assuming horizontal.
+	local oriSb = secondaryBar._sb
+	local vert = (oriSb and oriSb.GetOrientation and oriSb:GetOrientation() == "VERTICAL") or false
+	local revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
     IP.hashTex:ClearAllPoints()
-    IP.hashTex:SetSize(tickW, barH)
-    IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+    if vert then
+	    local y = frac * barH
+	    if y > barH - tickW then y = barH - tickW end
+	    if y < 0 then y = 0 end
+	    IP.hashTex:SetSize(barW, tickW)
+	    if revFill then
+	        IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", 0, -y)
+	    else
+	        IP.hashTex:SetPoint("BOTTOMLEFT", secondaryBar, "BOTTOMLEFT", 0, y)
+	    end
+	else
+	    local x = frac * barW
+	    if x > barW - tickW then x = barW - tickW end
+	    if x < 0 then x = 0 end
+	    IP.hashTex:SetSize(tickW, barH)
+	    IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+	end
     IP.hashTex:Show()
 end
 
