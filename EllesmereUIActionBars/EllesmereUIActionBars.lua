@@ -10478,46 +10478,66 @@ do
         hf:Hide()
     end
 
-    -- Flat tint over the whole button -- the alternative (or companion) to the
-    -- ring. Its own child frame at btn+14, one below the ring, so it draws over
-    -- the icon and the cooldown swipe deterministically instead of racing
-    -- draw-layer sublevels against Blizzard's own button textures. No texture,
-    -- no animation, no driver entry: strictly cheaper than the flipbook ring.
-    -- Created lazily, so nobody on the ring-only default pays for it.
-    ns._AssistOverlay = function(btn, show)
+    -- Flat tint over the button -- the alternative (or companion) to the ring.
+    -- Its own child frame at btn+14, one below the ring, so it draws over the
+    -- icon and the cooldown swipe deterministically instead of racing draw-layer
+    -- sublevels against Blizzard's own button textures. A color fill plus one
+    -- mask: no animation and no driver entry, so it is strictly cheaper than the
+    -- flipbook ring. Created lazily, so nobody on the ring-only default pays
+    -- for it.
+    -- style: nil/1 = hide, 2 = overlay only, 3 = overlay under the ring.
+    ns._AssistOverlay = function(btn, style)
         local fd = EFD(btn)
         local ov = fd.assistOverlay
-        if not show then
+        if not style or style == 1 then
             if ov then ov:Hide() end
             return
         end
+        local p = EAB.db and EAB.db.profile
         if not ov then
             ov = CreateFrame("Frame", nil, btn)
-            ov:SetAllPoints(btn)
             ov.tex = ov:CreateTexture(nil, "OVERLAY")
             ov.tex:SetAllPoints(ov)
+            -- Rounded corners: the addon's own Curved Square mask, so the tint
+            -- follows the button art instead of ending in hard 90-degree
+            -- corners. Only used when no button shape mask is in play -- that
+            -- one already defines the silhouette.
+            ov.roundMask = ov:CreateMaskTexture()
+            ov.roundMask:SetAllPoints(ov)
+            ov.roundMask:SetTexture(SHAPE_MASKS.csquare, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
             fd.assistOverlay = ov
+        end
+        -- Footprint. Alone (style 2) the tint covers exactly the button. Under
+        -- the ring (style 3) it grows or shrinks with the ring's outset so the
+        -- two end flush -- the tint never sticks out past the ring, which is
+        -- what a negative outset would otherwise produce. Change-guarded: the
+        -- rescan runs several times a second while a suggestion is up.
+        local pad = (style == 3) and ((p and p.assistGlowOutset) or 0) or 0
+        local ofd = EFD(ov)
+        if ofd.pad ~= pad then
+            ofd.pad = pad
+            ov:ClearAllPoints()
+            ov:SetPoint("TOPLEFT", btn, "TOPLEFT", -pad, pad)
+            ov:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", pad, -pad)
         end
         -- Re-assert: bar layout can change the button's frame level after create.
         ov:SetFrameLevel(btn:GetFrameLevel() + 14)
-        local p = EAB.db and EAB.db.profile
         local c = (p and p.assistGlowOverlayColor) or { r = 0.15, g = 0.5, b = 1 }
         local a = (p and p.assistGlowOverlayAlpha) or 30
         ov.tex:SetColorTexture(c.r or 0.15, c.g or 0.5, c.b or 1, a / 100)
-        -- Custom button shapes: follow the shape mask, else the tint is a
-        -- square sitting on a round icon. Keyed on the mask OBJECT, not a
-        -- boolean: a shape change swaps the mask, and the stale one must be
-        -- removed before the new one goes on.
-        local ofd = EFD(ov)
-        if fd.shapeMask and fd.shapeApplied then
-            if ofd.shapeMasked ~= fd.shapeMask then
-                if ofd.shapeMasked then UnmaskFrameTextures(ov, ofd.shapeMasked) end
-                MaskFrameTextures(ov, fd.shapeMask)
-                ofd.shapeMasked = fd.shapeMask
+        -- Custom button shapes win over the rounded corners: a circle mask must
+        -- not end up as a rounded square. Keyed on the mask OBJECT, not a
+        -- boolean -- a shape change swaps the mask, and the stale one has to be
+        -- removed before the new one goes on. Applied to the tint texture
+        -- directly rather than via MaskFrameTextures: that walks GetRegions(),
+        -- which here would also hand the mask to our own roundMask region.
+        local want = (fd.shapeMask and fd.shapeApplied) and fd.shapeMask or ov.roundMask
+        if ofd.shapeMasked ~= want then
+            if ofd.shapeMasked then
+                pcall(ov.tex.RemoveMaskTexture, ov.tex, ofd.shapeMasked)
             end
-        elseif ofd.shapeMasked then
-            UnmaskFrameTextures(ov, ofd.shapeMasked)
-            ofd.shapeMasked = nil
+            pcall(ov.tex.AddMaskTexture, ov.tex, want)
+            ofd.shapeMasked = want
         end
         ov:Show()
     end
@@ -10528,7 +10548,7 @@ do
     -- leave it invisible for whoever shows it next.
     local function AssistHide(btn)
         ns._AssistRingHide(btn)
-        ns._AssistOverlay(btn, false)
+        ns._AssistOverlay(btn)
         local bf = btn.AssistedCombatHighlightFrame
         if bf and bf:GetAlpha() ~= 1 then bf:SetAlpha(1) end
     end
@@ -10560,7 +10580,7 @@ do
         local style = (p and p.assistGlowStyle) or 1
 
         -- Tint: always ours, Blizzard never paints one.
-        ns._AssistOverlay(btn, style ~= 1)
+        ns._AssistOverlay(btn, style)
 
         -- Blizzard may show its own ring on a hovered button (candidate
         -- re-add). Defer to it so two identical shines never stack, but keep it

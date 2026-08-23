@@ -5829,7 +5829,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:DualRow(parent, y,
             { type="slider", text="Assisted Highlight Outset", min=-10, max=30, step=1,
-              tooltip="Moves the blue Assisted Highlight ring outward (or inward at negative values) so it no longer overlaps the proc glow on the same button.",
+              tooltip="Moves the blue Assisted Highlight ring outward (or inward at negative values) so it no longer overlaps the proc glow on the same button. With Ring + Overlay the tint resizes along with it, so the two stay flush.",
               disabled=function() return AssistOff() or (p.assistGlowStyle or 1) == 2 end,
               disabledTooltip="This option requires a style that draws the glow ring",
               rawTooltip=true,
