@@ -546,7 +546,9 @@ initFrame:SetScript("OnEvent", function(self)
     }
     local allGrowthOrder        = { "DOWN", "UP", "RIGHT", "LEFT" }
 
-    local function GrowthIsVertical(g) return g == "UP" or g == "DOWN" end
+    -- ns._RFGrowthIsVertical is the runtime module's single source of truth for
+    -- this check (EllesmereUIRaidFrames.lua); reuse it here rather than a second copy.
+    local GrowthIsVertical = ns._RFGrowthIsVertical
 
     -- Merge Groups renders through Blizzard's flat SecureGroupHeader, whose column
     -- axis (columnAnchorPoint) is always perpendicular to Unit Growth -- a same-axis
@@ -4855,6 +4857,22 @@ initFrame:SetScript("OnEvent", function(self)
         -- same-axis pair there has no valid column direction, so KeepGrowthPerpendicular
         -- bumps the other axis out of the way rather than letting the runtime
         -- silently reinterpret it (see the colAnchor comment in EllesmereUIRaidFrames.lua).
+        -- Changing the base pair can also leave a per-tier override same-axis
+        -- (an override that only set ONE axis inherits the other from base, so
+        -- a base edit can silently break a tier that looked fine when it was
+        -- set) -- fix those up the same way the Merge Groups toggle does.
+        local function FixTierOverridesPerpendicular()
+            local overrides = db.profile.raidSizeOverrides
+            if type(overrides) ~= "table" then return end
+            for _, ov in pairs(overrides) do
+                if type(ov) == "table" then
+                    KeepGrowthPerpendicular(ov.groupGrowth or SVal("groupGrowth", "RIGHT"),
+                        function() return ov.unitGrowth or SVal("unitGrowth", "DOWN") end,
+                        function(nv) ov.unitGrowth = nv end)
+                end
+            end
+        end
+
         _, h = W:DualRow(parent, y,
             { type="dropdown", text="Group Growth", values=growthValues, order=allGrowthOrder,
               getValue=function() return SVal("groupGrowth", "RIGHT") end,
@@ -4864,9 +4882,11 @@ initFrame:SetScript("OnEvent", function(self)
                       KeepGrowthPerpendicular(v,
                           function() return SVal("unitGrowth", "DOWN") end,
                           function(nv) db.profile.unitGrowth = nv end)
+                      FixTierOverridesPerpendicular()
                   end
                   if ns._BumpAbsorbGen then ns._BumpAbsorbGen() end
                   ReloadAndUpdate()
+                  EllesmereUI:RefreshPage()
               end },
             { type="dropdown", text="Unit Growth", values=growthValues, order=allGrowthOrder,
               getValue=function() return SVal("unitGrowth", "DOWN") end,
@@ -4876,9 +4896,11 @@ initFrame:SetScript("OnEvent", function(self)
                       KeepGrowthPerpendicular(v,
                           function() return SVal("groupGrowth", "RIGHT") end,
                           function(nv) db.profile.groupGrowth = nv end)
+                      FixTierOverridesPerpendicular()
                   end
                   if ns._BumpAbsorbGen then ns._BumpAbsorbGen() end
                   ReloadAndUpdate()
+                  EllesmereUI:RefreshPage()
               end });  y = y - h
 
         -- Row 4: Sort By (custom dropdown with drag-to-reorder roles) | Self Position
@@ -4934,16 +4956,7 @@ initFrame:SetScript("OnEvent", function(self)
                           KeepGrowthPerpendicular(SVal("groupGrowth", "RIGHT"),
                               function() return SVal("unitGrowth", "DOWN") end,
                               function(nv) db.profile.unitGrowth = nv end)
-                          local overrides = db.profile.raidSizeOverrides
-                          if type(overrides) == "table" then
-                              for _, ov in pairs(overrides) do
-                                  if type(ov) == "table" then
-                                      KeepGrowthPerpendicular(ov.groupGrowth or SVal("groupGrowth", "RIGHT"),
-                                          function() return ov.unitGrowth or SVal("unitGrowth", "DOWN") end,
-                                          function(nv) ov.unitGrowth = nv end)
-                                  end
-                              end
-                          end
+                          FixTierOverridesPerpendicular()
                       end
                       SSet("mergeGroups", v)
                       EllesmereUI:RefreshPage()
