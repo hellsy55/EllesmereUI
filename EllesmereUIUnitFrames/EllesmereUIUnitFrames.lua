@@ -14856,12 +14856,24 @@ function InitializeFrames()
         -- whole feature -- including this ForceBossHealthRepaint -- be exercised by
         -- just activating Preview and /targeting yourself, no encounter required.
         local previewActive = ns._bossPreviewActive
+        local needsRetry = false
         for i = 1, 5 do
             local bUnit = "boss" .. i
             local f = frames[bUnit]
             if f then
                 local isT = previewActive and UnitIsUnit("player", "target") or UnitIsUnit(bUnit, "target")
-                f._isTarget = (not issecretvalue(isT) and isT) and true or false
+                if issecretvalue(isT) then
+                    -- INSTANCE_ENCOUNTER_ENGAGE_UNIT fires inside a secure context right
+                    -- as the pull starts, and UnitIsUnit can hand back a secret value in
+                    -- that window. Collapsing that straight to "false" was wiping out an
+                    -- already-correct target border (e.g. you pulled a boss you were
+                    -- already targeting) even though nothing about your target changed.
+                    -- Leave f._isTarget exactly as it was and retry right after this
+                    -- secure closure finishes, once the comparison can resolve normally.
+                    needsRetry = true
+                else
+                    f._isTarget = isT and true or false
+                end
                 if f.unifiedBorder then
                     ns.ApplyBossBorderState(f)
                 end
@@ -14881,6 +14893,13 @@ function InitializeFrames()
                     end
                 end
             end
+        end
+        if needsRetry and not ns._bossTargetBorderRetryQueued then
+            ns._bossTargetBorderRetryQueued = true
+            C_Timer.After(0, function()
+                ns._bossTargetBorderRetryQueued = false
+                ns.UpdateBossTargetBorders()
+            end)
         end
     end
     if not frames._bossTargetBorderUpdater then
