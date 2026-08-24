@@ -8411,7 +8411,7 @@ local function LayoutTotemBar()
 
     -- Reparent and position TotemFrame every call (Blizzard's Update can reset these)
     TotemFrame:SetParent(totemBarFrame)
-    TotemFrame:SetFrameStrata("HIGH")
+    TotemFrame:SetFrameStrata(tb.frameStrata or "MEDIUM")
     -- Effective grow direction, resolved through the shared helper below so the
     -- layout and unlock mode's menu can never disagree about it.
     local _growDir = EllesmereUI.GetTotemGrowDir()
