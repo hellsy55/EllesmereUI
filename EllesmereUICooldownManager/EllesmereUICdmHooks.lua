@@ -5681,9 +5681,12 @@ local function ProcessPresetCooldowns()
                         showIC = false
                     end
                     -- Count shows for ANY owned stack, including the last
-                    -- one; it hides only at 0 (where the desaturation below
-                    -- already reads as "none left").
-                    local displayCount = showIC and (total > 0) and total or nil
+                    -- one; by default it hides at 0 (where the desaturation
+                    -- below already reads as "none left"). If the bar opted
+                    -- into "Show 0 When Empty", keep the text up and let it
+                    -- read 0 instead of disappearing.
+                    local showZero = bd and bd.showZeroItemCount
+                    local displayCount = showIC and (total > 0 or showZero) and total or nil
                     if displayCount then
                         if f._lastItemCount ~= displayCount then
                             f._itemCountText:SetText(displayCount)

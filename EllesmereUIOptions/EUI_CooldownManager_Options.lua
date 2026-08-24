@@ -18584,6 +18584,16 @@ initFrame:SetScript("OnEvent", function(self)
                           bd.showItemCount = (v ~= "never")
                           ns.RefreshCDMIconAppearance(bd.key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
                       end },
+                    -- Item bars (potions, healthstone, etc.) hide the counter at
+                    -- 0 by default. This flips that so it stays up and reads 0
+                    -- instead of disappearing when you're out of the item.
+                    { type="toggle", label="Show 0 When Empty",
+                      tooltip="Keep the item count visible and show 0 instead of hiding it when you have none of the item (e.g. potions, healthstone).",
+                      get=function() return BD().showZeroItemCount == true end,
+                      set=function(v)
+                          BD().showZeroItemCount = v and true or false
+                          ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
+                      end },
                     -- Crafted-rank pip on tracked items (ranks share icon art, so
                     -- two ranks are otherwise indistinguishable). Off by default.
                     { type="toggle", label="Show Item Quality",
@@ -18628,8 +18638,10 @@ initFrame:SetScript("OnEvent", function(self)
                       end },
                 },
             }
-            -- Show Charge/Stack Text (row 3) is buff-family only -- see its comment.
-            if not isBuffGlowBar then table.remove(scPopupSpec.rows, 3) end
+            -- Show Charge/Stack Text (row 4, after the Show Item Count dropdown
+            -- and the new Show 0 When Empty toggle) is buff-family only -- see
+            -- its comment.
+            if not isBuffGlowBar then table.remove(scPopupSpec.rows, 4) end
             local _, scCogShow = EllesmereUI.BuildCogPopup(scPopupSpec)
             MakeCogBtn(rightRgn, scCogShow, scSwatch, EllesmereUI.DIRECTIONS_ICON)
         end
