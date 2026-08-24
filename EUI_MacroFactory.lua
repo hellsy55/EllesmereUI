@@ -275,7 +275,12 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
                     lines[#lines + 1] = "/tm [@focus] ~" .. mark
                 end
                 if db.ping then
-                    lines[#lines + 1] = "/ping [@focus] onmyway"
+                    -- The ping type is a number, not a word: /ping matches the
+                    -- word forms against PING_TYPE_ON_MY_WAY and friends, which
+                    -- are localized, so a baked "onmyway" only resolves on an
+                    -- English client and sends a contextual ping everywhere
+                    -- else. 3 is on my way in every locale.
+                    lines[#lines + 1] = "/ping [@focus] 3"
                 end
                 if db.announce then
                     -- %f is the built-in chat substitution for the focus unit's
