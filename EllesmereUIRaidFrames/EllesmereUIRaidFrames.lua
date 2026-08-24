@@ -1536,11 +1536,16 @@ local function ResolveDisplayName(unit, applyCap, s)
         end
     end
     -- MethodInternal nicknames (EasyNicknameAPI), second source.
-    if not display and EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnit then
-        local ok, dn = pcall(EasyNicknameAPI.GetNicknameForUnit, unit)
-        if ok and type(dn) == "string"
-           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
-            display = dn
+    if not display and EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok, dn, handled = pcall(
+            EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "raidFrames")
+        if ok and handled == true then
+            if type(dn) == "string"
+               and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+                display = dn
+            else
+                display = name
+            end
         end
     end
     -- TimelineReminders, gated by its own EllesmereUI checkbox. GetNickname falls back to the
@@ -15005,6 +15010,15 @@ function ERF:OnEnable()
         end
         return false
     end
+    local function RegisterMethodInternalNicknames()
+        if ns._methodInternalSurfaceNickHooked then return end
+        if EasyNicknameAPI and EasyNicknameAPI.RegisterCallback then
+            EasyNicknameAPI.RegisterCallback("SurfaceNicknamesChanged", function()
+                if ns.RefreshAllNames then ns.RefreshAllNames() end
+            end, "EllesmereUIRaidFrames")
+            ns._methodInternalSurfaceNickHooked = true
+        end
+    end
     local function RegisterTRNicknames()
         if ns._trNickHooked then return true end
         local TR = TimelineReminders
@@ -15069,6 +15083,7 @@ function ERF:OnEnable()
             if (a and b and c) or event == "PLAYER_ENTERING_WORLD" then self:UnregisterAllEvents() end
         end)
     end
+    EventUtil.ContinueOnAddOnLoaded("MethodInternal", RegisterMethodInternalNicknames)
 
     -- Init options module if it loaded before us
     if ns._InitEUIModule then
