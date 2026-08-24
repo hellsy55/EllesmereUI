@@ -2495,11 +2495,8 @@ initFrame:SetScript("OnEvent", function(self)
         end  -- close do (indicators eyeball)
 
         local RI_STYLES = ns.ROLE_ICON_STYLES
-        local playerRole = UnitGroupRolesAssigned("player")
-        if playerRole == "NONE" then
-            local specIdx = GetSpecialization()
-            if specIdx then playerRole = GetSpecializationRole(specIdx) end
-        end
+        -- Effective role: the player's spec wins over a stale assigned role
+        local playerRole = EllesmereUI.UnitEffectiveRole("player")
         local roleStyleValues = {
             none          = "None",
             modern        = "Modern",

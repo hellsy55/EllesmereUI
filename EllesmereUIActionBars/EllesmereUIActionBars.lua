@@ -3022,6 +3022,12 @@ local function SetupBar(info, skipProtected)
                     -- OnEvent->UpdateAction calls per tick -- screen blink).
                     -- Taint-safe refresh; avoids passing secret cooldown values through a tainted call.
                     EAB_VTABLE.ForceButtonRefresh(btn, slot)
+                    -- Two channels ForceButtonRefresh doesn't own (same pairing
+                    -- as the bar-reveal path): checked state + equipped border.
+                    btn:SetChecked((IsCurrentAction(slot) or IsAutoRepeatAction(slot)) and true or false)
+                    if btn.Border then
+                        btn.Border:SetShown(IsEquippedAction(slot) and true or false)
+                    end
                 end
                 if bindPrefix then
                     btn.commandName = bindPrefix .. i
@@ -5195,8 +5201,18 @@ do
                                 -- target swap, and it is memo-gated.
                                 if event ~= "PLAYER_TARGET_CHANGED" then
                                     -- Taint-safe refresh; avoids passing secret cooldown values through a tainted call.
-                                    EAB_VTABLE.ForceButtonRefresh(btn, btn:GetAttribute("action"))
+                                    local infreqAction = btn:GetAttribute("action")
+                                    EAB_VTABLE.ForceButtonRefresh(btn, infreqAction)
                                     RefreshCooldownVisuals(btn)
+                                    -- Two channels ForceButtonRefresh doesn't own (same
+                                    -- pairing as the bar-reveal path): checked state +
+                                    -- equipped border, both stale after page/form flips.
+                                    if infreqAction then
+                                        btn:SetChecked((IsCurrentAction(infreqAction) or IsAutoRepeatAction(infreqAction)) and true or false)
+                                        if btn.Border then
+                                            btn.Border:SetShown(IsEquippedAction(infreqAction) and true or false)
+                                        end
+                                    end
                                 end
                                 local ufd = EFD(btn)
                                 if ufd.rangeTinted then

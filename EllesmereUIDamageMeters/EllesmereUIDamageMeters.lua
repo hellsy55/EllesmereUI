@@ -824,9 +824,9 @@ local function GetDMOutline()
     return (EUI and EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
 end
 
-local function SetDMFont(fs, size, flagsOverride)
+local function SetDMFont(fs, size, flagsOverride, fontOverride)
     if not (fs and fs.SetFont) then return end
-    local font = GetDMFont()
+    local font = fontOverride or GetDMFont()
     local flags = flagsOverride
     if flags == nil then flags = GetDMOutline() end
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, flags == "") end
@@ -1058,6 +1058,9 @@ end
 -- MethodInternal's surface choice is authoritative for known Method players;
 -- unhandled players keep their raw short character name.
 function ns.ResolvePlayerName(name, guid, isLocalPlayer)
+    -- Without the provider the answer is exactly the pre-nickname name; skip
+    -- the guid->unit resolution so non-users pay one nil check, nothing more.
+    if not EasyNicknameAPI then return StripRealm(name) end
     local nameIsPlain = type(name) == "string" and not IsSecret(name) and name ~= ""
     local unit = FindNicknameUnit(guid, isLocalPlayer)
     local fullName = nameIsPlain and name or nil
@@ -4610,12 +4613,23 @@ end
 local _saTimer  -- frame reference
 local _saTimerFS -- fontstring
 local _saTimerBG -- backdrop texture
-local _saTimerBorders -- four solid edge textures
+local _saTimerBorder -- PP border child frame
 local _saTimerPreview = false
 local _saTimerLive = false  -- last live/idle state seen (drives OOC desaturation)
 
 local function GetSATimerPreviewText()
     return DB().standaloneTimerDecimal and "11:37.0" or "11:37"
+end
+
+-- Per-user font override for the standalone timer only (standaloneTimerFont,
+-- a dropdown key: "__global"/nil = follow the Damage Meters module font).
+local function GetSATimerFontOverride()
+    local key = DB().standaloneTimerFont
+    if key and key ~= "__global" and EllesmereUI and EllesmereUI.ResolveFontName then
+        local path = EllesmereUI.ResolveFontName(key)
+        if path and path ~= "" then return path end
+    end
+    return nil
 end
 
 local function GetSATimerColor()
@@ -4653,11 +4667,12 @@ local function ApplySATimerStyle()
     else
         outlineFlags = "OUTLINE"
     end
-    SetDMFont(_saTimerFS, cfg.standaloneTimerSize or 26, outlineFlags)
+    SetDMFont(_saTimerFS, cfg.standaloneTimerSize or 26, outlineFlags, GetSATimerFontOverride())
     ApplySATimerColor()
 
     local previousText = _saTimerFS:GetText()
-    _saTimerFS:SetText("99:99")
+    -- Auto-size worst case must cover the decimal form, or live tenths clip.
+    _saTimerFS:SetText(cfg.standaloneTimerDecimal and "99:99.9" or "99:99")
     local autoWidth = (_saTimerFS:GetStringWidth() or 30) + 4
     local autoHeight = (_saTimerFS:GetStringHeight() or 14) + 4
     _saTimerFS:SetText(previousText)
@@ -4669,18 +4684,15 @@ local function ApplySATimerStyle()
         _saTimerBG:SetColorTexture(c.r or 0, c.g or 0, c.b or 0, c.a or 0)
     end
 
-    if _saTimerBorders then
+    if _saTimerBorder then
+        local PP = EllesmereUI and EllesmereUI.PP
         local c = cfg.standaloneTimerBorderColor or { r = 0, g = 0, b = 0, a = 1 }
         local borderSize = math.max(0, math.floor((cfg.standaloneTimerBorderSize or 0) + 0.5))
-        for _, edge in ipairs(_saTimerBorders) do
-            edge:SetColorTexture(c.r or 0, c.g or 0, c.b or 0, c.a == nil and 1 or c.a)
-            edge:SetShown(borderSize > 0)
-        end
-        if borderSize > 0 then
-            _saTimerBorders[1]:SetHeight(borderSize)
-            _saTimerBorders[2]:SetHeight(borderSize)
-            _saTimerBorders[3]:SetWidth(borderSize)
-            _saTimerBorders[4]:SetWidth(borderSize)
+        if borderSize > 0 and PP and PP.UpdateBorder then
+            PP.UpdateBorder(_saTimerBorder, borderSize, c.r or 0, c.g or 0, c.b or 0, c.a == nil and 1 or c.a)
+            _saTimerBorder:Show()
+        else
+            _saTimerBorder:Hide()
         end
     end
 
@@ -4849,19 +4861,11 @@ local function CreateSATimer()
     _saTimerBG = _saTimer:CreateTexture(nil, "BACKGROUND")
     _saTimerBG:SetAllPoints()
 
-    _saTimerBorders = {}
-    for i = 1, 4 do
-        local edge = _saTimer:CreateTexture(nil, "BORDER")
-        _saTimerBorders[i] = edge
-    end
-    _saTimerBorders[1]:SetPoint("TOPLEFT")
-    _saTimerBorders[1]:SetPoint("TOPRIGHT")
-    _saTimerBorders[2]:SetPoint("BOTTOMLEFT")
-    _saTimerBorders[2]:SetPoint("BOTTOMRIGHT")
-    _saTimerBorders[3]:SetPoint("TOPLEFT")
-    _saTimerBorders[3]:SetPoint("BOTTOMLEFT")
-    _saTimerBorders[4]:SetPoint("TOPRIGHT")
-    _saTimerBorders[4]:SetPoint("BOTTOMRIGHT")
+    _saTimerBorder = CreateFrame("Frame", nil, _saTimer)
+    _saTimerBorder:SetAllPoints(_saTimer)
+    _saTimerBorder:SetFrameLevel(_saTimer:GetFrameLevel() + 5)
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP and PP.CreateBorder then PP.CreateBorder(_saTimerBorder, 0, 0, 0, 1, 1) end
 
     _saTimerFS = _saTimer:CreateFontString(nil, "OVERLAY")
     ApplySATimerStyle()

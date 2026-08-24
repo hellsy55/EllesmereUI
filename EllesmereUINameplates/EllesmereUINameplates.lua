@@ -4618,12 +4618,11 @@ local function RefreshThreatCache()
         _inThreatContent = (instanceType == "party" or instanceType == "raid"
                             or isDelve)
     end
-    -- Role: cache so we don't recalculate on every nameplate update
-    local role = UnitGroupRolesAssigned("player")
-    if role == "NONE" and GetSpecializationRole then
-        local spec = GetSpecialization()
-        if spec then role = GetSpecializationRole(spec) or "NONE" end
-    end
+    -- Role: cache so we don't recalculate on every nameplate update. Effective
+    -- role (EllesmereUI.UnitEffectiveRole): the player's spec wins over a stale
+    -- premade-listing role (listed as tank, playing dps), and still covers the
+    -- solo "NONE" case the old spec fallback existed for.
+    local role = EllesmereUI.UnitEffectiveRole("player")
     _isTankRole = (role == "TANK")
 end
 
@@ -6234,6 +6233,16 @@ function NameplateFrame:UpdateHealthValues()
             self:UpdateName()
             self._castDirtyFull = true
             self:UpdateCast()
+            -- Unit changed without an add/remove cycle: the old occupant's
+            -- target/hover border styling would otherwise stick to the plate.
+            -- The one-shot flags MUST stay set going in -- ClearHoverExtras
+            -- early-outs on _hoverFxOn and ApplyTarget's size restore is
+            -- gated on _targetBorderSized; clearing them first skips both
+            -- restores. ClearHoverExtras restores hover size then re-runs
+            -- ApplyTarget; the direct call covers its no-hover-fx early-out
+            -- and re-evaluates target state for the new unit.
+            if ns.ClearHoverExtras then ns.ClearHoverExtras(self) end
+            self:ApplyTarget()
         end
     end
 
@@ -8166,7 +8175,17 @@ factionFrame:RegisterEvent("PLAYER_DIFFICULTY_CHANGED")
 factionFrame:RegisterEvent("ROLE_CHANGED_INFORM")
 factionFrame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
 factionFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+-- The cached tank-role verdict is spec-derived for the player (effective
+-- role), so the player's own spec swap must refresh it; the event also fires
+-- for other units' spec updates, which change nothing here.
+factionFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 factionFrame:SetScript("OnEvent", function(_, event, unit)
+    if event == "PLAYER_SPECIALIZATION_CHANGED" then
+        -- Never fall through: the dispatch below keys watchers by unit token,
+        -- and this event's unit args are not faction-watcher units.
+        if unit == "player" then RefreshThreatContextAndPlateColors() end
+        return
+    end
     if event == "PLAYER_ENTERING_WORLD"
     or event == "ZONE_CHANGED_NEW_AREA"
     or event == "PLAYER_DIFFICULTY_CHANGED"

@@ -126,7 +126,6 @@ local UnitIsConnected       = UnitIsConnected
 local UnitIsVisible         = UnitIsVisible
 local UnitIsDeadOrGhost     = UnitIsDeadOrGhost
 local UnitHasIncomingResurrection = UnitHasIncomingResurrection
-local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitThreatSituation   = UnitThreatSituation
 local UnitIsUnit            = UnitIsUnit
 local UnitInRange           = UnitInRange
@@ -1176,18 +1175,13 @@ function ns.RF_AnchorHostFor(d)
     return ns.RF_AnchorHost(d.health, s)
 end
 
--- Role for POWER-BAR gating. UnitGroupRolesAssigned returns "NONE" for the solo
--- player, which would fall through to the DPS toggle and wrongly hide a solo
--- healer's mana bar, so fall back to spec role. Player only: other units have
--- no reliable spec role, and in a real group Blizzard never returns "NONE".
+-- Role for POWER-BAR gating. Effective role (EllesmereUI.UnitEffectiveRole):
+-- the player's spec wins over the assigned role, which covers both the solo
+-- "NONE" case (a solo healer's mana bar must not fall through to the DPS
+-- toggle) and a stale premade-listing role (listed as tank, playing dps).
+-- Other units keep the assigned role.
 ns._ResolvePowerRole = function(unit)
-    local role = UnitGroupRolesAssigned(unit)
-    if role == "NONE" and UnitIsUnit(unit, "player") then
-        local spec = GetSpecialization and GetSpecialization()
-        local specRole = spec and GetSpecializationRole and GetSpecializationRole(spec)
-        if specRole then return specRole end
-    end
-    return role
+    return EllesmereUI.UnitEffectiveRole(unit)
 end
 
 -------------------------------------------------------------------------------
@@ -3813,7 +3807,7 @@ ns._UpdateRoleIcon = function(d, s, unit)
     local style = s.roleIconStyle or "modern"
     if style == "none" then roleIcon:Hide(); return end
     if s.roleIconHideInCombat and inCombat then roleIcon:Hide(); return end
-    local role = UnitGroupRolesAssigned(unit)
+    local role = EllesmereUI.UnitEffectiveRole(unit)
     if role and not issecretvalue(role) then
         local showForRole = (role == "TANK" and s.showRoleForTank)
             or (role == "HEALER" and s.showRoleForHealer)
@@ -5654,7 +5648,7 @@ XF.ResolveUnits = function()
             if #units >= cap then break end
             local name = GetRaidRosterInfo(i)
             if name and not seen[name]
-               and UnitGroupRolesAssigned("raid" .. i) == "TANK"
+               and EllesmereUI.UnitEffectiveRole("raid" .. i) == "TANK"
                -- Exclude Myself (Show Tanks cog): the tanks auto-include
                -- skips the player's own frame; explicit hotkey picks below
                -- still add it.
@@ -6056,7 +6050,7 @@ XF.ToggleHovered = function()
     -- Already covered by Show Tanks: adding would be an invisible duplicate.
     -- An Exclude-Myself'd player tank is NOT covered, so their manual add
     -- stays legitimate.
-    if set.showTanks and UnitGroupRolesAssigned(unit) == "TANK"
+    if set.showTanks and EllesmereUI.UnitEffectiveRole(unit) == "TANK"
        and not (set.excludeSelfTank and UnitIsUnit(unit, "player")) then
         return
     end
@@ -6126,7 +6120,7 @@ end
 -- Build a "player first" nameList for the player's raid subgroup. Names come from
 -- GetRaidRosterInfo (same source the secure header matches against, range-independent),
 -- so nothing can vanish. Others follow the active sort: role order (ROLE mode, via
--- UnitGroupRolesAssigned) else raid index. selfLast orders the player LAST instead.
+-- EllesmereUI.UnitEffectiveRole) else raid index. selfLast orders the player LAST instead.
 function ns._BuildSelfFirstNameList(playerGroup, sortByRole, roleOrder, selfLast)
     if not IsInRaid() or not playerGroup then return nil end
     local pri
@@ -6146,7 +6140,7 @@ function ns._BuildSelfFirstNameList(playerGroup, sortByRole, roleOrder, selfLast
         if subgroup == playerGroup then
             local unit = "raid" .. i
             local rp = 99
-            if pri then rp = pri[UnitGroupRolesAssigned(unit)] or 99 end
+            if pri then rp = pri[EllesmereUI.UnitEffectiveRole(unit)] or 99 end
             members[#members + 1] = {
                 name = name,
                 isPlayer = UnitIsUnit(unit, "player"),
@@ -6221,7 +6215,7 @@ function ns._BuildPartyClassNameList(includePlayer, sortByRole, roleOrder, class
             local _, classToken = UnitClass(unit)
             members[#members + 1] = {
                 name = name,
-                rolePri = (rolePri and rolePri[UnitGroupRolesAssigned(unit)]) or 99,
+                rolePri = (rolePri and rolePri[EllesmereUI.UnitEffectiveRole(unit)]) or 99,
                 classPri = classPri[classToken] or 99,
             }
         end
@@ -6259,7 +6253,7 @@ function ns._BuildArenaNameList(hideSelf, selfFirst, selfLast, sortByRole, roleO
         local isPlayer = UnitIsUnit(unit, "player")
         if not (hideSelf and isPlayer) then
             local rp = 99
-            if pri then rp = pri[UnitGroupRolesAssigned(unit)] or 99 end
+            if pri then rp = pri[EllesmereUI.UnitEffectiveRole(unit)] or 99 end
             members[#members + 1] = {
                 name = name,
                 isPlayer = isPlayer,
@@ -6304,7 +6298,7 @@ function ns._BuildMergedSelfNameList(sortByRole, roleOrder, selfLast, visibleGro
         if not visibleGroups or visibleGroups[subgroup] ~= false then
             local unit = "raid" .. i
             local rp = 99
-            if pri then rp = pri[UnitGroupRolesAssigned(unit)] or 99 end
+            if pri then rp = pri[EllesmereUI.UnitEffectiveRole(unit)] or 99 end
             members[#members + 1] = {
                 name = name,
                 isPlayer = UnitIsUnit(unit, "player"),
@@ -8448,6 +8442,22 @@ local function OnEvent(self, event, arg1, ...)
         end
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         if ns.BM_RebuildLookup then ns.BM_RebuildLookup(db) end
+        -- The player's effective role is spec-derived (EllesmereUI.UnitEffectiveRole),
+        -- so the player's own spec swap is a role change for every role consumer:
+        -- mirror the PLAYER_ROLES_ASSIGNED refresh and repaint role icons. The
+        -- event also fires for other units' spec updates; only the player's
+        -- changes our answers.
+        if arg1 == "player" and not inCombat then
+            if framesVisible and ns._ApplySortToHeaders then
+                ns._ApplySortToHeaders()
+            end
+            if ns._partyFramesVisible
+                and (db.profile.partyPrioritizeClass or ns._InArena())
+                and ns._LayoutPartyFrames then
+                ns._LayoutPartyFrames()
+            end
+            if ns._UpdateRoleIcons then ns._UpdateRoleIcons() end
+        end
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Re-sync the boss-combat flag on load. IsEncounterInProgress() still
         -- reports an active encounter after a mid-fight /reload or zone (where
@@ -11554,16 +11564,10 @@ local function BuildPreviewRoles()
     for i = 1, 20 do previewRoles[i] = nil end
     wipe(previewClassTokens)
 
-    -- Use group role if in a group, otherwise fall back to spec role
-    local playerRole = UnitGroupRolesAssigned("player")
+    -- Effective role: the player's spec wins over a stale assigned role
+    local playerRole = EllesmereUI.UnitEffectiveRole("player")
     if playerRole ~= "TANK" and playerRole ~= "HEALER" then
-        local specIdx = GetSpecialization()
-        local specRole = specIdx and select(5, GetSpecializationInfo(specIdx))
-        if specRole == "TANK" or specRole == "HEALER" then
-            playerRole = specRole
-        else
-            playerRole = "DAMAGER"
-        end
+        playerRole = "DAMAGER"
     end
     previewRoles[1] = playerRole
     local _, pct = UnitClass("player")
@@ -13985,15 +13989,10 @@ local function BuildPartyPreviewRoles()
     for i = 1, 5 do ns._partyPvRoles[i] = nil end
     wipe(ns._partyPvCT)
 
-    local playerRole = UnitGroupRolesAssigned("player")
+    -- Effective role: the player's spec wins over a stale assigned role
+    local playerRole = EllesmereUI.UnitEffectiveRole("player")
     if playerRole ~= "TANK" and playerRole ~= "HEALER" then
-        local specIdx = GetSpecialization()
-        local specRole = specIdx and select(5, GetSpecializationInfo(specIdx))
-        if specRole == "TANK" or specRole == "HEALER" then
-            playerRole = specRole
-        else
-            playerRole = "DAMAGER"
-        end
+        playerRole = "DAMAGER"
     end
 
     -- Slot 1 = player

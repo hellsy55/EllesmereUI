@@ -4412,10 +4412,10 @@ local function UpdateIronfurBar()
     local maxFrac = 0
     local shown = 0
 
-	-- Follow bar orientation instead of assuming horizontal.
-	local oriSb = secondaryBar._sb
-	local vert = (oriSb and oriSb.GetOrientation and oriSb:GetOrientation() == "VERTICAL") or false
-	local revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
+    -- Follow bar orientation instead of assuming horizontal.
+    local oriSb = secondaryBar._sb
+    local vert = (oriSb and oriSb.GetOrientation and oriSb:GetOrientation() == "VERTICAL") or false
+    local revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
 
     for i = 1, count do
         local t = ironfurTicks[i]
@@ -4433,23 +4433,23 @@ local function UpdateIronfurBar()
             end
             tex:SetColorTexture(1, 1, 1, 0.9)
             tex:ClearAllPoints()
-			if vert then
-	         local y = frac * barH
-	         if y > barH - tickW then y = barH - tickW end
-	         if y < 0 then y = 0 end
-	         tex:SetSize(barW, tickW)
-	         if revFill then
-	           tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", 0, -y)
-	         else
-	           tex:SetPoint("BOTTOMLEFT", secondaryBar, "BOTTOMLEFT", 0, y)
-	         end
-	       else
-	         local x = frac * barW
-	         if x > barW - tickW then x = barW - tickW end
-	         if x < 0 then x = 0 end
-	         tex:SetSize(tickW, barH)
-	         tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
-	       end
+            if vert then
+                local y = frac * barH
+                if y > barH - tickW then y = barH - tickW end
+                if y < 0 then y = 0 end
+                tex:SetSize(barW, tickW)
+                if revFill then
+                    tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", 0, -y)
+                else
+                    tex:SetPoint("BOTTOMLEFT", secondaryBar, "BOTTOMLEFT", 0, y)
+                end
+            else
+                local x = frac * barW
+                if x > barW - tickW then x = barW - tickW end
+                if x < 0 then x = 0 end
+                tex:SetSize(tickW, barH)
+                tex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+            end
             tex:Show()
         end
     end
@@ -4555,27 +4555,27 @@ IP.UpdateHash = function()
     local frac = remain / IP.DURATION
     if frac > 1 then frac = 1 end
     -- Follow bar orientation instead of assuming horizontal.
-	local oriSb = secondaryBar._sb
-	local vert = (oriSb and oriSb.GetOrientation and oriSb:GetOrientation() == "VERTICAL") or false
-	local revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
+    local oriSb = secondaryBar._sb
+    local vert = (oriSb and oriSb.GetOrientation and oriSb:GetOrientation() == "VERTICAL") or false
+    local revFill = (vert and oriSb.GetReverseFill and oriSb:GetReverseFill()) or false
     IP.hashTex:ClearAllPoints()
     if vert then
-	    local y = frac * barH
-	    if y > barH - tickW then y = barH - tickW end
-	    if y < 0 then y = 0 end
-	    IP.hashTex:SetSize(barW, tickW)
-	    if revFill then
-	        IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", 0, -y)
-	    else
-	        IP.hashTex:SetPoint("BOTTOMLEFT", secondaryBar, "BOTTOMLEFT", 0, y)
-	    end
-	else
-	    local x = frac * barW
-	    if x > barW - tickW then x = barW - tickW end
-	    if x < 0 then x = 0 end
-	    IP.hashTex:SetSize(tickW, barH)
-	    IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
-	end
+        local y = frac * barH
+        if y > barH - tickW then y = barH - tickW end
+        if y < 0 then y = 0 end
+        IP.hashTex:SetSize(barW, tickW)
+        if revFill then
+            IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", 0, -y)
+        else
+            IP.hashTex:SetPoint("BOTTOMLEFT", secondaryBar, "BOTTOMLEFT", 0, y)
+        end
+    else
+        local x = frac * barW
+        if x > barW - tickW then x = barW - tickW end
+        if x < 0 then x = 0 end
+        IP.hashTex:SetSize(tickW, barH)
+        IP.hashTex:SetPoint("TOPLEFT", secondaryBar, "TOPLEFT", x, 0)
+    end
     IP.hashTex:Show()
 end
 

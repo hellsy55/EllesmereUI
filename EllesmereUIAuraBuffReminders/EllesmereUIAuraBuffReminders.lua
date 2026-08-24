@@ -962,12 +962,13 @@ function EABR.UnitBenefits(u, benefit)
     if class == nil or isSecret(class) then return false end
     if not classSet[class] then return false end
     -- Role refinement for members with no spec data: some class+benefit
-    -- pairs are decided by the assigned role alone -- Intellect only serves
-    -- the HEALER spec of Paladin/Monk (and never a Druid tank); Attack
-    -- Power never serves the healer spec of these hybrids. Ambiguous combos
+    -- pairs are decided by the role alone -- Intellect only serves the
+    -- HEALER spec of Paladin/Monk (and never a Druid tank); Attack Power
+    -- never serves the healer spec of these hybrids. Ambiguous combos
     -- (e.g. a DAMAGER Druid: Balance wants int, Feral wants AP) and
     -- unassigned ("NONE") or secret roles fall through to the class answer.
-    local role = UnitGroupRolesAssigned(u)
+    -- Effective role: the player's spec wins over a stale assigned role.
+    local role = EllesmereUI.UnitEffectiveRole(u)
     if role ~= nil and not isSecret(role) then
         if benefit == "intellect" then
             if (class == "PALADIN" or class == "MONK") and (role == "DAMAGER" or role == "TANK") then
@@ -3485,8 +3486,12 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
     ---------------------------------------------------------------------------
     --  Healthstone in bags (group; "Where to Show" governs visibility). Bag
     --  state and class scans are combat-safe; secret class tokens skip units.
+    --  In combat only the warlock is reminded: a non-warlock can't be handed
+    --  a stone mid-fight, so for everyone else it is noise until the fight
+    --  ends (the list rebuilds on both combat transitions).
     ---------------------------------------------------------------------------
-    if (IsInGroup() or IsInRaid()) and EABR.ConsumableShows(co, "healthstone", inInstance) then
+    if (IsInGroup() or IsInRaid()) and EABR.ConsumableShows(co, "healthstone", inInstance)
+       and not (InCombat() and GetPlayerClass() ~= "WARLOCK") then
         if co and co.enabled and co.enabled.healthstone ~= false then
             -- Only remind if a Warlock is in the group
             local hasWarlock = false

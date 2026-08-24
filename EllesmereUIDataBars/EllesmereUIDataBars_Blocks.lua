@@ -896,10 +896,15 @@ local function MakeStatBlock(blockCfg, slot, content, barCtx, opts)
 
     -- A sample taken right when an event fires can catch the source before
     -- it's populated. Resample once more after a short delay to catch that.
+    -- One outstanding retry at a time: event bursts (durability drops hit
+    -- many items per damage wave) would otherwise queue a timer closure each.
+    local retryPending = false
     local function ForceTickChecked()
         ForceTick()
-        if opts.retryDelay then
+        if opts.retryDelay and not retryPending then
+            retryPending = true
             C_Timer.After(opts.retryDelay, function()
+                retryPending = false
                 if not inst._dead then ForceTick() end
             end)
         end
@@ -1306,8 +1311,12 @@ ns.BlockFactories.combat = function(blockCfg, slot, content, barCtx)
             text:ClearAllPoints()
             text:SetPoint("LEFT", frame, "LEFT", 0, 0)
             ns.SetFont(measureFS, fontSize, barCfg)
+            -- Fixed width from the wider label so the block never resizes on
+            -- combat edges; either label can be the wide one per locale.
             measureFS:SetText(EllesmereUI.L(CombatLabel(0)))
-            local width = max(30, ns.SnapToPixelGrid(measureFS:GetStringWidth() or 30) + 2)
+            local wOut = measureFS:GetStringWidth() or 30
+            measureFS:SetText(EllesmereUI.L(CombatLabel(1)))
+            local width = max(30, ns.SnapToPixelGrid(max(wOut, measureFS:GetStringWidth() or 30)) + 2)
             text:SetWidth(width)
             frame:SetSize(width, barH)
             frame:ClearAllPoints()

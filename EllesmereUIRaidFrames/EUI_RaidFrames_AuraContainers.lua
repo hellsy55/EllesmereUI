@@ -3438,7 +3438,7 @@ bmRegen:RegisterEvent("PLAYER_ENTERING_WORLD")
 local function RecheckTotem()
     local known = rfcPlayerClass == "SHAMAN"
         and IsPlayerSpell(POISON_CLEANSING_TOTEM) or false
-    if known == rfcTotemKnown then return end
+    if known == rfcTotemKnown then ns._rfcTotemDirty = nil; return end
     if InCombatLockdown() then ns._rfcTotemDirty = true; return end
     ns._rfcTotemDirty = nil
     rfcTotemKnown = known

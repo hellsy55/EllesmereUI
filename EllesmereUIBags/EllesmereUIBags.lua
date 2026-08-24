@@ -35,7 +35,7 @@ local function BagsItemUnusable(bagID, slot, itemLink, itemID)
     if cached ~= nil then return cached end
     local unusable = false
 
--- Recipes also have a spell (the teach effect), so they'd hit the tooltip scan
+    -- Recipes also have a spell (the teach effect), so they'd hit the tooltip scan
     -- below. Skip that: the scan can see red from the crafted item's own preview
     -- stats, not just from the recipe's learn requirements. Use the usable check
     -- instead, which reflects skill/known state directly.
@@ -46,7 +46,7 @@ local function BagsItemUnusable(bagID, slot, itemLink, itemID)
         _canUseCache[item] = unusable
         return unusable
     end
-    
+
     if IsEquippableItem(item) or C_Item.GetItemSpell(item) then
         -- Only use a tooltip from the real bag slot or real item link; both carry
         -- bonus IDs, which set the item's true required level. A bare itemID lacks
