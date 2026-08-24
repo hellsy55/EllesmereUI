@@ -3743,9 +3743,11 @@ local function BuildBars()
         if secondaryBar and secondaryBar._fillOpApplied and secondaryBar:IsShown() then
             -- Bar-type Fill Opacity active: the full-bar backdrop must retreat to
             -- the empty portion too, or it tints the translucent fill from behind
-            -- and defeats the world-show-through.
+            -- and defeats the world-show-through. Anchor to secondaryBar's own
+            -- inset inner StatusBar (_sb), not the uninset outer secondaryFrame,
+            -- or a halfPx sliver of _barBg peeks out past the fill's clipped edge.
             ns.AnchorBgToFillEdge(secondaryFrame._barBg, secondaryBar:GetStatusBarTexture(),
-                secondaryFrame, sp.pipOrientation or "HORIZONTAL")
+                secondaryBar._sb, sp.pipOrientation or "HORIZONTAL")
             secondaryFrame._barBg:Show()
         elseif (sp.fillOpacity or 100) < 100 then
             -- Pip/rune-type Fill Opacity active: a full-frame backdrop cannot hole
@@ -3753,7 +3755,14 @@ local function BuildBars()
             -- fill. Hide it; ApplyGapFills draws the gap strips in the bar-bg color
             -- and inactive pips keep their own per-pip background.
             secondaryFrame._barBg:Hide()
+        elseif isBarType then
+            -- Bar-type: anchor to secondaryBar's inset inner StatusBar (_sb) so
+            -- _barBg doesn't extend a halfPx past the fill/bg's own clipped edge.
+            secondaryFrame._barBg:SetAllPoints(secondaryBar._sb)
+            secondaryFrame._barBg:Show()
         else
+            -- Pip/rune-type: flush to secondaryFrame so this shows through the
+            -- gaps between pips (see comment above).
             secondaryFrame._barBg:SetAllPoints(secondaryFrame)
             secondaryFrame._barBg:Show()
         end
