@@ -2890,7 +2890,7 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
             t:ClearAllPoints()
             if vert then
                 local off = PP and PP.Scale(barH * frac) or (barH * frac)
-                off = math.max(0, math.min(off, barH - pxW))
+                off = math.max(0, math.min(off, PP and PP.Scale(barH - pxW) or (barH - pxW)))
                 t:SetSize(barW - vI * 2, pxW)
                 if revFill then
                     t:SetPoint("TOPLEFT", sb, "TOPLEFT", vI, -off)
@@ -2899,7 +2899,7 @@ local function ApplyResourceBarTicks(sb, maxVal, tickStr, tickCache, hashWidth, 
                 end
             else
                 local off = PP and PP.Scale(barW * frac) or (barW * frac)
-                off = math.max(0, math.min(off, barW - pxW))
+                off = math.max(0, math.min(off, PP and PP.Scale(barW - pxW) or (barW - pxW)))
                 t:SetSize(pxW, tickH)
                 t:SetPoint("TOPLEFT", sb, "TOPLEFT", off, -vI)
             end
