@@ -10261,20 +10261,34 @@ end
 
     local function SpellIdSet(id)
         local t = { [id] = true }
-        local a = safeNum(GetOverrideSpell, id);      if a then t[a] = true end
-        local b = safeNum(GetBaseSpell, id);          if b then t[b] = true end
-        local c = safeNum(FindBaseSpellByID, id);     if c then t[c] = true end
-        local d = safeNum(FindSpellOverrideByID, id); if d then t[d] = true end
+        -- Fuzzy override/base-spell resolution only makes sense for real
+        -- spellIDs. Item/equipment-slot presses resolve to the addon's own
+        -- NEGATIVE markers (see IconSpellID below) and must match exactly.
+        if type(id) == "number" and id > 0 then
+            local a = safeNum(GetOverrideSpell, id);      if a then t[a] = true end
+            local b = safeNum(GetBaseSpell, id);          if b then t[b] = true end
+            local c = safeNum(FindBaseSpellByID, id);     if c then t[c] = true end
+            local d = safeNum(FindSpellOverrideByID, id); if d then t[d] = true end
+        end
         return t
     end
 
     local function IconMatches(pressedSet, iconSid)
         if pressedSet[iconSid] then return true end
+        if type(iconSid) ~= "number" or iconSid <= 0 then return false end
         local a = safeNum(GetOverrideSpell, iconSid); if a and pressedSet[a] then return true end
         local b = safeNum(GetBaseSpell, iconSid);     if b and pressedSet[b] then return true end
         return false
     end
 
+    -- A CDM icon's identity as stamped by the bar-build pass (fc.spellID).
+    -- For an actual spell this IS its spellID; for the addon's own item/
+    -- equipment-slot tracking it is instead a NEGATIVE marker: -itemID for
+    -- an item preset (potions, healthstone, custom items, always <= -100),
+    -- or -inventorySlotID for an equipment-slot entry (trinkets = -13/-14).
+    -- See ns.SlotIDFromKey / the item-preset injection above. SlotIdentities
+    -- below produces this same marker (among other candidates) for a
+    -- pressed action/macro so it can compare equal here.
     local function IconSpellID(icon)
         local fc = _ecmeFC and _ecmeFC[icon]
         local sid = fc and fc.spellID
@@ -10338,32 +10352,239 @@ end
     ns.RefreshCdmPressMirrorFlag = RefreshCdmPressMirrorFlag
     RefreshCdmPressMirrorFlag()
 
-    local function SlotSpellID(slot)
-        if not slot then return nil end
-        if HasAction and not HasAction(slot) then return nil end
+    -- A tracked trinket icon can be identified TWO different ways depending
+    -- on whether Blizzard's own Cooldown Viewer already claims that
+    -- equipment slot natively:
+    --   * Native-claimed slot: Blizzard's viewer renders it, and its
+    --     cooldownInfo carries a REAL spellID (the item's on-use spell) --
+    --     IconSpellID falls back to C_CooldownViewer...GetCooldownViewerCooldownInfo
+    --     for that case, or fc.spellID may already be a real base/override
+    --     spellID copied from it.
+    --   * Not natively claimed: the addon renders its OWN injected trinket
+    --     frame instead (see the "Native-first, injection-fallback" branch
+    --     above), stamped with its own marker instead of a spellID:
+    --     -itemID for a plain item preset, -inventorySlotID for an
+    --     equipment-slot entry (trinket 1/2 = -13/-14).
+    -- Which path is live can differ per user/session, so a pressed item
+    -- macro is resolved to BOTH candidate identities and matched against
+    -- either -- whichever the on-screen icon actually turns out to be keyed by.
+    local function ItemUseSpellID(itemID)
+        if not itemID or not (C_Item and C_Item.GetItemSpell) then return nil end
+        local _, spellID = C_Item.GetItemSpell(itemID)
+        return spellID
+    end
+
+    local function AddIdentity(out, v)
+        if v then out[#out + 1] = v end
+    end
+
+    -- Warlock demon "special ability" spells (Axe Toss, Singe Magic, Spell
+    -- Lock, Seduction, Devour Magic, ...) are all cast through the SAME pet
+    -- action-bar button, whose icon texture swaps per demon but whose
+    -- Cooldown Viewer tracking stays anchored to one umbrella spell,
+    -- "Command Demon" (119898) -- confirmed live: the CDM icon kept
+    -- spellID 119898 across every demon type tested. A macro resolving to
+    -- the specific demon ability (via /cast line parsing) needs 119898
+    -- added as a match candidate too, since that's what the tracked icon
+    -- actually carries. Member IDs sourced from EllesmereUI_Kick.lua's
+    -- WARLOCK interrupt list plus the other demon specials.
+    local COMMAND_DEMON_SPELL = 119898
+    local COMMAND_DEMON_FAMILY = {
+        [19647]   = true,  -- Spell Lock (Felhunter)
+        [89766]   = true,  -- Axe Toss (Felguard)
+        [119910]  = true,
+        [1276467] = true,
+        [132409]  = true,
+        [89808]   = true,  -- Singe Magic (Imp)
+        [6358]    = true,  -- Seduction (Succubus)
+        [19505]   = true,  -- Devour Magic (Voidwalker)
+    }
+
+    -- Adds a real spellID identity, plus its Command Demon umbrella spell
+    -- when it's a member of that family. Use this (not raw AddIdentity) for
+    -- any resolved spellID coming from parsing a macro/action, so the
+    -- pet-ability case is covered without every call site needing to know about it.
+    local function AddSpellIdentity(out, spellID)
+        AddIdentity(out, spellID)
+        if spellID and COMMAND_DEMON_FAMILY[spellID] then
+            AddIdentity(out, COMMAND_DEMON_SPELL)
+        end
+    end
+
+    -- Rank-variant items (potions with several item IDs that share the same
+    -- display name across ranks/"Fleeting" versions, e.g. Light's Potential)
+    -- are tracked on CDM bars under ONE primary itemID (ns.CDM_ITEM_PRESETS),
+    -- with the rank variants listed as altItemIDs -- the icon's own marker is
+    -- always -primaryItemID, never -altItemID, even while an alt rank is
+    -- what's actually in the player's bags/what a macro's typed name
+    -- resolves to. Maps any itemID (primary or alt) to its preset's primary.
+    local function PresetPrimaryItemID(itemID)
+        if not itemID or not ns.CDM_ITEM_PRESETS then return nil end
+        for _, pr in ipairs(ns.CDM_ITEM_PRESETS) do
+            if pr.itemID == itemID then return pr.itemID end
+            if pr.altItemIDs then
+                for _, alt in ipairs(pr.altItemIDs) do
+                    if alt == itemID then return pr.itemID end
+                end
+            end
+        end
+        return nil
+    end
+
+    local function AddItemIdentities(out, itemID)
+        AddIdentity(out, -itemID)
+        local primaryID = PresetPrimaryItemID(itemID)
+        if primaryID and primaryID ~= itemID then AddIdentity(out, -primaryID) end
+        AddSpellIdentity(out, ItemUseSpellID(itemID))
+    end
+
+    local function AddEquipSlotIdentities(out, slotID)
+        AddIdentity(out, -slotID)
+        local itemID = GetInventoryItemID and GetInventoryItemID("player", slotID)
+        if itemID then AddSpellIdentity(out, ItemUseSpellID(itemID)) end
+    end
+
+    -- Parses a single macro line's target(s), if any:
+    --   /use 13                         -> "slot", 13
+    --   /use |Hitem:12345:...|h[Name]|h|r -> "itemLink", 12345
+    --   /use Light's Potential          -> "itemName", "Light's Potential"
+    --   /cast [pet:Imp][] Singe Magic   -> "spellNames", {"Singe Magic"}
+    --   /castsequence Foo, Bar          -> "spellNames", {"Foo", "Bar"}
+    -- Blizzard's own action auto-detection (GetActionInfo's subType, and the
+    -- GetMacroItem/GetMacroSpell fallbacks) only ever resolves ONE line's
+    -- worth of target -- for a multi-item potion macro or a per-pet/per-
+    -- target conditional ability macro, that's the wrong answer as often as
+    -- it's right (it picks by simple heuristic, not by evaluating which
+    -- condition is actually true), so every line is read and classified
+    -- here instead and ALL of them become match candidates. Strips
+    -- [conditional] blocks and leading whitespace; deliberately not a full
+    -- macro-syntax parser -- only the shapes real macros actually use.
+    local function MacroLineTargets(line)
+        local rest = line:gsub("%[[^%]]*%]", "")   -- strip [conditional] blocks
+        local cmd, arg = rest:match("^%s*/(%a+)!?%s*(.-)%s*$")
+        if not cmd or arg == "" then return nil end
+        cmd = cmd:lower()
+        if cmd == "use" or cmd == "userandom" then
+            local linkItemID = arg:match("|Hitem:(%d+)")
+            if linkItemID then return "itemLink", tonumber(linkItemID) end
+            local slotNum = tonumber(arg:match("^(%d+)$"))
+            -- Only a slot ns actually tracks/names (1..17,19) counts --
+            -- rejects stray bare numbers that aren't really an equipment slot.
+            if slotNum and ns.INV_SLOT_NAMES and ns.INV_SLOT_NAMES[slotNum] then
+                return "slot", slotNum
+            end
+            return "itemName", (arg:match('^"(.-)"$') or arg)
+        elseif cmd == "cast" or cmd == "castsequence" then
+            local names = {}
+            for name in arg:gmatch("[^,]+") do
+                name = name:match("^%s*(.-)%s*$")
+                name = name:match('^"(.-)"$') or name
+                if name ~= "" and name:lower() ~= "reset" and not name:match("^%d+$") then
+                    names[#names + 1] = name
+                end
+            end
+            return #names > 0 and "spellNames" or nil, names
+        end
+        return nil
+    end
+
+    -- Every candidate identity (spellID and/or marker) for the action/macro
+    -- bound to an action-bar slot.
+    local function SlotIdentities(slot)
+        local out = {}
+        if not slot then return out end
+        if HasAction and not HasAction(slot) then return out end
         -- NOTE (Midnight): GetActionInfo is documented as usable only in the
         -- secure restricted environment. This runs from an insecure post-hook,
         -- so a future build could hand back nil/secret here and silently no-op
         -- the press mirror. Revisit via a secure route if that ever regresses.
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
-            return id
+            AddSpellIdentity(out, id)
+        elseif actionType == "item" then
+            -- Plain item-slot action (not routed through a macro at all):
+            -- id IS the itemID here, unambiguously.
+            if id then AddItemIdentities(out, id) end
         elseif actionType == "macro" then
             if subType == "spell" then
-                return id
-            elseif subType == "item" then
-                return nil
-            end
-            local macroName = GetActionText(slot)
-            local macroIndex = macroName and GetMacroIndexByName(macroName)
-            if macroIndex and macroIndex > 0 then
-                if GetMacroItem and GetMacroItem(macroIndex) then
-                    return nil
+                -- Blizzard quirk: for a macro whose single action is a
+                -- spell, id IS the resolved spellID directly (not the
+                -- macro index).
+                AddSpellIdentity(out, id)
+            else
+                -- Every other case (subType == "item", subType == "pet", or
+                -- no subType at all): `id` from GetActionInfo is NOT a
+                -- reliable macro index here (verified live: it can point at
+                -- a completely unrelated macro). GetActionText -> the
+                -- macro's own NAME -> GetMacroIndexByName is the reliable path.
+                local macroName = GetActionText(slot)
+                local macroIndex = macroName and GetMacroIndexByName(macroName)
+                if macroIndex and macroIndex > 0 then
+                    -- GetMacroItem returns the item's NAME (a string), not a
+                    -- numeric itemID, and only ever resolves ONE item even
+                    -- when the macro has several /use lines (e.g. a potion
+                    -- macro with two different consumables) -- still tried
+                    -- first since it's cheap, but the body scan below is
+                    -- what actually covers every /use line.
+                    local itemName = GetMacroItem and GetMacroItem(macroIndex)
+                    local itemID = itemName and C_Item and C_Item.GetItemInfoInstant
+                        and select(1, C_Item.GetItemInfoInstant(itemName))
+                    if itemID then AddItemIdentities(out, itemID) end
+
+                    -- ALWAYS also scan every /use and /cast line in the
+                    -- macro body, regardless of what GetMacroItem already
+                    -- resolved above: a multi-item macro (several potions, a
+                    -- trinket slot plus a named item, etc.) or a per-pet/
+                    -- per-target conditional ability macro needs an identity
+                    -- per line -- Blizzard's own auto-detection only ever
+                    -- picks ONE by simple heuristic (not by evaluating which
+                    -- condition is actually true), so every possible outcome
+                    -- is added as a candidate rather than trusting just one.
+                    local body = GetMacroBody and GetMacroBody(macroIndex)
+                    local matchedAny = false
+                    if body then
+                        for line in body:gmatch("[^\r\n]+") do
+                            local kind, val = MacroLineTargets(line)
+                            if kind == "slot" then
+                                AddEquipSlotIdentities(out, val)
+                                matchedAny = true
+                            elseif kind == "itemLink" then
+                                AddItemIdentities(out, val)
+                                matchedAny = true
+                            elseif kind == "itemName" then
+                                local nameItemID = C_Item and C_Item.GetItemInfoInstant
+                                    and select(1, C_Item.GetItemInfoInstant(val))
+                                if nameItemID then
+                                    AddItemIdentities(out, nameItemID)
+                                    matchedAny = true
+                                end
+                            elseif kind == "spellNames" then
+                                for _, spellName in ipairs(val) do
+                                    local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellName)
+                                    local spellID = info and info.spellID
+                                    if spellID then
+                                        AddSpellIdentity(out, spellID)
+                                        matchedAny = true
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if not itemID and not matchedAny then
+                        -- GetMacroSpell also returns the spell's NAME (a
+                        -- string), not a numeric spellID -- same shape of bug
+                        -- as GetMacroItem above. Matters for pure /cast
+                        -- conditional macros where none of the per-line
+                        -- parsing above matched anything.
+                        local macroSpellName = GetMacroSpell(macroIndex)
+                        local macroSpellID = macroSpellName and C_Spell and C_Spell.GetSpellInfo
+                            and (C_Spell.GetSpellInfo(macroSpellName) or {}).spellID
+                        AddSpellIdentity(out, macroSpellID)
+                    end
                 end
-                return GetMacroSpell(macroIndex)
             end
         end
-        return nil
+        return out
     end
 
     -- Base key of a (possibly modified) binding, e.g. "SHIFT-1" -> "1".
@@ -10374,10 +10595,14 @@ end
     local function OnPress(btn, bindCmd)
         if not btn or not _anyPressMirror then return end
         local slot = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
-        local sid = SlotSpellID(slot)
-        if not sid then return end
+        local ids = SlotIdentities(slot)
+        if #ids == 0 then return end
 
-        local pressedSet = SpellIdSet(sid)
+        local pressedSet = {}
+        for i = 1, #ids do
+            local s = SpellIdSet(ids[i])
+            for k in pairs(s) do pressedSet[k] = true end
+        end
         local overlays
         if cdmBarIcons then
             for barKey, list in pairs(cdmBarIcons) do
@@ -10421,6 +10646,53 @@ end
         end
         wipe(_held); _heldN = 0; _poll:Hide()
         RefreshCdmPressMirrorFlag()
+    end
+
+    ---------------------------------------------------------------------------
+    --  Non-keybind casts (click-cast addons: Clique, mouseover binds, etc.)
+    --
+    --  Click-casting addons bind a spell to a mouse CLICK on a unit frame via
+    --  a secure macro attribute -- there is no action-bar slot and no
+    --  ActionButtonDown/MultiActionButtonDown event involved at all, so the
+    --  hooks below can never see a Soulstone cast off a mouseover-friendly
+    --  click-cast bind. UNIT_SPELLCAST_SENT fires for the player on every
+    --  successful cast attempt regardless of what triggered it (keybind,
+    --  mouse click, another addon's macro), always carrying the real spellID
+    --  as its last argument -- reusing the same matching/overlay pipeline as
+    --  OnPress catches this case generically, not just Clique specifically.
+    ---------------------------------------------------------------------------
+    local function FlashSpellID(spellID)
+        if not spellID or not _anyPressMirror then return end
+        local pressedSet = SpellIdSet(spellID)
+        local overlays
+        if cdmBarIcons then
+            for barKey, list in pairs(cdmBarIcons) do
+                local bd = barDataByKey and barDataByKey[barKey]
+                if bd and bd.pressMirror and not ns.IsBarBuffFamily(bd) then
+                    for i = 1, #list do
+                        local icon = list[i]
+                        if icon and icon:IsShown() then
+                            local isid = IconSpellID(icon)
+                            if isid and IconMatches(pressedSet, isid) then
+                                local ov = ShowPush(icon)
+                                if ov then overlays = overlays or {}; overlays[#overlays + 1] = ov end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if not overlays then return end
+        -- No keybind to poll for release (this wasn't a physical key press),
+        -- so entry.keys stays nil -- the existing poll loop already treats a
+        -- nil-keys entry as "release as soon as MIN_VISIBLE elapses" (see
+        -- ReleaseEntry/the OnUpdate loop above), giving a short fixed flash.
+        -- A fresh table per call as the _held key avoids two overlapping
+        -- click-casts stomping on each other's release timer.
+        local sentinel = {}
+        _held[sentinel] = { overlays = overlays, keys = nil, t = GetTime() }
+        _heldN = _heldN + 1
+        _poll:Show()
     end
 
     -- Click-routed keybinds (Bars 9/10, empower spells, custom paging) go
@@ -10471,5 +10743,23 @@ end
                 OnPress(_G[barName .. "Button" .. id], prefix and (prefix .. id) or nil)
             end)
         end
+    end)
+
+    -- See "Non-keybind casts" above: catches click-cast addons (Clique,
+    -- mouseover binds, etc.) that never touch an action-bar button at all.
+    -- spellID is grabbed as the LAST event argument rather than by a fixed
+    -- position, since UNIT_SPELLCAST_SENT's exact argument list has varied
+    -- across client versions but always ends with the spellID.
+    local castEv = ns.TakeShell()
+    if castEv.RegisterUnitEvent then
+        castEv:RegisterUnitEvent("UNIT_SPELLCAST_SENT", "player")
+    else
+        castEv:RegisterEvent("UNIT_SPELLCAST_SENT")
+    end
+    castEv:SetScript("OnEvent", function(_, _, unit, ...)
+        if unit ~= "player" then return end
+        local n = select("#", ...)
+        local spellID = select(n, ...)
+        if type(spellID) == "number" then FlashSpellID(spellID) end
     end)
 end)()
