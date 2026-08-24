@@ -1536,11 +1536,16 @@ local function ResolveDisplayName(unit, applyCap, s)
         end
     end
     -- MethodInternal nicknames (EasyNicknameAPI), second source.
-    if not display and EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnit then
-        local ok, dn = pcall(EasyNicknameAPI.GetNicknameForUnit, unit)
-        if ok and type(dn) == "string"
-           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
-            display = dn
+    if not display and EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok, dn, handled = pcall(
+            EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "raidFrames")
+        if ok and handled == true then
+            if type(dn) == "string"
+               and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+                display = dn
+            else
+                display = name
+            end
         end
     end
     -- TimelineReminders, gated by its own EllesmereUI checkbox. GetNickname falls back to the
@@ -6430,19 +6435,14 @@ ns._BuildHeaderSet = function(merge)
         self:SetHeight(%d)
     ]]):format(bw, bh)
 
-    -- Compute correct initial point/offset from saved growth direction
-    local initUnitGrowth = s.unitGrowth or "DOWN"
-    local initPoint, initXOff, initYOff
+    -- Compute correct initial point/offset from saved growth direction. Self-heal
+    -- a same-axis pair (see ns._RFEffectiveGrowth) before deriving anything from
+    -- it -- this bootstrap runs from the raw profile, ahead of _LayoutGroupsImpl's
+    -- own per-tier resolution and self-heal.
+    local initUnitGrowth, initGroupGrowth = ns._RFEffectiveGrowth(
+        s.unitGrowth or "DOWN", s.groupGrowth or "RIGHT", merge)
     local csInit = PixelSnap(s.cellSpacing or 2)
-    if initUnitGrowth == "DOWN" then
-        initPoint = "TOP";    initXOff = 0;    initYOff = -csInit
-    elseif initUnitGrowth == "UP" then
-        initPoint = "BOTTOM"; initXOff = 0;    initYOff = csInit
-    elseif initUnitGrowth == "RIGHT" then
-        initPoint = "LEFT";   initXOff = csInit; initYOff = 0
-    else -- LEFT
-        initPoint = "RIGHT";  initXOff = -csInit; initYOff = 0
-    end
+    local initPoint, initXOff, initYOff = ns._RFHeaderPoint(initUnitGrowth, csInit)
 
     if not merge then
         -----------------------------------------------------------
@@ -6507,23 +6507,7 @@ ns._BuildHeaderSet = function(merge)
         ns._flatHeader:SetAttribute("unitsPerColumn", 5)
         ns._flatHeader:SetAttribute("maxColumns", 8)
         ns._flatHeader:SetAttribute("columnSpacing", PixelSnap(s.groupSpacing or 8))
-        -- Compute correct initial columnAnchorPoint from saved growth directions
-        local initGroupGrowth = s.groupGrowth or "RIGHT"
-        local initColAnchor
-        if initGroupGrowth == "DOWN" or initGroupGrowth == "RIGHT" then
-            if initUnitGrowth == "DOWN" or initUnitGrowth == "UP" then
-                initColAnchor = "LEFT"
-            else
-                initColAnchor = "TOP"
-            end
-        else
-            if initUnitGrowth == "DOWN" or initUnitGrowth == "UP" then
-                initColAnchor = "RIGHT"
-            else
-                initColAnchor = "BOTTOM"
-            end
-        end
-        ns._flatHeader:SetAttribute("columnAnchorPoint", initColAnchor)
+        ns._flatHeader:SetAttribute("columnAnchorPoint", ns._RFColAnchor(initUnitGrowth, initGroupGrowth))
         ns._flatHeader:SetAttribute("sortMethod", "INDEX")
 
         -- Pre-create 40 buttons
@@ -6670,38 +6654,19 @@ ns._LayoutGroupsImpl = function()
         groupGrowth = activeOv.groupGrowth or groupGrowth
         unitGrowth  = activeOv.unitGrowth or unitGrowth
     end
+    -- Backstop: self-heal a same-axis pair that reached here without going
+    -- through a guarded write site (see ns._RFEffectiveGrowth).
+    unitGrowth, groupGrowth = ns._RFEffectiveGrowth(unitGrowth, groupGrowth, merged)
     local bw = PixelSnap(ns._activeSizeW or s.frameWidth or 72)
     local bh = PixelSnap(ns._activeSizeH or s.frameHeight or 46)
     local cs = PixelSnap(s.cellSpacing or 2)
     local gs = PixelSnap(s.groupSpacing or 8)
 
     -- Header attributes for unit growth direction
-    local hdrPoint, hdrXOff, hdrYOff
-    if unitGrowth == "DOWN" then
-        hdrPoint = "TOP";    hdrXOff = 0;   hdrYOff = -cs
-    elseif unitGrowth == "UP" then
-        hdrPoint = "BOTTOM"; hdrXOff = 0;   hdrYOff = cs
-    elseif unitGrowth == "RIGHT" then
-        hdrPoint = "LEFT";   hdrXOff = cs;  hdrYOff = 0
-    else -- LEFT
-        hdrPoint = "RIGHT";  hdrXOff = -cs; hdrYOff = 0
-    end
+    local hdrPoint, hdrXOff, hdrYOff = ns._RFHeaderPoint(unitGrowth, cs)
 
     -- Column anchor: where next column of 5 goes (perpendicular to unit growth)
-    local colAnchor
-    if groupGrowth == "DOWN" or groupGrowth == "RIGHT" then
-        if unitGrowth == "DOWN" or unitGrowth == "UP" then
-            colAnchor = "LEFT"
-        else
-            colAnchor = "TOP"
-        end
-    else -- UP or LEFT
-        if unitGrowth == "DOWN" or unitGrowth == "UP" then
-            colAnchor = "RIGHT"
-        else
-            colAnchor = "BOTTOM"
-        end
-    end
+    local colAnchor = ns._RFColAnchor(unitGrowth, groupGrowth)
 
     -- Group bounding box: size of one group along each axis
     local groupW, groupH
@@ -6735,8 +6700,14 @@ ns._LayoutGroupsImpl = function()
 
         -- Configure flat header layout attributes
         if ns._flatHeader then
+            -- Blizzard's header anchors its first button at the corner where
+            -- "point" and "columnAnchorPoint" meet, then grows away from it --
+            -- same corner ns._RFGrowthCorner names for separated headers. A
+            -- fixed TOPLEFT here left the rendered grid offset from the
+            -- container/mover box whenever growth pinned a different corner.
+            local hdrCorner = ns._RFGrowthCorner(unitGrowth, groupGrowth)
             ns._flatHeader:ClearAllPoints()
-            ns._flatHeader:SetPoint("TOPLEFT", containerFrame, "TOPLEFT", 0, 0)
+            ns._flatHeader:SetPoint(hdrCorner, containerFrame, hdrCorner, 0, 0)
             local layoutChanged = false
             -- While Self Position owns the merged header (whole-raid nameList,
             -- applied by ApplySortToHeaders at the end of this pass), a
@@ -6869,14 +6840,31 @@ ns._LayoutGroupsImpl = function()
     -- Apply sort after all headers are positioned
     ApplySortToHeaders()
 
-    -- Container size based on 4 groups for unlock mode mover
+    -- Container size based on 4 groups for unlock mode mover. Merged mode's
+    -- columnAnchorPoint is always perpendicular to unitGrowth (colAnchor above),
+    -- so its actual render axis follows unitGrowth, not the literal groupGrowth
+    -- (which can share unitGrowth's axis; Blizzard's header can't express that as
+    -- a column direction). Keying the box off groupGrowth there mismatches the
+    -- box against what merged mode really renders. Separated mode has no such
+    -- header constraint and renders along groupGrowth literally, so it keeps the
+    -- original formula.
     local totalW, totalH
-    if groupGrowth == "DOWN" or groupGrowth == "UP" then
-        totalW = groupW
-        totalH = MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs
+    if merged then
+        if unitGrowth == "DOWN" or unitGrowth == "UP" then
+            totalW = MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs
+            totalH = groupH
+        else
+            totalW = groupW
+            totalH = MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs
+        end
     else
-        totalW = MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs
-        totalH = groupH
+        if groupGrowth == "DOWN" or groupGrowth == "UP" then
+            totalW = groupW
+            totalH = MOVER_GROUPS * groupH + (MOVER_GROUPS - 1) * gs
+        else
+            totalW = MOVER_GROUPS * groupW + (MOVER_GROUPS - 1) * gs
+            totalH = groupH
+        end
     end
     containerFrame:SetSize(PixelSnap(totalW), PixelSnap(totalH))
 
@@ -7303,7 +7291,11 @@ ns._RFPosTopLeft = function(pos, w, h)
     return ax - pfx * w, ay + (1 - pfy) * h
 end
 
--- Footprint of the 4-group mover box for a frame size and growth pair.
+-- Footprint of the 4-group mover box for a frame size and growth pair. Callers
+-- that also derive a corner from the same pair (ns._RFCornerTerms/_RFGrowthCorner)
+-- must self-heal (ns._RFEffectiveGrowth) BEFORE calling either, so the size and
+-- the corner agree -- this function does not self-heal internally to avoid a
+-- caller healing one but not the other.
 ns._RFFootprint = function(bw, bh, unitGrowth, groupGrowth, cs, gs)
     bw, bh = PixelSnap(bw), PixelSnap(bh)
     local groupW, groupH
@@ -7330,18 +7322,71 @@ ns._RFBaseTopLeft = function()
     if not pos then return nil end
     local cs = PixelSnap(s.cellSpacing or 2)
     local gs = PixelSnap(s.groupSpacing or 8)
-    local w, h = ns._RFFootprint(s.frameWidth or 72, s.frameHeight or 46,
-        s.unitGrowth or "DOWN", s.groupGrowth or "RIGHT", cs, gs)
+    local ug, gg = ns._RFEffectiveGrowth(s.unitGrowth or "DOWN", s.groupGrowth or "RIGHT", s.mergeGroups)
+    local w, h = ns._RFFootprint(s.frameWidth or 72, s.frameHeight or 46, ug, gg, cs, gs)
     local l, t = ns._RFPosTopLeft(pos, w, h)
     return l, t, w, h
+end
+
+-- Shared growth-direction helpers. A single source of truth for "is this
+-- direction vertical" and for deriving the flat header's point/xOffset/yOffset
+-- and columnAnchorPoint from a growth pair -- both _LayoutGroupsImpl and
+-- _BuildHeaderSet's header-creation bootstrap need the identical derivation,
+-- and previously hand-duplicated it.
+ns._RFGrowthIsVertical = function(g)
+    return g == "DOWN" or g == "UP"
+end
+
+-- First-button point/xOffset/yOffset for a header growing along unitGrowth.
+ns._RFHeaderPoint = function(unitGrowth, cs)
+    if unitGrowth == "DOWN" then
+        return "TOP", 0, -cs
+    elseif unitGrowth == "UP" then
+        return "BOTTOM", 0, cs
+    elseif unitGrowth == "RIGHT" then
+        return "LEFT", cs, 0
+    else -- LEFT
+        return "RIGHT", -cs, 0
+    end
+end
+
+-- Blizzard's flat header can only wrap into columns when columnAnchorPoint runs
+-- perpendicular to unitGrowth -- see ns._RFEffectiveGrowth below for why merged
+-- mode never actually reaches a same-axis pair here in practice.
+ns._RFColAnchor = function(unitGrowth, groupGrowth)
+    if groupGrowth == "DOWN" or groupGrowth == "RIGHT" then
+        if ns._RFGrowthIsVertical(unitGrowth) then return "LEFT" end
+        return "TOP"
+    else -- UP or LEFT
+        if ns._RFGrowthIsVertical(unitGrowth) then return "RIGHT" end
+        return "BOTTOM"
+    end
+end
+
+-- Self-heals a same-axis Group/Unit Growth pair when Merge Groups is on (see
+-- _RFColAnchor above), applied as a read-time backstop for a pair that reached
+-- here without a guarded write (a stale per-tier override, a spec override,
+-- hand-edited SavedVariables). Group Growth wins here; the options UI's
+-- write-time KeepGrowthPerpendicular uses the same resolution EXCEPT its Unit
+-- Growth dropdown, which deliberately lets Unit Growth win instead. No-op if
+-- not merged.
+ns._RFEffectiveGrowth = function(unitGrowth, groupGrowth, merged)
+    if not merged then return unitGrowth, groupGrowth end
+    if ns._RFGrowthIsVertical(unitGrowth) == ns._RFGrowthIsVertical(groupGrowth) then
+        unitGrowth = ns._RFGrowthIsVertical(unitGrowth) and "RIGHT" or "DOWN"
+    end
+    return unitGrowth, groupGrowth
 end
 
 -- Pinned screen corner implied by a growth pair: frames grow AWAY from this corner, so
 -- it stays fixed when a tier's footprint differs from the base. Horizontal side = whichever
 -- growth is horizontal (RIGHT pins LEFT edge, LEFT pins RIGHT edge); vertical side likewise
--- (DOWN pins TOP, UP pins BOTTOM). Growths are perpendicular (UI-enforced); degenerate
--- imported data still resolves deterministically (UP beats BOTTOM, LEFT beats RIGHT,
--- default TOP+LEFT). Merged-groups fills from the same corner, no special case.
+-- (DOWN pins TOP, UP pins BOTTOM). Every ns._RFEffectiveGrowth caller heals a same-axis pair
+-- before reaching here whenever merged is true, so this only ever sees one for separated mode
+-- (merged=false is a no-op for _RFEffectiveGrowth), where all 16 combinations are legitimate
+-- and this tie-break (UP beats BOTTOM, LEFT beats RIGHT, default TOP+LEFT) is what existing
+-- per-tier offsets are calibrated against -- matching Blizzard's own same-axis corner instead
+-- would be dead code here for merged and a silent position-shift regression for separated.
 ns._RFGrowthCorner = function(unitGrowth, groupGrowth)
     local h = (unitGrowth == "LEFT" or groupGrowth == "LEFT") and "RIGHT" or "LEFT"
     local v = (unitGrowth == "UP" or groupGrowth == "UP") and "BOTTOM" or "TOP"
@@ -7427,10 +7472,10 @@ ns._RFRebaseSavedCenter = function(cx, cy)
     if not ov then return cx, cy end
     local cs = PixelSnap(s.cellSpacing or 2)
     local gs = PixelSnap(s.groupSpacing or 8)
-    local bw, bh = ns._RFFootprint(s.frameWidth or 72, s.frameHeight or 46,
-        s.unitGrowth or "DOWN", s.groupGrowth or "RIGHT", cs, gs)
-    local ug = ov.unitGrowth or s.unitGrowth or "DOWN"
-    local gg = ov.groupGrowth or s.groupGrowth or "RIGHT"
+    local bug, bgg = ns._RFEffectiveGrowth(s.unitGrowth or "DOWN", s.groupGrowth or "RIGHT", s.mergeGroups)
+    local bw, bh = ns._RFFootprint(s.frameWidth or 72, s.frameHeight or 46, bug, bgg, cs, gs)
+    local ug, gg = ns._RFEffectiveGrowth(
+        ov.unitGrowth or s.unitGrowth or "DOWN", ov.groupGrowth or s.groupGrowth or "RIGHT", s.mergeGroups)
     local tw, th = ns._RFFootprint(ov.width or s.frameWidth or 72,
         ov.height or s.frameHeight or 46, ug, gg, cs, gs)
     local kx, ky = ns._RFCornerTerms(tw, th, bw, bh, ug, gg)
@@ -7501,10 +7546,11 @@ ns._NormalizeTierOffsetAnchors = function()
         if pos and bl then
             for _, o in pairs(ov) do
                 if type(o) == "table" then
-                    local tw, th = ns._RFFootprint(
-                        o.width or s.frameWidth or 72, o.height or s.frameHeight or 46,
+                    local ug, gg = ns._RFEffectiveGrowth(
                         o.unitGrowth or s.unitGrowth or "DOWN",
-                        o.groupGrowth or s.groupGrowth or "RIGHT", cs, gs)
+                        o.groupGrowth or s.groupGrowth or "RIGHT", s.mergeGroups)
+                    local tw, th = ns._RFFootprint(
+                        o.width or s.frameWidth or 72, o.height or s.frameHeight or 46, ug, gg, cs, gs)
                     local tl, tt = ns._RFPosTopLeft(pos, tw, th)
                     o.offsetX = math.floor((o.offsetX or 0) + (tl - bl) + 0.5)
                     o.offsetY = math.floor((o.offsetY or 0) + (tt - bt) + 0.5)
@@ -7517,11 +7563,11 @@ ns._NormalizeTierOffsetAnchors = function()
         if pos and bl then
             for _, o in pairs(ov) do
                 if type(o) == "table" then
-                    local ug = o.unitGrowth or s.unitGrowth or "DOWN"
-                    local gg = o.groupGrowth or s.groupGrowth or "RIGHT"
+                    local ug, gg = ns._RFEffectiveGrowth(
+                        o.unitGrowth or s.unitGrowth or "DOWN",
+                        o.groupGrowth or s.groupGrowth or "RIGHT", s.mergeGroups)
                     local tw, th = ns._RFFootprint(
-                        o.width or s.frameWidth or 72, o.height or s.frameHeight or 46,
-                        ug, gg, cs, gs)
+                        o.width or s.frameWidth or 72, o.height or s.frameHeight or 46, ug, gg, cs, gs)
                     local kx, ky = ns._RFCornerTerms(tw, th, bw, bh, ug, gg)
                     if kx ~= 0 then
                         o.offsetX = math.floor((o.offsetX or 0) - kx + 0.5)
@@ -7579,8 +7625,9 @@ ns._ApplyTierOffset = function()
     local gs = PixelSnap(s.groupSpacing or 8)
     local fw = (ov and ov.width) or s.frameWidth or 72
     local fh = (ov and ov.height) or s.frameHeight or 46
-    local ug = (ov and ov.unitGrowth) or s.unitGrowth or "DOWN"
-    local gg = (ov and ov.groupGrowth) or s.groupGrowth or "RIGHT"
+    local ug, gg = ns._RFEffectiveGrowth(
+        (ov and ov.unitGrowth) or s.unitGrowth or "DOWN",
+        (ov and ov.groupGrowth) or s.groupGrowth or "RIGHT", s.mergeGroups)
     local tw, th = ns._RFFootprint(fw, fh, ug, gg, cs, gs)
     local x, y = ns._RFTierTopLeft(tw, th, ug, gg,
         (ov and ov.offsetX) or 0, (ov and ov.offsetY) or 0)
@@ -13676,8 +13723,8 @@ ns._ShowSizePreview = function(tier)
     local bh = PixelSnap(ov.height or s.frameHeight or 60)
     local cs = PixelSnap(s.cellSpacing or 2)
     local gs = PixelSnap(s.groupSpacing or 8)
-    local unitGrowth  = ov.unitGrowth or s.unitGrowth or "DOWN"
-    local groupGrowth = ov.groupGrowth or s.groupGrowth or "RIGHT"
+    local unitGrowth, groupGrowth = ns._RFEffectiveGrowth(
+        ov.unitGrowth or s.unitGrowth or "DOWN", ov.groupGrowth or s.groupGrowth or "RIGHT", s.mergeGroups)
     local frameCount  = tier
     local perGroup    = 5
     local numGroups   = math.ceil(frameCount / perGroup)
@@ -14963,6 +15010,15 @@ function ERF:OnEnable()
         end
         return false
     end
+    local function RegisterMethodInternalNicknames()
+        if ns._methodInternalSurfaceNickHooked then return end
+        if EasyNicknameAPI and EasyNicknameAPI.RegisterCallback then
+            EasyNicknameAPI.RegisterCallback("SurfaceNicknamesChanged", function()
+                if ns.RefreshAllNames then ns.RefreshAllNames() end
+            end, "EllesmereUIRaidFrames")
+            ns._methodInternalSurfaceNickHooked = true
+        end
+    end
     local function RegisterTRNicknames()
         if ns._trNickHooked then return true end
         local TR = TimelineReminders
@@ -15027,6 +15083,7 @@ function ERF:OnEnable()
             if (a and b and c) or event == "PLAYER_ENTERING_WORLD" then self:UnregisterAllEvents() end
         end)
     end
+    EventUtil.ContinueOnAddOnLoaded("MethodInternal", RegisterMethodInternalNicknames)
 
     -- Init options module if it loaded before us
     if ns._InitEUIModule then
