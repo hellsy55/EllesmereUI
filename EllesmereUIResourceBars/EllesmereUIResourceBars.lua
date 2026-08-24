@@ -1384,6 +1384,7 @@ local totemBarFrame
 local _totemBorderOverlays = setmetatable({}, { __mode = "k" })
 local _totemHooked = false
 local _totemOrigParent
+local _totemOrigStrata
 -- Engine-entry frames are created at FILE SCOPE on purpose: CPU bills a handler's
 -- whole call tree to the addon whose execution context CREATED the entry frame
 -- (inherited taint-style from the entry point, not the file the code lives in).
@@ -8600,11 +8601,14 @@ local function BuildTotemBar()
         if totemBarFrame then
             EllesmereUI.SetElementVisibility(totemBarFrame, false)
         end
-        -- Restore TotemFrame to original parent
+        -- Restore TotemFrame to original parent and strata
         if TotemFrame and _totemOrigParent and not InCombatLockdown() then
             TotemFrame:SetParent(_totemOrigParent)
             TotemFrame:ClearAllPoints()
             TotemFrame:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 155)
+            if _totemOrigStrata then
+                TotemFrame:SetFrameStrata(_totemOrigStrata)
+            end
         end
         return
     end
@@ -8619,9 +8623,10 @@ local function BuildTotemBar()
         if _G._ERB_RegisterUnlock then _G._ERB_RegisterUnlock() end
     end
 
-    -- Save original parent for restore on disable
+    -- Save original parent/strata for restore on disable
     if TotemFrame and not _totemOrigParent then
         _totemOrigParent = TotemFrame:GetParent()
+        _totemOrigStrata = TotemFrame:GetFrameStrata()
     end
 
     -- Position our container
