@@ -4611,7 +4611,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local _, cogShow = EllesmereUI.BuildCogPopup({
                     title = "Shift Offset",
                     rows = {
-                        { type = "slider", label = "Extra Y Offset", min = -50, max = 50, step = 1,
+                        { type = "slider", pixel = true, label = "Extra Y Offset", min = -50, max = 50, step = 1,
                           get = function()
                               local e = GlobalEntry()
                               return (e and e.shiftNoBarExtraY) or 0
