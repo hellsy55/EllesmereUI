@@ -208,7 +208,9 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health / Recuperate (Combat Based)",
             spells = {1231418}, -- Recuperate (universal campfire self-heal)
-            fixedBody = "/stopcasting\n/cast [nocombat] {1}\n/use [combat] item:271883\n/use [combat] item:271884\n/use [combat] item:241304\n/use [combat] item:241305",
+            -- Line order is the priority: the first potion in bags is the one used.
+            -- Concentrated Silvermoon r2 > r1, then Silvermoon r2 > r1.
+            fixedBody = "/stopcasting\n/cast [nocombat] {1}\n/use [combat] item:271884\n/use [combat] item:271883\n/use [combat] item:241304\n/use [combat] item:241305",
             fixedTooltip = "item:271884",
         },
         {

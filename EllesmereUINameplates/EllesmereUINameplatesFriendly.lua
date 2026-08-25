@@ -207,7 +207,7 @@ end
 ApplySubtitleFont()
 
 local _ffFile, _ffSize
-local function ApplyFriendlyFontOverride()
+local function ApplyFriendlyFontOverride(force)
     SaveOriginalFonts()
     local font = GetFont()
     local size = GetFriendlyNameSize()
@@ -216,7 +216,11 @@ local function ApplyFriendlyFontOverride()
     -- file + size they keep it: an unchanged pair means nothing to restore
     -- or re-apply. Every SetFont on these objects relayouts every plate
     -- name, so this stamp is what keeps plate-add bursts free.
-    if fontOverrideApplied and font == _ffFile and size == _ffSize then return end
+    -- `force` bypasses the stamp: on RESTRICTED friendly-player plates
+    -- (instanced content) the per-string SetTextHeight re-stamp is denied,
+    -- and this relayout is the only lever that clears Blizzard's per-instance
+    -- height, so the deferred re-apply forces it there (once per burst).
+    if not force and fontOverrideApplied and font == _ffFile and size == _ffSize then return end
     -- Restore to known-good originals first so we read the correct height
     -- even if Blizzard reset the font objects after a CVar change.
     if fontOverrideApplied then
@@ -366,13 +370,17 @@ end
 -- Touches font objects only -- no CVar writes -- so it can never feed back into
 -- UpdateNamePlateOptions.
 local _nameSizeReapplyPending = false
-local function ScheduleNameSizeReapply()
+local _nameSizeReapplyForce = false
+local function ScheduleNameSizeReapply(force)
+    if force then _nameSizeReapplyForce = true end
     if _nameSizeReapplyPending or not IsNameOnlyMode() then return end
     _nameSizeReapplyPending = true
     C_Timer.After(0, function()
         _nameSizeReapplyPending = false
+        local forced = _nameSizeReapplyForce
+        _nameSizeReapplyForce = false
         if not IsNameOnlyMode() then return end
-        ApplyFriendlyFontOverride()
+        ApplyFriendlyFontOverride(forced)
         -- Blizzard's own ApplyFrameOptions pass re-anchors the name (that is
         -- what fires this), so re-collapse it here rather than from a
         -- SetPoint hook, which would re-enter UpdateAnchors mid-pass. Rides
@@ -867,8 +875,9 @@ hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, unit)
 
     -- Re-assert the name-only font size for this newly added / camera-revealed
     -- plate -- Blizzard's per-plate setup resets the shared font object to default.
-    -- No-op outside name-only mode.
-    ScheduleNameSizeReapply()
+    -- No-op outside name-only mode. Forced in instanced content: friendly-player
+    -- plates are restricted there and the per-string re-stamp cannot take.
+    ScheduleNameSizeReapply(IsInInstance())
 
     -- Health-bar mode: full UF suppression for players (and NPCs if enabled)
     if IsFriendlyEnabled() then
@@ -1857,7 +1866,7 @@ end
 -- Font objects only -- safe, debounced, no CVar feedback.
 if NamePlateDriverFrame and NamePlateDriverFrame.UpdateNamePlateOptions then
     hooksecurefunc(NamePlateDriverFrame, "UpdateNamePlateOptions", function()
-        ScheduleNameSizeReapply()
+        ScheduleNameSizeReapply(IsInInstance())
     end)
 end
 
