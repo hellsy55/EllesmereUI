@@ -4143,11 +4143,13 @@ do
             outline = (outline == "") and "OUTLINE" or (outline .. ", OUTLINE")
         end
         local size = (EllesmereUIDB and EllesmereUIDB.targetDistanceTextSize) or DEFAULT_TEXT_SIZE
+        local strata = (EllesmereUIDB and EllesmereUIDB.targetDistanceStrata) or "MEDIUM"
         local align = GetAlign()
         distFrame._text:SetFont(fontPath, size, outline)
         distFrame._text:SetJustifyH(align)
         distFrame._text:ClearAllPoints()
         distFrame._text:SetPoint(align, distFrame, align, 0, 0)
+        distFrame:SetFrameStrata(strata)
         distFrame:SetSize(size * 5, size + 10)
 
         -- Unlock Mode owns anchors while dragging, or when Anchor-to is linked.
@@ -4169,7 +4171,6 @@ do
         if distFrame then return end
         distFrame = CreateFrame("Frame", nil, UIParent)
         distFrame:SetSize(100, 28)
-        distFrame:SetFrameStrata("HIGH")
         distFrame:SetFrameLevel(55)
         distFrame:EnableMouse(false)
         distFrame:SetMouseClickEnabled(false)
