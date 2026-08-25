@@ -9,7 +9,7 @@ if not ns then return end  -- module disabled: no options page
 
 local function GetNPOptOutline()
     -- Body-text preview flag, already slug-gated at the source (GetFontOutlineFlag).
-    return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or ""
+    return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag("nameplates") or ""
 end
 
 -------------------------------------------------------------------------------
