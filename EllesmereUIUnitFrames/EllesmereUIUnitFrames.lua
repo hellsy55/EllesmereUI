@@ -2047,9 +2047,17 @@ do
         -- Color inputs (class/reaction/dark/disconnect/tap) change via their
         -- own events or identity repaints -- a pure health tick re-runs the
         -- color chain only for modes whose color follows health/combat state
-        -- per tick (dynamic curve, threat, tap coloring).
-        if event ~= "UNIT_HEALTH" or element.colorSmooth
-           or element.colorThreat or element.colorTapping then
+        -- per tick (dynamic curve, threat, tap coloring). element.colorSmooth/
+        -- colorThreat/colorTapping are oUF's own flags and this addon never
+        -- sets them -- Dynamic/Class Reactive Health Color is EllesmereUI's
+        -- own PostUpdateColor path (ns.UF_DynamicHealthColor), gated by the
+        -- unit's healthColorMode setting instead, so check that directly or
+        -- a dynamic-colored bar stops tracking health value after every tick.
+        local unitKey = element._euiUnitKey
+        local unitColorMode = unitKey and db.profile[unitKey]
+        unitColorMode = unitColorMode and unitColorMode.healthColorMode
+        if event ~= "UNIT_HEALTH" or element.colorSmooth or element.colorThreat
+           or element.colorTapping or (unitColorMode and unitColorMode ~= "none") then
             UF_SecretSafeHealthColor(frame, event, unit)
         end
     end
