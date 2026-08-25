@@ -2700,7 +2700,10 @@ initFrame:SetScript("OnEvent", function(self)
         end
         if lessCommonOpen then
 
-        -- The three indicators share a single texture, so one position + size control set drives all of them.
+        -- Status Icon (Ready Check / Incoming Rez / In Other Phase / In Other Party) shares
+        -- a single texture, so one position + size control set drives all of them. Summon
+        -- has its own independent icon/position below -- it no longer shares this slot, so
+        -- it can be positioned and toggled on its own.
         local readyCheckPositionValues = {
             topleft     = "Top Left",
             top         = "Top",
@@ -2715,7 +2718,8 @@ initFrame:SetScript("OnEvent", function(self)
         local readyCheckPositionOrder = EllesmereUI.POSITION_GRID_ORDER
         local rcRow
         rcRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Ready Check / Summon / Rez", values=readyCheckPositionValues, order=readyCheckPositionOrder,
+            { type="dropdown", text="Status Icon", values=readyCheckPositionValues, order=readyCheckPositionOrder,
+              tooltip="Controls where status icons are displayed. Use the individual settings to choose which icons are shown: Ready Check, Resurrection, Other Phase, or Other Party.",
               getValue=function() return SVal("readyCheckPosition", "center") end,
               setValue=function(v) SSet("readyCheckPosition", v) end },
             { type="slider", text="Icon Size", min=8, max=40, step=1,
@@ -2724,23 +2728,66 @@ initFrame:SetScript("OnEvent", function(self)
         if not EllesmereUI._prebuilding then
             local rgn = rcRow._leftRegion
             local _, cogShow = EllesmereUI.BuildCogPopup({
-                title = "Ready Check / Summon / Rez",
+                title = "Status Icon",
                 rows = {
                     { type="toggle", label="Show Ready Check",
                       get=function() return SVal("showReadyCheck", true) end,
                       set=function(v) SSet("showReadyCheck", v) end },
-                    { type="toggle", label="Show Incoming Summon",
-                      get=function() return SVal("showSummonPending", true) end,
-                      set=function(v) SSet("showSummonPending", v) end },
                     { type="toggle", label="Show Incoming Resurrection",
                       get=function() return SVal("showIncomingRez", true) end,
                       set=function(v) SSet("showIncomingRez", v) end },
+                    { type="toggle", label="Show \"in other phase\"",
+                      get=function() return SVal("showInOtherPhase", false) end,
+                      set=function(v) SSet("showInOtherPhase", v) end },
+                    { type="toggle", label="Show \"in other party\"",
+                      get=function() return SVal("showInOtherParty", false) end,
+                      set=function(v) SSet("showInOtherParty", v) end },
                     { type="slider", label="Offset X", min=-50, max=50, step=1,
                       get=function() return SVal("readyCheckOffsetX", 0) end,
                       set=function(v) SSet("readyCheckOffsetX", v) end },
                     { type="slider", label="Offset Y", min=-50, max=50, step=1,
                       get=function() return SVal("readyCheckOffsetY", 0) end,
                       set=function(v) SSet("readyCheckOffsetY", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
+
+        -- Summon: independent position/size from the Status Icon slot above, so it can
+        -- be configured on its own.
+        local summonRow
+        summonRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Summon", values=readyCheckPositionValues, order=readyCheckPositionOrder,
+              tooltip="Controls where the incoming-summon icon is displayed, independent of the Status Icon slot above.",
+              getValue=function() return SVal("summonPosition", "center") end,
+              setValue=function(v) SSet("summonPosition", v) end },
+            { type="slider", text="Icon Size", min=8, max=40, step=1,
+              getValue=function() return SVal("summonSize", 20) end,
+              setValue=function(v) SSet("summonSize", v) end });  y = y - h
+        if not EllesmereUI._prebuilding then
+            local rgn = summonRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Summon",
+                rows = {
+                    { type="toggle", label="Show Incoming Summon",
+                      get=function() return SVal("showSummonPending", true) end,
+                      set=function(v) SSet("showSummonPending", v) end },
+                    { type="slider", label="Offset X", min=-50, max=50, step=1,
+                      get=function() return SVal("summonOffsetX", 0) end,
+                      set=function(v) SSet("summonOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                      get=function() return SVal("summonOffsetY", 0) end,
+                      set=function(v) SSet("summonOffsetY", v) end },
                 },
             })
             local cogBtn = CreateFrame("Button", nil, rgn)
@@ -2772,6 +2819,7 @@ initFrame:SetScript("OnEvent", function(self)
         local stRow
         stRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Status Text", values=statusTextPositionValues, order=statusTextPositionOrder,
+              tooltip="Controls whether status text is displayed and where. When enabled, Dead and Offline statuses are shown. AFK status can also be shown or hidden, but only when status text is enabled.",
               getValue=function() return SVal("statusTextPosition", "center") end,
               setValue=function(v) SSet("statusTextPosition", v) end },
             { type="slider", text="Text Size", min=6, max=30, step=1,

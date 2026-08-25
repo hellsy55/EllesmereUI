@@ -129,6 +129,9 @@ local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local UnitThreatSituation   = UnitThreatSituation
 local UnitIsUnit            = UnitIsUnit
 local UnitInRange           = UnitInRange
+local UnitInOtherParty      = UnitInOtherParty
+local UnitPhaseReason       = UnitPhaseReason
+local UnitDistanceSquared   = UnitDistanceSquared
 local UnitGetTotalAbsorbs   = UnitGetTotalAbsorbs
 local UnitGetTotalHealAbsorbs = UnitGetTotalHealAbsorbs
 local GetReadyCheckStatus   = GetReadyCheckStatus
@@ -500,12 +503,20 @@ local defaults = {
         raidMarkerOffsetX  = 0,
         raidMarkerOffsetY  = 0,
         showReadyCheck   = true,
-        showSummonPending = true,
         showIncomingRez  = true,
+        showInOtherPhase = false,
+        showInOtherParty = false,
         readyCheckSize   = 20,
         readyCheckPosition = "center",  -- "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom"
         readyCheckOffsetX  = 0,
         readyCheckOffsetY  = 0,
+        -- Summon indicator has its own position/size so it can be configured independently
+        -- of the Ready Check / Rez / Other Phase / Other Party status icon slot.
+        showSummonPending = true,
+        summonSize       = 20,
+        summonPosition   = "center",  -- "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom"
+        summonOffsetX    = 0,
+        summonOffsetY    = 0,
         threatBorderSize = 2,    -- aggro warning border thickness; 0 = off
         showLeaderIcon   = false,
         showLeaderIconInCombat = true,  -- "Show In Combat" cog; off = hide in combat
@@ -3561,9 +3572,12 @@ local function StyleButton(button)
     AnchorRaidMarker()
     d.AnchorRaidMarker = AnchorRaidMarker
 
-    -- Ready check icon (shared with incoming-summon / incoming-rez; above name text)
+    -- Status icon (Ready Check / Incoming Rez / In Other Phase / In Other Party; above name text)
+    -- Summon is intentionally NOT part of this slot -- it has its own icon/position below so it
+    -- can be positioned and toggled independently from the rest of the status icon stack.
     local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
+    readyCheck:EnableMouse(true)  -- required for OnEnter/OnLeave to fire on a plain texture region
     readyCheck:Hide()
     d.readyCheck = readyCheck
 
@@ -3596,6 +3610,62 @@ local function StyleButton(button)
     end
     AnchorReadyCheck()
     d.AnchorReadyCheck = AnchorReadyCheck
+
+    -- In Other Phase / In Other Party tooltip (tex.tooltip is set by UpdateReadyCheck;
+    -- nil for every other state, so OnEnter is a no-op then). Respects the existing
+    -- "Show Raid Frames Tooltip" mode/combat gating like every other RF tooltip.
+    readyCheck:SetScript("OnEnter", function(self)
+        if ns.RaidFrameTooltipAllowed(button) and self.tooltip then
+            local tooltip = GetAppropriateTooltip()
+            tooltip:SetOwner(self, "ANCHOR_RIGHT")
+            tooltip:SetText(self.tooltip, nil, nil, nil, nil, true)
+            tooltip:Show()
+        end
+        return true -- propagate to parent
+    end)
+    readyCheck:SetScript("OnLeave", function(self)
+        if ns.RaidFrameTooltipAllowed(button) and self.tooltip then
+            GetAppropriateTooltip():Hide()
+        end
+        return true -- propagate to parent
+    end)
+
+    -- Summon icon (Incoming Summon: pending / accepted / declined). Independent slot, own
+    -- position/size settings, toggled separately from the status icon group above.
+    local summonIcon = markerCarrier:CreateTexture(nil, "OVERLAY")
+    summonIcon:SetSize(PixelSnap(s.summonSize or 20), PixelSnap(s.summonSize or 20))
+    summonIcon:Hide()
+    d.summonIcon = summonIcon
+
+    local function AnchorSummonIcon()
+        local s = LiveS()   -- party/extra-aware (see LiveS note above)
+        local health = ns.RF_AnchorHost(health, s)   -- Uniform Icon Anchoring host swap
+        summonIcon:ClearAllPoints()
+        local pos = s.summonPosition or "center"
+        local ox = s.summonOffsetX or 0
+        local oy = s.summonOffsetY or 0
+        if pos == "topleft" then
+            summonIcon:SetPoint("TOPLEFT", health, "TOPLEFT", 2 + ox, -2 + oy)
+        elseif pos == "top" then
+            summonIcon:SetPoint("TOP", health, "TOP", ox, -2 + oy)
+        elseif pos == "topright" then
+            summonIcon:SetPoint("TOPRIGHT", health, "TOPRIGHT", -2 + ox, -2 + oy)
+        elseif pos == "left" then
+            summonIcon:SetPoint("LEFT", health, "LEFT", 2 + ox, oy)
+        elseif pos == "right" then
+            summonIcon:SetPoint("RIGHT", health, "RIGHT", -2 + ox, oy)
+        elseif pos == "bottomleft" then
+            summonIcon:SetPoint("BOTTOMLEFT", health, "BOTTOMLEFT", 2 + ox, 2 + oy)
+        elseif pos == "bottom" then
+            summonIcon:SetPoint("BOTTOM", health, "BOTTOM", ox, 2 + oy)
+        elseif pos == "bottomright" then
+            summonIcon:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", -2 + ox, 2 + oy)
+        else -- center
+            summonIcon:SetPoint("CENTER", health, "CENTER", ox, oy)
+        end
+    end
+    AnchorSummonIcon()
+    d.AnchorSummonIcon = AnchorSummonIcon
 
     -- Combat icon (marker carrier, above the border): members currently affecting combat; 9-position anchor mirrors the role icon.
     local combatIcon = markerCarrier:CreateTexture(nil, "OVERLAY", nil, 1)
@@ -4456,8 +4526,10 @@ ns._RFRezShown = function(unit)
     return true
 end
 
--- d.readyCheck is shared by the ready-check, incoming-summon and incoming-rez indicators (rez only
--- on dead units). Priority: active ready check > pending summon > incoming rez.
+-- d.readyCheck (the "Status Icon" slot) is shared by Ready Check, Incoming Rez, In Other
+-- Phase and In Other Party (rez only on dead units). Summon has its own icon/slot below --
+-- see UpdateSummonIcon -- so it doesn't compete with or get bumped by these.
+-- Priority: active ready check > incoming rez > in other phase > in other party.
 local function UpdateReadyCheck(button, unit)
     local d = GetFFD(button)
     local tex = d.readyCheck
@@ -4470,6 +4542,9 @@ local function UpdateReadyCheck(button, unit)
 
     local sz = PixelSnap(s.readyCheckSize or 20)
     tex:SetSize(sz, sz)
+
+    -- Reset tooltip
+    tex.tooltip = nil
 
     -- Ready check (priority)
     if s.showReadyCheck and readyCheckActive then
@@ -4492,7 +4567,122 @@ local function UpdateReadyCheck(button, unit)
         end
     end
 
-    -- Incoming summon
+    -- Incoming resurrection (cast in flight, or the latched unaccepted-offer window
+    -- -- see ns._RFRezShown).
+    if s.showIncomingRez and unit and ns._RFRezShown(unit) then
+        tex:SetTexCoord(0, 1, 0, 1)
+        tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+        tex:Show()
+        return
+    end
+
+    -- UnitPhaseReason() only returns reliable results within ~250 yards. We gate it with a cached UnitDistanceSquared.
+    if s.showInOtherPhase and unit and (d._isWithinDistance or false) then
+        local phaseReason = UnitPhaseReason(unit);
+
+        if phaseReason then
+            tex.tooltip = PartyUtil.GetPhasedReasonString(phaseReason, unit);
+            tex:SetAtlas("RaidFrame-Icon-Phasing")
+            tex:Show()
+            return
+        end
+    end
+
+    if s.showInOtherParty and unit and UnitInOtherParty(unit) then
+        tex.tooltip = PARTY_IN_PUBLIC_GROUP_MESSAGE;
+        tex:SetAtlas("RaidFrame-Icon-LFR")
+        tex:Show()
+        return
+    end
+
+    tex:Hide()
+end
+
+local DISTANCE_THRESHOLD_SQUARED = 250 * 250;
+
+local function UpdateDistance(button, unit)
+    local d = GetFFD(button)
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
+
+    if not s.showInOtherPhase then
+        return false
+    end
+
+    local distance, checkedDistance = UnitDistanceSquared(unit);
+
+    if checkedDistance then
+        local inDistance = distance < DISTANCE_THRESHOLD_SQUARED;
+        if inDistance ~= d._isWithinDistance then
+            d._isWithinDistance = inDistance;
+            return true
+        end
+    end
+
+    return false
+end
+
+-- Opt-in per-unit event registration for the two new indicators (mirrors
+-- ns.UpdateCombatEventRegistration's shape): only registered on units whose
+-- effective (raid or party) proxy has the indicator on, so it costs nothing
+-- while both are off. Called from OnEnable and every options-write funnel
+-- (ReloadFrames, party reload) that can flip these settings.
+function ns.UpdateDistanceEventRegistration()
+    if not (db and db.profile) then return end
+
+    local raidWant  = db.profile.showInOtherPhase and true or false
+    local partyWant = ns._partyProxy.showInOtherPhase and true or false
+    for unit, tracker in pairs(unitTrackers) do
+        local want
+        if unit == "player" then
+            want = raidWant or partyWant
+        elseif unit:find("^party%d") then
+            want = partyWant
+        else
+            want = raidWant
+        end
+        if want then
+            tracker:RegisterUnitEvent("UNIT_DISTANCE_CHECK_UPDATE", unit)
+        else
+            tracker:UnregisterEvent("UNIT_DISTANCE_CHECK_UPDATE")
+        end
+    end
+end
+
+function ns.UpdateOtherPartyEventRegistration()
+    if not (db and db.profile) then return end
+
+    local raidWant  = db.profile.showInOtherParty and true or false
+    local partyWant = ns._partyProxy.showInOtherParty and true or false
+    for unit, tracker in pairs(unitTrackers) do
+        local want
+        if unit == "player" then
+            want = raidWant or partyWant
+        elseif unit:find("^party%d") then
+            want = partyWant
+        else
+            want = raidWant
+        end
+        if want then
+            tracker:RegisterUnitEvent("UNIT_OTHER_PARTY_CHANGED", unit)
+        else
+            tracker:UnregisterEvent("UNIT_OTHER_PARTY_CHANGED")
+        end
+    end
+end
+
+-- Summon icon: independent slot/settings from the status icon above, so it can be
+-- positioned and toggled on its own without disturbing Ready Check / Rez / Other
+-- Phase / Other Party.
+local function UpdateSummonIcon(button, unit)
+    local d = GetFFD(button)
+    local tex = d.summonIcon
+    if not tex then return end
+
+    local s = d._isParty and ns._scaledPartyProxy or (d._isExtra and ns._scaledExtraProxy) or ns._scaledProfile
+
+    local sz = PixelSnap(s.summonSize or 20)
+    tex:SetSize(sz, sz)
+
     if s.showSummonPending and unit and C_IncomingSummon.HasIncomingSummon(unit) then
         local sStatus = C_IncomingSummon.IncomingSummonStatus(unit)
         if sStatus == SUMMON_STATUS_PENDING then
@@ -4508,15 +4698,6 @@ local function UpdateReadyCheck(button, unit)
             tex:Show()
             return
         end
-    end
-
-    -- Incoming resurrection (cast in flight, or the latched unaccepted-offer window
-    -- -- see ns._RFRezShown). Lowest priority; shows a body is already being picked up.
-    if s.showIncomingRez and unit and ns._RFRezShown(unit) then
-        tex:SetTexCoord(0, 1, 0, 1)
-        tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-        tex:Show()
-        return
     end
 
     tex:Hide()
@@ -4572,7 +4753,9 @@ local function UpdateAllButtons()
             if not (d._fpAt == now and d._fpUnit == u and d._fpGen == gen) then
                 d._fpAt = now; d._fpUnit = u; d._fpGen = gen
                 UpdateButton(btn)
+                UpdateDistance(btn, u)
                 UpdateReadyCheck(btn, u)
+                UpdateSummonIcon(btn, u)
             end
         end
     end
@@ -4589,7 +4772,9 @@ ns._RefreshAssignedButton = function(button, unit)
     if d._fpAt == now and d._fpUnit == unit and d._fpGen == ns._paintGen then return end
     d._fpAt = now; d._fpUnit = unit; d._fpGen = ns._paintGen
     UpdateButton(button)
+    UpdateDistance(button, unit)
     UpdateReadyCheck(button, unit)
+    UpdateSummonIcon(button, unit)
 end
 
 function ERF:UpdateAllFrames()
@@ -6033,6 +6218,11 @@ XF.Layout = function()
             d.readyCheck:SetSize(rcSz, rcSz)
             if d.AnchorReadyCheck then d.AnchorReadyCheck() end
         end
+        if d.summonIcon then
+            local smSz = PixelSnap(xs.summonSize or 20)
+            d.summonIcon:SetSize(smSz, smSz)
+            if d.AnchorSummonIcon then d.AnchorSummonIcon() end
+        end
         if d.combatIcon then
             local cciSz = PixelSnap(xs.combatIndicatorSize or 16)
             d.combatIcon:SetSize(cciSz, cciSz)
@@ -6139,6 +6329,12 @@ XF.EnsureBuilt = function(count)
                 end
             elseif event == "UNIT_IN_RANGE_UPDATE" then
                 ns._UpdateButtonRange(unit, b)
+            elseif event == "UNIT_DISTANCE_CHECK_UPDATE" then
+                if UpdateDistance(b, unit) then
+                    UpdateReadyCheck(b, unit)
+                end
+            elseif event == "UNIT_OTHER_PARTY_CHANGED" then
+                UpdateReadyCheck(b, unit)
             elseif event == "UNIT_FLAGS" then
                 ns._UpdateCombatIconFor(unit, b)
             elseif event == "READY_CHECK_CONFIRM" then
@@ -6213,6 +6409,12 @@ function ns.XF_Apply()
             -- UNIT_FLAGS is opt-in: extra frames mirror the raid combat-icon toggle.
             if db.profile.showCombatIndicator then
                 t:RegisterUnitEvent("UNIT_FLAGS", unit)
+            end
+            if db.profile.showInOtherPhase then
+                t:RegisterUnitEvent("UNIT_DISTANCE_CHECK_UPDATE", unit)
+            end
+            if db.profile.showInOtherParty then
+                t:RegisterUnitEvent("UNIT_OTHER_PARTY_CHANGED", unit)
             end
             t:RegisterEvent("READY_CHECK_CONFIRM")
             t:RegisterEvent("PLAYER_FLAGS_CHANGED")
@@ -7153,6 +7355,10 @@ local function ReloadFrames(skipButtons)
     -- Keep UNIT_FLAGS registration in lockstep with the combat-icon toggle so a
     -- disabled option listens for nothing (runs no event code).
     if ns.UpdateCombatEventRegistration then ns.UpdateCombatEventRegistration() end
+    -- UNIT_DISTANCE_CHECK_UPDATE
+    if ns.UpdateDistanceEventRegistration then ns.UpdateDistanceEventRegistration() end
+    -- UNIT_OTHER_PARTY_CHANGED
+    if ns.UpdateOtherPartyEventRegistration then ns.UpdateOtherPartyEventRegistration() end
     -- Rebuild dispel-color curves so custom-color edits take effect immediately.
     if ns._RebuildDispelCurves then ns._RebuildDispelCurves() end
     -- Recalculate active tier from current group size + overrides
@@ -7299,11 +7505,18 @@ local function ReloadFrames(skipButtons)
             if d.AnchorRaidMarker then d.AnchorRaidMarker() end
         end
 
-        -- Ready check / summon size + position
+        -- Status icon (ready check / rez / other phase / other party) size + position
         if d.readyCheck then
             local rcSz = PixelSnap(s.readyCheckSize or 20)
             d.readyCheck:SetSize(rcSz, rcSz)
             if d.AnchorReadyCheck then d.AnchorReadyCheck() end
+        end
+
+        -- Summon icon size + position (independent slot)
+        if d.summonIcon then
+            local smSz = PixelSnap(s.summonSize or 20)
+            d.summonIcon:SetSize(smSz, smSz)
+            if d.AnchorSummonIcon then d.AnchorSummonIcon() end
         end
 
         -- Combat icon size + position
@@ -7890,7 +8103,6 @@ local StartRangeTicker, StopRangeTicker
 do
 local rangeTicker = nil
 
-local UnitPhaseReason = UnitPhaseReason
 local C_Spell_IsSpellInRange = C_Spell and C_Spell.IsSpellInRange
 
 -- Classes whose effective reach is well under the ~40yd UnitInRange interact
@@ -8557,9 +8769,25 @@ local function OnEvent(self, event, arg1, ...)
         if btn then
             ns._UpdateButtonRange(arg1, btn)
         end
+    elseif event == "UNIT_DISTANCE_CHECK_UPDATE" then
+        local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
+        if btn then
+            if UpdateDistance(btn, arg1) then
+                UpdateReadyCheck(btn, arg1)
+            end
+        end
+    elseif event == "UNIT_OTHER_PARTY_CHANGED" then
+        local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
+        if btn then
+            UpdateReadyCheck(btn, arg1)
+        end
     elseif event == "UNIT_PHASE" then
         -- Phasing doesn't fire UNIT_IN_RANGE_UPDATE; re-evaluate all (rare).
         if ns._RangeSeedAll then ns._RangeSeedAll() end
+        local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
+        if btn then
+            UpdateReadyCheck(btn, arg1)
+        end
     elseif event == "UNIT_HEALTH" then
         local btn = unitToButton[arg1] or ns._partyUnitToButton[arg1]
         if btn then
@@ -8750,13 +8978,14 @@ local function OnEvent(self, event, arg1, ...)
         end)
     elseif event == "INCOMING_SUMMON_CHANGED" then
         -- Broadcast event (no unit payload); re-evaluate every visible button.
+        -- Summon has its own icon/slot now, independent of the status icon.
         for _, btn in ipairs(allButtons) do
             local u = btn:GetAttribute("unit")
-            if u and btn:IsVisible() then UpdateReadyCheck(btn, u) end
+            if u and btn:IsVisible() then UpdateSummonIcon(btn, u) end
         end
         for _, btn in ipairs(ns._partyAllButtons) do
             local u = btn:GetAttribute("unit")
-            if u and btn:IsVisible() then UpdateReadyCheck(btn, u) end
+            if u and btn:IsVisible() then UpdateSummonIcon(btn, u) end
         end
     elseif event == "INCOMING_RESURRECT_CHANGED" then
         -- Fires with a unit payload when a rez starts/stops on that unit. The stop
@@ -8957,8 +9186,10 @@ do
             "roleIconBehindBorder",
             "showRoleForTank", "showRoleForHealer", "showRoleForDPS",
             "showRaidMarker", "raidMarkerSize", "raidMarkerPosition", "raidMarkerOffsetX", "raidMarkerOffsetY",
-            "showReadyCheck", "showSummonPending", "showIncomingRez",
+            "showReadyCheck", "showIncomingRez", "showInOtherPhase", "showInOtherParty",
             "readyCheckSize", "readyCheckPosition", "readyCheckOffsetX", "readyCheckOffsetY",
+            "showSummonPending",
+            "summonSize", "summonPosition", "summonOffsetX", "summonOffsetY",
             "statusTextPosition", "statusTextOffsetX", "statusTextOffsetY", "statusTextSize", "statusTextColor",
             "showLeaderIcon", "showLeaderIconInCombat", "leaderIconPosition", "leaderIconSize", "leaderIconOffsetX", "leaderIconOffsetY",
             "showCombatIndicator", "combatIndicatorStyle", "combatIndicatorColor", "combatIndicatorCustomColor",
@@ -9402,7 +9633,9 @@ ns._UpdateAllPartyButtons = function()
         local u = btn:GetAttribute("unit")
         if u and btn:IsVisible() then
             UpdateButton(btn)
+            UpdateDistance(btn, u)
             UpdateReadyCheck(btn, u)
+            UpdateSummonIcon(btn, u)
         end
     end
 end
@@ -9728,6 +9961,10 @@ ns.ReloadPartyFrames = function(skipButtons)
     -- overwrites db.profile), so a section sync/unsync that flips the party's
     -- effective combat-icon state turns the party trackers on/off in step.
     if ns.UpdateCombatEventRegistration then ns.UpdateCombatEventRegistration() end
+    -- UNIT_DISTANCE_CHECK_UPDATE
+    if ns.UpdateDistanceEventRegistration then ns.UpdateDistanceEventRegistration() end
+    -- UNIT_OTHER_PARTY_CHANGED
+    if ns.UpdateOtherPartyEventRegistration then ns.UpdateOtherPartyEventRegistration() end
     local p = ns._partyProxy  -- reads party_ keys with fallthrough
     local raw = db.profile
     -- Scaled reads for everything in INDICATOR_SCALE_KEYS (role/leader/marker
@@ -9871,11 +10108,18 @@ ns.ReloadPartyFrames = function(skipButtons)
             if d.AnchorRaidMarker then d.AnchorRaidMarker() end
         end
 
-        -- Ready check / summon
+        -- Status icon (ready check / rez / other phase / other party)
         if d.readyCheck then
             local rcSz = PixelSnap(pp.readyCheckSize or 20)
             d.readyCheck:SetSize(rcSz, rcSz)
             if d.AnchorReadyCheck then d.AnchorReadyCheck() end
+        end
+
+        -- Summon icon (independent slot)
+        if d.summonIcon then
+            local smSz = PixelSnap(pp.summonSize or 20)
+            d.summonIcon:SetSize(smSz, smSz)
+            if d.AnchorSummonIcon then d.AnchorSummonIcon() end
         end
 
         -- Combat icon
@@ -11735,11 +11979,18 @@ local function CreatePreviewFrame(index)
     raidMarker:SetSize(rmSz, rmSz)
     raidMarker:Hide()
 
-    -- Ready check icon (position/size re-applied in the preview indicator pass)
+    -- Ready check / status icon (position/size re-applied in the preview indicator pass)
     local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
     readyCheck:SetPoint("CENTER", health, "CENTER", 0, 0)
     readyCheck:Hide()
+
+    -- Summon icon: independent slot from the status icon above (position/size
+    -- re-applied in the preview indicator pass, same as readyCheck).
+    local summonIcon = markerCarrier:CreateTexture(nil, "OVERLAY")
+    summonIcon:SetSize(PixelSnap(s.summonSize or 20), PixelSnap(s.summonSize or 20))
+    summonIcon:SetPoint("CENTER", health, "CENTER", 0, 0)
+    summonIcon:Hide()
 
     -- Combat icon (position/size/style re-applied in the preview indicator pass)
     local combatIcon = markerCarrier:CreateTexture(nil, "OVERLAY", nil, 1)
@@ -11827,6 +12078,7 @@ local function CreatePreviewFrame(index)
     f._dispelIconTex = dispelIconTex
     f._raidMarker = raidMarker
     f._readyCheck = readyCheck
+    f._summonIcon = summonIcon
     f._nameText = nameFS
     f._topNameBar = tnb
     f._topNameBarBg = tnbBg
@@ -12064,24 +12316,43 @@ local function BuildPreviewRoles()
         previewRoles._markerSlot1 = math.random(5)          -- slot 1-5 (group 1)
         previewRoles._markerSlot2 = 15 + math.random(5)     -- slot 16-20 (group 4)
 
-        -- Ready check: 3 not ready, 11 ready, 6 pending (randomized)
+        -- Status icon (Ready Check / Rez / In Other Phase / In Other Party): 3 not
+        -- ready, 8 ready, 4 waiting, 1 other-phase, 1 other-party (randomized).
+        -- Summon is generated separately below -- it has its own icon/slot now and
+        -- is free to land on the same preview slot as a status-icon state, same as
+        -- it can in a real raid.
         local rcStatuses = {}
         for i = 1, 3 do rcStatuses[#rcStatuses + 1] = "notready" end
         for i = 1, 8 do rcStatuses[#rcStatuses + 1] = "ready" end
-        for i = 1, 6 do rcStatuses[#rcStatuses + 1] = "pending" end
-        rcStatuses[#rcStatuses + 1] = "summon_pending"
-        rcStatuses[#rcStatuses + 1] = "summon_accepted"
-        rcStatuses[#rcStatuses + 1] = "summon_declined"
+        for i = 1, 4 do rcStatuses[#rcStatuses + 1] = "pending" end
+        rcStatuses[#rcStatuses + 1] = "other_phase"
+        rcStatuses[#rcStatuses + 1] = "other_party"
         -- Shuffle
         for i = #rcStatuses, 2, -1 do
             local j = math.random(i)
             rcStatuses[i], rcStatuses[j] = rcStatuses[j], rcStatuses[i]
         end
-        -- Clear readycheck/summon on marker slots so they don't overlap
+        -- Clear readycheck on marker slots so it doesn't overlap
         local ms1, ms2 = previewRoles._markerSlot1, previewRoles._markerSlot2
         if ms1 then rcStatuses[ms1] = nil end
         if ms2 then rcStatuses[ms2] = nil end
         previewRoles._readyCheck = rcStatuses
+
+        -- Summon icon: independent slot from the status icon above. Picked from the
+        -- non-marker slots so it never collides with a raid marker.
+        local summonPool = {}
+        for i = 1, 20 do
+            if i ~= ms1 and i ~= ms2 then summonPool[#summonPool + 1] = i end
+        end
+        for i = #summonPool, 2, -1 do
+            local j = math.random(i)
+            summonPool[i], summonPool[j] = summonPool[j], summonPool[i]
+        end
+        local summonStates = {}
+        if summonPool[1] then summonStates[summonPool[1]] = "summon_pending" end
+        if summonPool[2] then summonStates[summonPool[2]] = "summon_accepted" end
+        if summonPool[3] then summonStates[summonPool[3]] = "summon_declined" end
+        previewRoles._summon = summonStates
 
         -- Dispel types: one of each in group 1 (slots 1-5)
         local dispelTypes = { "Magic", "Curse", "Disease", "Poison", "" }
@@ -12103,17 +12374,21 @@ local function BuildPreviewRoles()
         previewRoles._deadSlot    = statePool[1]  -- plain corpse
         previewRoles._offlineSlot = statePool[2]
         previewRoles._rezSlot     = statePool[3]  -- corpse with an incoming-rez icon
-        -- Plain dead + offline bodies carry no readycheck/summon icon (looks wrong there).
+        -- Plain dead + offline bodies carry no status/summon icon (looks wrong there).
         if rcStatuses[statePool[1]] then rcStatuses[statePool[1]] = nil end
         if rcStatuses[statePool[2]] then rcStatuses[statePool[2]] = nil end
-        -- The rez corpse gets the incoming-rez icon. But markers win the shared icon
-        -- slot (same as the readycheck de-confliction above): if the rez slot landed
-        -- on a marker slot, skip the icon (the frame is still shown as a dead body).
+        if summonStates[statePool[1]] then summonStates[statePool[1]] = nil end
+        if summonStates[statePool[2]] then summonStates[statePool[2]] = nil end
+        -- The rez corpse gets the incoming-rez icon (and no summon icon). But markers
+        -- win the shared status icon slot (same as the readycheck de-confliction
+        -- above): if the rez slot landed on a marker slot, skip the icon (the frame
+        -- is still shown as a dead body).
         if statePool[3] ~= ms1 and statePool[3] ~= ms2 then
             rcStatuses[statePool[3]] = "rez"
         else
             rcStatuses[statePool[3]] = nil
         end
+        summonStates[statePool[3]] = nil
     end
 end
 
@@ -12121,6 +12396,47 @@ ns.previewAbsorbValues = ns.previewAbsorbValues or {}
 local previewHealthValues = {}
 local previewPowerValues = {}
 ns.previewHealAbsorbValues = {}
+
+-- Shared 8-way anchor helper for preview icons (status icon + summon icon both use the
+-- exact same position/offset scheme). Module-scope so it isn't rebuilt every paint.
+local function PreviewAnchorIcon(tex, host, pos, ox, oy)
+    tex:ClearAllPoints()
+    if pos == "topleft" then
+        tex:SetPoint("TOPLEFT", host, "TOPLEFT", 2 + ox, -2 + oy)
+    elseif pos == "top" then
+        tex:SetPoint("TOP", host, "TOP", ox, -2 + oy)
+    elseif pos == "topright" then
+        tex:SetPoint("TOPRIGHT", host, "TOPRIGHT", -2 + ox, -2 + oy)
+    elseif pos == "left" then
+        tex:SetPoint("LEFT", host, "LEFT", 2 + ox, oy)
+    elseif pos == "right" then
+        tex:SetPoint("RIGHT", host, "RIGHT", -2 + ox, oy)
+    elseif pos == "bottomleft" then
+        tex:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 2 + ox, 2 + oy)
+    elseif pos == "bottom" then
+        tex:SetPoint("BOTTOM", host, "BOTTOM", ox, 2 + oy)
+    elseif pos == "bottomright" then
+        tex:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", -2 + ox, 2 + oy)
+    else -- center
+        tex:SetPoint("CENTER", host, "CENTER", ox, oy)
+    end
+end
+
+-- Status icon states: texture/atlas, keyed by rcStatus. Other Phase / Other Party use
+-- the real Blizzard atlases, same as the live UpdateReadyCheck painter.
+local STATUS_ICON_LOOKUP = {
+    ready        = { tex = "Interface\\RaidFrame\\ReadyCheck-Ready" },
+    notready     = { tex = "Interface\\RaidFrame\\ReadyCheck-NotReady" },
+    pending      = { tex = "Interface\\RaidFrame\\ReadyCheck-Waiting" },
+    rez          = { tex = "Interface\\RaidFrame\\Raid-Icon-Rez" },
+    other_phase  = { atlas = "RaidFrame-Icon-Phasing" },
+    other_party  = { atlas = "RaidFrame-Icon-LFR" },
+}
+local SUMMON_ICON_LOOKUP = {
+    summon_pending  = { atlas = "RaidFrame-Icon-SummonPending" },
+    summon_accepted = { atlas = "RaidFrame-Icon-SummonAccepted" },
+    summon_declined = { atlas = "RaidFrame-Icon-SummonDeclined" },
+}
 
 local function ApplyPreviewData(f, index)
     -- The main raid preview is a base "20 Man" mockup: RefreshPreview lays out from the
@@ -13057,67 +13373,49 @@ local function ApplyPreviewData(f, index)
         end
     end
 
-    -- Ready check icon
+    -- Status icon (Ready Check / Rez / In Other Phase / In Other Party)
     if f._readyCheck then
         local rcStatuses = previewRoles._readyCheck
         local rcStatus = rcStatuses and rcStatuses[index]
-        local isSummon = rcStatus and rcStatus:sub(1, 6) == "summon"
-        local isRez    = rcStatus == "rez"
-        local showRC = indVis and rcStatus and (
-            (isRez and s.showIncomingRez) or
-            (isSummon and s.showSummonPending) or
-            (not isSummon and not isRez and s.showReadyCheck)
+        local entry = rcStatus and STATUS_ICON_LOOKUP[rcStatus]
+        local showRC = indVis and entry and (
+            (rcStatus == "rez" and s.showIncomingRez) or
+            (rcStatus == "other_phase" and s.showInOtherPhase) or
+            (rcStatus == "other_party" and s.showInOtherParty) or
+            ((rcStatus == "ready" or rcStatus == "notready" or rcStatus == "pending") and s.showReadyCheck)
         )
         if showRC then
             local rcSz = PixelSnap(s.readyCheckSize or 20)
             f._readyCheck:SetSize(rcSz, rcSz)
-            -- Anchor based on ready-check position setting
-            f._readyCheck:ClearAllPoints()
-            local pos = s.readyCheckPosition or "center"
-            local ox = s.readyCheckOffsetX or 0
-            local oy = s.readyCheckOffsetY or 0
-            local rcHost = ns.RF_AnchorHost(f._health, s)
-            if pos == "topleft" then
-                f._readyCheck:SetPoint("TOPLEFT", rcHost, "TOPLEFT", 2 + ox, -2 + oy)
-            elseif pos == "top" then
-                f._readyCheck:SetPoint("TOP", rcHost, "TOP", ox, -2 + oy)
-            elseif pos == "topright" then
-                f._readyCheck:SetPoint("TOPRIGHT", rcHost, "TOPRIGHT", -2 + ox, -2 + oy)
-            elseif pos == "left" then
-                f._readyCheck:SetPoint("LEFT", rcHost, "LEFT", 2 + ox, oy)
-            elseif pos == "right" then
-                f._readyCheck:SetPoint("RIGHT", rcHost, "RIGHT", -2 + ox, oy)
-            elseif pos == "bottomleft" then
-                f._readyCheck:SetPoint("BOTTOMLEFT", rcHost, "BOTTOMLEFT", 2 + ox, 2 + oy)
-            elseif pos == "bottom" then
-                f._readyCheck:SetPoint("BOTTOM", rcHost, "BOTTOM", ox, 2 + oy)
-            elseif pos == "bottomright" then
-                f._readyCheck:SetPoint("BOTTOMRIGHT", rcHost, "BOTTOMRIGHT", -2 + ox, 2 + oy)
-            else -- center
-                f._readyCheck:SetPoint("CENTER", rcHost, "CENTER", ox, oy)
-            end
-            if rcStatus == "ready" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
-            elseif rcStatus == "notready" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
-            elseif rcStatus == "pending" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\ReadyCheck-Waiting")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
-            elseif rcStatus == "summon_pending" then
-                f._readyCheck:SetAtlas("RaidFrame-Icon-SummonPending")
-            elseif rcStatus == "summon_accepted" then
-                f._readyCheck:SetAtlas("RaidFrame-Icon-SummonAccepted")
-            elseif rcStatus == "summon_declined" then
-                f._readyCheck:SetAtlas("RaidFrame-Icon-SummonDeclined")
-            elseif rcStatus == "rez" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+            PreviewAnchorIcon(f._readyCheck, ns.RF_AnchorHost(f._health, s),
+                s.readyCheckPosition or "center", s.readyCheckOffsetX or 0, s.readyCheckOffsetY or 0)
+            if entry.atlas then
+                f._readyCheck:SetAtlas(entry.atlas)
+            else
+                f._readyCheck:SetTexture(entry.tex)
                 f._readyCheck:SetTexCoord(0, 1, 0, 1)
             end
             f._readyCheck:Show()
         else
             f._readyCheck:Hide()
+        end
+    end
+
+    -- Summon icon: independent slot/settings from the status icon above.
+    if f._summonIcon then
+        local summonStates = previewRoles._summon
+        local summonStatus = summonStates and summonStates[index]
+        local entry = summonStatus and SUMMON_ICON_LOOKUP[summonStatus]
+        local showSummon = indVis and entry and s.showSummonPending
+        if showSummon then
+            local smSz = PixelSnap(s.summonSize or 20)
+            f._summonIcon:SetSize(smSz, smSz)
+            PreviewAnchorIcon(f._summonIcon, ns.RF_AnchorHost(f._health, s),
+                s.summonPosition or "center", s.summonOffsetX or 0, s.summonOffsetY or 0)
+            f._summonIcon:SetAtlas(entry.atlas)
+            f._summonIcon:Show()
+        else
+            f._summonIcon:Hide()
         end
     end
 
@@ -14473,7 +14771,8 @@ local function BuildPartyPreviewRoles()
         ns._partyPvRoles._deadSlot    = statusSlots[1]
         ns._partyPvRoles._offlineSlot = statusSlots[2]
         ns._partyPvRoles._afkSlot     = statusSlots[3]
-        ns._partyPvRoles._readyCheck  = { [statusSlots[4]] = "summon_accepted" }
+        ns._partyPvRoles._readyCheck  = {}
+        ns._partyPvRoles._summon      = { [statusSlots[4]] = "summon_accepted" }
     end
 end
 
@@ -15278,6 +15577,12 @@ function ERF:OnEnable()
 
     -- UNIT_FLAGS is opt-in: only registered while the combat icon is enabled.
     if ns.UpdateCombatEventRegistration then ns.UpdateCombatEventRegistration() end
+
+    -- UNIT_DISTANCE_CHECK_UPDATE is opt-in: only registered while the "in other phase" icon is enabled
+    if ns.UpdateDistanceEventRegistration then ns.UpdateDistanceEventRegistration() end
+
+    -- UNIT_OTHER_PARTY_CHANGED is opt-in: only registered while the "in other party" icon is enabled
+    if ns.UpdateOtherPartyEventRegistration then ns.UpdateOtherPartyEventRegistration() end
 
     -- Dynamically register/unregister UNIT_POWER_UPDATE per unit based on
     -- role and power display settings. Called after roster changes and
