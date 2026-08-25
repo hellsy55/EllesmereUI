@@ -1680,36 +1680,42 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    -- The ping type is given as a number, not a word. /ping matches the word
+    -- forms against PING_TYPE_ATTACK and friends, which are localized, so a
+    -- baked "/ping attack" only resolves on an English client and silently
+    -- sends a contextual ping everywhere else. The numeric aliases
+    -- (1 attack, 2 warning, 3 on my way, 4 assist, 5 look) are the same in
+    -- every locale.
     local function PingSlots()
         return {
             {
                 kind = "macrotext",
                 name = "Look",
-                macrotext = "/ping look",
+                macrotext = "/ping 5",
                 icon = { atlas = "Ping_Marker_Icon_NonThreat" },
             },
             {
                 kind = "macrotext",
                 name = "Assist",
-                macrotext = "/ping assist",
+                macrotext = "/ping 4",
                 icon = { atlas = "Ping_Marker_Icon_Assist" },
             },
             {
                 kind = "macrotext",
                 name = "Attack",
-                macrotext = "/ping attack",
+                macrotext = "/ping 1",
                 icon = { atlas = "Ping_Marker_Icon_Attack" },
             },
             {
                 kind = "macrotext",
                 name = "Warning",
-                macrotext = "/ping warning",
+                macrotext = "/ping 2",
                 icon = { atlas = "Ping_Marker_Icon_Warning" },
             },
             {
                 kind = "macrotext",
                 name = "On My Way",
-                macrotext = "/ping onmyway",
+                macrotext = "/ping 3",
                 icon = { atlas = "Ping_Marker_Icon_OnMyWay" },
             },
         }
