@@ -3937,6 +3937,11 @@ local function StyleButton(button)
             -- the next tick for one cheap read each.
             d._clsTok = nil
             d._pwType = nil
+            -- Health-color stamp (see ns._UpdateButtonHealth): a new occupant can
+            -- coincidentally land on the same class/health color as the previous
+            -- one, which would otherwise make the cache think nothing changed
+            -- and skip the real repaint for this button.
+            d._hcR, d._hcG, d._hcB, d._hcA, d._hcM = nil, nil, nil, nil, nil
             -- Fires even on a same-unit re-confirm (see the private-aura note above), so only drop
             -- the power-hide cache on a genuine occupant change -- else it forces an unconditional
             -- Show/Hide/SetHeight repaint, reintroducing the pop the deferred-power fix removed.
@@ -5000,6 +5005,14 @@ ns._UpdateButtonHealth = function(button)
                     end
                 end
             end
+        else
+            -- Dead/offline: _ApplyHealthBg (below) repaints the bar gray behind
+            -- this cache's back. Invalidate the stamp so the next tick where
+            -- the unit is alive/connected again is forced to see a "change"
+            -- and actually reapply SetStatusBarColor -- otherwise a revive
+            -- that lands on the same class/health color as before death gets
+            -- silently skipped, leaving the bar stuck on the gray death tint.
+            d._hcR, d._hcG, d._hcB, d._hcA, d._hcM = nil, nil, nil, nil, nil
         end
     end
 
