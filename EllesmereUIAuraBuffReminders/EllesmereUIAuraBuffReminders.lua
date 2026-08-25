@@ -3671,7 +3671,7 @@ local function Refresh()
     ---------------------------------------------------------------------------
     if remindersOn and PET_CLASSES[playerClass] then
         local co = db.profile.consumables
-        if co and co.enabled and co.enabled.pet ~= false then
+        if co and co.enabled and co.enabled.pet ~= false and EABR.ConsumableShows(co, "pet", inInstance) then
             local suppress = false
             local petIcon = 132161
             local petLabel = "Pet"
