@@ -5585,10 +5585,16 @@ function ns.UpdatePowerBorder(power, settings)
         -- Nothing to render and nothing to hide: stay lazy.
         if not ((isDet or isAttached) and size > 0) then return end
         border = CreateFrame("Frame", nil, power)
-        PP.Point(border, "TOPLEFT", power, "TOPLEFT", 0, 0)
-        PP.Point(border, "BOTTOMRIGHT", power, "BOTTOMRIGHT", 0, 0)
         power._pbBorder = border
     end
+    -- Re-anchored every pass, not once at creation: a pass that lands while the power
+    -- bar is zero-height (Power Bar Height 0, e.g. before a Spec Override raises it)
+    -- leaves this frame with its anchor entries intact but NO resolved rect, and nothing
+    -- recomputes it afterwards -- the border then stays invisible until a reload rebuilds
+    -- it. Re-setting both points restores the rect.
+    border:ClearAllPoints()
+    PP.Point(border, "TOPLEFT", power, "TOPLEFT", 0, 0)
+    PP.Point(border, "BOTTOMRIGHT", power, "BOTTOMRIGHT", 0, 0)
     local c = settings.powerBorderColor or { r = 0, g = 0, b = 0 }
     local alpha = settings.powerBorderAlpha or 1
     -- Attached bars are always Solid; their unused edges are hidden below so only
