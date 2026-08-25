@@ -963,6 +963,14 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "9.0.3",
+        mini = true,
+        fixes = {
+            { module = "Nameplates", text = "Friendly Name Size in Name Only mode now survives a reload." },
+            { module = "Resource Bars", text = "The Ebon Might bar no longer loses its countdown text for the rest of the session when its display overlay fails to build." },
+        },
+    },
+    {
         version = "9.0.2",
         heroes = {},
         features = {

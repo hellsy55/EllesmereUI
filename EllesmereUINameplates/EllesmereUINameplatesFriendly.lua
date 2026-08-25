@@ -311,14 +311,11 @@ local function _OnNameWidthChanged(self)
     _nameFixGuard = false
 end
 
--- Blizzard's NamePlateUnitFrameMixin:ApplyFrameOptions stamps a PER-INSTANCE
--- height onto the name FontString (name:SetTextHeight(healthBarFontHeight))
--- right after assigning the shared font object. A per-instance height beats the
--- shared SystemFont_NamePlate size, so the font-object override alone is lost on
--- every plate setup -- which is why the configured size did not survive a reload
--- (every plate is built fresh) while a live slider change still looked correct.
--- Re-assert the configured height per FontString, and again whenever Blizzard
--- re-stamps it. Guarded because our own write re-enters the hook.
+-- Blizzard's ApplyFrameOptions stamps a PER-INSTANCE height on the name
+-- FontString (name:SetTextHeight(healthBarFontHeight)), which beats the shared
+-- SystemFont_NamePlate size, so the font-object override alone is lost on every
+-- plate setup. Re-assert the configured height per FontString, and again whenever
+-- Blizzard re-stamps it. Guarded because our own write re-enters the hook.
 local _nameHeightGuard = false
 local function ApplyNameTextHeight(nameFS)
     if _nameHeightGuard then return end
