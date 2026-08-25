@@ -4497,6 +4497,14 @@ local function RebuildUnitMap()
                 -- Cache class token for power border (avoids UnitClass in hot path)
                 local _, classToken = UnitClass(u)
                 d.classToken = classToken
+                -- Repair a container binding the OnAttributeChanged hook dropped because
+                -- UnitExists(u) was false at the moment the header assigned it (roster still
+                -- streaming in on a zone/group transition). Nothing else re-drives this once
+                -- the header stops re-asserting the same token, so aura containers can stay
+                -- bound to a stale unit indefinitely.
+                if d.rfcUnit ~= u and UnitExists(u) and ns.RFC_OnUnitAssigned then
+                    ns.RFC_OnUnitAssigned(btn, d, u)
+                end
             end
         end
     end
