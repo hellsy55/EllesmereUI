@@ -4143,7 +4143,9 @@ do
             outline = (outline == "") and "OUTLINE" or (outline .. ", OUTLINE")
         end
         local size = (EllesmereUIDB and EllesmereUIDB.targetDistanceTextSize) or DEFAULT_TEXT_SIZE
-        local strata = (EllesmereUIDB and EllesmereUIDB.targetDistanceStrata) or "MEDIUM"
+        -- HIGH = the pre-setting strata, so existing installs keep their look; the
+        -- setting is the opt-in to sit lower (e.g. under the bank window).
+        local strata = (EllesmereUIDB and EllesmereUIDB.targetDistanceStrata) or "HIGH"
         local align = GetAlign()
         distFrame._text:SetFont(fontPath, size, outline)
         distFrame._text:SetJustifyH(align)

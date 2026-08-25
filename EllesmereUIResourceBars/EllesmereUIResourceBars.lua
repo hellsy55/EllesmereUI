@@ -4138,6 +4138,14 @@ local function UpdatePrimaryBar()
     local pctTainted = issecretvalue and issecretvalue(pctRaw)
     local pct01 = (not pctTainted) and (pctRaw / 100) or 1
 
+    -- Both allocating stages below (the curve color read returns a color object,
+    -- the formatters build strings) are stamped on the value pair, since
+    -- UNIT_POWER_UPDATE and UNIT_POWER_FREQUENT both fire for one change and the
+    -- repeat re-derives the same result. A secret value cannot be compared, so it
+    -- always rebuilds and drops the stamps (the next clean event rebuilds too).
+    local vmClean = not (issecretvalue and (issecretvalue(cur) or issecretvalue(mx)))
+    if not vmClean then primaryBar._colCur = nil; primaryBar._txtCur = nil end
+
     -- Color: threshold via ColorCurve (secret-safe) for non-mana specs. The
     -- per-spec entry was resolved once per config generation above; pc.tsEntry is
     -- already nil when thresholds are disabled.
@@ -4180,7 +4188,14 @@ local function UpdatePrimaryBar()
                 curve = GetBarThresholdCurve(tR, tG, tB, rvR, rvG, rvB, tPct)
             end
         end
-        if curve then
+        -- The curve object is the settings identity (rebuilt on any input change),
+        -- so (value, max, curve, target) names every input of this color.
+        if curve and not (vmClean and primaryBar._colCur == cur and primaryBar._colMx == mx
+                          and primaryBar._colCurve == curve and primaryBar._colTI == _ppTextInstead) then
+            if vmClean then
+                primaryBar._colCur, primaryBar._colMx = cur, mx
+                primaryBar._colCurve, primaryBar._colTI = curve, _ppTextInstead
+            end
             local ok, colorResult = pcall(UnitPowerPercent, "player", cachedPrimary, false, curve)
             if ok and colorResult and colorResult.GetRGBA then
                 if _ppTextInstead then
@@ -4230,23 +4245,32 @@ local function UpdatePrimaryBar()
     end
 
     if pp.textFormat ~= "none" and not _G._ERB_TextHiddenByForm(pp) then
-        local fmt = pp.textFormat
-        local percentSuffix = (pp.showPercent == false) and "" or "%"
-        local percentText = format("%d", pctRaw) .. percentSuffix
-        local txt
-        if fmt == "smart" then
-            local isPercent = EllesmereUI.IsSmartPowerPercent and EllesmereUI.IsSmartPowerPercent(cachedPrimary)
-            txt = isPercent and percentText or AbbreviateNumbers(cur)
-        elseif fmt == "both" then
-            txt = AbbreviateNumbers(cur) .. " | " .. percentText
-        elseif fmt == "curpp" then
-            txt = AbbreviateNumbers(cur)
-        elseif fmt == "perpp" then
-            txt = percentText
-        else
-            txt = AbbreviateNumbers(cur)
+        -- Stamped only when the text is actually written, so a form-hidden
+        -- stretch can never leave a stale string behind for a repeated value.
+        if not (vmClean and primaryBar._txtCur == cur and primaryBar._txtMx == mx
+                and primaryBar._txtGen == ns.CfgGen and primaryBar._txtPow == cachedPrimary) then
+            if vmClean then
+                primaryBar._txtCur, primaryBar._txtMx = cur, mx
+                primaryBar._txtGen, primaryBar._txtPow = ns.CfgGen, cachedPrimary
+            end
+            local fmt = pp.textFormat
+            local percentSuffix = (pp.showPercent == false) and "" or "%"
+            local percentText = format("%d", pctRaw) .. percentSuffix
+            local txt
+            if fmt == "smart" then
+                local isPercent = EllesmereUI.IsSmartPowerPercent and EllesmereUI.IsSmartPowerPercent(cachedPrimary)
+                txt = isPercent and percentText or AbbreviateNumbers(cur)
+            elseif fmt == "both" then
+                txt = AbbreviateNumbers(cur) .. " | " .. percentText
+            elseif fmt == "curpp" then
+                txt = AbbreviateNumbers(cur)
+            elseif fmt == "perpp" then
+                txt = percentText
+            else
+                txt = AbbreviateNumbers(cur)
+            end
+            primaryBar._text:SetText(txt)
         end
-        primaryBar._text:SetText(txt)
         primaryBar._text:Show()
     else
         primaryBar._text:Hide()

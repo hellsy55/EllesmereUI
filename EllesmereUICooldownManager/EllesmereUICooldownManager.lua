@@ -8993,14 +8993,10 @@ RegisterCDMUnlockElements = function()
                     local ox = (bd3 and bd3.addOffsetX) or 0
                     local oy = (bd3 and bd3.addOffsetY) or 0
                     if ox == 0 and oy == 0 then return nil end
-                    -- The offset is STORED in coordinate units but the options
-                    -- slider reads and writes physical pixels, so report pixels
-                    -- here too -- otherwise the tooltip prints the raw fraction
-                    -- (0.5007... instead of 1) and disagrees with the slider.
-                    local PPt = EllesmereUI.PP
-                    if PPt and PPt.ToPixels then
-                        ox, oy = PPt.ToPixels(ox), PPt.ToPixels(oy)
-                    end
+                    -- Stored in coordinate units; the options sliders show
+                    -- physical pixels, so report the same unit here.
+                    local toPx = EllesmereUI.PP.ToPixels
+                    ox, oy = toPx(ox), toPx(oy)
                     return EllesmereUI.Lf(
                         "This bar has an Additional Bar Offset (X %1$s, Y %2$s) set in its options. Unlock mode shows the base position; the offset re-applies when you exit.",
                         ox, oy)
