@@ -311,13 +311,33 @@ local function _OnNameWidthChanged(self)
     _nameFixGuard = false
 end
 
+-- Blizzard's NamePlateUnitFrameMixin:ApplyFrameOptions stamps a PER-INSTANCE
+-- height onto the name FontString (name:SetTextHeight(healthBarFontHeight))
+-- right after assigning the shared font object. A per-instance height beats the
+-- shared SystemFont_NamePlate size, so the font-object override alone is lost on
+-- every plate setup -- which is why the configured size did not survive a reload
+-- (every plate is built fresh) while a live slider change still looked correct.
+-- Re-assert the configured height per FontString, and again whenever Blizzard
+-- re-stamps it. Guarded because our own write re-enters the hook.
+local _nameHeightGuard = false
+local function ApplyNameTextHeight(nameFS)
+    if _nameHeightGuard then return end
+    if not (nameFS and nameFS.SetTextHeight) then return end
+    if not IsNameOnlyMode() then return end
+    _nameHeightGuard = true
+    pcall(nameFS.SetTextHeight, nameFS, GetFriendlyNameSize())
+    _nameHeightGuard = false
+end
+
 local function EnsureNameUnconstrained(nameFS)
     if not nameFS then return end
     FixNameSizing(nameFS)
+    ApplyNameTextHeight(nameFS)
     if hookedNameFonts[nameFS] then return end
     hookedNameFonts[nameFS] = true
     hooksecurefunc(nameFS, "SetWidth", _OnNameWidthChanged)
     if nameFS.SetSize then hooksecurefunc(nameFS, "SetSize", _OnNameWidthChanged) end
+    if nameFS.SetTextHeight then hooksecurefunc(nameFS, "SetTextHeight", ApplyNameTextHeight) end
 end
 
 local function ApplyFontToNameplate(nameplate)
@@ -331,6 +351,9 @@ ns.ApplyFontToNameplate = ApplyFontToNameplate
 function ns.RefreshFriendlyNameSize()
     if IsNameOnlyMode() then
         ApplyFriendlyFontOverride()
+        -- Blizzard's per-instance name height overrides the font object, so the
+        -- visible plates need the new size stamped on directly.
+        if ReanchorAllPlayerNames then ReanchorAllPlayerNames() end
         -- The guild line hangs half a name-height below the plate centre, so
         -- a new name size moves it (ns lookup: defined later in this file).
         if ns.RefreshFriendlyBelowName then ns.RefreshFriendlyBelowName() end
@@ -720,7 +743,10 @@ function ReanchorAllPlayerNames()
     for unit, nameplate in pairs(pending) do
         if UnitIsPlayer(unit) and not UnitCanAttack("player", unit) and not UnitIsUnit(unit, "player") then
             local uf = nameplate.UnitFrame
-            if uf and uf.name then FixNameSizing(uf.name) end
+            if uf and uf.name then
+                FixNameSizing(uf.name)
+                ApplyNameTextHeight(uf.name)
+            end
         end
     end
 end
