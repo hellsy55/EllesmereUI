@@ -910,6 +910,10 @@ hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, unit)
                 uf:RegisterEvent("PLAYER_TARGET_CHANGED")
                 uf:RegisterEvent("PLAYER_SOFT_FRIEND_CHANGED")
                 uf:RegisterEvent("PLAYER_SOFT_ENEMY_CHANGED")
+                -- Blizzard's RaidTargetFrame is the marker display on this path and
+                -- its OnUnitSet drives it from this event alone; without it the marker
+                -- froze until the plate was re-acquired.
+                uf:RegisterEvent("RAID_TARGET_UPDATE")
             end
             EnsureNameUnconstrained(nameplate.UnitFrame.name)
             -- Subtitle Text: inline title + guild line, both composed onto

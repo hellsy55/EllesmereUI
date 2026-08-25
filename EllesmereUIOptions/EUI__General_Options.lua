@@ -963,11 +963,14 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "9.0.3",
+        version = "9.0.4",
         mini = true,
         fixes = {
             { module = "Nameplates", text = "Friendly Name Size in Name Only mode now survives a reload." },
+            { module = "Nameplates", text = "Raid markers on friendly player nameplates now update as soon as they are applied." },
             { module = "Resource Bars", text = "The Ebon Might bar no longer loses its countdown text for the rest of the session when its display overlay fails to build." },
+            { module = "Damage Meters", text = "The unlock mode Element Options link now opens the right settings for the meter windows, Combat Timer and Icon History." },
+            { module = "Blizz UI Enhanced", text = "The tooltip anchor's unlock mode Element Options link now opens the Tooltips settings." },
         },
     },
     {
