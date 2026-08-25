@@ -208,8 +208,8 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             icon = "Interface\\Icons\\inv_potion_131",
             label = "Health / Recuperate (Combat Based)",
             spells = {1231418}, -- Recuperate (universal campfire self-heal)
-            fixedBody = "/stopcasting\n/cast [nocombat] {1}\n/use [combat] item:241304\n/use [combat] item:241305",
-            fixedTooltip = "item:241304",
+            fixedBody = "/stopcasting\n/cast [nocombat] {1}\n/use [combat] item:271883\n/use [combat] item:271884\n/use [combat] item:241304\n/use [combat] item:241305",
+            fixedTooltip = "item:271884",
         },
         {
             name = "EUI_Food",
