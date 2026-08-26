@@ -1860,7 +1860,14 @@ local function RegisterUnlock()
             clearPos = function()
                 local p = P(); if p and p.pos then p.pos[key] = nil end
             end,
-            applyPos = function() ApplySectionPosition(key) end,
+            applyPos = function()
+                -- Compact reuses the Group shell but owns a separate unlock key
+                -- and saved position. The global login pass visits every
+                -- registered element, including this inactive legacy entry; do
+                -- not let its stale Group position overwrite Compact's position.
+                if key == "Group" and ShowAs() == "compact" then return end
+                ApplySectionPosition(key)
+            end,
         })
     end
 
@@ -1916,6 +1923,7 @@ local function RegisterUnlock()
             if p and p.pos then p.pos.Compact = nil end
         end,
         applyPos = function()
+            if ShowAs() ~= "compact" then return end
             ApplySectionPosition("Group", COMPACT_UNLOCK_KEY, "Compact")
         end,
     })
