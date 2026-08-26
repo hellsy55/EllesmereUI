@@ -8120,11 +8120,23 @@ local function GhostAuraCheck()
                 d.ghostCleared = false
                 -- UNIT_AURA doesn't fire while ghosted, so any aura that fell off during
                 -- that window (LoS break, loading screen) never reached the containers.
-                -- Force the same full resync RebuildUnitMap uses for a stale unit binding
-                -- so the display can't be left showing a HoT/debuff that already expired.
-                if ns.RFC_OnUnitAssigned then
-                    d.rfcUnit = nil
-                    ns.RFC_OnUnitAssigned(btn, d, unit)
+                -- unitToButton et al. only ever gain entries on reassignment, never drop
+                -- the old one, so btn here can be stale for this token; re-confirm against
+                -- the button's own live attribute before touching anything. Re-parse
+                -- current content in place (unit didn't change) rather than a SetUnit
+                -- rebind -- same shape as ApplyAssistGate's own regain refresh.
+                if btn:GetAttribute("unit") == unit then
+                    if d.rfcDebuffs then d.rfcDebuffs:UpdateAllAuras() end
+                    if d.rfcDispLoc then d.rfcDispLoc:UpdateAllAuras() end
+                    if d.rfcDispel then d.rfcDispel:UpdateAllAuras() end
+                    if d.rfcBm then d.rfcBm:UpdateAllAuras() end
+                    if d.rfcBmChain then
+                        for _, cc in pairs(d.rfcBmChain) do cc:UpdateAllAuras() end
+                    end
+                    if d.rfcBmSimple then d.rfcBmSimple:UpdateAllAuras() end
+                    if d.dmTiles then
+                        for _, c in pairs(d.dmTiles) do c:UpdateAllAuras() end
+                    end
                 end
             end
         end
