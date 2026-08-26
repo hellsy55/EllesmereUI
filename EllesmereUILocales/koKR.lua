@@ -7240,7 +7240,6 @@ L["Important Cast Glow Settings"] = "중요 시전 반짝임 설정"
 L["Fade a bar when the enemy is beyond your active interrupt spell's range. Has no effect for specs without an interrupt."] = "적이 현재 활성화된 차단 주문의 사거리를 벗어나면 주문 바를 흐리게 표시합니다. 차단기가 없는 전문화에는 효과가 없습니다."
 L["Show the enemy's raid target marker to the left of the spell name."] = "주문 이름 왼쪽에 적의 공격대 징표를 표시합니다."
 L["Glow the bar when the enemy casts a spell Blizzard flags as important."] = "적이 블리자드에서 '중요'로 지정한 주문을 시전할 때 시전 바를 반짝이게 합니다."
-L["Limit the bars to the selected content and combat states: nothing selected shows them everywhere.."] = "주문 바를 선택한 콘텐츠 및 전투 상태로 제한합니다. 아무것도 선택하지 않으면 모든 곳에서 표시됩니다."
 
 -- == Chat prints (채팅창 print 출력 - 소스 엘키(L/Lf) 삽입 대기) ==================
 -- 원본이 print() 에 영문 리터럴을 직접 쓰는 곳들. 엔진 자동번역 밖이라 소스에서
