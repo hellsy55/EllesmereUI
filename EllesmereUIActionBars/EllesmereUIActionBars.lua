@@ -12722,6 +12722,22 @@ function EAB:FinishSetup()
 
         if not inCombat then
             -- Normal load: use the direct path (all protected ops are fine)
+            -- Guard Blizzard buttons against SetAttribute in combat: even when hidden,
+            -- ACTIONBAR_SLOT_CHANGED during combat can trigger UpdatePressAndHoldAction,
+            -- which tries SetAttribute and gets ADDON_ACTION_BLOCKED. Wrap it to skip
+            -- the pressAndHoldAction write in combat (the secure button doesn't need it;
+            -- the held-action state survives combat-paused execution).
+            if ActionButton1 and ActionButton1.UpdatePressAndHoldAction then
+                local orig = ActionButton1.UpdatePressAndHoldAction
+                for i = 1, 12 do
+                    local btn = _G["ActionButton" .. i]
+                    if btn then
+                        btn.UpdatePressAndHoldAction = function(self)
+                            if not InCombatLockdown() then orig(self) end
+                        end
+                    end
+                end
+            end
             HideBlizzardBars()
             for _, info in ipairs(BAR_CONFIG) do
                 SetupBar(info, false)
