@@ -5241,6 +5241,11 @@ ns.BlockFactories.currency = function(blockCfg, slot, content, barCtx)
         return nil
     end
 
+    local function Num(v)
+        if BreakUpLargeNumbers then return BreakUpLargeNumbers(v or 0) end
+        return tostring(v or 0)
+    end
+
     function inst:Refresh()
         local s = D()
         local barCfg = BC()
@@ -5369,12 +5374,17 @@ ns.BlockFactories.currency = function(blockCfg, slot, content, barCtx)
             ns.Tip_AddWrappedLine(info.description, 280, 0.8, 0.8, 0.8)
         end
         ns.Tip_AddLine(" ")
-        local qty
-        if BreakUpLargeNumbers then qty = BreakUpLargeNumbers(info.quantity or 0) else qty = tostring(info.quantity or 0) end
-        if info.maxQuantity and info.maxQuantity > 0 then
-            local maxQty
-            if BreakUpLargeNumbers then maxQty = BreakUpLargeNumbers(info.maxQuantity) else maxQty = tostring(info.maxQuantity) end
-            ns.Tip_AddDouble(L["TOTAL"], qty .. " / " .. maxQty, 0.6, 0.6, 0.6, 1, 1, 1)
+        local qty = Num(info.quantity)
+        local cap = info.maxQuantity
+        if cap and cap > 0 then
+            -- useTotalEarnedForMaxQty currencies (crests) cap what you EARNED this
+            -- season, not what you hold, so the wallet total is the wrong numerator.
+            if info.useTotalEarnedForMaxQty then
+                ns.Tip_AddDouble(L["TOTAL"], qty .. " |cffaaaaaa(" .. Num(info.totalEarned) .. "/" .. Num(cap) .. ")|r",
+                    0.6, 0.6, 0.6, 1, 1, 1)
+            else
+                ns.Tip_AddDouble(L["TOTAL"], qty .. " / " .. Num(cap), 0.6, 0.6, 0.6, 1, 1, 1)
+            end
         else
             ns.Tip_AddDouble(L["TOTAL"], qty, 0.6, 0.6, 0.6, 1, 1, 1)
         end
