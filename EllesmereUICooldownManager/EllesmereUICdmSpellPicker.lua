@@ -571,7 +571,7 @@ function ns.EnumerateCDMSettingsCatalog(wantSet)
 
     local result = {}
     for _, cdID in ipairs(ordered) do
-        local pInfo = infoByID[cdID]
+        local pInfo = _IsUsableSID(cdID) and infoByID[cdID]
         local category
         if type(pInfo) == "table" then category = pInfo.category end
         if category ~= nil and wantSet[category] then

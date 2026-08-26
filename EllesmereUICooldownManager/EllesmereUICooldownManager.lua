@@ -8683,7 +8683,7 @@ local function BuildBuffFamilyPresentSet()
 
     local present, sawEntry = {}, false
     for _, cdID in ipairs(ordered) do
-        local mergedInfo = infoByID[cdID]
+        local mergedInfo = _IsUsableSID(cdID) and infoByID[cdID]
         local category = type(mergedInfo) == "table" and mergedInfo.category
         if category ~= nil and wantCats[category] then
             sawEntry = true
