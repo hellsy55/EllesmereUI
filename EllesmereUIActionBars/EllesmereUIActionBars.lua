@@ -583,6 +583,7 @@ for _, info in ipairs(BAR_CONFIG) do
         outOfRangeColoring = false,
         outOfRangeColor = { r = 0.8, g = 0.1, b = 0.1 },
         buttonShape = "none",
+        flyoutDirection = "auto",
         shapeBorderEnabled = true,
         shapeBorderColor = { r = 0, g = 0, b = 0, a = 1 },
         shapeBorderSize = 7,
@@ -6427,10 +6428,14 @@ local function LayoutBar(key)
         end
     end
 
-    -- flyoutDirection per button from orientation + live screen position: split
-    -- each axis into thirds and open away from the nearest screen edge.
+    -- flyoutDirection per button: either a user-forced fixed direction, or
+    -- (when set to "auto") derived from orientation + live screen position by
+    -- splitting each axis into thirds and opening away from the nearest edge.
     local flyDir
-    do
+    local forcedFlyDir = s.flyoutDirection
+    if forcedFlyDir and forcedFlyDir ~= "auto" then
+        flyDir = forcedFlyDir
+    else
         local cx, cy = frame:GetCenter()
         local uiW = UIParent:GetWidth()
         local uiH = UIParent:GetHeight()
@@ -8507,21 +8512,26 @@ function EAB:RecalcFlyoutDirection(barKey)
     local s = self.db.profile.bars[barKey]
     if not frame or not btns or not s then return end
     local isVert = (s.orientation == "vertical")
-    local cx, cy = frame:GetCenter()
-    if not cx or not cy then return end
-    local uiW = UIParent:GetWidth()
-    local uiH = UIParent:GetHeight()
-    local uiScale = UIParent:GetEffectiveScale()
-    local fScale  = frame:GetEffectiveScale()
-    cx = cx * fScale / uiScale
-    cy = cy * fScale / uiScale
-    local thirdW = uiW / 3
-    local thirdH = uiH / 3
     local dir
-    if isVert then
-        dir = (cx > thirdW * 2) and "LEFT" or "RIGHT"
+    local forcedDir = s.flyoutDirection
+    if forcedDir and forcedDir ~= "auto" then
+        dir = forcedDir
     else
-        dir = (cy > thirdH * 2) and "DOWN" or "UP"
+        local cx, cy = frame:GetCenter()
+        if not cx or not cy then return end
+        local uiW = UIParent:GetWidth()
+        local uiH = UIParent:GetHeight()
+        local uiScale = UIParent:GetEffectiveScale()
+        local fScale  = frame:GetEffectiveScale()
+        cx = cx * fScale / uiScale
+        cy = cy * fScale / uiScale
+        local thirdW = uiW / 3
+        local thirdH = uiH / 3
+        if isVert then
+            dir = (cx > thirdW * 2) and "LEFT" or "RIGHT"
+        else
+            dir = (cy > thirdH * 2) and "DOWN" or "UP"
+        end
     end
     for _, btn in ipairs(btns) do
         btn:SetAttribute("flyoutDirection", dir)

@@ -29,8 +29,13 @@ local AURA_ZOOM = 0.07
 local FALLBACK_FONT = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
 
 local SATED_DEBUFFS = {
-    [57723] = true, [57724] = true, [80354] = true, [95809] = true,
-    [160455] = true, [264689] = true, [390435] = true,
+    -- [57723] = true,  -- Exhaustion
+    -- [390435] = true, -- Exhaustion
+    -- [57724] = true,  -- Sated
+    -- [264689] = true, -- Fatigued
+    -- [80354] = true,  -- Time Warp
+    -- [95809] = true,  -- Insanity
+    -- [160455] = true, -- Fatigued
 }
 local ALWAYS_HIDE_DEBUFFS = {
     [1254550] = true, -- Arcane Empowerment
