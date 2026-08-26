@@ -15709,7 +15709,10 @@ initFrame:SetScript("OnEvent", function(self)
             local B = db.profile.boss
             local hh
             -- Inline cog-button helper (boss-section style).
-            local function CCogBtn(rgn, showFn, iconPath)
+            -- disabledFn (optional) mirrors the shared-settings MakeCogBtn: when it
+            -- returns true the cog dims to 0.15 and stops taking mouse input,
+            -- refreshed live via RegisterWidgetRefresh.
+            local function CCogBtn(rgn, showFn, iconPath, disabledFn)
                 local cogBtn = CreateFrame("Button", nil, rgn)
                 cogBtn:SetSize(26, 26)
                 cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
@@ -15719,9 +15722,19 @@ initFrame:SetScript("OnEvent", function(self)
                 local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
                 cogTex:SetAllPoints()
                 cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
-                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-                cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+                local function isOff() return disabledFn and disabledFn() or false end
+                cogBtn:SetScript("OnEnter", function(self) if not isOff() then self:SetAlpha(0.7) end end)
+                cogBtn:SetScript("OnLeave", function(self) if not isOff() then self:SetAlpha(0.4) end end)
+                cogBtn:SetScript("OnClick", function(self) if not isOff() then showFn(self) end end)
+                if disabledFn then
+                    local function applyCogState()
+                        local off = isOff()
+                        cogBtn:SetAlpha(off and 0.15 or 0.4)
+                        cogBtn:EnableMouse(not off)
+                    end
+                    applyCogState()
+                    EllesmereUI.RegisterWidgetRefresh(applyCogState)
+                end
                 return cogBtn
             end
 
@@ -15948,7 +15961,7 @@ initFrame:SetScript("OnEvent", function(self)
                     {type="slider",label="Shift Y",min=-10,max=10,step=1,get=function() return B.castbarBorderTextureShiftY==nil and BD(4) or B.castbarBorderTextureShiftY end,set=function(v) B.castbarBorderTextureShiftY=v==0 and nil or v; ReloadAndUpdate() end},
                     {type="toggle",label="Show Behind",get=function() return B.castbarBorderBehind==true end,set=function(v) B.castbarBorderBehind=v and true or nil; ReloadAndUpdate() end},
                 }})
-                CCogBtn(borderRow._leftRegion,showCog,nil,EllesmereUI.DIRECTIONS_ICON)
+                CCogBtn(borderRow._leftRegion,showCog,EllesmereUI.DIRECTIONS_ICON)
             end
 
             local function BuildBossCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback, showSourceCog)
@@ -15999,7 +16012,7 @@ initFrame:SetScript("OnEvent", function(self)
                               end },
                         },
                     })
-                    MakeCogBtn(rgn, cogShow, swatch, nil, function()
+                    CCogBtn(rgn, cogShow, nil, function()
                         return B[enabledKey] ~= true
                     end)
                 end
