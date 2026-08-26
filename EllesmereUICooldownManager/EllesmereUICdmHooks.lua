@@ -10283,6 +10283,14 @@ do
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
             return id
+        elseif actionType == "item" then
+            -- On-use trinkets/potions/healthstones placed directly on the
+            -- action bar: hand back the itemID as a second return. Bar icons
+            -- for these track by NEGATIVE identity (-itemID for item presets,
+            -- -invSlot for "whatever's equipped in slot X" -- see
+            -- ns.INV_SLOT_NAMES / the <= -100 item-preset branch above), not a
+            -- resolved spellID, so the caller builds the matching keys itself.
+            return nil, id
         elseif actionType == "macro" then
             if subType == "spell" then
                 return id
@@ -10309,10 +10317,27 @@ do
     local function OnPress(btn, bindCmd)
         if not btn or not _anyPressMirror then return end
         local slot = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
-        local sid = SlotSpellID(slot)
-        if not sid then return end
+        local sid, itemID = SlotSpellID(slot)
+        if not sid and not itemID then return end
 
-        local pressedSet = SpellIdSet(sid)
+        local pressedSet = sid and SpellIdSet(sid) or {}
+        if itemID then
+            -- Item-preset icons (potions, healthstones, custom item ids) key
+            -- off -itemID; equipment-slot icons (trinkets -13/-14, or any
+            -- user-added slot) key off -invSlot for whatever's equipped there.
+            -- Match both, plus the item's own on-use spell for the rarer case
+            -- of it being tracked as a plain Custom Spell entry instead.
+            pressedSet[-itemID] = true
+            for invSlot in pairs(ns.INV_SLOT_NAMES) do
+                if GetInventoryItemID("player", invSlot) == itemID then
+                    pressedSet[-invSlot] = true
+                end
+            end
+            local _, useSpellID = C_Item.GetItemSpell(itemID)
+            if useSpellID then
+                for k in pairs(SpellIdSet(useSpellID)) do pressedSet[k] = true end
+            end
+        end
         local overlays
         if cdmBarIcons then
             for barKey, list in pairs(cdmBarIcons) do
