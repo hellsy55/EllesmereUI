@@ -1175,6 +1175,7 @@ local defaults = {
             interruptedCastEnabled = false,
             interruptedCastDuration = 1.5,
             interruptedCastR = 0.85, interruptedCastG = 0.15, interruptedCastB = 0.15, interruptedCastA = 1,
+            interruptedCastShowSource = true,
         },
         enabledFrames = {
             player = true,
@@ -7456,7 +7457,8 @@ local function SetupShowOnCastBar(frame, unit)
                 -- FontString:SetFormattedText), which is what Blizzard's own
                 -- AdvancedFocusCastBarMixin does for this exact feature.
                 local sourceText
-                if interrupted and interruptGUID and (unit == "target" or unit == "focus")
+                if interrupted and interruptGUID
+                   and (unit == "target" or unit == "focus" or (unit and unit:match("^boss%d+$")))
                    and s.interruptedCastShowSource ~= false then
                     local interruptName = UnitNameFromGUID(interruptGUID)
                     if interruptName ~= nil then

@@ -15951,7 +15951,7 @@ initFrame:SetScript("OnEvent", function(self)
                 CCogBtn(borderRow._leftRegion,showCog,nil,EllesmereUI.DIRECTIONS_ICON)
             end
 
-            local function BuildBossCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback)
+            local function BuildBossCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback, showSourceCog)
                 local row
                 row, hh = Ww:DualRow(pp, yy,
                     { type="toggle", text=label,
@@ -15981,9 +15981,31 @@ initFrame:SetScript("OnEvent", function(self)
                     swatch:SetAlpha(off and 0.3 or 1); blocker:SetShown(off); updateSwatch()
                 end
                 RegisterWidgetRefresh(UpdateState); UpdateState()
+
+                -- Cog to the LEFT of the color swatch: lets the person show who
+                -- (or what) interrupted the boss's cast, e.g. "Interrupted (Shaashak)".
+                -- Mirrors the target/focus "Interrupted By" cog; boss1-8 share the
+                -- single B settings table, so this toggle applies to all boss frames.
+                if showSourceCog then
+                    local sourceKey = colorPrefix.."ShowSource"
+                    local _, cogShow = EllesmereUI.BuildCogPopup({
+                        title = "Interrupted By",
+                        rows = {
+                            { type="toggle", label="Show Who Interrupted",
+                              get=function() return B[sourceKey] ~= false end,
+                              set=function(v)
+                                  B[sourceKey] = v and true or false
+                                  ReloadAndUpdate()
+                              end },
+                        },
+                    })
+                    MakeCogBtn(rgn, cogShow, swatch, nil, function()
+                        return B[enabledKey] ~= true
+                    end)
+                end
             end
             BuildBossCastOutcomeRow("Show Cancelled Cast","cancelledCastEnabled","cancelledCastDuration","cancelledCast",{0.95,0.55,0.10})
-            BuildBossCastOutcomeRow("Show Interrupted Cast","interruptedCastEnabled","interruptedCastDuration","interruptedCast",{0.85,0.15,0.15})
+            BuildBossCastOutcomeRow("Show Interrupted Cast","interruptedCastEnabled","interruptedCastDuration","interruptedCast",{0.85,0.15,0.15}, true)
 
             -- Row 4: Spell Name (dropdown + swatch + Size/X/Y cog) | Duration (same)
             local castTextRow
