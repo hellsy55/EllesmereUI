@@ -84,6 +84,41 @@ local GetTime = GetTime
 -- Spell info cache: spellID -> { name, iconID } (never changes for a given ID)
 local _spellInfoCache = {}
 
+-------------------------------------------------------------------------------
+--  Item-use spell cache
+--  spellID -> { name, icon, itemID }
+--  Trinkets, potions, healthstones etc. fire the exact same
+--  UNIT_SPELLCAST_SUCCEEDED event as a normal spell cast, just with the
+--  item's on-use spellID. That spellID is not "known" via IsPlayerSpell, so
+--  without this cache it gets filtered out as noise. Rebuilt from bags +
+--  equipped slots whenever they change, so it stays valid even after a
+--  consumable is used up and removed from the bag.
+-------------------------------------------------------------------------------
+local _itemSpellCache = {}
+
+local function CacheItemSpell(itemID)
+    if not itemID then return end
+    local spellName, spellID = C_Item.GetItemSpell(itemID)
+    if spellID then
+        local info = _spellInfoCache[spellID] or (C_Spell and C_Spell.GetSpellInfo(spellID))
+        if info then _spellInfoCache[spellID] = info end
+        local icon = (info and info.iconID) or C_Item.GetItemIconByID(itemID)
+        _itemSpellCache[spellID] = { name = spellName, icon = icon, itemID = itemID }
+    end
+end
+
+local function ScanItemSpells()
+    for bag = 0, 4 do
+        local slots = C_Container.GetContainerNumSlots(bag)
+        for slot = 1, (slots or 0) do
+            CacheItemSpell(C_Container.GetContainerItemID(bag, slot))
+        end
+    end
+    for slot = 1, 19 do
+        CacheItemSpell(GetInventoryItemID("player", slot))
+    end
+end
+
 -- Cached DB accessor; defaults are merged once at init, not per-call
 local _shDB
 local function DB()
@@ -265,6 +300,10 @@ local _eventsActive = false
 local eventFrame = CreateFrame("Frame")
 
 local function OnSpellEvent(_, event, unit, ...)
+    if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_EQUIPMENT_CHANGED" then
+        ScanItemSpells()
+        return
+    end
     if unit ~= "player" then return end
 
     -- UNIT_SPELLCAST_SENT has unique args: unit, target, castGUID, spellID
@@ -335,7 +374,7 @@ local function OnSpellEvent(_, event, unit, ...)
             -- IsPlayerSpell catches most, but override/transform spells (e.g.
             -- Lightsmith armaments) fail it. Fall back to IsSpellKnownOrOverridesKnown
             -- and cache the result (that API is flaky on repeated calls).
-            if not IsPlayerSpell(spellID) then
+            if not IsPlayerSpell(spellID) and not _itemSpellCache[spellID] then
                 if not _knownOverrides[spellID] then
                     if IsSpellKnownOrOverridesKnown and IsSpellKnownOrOverridesKnown(spellID) then
                         _knownOverrides[spellID] = true
@@ -372,13 +411,16 @@ local function OnSpellEvent(_, event, unit, ...)
                 end
             end
             if not dominated then
+                local itemInfo = _itemSpellCache[spellID]
                 local info = spellID and _spellInfoCache[spellID]
                 if not info and spellID then info = C_Spell and C_Spell.GetSpellInfo(spellID); if info then _spellInfoCache[spellID] = info end end
-                if not info then return end
+                local name = (info and info.name) or (itemInfo and itemInfo.name)
+                local icon = (info and info.iconID) or (itemInfo and itemInfo.icon)
+                if not name then return end
                 PushEntry({
                     spellID      = spellID,
-                    spellName    = info.name or "?",
-                    icon         = info.iconID,
+                    spellName    = name,
+                    icon         = icon,
                     target       = castGUID and _pendingTargets[castGUID],
                     startTime    = GetTime(),
                     endTime      = GetTime(),
@@ -386,6 +428,7 @@ local function OnSpellEvent(_, event, unit, ...)
                     status       = "success",
                     isInstant    = true,
                     isChannel    = false,
+                    isItem       = itemInfo ~= nil,
                     timestamp    = GetTime(),
                 })
             end
@@ -435,8 +478,11 @@ local function RegisterEvents()
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+    eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
+    eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
     eventFrame:SetScript("OnEvent", OnSpellEvent)
     _eventsActive = true
+    ScanItemSpells()
 end
 
 local function UnregisterEvents()
