@@ -1225,6 +1225,20 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() local c = TSB(); return not c or c.showSpellName ~= false end,
               setValue=function(v) local c = TSB(); if c then c.showSpellName = v and true or false; TSBRefresh() end end });  y = y - h
         if not EllesmereUI._prebuilding then
+            local _, showIconCog = EllesmereUI.BuildCogPopup({
+                title = "Spell Icon Settings",
+                rows = {
+                    { type="toggle", label="Icon on Right",
+                      tooltip = "Attach the spell icon to the right of the cast bar instead of the left.",
+                      get=function() local c = TSB(); return c and c.iconOnRight end,
+                      set=function(v) local c = TSB(); if c then c.iconOnRight = v; TSBRefresh() end end },
+                    { type="toggle", label="Show Icon Divider",
+                      tooltip = "Draw a 1px divider between the spell icon and the cast bar, matching the border color.",
+                      get=function() local c = TSB(); return c and c.showIconDivider end,
+                      set=function(v) local c = TSB(); if c then c.showIconDivider = v; TSBRefresh() end end },
+                },
+            })
+            MakeCog(row._leftRegion, showIconCog, "Spell Icon Settings")
             local _, showNameCog = EllesmereUI.BuildCogPopup({
                 title = "Spell Name",
                 rows = {
