@@ -1701,7 +1701,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Visibility | Visibility Options (renaming lives in the selector's
         -- inline edit; "Never" visibility fully disables the bar's work).
         local visRow
-        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+        visRow, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
             { getStore = function() return ns.GetBar(barId) end,
               legacyKey = "visibility",
               caps = ns.EDB_VIS_CAPS,
@@ -1710,34 +1710,18 @@ initFrame:SetScript("OnEvent", function(self)
                   -- rebuilds), so run the full apply, not just the vis pass.
                   ns.ApplyBar(barId)
                   ns.UpdateAllBarVisibility()
-              end },
-            { type = "dropdown", text = "Visibility Options",
-              values = { __placeholder = "..." }, order = { "__placeholder" },
-              getValue = function() return "__placeholder" end,
-              setValue = function() end });  y = y - h
-        do
-            local rightRgn = visRow._rightRegion
-            if rightRgn._control then rightRgn._control:Hide() end
-            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
-                EllesmereUI.VIS_OPT_ITEMS,
-                function(k)
-                    local c = ns.GetBar(barId)
-                    if c and c[k] then return true end
-                    return false
-                end,
-                function(k, v)
-                    local c = ns.GetBar(barId)
-                    if not c then return end
-                    c[k] = v
-                    ns.UpdateAllBarVisibility()
-                    EllesmereUI:RefreshPage()
-                end)
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
-            rightRgn._control = cbDD
-            rightRgn._lastInline = nil
-            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
-        end
+              end,
+              onOptionChanged = function() ns.UpdateAllBarVisibility() end },
+            -- Hide Border moved up from the section's old trailing half-row into the slot
+            -- the Visibility Options dropdown left behind, so neither row is half empty.
+            { type = "toggle", text = "Hide Border",
+              tooltip = "Hide the 1-pixel outline around the bar.",
+              getValue = function() return cfg.hideBorder == true end,
+              setValue = function(v)
+                  cfg.hideBorder = v and true or false
+                  ns.ApplyTheme(barId)
+                  RefreshPreviewTheme()
+              end });  y = y - h
         -- Inline cog on the Visibility dropdown: Bar Strata. Lives here rather
         -- than as a row of its own because it answers the same question the
         -- visibility controls do -- when and where this bar shows up -- and it
@@ -1911,14 +1895,6 @@ initFrame:SetScript("OnEvent", function(self)
                   cfg.hoverHighlight = v and true or false
                   Apply()
               end }
-        local showBorderCfg = { type = "toggle", text = "Hide Border",
-              tooltip = "Hide the 1-pixel outline around the bar.",
-              getValue = function() return cfg.hideBorder == true end,
-              setValue = function(v)
-                  cfg.hideBorder = v and true or false
-                  ns.ApplyTheme(barId)
-                  RefreshPreviewTheme()
-              end }
         -- Bar Opacity drives BOTH styles: the Modern flat color's alpha or
         -- the EllesmereUI shell's backdrop dim, whichever is active.
         local opacityRow
@@ -2065,9 +2041,6 @@ initFrame:SetScript("OnEvent", function(self)
               end });  y = y - h
 
         _, h = W:DualRow(parent, y, scaleCfg, hoverBlocksCfg);  y = y - h
-        -- Odd last slot: blank right label per the DualRow rules (a nil right
-        -- config would stretch the toggle across the full row).
-        _, h = W:DualRow(parent, y, showBorderCfg, { type = "label", text = "" });  y = y - h
 
         -- Bar deletion lives in the selector dropdown's inline delete -- no
         -- body row. Visibility moved to the top of the section; rename =
@@ -3353,8 +3326,10 @@ initFrame:SetScript("OnEvent", function(self)
             cfg.hideBorder = nil
             cfg.visibility = "always"
             cfg.visibilityModes = nil
-            for _, item in ipairs(EllesmereUI.VIS_OPT_ITEMS) do
-                cfg[item.key] = nil
+            -- VIS_OPT_KEYS, not VIS_OPT_ITEMS: the counter-lane keys have no row in the
+            -- legacy item list, and a reset that skipped them would leave a bar hidden.
+            for _, k in ipairs(EllesmereUI.VIS_OPT_KEYS) do
+                cfg[k] = nil
             end
             cfg.savedPos = nil
             ns.ApplyBar(cfg.id)

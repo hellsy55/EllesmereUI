@@ -12459,13 +12459,10 @@ local function UnitFrame_OnLeave(self)
             -- keep the frame shown on mouse leave instead of re-hiding it.
             local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions
                                  and EllesmereUI.CheckVisibilityOptions(s)
-            local hasAnyHideOpt = s.visHideNoTarget
-                               or s.visHideNoEnemy
-                               or s.visHideMounted
-                               or s.visOnlyMounted
-                               or s.visHideHousing
-                               or s.visOnlyHousing
-                               or s.visOnlyInstances
+            -- Shared walk over every option lane: a hand-written subset here left a frame
+            -- fading out on mouse leave whenever it used a lane the list had not caught up to.
+            local hasAnyHideOpt = EllesmereUI and EllesmereUI.VisHasAnyOption
+                               and EllesmereUI.VisHasAnyOption(s)
             local keepShown = (not hiddenByOpts) and hasAnyHideOpt
             leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0
         end
@@ -13884,13 +13881,8 @@ function InitializeFrames()
                     -- mounted, etc.) and it's NOT currently triggering, treat the frame as
                     -- a positive-show so it doesn't require hover to see (fixes "dismount
                     -- in combat keeps frame hidden" / "hide if no target inverted").
-                    local hasAnyHideOpt = s.visHideNoTarget
-                                       or s.visHideNoEnemy
-                                       or s.visHideMounted
-                                       or s.visOnlyMounted
-                                       or s.visHideHousing
-                                       or s.visOnlyHousing
-                                       or s.visOnlyInstances
+                    local hasAnyHideOpt = EllesmereUI and EllesmereUI.VisHasAnyOption
+                                       and EllesmereUI.VisHasAnyOption(s)
                     if hiddenByOpts then
                         bodyAlpha = 0
                     elseif hasAnyHideOpt then

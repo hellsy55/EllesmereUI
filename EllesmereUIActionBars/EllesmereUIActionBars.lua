@@ -8837,7 +8837,9 @@ local function BuildVisibilityString(info, s, visOverride)
     -- keeps this working in combat, and Lua cannot un-hide past the driver.
     if s.visOnlyMounted then visOptHide = visOptHide .. "[nomounted] hide; " end
     if s.visHideNoTarget then visOptHide = visOptHide .. "[noexists] hide; " end
+    if s.visHideWithTarget then visOptHide = visOptHide .. "[exists] hide; " end
     if s.visHideNoEnemy then visOptHide = visOptHide .. "[noharm] hide; " end
+    if s.visHideWithEnemy then visOptHide = visOptHide .. "[harm] hide; " end
 
     -- Authoritative multi-select set. Explicit overrides (toggle keybind,
     -- QuickKeybind, grid drag) substitute the whole mode term as for single
@@ -9276,8 +9278,13 @@ function EAB:_RefreshSoftTargetGate()
         local s = self.db.profile.bars[info.key]
         if s then
             if s.visHideNoTarget then anySoft = true end
-            if s.visHideNoTarget or s.visOnlyInstances or s.visHideHousing
-               or s.visOnlyHousing or s.visHideMounted then
+            -- Driven off the shared key list rather than a hand-written subset: an
+            -- option missing here silently skips the whole UpdateHousingVisibility pass
+            -- for that bar. Deliberately over-inclusive (it also matches the
+            -- macro-expressible lanes) -- a needless walk on a rare zone/mount edge is
+            -- cheap, a missed one leaves the bar stale until the next settings change.
+            if not anyNonMacro and EllesmereUI.VisHasAnyOption
+               and EllesmereUI.VisHasAnyOption(s) then
                 anyNonMacro = true
             end
         end
@@ -9717,29 +9724,6 @@ function EAB:UpdateHousingVisibility()
                 -- UnitExists("target") doesn't, so test those tokens directly.
                 if not UnitExists("target") and (UnitExists("softinteract") or UnitExists("softenemy") or UnitExists("softfriend")) then return true end
             end
-            if s.visOnlyInstances then
-                local _, iType, diffID = GetInstanceInfo()
-                diffID = tonumber(diffID) or 0
-                local inInstance = false
-                if diffID > 0 then
-                    if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
-                        inInstance = false
-                    elseif iType == "party" or iType == "raid" or iType == "scenario" or iType == "arena" or iType == "pvp" then
-                        inInstance = true
-                    end
-                end
-                if not inInstance then return true end
-            end
-            if s.visHideHousing then
-                if C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot() then
-                    return true
-                end
-            end
-            if s.visOnlyHousing then
-                if not (C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot()) then
-                    return true
-                end
-            end
             if s.visHideMounted then
                 -- Regular mounts are handled entirely by the secure "[mounted] hide"
                 -- clause, which self-updates even in combat, so the bar reappears the
@@ -9753,6 +9737,16 @@ function EAB:UpdateHousingVisibility()
                     and EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
                     return true
                 end
+            end
+            -- Every other Lua-only option (both instance lanes, both housing lanes, both
+            -- skyriding-mount lanes) comes from the shared evaluator, so a lane added
+            -- there is live here too instead of silently going stale on the next zone or
+            -- mount edge. skipMountAxis keeps the driver's [mounted]/[nomounted] clauses
+            -- authoritative, leaving the narrower shapeshift check above as the only
+            -- mount handling on this path.
+            if EllesmereUI and EllesmereUI.CheckVisibilityOptionsNonMacro
+                and EllesmereUI.CheckVisibilityOptionsNonMacro(s, true) then
+                return true
             end
             return false
         end
@@ -13360,9 +13354,13 @@ function EAB:FinishSetup()
                     local frame = barFrames[info.key]
                     if s and frame and not s.alwaysHidden then
                         local vis = s.barVisibility or "always"
+                        -- Any visibility option at all counts: a bar the player cannot
+                        -- see is a bar they cannot drop a spell onto, so surfacing one
+                        -- that did not strictly need it is the harmless direction.
                         local hasCondition = vis ~= "always" and vis ~= "never"
-                            or s.visHideNoTarget or s.visHideNoEnemy
-                            or s.visHideMounted or s.visOnlyMounted or s.visOnlyInstances
+                        if not hasCondition and EllesmereUI.VisHasAnyOption then
+                            hasCondition = EllesmereUI.VisHasAnyOption(s)
+                        end
                         if hasCondition then
                             _gridSurfacedBars[info.key] = true
                             RegisterAttributeDriver(frame, "state-visibility", "show")
