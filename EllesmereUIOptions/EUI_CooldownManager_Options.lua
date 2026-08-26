@@ -16891,28 +16891,28 @@ initFrame:SetScript("OnEvent", function(self)
                   end });  y = y - h
         end
 
-        -- Vertical Orientation | (free). Moved down here, after Max Icons/Overflow To;
-        -- shown for every non-focuskick bar regardless of overflow capability, same as
-        -- before the move (this section's outer gate is `not isFocusKick`, not isOverflowBar).
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Vertical Orientation",
-              getValue=function() return BD().verticalOrientation end,
-              setValue=function(v)
-                  local bd = BD()
-                  bd.verticalOrientation = v
-                  bd.growDirection = v and "DOWN" or "RIGHT"
-                  -- Orientation flip invalidates the row growth direction too (UP/DOWN are
-                  -- horizontal-bar values, LEFT/RIGHT vertical).
-                  bd.rowGrowDirection = nil
-                  -- Orientation flip swaps the meaning of width-axis vs height-axis, so width/height match caches no longer apply.
-                  bd._matchIconPhys = nil
-                  bd._matchExtraPixels = nil
-                  bd._matchStride = nil
-                  bd._matchExtraPixelsH = nil
-                  bd._matchStrideH = nil
-                  ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
-              end },
-            { type="label", text="" });  y = y - h
+        -- Vertical Orientation shares a row with Keep Buffs in Same Place on buff bars
+        -- (both apply there), and stands alone -- last row of the section -- otherwise.
+        -- Moved down here, after Max Icons/Overflow To; shown for every non-focuskick bar
+        -- regardless of overflow capability, same as before the move (this section's outer
+        -- gate is `not isFocusKick`, not isOverflowBar).
+        local vertOrientCfg = { type="toggle", text="Vertical Orientation",
+            getValue=function() return BD().verticalOrientation end,
+            setValue=function(v)
+                local bd = BD()
+                bd.verticalOrientation = v
+                bd.growDirection = v and "DOWN" or "RIGHT"
+                -- Orientation flip invalidates the row growth direction too (UP/DOWN are
+                -- horizontal-bar values, LEFT/RIGHT vertical).
+                bd.rowGrowDirection = nil
+                -- Orientation flip swaps the meaning of width-axis vs height-axis, so width/height match caches no longer apply.
+                bd._matchIconPhys = nil
+                bd._matchExtraPixels = nil
+                bd._matchStride = nil
+                bd._matchExtraPixelsH = nil
+                bd._matchStrideH = nil
+                ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
+            end }
 
         if ns.IsBarBuffFamily(barData) then
             local prof = ns.ECME and ns.ECME.db and ns.ECME.db.profile
@@ -16937,7 +16937,9 @@ initFrame:SetScript("OnEvent", function(self)
                       ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreviewAndResize()
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" }); y = y - h
+                vertOrientCfg); y = y - h
+        else
+            _, h = W:DualRow(parent, y, vertOrientCfg, { type="label", text="" });  y = y - h
         end
 
         end -- not isFocusKick (Bar Layout section)
