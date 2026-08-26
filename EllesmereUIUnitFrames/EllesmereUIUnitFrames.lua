@@ -6993,6 +6993,36 @@ local function CreateCastBar(frame, unit, settings)
     castbar._shieldedTint = shieldedTint
     castbar._shieldHost = shieldHost
 
+    -- Out of Range darken overlay: a plain BLACK layer drawn above the tint
+    -- and shield, on its own host frame. Parented to castbarBg (NOT castbar):
+    -- castbarBg's level is set once, early, and never rewritten afterward
+    -- (see the target/focus/boss reparent block above). castbar's OWN level,
+    -- by contrast, gets rewritten by ApplyConfigCastbarBorder (bgLevel + 2),
+    -- and depending on border settings the border itself can render as high
+    -- as bgLevel + 5 -- a small relative offset off castbar risked landing
+    -- under other overlays. +50 off the stable castbarBg anchor clears
+    -- everything in this function with margin to spare.
+    --
+    -- The Cast Bar Out of Range Alpha fade drives THIS overlay's alpha
+    -- instead of castbar's own alpha. Fading castbar directly used to
+    -- cascade multiplicatively into castTintLayer AND shieldHost together;
+    -- because they're stacked (shield drawn over tint), scaling both down by
+    -- the same factor is NOT equivalent to fading the already-composited
+    -- colour -- the shield's cover power drops faster than its own opacity,
+    -- letting the tint underneath bleed through and discolour "grey"
+    -- uninterruptible casts toward whatever tint sits underneath. A flat
+    -- black overlay drawn on TOP of the fully resolved bar dims it by a pure
+    -- brightness scale instead (result = colour * (1 - overlayAlpha)), which
+    -- can't shift hue no matter how many layers sit underneath.
+    local oorDarkHost = CreateFrame("Frame", nil, castbarBg)
+    oorDarkHost:SetAllPoints(castbar)
+    oorDarkHost:SetFrameLevel(castbarBg:GetFrameLevel() + 50)
+    oorDarkHost:SetAlpha(0)
+    local oorDarkTex = oorDarkHost:CreateTexture(nil, "OVERLAY")
+    oorDarkTex:SetAllPoints(oorDarkHost)
+    oorDarkTex:SetColorTexture(0, 0, 0, 1)
+    castbar._oorDarkHost = oorDarkHost
+
     -- Cast bar reuses the unit's health bar texture (overridden donor-aware in ReloadFrames).
     ns.ApplyCastBarTexture(castbar, (settings and (settings.castbarTexture or settings.healthBarTexture)) or db.profile.healthBarTexture or "none")
     ns.ApplyCastFillOpacity(castbar, settings)
@@ -16490,6 +16520,43 @@ do
         return nil
     end
 
+    -- Cast Bar-only Out of Range Alpha now drives the darken overlay created
+    -- in CreateCastBar (castbar._oorDarkHost) instead of the castbar's OWN
+    -- alpha -- see the overlay's creation comment for why fading castbar
+    -- directly discoloured uninterruptible (shielded) casts.
+    local function ResetCastbarOor(cb)
+        if not cb then return end
+        cb:SetAlpha(1)
+        if cb._oorDarkHost then cb._oorDarkHost:SetAlpha(0) end
+    end
+
+    local function SetCastbarOorDarken(cb, castOor, inRange)
+        if not cb then return end
+        cb:SetAlpha(1)
+        local dark = cb._oorDarkHost
+        if not dark then return end
+        if castOor >= 1 then
+            dark:SetAlpha(0)
+        elseif inRange ~= nil then
+            -- Outside instanced content inRange is a plain boolean, and
+            -- SetAlphaFromBoolean does not reliably re-evaluate a changing
+            -- numeric argument on every call for a non-secret condition
+            -- (measured: the darken amount stuck at whatever it first
+            -- resolved to and ignored later slider changes). Plain SetAlpha
+            -- has no such issue and is safe here specifically because
+            -- comparing/branching on a NON-secret boolean is legal Lua; only
+            -- fall back to the boolean-driven API when the value is
+            -- genuinely secret (raid/instance content).
+            if issecretvalue(inRange) then
+                dark:SetAlphaFromBoolean(inRange, 0, 1 - castOor)
+            else
+                dark:SetAlpha(inRange and 0 or (1 - castOor))
+            end
+        else
+            dark:SetAlpha(0)
+        end
+    end
+
     local function TickBoss(f, unit)
         if not db then return end
         local s = db.profile.boss
@@ -16504,7 +16571,7 @@ do
             -- is nothing to range-check, reset both to full same as the
             -- whole frame.
             if cbg then cbg:SetAlpha(1) end
-            if f.Castbar then f.Castbar:SetAlpha(1) end
+            ResetCastbarOor(f.Castbar)
             return
         end
 
@@ -16530,20 +16597,12 @@ do
 
         -- Cast Bar-only Out of Range Alpha: independent of the whole-frame
         -- fade above (shares the same range check when both are active).
-        if f.Castbar then
-            if castOor >= 1 then
-                f.Castbar:SetAlpha(1)
-            elseif inRange ~= nil then
-                f.Castbar:SetAlphaFromBoolean(inRange, 1, castOor)
-            else
-                f.Castbar:SetAlpha(1)
-            end
-        end
+        SetCastbarOorDarken(f.Castbar, castOor, inRange)
     end
 
     local function ResetCastbarAlpha(unitKey)
         local cb = frames[unitKey] and frames[unitKey].Castbar
-        if cb then cb:SetAlpha(1) end
+        ResetCastbarOor(cb)
     end
 
     local function TickPipelineUnit(unitKey)
@@ -16565,15 +16624,7 @@ do
         -- fade above (shares the same range check when both are active), so
         -- it can dim just the Castbar element on its own.
         local cb = frames[unitKey] and frames[unitKey].Castbar
-        if cb then
-            if castOor >= 1 then
-                cb:SetAlpha(1)
-            elseif inRange ~= nil then
-                cb:SetAlphaFromBoolean(inRange, 1, castOor)
-            else
-                cb:SetAlpha(1)
-            end
-        end
+        SetCastbarOorDarken(cb, castOor, inRange)
     end
 
     local function Tick()
