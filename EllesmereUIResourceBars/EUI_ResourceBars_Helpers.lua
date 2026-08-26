@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EUI_ResourceBars_Options.lua
 --  Registers the Resource Bars module with EllesmereUI
@@ -10,13 +11,12 @@ local function DB()
 	return db and db.profile
 end
 
--- A threshold card is shadowed when an earlier card with the same talent
--- gate covers an overlapping spec scope - a duplicate the resolver can never
--- reach (first match wins). Cards that target another spec, or a talent you
--- aren't running right now, are not shadowed.
--- Spec-overlap mirrors the popup's SpecsConflict (a concrete spec
--- shared, or both "All Specs"); an All-Specs card and a spec-specific card do
--- not shadow each other since the resolver prioritises the specific one.
+-- A threshold card is shadowed when an earlier card with the same talent gate covers an
+-- overlapping spec scope - a duplicate the resolver can never reach (first match wins).
+-- Cards that target another spec, or a talent you aren't running right now, are not
+-- shadowed. Spec-overlap mirrors the popup's SpecsConflict (a concrete spec shared, or
+-- both "All Specs"); an All-Specs card and a spec-specific card do not shadow each
+-- other since the resolver prioritises the specific one.
 ns._ERB_IsThresholdCardShadowed = function(entries, idx)
     local cur = entries and entries[idx]
     if not cur or not cur.specIDs then return false end
@@ -40,10 +40,9 @@ ns._ERB_IsThresholdCardShadowed = function(entries, idx)
     return false
 end
 
--- The unlock-mode open/close cycle leaves these overlays with an
--- undefined rect, so the frame and its regions draw nothing even
--- though it still exists. Capture the overlay's own anchors + height
--- at build time, then on show re-assert them one frame later
+-- The unlock-mode open/close cycle leaves these overlays with an undefined rect, so the
+-- frame and its regions draw nothing even though it still exists. Capture the overlay's
+-- own anchors + height at build time, then on show re-assert them one frame later
 ns.ERB_OverlayHealOnShow = function(ov, obg, olbl, bgAlpha)
 	local txt = olbl:GetText() or ""
 	local pts = {}
@@ -149,10 +148,9 @@ ns.IsBarTypeSecondary = function()
 	return false
 end
 
--- Two cards collide in the resolver only if they share a spec
--- context: a common non-zero specID, OR both are All Specs (0).
--- (A spec-specific card and an All-Specs card sit in different
--- resolver tiers, so they never collide.)
+-- Two cards collide in the resolver only if they share a spec context: a common
+-- non-zero specID, OR both are All Specs (0). (A spec-specific card and an All-Specs
+-- card sit in different resolver tiers, so they never collide.)
 ns.SpecsConflict = function(aIDs, bIDs)
 	if not aIDs or not bIDs then return false end
 	local aHasAll, aSet = false, {}
@@ -196,6 +194,54 @@ ns.HasCRAllSpecs = function()
 		end
 	end
 	return false
+end
+
+-- An entry counts as configured when its single threshold is on (a missing flag
+-- means on, for migrated entries) or when multi-band coloring replaces it. The
+-- band fallbacks mirror ResolveThresholdSpecEntry's ResolveBandConfig: both the
+-- enable flag and the band list fall back to the bar table.
+local function ThresholdEntryConfigured(bd, entry)
+	if entry.thresholdEnabled ~= false then return true end
+	local multi = entry.multiBandEnabled
+	if multi == nil then multi = bd.multiBandEnabled end
+	if not multi then return false end
+	local bands = (entry.bands and #entry.bands > 0) and entry.bands or bd.bands
+	return (bands and #bands > 0) and true or false
+end
+
+-- Threshold notice: the spec names holding a configured threshold on a bar table,
+-- for the info badge on the Threshold Settings button. pageSpecID is set on the
+-- Advanced per-spec pages, where thresholdSpecs is collapsed to a single
+-- implied-spec entry (specIDs = {0}) and the page's own spec is the real scope --
+-- druid form mode lives there too, its per-form entries carry no specIDs at all.
+-- Returns nil when nothing is configured, else the comma-joined name list plus
+-- whether one of those entries applies to the spec being played.
+ns.ThresholdNoticeInfo = function(bd, pageSpecID)
+	local entries = bd and bd.thresholdSpecs
+	if not entries or #entries == 0 then return nil end
+	local activeSpecID = _G._ERB_ResolveSpecIDCached and _G._ERB_ResolveSpecIDCached()
+	local names, seen, active = {}, {}, false
+	for _, entry in ipairs(entries) do
+		if ThresholdEntryConfigured(bd, entry) then
+			local label, hitsActive
+			if pageSpecID then
+				label = SpecName(pageSpecID)
+				hitsActive = (pageSpecID == activeSpecID)
+			elseif entry.specIDs and #entry.specIDs > 0 then
+				label = ns.EntryLabel(entry)
+				for _, sid in ipairs(entry.specIDs) do
+					if sid == 0 or sid == activeSpecID then hitsActive = true; break end
+				end
+			end
+			if label and not seen[label] then
+				seen[label] = true
+				names[#names + 1] = label
+			end
+			if hitsActive then active = true end
+		end
+	end
+	if #names == 0 then return nil end
+	return table.concat(names, ", "), active
 end
 
 -- Enumerate every choosable talent in the active loadout (class + spec trees),

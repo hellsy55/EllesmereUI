@@ -1,8 +1,11 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local ADDON_NAME = ...
 
 local ECL = EllesmereUI.Lite.NewAddon("EllesmereUICursor")
 
-local TEX_CUSTOM = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ellesmere_cursor.tga"
+-- Shared with the Quickdraw hub: the full Ellesmere logo in the parent's
+-- media folder.
+local TEX_CUSTOM = "Interface\\AddOns\\EllesmereUI\\media\\logo-full-thin-2.png"
 
 local RING_TEXTURES = {
     thin   = "Interface\\AddOns\\EllesmereUIQoL\\Media\\ring_thin.tga",
@@ -262,12 +265,11 @@ end
 local _unlockHidGCD, _unlockHidCast
 -- Cursor glue + state watch, riding the suite's shared cursor service
 -- (EllesmereUI.Mouse) instead of a per-frame OnUpdate on the cursor frame:
--- the glue is a Tier A motionOnly subscriber (per render frame while the
--- cursor MOVES, parked while it rests -- a resting cursor ring needs no
--- repositioning, and mouselook freezes GetCursorPosition so steering parks
--- it too, which Only-Show-When-Hidden wants anyway); the unlock-mode
--- circle sync is pure state and rides the 0.15s Tier B watch. Both are
--- subscribed ONLY while the frame is visible (UpdateVisibility owns the
+-- the glue is a Tier A motionOnly subscriber (per render frame while the cursor MOVES,
+-- parked while it rests -- a resting cursor ring needs no repositioning, and mouselook
+-- freezes GetCursorPosition so steering parks it too, which Only-Show-When-Hidden wants
+-- anyway); the unlock-mode circle sync is pure state and rides the 0.15s Tier B watch.
+-- Both are subscribed ONLY while the frame is visible (UpdateVisibility owns the
 -- edges), preserving the old hidden-frame-stops-OnUpdate behavior.
 local function CursorGlueBody(rawX, rawY)
     local s = UIParent:GetEffectiveScale()
@@ -295,10 +297,9 @@ local function SetCursorGlue(on)
     local M = EllesmereUI and EllesmereUI.Mouse
     if not M then return end
     if on then
-        -- Snap immediately: the motionOnly subscriber stays parked until
-        -- the cursor moves, so without this the frame would sit wherever
-        -- it last was (OnEnable's CENTER default on login) until the
-        -- first pixel of motion.
+        -- Snap immediately: the motionOnly subscriber stays parked until the cursor
+        -- moves, so without this the frame would sit wherever it last was (OnEnable's
+        -- CENTER default on login) until the first pixel of motion.
         CursorGlueBody(M.Get())
         M.SubscribeFrame("qolCursor", CursorGlueBody, true)
         M.SubscribeTick("qolCursorWatch", 0.15, CursorWatchBody)
@@ -441,6 +442,7 @@ local function CreateGCDCircle()
         local g2 = GCD_DB()
         if not g2.enabled then return end
         if g2.instanceOnly and not InRealInstancedContent() then return end
+        if g2.combatOnly and not InCombatLockdown() then return end
         -- On cancelled/failed/interrupted casts the GCD resets stop the ring
         if event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_STOP" then
             local cdData = GetSpellCooldown(61304)
@@ -505,6 +507,10 @@ local function ApplyGCDCircle()
     if g.instanceOnly and not InRealInstancedContent() then
         gcdRoot:Hide()
     end
+    -- Respect combat-only: hide if not in combat
+    if g.combatOnly and not InCombatLockdown() then
+        gcdRoot:Hide()
+    end
     if attached and not EllesmereUI._unlockActive then
         -- When the cursor circle is visible, anchor directly to it.
         -- When the cursor circle is hidden (e.g. instance-only outside an instance),
@@ -557,6 +563,12 @@ UpdateVisibility = function()
     if shouldShow and p.instanceOnly then
         shouldShow = InRealInstancedContent()
     end
+    -- "Combat Only": only show while the player is in combat. The combat-edge
+    -- events driving this are registered only while a toggle is on
+    -- (ApplyCombatOnlyEvents).
+    if shouldShow and p.combatOnly then
+        shouldShow = InCombatLockdown() and true or false
+    end
     -- Standard visibility options (returns true if should HIDE)
     if shouldShow and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(p) then
         shouldShow = false
@@ -608,11 +620,12 @@ UpdateVisibility = function()
         HideTrailDots()
     end
 
-    -- GCD circle instance-only check
+    -- GCD circle instance-only / combat-only check
     if gcdRoot then
         local g = GCD_DB()
         if g.enabled then
-            if g.instanceOnly and not InRealInstancedContent() then
+            if (g.instanceOnly and not InRealInstancedContent())
+                or (g.combatOnly and not InCombatLockdown()) then
                 gcdRoot:Hide()
                 gcdRoot:SetScript("OnUpdate", nil)
             else
@@ -637,11 +650,12 @@ UpdateVisibility = function()
         end
     end
 
-    -- Cast circle instance-only check
+    -- Cast circle instance-only / combat-only check
     if castRoot then
         local c = Cast_DB()
         if c.enabled then
-            if c.instanceOnly and not InRealInstancedContent() then
+            if (c.instanceOnly and not InRealInstancedContent())
+                or (c.combatOnly and not InCombatLockdown()) then
                 castRoot:Hide()
                 castRoot:SetScript("OnUpdate", nil)
             else
@@ -822,6 +836,7 @@ local function CreateCastCircle()
         local c2 = Cast_DB()
         if not c2.enabled then return end
         if c2.instanceOnly and not InRealInstancedContent() then return end
+        if c2.combatOnly and not InCombatLockdown() then return end
 
         if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_DELAYED" then
             local name, _, _, startMS, endMS, _, cID = UnitCastingInfo("player")
@@ -943,6 +958,10 @@ local function ApplyCastCircle()
     castRoot:Show()
     -- Respect instance-only: hide if not in instance
     if c.instanceOnly and not InRealInstancedContent() then
+        castRoot:Hide()
+    end
+    -- Respect combat-only: hide if not in combat
+    if c.combatOnly and not InCombatLockdown() then
         castRoot:Hide()
     end
     if attached and not EllesmereUI._unlockActive then
@@ -1162,6 +1181,27 @@ _G._ECL_ApplyCastPosition = function()
     end
 end
 
+-- Combat-edge events exist only while some Combat Only toggle is on: the
+-- cursor circle is default-enabled, so unconditional PLAYER_REGEN_*
+-- registrations would run the visibility pass on every combat edge for every
+-- user. Re-evaluated from OnEnable and the three options setters; Lite's
+-- UnregisterEvent is nil-safe, the _combatEventsOn latch skips no-op flips.
+local function ApplyCombatOnlyEvents()
+    local p = ECL.db and ECL.db.profile
+    local want = (p and (p.combatOnly
+        or (p.gcd and p.gcd.combatOnly)
+        or (p.castCircle and p.castCircle.combatOnly))) and true or false
+    if want == ECL._combatEventsOn then return end
+    ECL._combatEventsOn = want
+    if want then
+        ECL:RegisterEvent("PLAYER_REGEN_DISABLED", UpdateVisibility)
+        ECL:RegisterEvent("PLAYER_REGEN_ENABLED", UpdateVisibility)
+    else
+        ECL:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        ECL:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    end
+end
+
 -------------------------------------------------------------------------------
 --  Initialization
 -------------------------------------------------------------------------------
@@ -1173,6 +1213,7 @@ function ECL:OnInitialize()
                 enabled = true,
                 instanceOnly = false,
                 onlyWhenHidden = false,
+                combatOnly = false,
                 useClassColor = true,
                 hex = "0CD29D",
                 texture = "ring_normal",
@@ -1188,6 +1229,7 @@ function ECL:OnInitialize()
                     alpha = 80,
                     useClassColor = false,
                     instanceOnly = false,
+                    combatOnly = false,
                 },
                 castCircle = {
                     enabled = false,
@@ -1201,6 +1243,7 @@ function ECL:OnInitialize()
                     sparkHex = nil,
                     useClassColor = true,
                     instanceOnly = false,
+                    combatOnly = false,
                 },
                 trail = false,
                 visibility       = "always",
@@ -1245,6 +1288,7 @@ function ECL:OnInitialize()
     _G._ECL_AceDB = self.db
     _G._ECL_Apply = Apply
     _G._ECL_UpdateVisibility = UpdateVisibility
+    _G._ECL_ApplyCombatOnlyEvents = ApplyCombatOnlyEvents
     if EllesmereUI and EllesmereUI.RegisterVisibilityUpdater then
         EllesmereUI.RegisterVisibilityUpdater(UpdateVisibility)
     end
@@ -1306,4 +1350,6 @@ function ECL:OnEnable()
 
     self:RegisterEvent("PLAYER_ENTERING_WORLD", UpdateVisibility)
     self:RegisterEvent("ZONE_CHANGED_NEW_AREA", UpdateVisibility)
+    -- Combat-edge events only while a Combat Only toggle needs them.
+    ApplyCombatOnlyEvents()
 end

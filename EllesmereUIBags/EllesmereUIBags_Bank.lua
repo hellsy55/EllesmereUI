@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIBags_Bank.lua
 --  Bank UI module - opens when interacting with a banker NPC
@@ -58,6 +59,13 @@ local function IsGearItem(itemLink)
     if not itemLink then return false end
     local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
     return classID == ITEM_CLASS_WEAPON or classID == ITEM_CLASS_ARMOR
+end
+local function GetItemLevelAtLocation(loc, itemLink)
+    if loc and loc:IsValid() and C_Item.DoesItemExist(loc) then
+        local level = C_Item.GetCurrentItemLevel(loc)
+        if level and level > 0 then return level end
+    end
+    return itemLink and C_Item.GetDetailedItemLevelInfo(itemLink) or nil
 end
 local function GetAccentRGB()
     if EUI.GetAccentColor then return EUI.GetAccentColor() end
@@ -144,7 +152,7 @@ local function GetCharacterBankTabs()
                 if numSlots > 0 then
                     local icon = td.icon
                     if not icon or icon == 134400 then icon = GetFallbackIcon(bagID) end
-                    tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = td.name or ("Bank Tab " .. i), icon = icon, depositFlags = td.depositFlags or 0 }
+                    tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = td.name or EUI.Lf("Bank Tab %1$d", i), icon = icon, depositFlags = td.depositFlags or 0 }
                 end
             end
         end
@@ -152,7 +160,7 @@ local function GetCharacterBankTabs()
         for i, bagID in ipairs(CHARACTER_BANK_BAGS) do
             local numSlots = C_Container.GetContainerNumSlots(bagID)
             if numSlots > 0 then
-                tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = "Bank Tab " .. #tabs + 1, icon = GetFallbackIcon(bagID), depositFlags = 0 }
+                tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = EUI.Lf("Bank Tab %1$d", #tabs + 1), icon = GetFallbackIcon(bagID), depositFlags = 0 }
             end
         end
     end
@@ -177,10 +185,10 @@ local function GetWarbandBankTabs()
             if bagID then
                 local numSlots = C_Container.GetContainerNumSlots(bagID)
                 if numSlots > 0 then
-                    local name = td.name or ("Tab " .. i)
+                    local name = td.name or EUI.Lf("Tab %1$d", i)
                     local icon = td.icon
                     if not icon or icon == 134400 then icon = GetFallbackIcon(bagID) end
-                    tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = "Warbank " .. name, icon = icon, depositFlags = td.depositFlags or 0 }
+                    tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = EUI.L("Warbank") .. " " .. name, icon = icon, depositFlags = td.depositFlags or 0 }
                 end
             end
         end
@@ -188,7 +196,7 @@ local function GetWarbandBankTabs()
         for i, bagID in ipairs(WARBAND_BANK_BAGS) do
             local numSlots = C_Container.GetContainerNumSlots(bagID)
             if numSlots > 0 then
-                tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = "Warbank Tab " .. #tabs + 1, icon = GetFallbackIcon(bagID), depositFlags = 0 }
+                tabs[#tabs + 1] = { bagID = bagID, numSlots = numSlots, name = EUI.L("Warbank") .. " " .. EUI.Lf("Tab %1$d", #tabs + 1), icon = GetFallbackIcon(bagID), depositFlags = 0 }
             end
         end
     end
@@ -269,6 +277,7 @@ searchClear:Hide()
 searchClear:SetScript("OnClick", function()
     bankSearch:SetText("")
     bankSearch:ClearFocus()
+    C_Container.SetItemSearch("")
 end)
 
 bankSearch:SetScript("OnEnterPressed", function(self)
@@ -277,12 +286,17 @@ end)
 bankSearch:SetScript("OnEscapePressed", function(self)
     self:SetText("")
     self:ClearFocus()
+    C_Container.SetItemSearch("")
 end)
 bankSearch:SetScript("OnTextChanged", function(self)
     local text = self:GetText()
     searchPlaceholder:SetShown(text == "")
     searchClear:SetShown(text ~= "")
+    C_Container.SetItemSearch(text)
     if EUI_Bank:IsVisible() then EUI_Bank:RefreshBank() end
+    if EUI_Bags and EUI_Bags:IsVisible() and EUI_Bags.RefreshInventory then
+        EUI_Bags:RefreshInventory()
+    end
 end)
 
 -- Sort button
@@ -589,6 +603,9 @@ EUI_BankTabConfigFrame:Hide()
 -- Built lazily on the first right-click of a bank tab.
 local function EnsureBankTabConfigFrame()
     if EUI_BankTabConfigFrame.OpenBankTabSettings then return end
+    -- Options surface is LoadOnDemand; load it so EUI.BuildCheckboxControl exists.
+    if not EUI.BuildCheckboxControl then EUI:EnsureLoaded() end
+    if not EUI.BuildCheckboxControl then return end
     local bgAtlasBTC = EUI_BankTabConfigFrame:CreateTexture(nil, "BACKGROUND")
     bgAtlasBTC:SetAllPoints()
     bgAtlasBTC:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\modern_blizz.png")
@@ -795,7 +812,7 @@ local function EnsureBankTabConfigFrame()
         if parent.bankType and parent.tabId then
             local newName = bankTabNameEditBox:GetText()
             if not newName or newName == "" then
-                newName = parent.fallbackName or ("Tab " .. tostring(parent.tabId))
+                newName = parent.fallbackName or EUI.Lf("Tab %1$d", parent.tabId)
             end
 
             C_Bank.UpdateBankTabSettings(parent.bankType, parent.tabId, newName, parent.icon, parent.depositFlags or 0)
@@ -842,7 +859,7 @@ local function EnsureBankTabConfigFrame()
         local displayName = tabData.name
         if self.bankType == Enum.BankType.Account then
             -- Remove "Warbank " prefix as this is a prefix added by EUI and not the real tab name. This is necessary to edit the tab
-            local prefix = "Warbank "
+            local prefix = EUI.L("Warbank") .. " "
             local prefix_len = #prefix
             if strsub(tabData.name, 1, prefix_len) == prefix then
                 displayName = strsub(tabData.name, prefix_len + 1)
@@ -1200,16 +1217,15 @@ end
 -------------------------------------------------------------------------------
 --  TradeSkillMaster compatibility
 -------------------------------------------------------------------------------
--- TSM decides whether its Banking UI targets the character bank or the
--- warband bank by watching Blizzard's BankPanel, which EUI reparents to a
--- hidden frame, so TSM never sees bank/warbank switches made in the EUI
--- sidebar. TSM supports addon-provided bank frames through two globals
--- (TSM Core/Service/Banking/Core.lua): it calls Addon_GetBankType() to
--- read the active bank type, and hooksecurefunc's Addon_SetBankType at
--- init so it can re-check whenever the view changes. Both globals must
--- exist before TSM initializes; EUI loads first alphabetically. Cost when
--- TSM is absent is one comparison per RefreshBank. Guarded so another bag
--- addon that already implements the contract wins.
+-- TSM decides whether its Banking UI targets the character bank or the warband bank by
+-- watching Blizzard's BankPanel, which EUI reparents to a hidden frame, so TSM never
+-- sees bank/warbank switches made in the EUI sidebar. TSM supports addon-provided bank
+-- frames through two globals (TSM Core/Service/Banking/Core.lua): it calls
+-- Addon_GetBankType() to read the active bank type, and hooksecurefunc's
+-- Addon_SetBankType at init so it can re-check whenever the view changes. Both globals
+-- must exist before TSM initializes; EUI loads first alphabetically. Cost when TSM is
+-- absent is one comparison per RefreshBank. Guarded so another bag addon that already
+-- implements the contract wins.
 
 local _lastTSMBankType = nil
 
@@ -1615,7 +1631,6 @@ function EUI_Bank:RefreshBank()
     local searchQuery = ""
     if EUI_Bank._searchBox then
         searchQuery = EUI_Bank._searchBox:GetText() or ""
-        searchQuery = searchQuery:lower()
     end
     local hasSearch = searchQuery ~= ""
 
@@ -1645,10 +1660,7 @@ function EUI_Bank:RefreshBank()
         if not hasSearch then return true end
         local info = C_Container.GetContainerItemInfo(bagID, slot)
         if not info then return false end
-        local link = C_Container.GetContainerItemLink(bagID, slot)
-        local itemName = link and GetItemInfo(link)
-        if not itemName then return false end
-        return itemName:lower():find(searchQuery, 1, true) ~= nil
+        return not info.isFiltered
     end
 
     -- Phase 1: Build flat layout list (no button creation, just positions).
@@ -1704,23 +1716,10 @@ function EUI_Bank:RefreshBank()
                 for slot = 1, tab.numSlots do
                     local info = C_Container.GetContainerItemInfo(tab.bagID, slot)
                     if info then used = used + 1 end
-                    if not hasSearch or info then
+                    -- use native search filter so type keywords work too
+                    if not hasSearch or (info and not info.isFiltered) then
                         visibleSlots[#visibleSlots + 1] = { slot = slot, _cachedInfo = info }
                     end
-                end
-                -- When searching, filter by name
-                if hasSearch then
-                    local filtered = {}
-                    for _, vs in ipairs(visibleSlots) do
-                        if vs._cachedInfo then
-                            local link = C_Container.GetContainerItemLink(tab.bagID, vs.slot)
-                            local itemName = link and GetItemInfo(link)
-                            if itemName and itemName:lower():find(searchQuery, 1, true) then
-                                filtered[#filtered + 1] = vs
-                            end
-                        end
-                    end
-                    visibleSlots = filtered
                 end
                 if not hasSearch or #visibleSlots > 0 then
                     headerIdx = headerIdx + 1
@@ -1765,12 +1764,12 @@ function EUI_Bank:RefreshBank()
     if _selectedView == -1 then
         -- OneBank: character bank only, flat with "Bank" header
         local slots, filled = BuildOneView(charTabs)
-        LayoutFlatSlots(slots, "Bank (" .. filled .. " / " .. #slots .. ")")
+        LayoutFlatSlots(slots, EllesmereUI.Lf("Bank (%1$d / %2$d)", filled, #slots))
 
     elseif _selectedView == -3 then
         -- OneWarbank: warband bank only, flat with "Warband Bank" header
         local slots, filled = BuildOneView(warbTabs)
-        LayoutFlatSlots(slots, "Warband Bank (" .. filled .. " / " .. #slots .. ")")
+        LayoutFlatSlots(slots, EllesmereUI.Lf("Warband Bank (%1$d / %2$d)", filled, #slots))
 
     elseif _selectedView == -2 then
         -- All Warbank Tabs: per-tab headers for warband only
@@ -1791,14 +1790,11 @@ function EUI_Bank:RefreshBank()
             end
             local visibleSlots = allSlots
             if hasSearch then
+                -- use native search filter so type keywords work too
                 local filtered = {}
                 for _, vs in ipairs(allSlots) do
-                    if vs._cachedInfo then
-                        local link = C_Container.GetContainerItemLink(tab.bagID, vs.slot)
-                        local itemName = link and GetItemInfo(link)
-                        if itemName and itemName:lower():find(searchQuery, 1, true) then
-                            filtered[#filtered + 1] = vs
-                        end
+                    if vs._cachedInfo and not vs._cachedInfo.isFiltered then
+                        filtered[#filtered + 1] = vs
                     end
                 end
                 visibleSlots = filtered
@@ -1904,16 +1900,18 @@ function EUI_Bank:RefreshBank()
             local showBindType = isGear and not info.isBound and BP().bagDisplayBindType
             local showIlvl = isGear and BP().showItemlevelInBags ~= false
             local giIlvl, giBindType
+            local loc
             if showBindType or showIlvl then
-                local _, _, _, i4, _, _, _, _, _, _, _, _, _, b14 = GetItemInfo(itemLink)
-                giIlvl, giBindType = i4, b14
+                local _, _, _, _, _, _, _, _, _, _, _, _, _, b14 = GetItemInfo(itemLink)
+                loc = ItemLocation:CreateFromBagAndSlot(bagID, slot)
+                giIlvl = showIlvl and GetItemLevelAtLocation(loc, itemLink) or nil
+                giBindType = b14
             end
 
             -- Bind Type : BoE / WuE bottom-left (gear only)
             if btn.BindTypeText then
                 if showBindType then
                     local isWuE = false
-                    local loc = ItemLocation:CreateFromBagAndSlot(bagID, slot)
                     if loc and C_Item.DoesItemExist(loc) then
                         isWuE = C_Item.IsBoundToAccountUntilEquip(loc)
                     end
@@ -2085,7 +2083,9 @@ function BuildBankSidebar()
                     -- The bagID is the tab ID UpdateBankTabSettings expects:
                     -- Enum.BagIndex.CharacterBankTab_1..6 / AccountBankTab_1..5
                     EnsureBankTabConfigFrame()
-                    EUI_BankTabConfigFrame:OpenBankTabSettings(tabData, tabData.bagID)
+                    if EUI_BankTabConfigFrame.OpenBankTabSettings then
+                        EUI_BankTabConfigFrame:OpenBankTabSettings(tabData, tabData.bagID)
+                    end
                     return
                 end
             end
@@ -2369,6 +2369,7 @@ eventFrame:SetScript("OnEvent", function(_, event)
             EUI_Bank._searchBox:SetText("")
             EUI_Bank._searchBox:ClearFocus()
         end
+        C_Container.SetItemSearch("")
         local bankScale = BP().bagScale or 1
         EUI_Bank:SetScale(bankScale)
         EUI_Bank:Show()
@@ -2411,6 +2412,7 @@ eventFrame:SetScript("OnEvent", function(_, event)
             EUI_Bank._searchBox:SetText("")
             EUI_Bank._searchBox:ClearFocus()
         end
+        C_Container.SetItemSearch("")
         EUI_Bank:Hide()
         -- Auto-close bags if we auto-opened them
         if EUI_Bank._autoOpenedBags and EUI_Bags and EUI_Bags:IsVisible() then
@@ -2457,11 +2459,10 @@ eventFrame:SetScript("OnEvent", function(_, event)
     end
 end)
 
--- Kill Blizzard bank frame: reparent to hidden frame only.
--- Do NOT call BankFrame:Hide() -- that fires BANKFRAME_CLOSED and kills
--- the bank interaction. Reparenting is invisible to the event system.
--- Do NOT use SetScript on BankFrame -- that taints it and breaks
--- PurchaseBankTab() and other secure bank operations.
+-- Kill Blizzard bank frame: reparent to hidden frame only. Do NOT call BankFrame:Hide()
+-- -- that fires BANKFRAME_CLOSED and kills the bank interaction. Reparenting is
+-- invisible to the event system. Do NOT use SetScript on BankFrame -- that taints it
+-- and breaks PurchaseBankTab() and other secure bank operations.
 do
     local hiddenParent = CreateFrame("Frame")
     hiddenParent:Hide()

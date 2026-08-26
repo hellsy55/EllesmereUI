@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIQoL_RaidTools.lua -- Raid control panels (QoL: Raid Tools page)
 --
@@ -5,6 +6,10 @@
 --  timer; plain buttons) and Markers (target row + world row; secure buttons,
 --  placeable mid-combat) -- shown either as one combined window (default) or
 --  as two independently positioned windows.
+--
+--  Group & Pull buttons are all created once at build; per-button switches and
+--  0-second pull slots decide which ones LayoutGroupContent places (it re-flows
+--  the survivors and is the only writer of the group content height).
 --
 --  SHOW MODE (p.mode) replaces the old shared-visibility system outright:
 --
@@ -230,17 +235,18 @@ local sections = {}            -- key -> shell frame
 local shellTitle = {}          -- key -> title fontstring
 local groupHolder, markersHolder   -- plain content holders (see header)
 local iconBtn                  -- collapsed-state square
-local GROUP_CONTENT_H, MARKERS_CONTENT_H   -- computed at build
+-- Markers are fixed at build; the Group & Pull height follows the settings and
+-- is re-computed by LayoutGroupContent on every Apply.
+local GROUP_CONTENT_H, MARKERS_CONTENT_H
 local Apply                    -- forward: the event handler closes over it
 
 -- ONE representation of each secure decision, run from both paths.
 --
--- The keybind clicks the button, which is the only thing that works during
--- combat. Out of combat the same snippet is run through SecureHandlerExecute
--- instead of being re-implemented in Lua. EllesmereUIRaidFrames.lua does
--- exactly this, for exactly this reason: the driver manager only fires the
--- attribute handlers on value CHANGES, so a reapply with unchanged states
--- would otherwise never run.
+-- The keybind clicks the button, which is the only thing that works during combat. Out
+-- of combat the same snippet is run through SecureHandlerExecute instead of being
+-- re-implemented in Lua. EllesmereUIRaidFrames.lua does exactly this, for exactly this
+-- reason: the driver manager only fires the attribute handlers on value CHANGES, so a
+-- reapply with unchanged states would otherwise never run.
 local RUN_APPLY = [[ self:RunAttribute("apply") ]]
 
 -- The keybind's job depends on Default to Collapsed When Shown:
@@ -348,12 +354,11 @@ local COLLAPSE_SNIPPET = [[
     end
 ]]
 
--- Every fontstring is registered on the OUR-frame that owns it (`_fonts`),
--- and ApplyFonts walks the small fixed owner list -- no module-level registry
--- to keep in sync with frame lifetime. MakeFont (like every options-panel
--- helper) hardcodes the options-panel font; on-screen text has to resolve
--- through GetFontPath instead, or these panels would be the only ones in the
--- suite ignoring the Global Font setting.
+-- Every fontstring is registered on the OUR-frame that owns it (`_fonts`), and
+-- ApplyFonts walks the small fixed owner list -- no module-level registry to keep in
+-- sync with frame lifetime. MakeFont (like every options-panel helper) hardcodes the
+-- options-panel font; on-screen text has to resolve through GetFontPath instead, or
+-- these panels would be the only ones in the suite ignoring the Global Font setting.
 local FONT_KEY = "extras"      -- QoL's key in EllesmereUI._addonKeyToFolder
 local fontOwners = {}          -- filled at build: shells + holders
 local function TrackFont(owner, fs, size)
@@ -378,19 +383,20 @@ end
 
 local groupButtons = {}        -- plain buttons, enable-gated on assist
 local markerButtons = {}       -- secure buttons, dimmed on assist
-local pullButtons = {}         -- fixed set of 3; durations are re-labelled live
-local convertButton
+local pullButtons = {}         -- fixed set of 3; only the ones above 0s show
+-- Created once at build; the layout pass decides which reach the screen. Ready
+-- Check has no switch by design.
+local readyButton, roleButton, convertButton, disbandButton, stopButton
 
 -- Both marker rows draw Blizzard's own raid target sheet -- the texture the
 -- rest of the suite already uses for markers, in nameplates and raid frames.
 local MARKER_SHEET = "Interface\\TargetingFrame\\UI-RaidTargetingIcons"
 
--- The sheet's SYMBOL order (1 Star, 2 Circle, 3 Diamond, 4 Triangle, 5 Moon,
--- 6 Square, 7 Cross, 8 Skull) is NOT the WORLD marker ID order (1 Blue,
--- 2 Green, 3 Purple, 4 Red, 5 Yellow, 6 Orange, 7 Silver, 8 White). Each
--- flare carries its symbol, so the button shows the symbol and this maps it
--- to the flare that actually wears it -- without it, clicking Star (symbol 1)
--- dropped the BLUE flare (world ID 1).
+-- The sheet's SYMBOL order (1 Star, 2 Circle, 3 Diamond, 4 Triangle, 5 Moon, 6 Square,
+-- 7 Cross, 8 Skull) is NOT the WORLD marker ID order (1 Blue, 2 Green, 3 Purple, 4 Red,
+-- 5 Yellow, 6 Orange, 7 Silver, 8 White). Each flare carries its symbol, so the button
+-- shows the symbol and this maps it to the flare that actually wears it -- without it,
+-- clicking Star (symbol 1) dropped the BLUE flare (world ID 1).
 local SYMBOL_TO_WORLD = { 5, 6, 3, 2, 7, 1, 4, 8 }
 
 -- One slice of the shared EllesmereUIQoLDB profile, the same arrangement
@@ -415,22 +421,25 @@ local DB_DEFAULTS = {
         -- One scale for the whole feature: whichever windows the Show as
         -- choice puts on screen (and the collapsed icon) all wear it.
         scale         = 1,
-        -- Three slots is a LAYOUT choice (they fill one row beside Stop), not
-        -- a security constraint -- the pull buttons are plain, only the marker
-        -- buttons are secure. Growing the count later means growing the panel,
-        -- nothing more.
+        -- Three slots is a LAYOUT choice (they fill one row beside Stop), not a
+        -- security constraint -- the pull buttons are plain, only the marker buttons
+        -- are secure. Growing the count later means growing the panel, nothing more.
+        -- 0 = slot hidden; all three at 0 removes the pull row, Stop included.
         pullTimes     = { PULL_DEFAULTS[1], PULL_DEFAULTS[2], PULL_DEFAULTS[3] },
+        -- Per-button switches (Ready Check has none); hidden buttons close up.
+        showRoleCheck = true,
+        showConvert   = true,
+        showDisband   = true,
         -- Per-section: pos[key] = { point, relPoint, x, y }
         pos           = {},
     },
   },
 }
 
--- Our slice of the shared QoL profile, re-derived on every read -- the same
--- accessor BattleRes and MovementAlert use. Deliberately NOT cached: a profile
--- switch replaces the whole profile table, and a cached pointer would leave
--- the event handler, the slash command and the unlock callbacks writing into
--- an orphaned table.
+-- Our slice of the shared QoL profile, re-derived on every read -- the same accessor
+-- BattleRes and MovementAlert use. Deliberately NOT cached: a profile switch replaces
+-- the whole profile table, and a cached pointer would leave the event handler, the
+-- slash command and the unlock callbacks writing into an orphaned table.
 --
 -- A PURE READ, with no `or {}` seeding. Spec Overrides captures a page by
 -- swapping the profile tables for read-tracking proxies: reading a table value
@@ -509,8 +518,12 @@ local function MakeMarkerButton(parent, index, kind)
     local b = CreateFrame("Button", nil, parent, "SecureActionButtonTemplate")
     b:SetSize(MARKER_SZ, MARKER_SZ)
     -- One phase only: the "!" prefix toggles the marker, so firing on both the
-    -- down and the up would set it and immediately clear it again.
+    -- down and the up would set it and immediately clear it again. useOnKeyDown
+    -- is pinned because left unset it follows the ActionButtonUseKeyDown CVar,
+    -- and at 0 the secure handler acts on the up phase we never register --
+    -- every marker button goes dead.
     b:RegisterForClicks("AnyDown")
+    b:SetAttribute("useOnKeyDown", true)
 
     local icon = b:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
@@ -571,10 +584,9 @@ end
 
 -- Ready check, role check, countdown and markers all require lead or assist.
 --
--- Solo counts as permitted. You are the only member, so nothing is being taken
--- from anyone, and the game already no-ops whatever does not apply outside a
--- group -- gating it ourselves would only make the panels dead on a target
--- dummy for no reason.
+-- Solo counts as permitted. You are the only member, so nothing is being taken from
+-- anyone, and the game already no-ops whatever does not apply outside a group -- gating
+-- it ourselves would only make the panels dead on a target dummy for no reason.
 local function HasAssist()
     if not IsInGroup() then return true end
     return UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
@@ -603,15 +615,23 @@ local function AssistSuppressed()
     return IsInRaid() and not HasAssist()
 end
 
--- Durations are the only pull-timer setting that can change at runtime: the
--- button count is fixed at build, so re-labelling is all it takes.
-local function RefreshPullTimes()
+-- An optional button's switch, defaulting to shown for an unset profile.
+local function ButtonShown(key)
+    local p = P()
+    return not p or p[key] ~= false
+end
+
+-- The pull durations worth a button, in slot order. 0 (and anything below it)
+-- means the user turned that slot off.
+local function VisiblePullTimes()
     local times = (P() and P().pullTimes) or {}
-    for i, b in ipairs(pullButtons) do
-        local secs = times[i] or PULL_DEFAULTS[i]
-        b.secs = secs
-        b._lbl:SetText(tostring(secs))
+    local out = {}
+    for i = 1, PULL_SLOTS do
+        local secs = times[i]
+        if secs == nil then secs = PULL_DEFAULTS[i] end
+        if secs and secs > 0 then out[#out + 1] = secs end
     end
+    return out
 end
 
 -- GROUP_ROSTER_UPDATE is one of the chattiest events in a raid -- it bursts on
@@ -764,11 +784,10 @@ local function MakeShell(key)
             self:Hide()
         end
     ]])
-    -- A driver transition is a context change: it reclaims control from any
-    -- manual override and re-seeds the collapsed/expanded form. The icon has
-    -- no state template of its own (click templates do not dispatch _onstate),
-    -- so each shell fans the verdict out to it -- both shells stamping the
-    -- same values is idempotent.
+    -- A driver transition is a context change: it reclaims control from any manual
+    -- override and re-seeds the collapsed/expanded form. The icon has no state template
+    -- of its own (click templates do not dispatch _onstate), so each shell fans the
+    -- verdict out to it -- both shells stamping the same values is idempotent.
     f:SetAttribute("_onstate-euirt_vis", [[
         local vis = (newstate == "show")
         self:SetAttribute("visible", vis)
@@ -813,51 +832,96 @@ local function MakeShell(key)
     return f
 end
 
+-- Places the Group & Pull buttons per the settings and is the ONLY writer of
+-- GROUP_CONTENT_H. Plain frames only, run from build and Apply (out of combat);
+-- must run BEFORE ApplyLayout, which sizes the shells from that height.
+local function LayoutGroupContent()
+    if not groupHolder then return end
+    local f = groupHolder
+
+    -- Row plan: two action buttons per row in fixed order; hidden buttons close
+    -- the gap, a lone button takes the full width.
+    local rows, pair = {}, {}
+    local function Add(b)
+        pair[#pair + 1] = b
+        if #pair == 2 then rows[#rows + 1] = pair; pair = {} end
+    end
+    Add(readyButton)
+    if ButtonShown("showRoleCheck") then Add(roleButton) end
+    if ButtonShown("showConvert")   then Add(convertButton) end
+    if ButtonShown("showDisband")   then Add(disbandButton) end
+    if #pair > 0 then rows[#rows + 1] = pair end
+
+    -- Pull row: surviving durations move onto the leading buttons (the click
+    -- closure reads b.secs), Stop last; no durations = no row at all.
+    local times = VisiblePullTimes()
+    if #times > 0 then
+        local pull = {}
+        for i, secs in ipairs(times) do
+            local b = pullButtons[i]
+            b.secs = secs
+            b._lbl:SetText(tostring(secs))
+            pull[i] = b
+        end
+        pull[#pull + 1] = stopButton
+        rows[#rows + 1] = pull
+    end
+
+    -- Hide all, then show only what the plan placed.
+    for _, b in ipairs(groupButtons) do b:Hide() end
+
+    local y = 0
+    for _, row in ipairs(rows) do
+        local n = #row
+        local w = (PANEL_W - PAD * 2 - ROW_GAP * (n - 1)) / n
+        for i, b in ipairs(row) do
+            b:SetWidth(w)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
+            b:Show()
+        end
+        y = y - ROW_H - ROW_GAP
+    end
+    y = y + ROW_GAP   -- the last row's trailing gap is not content
+
+    GROUP_CONTENT_H = -y
+    f:SetHeight(GROUP_CONTENT_H)
+end
+
 -- Group & Pull content, in its own plain holder so one-window mode can treat
--- it uniformly with the markers holder.
+-- it uniformly with the markers holder. Creation only -- the buttons are born
+-- unplaced at full-row width, and LayoutGroupContent puts them where the
+-- settings say (MakeGroupButton runs labels through L itself).
 local function BuildGroupContent()
     groupHolder = CreateFrame("Frame", nil, sections.Group)
     groupHolder:SetWidth(PANEL_W)
     fontOwners[#fontOwners + 1] = groupHolder
     local f = groupHolder
-    local y = 0
+    local full = PANEL_W - PAD * 2
 
-    -- MakeGroupButton runs labels through L itself.
-    local half = (PANEL_W - PAD * 2 - ROW_GAP) / 2
-    local ready = MakeGroupButton(f, "Ready Check", half, function() DoReadyCheck() end)
-    ready:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+    readyButton = MakeGroupButton(f, "Ready Check", full, function() DoReadyCheck() end)
+    roleButton  = MakeGroupButton(f, "Role Check", full, function() InitiateRolePoll() end)
 
-    local role = MakeGroupButton(f, "Role Check", half, function() InitiateRolePoll() end)
-    role:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + half + ROW_GAP, y)
-    y = y - ROW_H - ROW_GAP
-
-    convertButton = MakeGroupButton(f, "Convert to Raid", half, function()
+    convertButton = MakeGroupButton(f, "Convert to Raid", full, function()
         if IsInRaid() then C_PartyInfo.ConvertToParty() else C_PartyInfo.ConvertToRaid() end
     end, true)
-    convertButton:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
 
-    local disband = MakeGroupButton(f, "Disband", half, function()
+    disbandButton = MakeGroupButton(f, "Disband", full, function()
         ConfirmDisband()
     end, true)
-    disband:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + half + ROW_GAP, y)
-    y = y - ROW_H - ROW_GAP
 
-    -- Pull timer row: three durations + Stop, sharing the holder's width.
-    local w = (PANEL_W - PAD * 2 - PULL_SLOTS * ROW_GAP) / (PULL_SLOTS + 1)
     for i = 1, PULL_SLOTS do
         -- The pull duration lives on the button and changes at runtime, so
         -- the click reads it through the closure.
         local b
-        b = MakeGroupButton(f, "", w, function() StartPull(b.secs) end)
-        b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
+        b = MakeGroupButton(f, "", full, function() StartPull(b.secs) end)
         pullButtons[i] = b
     end
-    local cancel = MakeGroupButton(f, "Stop", w, StopPull)
-    cancel:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * PULL_SLOTS, y)
-    y = y - ROW_H
+    stopButton = MakeGroupButton(f, "Stop", full, StopPull)
 
-    GROUP_CONTENT_H = -y
-    f:SetHeight(GROUP_CONTENT_H)
+    -- A height right away: BuildAll has callers (the slash command, unlock
+    -- mode) that reach the shells without going through Apply.
+    LayoutGroupContent()
 end
 
 -- Row order matches how they are used: unit markers first, ground markers
@@ -907,8 +971,7 @@ local function BuildCollapsedIcon()
     iconBtn:RegisterForClicks("AnyDown")
     iconBtn:Hide()
     -- Rides the Group shell's saved position with no bookkeeping of its own:
-    -- anchoring to a hidden frame is fine, the anchor resolves through its
-    -- points.
+    -- anchoring to a hidden frame is fine, the anchor resolves through its points.
     iconBtn:SetPoint("TOPLEFT", nil, "TOPLEFT", 0, 0)  -- re-pointed at build
 
     -- The button IS the art: full-bleed image at full opacity, no chrome and
@@ -1055,10 +1118,9 @@ local function ApplyLayout()
         winMarkers:SetHeight(CONTENT_TOP + MARKERS_CONTENT_H + PAD)
     end
 
-    -- The collapsed icon rides the shell the mode actually shows: Markers-only
-    -- anchors (and scales, see Apply) to the Markers shell, everything else to
-    -- Group & Pull. Which CORNER it rides is the Menu Grow Direction setting
-    -- (see ICON_CORNER above).
+    -- The collapsed icon rides the shell the mode actually shows: Markers-only anchors
+    -- (and scales, see Apply) to the Markers shell, everything else to Group & Pull.
+    -- Which CORNER it rides is the Menu Grow Direction setting (see ICON_CORNER above).
     local corner = ICON_CORNER[p and p.growDir] or "TOPLEFT"
     iconBtn:ClearAllPoints()
     iconBtn:SetPoint(corner,
@@ -1073,12 +1135,11 @@ end
 
 -- Positions round-trip through unlock mode's CENTER/CENTER convention.
 --
--- That pairing is not decoration: for an odd-height frame the stored centre
--- ends in .5, and ApplyCenterPosition subtracts the live half-height so the
--- edges land back on whole pixels. Applying the stored value with a plain
--- SetPoint skips that and leaves the frame a pixel off -- visible only after
--- the snap tool, because a normal drag is converted on the way in and a
--- snapped one is not.
+-- That pairing is not decoration: for an odd-height frame the stored centre ends in .5,
+-- and ApplyCenterPosition subtracts the live half-height so the edges land back on
+-- whole pixels. Applying the stored value with a plain SetPoint skips that and leaves
+-- the frame a pixel off -- visible only after the snap tool, because a normal drag is
+-- converted on the way in and a snapped one is not.
 local function DefaultPos(key)
     -- Unpositioned installs park the whole feature in the TOP-LEFT corner of
     -- the screen (a small margin off the edges); two-window mode stacks
@@ -1101,10 +1162,9 @@ local function ApplySectionPosition(key)
     local pos = ((P() and P().pos) or {})[key] or DefaultPos(key)
     if EllesmereUI.ApplyCenterPosition
        and pos.point == "CENTER" and pos.relPoint == "CENTER" then
-        -- Skips anchor-linked elements itself, and defers its own combat case
-        -- for protected frames. FALSE means it could not resolve a live frame
-        -- for this key -- fall through to the plain path, exactly as unlock
-        -- mode's own caller does.
+        -- Skips anchor-linked elements itself, and defers its own combat case for
+        -- protected frames. FALSE means it could not resolve a live frame for this key
+        -- -- fall through to the plain path, exactly as unlock mode's own caller does.
         if EllesmereUI.ApplyCenterPosition(UNLOCK_KEY .. key, pos) then return end
     end
 
@@ -1117,19 +1177,17 @@ local function ApplySectionPosition(key)
 end
 
 local function ApplyPositions()
-    -- While an unlock session is open UNLOCK MODE owns these frames: it moves
-    -- them live and only writes the result on Save & Exit. A settings pass
-    -- landing mid-session (the options panel hiding/showing flips the preview,
-    -- and a combat-deferred Apply completes on PLAYER_REGEN_ENABLED) would drag
-    -- the window back to the last SAVED spot -- and because Save & Exit derives
-    -- the value it stores from the frame's LIVE bounds, the drag is then
-    -- written back as the old position and lost for good. Same guard Action
-    -- Bars, Aura Reminders and the Cooldown Manager already carry.
+    -- While an unlock session is open UNLOCK MODE owns these frames: it moves them live
+    -- and only writes the result on Save & Exit. A settings pass landing mid-session
+    -- (the options panel hiding/showing flips the preview, and a combat-deferred Apply
+    -- completes on PLAYER_REGEN_ENABLED) would drag the window back to the last SAVED
+    -- spot -- and because Save & Exit derives the value it stores from the frame's LIVE
+    -- bounds, the drag is then written back as the old position and lost for good. Same
+    -- guard Action Bars, Aura Reminders and the Cooldown Manager already carry.
     if EllesmereUI._unlockActive then return end
 
-    -- Each shell is positioned only when the Show as choice can put it on
-    -- screen; One Window and Only Group & Pull ride pos.Group, Only Markers
-    -- rides pos.Markers.
+    -- Each shell is positioned only when the Show as choice can put it on screen; One
+    -- Window and Only Group & Pull ride pos.Group, Only Markers rides pos.Markers.
     local showAs = ShowAs()
     if showAs ~= "markers" then ApplySectionPosition("Group") end
     if showAs == "two" or showAs == "markers" then ApplySectionPosition("Markers") end
@@ -1272,10 +1330,9 @@ local function EnsureEvents()
     if not ev then
         ev = CreateFrame("Frame")
         ev:SetScript("OnEvent", function(_, event)
-            -- Pending work FIRST, before the mode gate: a switch TO "never"
-            -- deferred by combat must complete even though the profile
-            -- already reads never -- swallowing it here is how panels get
-            -- stranded on screen.
+            -- Pending work FIRST, before the mode gate: a switch TO "never" deferred by
+            -- combat must complete even though the profile already reads never --
+            -- swallowing it here is how panels get stranded on screen.
             if event == "PLAYER_REGEN_ENABLED" and applyPending then
                 Apply()
                 return
@@ -1369,12 +1426,11 @@ local function RegisterUnlock()
     end
 end
 
--- Options-page entry point, and the completion target for combat-deferred
--- work. Every path below writes secure attributes, drivers, bindings or
--- geometry on protected frames -- ALL blocked in lockdown, the switch to
--- "never" included (SetAttribute is as protected as Hide). So in combat the
--- whole request is parked behind applyPending, with the REGEN listener
--- guaranteed alive to finish it.
+-- Options-page entry point, and the completion target for combat-deferred work. Every
+-- path below writes secure attributes, drivers, bindings or geometry on protected
+-- frames -- ALL blocked in lockdown, the switch to "never" included (SetAttribute is as
+-- protected as Hide). So in combat the whole request is parked behind applyPending,
+-- with the REGEN listener guaranteed alive to finish it.
 function Apply()
     if InCombatLockdown() then
         applyPending = true
@@ -1408,6 +1464,9 @@ function Apply()
     EnsureEvents()
     RegisterUnlock()
     BuildAll()
+    -- Before ApplyLayout: it sizes the shells from GROUP_CONTENT_H, which the
+    -- hidden buttons and the 0-second pull slots move.
+    LayoutGroupContent()
     ApplyLayout()
     -- One Window Scale for everything the feature draws.
     local scale = WindowScale()
@@ -1418,7 +1477,6 @@ function Apply()
     ApplyVisibility()
     ApplyToggleKeybind()
     ApplyFonts()
-    RefreshPullTimes()
     RefreshPermissions(true)
 end
 _G._EUI_RaidTools_Apply = Apply

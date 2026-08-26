@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EUI_UpgradeCalc.lua  (part of EllesmereUIQoL)
 --  Gear upgrade planner: data tables, game logic, and calculator UI.
@@ -28,28 +29,28 @@ end
 -- Add or remove tracks from Data.trackOrder to match the season's track list.
 Data.tracks = {
     Adventurer = {
-        crestName = "Adventurer Crest",
-        hexColor = "|cff1eff00", currID = 3383, tier = 1,
+        crestName = "Adventurer Mistcrest",
+        hexColor = "|cff1eff00", currID = 3442, tier = 1,
         ranks = { 220, 224, 227, 230, 233, 237 },
     },
     Veteran = {
-        crestName = "Veteran Crest",
-        hexColor = "|cff0070dd", currID = 3341, tier = 2,
+        crestName = "Veteran Mistcrest",
+        hexColor = "|cff0070dd", currID = 3443, tier = 2,
         ranks = { 233, 237, 240, 243, 246, 250 },
     },
     Champion = {
-        crestName = "Champion Crest",
-        hexColor = "|cffa335ee", currID = 3343, tier = 3,
+        crestName = "Champion Mistcrest",
+        hexColor = "|cffa335ee", currID = 3444, tier = 3,
         ranks = { 246, 250, 253, 256, 259, 263 },
     },
     Hero = {
-        crestName = "Hero Crest",
-        hexColor = "|cffff8000", currID = 3345, tier = 4,
+        crestName = "Hero Mistcrest",
+        hexColor = "|cffff8000", currID = 3445, tier = 4,
         ranks = { 259, 263, 266, 269, 272, 276 },
     },
     Myth = {
-        crestName = "Myth Crest",
-        hexColor = "|cffffd100", currID = 3347, tier = 5,
+        crestName = "Myth Mistcrest",
+        hexColor = "|cffffd100", currID = 3446, tier = 5,
         ranks = { 272, 276, 279, 282, 285, 289 },
     },
 }
@@ -613,7 +614,70 @@ f:SetFrameStrata("DIALOG")
 f:SetMovable(true)
 f:EnableMouse(true)
 f:RegisterForDrag("LeftButton")
-f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+
+-- Session snap: dock beside CharacterFrame on each open until the user drags.
+local _sessionUnpinned = false
+local _cfSnapHooked = false
+
+local function ShouldSnapToCharacterFrame()
+    if _sessionUnpinned then return false end
+    local cf = _G.CharacterFrame
+    return cf ~= nil and cf:IsShown()
+end
+
+local function DockToCharacterFrame()
+    local cf = _G.CharacterFrame
+    if not cf or not cf:IsShown() then return end
+    local margin = 4
+    local cs = cf:GetEffectiveScale() or 1
+    local es = f:GetEffectiveScale() or 1
+    local ues = UIParent:GetEffectiveScale() or 1
+    local wAbs = (f:GetWidth() or 0) * es
+    local leftRoom = (cf:GetLeft() or 0) * cs
+    local rightRoom = (GetScreenWidth() or 0) * ues - (cf:GetRight() or 0) * cs
+    local minRoom = wAbs + margin * es
+    local leftFits = leftRoom >= minRoom
+    local rightFits = rightRoom >= minRoom
+    local dockLeft
+    if rightFits then
+        dockLeft = false
+    elseif leftFits then
+        dockLeft = true
+    else
+        dockLeft = leftRoom >= rightRoom
+    end
+    f:ClearAllPoints()
+    if dockLeft then
+        f:SetPoint("TOPRIGHT", cf, "TOPLEFT", -margin, 0)
+    else
+        f:SetPoint("TOPLEFT", cf, "TOPRIGHT", margin, 0)
+    end
+end
+
+local function TrySnapToCharacterFrame()
+    if f:IsShown() and ShouldSnapToCharacterFrame() then
+        DockToCharacterFrame()
+    end
+end
+
+local function InstallCharacterFrameSnapHooks()
+    if _cfSnapHooked then return end
+    local cf = _G.CharacterFrame
+    if not cf then return end
+    _cfSnapHooked = true
+    cf:HookScript("OnShow", TrySnapToCharacterFrame)
+    hooksecurefunc(cf, "SetPoint", function()
+        TrySnapToCharacterFrame()
+    end)
+    hooksecurefunc(cf, "SetScale", function()
+        TrySnapToCharacterFrame()
+    end)
+end
+
+f:SetScript("OnDragStart", function(self)
+    _sessionUnpinned = true
+    self:StartMoving()
+end)
 f:SetScript("OnDragStop",  function(self) self:StopMovingOrSizing() end)
 f:Hide()
 
@@ -1688,6 +1752,8 @@ f:SetScript("OnShow", function()
     if IsLocked() then f:Hide(); return end
     Calc.ApplyBgOpacity()
     Calc.ApplyScale()
+    InstallCharacterFrameSnapHooks()
+    TrySnapToCharacterFrame()
     -- Reload persisted crest manual-add offsets each time the frame opens,
     -- so that values the user set before logging out are visible immediately.
     local dbAdds = DB().crestManualAdds
@@ -1700,6 +1766,7 @@ f:SetScript("OnShow", function()
 end)
 f:SetScript("OnHide", function()
     equipListener:UnregisterAllEvents()
+    _sessionUnpinned = false
     -- Cancel any pending equipment-change debounce.
     if _equipDebounce then _equipDebounce:Cancel(); _equipDebounce = nil end
     -- If hidden mid-scan (e.g. combat, /reload), unblock future scans.
@@ -1716,14 +1783,13 @@ SlashCmdList["EUIUPGCALC"] = function()
     if f:IsShown() then f:Hide() else f:Show() end
 end
 
--- ── Profile integration + first-run crest filter ────────────────────────────
--- On PLAYER_LOGIN we call NewDB so our data lives inside EllesmereUIDB.profiles
--- (the same place Cursor, BattleRes etc store theirs).  Without this, NewDB
--- wipes EllesmereUIQoLDB and our saved data is lost every session.
--- The first-run filter runs once (guarded by opts.firstRunV2) to auto-hide
--- crest tracks that have no upgradeable items on the player's current gear.
--- The guard is versioned so the bad verdict written by the v1 enUS-only scan
--- gets discarded and recomputed.
+-- ── Profile integration + first-run crest filter ──────────────────────────── On
+-- PLAYER_LOGIN we call NewDB so our data lives inside EllesmereUIDB.profiles (the same
+-- place Cursor, BattleRes etc store theirs). Without this, NewDB wipes EllesmereUIQoLDB
+-- and our saved data is lost every session. The first-run filter runs once (guarded by
+-- opts.firstRunV2) to auto-hide crest tracks that have no upgradeable items on the
+-- player's current gear. The guard is versioned so the bad verdict written by the v1
+-- enUS-only scan gets discarded and recomputed.
 local _firstRunEvt = CreateFrame("Frame")
 _firstRunEvt:RegisterEvent("PLAYER_LOGIN")
 _firstRunEvt:SetScript("OnEvent", function(self)
@@ -1854,3 +1920,32 @@ do
         end
     end)
 end
+
+-- Open/close with Character Sheet: when the toggle is on, the calculator frame
+-- follows CharacterFrame visibility. Runtime machinery, so it lives here (the
+-- options page is LoadOnDemand and cannot host login-time hooks).
+local _charSheetHooked = false
+local function HookCharacterSheet()
+    if _charSheetHooked then return end
+    if not CharacterFrame then return end
+    _charSheetHooked = true
+    CharacterFrame:HookScript("OnShow", function()
+        if Opts().openWithCharSheet then
+            local fr = _G["EUIUpgCalcFrame"]
+            if fr and not fr:IsShown() then fr:Show() end
+        end
+    end)
+    CharacterFrame:HookScript("OnHide", function()
+        if Opts().openWithCharSheet then
+            local fr = _G["EUIUpgCalcFrame"]
+            if fr and fr:IsShown() then fr:Hide() end
+        end
+    end)
+end
+
+local loginFrame = CreateFrame("Frame")
+loginFrame:RegisterEvent("PLAYER_LOGIN")
+loginFrame:SetScript("OnEvent", function(self)
+    self:UnregisterEvent("PLAYER_LOGIN")
+    HookCharacterSheet()
+end)

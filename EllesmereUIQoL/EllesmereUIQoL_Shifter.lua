@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIQoL_Shifter.lua
 --  Shift+drag to permanently reposition Blizzard panels.
@@ -24,6 +25,7 @@ local eventFrame
 --  Frame registry
 -------------------------------------------------------------------------------
 local PRELOADED = {
+    "ContainerFrameCombinedBags",
     "CharacterFrame",
     "FriendsFrame",
     "PVEFrame",
@@ -104,24 +106,23 @@ local DRAG_HEADERS = {
 -- to a child frame: either a global name or a function(frame) -> child.
 local EXTRA_DRAG_TARGETS = {
     ["AchievementFrame"] = function(frame) return frame.Header or _G["AchievementFrameHeader"] end,
+    ["ContainerFrameCombinedBags"] = function(frame) return frame.TitleContainer or _G["ContainerFrameCombinedBags"] end,
 }
 
--- Blizzard windows that normally dock beside CharacterFrame (Item Upgrade,
--- Transmog, Item Socketing, Merchant -- covers vendors like the Crest
--- Exchange -- plus Friends, Guild/Communities, and Professions, which
--- normally sit to CharacterFrame's left with CharacterFrame staying put).
--- See the docking hook in HookFrame for why and how.
+-- Blizzard windows that normally dock beside CharacterFrame (Item Upgrade, Transmog,
+-- Item Socketing, Merchant -- covers vendors like the Crest Exchange -- plus Friends,
+-- Guild/Communities, and Professions, which normally sit to CharacterFrame's left with
+-- CharacterFrame staying put). See the docking hook in HookFrame for why and how.
 --
--- PVEFrame is deliberately NOT here: EllesmereUIBlizzardSkin_GroupFinder.lua
--- owns that pairing instead, docking CharacterFrame beside PVEFrame (rather
--- than the reverse) with room-detection that also accounts for third-party
--- companion panels bolted onto PVEFrame (e.g. RaiderIO's Mythic+ panel).
--- Having both mechanisms active fought each other: this one's plain room
--- check has no idea RaiderIO's panel exists, so it could re-dock PVEFrame
--- right back on top of it the moment CharacterFrame got any saved/temp
--- Shifter position at all. PVEFrame being protected already skipped this
--- module's strata/Raise writes too (see the `else` branch below), so
--- dropping it here leaves it entirely to GroupFinder.lua, with nothing lost.
+-- PVEFrame is deliberately NOT here: EllesmereUIBlizzardSkin_GroupFinder.lua owns that
+-- pairing instead, docking CharacterFrame beside PVEFrame (rather than the reverse)
+-- with room-detection that also accounts for third-party companion panels bolted onto
+-- PVEFrame (e.g. RaiderIO's Mythic+ panel). Having both mechanisms active fought each
+-- other: this one's plain room check has no idea RaiderIO's panel exists, so it could
+-- re-dock PVEFrame right back on top of it the moment CharacterFrame got any saved/temp
+-- Shifter position at all. PVEFrame being protected already skipped this module's
+-- strata/Raise writes too (see the `else` branch below), so dropping it here leaves it
+-- entirely to GroupFinder.lua, with nothing lost.
 local DOCKING_COMPANIONS = {
     ItemUpgradeFrame = true,
     TransmogFrame = true,
@@ -287,11 +288,10 @@ local function ApplyScaleStep(frame, name, delta, mode)
     -- Keep the frame visually in place: rescale whichever position table is
     -- (or becomes) active, then re-apply it.
     local ratio = oldS / new
-    -- With NO stored position, Blizzard's panel manager re-seats the scaled
-    -- window on its next layout pass (first tab switch) and it visibly
-    -- jumps. Zooming therefore claims the seat like dragging does: capture
-    -- the current visual spot (center-based, frame-local units at the NEW
-    -- scale) so the pin holds it.
+    -- With NO stored position, Blizzard's panel manager re-seats the scaled window on
+    -- its next layout pass (first tab switch) and it visibly jumps. Zooming therefore
+    -- claims the seat like dragging does: capture the current visual spot
+    -- (center-based, frame-local units at the NEW scale) so the pin holds it.
     local function CaptureCenter()
         local fcx, fcy = frame:GetCenter()
         local ucx, ucy = UIParent:GetCenter()
@@ -356,6 +356,15 @@ wheelOverlay:EnableMouse(false)
 wheelOverlay:EnableMouseWheel(true)
 wheelOverlay:SetFrameStrata("TOOLTIP")
 
+-- True zero cost while no registered panel is open: the wheel machinery is
+-- armed by panel VISIBILITY. WheelArm.shown counts visible registry frames
+-- (OnShow/OnHide hooks installed in HookFrame); the 0<->1 edges register and
+-- unregister MODIFIER_STATE_CHANGED itself, so with every panel closed a
+-- modifier press never enters Lua and the overlay (with its 10Hz poll) stays
+-- hidden. The drag path needs none of this -- its hooks are click-driven.
+-- One table = one file-scope local; Sync/Note defined below UpdateWheelOverlay.
+local WheelArm = { shown = 0 }
+
 local function FindWheelTarget()
     for i = 1, #hookedFrames do
         local e = hookedFrames[i]
@@ -366,7 +375,8 @@ local function FindWheelTarget()
 end
 
 local function UpdateWheelOverlay()
-    if not (IsEnabled() and (IsShiftKeyDown() or IsControlKeyDown())) then
+    if WheelArm.shown == 0
+       or not (IsEnabled() and (IsShiftKeyDown() or IsControlKeyDown())) then
         wheelTarget, wheelTargetName = nil, nil
         wheelOverlay:Hide()
         return
@@ -406,6 +416,30 @@ wheelOverlay:SetScript("OnMouseWheel", function(_, delta)
         ApplyScaleStep(frame, name, delta, "temp")
     end
 end)
+
+-- Arm/disarm the modifier listener from the visible-panel count. IsEnabled is
+-- re-read here, so count edges while the feature is toggled off keep the
+-- listener down, and the mid-session enable path (InitShifter tail) re-arms
+-- even with a panel already open. UpdateWheelOverlay runs on both edges: on
+-- arm a modifier may already be held as the panel opens; on disarm its head
+-- gate parks the overlay.
+function WheelArm.Sync()
+    if not eventFrame then return end
+    if WheelArm.shown > 0 and IsEnabled() then
+        eventFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+    else
+        eventFrame:UnregisterEvent("MODIFIER_STATE_CHANGED")
+    end
+    UpdateWheelOverlay()
+end
+
+function WheelArm.Note(delta)
+    local was = WheelArm.shown
+    local now = was + delta
+    if now < 0 then now = 0 end
+    WheelArm.shown = now
+    if (was == 0) ~= (now == 0) then WheelArm.Sync() end
+end
 
 -------------------------------------------------------------------------------
 --  Cursor-delta drag (for PROTECTED frames)
@@ -505,11 +539,18 @@ local function HookFrame(frame, name)
     ffd._shHooked = true
     hookedFrames[#hookedFrames + 1] = { frame = frame, name = name }
 
-    -- Non-protected frames use the cheap native StartMoving path. Protected
-    -- frames are NEVER made movable / SetMovable'd / StartMoving'd / SetPoint'd
-    -- by insecure code (it taints them); they drag via the secure cursor-delta
-    -- path above. SetMovable is only needed for StartMoving, so protected frames
-    -- skip it entirely.
+    -- Wheel arming rides panel visibility (WheelArm.Note): registry frames
+    -- are all top-level closable panels, so OnShow/OnHide track exactly the
+    -- IsVisible state FindWheelTarget tests. A frame hooked while already
+    -- open (LoD addon load, /reload with the map up) counts immediately.
+    frame:HookScript("OnShow", function() WheelArm.Note(1) end)
+    frame:HookScript("OnHide", function() WheelArm.Note(-1) end)
+    if frame:IsShown() then WheelArm.Note(1) end
+
+    -- Non-protected frames use the cheap native StartMoving path. Protected frames are
+    -- NEVER made movable / SetMovable'd / StartMoving'd / SetPoint'd by insecure code
+    -- (it taints them); they drag via the secure cursor-delta path above. SetMovable is
+    -- only needed for StartMoving, so protected frames skip it entirely.
     if not frame:IsProtected() then
         frame:SetMovable(true)
         frame:SetClampedToScreen(true)
@@ -589,19 +630,18 @@ local function HookFrame(frame, name)
         tempScale[frame] = nil
     end)
 
-    -- Item Upgrade / Transmog / Item Socketing / Merchant (covers vendors
-    -- like the Crest Exchange) dock beside CharacterFrame. Blizzard's own
-    -- docking math assumes CharacterFrame sits at its default screen
-    -- position; once Shifter has CharacterFrame pinned somewhere else that
-    -- math falls apart and the companion ends up wherever Blizzard's now-
-    -- wrong calculation put it -- frequently right on top of CharacterFrame's
-    -- pinned spot, and since CharacterFrame's skin forces it to "HIGH"
-    -- strata while these default to "MEDIUM", it then renders buried
-    -- underneath. Docks left by default (matching Blizzard's normal layout),
-    -- falling back to whichever side actually has room -- otherwise
-    -- SetClampedToScreen just snaps it back onto CharacterFrame regardless of
-    -- which side we pick. Only kicks in when the companion has no pin of its
-    -- own; an explicit Shift+drag on the companion wins over auto-docking.
+    -- Item Upgrade / Transmog / Item Socketing / Merchant (covers vendors like the
+    -- Crest Exchange) dock beside CharacterFrame. Blizzard's own docking math assumes
+    -- CharacterFrame sits at its default screen position; once Shifter has
+    -- CharacterFrame pinned somewhere else that math falls apart and the companion
+    -- ends up wherever Blizzard's now- wrong calculation put it -- frequently right on
+    -- top of CharacterFrame's pinned spot, and since CharacterFrame's skin forces it
+    -- to "HIGH" strata while these default to "MEDIUM", it then renders buried
+    -- underneath. Docks left by default (matching Blizzard's normal layout), falling
+    -- back to whichever side actually has room -- otherwise SetClampedToScreen just
+    -- snaps it back onto CharacterFrame regardless of which side we pick. Only kicks
+    -- in when the companion has no pin of its own; an explicit Shift+drag on the
+    -- companion wins over auto-docking.
     local ShouldDock, DockToCharacterFrame
     if DOCKING_COMPANIONS[name] then
         local defaultStrata = frame:GetFrameStrata()
@@ -617,11 +657,10 @@ local function HookFrame(frame, name)
         DockToCharacterFrame = function()
             local cf = _G.CharacterFrame
             local margin = 4
-            -- Compare available room in SCREEN-ABSOLUTE units. cf's edges
-            -- are in CF's effective-scale space and this frame's width is in
-            -- its own; raw mixing picks the wrong side (and mis-places the
-            -- protected dock below) the moment either frame is
-            -- Shifter-scaled -- which is the headline scenario here.
+            -- Compare available room in SCREEN-ABSOLUTE units. cf's edges are in CF's
+            -- effective-scale space and this frame's width is in its own; raw mixing
+            -- picks the wrong side (and mis-places the protected dock below) the moment
+            -- either frame is Shifter-scaled -- which is the headline scenario here.
             local cs = cf:GetEffectiveScale() or 1
             local es = frame:GetEffectiveScale() or 1
             local ues = UIParent:GetEffectiveScale() or 1
@@ -630,13 +669,12 @@ local function HookFrame(frame, name)
             local rightRoom = (GetScreenWidth() or 0) * ues - (cf:GetRight() or 0) * cs
             local dockLeft = leftRoom >= wAbs + margin * es or leftRoom >= rightRoom
             if frame:IsProtected() then
-                -- Plain SetPoint on a protected frame (e.g. PVEFrame) taints
-                -- it -- same reason SecureSetPoint exists for saved/dragged
-                -- positions above. SecureSetPoint only anchors relative to
-                -- UIParent, so convert the dock target into a UIParent-CENTER
-                -- offset, with every coordinate normalized through its own
-                -- frame's effective scale (screen-absolute space) before
-                -- dividing back into this frame's units.
+                -- Plain SetPoint on a protected frame (e.g. PVEFrame) taints it -- same
+                -- reason SecureSetPoint exists for saved/dragged positions above.
+                -- SecureSetPoint only anchors relative to UIParent, so convert the dock
+                -- target into a UIParent-CENTER offset, with every coordinate
+                -- normalized through its own frame's effective scale (screen-absolute
+                -- space) before dividing back into this frame's units.
                 if InCombatLockdown() then return end
                 local hAbs = (frame:GetHeight() or 0) * es
                 local absCenterX
@@ -694,15 +732,14 @@ local function HookFrame(frame, name)
         end)
     else
         -- Any other Shifter-managed window can end up rendered underneath a
-        -- Shifter-pinned CharacterFrame purely because CharacterFrame's skin
-        -- forces it to "HIGH" strata -- not because it's meant to dock
-        -- beside CharacterFrame (unlike DOCKING_COMPANIONS, this never
-        -- touches position, just strata). Applies generically to every other
-        -- Shifter-hooked frame so newly discovered cases don't need a
-        -- hardcoded entry. Protected frames are skipped: SetFrameStrata and
-        -- Raise are still INSECURE writes, and on a protected frame they
-        -- taint its whole tree (the PVEFrame SetMovable incident) -- those
-        -- stay at Blizzard strata, possibly buried but never tainted.
+        -- Shifter-pinned CharacterFrame purely because CharacterFrame's skin forces it
+        -- to "HIGH" strata -- not because it's meant to dock beside CharacterFrame
+        -- (unlike DOCKING_COMPANIONS, this never touches position, just strata).
+        -- Applies generically to every other Shifter-hooked frame so newly discovered
+        -- cases don't need a hardcoded entry. Protected frames are skipped:
+        -- SetFrameStrata and Raise are still INSECURE writes, and on a protected frame
+        -- they taint its whole tree (the PVEFrame SetMovable incident) -- those stay at
+        -- Blizzard strata, possibly buried but never tainted.
         local defaultStrata = frame:GetFrameStrata()
         frame:HookScript("OnHide", function()
             if not frame:IsProtected() then frame:SetFrameStrata(defaultStrata) end
@@ -732,12 +769,11 @@ local function HookFrame(frame, name)
         end
     end)
 
-    -- Re-assert the user's scale whenever Blizzard (or anything) changes it in
-    -- place. Some windows rescale themselves on a state change with no
-    -- hide/show to fire the OnShow restore -- e.g. the crafting order window
-    -- resets its scale when you submit an order, so a scaled window snapped
-    -- back. Only re-assert for frames the user has actually scaled; guarded so
-    -- our own re-scale can't recurse.
+    -- Re-assert the user's scale whenever Blizzard (or anything) changes it in place.
+    -- Some windows rescale themselves on a state change with no hide/show to fire the
+    -- OnShow restore -- e.g. the crafting order window resets its scale when you submit
+    -- an order, so a scaled window snapped back. Only re-assert for frames the user has
+    -- actually scaled; guarded so our own re-scale can't recurse.
     hooksecurefunc(frame, "SetScale", function()
         if not IsEnabled() then return end
         if ffd._shIgnoreSS then return end
@@ -1158,8 +1194,11 @@ local function InitShifter()
     if next(pendingAddons) then
         eventFrame:RegisterEvent("ADDON_LOADED")
     end
-    -- Scroll-wheel scaling: arm the capture overlay on modifier presses.
-    eventFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+    -- Scroll-wheel scaling: the modifier listener is owned by WheelArm.Sync
+    -- and registered ONLY while a registered panel is open -- with everything
+    -- closed a modifier press never enters Lua. Called here (not just on
+    -- count edges) so a mid-session enable with a panel already open arms.
+    WheelArm.Sync()
 end
 
 eventFrame:RegisterEvent("PLAYER_LOGIN")
@@ -1224,9 +1263,8 @@ function EllesmereUI._InitShifterLootWindows()
     InitLootWindows()
 end
 
--- Exposed for the options toggle. Releases the loot windows back to
--- Blizzard's position management; existing hooks go dormant via the
--- LootEnabled gate.
+-- Exposed for the options toggle. Releases the loot windows back to Blizzard's position
+-- management; existing hooks go dormant via the LootEnabled gate.
 function EllesmereUI._DisableShifterLootWindows()
     for i = 1, #LOOT_WINDOWS do
         local frame = LootFrame(LOOT_WINDOWS[i].name)

@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local _, ns = ...
 
 -- ===========================================================================
@@ -38,6 +39,7 @@ local C_SpellBook            = C_SpellBook
 local wipe                   = wipe
 local pcall                  = pcall
 local type                   = type
+local tonumber               = tonumber
 local RAID_CLASS_COLORS      = RAID_CLASS_COLORS
 local C_Container            = C_Container
 local GetInventoryItemCooldown = GetInventoryItemCooldown
@@ -45,21 +47,18 @@ local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellI
 
 -- 12.1 ONLY: engine-slot driver for aura-triggered built-in rules. Ebon Might
 -- (395296) was removed from the never-secret list in build 68824, so
--- GetPlayerAuraBySpellID returns nothing for it in restricted content and the
--- numeric expirationTime window can never open mid-combat. The replacement
--- rides a hidden one-slot aura container (includeSpellIDs on the player --
--- helpful-on-assistable passes the identity gate regardless of secrecy)
--- whose slot subtree IS the active display, engine-driven end to end: the
--- button shows only while the aura is up, SetIcon binds the aura's own
--- texture, SetDurationCooldown renders the swipe from the real duration
--- object (extensions included), and SetDurationText drives the countdown
--- text -- all styled inside the creation window (the subtree is denied to
--- addon code afterward, reads and writes both). The legacy overlay frame
--- stays permanently dark on 12.1; it survives only for border raising and
--- the shared settings plumbing in ApplyToFrame.
--- FA121 stays nil on 12.0: every consumer site guards on it, so retail
--- behavior is byte-identical. Declared here (above ApplyToFrame) so the
--- gated sites capture it as an upvalue; defined after ApplyRule below.
+-- GetPlayerAuraBySpellID returns nothing for it in restricted content and the numeric
+-- expirationTime window can never open mid-combat. The replacement rides a hidden
+-- one-slot aura container (includeSpellIDs on the player -- helpful-on-assistable
+-- passes the identity gate regardless of secrecy) whose slot subtree IS the active
+-- display, engine-driven end to end: the button shows only while the aura is up,
+-- SetIcon binds the aura's own texture, SetDurationCooldown renders the swipe from the
+-- real duration object (extensions included), and SetDurationText drives the countdown
+-- text -- all styled inside the creation window (the subtree is denied to addon code
+-- afterward, reads and writes both). The legacy overlay frame stays permanently dark on
+-- 12.1; it survives only for border raising and the shared settings plumbing in
+-- ApplyToFrame. Declared here (above ApplyToFrame) so the consumer sites capture it as
+-- an upvalue; defined after ApplyRule below.
 local FA121
 
 -- ---------------------------------------------------------------------------
@@ -102,7 +101,10 @@ local _overlays  = setmetatable({}, { __mode = "k" })  -- iconFrame -> overlay d
 
 -- Cooldown-state effects (continuous, cooldown-driven; presets only).
 local _cdStateRules = {}                                -- subset: cas.cdStateEffect set
-local _cdStateTicker
+-- Same-frame coalescer for edge-driven cd-state evaluation. The engine owns
+-- the edges (widget push = cooldown started, OnCooldownDone = cooldown ended),
+-- so there is NO poll ticker: evaluation runs only when an edge fires.
+local _cdEvalQueued = false
 local _hasUserRules = false                             -- any profile (user) rule armed
 
 -- CD-ready sound "armed" state, keyed by ability so it survives the rule-object
@@ -115,22 +117,21 @@ local GetOverlay, ResolveSwipeColor, IconTexture, ApplyToFrame, ApplyRule, Raise
 local EnsureTicker, OpenWindow, CloseWindow, CloseAll, CastWindow
 local OpenFromAura, EvalCustom, InitialStamp, OnEvent, UpdateListeners
 local ResolveCastSpells
-local PresetOnCD, ApplyCdState, RestoreAllCdState, EnsureCdStateTicker, EvalCdStateNow
+local PresetOnCD, ApplyCdState, RestoreAllCdState, EvalCdStateNow, QueueCdStateEval
 
 -- ---------------------------------------------------------------------------
 --  Icon identity: slot key <-> equipped item key
 -- ---------------------------------------------------------------------------
 -- The same icon can be named by two different tokens. An equipped trinket is
 -- -itemID in the settings store (ResolveCustomActiveKey maps a slot frame to
--- the equipped item so each item tracks separately) and -13/-14 on the slot
--- frame itself. Which token a RULE ends up with depends on whether equipment
--- data was readable at re-arm -- and at login it is not: GetInventoryItemID
--- returns nil, the equipped-trinket skip in Rearm does not fire, and the rule
--- is keyed -itemID while the frame that renders moments later carries -13.
--- Nothing reconciled them, so the rule sat armed against an icon that did not
--- exist for the rest of the session; any settings touch re-armed with
--- equipment present and it started working, which is the "dead until I open
--- the setting again" report.
+-- the equipped item so each item tracks separately) and -13/-14 on the slot frame
+-- itself. Which token a RULE ends up with depends on whether equipment data was
+-- readable at re-arm -- and at login it is not: GetInventoryItemID returns nil, the
+-- equipped-trinket skip in Rearm does not fire, and the rule is keyed -itemID while the
+-- frame that renders moments later carries -13. Nothing reconciled them, so the rule
+-- sat armed against an icon that did not exist for the rest of the session; any
+-- settings touch re-armed with equipment present and it started working, which is the
+-- "dead until I open the setting again" report.
 --
 -- Comparing through this map fixes every ordering variant at once, because it
 -- resolves at MATCH time (frames render long after equipment is available)
@@ -157,15 +158,21 @@ end
 -- Refreshed lazily while empty (covers the login window, where re-arm ran
 -- before equipment was readable) and on every equipment change.
 --
--- The throttle matters because an EMPTY map re-reads on EVERY call, and the
--- callers are hot: EvalCdStateNow runs on a 0.12s ticker and asks once per
--- icon per rule. Unthrottled that is a wipe plus a slot sweep hundreds of
--- times a second for as long as the map stays empty. It only ever engages
--- while empty, so a character wearing anything at all never reaches it --
--- which is also why widening the sweep above shrinks this window to the brief
--- login gap it was written for.
+-- The throttle matters because an EMPTY map re-reads on EVERY call, and the callers are
+-- hot: EvalCdStateNow runs on a 0.12s ticker and asks once per icon per rule.
+-- Unthrottled that is a wipe plus a slot sweep hundreds of times a second for as long
+-- as the map stays empty. It only ever engages while empty, so a character wearing
+-- anything at all never reaches it -- which is also why widening the sweep above
+-- shrinks this window to the brief login gap it was written for.
 local _slotKeyNextTry = 0
 local function KeyMatches(ruleKey, frameKey)
+    -- An icon with no resolved identity matches NO rule. fc.spellID is nil for a
+    -- window on every rebuild: BuildAllCDMBars clears it on each live icon, and
+    -- FullCDMRebuild re-arms (which evaluates every rule) before the reanchor
+    -- re-stamps it. Without this guard both lookups below fall through to
+    -- nil == nil, so EVERY user rule claimed EVERY identity-less icon and any
+    -- Hidden (CD Ready / On CD) rule alpha-0'd unrelated potions and trinkets.
+    if ruleKey == nil or frameKey == nil then return false end
     if ruleKey == frameKey then return true end
     if not next(_slotItemKey) then
         local now = GetTime()
@@ -202,7 +209,7 @@ GetOverlay = function(iconFrame)
     cd:SetDrawEdge(false)
     cd:SetDrawBling(false)
     cd:SetHideCountdownNumbers(false)
-    cd:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
+    cd:SetSwipeTexture("Interface\\AddOns\\EllesmereUI\\media\\white-square.png")
     o.cd = cd
 
     -- Own glow frame for ns.ApplyActiveOverlays (never collides with the real
@@ -289,6 +296,22 @@ IconTexture = function(iconFrame, o, rule)
     end
 end
 
+-- Threshold Text block for one rule's overlay countdown. Per-spell Threshold Text covers
+-- the ACTIVE STATE countdown as well as cooldown and recharge, but a USER rule's styling
+-- block is its customActiveStates entry, which carries threshold keys only when they were
+-- set from the preset/custom menu -- a threshold set on the SPELL lives in the family
+-- entry and would never reach these overlays. Fall through to the shared resolver, which
+-- reads family first then cas. Returns ss untouched when it already arms the feature, and
+-- when nobody uses it (session gate), so non-users pay nothing.
+local function ThresholdFor(frame, rule, ss)
+    if (tonumber(ss and ss.thresholdSeconds) or 0) > 0 then return ss end
+    if not (ns._cdmAnyThresholdText and ns.ResolveThresholdTextSettings) then return ss end
+    local fcT = frame and ns._ecmeFC and ns._ecmeFC[frame]
+    local bkT = fcT and fcT.barKey
+    return ns.ResolveThresholdTextSettings(frame, rule.spellID,
+        bkT and ns.GetBarSpellData and ns.GetBarSpellData(bkT), bkT)
+end
+
 -- ---------------------------------------------------------------------------
 --  Show / hide the overlay on a single icon frame.
 -- ---------------------------------------------------------------------------
@@ -346,7 +369,7 @@ ApplyToFrame = function(iconFrame, rule, win)
         -- only touches widgets it manages, and StyleOverlayCooldownText (above)
         -- already set the countdown numbers per the Duration Text state.
         if ns._cdmAnyThresholdText and ns.ApplyThresholdFormatter then
-            ns.ApplyThresholdFormatter(o.cd, ss)
+            ns.ApplyThresholdFormatter(o.cd, ThresholdFor(iconFrame, rule, ss))
         end
         -- Feed the active glow + border the underlying icon's shape / border so
         -- Shape Glow masks to the shape (it reads the shape from its glow frame's
@@ -380,8 +403,20 @@ ApplyToFrame = function(iconFrame, rule, win)
     end
 end
 
--- Apply (or clear) a rule on every matching live icon. A rule with .barKey only
--- matches icons on that bar (user rules are per-bar); built-in rules match any.
+-- BUILT-IN rules only ever target native viewer entries, so they only match
+-- icons on the three native bars. Guards against a stale cached spellID on a
+-- Blizzard-pool-reused icon frame matching a custom bar it never belonged to
+-- (field: Ebon Might's built-in overlay painting a custom-bar potion slot
+-- after icon-size/glow adjustments forced frame reuse). USER rules are
+-- deliberately NOT scoped: they are barKey-less by design and follow the
+-- spell to whichever bar hosts it (see the AddUserRule contract below) --
+-- scoping them would kill custom-bar cd-state effects, overlays and
+-- ready-sounds.
+local NATIVE_VIEWER_BARKEYS = { cooldowns = true, utility = true, buffs = true }
+
+-- Apply (or clear) a rule on every matching live icon. A rule with .barKey
+-- only matches icons on that bar; a user rule matches any bar; a built-in
+-- rule matches native viewer bars only.
 ApplyRule = function(rule, win)
     local icons = ns.cdmBarIcons
     local FCt = ns._ecmeFC
@@ -391,7 +426,15 @@ ApplyRule = function(rule, win)
         for i = 1, #list do
             local f = list[i]
             local fc = f and FCt[f]
-            if fc and KeyMatches(sid, fc.spellID) and (not rule.barKey or fc.barKey == rule.barKey) then
+            local barScopeOK
+            if rule.barKey then
+                barScopeOK = fc and fc.barKey == rule.barKey
+            elseif rule.user then
+                barScopeOK = fc ~= nil
+            else
+                barScopeOK = fc and fc.barKey and NATIVE_VIEWER_BARKEYS[fc.barKey]
+            end
+            if barScopeOK and KeyMatches(sid, fc.spellID) then
                 ApplyToFrame(f, rule, win)
                 if ns._fakeActiveDebug then
                     print(("|cff0cd29fEUI FakeActive|r %s sid=%s"):format(
@@ -410,7 +453,6 @@ end
 --  regen) and parked by hiding the proxy -- a hidden container fully
 --  unregisters its events, so the parked state costs nothing.
 -- ---------------------------------------------------------------------------
-if EllesmereUI and EllesmereUI.IS_121 then
     FA121 = { byRule = {} }
     local FA121_WIN = { fa121 = true, start = 0, dur = 0, expiry = 0 }
 
@@ -420,13 +462,12 @@ if EllesmereUI and EllesmereUI.IS_121 then
         return st
     end
 
-    -- NO Lua presence signal exists: the button AND every child created in
-    -- its creation window are denied to addon code afterward (field-mapped
-    -- 2026-07-22 -- reads and writes both). The design therefore keeps the
-    -- entire active display INSIDE the slot subtree, engine-driven end to
-    -- end: visibility (button shown only while the aura is up), icon
-    -- (SetIcon) and swipe (SetDurationCooldown) all render without any
-    -- addon code running. The legacy overlay (o.frame) stays alpha 0 on
+    -- NO Lua presence signal exists: the button AND every child created in its creation
+    -- window are denied to addon code afterward (field-mapped 2026-07-22 -- reads and
+    -- writes both). The design therefore keeps the entire active display INSIDE the
+    -- slot subtree, engine-driven end to end: visibility (button shown only while the
+    -- aura is up), icon (SetIcon) and swipe (SetDurationCooldown) all render without
+    -- any addon code running. The legacy overlay (o.frame) stays alpha 0 on
     -- 12.1 -- it exists only so RaiseOverlayBorders and settings plumbing
     -- keep working through the shared ApplyToFrame path.
 
@@ -440,12 +481,11 @@ if EllesmereUI and EllesmereUI.IS_121 then
             return
         end
         -- Repositioning is ALWAYS a proxy move: the slot button anchored
-        -- SetAllPoints(proxy) once in its creation window, and the proxy is
-        -- our frame -- legal any time, icon churn included.
-        -- Parent to the ICON FRAME, never to o.frame: the legacy overlay is
-        -- held at alpha 0 on 12.1 and children inherit EFFECTIVE alpha -- a
-        -- proxy under o.frame renders the whole engine subtree invisible
-        -- (field-hit 2026-07-22: everything worked, at alpha 0).
+        -- SetAllPoints(proxy) once in its creation window, and the proxy is our frame
+        -- -- legal any time, icon churn included. Parent to the ICON FRAME, never to
+        -- o.frame: the legacy overlay is held at alpha 0 on 12.1 and children inherit
+        -- EFFECTIVE alpha -- a proxy under o.frame renders the whole engine subtree
+        -- invisible (field-hit 2026-07-22: everything worked, at alpha 0).
         st.proxy:SetParent(iconFrame)
         st.proxy:ClearAllPoints()
         st.proxy:SetAllPoints(iconFrame)
@@ -471,7 +511,7 @@ if EllesmereUI and EllesmereUI.IS_121 then
                     pcall(ns.StyleOverlayCooldownText, st.cd, bd, ss, iconFrame:GetScale())
                 end
                 if ns._cdmAnyThresholdText and ns.ApplyThresholdFormatter then
-                    pcall(ns.ApplyThresholdFormatter, st.cd, ss)
+                    pcall(ns.ApplyThresholdFormatter, st.cd, ThresholdFor(iconFrame, rule, ss))
                 end
             else
                 st.cdLocked = true
@@ -520,7 +560,12 @@ if EllesmereUI and EllesmereUI.IS_121 then
                     for i = 1, #list do
                         local f = list[i]
                         local fc = f and FCt[f]
-                        if fc and KeyMatches(rule.spellID, fc.spellID) then
+                        -- Native-bars-only, same scope as ApplyRule's built-in
+                        -- arm: this walk only ever runs for built-in engine-slot
+                        -- rules, and a stale cached spellID on a reused custom-
+                        -- bar frame must not donate srcFrame/crop/styling here.
+                        if fc and fc.barKey and NATIVE_VIEWER_BARKEYS[fc.barKey]
+                           and KeyMatches(rule.spellID, fc.spellID) then
                             local barKey = fc.barKey
                             bd = barKey and ns.barDataByKey and ns.barDataByKey[barKey]
                             ss = rule.cas
@@ -547,12 +592,11 @@ if EllesmereUI and EllesmereUI.IS_121 then
             end
         end
         -- No icon found = CDM bars not built yet (login race) OR the spell
-        -- is not on any bar. Do NOT build: every baked decision (the text
-        -- gate, fonts, swipe color, crop) resolved nil and would be wrong
-        -- for the whole session (built latches). The rescan retries
-        -- re-queue the build; once the icon exists, everything bakes from
-        -- real settings. Field-hit as "swipe works, no text" in sessions
-        -- where the build outran bar construction.
+        -- is not on any bar. Do NOT build: every baked decision (the text gate, fonts,
+        -- swipe color, crop) resolved nil and would be wrong for the whole session
+        -- (built latches). The rescan retries re-queue the build; once the icon exists,
+        -- everything bakes from real settings. Field-hit as "swipe works, no text" in
+        -- sessions where the build outran bar construction.
         if not st.srcFrame then return end
         local container = AK.CreateContainerShell(st.proxy, { point = { "CENTER" } })
         AK.AddSlotToContainer(container, {
@@ -563,16 +607,15 @@ if EllesmereUI and EllesmereUI.IS_121 then
             candidateFilters = { includeSpellIDs = { [rule.auraSpellID] = true } },
             style = "cdm:fa121",
             extraInit = function(button)
-                -- Creation window: the only legal moment for button-level
-                -- wiring AND (per the field lessons above) the only reliable
-                -- window for touching ANYTHING in this subtree -- post-window
-                -- reads AND writes on the button and its children are denied.
-                -- Therefore the subtree is entirely self-sufficient: the
-                -- ENGINE drives visibility (button shown only while the aura
-                -- is up), the icon (SetIcon binds the aura's own texture)
-                -- and the swipe (SetDurationCooldown from the real duration
-                -- object, extensions included). No Lua signal, no slave.
-                -- Two-point anchoring sizes the button by anchors forever.
+                -- Creation window: the only legal moment for button-level wiring AND
+                -- (per the field lessons above) the only reliable window for touching
+                -- ANYTHING in this subtree -- post-window reads AND writes on the
+                -- button and its children are denied. Therefore the subtree is entirely
+                -- self-sufficient: the ENGINE drives visibility (button shown only
+                -- while the aura is up), the icon (SetIcon binds the aura's own
+                -- texture) and the swipe (SetDurationCooldown from the real duration
+                -- object, extensions included). No Lua signal, no slave. Two-point
+                -- anchoring sizes the button by anchors forever.
                 button:SetAllPoints(st.proxy)
                 if button.SetMouseMotionEnabled then button:SetMouseMotionEnabled(false) end
                 -- Saturated icon: engine-bound, engine-shown. Zoom baked
@@ -590,7 +633,7 @@ if EllesmereUI and EllesmereUI.IS_121 then
                 cd:SetDrawEdge(false)
                 cd:SetDrawBling(false)
                 cd:SetHideCountdownNumbers(false)
-                cd:SetSwipeTexture("Interface\\Buttons\\WHITE8x8")
+                cd:SetSwipeTexture("Interface\\AddOns\\EllesmereUI\\media\\white-square.png")
                 cd:SetFrameLevel(button:GetFrameLevel() + 1)
                 local cr, cg, cb, ca = ResolveSwipeColor(ss)
                 cd:SetSwipeColor(cr, cg, cb, ca)
@@ -599,29 +642,30 @@ if EllesmereUI and EllesmereUI.IS_121 then
                     pcall(ns.StyleOverlayCooldownText, cd, bd, ss, scale)
                 end
                 if ns.ApplyThresholdFormatter then
-                    pcall(ns.ApplyThresholdFormatter, cd, ss)
+                    -- Resolve INSIDE the protection: an argument expression evaluates before pcall
+                    -- is entered, and a throw in this creation window takes the whole slot down
+                    -- (its swipe with it), not just the countdown text.
+                    local okT, ttB = pcall(ThresholdFor, st.srcFrame, rule, ss)
+                    pcall(ns.ApplyThresholdFormatter, cd, okT and ttB or ss)
                 end
                 if ns.ApplyShapeToOverlay and st.srcFrame then
                     pcall(ns.ApplyShapeToOverlay, st.srcFrame, tex, cd, bd)
                 end
-                -- Duration text: engine-bound cooldowns render NO widget
-                -- countdown (time display belongs to the SetDurationText
-                -- binding -- the AuraKit rule), so register a dedicated
-                -- FontString styled like the icon's cooldown text. Only
-                -- when the resolved cooldown-text setting is on: the engine
-                -- SetText()s every REGISTERED string, and a no-text config
-                -- should carry no binding at all. Fonted BEFORE
-                -- registration (an unfonted registered FS hard-errors
-                -- inside the engine).
-                local showCD = bd and bd.showCooldownText
+                -- Duration text: engine-bound cooldowns render NO widget countdown
+                -- (time display belongs to the SetDurationText binding -- the AuraKit
+                -- rule), so register a dedicated FontString styled like the icon's
+                -- cooldown text. Only when the resolved cooldown-text setting is on:
+                -- the engine SetText()s every REGISTERED string, and a no-text config
+                -- should carry no binding at all. Fonted BEFORE registration (an
+                -- unfonted registered FS hard-errors inside the engine).
+                local showCD = ns.CdmDurationTextOn(bd)
                 if ss and ss.showCooldownText ~= nil then showCD = ss.showCooldownText end
                 if showCD then
-                    -- ARMORED: an uncaught error inside initializeFrame
-                    -- aborts the engine's whole CreateFrameBatch and kills
-                    -- the slot declaration (and every declaration after
-                    -- it). Text is optional polish -- it must never take
-                    -- the swipe down with it. Failures land in st.fsErr
-                    -- for the debug dump.
+                    -- ARMORED: an uncaught error inside initializeFrame aborts the
+                    -- engine's whole CreateFrameBatch and kills the slot declaration
+                    -- (and every declaration after it). Text is optional polish -- it
+                    -- must never take the swipe down with it. Failures land in
+                    -- st.fsErr for the debug dump.
                     local okFS, errFS = pcall(function()
                         -- Text CARRIER above the cooldown: regions created
                         -- on a Cooldown render UNDER its swipe (the classic
@@ -685,7 +729,17 @@ if EllesmereUI and EllesmereUI.IS_121 then
         AK.QueueBuildJob(function()
             st.queued = nil
             Build(rule, st)
-            if st.armed then FA121.Rescan() end
+            -- Rescan ONLY after a build that actually completed (it attaches
+            -- the fresh slot to the live icon). A BAILED build (icon not on
+            -- any bar yet -- or ever) must NOT rescan from its own job tail:
+            -- Rescan re-queues the build for unbuilt armed rules, so the tail
+            -- call turned every permanent bail into a self-feeding job loop
+            -- that burned the scheduler's full per-frame budget forever
+            -- (field: Aug Evoker Ebon Might rule = 50% idle CPU + login and
+            -- post-combat turbo-window FPS drops). Bailed builds retry on
+            -- the EXTERNAL staggered rescans (PEW/rearm + 3s/8s), which are
+            -- finite by design.
+            if st.armed and st.built then FA121.Rescan() end
         end, "cdm:fa121-shell")
     end
 
@@ -746,14 +800,27 @@ if EllesmereUI and EllesmereUI.IS_121 then
     -- quiet sessions cost three no-op walks of a one-entry table.
     local pew = ns.TakeShell()
     pew:RegisterEvent("PLAYER_ENTERING_WORLD")
-    pew:SetScript("OnEvent", function()
+    -- Cinematics fire UNIT_FACTION for the player and briefly drop
+    -- assistability, which disables the slot's spell-ID candidate filter
+    -- engine-side -- the fa121 slot then renders the FIRST helpful aura
+    -- instead of the rule's, and no aura edge is guaranteed to follow the
+    -- restore. Reparse armed built slots on that edge (typically one slot).
+    pew:RegisterUnitEvent("UNIT_FACTION", "player")
+    pew:SetScript("OnEvent", function(_, event)
+        if event == "UNIT_FACTION" then
+            for _, st in pairs(FA121.byRule) do
+                if st.armed and st.built and st.container then
+                    st.container:UpdateAllAuras()
+                end
+            end
+            return
+        end
         FA121.Rescan()
         if C_Timer then
             C_Timer.After(3, FA121.Rescan)
             C_Timer.After(8, FA121.Rescan)
         end
     end)
-end
 
 -- ---------------------------------------------------------------------------
 --  Expiry ticker (self-hides when idle).
@@ -870,15 +937,21 @@ OnEvent = function(self, event, unit, _, spellID)
         -- refresh unconditionally. It is a wipe plus one lookup per slot on an
         -- event that fires only when gear actually changes.
         RefreshSlotItemKeys()
-        -- Re-arm stays TRINKET-ONLY on purpose. A trinket swap re-points a
-        -- slot's settings to a different item, so the slot must pick up the
-        -- newly-equipped trinket's rule (or none). Re-arming on every gear
-        -- change would tear down and rebuild the whole rule set mid-gearing
-        -- for no benefit -- the refreshed map above already keeps matching
-        -- correct for the other slots.
+        -- Gear changed: one re-evaluation so a swapped-in mid-cooldown item
+        -- paints its cd-state (trinket slots re-arm below, which also evals).
+        QueueCdStateEval()
+        -- Re-arm stays TRINKET-ONLY on purpose. A trinket swap re-points a slot's
+        -- settings to a different item, so the slot must pick up the newly-equipped
+        -- trinket's rule (or none). Re-arming on every gear change would tear down and
+        -- rebuild the whole rule set mid-gearing for no benefit -- the refreshed map
+        -- above already keeps matching correct for the other slots.
         if unit == 13 or unit == 14 then
             ns.FakeActive_Rearm()
         end
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Combat end: cooldown reads were secret-dropped during combat, so any
+        -- fail-open cd-state paint corrects on this first plain re-read.
+        QueueCdStateEval()
     end
 end
 
@@ -892,6 +965,10 @@ UpdateListeners = function()
         else _events:UnregisterEvent("UNIT_AURA") end
         if _needCast then _events:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         else _events:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED") end
+        -- Combat end re-syncs cd-state once: cooldown reads secret-drop during
+        -- combat, so the first plain read corrects anything painted fail-open.
+        if #_cdStateRules > 0 then _events:RegisterEvent("PLAYER_REGEN_ENABLED")
+        else _events:UnregisterEvent("PLAYER_REGEN_ENABLED") end
         -- Trinket swaps only matter when the player actually uses custom states.
         if _hasUserRules then _events:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
         else _events:UnregisterEvent("PLAYER_EQUIPMENT_CHANGED") end
@@ -985,9 +1062,8 @@ end
 PresetOnCD = function(key)
     local now = GetTime()
     if key > 0 then
-        -- A transform's real CD ticks on the override ID (e.g. Rushing Wind
-        -- Kick over Rising Sun Kick); the base-ID query reads not-on-CD
-        -- through that whole CD.
+        -- A transform's real CD ticks on the override ID (e.g. Rushing Wind Kick over
+        -- Rising Sun Kick); the base-ID query reads not-on-CD through that whole CD.
         local effKey = key
         if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
             local ov = C_SpellBook.FindSpellOverrideByID(key)
@@ -1004,10 +1080,9 @@ PresetOnCD = function(key)
         if GetInventoryItemCooldown then start, dur, enable = GetInventoryItemCooldown("player", invSlot) end
     else
         local itemID = -key
-        -- Pot presets walk the swap-aware variant chain (partner family
-        -- included while the toggle is on) -- only the owned/used id reports
-        -- the shared potion cooldown. Everything else keeps the legacy
-        -- primary-then-alts walk.
+        -- Pot presets walk the swap-aware variant chain (partner family included while
+        -- the toggle is on) -- only the owned/used id reports the shared potion
+        -- cooldown. Everything else keeps the legacy primary-then-alts walk.
         local chain = ns.GetPresetPotChain and ns.GetPresetPotChain(itemID)
         if chain then
             for i = 1, #chain do
@@ -1037,12 +1112,11 @@ PresetOnCD = function(key)
     return (dur > 1.5 and now < start + dur) or false
 end
 
--- "Ready" for the Hidden (CD Ready) effects, which must not dismiss a charge
--- spell that is still recharging: a custom SPELL preset can have charges, so it
--- defers to the shared charge-aware read (ns.CdmCdStateReady). Items (key < 0)
--- have no charges, so onCD alone answers it. The override walk mirrors
--- PresetOnCD above -- the charges live on the override id (e.g. the transform),
--- not the base one.
+-- "Ready" for the Hidden (CD Ready) effects, which must not dismiss a charge spell that
+-- is still recharging: a custom SPELL preset can have charges, so it defers to the
+-- shared charge-aware read (ns.CdmCdStateReady). Items (key < 0) have no charges, so
+-- onCD alone answers it. The override walk mirrors PresetOnCD above -- the charges live
+-- on the override id (e.g. the transform), not the base one.
 local function PresetCdReady(key, onCD)
     if key <= 0 then return not onCD end
     local effKey = key
@@ -1053,11 +1127,10 @@ local function PresetCdReady(key, onCD)
     return ns.CdmCdStateReady(effKey, onCD)
 end
 
--- Normal (shown) alpha for a frame, from its bar's opacity (out-of-combat
--- fade folded in via EffectiveBarAlpha so restores don't clobber the fade).
--- Overflow-diverted frames render inside the target bar, so their restore
--- alpha follows that bar's opacity (same source the visibility/layout
--- passes use), not the identity bar's.
+-- Normal (shown) alpha for a frame, from its bar's opacity (out-of-combat fade folded
+-- in via EffectiveBarAlpha so restores don't clobber the fade). Overflow-diverted
+-- frames render inside the target bar, so their restore alpha follows that bar's
+-- opacity (same source the visibility/layout passes use), not the identity bar's.
 local function FrameBaseAlpha(fc)
     -- IconShownAlpha = EffectiveBarAlpha of the painted bar, forced to 0
     -- while that bar is visibility-hidden -- a restore here must never
@@ -1107,12 +1180,24 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
         return
     end
     -- Glow modes: glow while the ability is READY (off cooldown). Not a hide.
+    -- Restore the alpha as well as the flag, exactly as the appearance refresh
+    -- does on this transition: once a bar has settled nothing else re-asserts a
+    -- preset frame's alpha, so clearing the flag alone leaves a hide from an
+    -- earlier state painted for good.
+    if fc._cdStateHidden then frame:SetAlpha(FrameBaseAlpha(fc)) end
     fc._cdStateHidden = false
     if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
     local glow = fd and fd.glowOverlay
     if not glow then return end
     if not onCD then
-        if not fd._presetCdGlowOn then
+        -- Re-assert against the overlay's REAL state (overlay._glowActive), not
+        -- our flag alone. fd.glowOverlay is shared with the proc-glow and
+        -- appearance passes, and twelve of the thirteen sites that stop it never
+        -- tell this engine -- so the flag said "lit" while the overlay was dark
+        -- and a ready preset stayed unglowed until the next re-arm. Only ever
+        -- starts a glow when nothing is running, so it cannot stomp another
+        -- owner's.
+        if not fd._presetCdGlowOn or not glow._glowActive then
             local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(cas or {})
             ns.StartNativeGlow(glow, eff == "pixelGlowReady" and 1 or 3, gr or 1, gg or 1, gb or 1)
             fd._presetCdGlowOn = true
@@ -1150,9 +1235,74 @@ RestoreAllCdState = function()
     end
 end
 
--- One full evaluation pass. Driven by the ticker (continuous) AND called
--- synchronously at the end of a re-arm, so a settings change does not leave the
--- icon shown for a tick before the next poll re-hides it.
+-- Is this frame one WE inject? customActiveStates is only editable from the
+-- per-icon menu's "Custom Active State" section, offered for exactly these
+-- frames (EUI_CooldownManager_Options.lua isCustomInjected). A Blizzard viewer
+-- frame carries none of the flags, so a user rule reaching one is an orphan:
+-- removing a custom spell clears customSpellIDs but not the profile-level
+-- active state, and no menu can then show or clear it -- which hid a plainly
+-- tracked spell with nothing to explain why.
+local function IsInjectedFrame(f)
+    return (f._isCustomSpellFrame or f._isRacialFrame or f._isPresetFrame
+            or f._isItemPresetFrame or f._isTrinketFrame) and true or false
+end
+ns.CdmIsInjectedFrame = IsInjectedFrame
+
+-- Same-frame coalesced evaluation: every engine edge funnels here. Zero cost
+-- while no cd-state rules exist.
+QueueCdStateEval = function()
+    if _cdEvalQueued or #_cdStateRules == 0 then return end
+    _cdEvalQueued = true
+    C_Timer.After(0, function()
+        _cdEvalQueued = false
+        EvalCdStateNow()
+    end)
+end
+
+-- NOTE: pushes NEVER arm anything directly. The drain is push-through by
+-- design (fresh duration objects land on frames constantly, including
+-- zero-duration pushes onto READY frames when cooldown chatter waves arm it),
+-- so a push proves nothing about cooldown state -- arming happens only in the
+-- evaluation's read branch, on a cooldown actually observed running. A
+-- push-side arm here fired ready sounds whenever ANY charge spell spent a
+-- charge (the chatter pushed onto unrelated ready frames).
+
+-- Install the engine-edge hooks on a rule-matched preset frame, once per frame
+-- object (pool reuse keeps hooks valid: handlers resolve the frame's CURRENT
+-- spell at fire time). The widget carries ONLY real cooldowns -- the drain
+-- pushes with ignoreGCD -- so OnCooldownDone is the true ready edge with no
+-- GCD confusion, and it fires under combat secrecy (the engine animates
+-- durations Lua cannot read) and at alpha 0 (cd-state hides never Hide()).
+local function WireCdStateFrame(f)
+    if f._cdsWired then return end
+    local cd = f.cd or f.Cooldown
+    if not cd then return end
+    f._cdsWired = true
+    cd:HookScript("OnCooldownDone", function()
+        QueueCdStateEval()
+    end)
+    if cd.SetCooldownFromDurationObject then
+        hooksecurefunc(cd, "SetCooldownFromDurationObject", function()
+            QueueCdStateEval()
+        end)
+    end
+    if cd.SetCooldown then
+        hooksecurefunc(cd, "SetCooldown", function()
+            QueueCdStateEval()
+        end)
+    end
+    -- Early clears (encounter resets, drain falling edges) are ready edges.
+    if cd.Clear then
+        hooksecurefunc(cd, "Clear", function()
+            QueueCdStateEval()
+        end)
+    end
+end
+
+-- One full evaluation pass. Edge-driven (widget push / OnCooldownDone / Clear /
+-- regen / gear, all through QueueCdStateEval) AND called synchronously at the
+-- end of a re-arm, so a settings change does not leave the icon shown for a
+-- frame before the next edge re-hides it.
 EvalCdStateNow = function()
     local icons = ns.cdmBarIcons
     local FCt = ns._ecmeFC
@@ -1178,8 +1328,13 @@ EvalCdStateNow = function()
                 for i = 1, #list do
                     local f = list[i]
                     local fc = f and FCt[f]
-                    if fc and KeyMatches(sid, fc.spellID) then
+                    -- rule.user rules come from the profile store; built-in rules
+                    -- (FAKE_ACTIVE_RULES) deliberately decorate Blizzard icons and
+                    -- keep their reach.
+                    if fc and KeyMatches(sid, fc.spellID)
+                       and (not rule.user or IsInjectedFrame(f)) then
                         hasIcon = true
+                        WireCdStateFrame(f)
                         if eff then ApplyCdState(f, fc, cas, eff, onCD, ready) end
                     end
                 end
@@ -1201,21 +1356,6 @@ EvalCdStateNow = function()
             end
         end
     end
-end
-
-EnsureCdStateTicker = function()
-    if not _cdStateTicker then
-        _cdStateTicker = CreateFrame("Frame")
-        _cdStateTicker:Hide()
-        _cdStateTicker._acc = 0
-        _cdStateTicker:SetScript("OnUpdate", function(self, elapsed)
-            self._acc = self._acc + elapsed
-            if self._acc < 0.12 then return end
-            self._acc = 0
-            EvalCdStateNow()
-        end)
-    end
-    _cdStateTicker:Show()
 end
 
 local function MapCast(rule)
@@ -1423,10 +1563,9 @@ function ns.FakeActive_Rearm()
     _armed = #_rules > 0
     UpdateListeners()
     if #_cdStateRules > 0 then
-        EnsureCdStateTicker()
-        EvalCdStateNow()  -- apply now so the rebuild doesn't flash the icon visible
-    elseif _cdStateTicker then
-        _cdStateTicker:Hide()
+        -- Apply + wire the engine-edge hooks now so the rebuild doesn't flash
+        -- the icon visible; from here every transition is edge-driven.
+        EvalCdStateNow()
     end
 
     if not _armed then return end
@@ -1462,13 +1601,12 @@ end
 -- GetInventoryItemID -- so a re-arm that runs before the client can answer that
 -- builds no slot rule, and the icon it was meant to drive matches nothing.
 --
--- The login re-arm rides FullCDMRebuild, which is early enough for that to
--- happen, and nothing re-arms afterwards: PLAYER_EQUIPMENT_CHANGED is only
--- registered once user rules exist and in any case needs a real gear swap. So
--- the state stayed dormant for the whole session, and the only thing that
--- revived it was opening the options, which re-arms as a side effect. That is
--- exactly the reported shape: "works until you log out, then you have to choose
--- it again".
+-- The login re-arm rides FullCDMRebuild, which is early enough for that to happen, and
+-- nothing re-arms afterwards: PLAYER_EQUIPMENT_CHANGED is only registered once user
+-- rules exist and in any case needs a real gear swap. So the state stayed dormant for
+-- the whole session, and the only thing that revived it was opening the options, which
+-- re-arms as a side effect. That is exactly the reported shape: "works until you log
+-- out, then you have to choose it again".
 --
 -- Once per session, deferred, and only for the FIRST world entry: re-arming is
 -- a teardown and rebuild of every rule, so doing it on later zone-ins could cut

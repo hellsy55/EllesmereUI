@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUICdmRPTSync.lua
 --  Generic CDs/Buffs sync, across chosen specs of the ACTIVE PROFILE.
@@ -124,7 +125,18 @@ end
 
 local function IsRPTId(id)
     if type(id) ~= "number" then return false end
-    if id < 0 then return true end  -- trinket slots (-13/-14) + item presets (-itemID)
+    if id < 0 then
+        -- The negative space is SHARED: trinket slots (-13/-14) and item
+        -- presets (-itemID) are sync material, but hosted-buff and cd-claim
+        -- markers (at/below -HOSTED_BUFF_MARKER_BASE) encode CLASS SPELLS --
+        -- syncing those leaked inert foreign-class icons onto every synced
+        -- spec's bars (cross-class field report, 2026-08-16), with step 2's
+        -- additive re-add resurrecting them after manual removal.
+        if ns.HOSTED_BUFF_MARKER_BASE and id <= -ns.HOSTED_BUFF_MARKER_BASE then
+            return false
+        end
+        return true
+    end
     -- Racial slot: match ANY race's racial, not just the current character's
     -- (ns._myRacialsSet). A profile shared across characters of different races
     -- stores a different racial spell ID per character, so the sync must still
@@ -261,10 +273,9 @@ local function ApplyRPT(specProfiles, sourceSpecKey, targetSpecKey)
 
     -- Which bar the source keeps each RPT id on. Bar MEMBERSHIP and per-icon
     -- settings are synced, but the SLOT POSITION (order within a bar) is NOT:
-    -- each spec keeps its own icon order so a sync never shoves the
-    -- trinket/pot/racial back to default. Preserving existing slots also makes
-    -- this pass idempotent, so re-propagation on spec change / logout no longer
-    -- resets positions.
+    -- each spec keeps its own icon order so a sync never shoves the trinket/pot/racial
+    -- back to default. Preserving existing slots also makes this pass idempotent, so
+    -- re-propagation on spec change / logout no longer resets positions.
     local srcBarOf = {}
     for barKey, data in pairs(srcRPT) do
         for _, id in ipairs(data.ids) do srcBarOf[id] = barKey end
@@ -434,9 +445,8 @@ function ns.ClearRPTSync()
     if b then b.rptSyncSpecs = nil end
 end
 
--- Auto-propagate RPT after the centralized spell-mutation functions run (covers
--- add / remove / move / preset / replace of racials, pots, trinkets & buff
--- presets). Settings
+-- Auto-propagate RPT after the centralized spell-mutation functions run (covers add /
+-- remove / move / preset / replace of racials, pots, trinkets & buff presets). Settings
 -- changes are covered by a spell-picker close hook in the options file.
 do
     local function Wrap(fnName)

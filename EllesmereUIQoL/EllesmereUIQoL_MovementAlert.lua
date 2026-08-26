@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIQoL_MovementAlert.lua
 --  Three independent on-screen trackers for class mobility abilities:
@@ -34,6 +35,7 @@ local function PlainValue(value)
 end
 
 local inCombat = false
+local playerClassToken = select(2, UnitClass("player")) -- class never changes: resolved once
 
 -------------------------------------------------------------------------------
 --  Mobility spell tables
@@ -154,6 +156,81 @@ local function GetKnownCategoryDuration(spellId)
     return 0
 end
 
+-- Shared lockout vs. the ability's own cooldown. Casting one charge-type
+-- ability briefly locks out its siblings through a start-recovery/cooldown
+-- category -- Druid Skull Bash does this to Wild Charge for ~2s -- and the
+-- client reports that window through the very same cooldown fields a real
+-- cooldown uses, with isOnGCD false, so the GCD gate above it never catches
+-- it. The discriminator is magnitude: a window far shorter than the ability's
+-- own base cooldown cannot BE that cooldown, so it is not something to alert
+-- on. Blizzard classifies the same way in Blizzard_CooldownViewer
+-- (MIN_GLOBAL_RECOVERY_TIME), just at GCD length. Gated on the base cooldown
+-- being the longer of the two, so a user-added spell that genuinely has a
+-- 1-2s cooldown still tracks normally.
+local MIN_REAL_COOLDOWN = 3
+
+-- entry.baseDuration is learned from LIVE cooldown reads, and those are secret in
+-- instanced content, so an entry first cached there carries no base at all. That
+-- disabled the classifier below exactly where the lockout is most visible: in
+-- combat. Static spell data is not live cooldown state and stays readable, so
+-- fall back to it rather than treating an unknown base as "cannot classify".
+-- GetSpellBaseCooldown is the GLOBAL (client-verified: no C_Spell form exists).
+local function ResolveBaseDuration(entry)
+    local base = entry and entry.baseDuration
+    if type(base) == "number" and not IsSecret(base) then return base end
+    local id = entry and (entry.baseSpellId or entry.spellId)
+    if not id then return 0 end
+    if GetSpellBaseCooldown then
+        local ms = GetSpellBaseCooldown(id)
+        if type(ms) == "number" and not IsSecret(ms) then
+            local secs = ms / 1000
+            if secs > MIN_REAL_COOLDOWN then return secs end
+        end
+    end
+    return GetKnownCategoryDuration(id)
+end
+
+local function IsLockoutWindow(entry, seconds)
+    if type(seconds) ~= "number" or IsSecret(seconds) then return false end
+    local base = ResolveBaseDuration(entry)
+    if type(base) ~= "number" or base <= MIN_REAL_COOLDOWN then return false end
+    return seconds < MIN_REAL_COOLDOWN
+end
+
+-- The same classification when the window is SECRET, which is the case Lua cannot
+-- do at all: IsLockoutWindow refuses a secret and lets it through, so in instanced
+-- content the lockout reached the display with a number on it. Hand the comparison
+-- to the engine instead, with the curve trick the charge-visibility path already
+-- uses: a step curve is 0 below the threshold and 1 above, the duration object
+-- evaluates it in C, and the result drives alpha. Never read the result, only feed it.
+local lockoutAlphaCurve = nil   -- nil = not built, false = API unavailable
+local function GetLockoutAlphaCurve()
+    if lockoutAlphaCurve == nil then
+        if C_CurveUtil and C_CurveUtil.CreateCurve and Enum and Enum.LuaCurveType then
+            local c = C_CurveUtil.CreateCurve()
+            c:SetType(Enum.LuaCurveType.Step)
+            c:AddPoint(0, 0)                   -- cross-ability lockout: hide
+            c:AddPoint(MIN_REAL_COOLDOWN, 1)   -- the ability's own cooldown: show
+            lockoutAlphaCurve = c
+        else
+            lockoutAlphaCurve = false
+        end
+    end
+    return lockoutAlphaCurve or nil
+end
+
+-- 1, or a possibly-secret 0/1 from the engine. Gated on the entry's own base being
+-- the longer of the two, so a user-added spell with a genuine 1-2s cooldown still
+-- tracks normally -- the same condition IsLockoutWindow applies.
+local function LockoutAlpha(entry, duration)
+    if not duration or not duration.EvaluateTotalDuration then return 1 end
+    local base = ResolveBaseDuration(entry)
+    if type(base) ~= "number" or base <= MIN_REAL_COOLDOWN then return 1 end
+    local curve = GetLockoutAlphaCurve()
+    if not curve then return 1 end
+    return duration:EvaluateTotalDuration(curve, 1) or 1
+end
+
 -------------------------------------------------------------------------------
 --  DB
 -------------------------------------------------------------------------------
@@ -166,7 +243,7 @@ local defaults = {
             combatOnly       = false,
             -- text_nd = "Name Duration", text_dn = "Duration Name"; the
             -- legacy "text" value renders identically to text_dn.
-            displayMode      = "text",   -- text (legacy) | text_nd | text_dn | icon | bar
+            displayMode      = "text",   -- text (legacy) | text_nd | text_dn | text_d (number only) | icon | bar
             textSize         = 24,
             iconSize         = 40,
             textColorR       = 1, textColorG = 1, textColorB = 1,
@@ -219,8 +296,7 @@ local function MovementEnabled()
     local ma = MA()
     local ec = ma and ma.enabledClasses
     if not ec then return false end
-    local _, class = UnitClass("player")
-    return ec[class] == true
+    return ec[playerClassToken] == true
 end
 _G._EUI_MovementAlert_DB = function() return db end
 EllesmereUI._ResetMovementAlert = function()
@@ -353,6 +429,7 @@ local activeSlotCount = 0
 -- last poll, so the "ready" TTS callout fires exactly once per cooldown
 -- ending instead of every poll tick while the spell sits ready.
 local readyAlertShown = {}
+local readyAlertScratch = {} -- swapped with readyAlertShown each check: no per-check table
 
 local function CreateDisplaySlot()
     local slot = CreateFrame("Frame", nil, movementFrame)
@@ -377,15 +454,38 @@ local function CreateDisplaySlot()
     if slot.icon.cooldown.SetCountdownFont then
         slot.icon.cooldown:SetCountdownFont("EUI_MovementAlertCdFont")
     end
-    -- Own countdown text for icon mode: the engine numbers on a plain
-    -- Cooldown widget only render when the user's countdownForCooldowns
-    -- CVar is on, so the poll drives this FontString instead. The engine
-    -- numbers remain only for secret durations (which Lua cannot format).
+    -- Own countdown text for icon mode: the poll drives this FontString for
+    -- readable durations (our precision/decimal control); the engine numbers
+    -- take over only for secret durations, which Lua cannot format (see the
+    -- engine-countdown block below for the CVar posture).
     slot.icon.timeText = slot.icon.cooldown:CreateFontString(nil, "OVERLAY")
     slot.icon.timeText:SetFontObject(movementCdFont)
     slot.icon.timeText:SetPoint("CENTER")
     slot.icon.timeText:SetText("")
     slot.icon:Hide()
+
+    -- Engine-drawn countdown for text modes. See ShowEngineCountdown.
+    slot.cdNum = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
+    slot.cdNum:SetDrawSwipe(false)
+    slot.cdNum:SetDrawEdge(false)
+    if slot.cdNum.SetDrawBling then slot.cdNum:SetDrawBling(false) end
+    slot.cdNum:SetHideCountdownNumbers(false)
+    if slot.cdNum.SetCountdownFont then
+        slot.cdNum:SetCountdownFont("EUI_MovementAlertCdFont")
+    end
+    -- Blizzard suppresses countdown text on short cooldowns by default, which
+    -- would silently drop the number on exactly the short mobility cooldowns
+    -- this feature exists for.
+    if slot.cdNum.SetMinimumCountdownDuration then
+        slot.cdNum:SetMinimumCountdownDuration(0)
+    end
+    -- The engine exposes the FontString it draws into, so the number can be
+    -- placed and sized against our own text instead of being inferred from the
+    -- host frame's geometry (which is what made it render at a different size).
+    if slot.cdNum.GetCountdownFontString then
+        slot.cdNumText = slot.cdNum:GetCountdownFontString()
+    end
+    slot.cdNum:Hide()
 
     slot.bar = CreateFrame("StatusBar", nil, slot)
     slot.bar:SetSize(150, 20)
@@ -440,6 +540,13 @@ local function StyleSlot(slot)
     end
     slot.text:SetTextColor(tR, tG, tB)
     slot.icon.timeText:SetTextColor(tR, tG, tB)
+    -- Pin the engine's countdown FontString to the same font object and colour
+    -- every pass: left alone it sizes itself against its host frame rather than
+    -- the user's Text Size.
+    if slot.cdNumText then
+        slot.cdNumText:SetFontObject(movementCdFont)
+        slot.cdNumText:SetTextColor(tR, tG, tB)
+    end
 
     local barH = math.max(12, math.floor(frameH * 0.5))
     local barW = frameW - (ma.barShowIcon ~= false and (barH + 8) or 0) - 10
@@ -455,6 +562,10 @@ local function StyleSlot(slot)
     else
         movementCdFont:SetFont(fontPath, fontSize, outline)
     end
+    -- The engine draws its countdown numbers straight from this font object,
+    -- so the colour has to live here too or the prototype's number ignores the
+    -- user's Text Colour.
+    movementCdFont:SetTextColor(tR, tG, tB)
 
     -- Bar texture (change-guarded: StyleSlot runs on every poll tick)
     local texPath = (EllesmereUI.ResolveTexturePath
@@ -467,6 +578,164 @@ local function StyleSlot(slot)
 
     local iconSz = math.max(16, math.min(128, ma.iconSize or 40))
     slot.icon:SetSize(iconSz, iconSz)
+end
+
+-------------------------------------------------------------------------------
+--  Engine-drawn countdown for the text modes
+--
+--  A secret remaining cannot be formatted in Lua (that is the 0.0 bug), but
+--  the ENGINE can draw it: a Cooldown widget handed the same duration object
+--  renders the number itself, which is exactly why icon mode still counts down
+--  in combat. Everything except the number is switched off here, so all this
+--  widget contributes is text sitting beside the name.
+--
+--  CVar posture: Blizzard READS countdownForCooldowns and passes it into
+--  SetHideCountdownNumbers for its own buttons (Blizzard_ActionBar/Shared/
+--  ActionButton.lua) -- the CVar gates Blizzard's calls, not the widget
+--  internals -- so forcing false here draws numbers regardless
+--  (field-verified 8.7.8). If a client configuration exists where it does
+--  not, the degradation is no number, same as before this path existed.
+-------------------------------------------------------------------------------
+-- The duration OBJECT is the only safe way to drive this. Cooldown:SetCooldown
+-- is SecretArguments = "AllowedWhenUntainted", so handing it the secret start
+-- and duration from the cdInfo path would error out of our own tainted ticker;
+-- the object itself is not a secret value, so passing it is fine. When there is
+-- no object there is simply no number, which is the same degradation as before.
+local function BindEngineCountdown(cd, duration)
+    if duration and cd.SetCooldownFromDurationObject then
+        cd:SetCooldownFromDurationObject(duration)
+        return true
+    end
+    return false
+end
+
+local function HideEngineCountdown(slot)
+    if slot.cdNum then slot.cdNum:Hide() end
+    -- ShowEngineCountdown slides the name off centre to make room for the
+    -- number, so every render has to start from the plain centred layout or
+    -- the offset accumulates across modes.
+    if slot.text then
+        slot.text:ClearAllPoints()
+        slot.text:SetPoint("CENTER")
+    end
+end
+
+local function ShowEngineCountdown(slot, displayMode, duration)
+    local cd = slot.cdNum
+    if not cd then return false end
+    local ma = MA()
+    local fontSize = math.max(8, math.min(72, ma.textSize or 24))
+    -- Decimals: this is the engine's version of the Show Decimal toggle. Above
+    -- the threshold it prints whole seconds, below it one decimal place, so
+    -- "always" is a threshold past any cooldown and "never" is zero.
+    local precision = ((tonumber(ma.precision) or 1) > 0) and 1 or 0
+    if cd.SetCountdownMillisecondsThreshold then
+        cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
+    end
+    -- Blizzard abbreviates past two minutes by default, so a 90s cooldown would
+    -- print "1:30" where every other path in this feature prints "90".
+    if cd.SetCountdownAbbrevThreshold then
+        cd:SetCountdownAbbrevThreshold(0)
+    end
+    -- Layout. The number is a separate object from the name, so the pair has to
+    -- be centred as a unit: reserve a fixed width for the number and slide the
+    -- name half of that the other way. The width is RESERVED rather than
+    -- measured because the number's own width changes as it counts down
+    -- (100.0 -> 9.9), and centring on a measured width would shuffle the name
+    -- sideways on every tick.
+    local gap = math.max(2, fontSize * 0.15)
+    local reserved = fontSize * (precision == 1 and 2.4 or 1.6)
+    local shift = (reserved + gap) / 2
+    local numberFirst = (displayMode ~= "text_nd")
+    -- text_d: no name at all, the number IS the text -- centre it on the slot.
+    local numberOnly = (displayMode == "text_d")
+    if numberOnly then shift = 0 end
+
+    slot.text:ClearAllPoints()
+    slot.text:SetPoint("CENTER", slot, "CENTER", numberFirst and shift or -shift, 0)
+
+    -- Position the FontString itself when the engine hands it over, so the
+    -- number matches our own text exactly; fall back to moving the host frame
+    -- (whose centred number only approximates the same place) when it does not.
+    cd:ClearAllPoints()
+    local fs = slot.cdNumText
+    if fs then
+        cd:SetSize(1, 1)
+        cd:SetPoint("CENTER", slot.text, "CENTER", 0, 0)
+        fs:ClearAllPoints()
+        -- No SetWidth: the anchor below already grows the digits outward, and a
+        -- hard width clips five-glyph values like "120.0" (Stampeding Roar).
+        -- reserved is only an estimate for the centring shift above.
+        if numberOnly then
+            fs:SetJustifyH("CENTER")
+            fs:SetPoint("CENTER", slot.text, "CENTER", 0, 0)
+        elseif numberFirst then
+            fs:SetJustifyH("RIGHT")
+            fs:SetPoint("RIGHT", slot.text, "LEFT", -gap, 0)
+        else
+            fs:SetJustifyH("LEFT")
+            fs:SetPoint("LEFT", slot.text, "RIGHT", gap, 0)
+        end
+    else
+        cd:SetSize(reserved, fontSize * 1.4)
+        if numberOnly then
+            cd:SetPoint("CENTER", slot.text, "CENTER", 0, 0)
+        elseif numberFirst then
+            cd:SetPoint("RIGHT", slot.text, "LEFT", -gap, 0)
+        else
+            cd:SetPoint("LEFT", slot.text, "RIGHT", gap, 0)
+        end
+    end
+    if not BindEngineCountdown(cd, duration) then
+        -- Nothing to drive the number with: undo the room made for it, or the
+        -- name is left sitting off centre with an empty gap beside it.
+        HideEngineCountdown(slot)
+        return false
+    end
+    cd:Show()
+    return true
+end
+
+-- Bar mode's number lives centred in the bar with no name beside it, so it
+-- needs the binding but none of the two-object layout above.
+local function ShowEngineCountdownCentred(slot, anchor, duration)
+    local cd = slot.cdNum
+    if not cd then return false end
+    local ma = MA()
+    local fontSize = math.max(8, math.min(72, ma.textSize or 24))
+    local precision = ((tonumber(ma.precision) or 1) > 0) and 1 or 0
+    if cd.SetCountdownMillisecondsThreshold then
+        cd:SetCountdownMillisecondsThreshold(precision == 1 and 86400 or 0)
+    end
+    -- Blizzard abbreviates past two minutes by default, so a 90s cooldown would
+    -- print "1:30" where every other path in this feature prints "90".
+    if cd.SetCountdownAbbrevThreshold then
+        cd:SetCountdownAbbrevThreshold(0)
+    end
+    cd:ClearAllPoints()
+    -- The host frame is created before slot.bar, so without this the number is
+    -- painted under the bar's background and fill and never appears.
+    if anchor.GetFrameLevel then
+        cd:SetFrameLevel(anchor:GetFrameLevel() + 5)
+    end
+    local fs = slot.cdNumText
+    if fs then
+        cd:SetSize(1, 1)
+        cd:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+        fs:ClearAllPoints()
+        fs:SetWidth(0)
+        fs:SetJustifyH("CENTER")
+        fs:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+    else
+        cd:SetSize(fontSize * 3, fontSize * 1.4)
+        cd:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+    end
+    if not BindEngineCountdown(cd, duration) then
+        cd:Hide()
+        return false
+    end
+    cd:Show()
+    return true
 end
 
 -------------------------------------------------------------------------------
@@ -499,14 +768,18 @@ end
 
 local function SafeGetBaseDuration(spellId)
     if C_Spell.GetSpellCooldownDuration then
-        local dur = C_Spell.GetSpellCooldownDuration(spellId)
+        -- ignoreGCD: without it this reads the global cooldown whenever one is
+        -- running, and the 1.5 floor below then throws the answer away.
+        local dur = C_Spell.GetSpellCooldownDuration(spellId, true)
         if dur then
             local total = dur:GetTotalDuration()
             if not IsSecret(total) and total and total > 1.5 then return total end
         end
     end
-    if C_Spell.GetSpellBaseCooldown then
-        local ms = C_Spell.GetSpellBaseCooldown(spellId)
+    -- Global, not C_Spell (client-verified: no C_Spell form exists). Static
+    -- spell data, so it stays readable when the live cooldown is secret.
+    if GetSpellBaseCooldown then
+        local ms = GetSpellBaseCooldown(spellId)
         if not IsSecret(ms) and ms and ms > 1500 then return ms / 1000 end
     end
     local cdInfo = C_Spell.GetSpellCooldown(spellId)
@@ -675,109 +948,17 @@ local function UpdateCachedCharges()
             end
         else
             local cdInfo = C_Spell.GetSpellCooldown(entry.spellId)
-            if cdInfo and cdInfo.duration and not IsSecret(cdInfo.duration) and cdInfo.duration > 0 then
+            -- A shared lockout must not be adopted as the ability's base
+            -- cooldown either -- that would poison the very value
+            -- IsLockoutWindow classifies against.
+            if cdInfo and cdInfo.duration and not IsSecret(cdInfo.duration) and cdInfo.duration > 0
+               and not IsLockoutWindow(entry, cdInfo.duration) then
                 entry.baseDuration = cdInfo.duration
             end
         end
     end
 end
 
--- Buff-active tracking (e.g. Warlock Burning Rush): tracks auraInstanceID
--- from UNIT_AURA payloads so it also works while in combat.
-local buffActiveState = {}
-local expectingBuffAura = {}
-local function BuffActiveKey(entry) return entry.spellId end
-local function IsBuffActiveTrackedSpell(castSpellId)
-    if BUFF_ACTIVE_SPELLS[castSpellId] then return castSpellId end
-    local mapped = trackedSpellSet[castSpellId]
-    if mapped and BUFF_ACTIVE_SPELLS[mapped] then return mapped end
-    return nil
-end
-local function SetBuffActiveState(spellId, active, instanceID)
-    buffActiveState[spellId] = { active = active, instanceID = instanceID }
-end
-local function ClearBuffActiveTracking()
-    wipe(buffActiveState); wipe(expectingBuffAura)
-end
-local function IsBuffActiveDisplayed(entry)
-    local key = BuffActiveKey(entry)
-    local state = buffActiveState[key]
-    if state and state.active then return true end
-    if not inCombat and not InCombatLockdown() then
-        return C_UnitAuras.GetPlayerAuraBySpellID(entry.spellId) ~= nil
-    end
-    return false
-end
-local function SyncBuffActiveOnCombatStart()
-    for _, entry in ipairs(cachedMovementSpells) do
-        if entry.checkType == "buffActive" then
-            local key = BuffActiveKey(entry)
-            local aura = C_UnitAuras.GetPlayerAuraBySpellID(key)
-            if aura and aura.auraInstanceID then SetBuffActiveState(key, true, aura.auraInstanceID) end
-        end
-    end
-end
-local function OnBuffActiveSpellCast(castSpellId)
-    local key = IsBuffActiveTrackedSpell(castSpellId)
-    if not key then return end
-    local state = buffActiveState[key]
-    if state and state.active then expectingBuffAura[key] = nil else expectingBuffAura[key] = true end
-end
-local function OnPlayerBuffActiveAuraUpdate(updateInfo)
-    if not updateInfo then return end
-    if updateInfo.removedAuraInstanceIDs then
-        for _, entry in ipairs(cachedMovementSpells) do
-            if entry.checkType == "buffActive" then
-                local key = BuffActiveKey(entry)
-                local state = buffActiveState[key]
-                if state and state.instanceID then
-                    for _, instanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
-                        if PlainValue(instanceID) == state.instanceID then
-                            SetBuffActiveState(key, false, nil)
-                            expectingBuffAura[key] = nil
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end
-    if updateInfo.addedAuras then
-        for _, entry in ipairs(cachedMovementSpells) do
-            if entry.checkType == "buffActive" then
-                local key = BuffActiveKey(entry)
-                if expectingBuffAura[key] then
-                    -- Prefer an exact spellId match, but in combat the field is
-                    -- a secret value we can't read at all. Fall back to the
-                    -- batch's only unreadable aura -- with more than one there
-                    -- is no way to tell which is ours, so leave the expectation
-                    -- standing rather than latch onto an unrelated aura.
-                    local match, unreadable, unreadableCount = nil, nil, 0
-                    for _, aura in ipairs(updateInfo.addedAuras) do
-                        local sid = PlainValue(aura.spellId)
-                        if sid then
-                            if sid == key then match = aura; break end
-                        else
-                            unreadable = aura
-                            unreadableCount = unreadableCount + 1
-                        end
-                    end
-                    if not match and unreadableCount == 1 then match = unreadable end
-                    if match and match.auraInstanceID then
-                        SetBuffActiveState(key, true, match.auraInstanceID)
-                        expectingBuffAura[key] = nil
-                    end
-                end
-                for _, aura in ipairs(updateInfo.addedAuras) do
-                    local sid = PlainValue(aura.spellId)
-                    if sid and sid == key and aura.auraInstanceID then
-                        SetBuffActiveState(key, true, aura.auraInstanceID)
-                    end
-                end
-            end
-        end
-    end
-end
 
 local function CacheMovementSpells(fullReset)
     local class = select(2, UnitClass("player"))
@@ -786,7 +967,6 @@ local function CacheMovementSpells(fullReset)
     if fullReset then
         CancelAllRechargeTimers()
         wipe(spellWasCast); wipe(spellCastTime); wipe(chargeRechargeStart)
-        ClearBuffActiveTracking()
         cacheResetTime = GetTime()
     end
 
@@ -913,13 +1093,22 @@ local function CancelMovementCountdown()
     if movementCountdownTimer then movementCountdownTimer:Cancel(); movementCountdownTimer = nil end
 end
 
-local function HideMovementDisplay()
+-- buffActive engine-lane handles (declared here so HideMovementDisplay -- the
+-- universal off-path -- can park the host; defined in the lane block below).
+local buffAlertHost, buffAlertBuilt, buffAlertRegenArm, buffAlertLastCount
+local buffAlertContainer, buffAlertAssist, buffAlertVehicle
+
+-- keepBuffLane: the cooldown display is going away but the buffActive lane is
+-- not. A buffActive spell takes no slot, so an empty cooldown stack is its
+-- NORMAL state -- parking the host there would hide the alert permanently.
+local function HideMovementDisplay(keepBuffLane)
     wipe(readyAlertShown)
     movementFrame:Hide()
     for _, slot in ipairs(displayPool) do
-        slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); slot:Hide()
+        slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); HideEngineCountdown(slot); slot:Hide()
     end
     activeSlotCount = 0
+    if buffAlertHost and not keepBuffLane then buffAlertHost:Hide() end
     CancelMovementCountdown()
 end
 
@@ -940,17 +1129,20 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     -- literal "%" so SetFormattedText cannot misread it as a format
     -- directive expecting arguments it never gets.
     local escapedName = (spellName:gsub("%%", "%%%%"))
-    -- Two fixed text arrangements, both reading as "No <ability>" (the
-    -- alert shows while the spell is unavailable); the legacy "text" value
-    -- keeps the old default's duration-first order.
+    -- Three fixed text arrangements: two read as "No <ability>" (the alert
+    -- shows while the spell is unavailable), text_d is the bare number; the
+    -- legacy "text" value keeps the old default's duration-first order.
     local fmtStr
     if displayMode == "text_nd" then
         fmtStr = "No " .. escapedName .. " " .. precFmt
+    elseif displayMode == "text_d" then
+        fmtStr = precFmt
     else
         fmtStr = precFmt .. " No " .. escapedName
     end
 
     slot.text:Hide(); slot.icon:Hide(); slot.bar:Hide()
+    HideEngineCountdown(slot)
 
     -- Start-recovery branch. GetSpellCooldown's timeUntilEndOfStartRecovery
     -- is ALWAYS present as a number on this client (0 outside an actual
@@ -961,7 +1153,7 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     -- falls through to the main path, whose engine sinks accept secrets.
     local recov = cdInfo and cdInfo.timeUntilEndOfStartRecovery
     if issecretvalue and issecretvalue(recov) then recov = nil end
-    if type(recov) == "number" and recov > 0 then
+    if type(recov) == "number" and recov > 0 and not IsLockoutWindow(spellEntry, recov) then
         if displayMode == "icon" and spellIcon then
             slot.icon.tex:SetTexture(spellIcon)
             -- Recharge swipe: derived from the entry's recharge duration
@@ -997,13 +1189,21 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
 
     local cdRemaining, cdStart, cdDuration, cdModRate
     local hasSecretDuration = false
+    -- True only when the duration OBJECT supplied the values below. The engine
+    -- countdown is driven from that object, so anything resolved from cdInfo
+    -- instead must not try to use it: the object was either absent or already
+    -- rejected here, and SetCooldownFromDurationObject clears to nothing on an
+    -- expired one while still reporting success.
+    local fromDuration = false
     if duration then
         local rem, total = duration:GetRemainingDuration(), duration:GetTotalDuration()
         if IsSecret(rem) or IsSecret(total) then
             hasSecretDuration = true
+            fromDuration = true
             cdRemaining, cdDuration = rem, total
             cdStart, cdModRate = duration:GetStartTime(), duration:GetModRate()
-        elseif total and total > 1.5 and rem and rem > 0 then
+        elseif total and total > 1.5 and not IsLockoutWindow(spellEntry, total) and rem and rem > 0 then
+            fromDuration = true
             cdRemaining, cdDuration = rem, total
             cdStart, cdModRate = duration:GetStartTime(), duration:GetModRate()
         end
@@ -1014,7 +1214,10 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
         if IsSecret(s) or IsSecret(d) then
             hasSecretDuration = true
             cdStart, cdDuration, cdModRate, cdRemaining = s, d, m, true
-        elseif d > 0 then
+        -- This fallback never had the duration-object branch's own GCD floor,
+        -- so anything the branch above rejected as too short landed here and
+        -- rendered anyway.
+        elseif d > 0 and not IsLockoutWindow(spellEntry, d) then
             cdStart, cdDuration, cdModRate = s, d, m
             cdRemaining = math.max(0, (s + d) - GetTime())
         end
@@ -1022,6 +1225,23 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
 
     if not cdRemaining then return false end
     if not hasSecretDuration and cdRemaining <= 0 then return false end
+
+    -- The text branches format cdRemaining themselves, so what decides them is
+    -- whether THAT value can be rendered, not whether some other field of the
+    -- same cooldown happened to be secret: hasSecretDuration is set when EITHER
+    -- the remaining or the total is secret, and a secret total leaves a
+    -- perfectly renderable remaining behind. Bar mode keeps using
+    -- hasSecretDuration because it also feeds cdDuration to SetMinMaxValues.
+    -- Both tests are secret-safe (no comparison against a secret): the sentinel
+    -- is a plain boolean, and IsSecret is issecretvalue.
+    local unreadableRemaining = type(cdRemaining) == "boolean" or IsSecret(cdRemaining)
+    -- Show a number only when there is a real, positive one to show. The <= 0
+    -- test is reachable ONLY once unreadableRemaining is false, so it never
+    -- compares against a secret. It matters because the guard above lets a
+    -- non-positive remaining through whenever hasSecretDuration was set by the
+    -- OTHER field, which is the last route by which a literal 0.0 could still
+    -- reach the display.
+    local showRemaining = not unreadableRemaining and cdRemaining > 0
 
     if displayMode == "icon" then
         if spellIcon then
@@ -1039,18 +1259,19 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
                 slot.icon.cooldown:SetHideCountdownNumbers(false)
                 slot.icon.timeText:SetText("")
             else
-                -- Our own countdown text: the engine numbers only render
-                -- when the countdownForCooldowns CVar is on, which most
-                -- users have off -- the poll refreshes this every tick.
+                -- Our own countdown text for readable durations, refreshed by
+                -- the poll every tick; the engine numbers are suppressed here
+                -- and serve only the secret branch.
                 slot.icon.cooldown:SetHideCountdownNumbers(true)
                 slot.icon.timeText:SetFormattedText("%." .. precision .. "f", cdRemaining)
             end
             slot.icon:Show()
         else
             -- Icon mode with no icon falls back to text, so it needs the same
-            -- sentinel guard as the text branch below.
-            if type(cdRemaining) == "boolean" then
+            -- guard as the text branch below.
+            if not showRemaining then
                 slot.text:SetText("No " .. spellName)
+                if fromDuration then ShowEngineCountdown(slot, displayMode, duration) end
             else
                 slot.text:SetFormattedText(fmtStr, cdRemaining)
             end
@@ -1060,40 +1281,56 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
         local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
         slot.bar:SetStatusBarColor(r, g, b)
         if type(cdRemaining) == "boolean" then
-            -- Unreadable remaining (see the text branch): show a full bar so the
-            -- alert still reads as "unavailable" instead of an empty one, which
-            -- would look like the cooldown had just finished.
+            -- Only the sentinel leaves nothing to scale the fill with: show a
+            -- full bar so the alert still reads as "unavailable" instead of an
+            -- empty one, which would look like a cooldown that just finished.
             slot.bar:SetMinMaxValues(0, 1)
             slot.bar:SetValue(1)
-            slot.bar.text:SetShown(false)
         else
+            -- A SECRET remaining still animates: SimpleStatusBar's SetValue and
+            -- SetMinMaxValues are both AllowedWhenTainted, so the engine scales
+            -- the fill from values Lua may not read. Gating this on
+            -- hasSecretDuration would freeze the bar at 100% for no reason.
             slot.bar:SetMinMaxValues(0, cdDuration)
             slot.bar:SetValue(cdRemaining)
-            slot.bar.text:SetShown(ma.barShowDuration ~= false)
-            if ma.barShowDuration ~= false then
-                slot.bar.text:SetFormattedText("%." .. precision .. "f", cdRemaining)
-            end
+        end
+        -- The NUMBER is the part Lua cannot produce, so it comes from our own
+        -- formatter when readable and from the engine when not.
+        if ma.barShowDuration == false then
+            slot.bar.text:SetShown(false)
+        elseif showRemaining then
+            slot.bar.text:SetShown(true)
+            slot.bar.text:SetFormattedText("%." .. precision .. "f", cdRemaining)
+        else
+            slot.bar.text:SetShown(false)
+            if fromDuration then ShowEngineCountdownCentred(slot, slot.bar, duration) end
         end
         if ma.barShowIcon ~= false and spellIcon then slot.bar.icon:SetTexture(spellIcon); slot.bar.icon:Show() else slot.bar.icon:Hide() end
         slot.bar:Show()
     else -- any text mode (text_nd / text_dn / legacy "text")
-        if type(cdRemaining) == "boolean" then
-            -- The cdInfo fallback stores a BOOLEAN sentinel when the cooldown is
-            -- secret, because Lua cannot compute a remaining from secret
-            -- start/duration. Feeding that to a "%.1f" renders 0.0, which reads
-            -- as "ready" -- the exact opposite of what the alert means, and what
-            -- made the countdown appear to reset the instant combat started in
-            -- instanced content. Drop the number instead: the alert still says
-            -- the ability is unavailable, which is the part that matters.
+        if not showRemaining then
+            -- Whenever the remaining is unreadable, drop the number: the alert
+            -- still says the ability is unavailable, which is the part that
+            -- matters. Formatting it ourselves renders 0.0, which reads as
+            -- "ready" -- the exact opposite of what the alert means.
             --
-            -- Only the sentinel is special-cased. A genuine secret NUMBER is
-            -- passed straight through, because SetFormattedText is
-            -- AllowedWhenTainted and the engine renders the real value from it.
-            -- Sentinel test is type-based, NOT `== true`: the Duration-object
-            -- path above stores a raw SECRET number in cdRemaining, and
-            -- equality against a secret is not a comparison we ever risk;
-            -- type() is secret-safe and the sentinel is a plain boolean.
-            slot.text:SetText("No " .. spellName)
+            -- BOTH producers land here, which is what the first pass at this
+            -- got wrong. The cdInfo fallback stores a BOOLEAN sentinel (Lua
+            -- cannot compute a remaining from a secret start plus duration),
+            -- and the Duration-object path above stores a raw SECRET NUMBER.
+            -- Only the sentinel used to be guarded, on the assumption that
+            -- SetFormattedText being AllowedWhenTainted meant the engine would
+            -- render a secret's real value. It does not: field-confirmed on
+            -- 8.7.8, a secret remaining renders as 0.0 here. Icon mode never
+            -- relied on that assumption -- it blanks its own text and lets the
+            -- Cooldown widget draw the secret -- so the two branches disagreed
+            -- and the text one was wrong. Gating on hasSecretDuration covers
+            -- both producers and drops the fragile type() test with it.
+            -- text_d shows only the number, so the label stays empty and the
+            -- engine countdown is centred on the slot instead of beside it.
+            slot.text:SetText(displayMode == "text_d" and "" or ("No " .. spellName))
+            -- The number Lua cannot format, drawn by the engine.
+            if fromDuration then ShowEngineCountdown(slot, displayMode, duration) end
         else
             slot.text:SetFormattedText(fmtStr, cdRemaining)
         end
@@ -1104,39 +1341,202 @@ local function ShowMovementSlot(index, cdInfo, spellEntry, duration)
     return true
 end
 
-local function ShowBuffActiveSlot(index, spellEntry)
+-------------------------------------------------------------------------------
+--  buffActive lane (Burning Rush): ENGINE-OWNED end to end.
+--  GetPlayerAuraBySpellID is RequiresNonSecretAura -- under aura restriction
+--  (/euidev = M+/raid combat, the viability bar) it returns ZERO VALUES for a
+--  flagged spell WHILE THE BUFF IS UP, indistinguishable from absent
+--  (field-settled 2026-08-13). No Lua probe or payload state machine can know
+--  presence there; the engine can. One hidden AuraContainer with
+--  includeSpellIDs shows/hides its button on presence entirely C-side,
+--  identical in and out of restriction; the alert visual is a region ON the
+--  engine button (visibility inherits, SetText is a display-only sink).
+--  HOST RULES (forbidden-dependent geometry lock): UIParent-parented AND
+--  UIParent-anchored, positioned NUMERICALLY, out of combat only -- the
+--  engine child makes the host's own geometry writes ADDON_ACTION_BLOCKED
+--  inside lockdown, so combat repositions park on a one-shot regen re-apply.
+-------------------------------------------------------------------------------
+local BUFF_ALERT_STYLE = "qol:movealert"
+
+local function BuffAlertApplyExtra(button, d, style)
     local ma = MA()
-    local slot = GetDisplaySlot(index)
-    StyleSlot(slot)
-    local displayMode = ma.displayMode or "text"
-    local spellName = spellEntry.customText or spellEntry.spellName or "Active!"
-    local spellIcon = spellEntry.spellIcon
-
-    slot.text:Hide(); slot.icon:Hide(); slot.bar:Hide()
-
-    if displayMode == "icon" and spellIcon then
-        slot.icon.tex:SetTexture(spellIcon)
-        slot.icon.cooldown:Clear()
-        slot.icon.cooldown:SetHideCountdownNumbers(true)
-        slot.icon.timeText:SetText("")
-        slot.icon:Show()
-    elseif displayMode == "bar" then
-        slot.bar:SetMinMaxValues(0, 1); slot.bar:SetValue(1)
-        local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
-        slot.bar:SetStatusBarColor(r, g, b)
-        -- Name label, not a duration -- always shown (and the shared
-        -- fontstring may have been hidden by the Show Duration Text gate).
-        slot.bar.text:Show()
-        slot.bar.text:SetText(spellName)
-        if ma.barShowIcon ~= false and spellIcon then slot.bar.icon:SetTexture(spellIcon); slot.bar.icon:Show() else slot.bar.icon:Hide() end
-        slot.bar:Show()
-    else
-        slot.text:SetText(spellName)
-        slot.text:Show()
+    local mode = ma.displayMode or "text"
+    if not d.maText then
+        d.maText = button:CreateFontString(nil, "OVERLAY")
     end
+    local entry = style.maEntry
+    local label = (entry and (entry.customText or entry.spellName)) or "Active!"
+    local r, g, b = ResolveAlertColor("textColor", "textColorUseClass")
+    local fp = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("qol")) or STANDARD_TEXT_FONT
+    d.maText:SetFont(fp, ma.textSize or 16, "OUTLINE")
+    d.maText:SetTextColor(r, g, b)
+    d.maText:ClearAllPoints()
+    if mode == "icon" then
+        if d.icon then d.icon:SetAlpha(1) end
+        d.maText:Hide()
+    else
+        -- text AND bar modes render as the plain label: a permanent toggle
+        -- buff has no duration for a bar to add, and the engine button is the
+        -- only restriction-safe visibility carrier either way.
+        if d.icon then d.icon:SetAlpha(0) end
+        d.maText:SetPoint("CENTER", button, "CENTER", 0, 0)
+        d.maText:SetText(label)
+        d.maText:Show()
+    end
+end
 
-    slot:Show()
+local function BuildBuffAlertStyle(entry)
+    local ma = MA()
+    local px = (EllesmereUI.PP and EllesmereUI.PP.Scale and EllesmereUI.PP.Scale(ma.iconSize or 32)) or ma.iconSize or 32
+    return {
+        width = px, height = px,
+        iconCrop = true,
+        hideDurationText = true, -- permanent buff: no countdown to draw
+        hideSwipe = true,
+        noTooltips = true,
+        applyExtra = BuffAlertApplyExtra,
+        maEntry = entry,
+    }
+end
+
+-- Identity gate (Blizzard_AuraContainer/Blizzard_AuraContainerUtil.lua,
+-- AuraContainerUtil.CanApplyIdentityCandidateFilters + DoesAuraPassCandidateFilters,
+-- verified 12.1.0.69299): includeSpellIDs is applied to a HELPFUL aura only while
+-- UnitCanAssist("player", unit) holds, and it FAILS OPEN -- when the gate fails the
+-- spell-ID filter is skipped entirely and the aura passes on its filter string
+-- alone, so a group asking for one spell renders every buff. Boarding a
+-- vehicle drops the player's own assistability, so this one-button HELPFUL group
+-- stops meaning "Burning Rush" and renders whatever buff it finds first, wearing
+-- the Burning Rush label. Membership is cached per aura instance and UNIT_AURA
+-- only re-parses what changed, so the degraded parse outlived the ride: the alert
+-- stayed up after dismounting until a reload rebuilt the container.
+-- Latched from the vehicle events rather than probed here, because
+-- UnitUsingVehicle is still true across the EXIT transition (see the RF assist
+-- gate's AssistProbe, which guards the same engine gate one unit over).
+local function BuffAlertAssistable()
+    if buffAlertVehicle then return false end
+    -- Cinematics flip the same flag without a vehicle (UNIT_FACTION edge). A
+    -- CLEANLY-false answer denies; unreadable ones stay fail-open, since a
+    -- transient nil must not blank a working alert.
+    local ok, canAssist = pcall(UnitCanAssist, "player", "player")
+    if ok and not IsSecret(canAssist) and canAssist == false then return false end
     return true
+end
+
+-- Reconcile the latch against the live flag. Needed wherever the EXITED edge
+-- could have been missed: while the tracker's events are unregistered nothing
+-- clears the latch, so a tracker switched off mid-ride (or a profile swap, or
+-- being teleported out of a vehicle) would otherwise come back with the lane
+-- suppressed for the rest of the session.
+local function SyncBuffAlertVehicleLatch()
+    local probe = UnitUsingVehicle or UnitInVehicle
+    buffAlertVehicle = (probe and probe("player")) and true or false
+end
+
+-- Build once per session on first eligible pass (warlock + Movement Alerts on
+-- + Burning Rush checked); later passes only refresh the style (mode/size/
+-- color edits ride RestyleSoon) and the host's shown state. Engine frames are
+-- permanent, so disable parks via host:Hide() (the container is a CHILD of the
+-- host -- creation-time parenting is legal) and re-enable reuses everything.
+local function EnsureBuffAlertLane()
+    local AK = EllesmereUI.AuraKit
+    if not (AK and AK.RequestContainer and AK.AddGroupToContainer and AK.RestyleSoon) then return end
+    local entry
+    for _, e in ipairs(cachedMovementSpells) do
+        if e.checkType == "buffActive" then entry = e; break end
+    end
+    if not entry then
+        if buffAlertHost then buffAlertHost:Hide() end
+        return
+    end
+    -- Resolved ahead of the Show() below, not beside it: every pass runs through
+    -- here, so a gate applied anywhere else would be undone by the next tick.
+    local assist = BuffAlertAssistable()
+    local wasDenied = (buffAlertAssist == false)
+    buffAlertAssist = assist
+    if buffAlertBuilt then
+        if not assist then buffAlertHost:Hide(); return end
+        buffAlertHost:Show()
+        -- Whatever was parsed during the degraded window is wrong, and leaving a
+        -- vehicle produces no aura edge for buffs that were already up, so the
+        -- engine would keep serving the stale membership (it is cached per aura
+        -- instance; UNIT_AURA re-parses only what changed). The Show() above
+        -- re-parses on its own -- AuraContainerPrivateMixin:OnShow_Intrinsic in
+        -- Blizzard_AuraContainer/Blizzard_AuraContainer.lua calls UpdateAllAuras --
+        -- and this is that same lever stated outright, so the recovery does not
+        -- silently depend on the host being hidden rather than faded. NOTE the
+        -- method is a no-op on AuraContainerSharedMixin; the real
+        -- MarkDirty(FullAuraRebuild) is ManagedAuraContainerSharedMixin's
+        -- override, which reaches the addon-callable partition through
+        -- ManagedAuraContainerInboundMixin. Bounded to the real denied->allowed flip.
+        if wasDenied and buffAlertContainer and buffAlertContainer.UpdateAllAuras then
+            buffAlertContainer:UpdateAllAuras()
+        end
+        AK.styles[BUFF_ALERT_STYLE] = BuildBuffAlertStyle(entry)
+        AK.RestyleSoon(BUFF_ALERT_STYLE)
+        return
+    end
+    -- Denial must not postpone the BUILD, only the display: logging in inside a
+    -- vehicle (or behind an intro cinematic) would otherwise defer creation to
+    -- the first allowed pass. Build unconditionally and park at the end; the
+    -- container is created and hidden inside one call, so nothing renders in
+    -- between.
+    buffAlertBuilt = true
+    buffAlertHost = CreateFrame("Frame", nil, UIParent)
+    buffAlertHost:SetSize(2, 2)
+    -- Provisional numeric seat; RepositionBuffAlertHost follows the alert
+    -- stack on every out-of-combat render pass.
+    buffAlertHost:SetPoint("CENTER", UIParent, "CENTER", 0, -260)
+    AK.styles[BUFF_ALERT_STYLE] = BuildBuffAlertStyle(entry)
+    local include = { [entry.spellId] = true }
+    -- Override form too (talent variants share the alert); Burning Rush has
+    -- none today, guarded for the day it grows one.
+    if FindSpellOverrideByID then
+        local ov = FindSpellOverrideByID(entry.spellId)
+        if type(ov) == "number" and ov > 0 then include[ov] = true end
+    end
+    AK.RequestContainer(buffAlertHost, "player", {
+        point = { "CENTER", buffAlertHost, "CENTER", 0, 0 },
+        layout = { anchorPoint = "CENTER", padding = { 0, 0, 0, 0 }, rowWidth = 400 },
+    }, function(container)
+        buffAlertContainer = container
+        AK.AddGroupToContainer(container, {
+            key = "buffalert",
+            filter = { "HELPFUL" },
+            style = BUFF_ALERT_STYLE,
+            maxFrameCount = 1,
+            candidateFilters = { includeSpellIDs = include },
+            layout = { anchorPoint = "CENTER", padding = { 0, 0, 0, 0 }, rowWidth = 400 },
+        })
+    end)
+    if not assist then buffAlertHost:Hide() end
+end
+
+-- Numeric follow of the alert stack's top (slots grow UP from movementFrame's
+-- bottom, +2px gaps). Geometry reads are on OUR movementFrame (no engine
+-- content beneath it -- always legal); the WRITE on the host is lockdown-
+-- blocked, so combat passes arm a one-shot regen re-apply reading the LAST
+-- counted stack height.
+local function RepositionBuffAlertHost(count)
+    if not buffAlertHost then return end
+    buffAlertLastCount = count
+    if InCombatLockdown() then
+        if not buffAlertRegenArm then
+            buffAlertRegenArm = CreateFrame("Frame")
+            buffAlertRegenArm:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                RepositionBuffAlertHost(buffAlertLastCount or 0)
+            end)
+        end
+        buffAlertRegenArm:RegisterEvent("PLAYER_REGEN_ENABLED")
+        return
+    end
+    local fw, fh = movementFrame:GetWidth(), movementFrame:GetHeight()
+    local left, bottom = movementFrame:GetLeft(), movementFrame:GetBottom()
+    if not (fw and fh and left and bottom) then return end
+    buffAlertHost:ClearAllPoints()
+    buffAlertHost:SetPoint("CENTER", UIParent, "BOTTOMLEFT",
+        left + fw / 2, bottom + count * (fh + 2) + fh / 2)
 end
 
 -------------------------------------------------------------------------------
@@ -1152,8 +1552,9 @@ end
 --  that secret total into a secret ALPHA the engine resolves itself, with no
 --  Lua comparison anywhere -- the same trick Action Bars uses to stop
 --  banked-charge buttons desaturating (desatCurveReal / GetCdAlphaCurve).
---  Non-charge spells are forced back to full alpha so a pooled slot can never
---  keep a stale 0 from a previous occupant.
+--  Non-charge spells get LockoutAlpha instead: 1 in every readable case, and the
+--  engine-resolved 0/1 when a secret window needs classifying -- a pooled slot
+--  still can't keep a stale 0, because this runs for every shown slot each pass.
 -------------------------------------------------------------------------------
 local chargeAlphaCurve = nil   -- nil = not built, false = API unavailable
 local function GetChargeAlphaCurve()
@@ -1171,15 +1572,28 @@ local function GetChargeAlphaCurve()
     return chargeAlphaCurve or nil
 end
 
-local function ApplyChargeVisibility(slot, spellId, chargeInfo)
+local function ApplyChargeVisibility(slot, spellId, chargeInfo, entry, duration)
     if not slot then return end
     -- maxCharges stays PLAIN even when the rest of the charge record is secret,
     -- so this branch is safe (and is why the entry's cached isChargeSpell flag
     -- is not consulted -- SafeGetChargeInfo throws the whole record away when
     -- cooldownDuration is secret, leaving Shift cached as a 1-charge cooldown).
     local mc = chargeInfo and chargeInfo.maxCharges
-    if mc == nil or IsSecret(mc) or mc <= 1 then slot:SetAlpha(1); return end
+    -- Non-charge: the only thing that hides the slot is a cross-ability lockout,
+    -- and when its window is secret the engine-side compare in LockoutAlpha is
+    -- the ONLY way to classify it. This is also the single writer of alpha on
+    -- that path, so it must not be reduced to a bare SetAlpha(1) -- that is what
+    -- let the lockout show through.
+    if mc == nil or IsSecret(mc) or mc <= 1 then
+        slot:SetAlpha(LockoutAlpha(entry, duration))
+        return
+    end
     local curve = GetChargeAlphaCurve()
+    -- Deliberately WITHOUT ignoreGCD: the GCD-length total IS the banked-charge
+    -- signal the step curve keys on (a banked charge reports only a GCD-length
+    -- cooldown; the full recharge drives it only once the last charge is spent).
+    -- Asking the API to skip the GCD would change that signal's class and show
+    -- the alert while a charge is still banked.
     local durObj = C_Spell.GetSpellCooldownDuration and C_Spell.GetSpellCooldownDuration(spellId)
     if curve and durObj and durObj.EvaluateTotalDuration then
         -- Result may be SECRET: never compare it. SetAlpha accepts secrets, and
@@ -1188,6 +1602,31 @@ local function ApplyChargeVisibility(slot, spellId, chargeInfo)
     else
         slot:SetAlpha(1)
     end
+end
+
+-- Same-frame coalescer for the check: cooldown/usable/charge storms and player
+-- aura batches fire several times per frame, and every check re-queries each
+-- tracked spell, so duplicates collapse into ONE check on the next OnUpdate.
+-- The frame is shown only while a check is pending (zero cost idle); the
+-- 100 ms countdown repaint rides the same funnel so it can never double up
+-- with an event-driven check in the same frame.
+local movementCheckCharges = false
+local movementCheckFrame = CreateFrame("Frame")
+movementCheckFrame:Hide()
+movementCheckFrame:SetScript("OnUpdate", function(self)
+    self:Hide()
+    if movementCheckCharges then
+        movementCheckCharges = false
+        UpdateCachedCharges()
+    end
+    CheckMovementCooldown()
+end)
+local function RequestMovementCheck()
+    movementCheckFrame:Show()
+end
+local function RequestMovementCheckWithCharges()
+    movementCheckCharges = true
+    movementCheckFrame:Show()
 end
 
 CheckMovementCooldown = function()
@@ -1200,33 +1639,59 @@ CheckMovementCooldown = function()
     if #cachedMovementSpells == 0 then HideMovementDisplay(); return end
 
     local count = 0
-    local nowShownReady = {}
+    local nowShownReady = readyAlertScratch
+    wipe(nowShownReady)
     for _, entry in ipairs(cachedMovementSpells) do
         if entry.checkType == "buffActive" then
-            if IsBuffActiveDisplayed(entry) then
-                if ShowBuffActiveSlot(count + 1, entry) then count = count + 1 end
-            end
+            -- Engine-owned lane: presence rendering never passes through Lua
+            -- (see EnsureBuffAlertLane). The entry deliberately takes no slot.
         else
             local spellId = entry.baseSpellId or entry.spellId
             local hasCharges = C_Spell.GetSpellCharges(spellId)
             local spellInfo  = C_Spell.GetSpellCooldown(spellId)
             if spellInfo and spellInfo.timeUntilEndOfStartRecovery and
                (spellInfo.isOnGCD == false or (spellInfo.isOnGCD == nil and not hasCharges)) then
+                -- The duration OBJECT is the only thing that can put a number on
+                -- screen while the cooldown is secret, so getting one matters more
+                -- than which API supplies it. Two reasons it used to come back
+                -- empty in combat: GetSpellCooldownDuration's second argument is
+                -- ignoreGCD and it DEFAULTS TO FALSE, so while a global cooldown
+                -- is running -- which in combat is most of the time -- it
+                -- describes the GCD rather than the spell's own cooldown, and a
+                -- GCD-length total is then rejected downstream; and an entry
+                -- cached while its charge data was secret has isChargeSpell false
+                -- even for a charge spell, sending it to the wrong API entirely.
+                -- Ask for the real cooldown, and fall back to the other API
+                -- rather than giving up.
                 local duration
                 if entry.isChargeSpell and C_Spell.GetSpellChargeDuration then
                     duration = C_Spell.GetSpellChargeDuration(spellId)
-                elseif not entry.isChargeSpell and C_Spell.GetSpellCooldownDuration then
-                    duration = C_Spell.GetSpellCooldownDuration(spellId)
+                elseif C_Spell.GetSpellCooldownDuration then
+                    duration = C_Spell.GetSpellCooldownDuration(spellId, true)
+                end
+                if not duration then
+                    if entry.isChargeSpell and C_Spell.GetSpellCooldownDuration then
+                        duration = C_Spell.GetSpellCooldownDuration(spellId, true)
+                    elseif C_Spell.GetSpellChargeDuration then
+                        duration = C_Spell.GetSpellChargeDuration(spellId)
+                    end
                 end
                 if ShowMovementSlot(count + 1, spellInfo, entry, duration) then
                     count = count + 1
                     nowShownReady[entry.spellId] = entry
-                    -- Charge spells alpha-hide while a charge is still banked.
-                    ApplyChargeVisibility(GetDisplaySlot(count), spellId, hasCharges)
+                    -- Charge spells alpha-hide while a charge is still banked;
+                    -- non-charge slots get the secret-lockout classification.
+                    ApplyChargeVisibility(GetDisplaySlot(count), spellId, hasCharges, entry, duration)
                 end
             end
         end
     end
+
+    -- Engine lane: resolve build/park once per pass (self-hides when no
+    -- buffActive spell is enabled for the spec), then seat the host at the
+    -- stack top -- write side is OOC-gated inside RepositionBuffAlertHost.
+    EnsureBuffAlertLane()
+    RepositionBuffAlertHost(count)
 
     -- "Ready" TTS callout: fires once per spell exactly when it drops out of
     -- the on-cooldown set above (not while it sits ready, and not on the
@@ -1238,11 +1703,11 @@ CheckMovementCooldown = function()
             end
         end
     end
-    readyAlertShown = nowShownReady
+    readyAlertShown, readyAlertScratch = nowShownReady, readyAlertShown
 
     for i = count + 1, activeSlotCount do
         local slot = displayPool[i]
-        if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); slot:Hide() end
+        if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); HideEngineCountdown(slot); slot:Hide() end
     end
 
     if count > 0 then
@@ -1251,10 +1716,12 @@ CheckMovementCooldown = function()
         movementFrame:Show()
         CancelMovementCountdown()
         -- Fixed 100ms display refresh (smooth 1-decimal countdown).
-        movementCountdownTimer = C_Timer.NewTimer(0.1, CheckMovementCooldown)
+        movementCountdownTimer = C_Timer.NewTimer(0.1, RequestMovementCheck)
     else
         activeSlotCount = 0
-        HideMovementDisplay()
+        -- EnsureBuffAlertLane just showed/parked the host for this pass; leave
+        -- its verdict alone (see keepBuffLane).
+        HideMovementDisplay(true)
     end
 end
 EllesmereUI._CheckMovementCooldown = function() if CheckMovementCooldown then CheckMovementCooldown() end end
@@ -1339,7 +1806,7 @@ local function PreviewTick()
     if ShowMovementSlot(1, previewCdInfo, previewEntry) then
         for i = 2, activeSlotCount do
             local slot = displayPool[i]
-            if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); slot:Hide() end
+            if slot then slot.text:Hide(); slot.icon:Hide(); slot.icon.cooldown:Clear(); slot.bar:Hide(); HideEngineCountdown(slot); slot:Hide() end
         end
         activeSlotCount = 1
         LayoutDisplaySlots(1)
@@ -1513,10 +1980,11 @@ local gatewayFrame = CreateFrame("Frame", "EUI_GatewayShardFrame", UIParent)
 gatewayFrame:SetSize(200, 40)
 gatewayFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 150)
 gatewayFrame:Hide()
-local gatewayText = gatewayFrame:CreateFontString(nil, "OVERLAY")
+local gatewayText = gatewayFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 gatewayText:SetPoint("CENTER")
 
 local lastGatewayUsable = false
+local lastGatewayText = nil
 local gatewayPollTicker = nil
 
 local function StopGatewayPolling()
@@ -1545,10 +2013,16 @@ local function CheckGatewayUsable()
     if isUsable and not lastGatewayUsable then FireTrackerAlert("gw") end
     lastGatewayUsable = isUsable
 
+    -- 10 Hz poll: only the usability read is per-tick work; the label and
+    -- visibility are written on change (a label edit still lands live).
     if isUsable then
-        gatewayText:SetText(ma.gwText or "GATEWAY READY")
-        gatewayFrame:Show()
-    else
+        local txt = ma.gwText or "GATEWAY READY"
+        if txt ~= lastGatewayText then
+            lastGatewayText = txt
+            gatewayText:SetText(txt)
+        end
+        if not gatewayFrame:IsShown() then gatewayFrame:Show() end
+    elseif gatewayFrame:IsShown() then
         gatewayFrame:Hide()
     end
 end
@@ -1654,18 +2128,32 @@ local function UpdateEventRegistration()
         loader:RegisterEvent("SPELL_UPDATE_CHARGES")
         loader:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
         loader:RegisterUnitEvent("UNIT_AURA", "player")
+        -- buffActive lane's identity gate (see BuffAlertAssistable): the
+        -- occupancy latch plus the faction edge cinematics flip. Player-only,
+        -- and only while the tracker is on. ENTERING as well as ENTERED --
+        -- the filters degrade from the boarding transition. CINEMATIC_STOP
+        -- covers the addon-cancelled skip, whose faction restore can order
+        -- ahead of the edge above (the RF gate carries it for the same reason);
+        -- the lane runs no ticker, so a missed restore leaves it hidden.
+        loader:RegisterUnitEvent("UNIT_ENTERING_VEHICLE", "player")
+        loader:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+        loader:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
+        loader:RegisterUnitEvent("UNIT_FACTION", "player")
+        loader:RegisterEvent("CINEMATIC_STOP")
+        -- The EXITED edge cannot reach a lane whose events are unregistered.
+        SyncBuffAlertVehicleLatch()
         movementEventsRegistered = true
-        -- Toggling the master switch off then back on mid-combat would
-        -- otherwise leave buffActiveState (e.g. Burning Rush) stale until
-        -- the next aura change, since it's normally only synced on
-        -- PLAYER_REGEN_DISABLED/PLAYER_ENTERING_WORLD.
-        if inCombat then SyncBuffActiveOnCombatStart() end
     elseif not moveOn and movementEventsRegistered then
         loader:UnregisterEvent("SPELL_UPDATE_USABLE")
         loader:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
         loader:UnregisterEvent("SPELL_UPDATE_CHARGES")
         loader:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
         loader:UnregisterEvent("UNIT_AURA")
+        loader:UnregisterEvent("UNIT_ENTERING_VEHICLE")
+        loader:UnregisterEvent("UNIT_EXITED_VEHICLE")
+        loader:UnregisterEvent("UNIT_ENTERED_VEHICLE")
+        loader:UnregisterEvent("UNIT_FACTION")
+        loader:UnregisterEvent("CINEMATIC_STOP")
         movementEventsRegistered = false
         CancelMovementCountdown()
     end
@@ -1781,15 +2269,16 @@ loader:SetScript("OnEvent", function(self, event, ...)
         CheckMovementCooldown()
     elseif event == "PLAYER_ENTERING_WORLD" then
         inCombat = UnitAffectingCombat("player")
+        -- Safety net for an exit that never fires UNIT_EXITED_VEHICLE (being
+        -- teleported out of one).
+        SyncBuffAlertVehicleLatch()
         wipe(timeSpiralActiveSpells)
         timeSpiralActiveTime = nil
         CacheMovementSpells(true)
-        if inCombat then SyncBuffActiveOnCombatStart() end
         CheckMovementCooldown()
         CheckGatewayUsable()
     elseif event == "PLAYER_REGEN_DISABLED" then
         inCombat = true
-        SyncBuffActiveOnCombatStart()
         CheckMovementCooldown()
         -- Combat Only paused the ticker on the last out-of-combat check;
         -- StartGatewayPolling() resumes it now that inCombat is true.
@@ -1813,19 +2302,25 @@ loader:SetScript("OnEvent", function(self, event, ...)
         CheckMovementCooldown()
         CheckGatewayUsable()
     elseif event == "SPELL_UPDATE_COOLDOWN" or event == "SPELL_UPDATE_USABLE" or event == "SPELL_UPDATE_CHARGES" then
-        UpdateCachedCharges()
-        CheckMovementCooldown()
+        RequestMovementCheckWithCharges()
     elseif event == "UNIT_AURA" then
-        local unit, updateInfo = ...
-        if unit == "player" then OnPlayerBuffActiveAuraUpdate(updateInfo) end
-        UpdateCachedCharges()
-        CheckMovementCooldown()
+        RequestMovementCheckWithCharges()
+    elseif event == "UNIT_ENTERING_VEHICLE" or event == "UNIT_ENTERED_VEHICLE" then
+        buffAlertVehicle = true
+        RequestMovementCheck()
+    elseif event == "UNIT_EXITED_VEHICLE" then
+        buffAlertVehicle = false
+        RequestMovementCheck()
+    elseif event == "UNIT_FACTION" or event == "CINEMATIC_STOP" then
+        -- Re-drive ONLY: a cinematic flips assistability with no vehicle
+        -- involved, and BuffAlertAssistable's own probe reads that. Neither
+        -- may touch the latch -- UNIT_FACTION also fires on the BOARDING
+        -- transition, where clearing it would undo the suppression we just set.
+        RequestMovementCheck()
     elseif event == "PLAYER_DEAD" then
-        ClearBuffActiveTracking()
-        CheckMovementCooldown()
+        RequestMovementCheck()
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, _, spellId = ...
-        if unit == "player" then OnBuffActiveSpellCast(spellId) end
         for _, mod in ipairs(TALENT_CD_REDUCTIONS) do
             if spellId == mod.trigger and IsPlayerSpell and IsPlayerSpell(mod.talent) then
                 for _, entry in ipairs(cachedMovementSpells) do
@@ -1862,7 +2357,7 @@ loader:SetScript("OnEvent", function(self, event, ...)
             end
         end
         OnTrackedSpellCast(spellId)
-        CheckMovementCooldown()
+        RequestMovementCheck()
     elseif event == "UNIT_SPELLCAST_SENT" then
         local _, _, _, spellId = ...
         OnSpellCast(spellId)

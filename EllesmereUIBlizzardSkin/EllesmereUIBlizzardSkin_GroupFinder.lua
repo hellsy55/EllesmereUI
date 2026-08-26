@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -------------------------------------------------------------------------------
 --  EllesmereUIBlizzardSkin_GroupFinder.lua
 --  Dark, minimal reskin of Blizzard's Group Finder window (PVEFrame): Dungeon
@@ -665,12 +666,11 @@ local function SkinCategoryButton(btn, opts)
     local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
     if hl then hl:SetAlpha(0) end
 
-    -- Card look matches the Guild & Communities sidebar entries: the same
-    -- dialog-sheet card atlas at half strength, pulled in 2px top and bottom
-    -- so stacked tabs never sit flush. No border -- the card art carries its
-    -- own soft edge.
-    -- The stock template clips child regions to the button rect, which
-    -- swallows any card overhang -- unclip so the art can reach the edges.
+    -- Card look matches the Guild & Communities sidebar entries: the same dialog-sheet
+    -- card atlas at half strength, pulled in 2px top and bottom so stacked tabs never
+    -- sit flush. No border -- the card art carries its own soft edge. The stock
+    -- template clips child regions to the button rect, which swallows any card overhang
+    -- -- unclip so the art can reach the edges.
     if btn.SetClipsChildren then btn:SetClipsChildren(false) end
     local card = btn:CreateTexture(nil, "BACKGROUND")
     card:SetAtlas("Ui-Dialog-New-Background")
@@ -874,9 +874,8 @@ local function UpdateLFGCategorySelection()
     end
 end
 
--- Refresh button -> strip art, draw the house white UI-RefreshButton glyph
--- (desaturated + white vertex, 0.9 -> 1 on hover). Matches the Auction House
--- refresh button.
+-- Refresh button -> strip art, draw the house white UI-RefreshButton glyph (desaturated
+-- + white vertex, 0.9 -> 1 on hover). Matches the Auction House refresh button.
 local function SkinRefreshGlyph(rb)
     if not rb or rb:IsForbidden() then return end
     local d = GetFFD(rb)
@@ -1029,8 +1028,7 @@ local function FadeRaidFinderArt()
             end)
         end
     end
-    -- Questpaper scenic art behind the rewards list: re-textured by the same
-    -- updaters.
+    -- Questpaper scenic art behind the rewards list: re-textured by the same updaters.
     local qb = _G.RaidFinderQueueFrameBackground
     if qb and qb.SetAlpha then qb:SetAlpha(0) end
 end
@@ -1054,9 +1052,152 @@ local function Skin_RaidFinder()
     if rfSB then SkinScrollBar(rfSB) end
 end
 
+-------------------------------------------------------------------------------
+--  Reward tiles (Dungeon Finder + Raid Finder) and the M+ dungeon icon row.
+-------------------------------------------------------------------------------
+
+-- Rings and plates stacked on a LargeItemButtonTemplate icon. The same list the
+-- quest reward tiles use, and for the same reason: IconBorder is a ROUNDED
+-- quality ring drawn OVER the icon, so it defeats the square crop underneath
+-- it, and NameFrame is the parchment plate behind the label.
+local REWARD_ART = { "IconBorder", "IconOverlay", "IconOverlay2", "IconBorder2", "NameFrame" }
+
+-- Rarity color for one reward tile, or nil for "no rarity" (border draws black).
+-- Derived from the LFG reward API rather than the IconBorder ring: these tiles
+-- never get SetItemButtonQuality, so the ring carries no color; the tile's
+-- SetID(rewardIndex) + .dungeonID / .shortageIndex identify the reward.
+local function RewardQualityColor(btn)
+    local did, si = btn.dungeonID, btn.shortageIndex
+    local id = btn.GetID and btn:GetID()
+    if type(did) ~= "number" or type(id) ~= "number" or id <= 0 then return end
+    -- `_` is declared LOCAL rather than left to fall through to the global of
+    -- that name: this runs inside Blizzard's own call stack from a hook, and a
+    -- stray global write from there is exactly the kind of thing this file's
+    -- taint rules exist to avoid.
+    local ok, _, numItems, rewardType, rewardID, quality
+    if si ~= nil then
+        if type(GetLFGDungeonShortageRewardInfo) ~= "function" then return end
+        ok, _, _, numItems, _, rewardType, rewardID, quality =
+            pcall(GetLFGDungeonShortageRewardInfo, did, si, id)
+    else
+        if type(GetLFGDungeonRewardInfo) ~= "function" then return end
+        ok, _, _, numItems, _, rewardType, rewardID, quality =
+            pcall(GetLFGDungeonRewardInfo, did, id)
+    end
+    if not ok then return end
+    -- Currency CONTAINERS carry their own quality, not the raw currency's.
+    -- Blizzard remaps it one line before it fills the tile, so a skin that
+    -- skips this paints a bag of gold with the wrong rarity.
+    if rewardType == "currency" and rewardID ~= nil and C_CurrencyInfo
+       and C_CurrencyInfo.IsCurrencyContainer and CurrencyContainerUtil then
+        local okC, isC = pcall(C_CurrencyInfo.IsCurrencyContainer, rewardID, numItems)
+        if okC and isC then
+            local okQ, _, _, _, q = pcall(CurrencyContainerUtil.GetCurrencyContainerInfo,
+                                          rewardID, numItems, nil, nil, quality)
+            if okQ then quality = q end
+        end
+    end
+    if quality == nil or issecretvalue(quality) or type(quality) ~= "number" then return end
+    local col = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
+    if not (col and col.r) then return end
+    -- Achromatic qualities (poor grey, common white) are not a cue -- they read
+    -- as a colored border that happens to be grey. Same chroma test the engine
+    -- applies when it reads a ring, so the two surfaces agree on what counts.
+    local hi = math.max(col.r, col.g, col.b)
+    local lo = math.min(col.r, col.g, col.b)
+    if (hi - lo) <= 0.1 then return end
+    return col.r, col.g, col.b
+end
+
+-- One reward tile, treated exactly like a quest reward: strip the rings and the
+-- parchment plate, square the icon, put the rarity back as a SQUARE border.
+local function SkinRewardTile(btn)
+    if not btn or btn:IsForbidden() then return end
+    for i = 1, #REWARD_ART do
+        local t = btn[REWARD_ART[i]]
+        if t and t.SetAlpha and t.IsObjectType and t:IsObjectType("Texture") then
+            t:SetAlpha(0)
+        end
+    end
+    if btn.Name and btn.Name.SetTextColor then btn.Name:SetTextColor(1, 1, 1) end
+    local wsk = ns.WSkin
+    if not (wsk and wsk.SquareIcon and btn.Icon) then return end
+    local r, g, b = RewardQualityColor(btn)
+    if r then
+        -- Crop first, and only border what actually cropped: SquareIcon leaves a
+        -- masked icon fully native, and a square border round something the mask
+        -- renders as a different shape is worse than no border.
+        if wsk.SquareIcon(btn.Icon, nil) and wsk.QualityBorder then
+            wsk.QualityBorder(btn, btn.Icon, r, g, b)
+        end
+    else
+        -- No rarity worth showing: let the engine draw its black edge.
+        wsk.SquareIcon(btn.Icon, btn, true)
+    end
+end
+
+-- Every tile in one rewards panel. Shared by the Dungeon Finder and the Raid
+-- Finder: RaidFinderQueueFrameRewards_UpdateFrame delegates to
+-- LFGRewardsFrame_UpdateFrame with its own child frame, so hooking the shared
+-- updater covers both panels in one place.
+--
+-- The item rows are GLOBALS ($parentItem1..n), created on demand and counted by
+-- parentFrame.numRewardFrames; MoneyReward is a parentKey. Both inherit
+-- LargeItemButtonTemplate, so both take the same treatment -- the gold row is
+-- the one in the screenshot.
+local function SkinRewardsFrame(parentFrame)
+    if not parentFrame or parentFrame:IsForbidden() then return end
+    local name = parentFrame.GetName and parentFrame:GetName()
+    local n = parentFrame.numRewardFrames
+    if name and type(n) == "number" then
+        for i = 1, n do
+            SkinRewardTile(_G[name .. "Item" .. i])
+        end
+    end
+    SkinRewardTile(parentFrame.MoneyReward)
+end
+
+-- The M+ dungeon icon row. The template draws a ROUNDED DungeonIconFrame atlas
+-- over the icon as an unnamed BORDER-layer region, so cropping alone shows no
+-- change: FadeRegions (icon kept) is the only way to reach it.
+local _iconKeep = {}
+local function SquareDungeonIcons()
+    local cf = _G.ChallengesFrame
+    local icons = cf and cf.DungeonIcons
+    if type(icons) ~= "table" then return end
+    for i = 1, #icons do
+        local f = icons[i]
+        if f and not f:IsForbidden() and f.Icon then
+            wipe(_iconKeep); _iconKeep[f.Icon] = true
+            FadeRegions(f, _iconKeep)
+            f.Icon:ClearAllPoints()
+            f.Icon:SetAllPoints(f)
+            local wsk = ns.WSkin
+            if wsk and wsk.SquareIcon then
+                if wsk.SquareIcon(f.Icon, nil) and wsk.QualityBorder then
+                    wsk.QualityBorder(f, f.Icon, 0, 0, 0)
+                end
+            elseif f.Icon.SetTexCoord then
+                f.Icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            end
+        end
+    end
+end
+
+local _challengesHooked = false
+
 local function Skin_Challenges()
     if not _G.ChallengesFrame then return end
     local cf = _G.ChallengesFrame
+    -- ChallengesFrameMixin:Update rebuilds the icon row on show and on every
+    -- C_MythicPlus data refresh (icons created after the panel-skin pass would
+    -- otherwise stay round), so square from the updater.
+    if not _challengesHooked and type(cf.Update) == "function" then
+        _challengesHooked = true
+        hooksecurefunc(cf, "Update", function()
+            if SkinEnabled() then SquareDungeonIcons() end
+        end)
+    end
     SkinPanel(cf, { noBg = true, noBorder = true })
     -- The M+ main-area scenic backdrop (ChallengesFrame.Background + an anon
     -- BG texture) defeated every ALPHA approach we tried -- Blizzard re-raises
@@ -1072,6 +1213,7 @@ local function Skin_Challenges()
         if kf.StartButton then SkinButton(kf.StartButton) end
         if kf.CloseButton then SkinCloseButton(kf.CloseButton) end
     end
+    SquareDungeonIcons()
 end
 
 -- PvP tab (PVPUIFrame, Blizzard_PVPUI -- separate LoD addon): the D&R
@@ -1202,8 +1344,14 @@ local _hooksInstalled = false
 local function InstallHooks()
     if _hooksInstalled or not PVEFrame then return end
     _hooksInstalled = true
-    hooksecurefunc(PVEFrame, "Show", RefreshAll)
-    if PVEFrame_ShowFrame then hooksecurefunc("PVEFrame_ShowFrame", function() RefreshAll(); UpdateTabVisuals() end) end
+    -- Deferred so this runs on its own tick, after the click that opened the
+    -- frame has finished, instead of inside that same execution chain.
+    hooksecurefunc(PVEFrame, "Show", function() C_Timer.After(0, RefreshAll) end)
+    if PVEFrame_ShowFrame then
+        hooksecurefunc("PVEFrame_ShowFrame", function()
+            C_Timer.After(0, function() RefreshAll(); UpdateTabVisuals() end)
+        end)
+    end
     if PVEFrame_TabOnClick then hooksecurefunc("PVEFrame_TabOnClick", function() RefreshAll(); UpdateTabVisuals() end) end
     if GroupFinderFrame_SelectGroupButton then
         hooksecurefunc("GroupFinderFrame_SelectGroupButton", function(index)
@@ -1224,10 +1372,15 @@ local function InstallHooks()
     -- rewards/role/raid update; one-shot fades never stick against them, so
     -- re-fade from the updaters themselves.
     if LFGRewardsFrame_UpdateFrame then
-        hooksecurefunc("LFGRewardsFrame_UpdateFrame", function(_, _, background)
+        hooksecurefunc("LFGRewardsFrame_UpdateFrame", function(parentFrame, _, background)
             if background and not issecretvalue(background) and background.SetAlpha then
                 background:SetAlpha(0)
             end
+            -- Reward tiles are re-filled from scratch on every one of these
+            -- passes (SetItemButtonTexture re-shows the rings), so the skin has
+            -- to ride the updater rather than being applied once when the panel
+            -- is built.
+            SkinRewardsFrame(parentFrame)
         end)
     end
     if RaidFinderQueueFrameRewards_UpdateFrame then
@@ -1316,18 +1469,17 @@ local function InstallRememberRolesHooks()
     end
 end
 
--- CHARACTER / PVEFRAME OVERLAP ------------------------------------------------
--- Stock Blizzard has no docking relationship between CharacterFrame and
--- PVEFrame (Dungeons & Raids); both anchor near the same default screen
--- position, so opening one while the other is open overlaps them. Any addon
--- that docks its own panel to PVEFrame's edge (e.g. RaiderIO's Mythic+ panel)
--- is unaware of CharacterFrame, so it gets partially covered by CharacterFrame
--- in turn. PVEFrame is PROTECTED (it parents the LFGList applicant viewer,
--- which throws on tainted secret-value comparisons -- see
--- EllesmereUIQoL_Shifter.lua's SecureSetPoint), so it is never repositioned
--- here; CharacterFrame is not protected, so it docks beside PVEFrame instead.
--- Reading PVEFrame's position does not taint it -- only writing to it would.
--- Independent of reskinLFGMenu: a positioning fix, not part of the skin.
+-- CHARACTER / PVEFRAME OVERLAP ------------------------------------------------ Stock
+-- Blizzard has no docking relationship between CharacterFrame and PVEFrame (Dungeons &
+-- Raids); both anchor near the same default screen position, so opening one while the
+-- other is open overlaps them. Any addon that docks its own panel to PVEFrame's edge
+-- (e.g. RaiderIO's Mythic+ panel) is unaware of CharacterFrame, so it gets partially
+-- covered by CharacterFrame in turn. PVEFrame is PROTECTED (it parents the LFGList
+-- applicant viewer, which throws on tainted secret-value comparisons -- see
+-- EllesmereUIQoL_Shifter.lua's SecureSetPoint), so it is never repositioned here;
+-- CharacterFrame is not protected, so it docks beside PVEFrame instead. Reading
+-- PVEFrame's position does not taint it -- only writing to it would. Independent of
+-- reskinLFGMenu: a positioning fix, not part of the skin.
 local PVE_DOCK_MARGIN = 4
 
 local function CharacterFrameIsUserPinned()
@@ -1335,13 +1487,12 @@ local function CharacterFrameIsUserPinned()
         and EllesmereUIDB.shifterPositions["CharacterFrame"] ~= nil
 end
 
--- Third-party panels known to dock themselves beside PVEFrame with no
--- awareness of CharacterFrame (RaiderIO's Mythic+/profile panel, confirmed
--- via /fstack). Checked by name -- cheap and reliable -- instead of scanning
--- every frame in the UI: that approach kept missing the actual frame, once
--- matched CharacterFrame's own child and produced a circular anchor, and was
--- slow enough on its own to cause a visible hitch. Add another name here if
--- a different addon is reported doing the same thing.
+-- Third-party panels known to dock themselves beside PVEFrame with no awareness of
+-- CharacterFrame (RaiderIO's Mythic+/profile panel, confirmed via /fstack). Checked by
+-- name -- cheap and reliable -- instead of scanning every frame in the UI: that
+-- approach kept missing the actual frame, once matched CharacterFrame's own child and
+-- produced a circular anchor, and was slow enough on its own to cause a visible hitch.
+-- Add another name here if a different addon is reported doing the same thing.
 local KNOWN_PVE_COMPANIONS = { "RaiderIO_ProfileTooltip" }
 
 local function FindOutermostFrame(pve, side)
@@ -1411,34 +1562,32 @@ local function DockCharacterFrame()
         expectedEdgeAbs = rightEdgeAbs + PVE_DOCK_MARGIN * cs
     end
 
-    -- PVEFrame's own internal layout re-anchors it (and RaiderIO's tooltip)
-    -- repeatedly while it settles, and Shifter re-applies CharacterFrame's
-    -- own saved/temp position on every scale step -- both re-trigger this
-    -- constantly. Skip the write only when CharacterFrame's ACTUAL current
-    -- edge already matches where we'd put it -- not by reading GetPoint()
-    -- back (SetClampedToScreen can silently rewrite the stored anchor once
-    -- it adjusts a frame to fit on screen) and not by caching our own last
-    -- decision (Shifter's scale step can reposition CharacterFrame away from
-    -- our dock via ITS OWN saved-position math without leftFrame/rightFrame/
-    -- dockLeft ever changing, which a decision-only cache can't detect).
+    -- PVEFrame's own internal layout re-anchors it (and RaiderIO's tooltip) repeatedly
+    -- while it settles, and Shifter re-applies CharacterFrame's own saved/temp position
+    -- on every scale step -- both re-trigger this constantly. Skip the write only when
+    -- CharacterFrame's ACTUAL current edge already matches where we'd put it -- not by
+    -- reading GetPoint() back (SetClampedToScreen can silently rewrite the stored
+    -- anchor once it adjusts a frame to fit on screen) and not by caching our own last
+    -- decision (Shifter's scale step can reposition CharacterFrame away from our dock
+    -- via ITS OWN saved-position math without leftFrame/rightFrame/ dockLeft ever
+    -- changing, which a decision-only cache can't detect).
     local curEdgeAbs = (dockLeft and (cf:GetRight() or 0) or (cf:GetLeft() or 0)) * cs
     if math.abs(curEdgeAbs - expectedEdgeAbs) < 1 then
         return
     end
 
     _dockingCharacterFrame = true
-    -- Shifter installs its own hooksecurefunc(CharacterFrame, "SetPoint", ...)
-    -- (on every frame it manages, independent of the docking-companions
-    -- system) that re-applies a saved/temp Shifter position on every
-    -- SetPoint call. Once a scale action has saved ANY position for
-    -- CharacterFrame, that hook fires synchronously right after ours and
-    -- snaps it straight back -- undoing this dock entirely. _shIgnoreSP is
-    -- the exact flag Shifter sets around its OWN writes for the same reason;
-    -- set it here too so our write isn't immediately reverted. This hook can
-    -- itself fire NESTED inside a SetPoint call Shifter's own ApplyPosition
-    -- made (with the flag already true) -- restore the PRIOR value rather
-    -- than hardcoding false, or we'd clear it while still nested inside that
-    -- call, letting Shifter's own SetPoint hook see it false and recurse.
+    -- Shifter installs its own hooksecurefunc(CharacterFrame, "SetPoint", ...) (on
+    -- every frame it manages, independent of the docking-companions system) that
+    -- re-applies a saved/temp Shifter position on every SetPoint call. Once a scale
+    -- action has saved ANY position for CharacterFrame, that hook fires synchronously
+    -- right after ours and snaps it straight back -- undoing this dock entirely.
+    -- _shIgnoreSP is the exact flag Shifter sets around its OWN writes for the same
+    -- reason; set it here too so our write isn't immediately reverted. This hook can
+    -- itself fire NESTED inside a SetPoint call Shifter's own ApplyPosition made (with
+    -- the flag already true) -- restore the PRIOR value rather than hardcoding false,
+    -- or we'd clear it while still nested inside that call, letting Shifter's own
+    -- SetPoint hook see it false and recurse.
     local shifterFFD = EllesmereUI._GetFFD and EllesmereUI._GetFFD(cf)
     local prevIgnoreSP = shifterFFD and shifterFFD._shIgnoreSP
     if shifterFFD then shifterFFD._shIgnoreSP = true end
@@ -1474,28 +1623,25 @@ local function InstallPVEDockHooks()
 
     CaptureDefaultCharacterPoint()
 
-    -- Direct everywhere: DockCharacterFrame already no-ops safely if either
-    -- frame isn't shown yet, so there's no unsettled-state risk to defer
-    -- for, and FindOutermostFrame is cheap now (named lookups, not a frame
-    -- scan). Deferring a SetPoint-triggered re-dock to next frame (e.g. if
-    -- Blizzard's layout system repositions CharacterFrame again after it's
-    -- already rendering) is exactly what shows one frame at the wrong
-    -- position before snapping into place.
-    -- Blizzard's OWN UIParentPanelManager treats CharacterFrame and PVEFrame
-    -- as part of the same "managed panel" group, and repositions CharacterFrame
-    -- itself (via its own SetPoint calls) whenever PVEFrame opens -- the exact
-    -- native behavior this whole feature works around. Left alone, every one
-    -- of those calls also re-triggers Shifter's saved-position restore (if
-    -- CharacterFrame has one) AND our own dock, and each of THOSE writes reads
-    -- to Blizzard's manager as "a managed panel moved," so it reasserts itself
-    -- again -- three systems endlessly re-triggering each other. Opting out
-    -- permanently (rather than only while PVEFrame is open) closes this for
-    -- good: CharacterFrame's position is already fully covered by our own
-    -- dock logic, Shifter's saved/temp positions, and the native-default
-    -- capture/restore below, so there's no case left where Blizzard's
-    -- automatic management is actually needed. ignoreFramePositionManager is
-    -- the sanctioned opt-out -- already used the same way for the loot
-    -- windows in EllesmereUIQoL_Shifter.lua.
+    -- Direct everywhere: DockCharacterFrame already no-ops safely if either frame isn't
+    -- shown yet, so there's no unsettled-state risk to defer for, and
+    -- FindOutermostFrame is cheap now (named lookups, not a frame scan). Deferring a
+    -- SetPoint-triggered re-dock to next frame (e.g. if Blizzard's layout system
+    -- repositions CharacterFrame again after it's already rendering) is exactly what
+    -- shows one frame at the wrong position before snapping into place. Blizzard's OWN
+    -- UIParentPanelManager treats CharacterFrame and PVEFrame as part of the same
+    -- "managed panel" group, and repositions CharacterFrame itself (via its own
+    -- SetPoint calls) whenever PVEFrame opens -- the exact native behavior this whole
+    -- feature works around. Left alone, every one of those calls also re-triggers
+    -- Shifter's saved-position restore (if CharacterFrame has one) AND our own dock,
+    -- and each of THOSE writes reads to Blizzard's manager as "a managed panel moved,"
+    -- so it reasserts itself again -- three systems endlessly re-triggering each other.
+    -- Opting out permanently (rather than only while PVEFrame is open) closes this for
+    -- good: CharacterFrame's position is already fully covered by our own dock logic,
+    -- Shifter's saved/temp positions, and the native-default capture/restore below, so
+    -- there's no case left where Blizzard's automatic management is actually needed.
+    -- ignoreFramePositionManager is the sanctioned opt-out -- already used the same way
+    -- for the loot windows in EllesmereUIQoL_Shifter.lua.
     _G.CharacterFrame.ignoreFramePositionManager = true
 
     _G.CharacterFrame:HookScript("OnShow", DockCharacterFrame)
