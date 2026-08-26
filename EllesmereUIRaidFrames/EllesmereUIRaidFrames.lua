@@ -8118,6 +8118,14 @@ local function GhostAuraCheck()
         else
             if d.ghostCleared then
                 d.ghostCleared = false
+                -- UNIT_AURA doesn't fire while ghosted, so any aura that fell off during
+                -- that window (LoS break, loading screen) never reached the containers.
+                -- Force the same full resync RebuildUnitMap uses for a stale unit binding
+                -- so the display can't be left showing a HoT/debuff that already expired.
+                if ns.RFC_OnUnitAssigned then
+                    d.rfcUnit = nil
+                    ns.RFC_OnUnitAssigned(btn, d, unit)
+                end
             end
         end
     end
