@@ -10269,6 +10269,43 @@ end
         if ok and type(res) == "number" and res > 0 then return res end
     end
 
+    -- Warlock Hellcaller hero talent "Wither" replaces Corruption (Affliction)
+    -- or Immolate (Destruction) on the action bar, but Blizzard exposes no
+    -- live per-spec signal for it: GetOverrideSpell/GetBaseSpell/
+    -- FindBaseSpellByID/FindSpellOverrideByID(445468) only ever resolve to
+    -- 172, the LEGACY Corruption id -- in BOTH specs, never reaching 146739
+    -- (the MODERN id the Affliction Cooldown Viewer slot is actually stamped
+    -- with) or 157736 (the modern Immolate id on Destruction). Field-confirmed
+    -- live (2026-08): pressing Wither in either spec resolves natively to
+    -- {445468, 172} only, and neither cooldownInfo.spellID/overrideSpellID
+    -- nor linkedSpellIDs vary with the active talent either -- so there is
+    -- nothing dynamic to learn here. Hardcoded as one mutually-matching
+    -- family instead, the same pattern as COMMAND_DEMON_FAMILY above.
+    local WITHER_FAMILY = {
+        [445468]  = true, -- Wither (the castable button, both specs)
+        [172]     = true, -- Corruption, legacy id (what the native override chain reports)
+        [146739]  = true, -- Corruption, modern id (Affliction CDM slot identity)
+        [157736]  = true, -- Immolate, modern id (Destruction CDM slot identity)
+    }
+
+    -- Adds every WITHER_FAMILY id to `t` (in place) if any id already in `t`
+    -- is a member. No-op otherwise. Kept as a tiny generic hook (AddSpellFamilies)
+    -- so a future hardcoded family can be added alongside this one without
+    -- touching SpellIdSet/IconMatches again.
+    local SPELL_FAMILIES = { WITHER_FAMILY }
+    local function AddSpellFamilies(t)
+        for f = 1, #SPELL_FAMILIES do
+            local fam = SPELL_FAMILIES[f]
+            local hit = false
+            for id in pairs(t) do
+                if fam[id] then hit = true; break end
+            end
+            if hit then
+                for fid in pairs(fam) do t[fid] = true end
+            end
+        end
+    end
+
     local function SpellIdSet(id)
         local t = { [id] = true }
         -- Fuzzy override/base-spell resolution only makes sense for real
@@ -10279,6 +10316,7 @@ end
             local b = safeNum(GetBaseSpell, id);          if b then t[b] = true end
             local c = safeNum(FindBaseSpellByID, id);     if c then t[c] = true end
             local d = safeNum(FindSpellOverrideByID, id); if d then t[d] = true end
+            AddSpellFamilies(t)
         end
         return t
     end
@@ -10288,6 +10326,12 @@ end
         if type(iconSid) ~= "number" or iconSid <= 0 then return false end
         local a = safeNum(GetOverrideSpell, iconSid); if a and pressedSet[a] then return true end
         local b = safeNum(GetBaseSpell, iconSid);     if b and pressedSet[b] then return true end
+        -- Same hardcoded-family fallback as SpellIdSet, walked from the icon side.
+        local famSet = { [iconSid] = true }
+        AddSpellFamilies(famSet)
+        for nid in pairs(famSet) do
+            if nid ~= iconSid and pressedSet[nid] then return true end
+        end
         return false
     end
 
@@ -10349,14 +10393,104 @@ end
     -- bar on each key press (the ActionButtonDown hook fires for all users).
     -- Recomputed only when the bar list is rebuilt (RefreshCdmPressMirrorFlag,
     -- called from the CDM bar-rebuild pass) or when the toggle changes.
+    -- TEMP DIAGNOSTIC: /euipressdebug toggles chat prints of the pressed-id
+    -- set and every pressMirror-enabled icon's resolved spellID + match
+    -- result, to find exactly where Wither/Corruption/Immolate diverges.
+    -- Safe to delete once the real mismatch is found and fixed.
+    -- TEMP DIAGNOSTIC: /euicdmdump <barKey> prints every icon currently in
+    -- that bar's list (cdmBarIcons), regardless of shown state, with its
+    -- fc.spellID / isHostedBuff / resolvedSid / baseSpellID and IsShown().
+    -- Lets us see whether a hosted-buff placeholder exists at all right now,
+    -- without needing a keypress. Safe to delete once diagnosis is done.
+    SLASH_EUICDMDUMP1 = "/euicdmdump"
+    SlashCmdList["EUICDMDUMP"] = function(msg)
+        local barKey = msg and msg:match("%S+")
+        if not barKey then
+            print("|cff33ff99[EUI CDMDump]|r usage: /euicdmdump <barKey>  (known bars below)")
+            if barDataByKey then
+                local names = {}
+                for k in pairs(barDataByKey) do names[#names+1] = tostring(k) end
+                print("|cff33ff99[EUI CDMDump]|r bars: "..table.concat(names, ", "))
+            end
+            return
+        end
+        local list = cdmBarIcons and cdmBarIcons[barKey]
+        if not list then
+            print("|cff33ff99[EUI CDMDump]|r no such bar in cdmBarIcons: "..barKey)
+            return
+        end
+        print("|cff33ff99[EUI CDMDump]|r bar="..barKey.." count="..#list)
+        for i = 1, #list do
+            local icon = list[i]
+            local fc = _ecmeFC and _ecmeFC[icon]
+            local cdID = icon and icon.cooldownID
+            local info = cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+                and C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+            local function nameOf(id)
+                if not id or type(id) ~= "number" or id <= 0 then return "?" end
+                local ok, si = pcall(C_Spell.GetSpellInfo, id)
+                return (ok and si and si.name) and si.name or "?"
+            end
+            local liveSid = icon and icon.GetSpellID and icon:GetSpellID()
+            if issecretvalue and issecretvalue(liveSid) then liveSid = "<secret>" end
+            local linked = ""
+            if info and info.linkedSpellIDs and #info.linkedSpellIDs > 0 then
+                local parts = {}
+                for j = 1, #info.linkedSpellIDs do
+                    parts[#parts+1] = info.linkedSpellIDs[j].."("..nameOf(info.linkedSpellIDs[j])..")"
+                end
+                linked = table.concat(parts, "/")
+            end
+            print(string.format(
+                "  [%d] shown=%s fc.spellID=%s(%s) isHostedBuff=%s cdID=%s | info.spellID=%s(%s) info.overrideSpellID=%s(%s) live:GetSpellID=%s linked=%s",
+                i,
+                tostring(icon and icon:IsShown()),
+                tostring(fc and fc.spellID), nameOf(fc and fc.spellID),
+                tostring(fc and fc.isHostedBuff),
+                tostring(cdID),
+                tostring(info and info.spellID), nameOf(info and info.spellID),
+                tostring(info and info.overrideSpellID), nameOf(info and info.overrideSpellID),
+                tostring(liveSid),
+                (linked ~= "" and linked or "-")
+            ))
+        end
+    end
+
+    SLASH_EUIPRESSDEBUG1 = "/euipressdebug"
+    SlashCmdList["EUIPRESSDEBUG"] = function()
+        EUI_PRESSMIRROR_DEBUG = not EUI_PRESSMIRROR_DEBUG
+        print("|cff33ff99[EUI PressMirror]|r debug "..(EUI_PRESSMIRROR_DEBUG and "ON" or "OFF"))
+    end
+
     local _anyPressMirror = false
     local function RefreshCdmPressMirrorFlag()
         _anyPressMirror = false
         if not barDataByKey then return end
-        for _, bd in pairs(barDataByKey) do
-            -- Buff-family bars never mirror presses (auto-tracked auras, not
-            -- keybind-pressed), so ignore a stale/imported pressMirror on them.
-            if bd and bd.pressMirror and not ns.IsBarBuffFamily(bd) then _anyPressMirror = true; return end
+        for barKey, bd in pairs(barDataByKey) do
+            if bd then
+                if bd.pressMirror then
+                    _anyPressMirror = true
+                    return
+                end
+                -- Bar toggle is off, but a hosted buff/debuff -- or, on a real
+                -- buff-family bar, any tracked buff/debuff -- can still force
+                -- Mirror Key Presses on via its own per-icon override (that
+                -- icon's cog -> Mirror Key Presses -> On).
+                local list = cdmBarIcons and cdmBarIcons[barKey]
+                if list then
+                    for i = 1, #list do
+                        local icon = list[i]
+                        local fc = _ecmeFC and _ecmeFC[icon]
+                        if fc and fc.spellID and ns.ResolveSpellSettings then
+                            local ss = ns.ResolveSpellSettings(icon, fc.spellID, false, barKey)
+                            if ss and ss.pressMirror == "on" then
+                                _anyPressMirror = true
+                                return
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
     ns.RefreshCdmPressMirrorFlag = RefreshCdmPressMirrorFlag
@@ -10606,25 +10740,67 @@ end
         if not btn or not _anyPressMirror then return end
         local slot = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
         local ids = SlotIdentities(slot)
-        if #ids == 0 then return end
+        if #ids == 0 then
+            if EUI_PRESSMIRROR_DEBUG then
+                print("|cff33ff99[EUI PressMirror]|r slot="..tostring(slot).." -> no identities resolved")
+            end
+            return
+        end
 
         local pressedSet = {}
         for i = 1, #ids do
             local s = SpellIdSet(ids[i])
             for k in pairs(s) do pressedSet[k] = true end
         end
+        if EUI_PRESSMIRROR_DEBUG then
+            local function nameOf(id)
+                if not id or type(id) ~= "number" or id <= 0 then return "?" end
+                local ok, si = pcall(C_Spell.GetSpellInfo, id)
+                return (ok and si and si.name) and si.name or "?"
+            end
+            local idList, pressedList = {}, {}
+            for i = 1, #ids do idList[#idList+1] = tostring(ids[i]).."("..nameOf(ids[i])..")" end
+            for k in pairs(pressedSet) do pressedList[#pressedList+1] = tostring(k).."("..nameOf(k)..")" end
+            print("|cff33ff99[EUI PressMirror]|r slot="..tostring(slot)
+                .." rawIDs=["..table.concat(idList, ", ").."]"
+                .." pressedSet=["..table.concat(pressedList, ", ").."]")
+        end
         local overlays
         if cdmBarIcons then
             for barKey, list in pairs(cdmBarIcons) do
                 local bd = barDataByKey and barDataByKey[barKey]
-                if bd and bd.pressMirror and not ns.IsBarBuffFamily(bd) then
+                if bd then
                     for i = 1, #list do
                         local icon = list[i]
                         if icon and icon:IsShown() then
-                            local isid = IconSpellID(icon)
-                            if isid and IconMatches(pressedSet, isid) then
-                                local ov = ShowPush(icon)
-                                if ov then overlays = overlays or {}; overlays[#overlays + 1] = ov end
+                            local fc = _ecmeFC and _ecmeFC[icon]
+                            -- Effective enable for THIS icon: its own Mirror Key Presses cog
+                            -- (Default/On/Off) overrides the bar-wide toggle when set; with no
+                            -- override, it just inherits the bar toggle.
+                            local enabled = bd.pressMirror
+                            if fc and fc.spellID and ns.ResolveSpellSettings then
+                                local ss = ns.ResolveSpellSettings(icon, fc.spellID, false, barKey)
+                                local override = ss and ss.pressMirror
+                                if override == "on" then enabled = true
+                                elseif override == "off" then enabled = false end
+                            end
+                            if enabled then
+                                local isid = IconSpellID(icon)
+                                local matched = isid and IconMatches(pressedSet, isid)
+                                if EUI_PRESSMIRROR_DEBUG and isid then
+                                    local nm = "?"
+                                    if type(isid) == "number" and isid > 0 then
+                                        local ok, si = pcall(C_Spell.GetSpellInfo, isid)
+                                        nm = (ok and si and si.name) and si.name or "?"
+                                    end
+                                    print("|cff33ff99[EUI PressMirror]|r bar="..tostring(barKey)
+                                        .." iconSpellID="..tostring(isid).."("..nm..")"
+                                        .." matched="..tostring(matched and true or false))
+                                end
+                                if matched then
+                                    local ov = ShowPush(icon)
+                                    if ov then overlays = overlays or {}; overlays[#overlays + 1] = ov end
+                                end
                             end
                         end
                     end
@@ -10678,14 +10854,24 @@ end
         if cdmBarIcons then
             for barKey, list in pairs(cdmBarIcons) do
                 local bd = barDataByKey and barDataByKey[barKey]
-                if bd and bd.pressMirror and not ns.IsBarBuffFamily(bd) then
+                if bd then
                     for i = 1, #list do
                         local icon = list[i]
                         if icon and icon:IsShown() then
-                            local isid = IconSpellID(icon)
-                            if isid and IconMatches(pressedSet, isid) then
-                                local ov = ShowPush(icon)
-                                if ov then overlays = overlays or {}; overlays[#overlays + 1] = ov end
+                            local fc = _ecmeFC and _ecmeFC[icon]
+                            local enabled = bd.pressMirror
+                            if fc and fc.spellID and ns.ResolveSpellSettings then
+                                local ss = ns.ResolveSpellSettings(icon, fc.spellID, false, barKey)
+                                local override = ss and ss.pressMirror
+                                if override == "on" then enabled = true
+                                elseif override == "off" then enabled = false end
+                            end
+                            if enabled then
+                                local isid = IconSpellID(icon)
+                                if isid and IconMatches(pressedSet, isid) then
+                                    local ov = ShowPush(icon)
+                                    if ov then overlays = overlays or {}; overlays[#overlays + 1] = ov end
+                                end
                             end
                         end
                     end

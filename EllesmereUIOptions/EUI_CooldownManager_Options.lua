@@ -10426,6 +10426,33 @@ initFrame:SetScript("OnEvent", function(self)
                     -- one (same settings as on a buffs bar); isHostedBuff is resolved above
                     -- (slot-based). Hosted buffs are removed from Apply-to-Bar entirely (no strip, no bar-tier chaining in ResolveSpellSettings).
                     hostedBuffNoApply = isHostedBuff
+
+                    -- Mirror Key Presses: per-icon tri-state override of the bar's own Mirror
+                    -- Key Presses toggle. Universal -- applies to CD/Utility spells, hosted
+                    -- buffs on a CD/util bar, AND buffs/debuffs tracked on a real buff-family
+                    -- bar, since any of them can be something YOU press a keybind for. Default
+                    -- = inherit the bar; On = force this icon to press-mirror even if the bar
+                    -- toggle is off; Off = force it out even if the bar toggle is on. Checked
+                    -- at press-time in CdmHooks (OnPress) against
+                    -- ns.ResolveSpellSettings(icon, fc.spellID, false, barKey).pressMirror.
+                    do
+                        local PRESSMIRROR_ITEMS = {
+                            { val = nil,   label = "Default" },
+                            { val = "on",  label = "On" },
+                            { val = "off", label = "Off" },
+                        }
+                        MakeSubnavRow("Mirror Key Presses", PRESSMIRROR_ITEMS,
+                            function() return ss.pressMirror end,
+                            function(v)
+                                EnsureSS(); SetOwn("pressMirror", v)
+                                -- Bar-level toggle may now be irrelevant for this icon (forced
+                                -- on/off), or this icon may be the only reason the fast-path
+                                -- flag needs to be on/off -- resync it either way.
+                                if ns.RefreshCdmPressMirrorFlag then ns.RefreshCdmPressMirrorFlag() end
+                            end,
+                            function() return ss.pressMirror == nil end)
+                    end
+
                     if isBuffBar or isHostedBuff then
                         -- Injected custom/preset buffs (cast-timer driven, identified by a stored
                         -- spellDuration) are show-on-cast only, so the Always Show Buffs/Desaturate Inactive overrides (which act on Blizzard-tracked inactive placeholders) don't apply to them.
@@ -19042,23 +19069,24 @@ initFrame:SetScript("OnEvent", function(self)
                   end
               end });  y = y - h
 
-        -- Hide Items if Missing | Mirror Key Presses -- CD/utility bars only.
-        -- Buff bars host Hide Items if Missing in the tooltip row above (their
-        -- copy of this row would be empty), and Mirror Key Presses is not for
-        -- buff-family bars (buffs are auto-tracked auras, not keybind-pressed
-        -- abilities, so a "pressed" look has no meaning). (Per-spell threshold
-        -- decimals/color moved to the per-icon dropdown: Threshold Text.)
-        if not isAnyBuffBar then
-        _, h = W:DualRow(parent, y,
-            hideMissingCfg,
-            { type="toggle", text="Mirror Key Presses",
+        -- Hide Items if Missing (CD/utility bars only -- buff bars host their
+        -- own copy of this in the tooltip row above, so their slot here would
+        -- be empty) | Mirror Key Presses (now available on ANY bar type,
+        -- including buff-family bars: a buff/debuff you track can still be
+        -- something YOU cast via a keybind -- e.g. a hero-talent-morphed DoT
+        -- -- so "pressed" can be meaningful there too. Per-icon overrides on
+        -- individual buffs, added alongside this, let a specific buff opt out
+        -- even while the bar-wide toggle is on, or opt in while it's off.)
+        local pressMirrorCfg = { type="toggle", text="Mirror Key Presses",
               tooltip = "When you press an ability's keybind, show the action button's \"pushed down\" look on its icon on this bar -- even while the ability is on cooldown.",
               getValue=function() return BD().pressMirror == true end,
               setValue=function(v)
                   BD().pressMirror = v
                   if ns.ClearCdmPressPush then ns.ClearCdmPressPush() end
-              end });  y = y - h
-        end
+              end }
+        _, h = W:DualRow(parent, y,
+            (not isAnyBuffBar) and hideMissingCfg or nil,
+            pressMirrorCfg);  y = y - h
 
         -- Bar Strata: per-bar screen render layer for the bar container and its
         -- icons (MEDIUM default = the engine's baseline, so unset bars are
