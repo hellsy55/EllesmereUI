@@ -638,6 +638,20 @@ function EUI.VisFullCopy(dst, src, legacyKey, dstCaps, applyScalarFn)
     end
 end
 
+-- True when the store has ANY visibility option lane set. Callers gate work on this:
+-- event passes that would otherwise be skipped, hover keep-shown, drag surfacing. A
+-- hand-written subset here is exactly how a newly added lane silently stops working, so
+-- this always walks VIS_OPT_KEYS rather than naming fields.
+function EUI.VisHasAnyOption(store)
+    if not store then return false end
+    local keys = EUI.VIS_OPT_KEYS
+    if not keys then return false end
+    for i = 1, #keys do
+        if store[keys[i]] then return true end
+    end
+    return false
+end
+
 function EUI.VisFullEquals(a, aKey, b, bKey)
     if not a or not b then return false end
     if not EUI.VisSelectionEquals(a, aKey, b, bKey) then return false end

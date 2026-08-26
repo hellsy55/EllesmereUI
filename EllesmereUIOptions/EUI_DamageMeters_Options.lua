@@ -93,13 +93,14 @@ initFrame:SetScript("OnEvent", function(self)
         local function VisApply()
             if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end
         end
-        _, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
+        local visRow
+        visRow, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
             { getStore = DB, legacyKey = "visibility",
               caps = { partyIncludesRaid = false, luaDragonriding = true },
               onChanged = VisApply,
               onOptionChanged = VisApply },
-            -- Always Show Player moved up into the slot the Visibility Options dropdown
-            -- left behind: it is a visibility rule for your own bar.
+            -- Refresh Rate moved up into the slot the Visibility Options dropdown left
+            -- behind; its "(seconds)" suffix is attached below.
             { type="slider", text="Refresh Rate",
               tooltip = "Increase to improve performance, Decrease to update meters faster",
               min = 0.1, max = 2, step = 0.1,
@@ -211,14 +212,15 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         -- Reset Data Keybind (+ inline cog: hide reset button) | (free). Refresh Rate and
-        -- its "(seconds)" suffix moved up to the Background Opacity row.
+        -- its "(seconds)" suffix moved up to the Visibility row.
         local rrRow
         rrRow, h = W:DualRow(parent, y,
             { type="label", text="Reset Data Keybind" },
             { type="label", text="" })
-        -- Refresh Rate now lives in the Background Opacity row's right slot.
+        -- "(seconds)" suffix for Refresh Rate, which lives in the Visibility row's right
+        -- slot -- not this row.
         do
-            local rgn = bgRow._rightRegion
+            local rgn = visRow._rightRegion
             local suffix = rgn:CreateFontString(nil, "OVERLAY")
             suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
             suffix:SetTextColor(1, 1, 1, 0.35)

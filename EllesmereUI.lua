@@ -12732,7 +12732,12 @@ end
 
 -- Non-macro visibility subset: the options that CAN'T be expressed in a secure [macro] condition
 -- and must be evaluated in Lua. Used by secure action bar frames that delegate the macro-expressible options (target/combat/group) to their state-visibility driver and only need Lua handling for these three.
-function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
+-- skipMountAxis: the caller's secure state driver already carries [mounted]/[nomounted]
+-- clauses that self-update inside combat. Evaluating the mount axis here too would let
+-- Lua clobber the driver with a literal "hide" that cannot re-evaluate until combat ends
+-- (see BuildVisibilityString in EllesmereUIActionBars.lua). Such callers pass true and
+-- keep their own narrower mount check for the shapeshift forms [mounted] cannot see.
+function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
     if not opts then return false end
 
     -- Instances axis: Only Show in Instances / Hide in Instances share one probe.
@@ -12765,16 +12770,18 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
         end
     end
 
-    -- Hide when Mounted (includes druid travel/flight/aquatic forms)
-    if opts.visHideMounted then
-        if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
-    end
+    if not skipMountAxis then
+        -- Hide when Mounted (includes druid travel/flight/aquatic forms)
+        if opts.visHideMounted then
+            if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
+        end
 
-    -- Only Show when Mounted (inverse; druid mount-like forms count as mounted
-    -- here too -- secure action bars carry a [nomounted] clause instead, which
-    -- cannot see forms, see BuildVisibilityString)
-    if opts.visOnlyMounted then
-        if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return true end
+        -- Only Show when Mounted (inverse; druid mount-like forms count as mounted
+        -- here too -- secure action bars carry a [nomounted] clause instead, which
+        -- cannot see forms, see BuildVisibilityString)
+        if opts.visOnlyMounted then
+            if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return true end
+        end
     end
 
     -- Skyriding-mount axis (glide capability, ground included -- NOT the airborne
