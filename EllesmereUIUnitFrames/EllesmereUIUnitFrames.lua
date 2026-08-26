@@ -14121,6 +14121,9 @@ function InitializeFrames()
     frames._portraitBorderUpdater:SetScript("OnEvent", function(_, event)
         local unitKey = (event == "PLAYER_TARGET_CHANGED") and "target" or "focus"
         local frame = frames[unitKey]
+        -- A ping shown for the old target/focus must not carry over onto the new one;
+        -- Blizzard's own TargetFrame clears its ping icon on this same event.
+        if frame and frame._pingIcon then frame._pingIcon:ClearPing() end
         if frame and (unitKey == "target" or unitKey == "focus") then
             local s = db.profile[unitKey]
             if frame.LeftText and s and s.leftTextClassColor ~= nil then
@@ -14197,12 +14200,12 @@ function InitializeFrames()
         end
     end)
 
-    -- Target-of-target/focus-target text class colors must re-apply when their unit
+    -- Target-of-target/focus-target/pet text class colors must re-apply when their unit
     -- changes or first becomes available (login/reload). Unlike target/focus, mini
     -- frames have no PLAYER_*_CHANGED of their own, so a class color set at style
-    -- time -- when "targettarget"/"focustarget" was not yet a resolvable player --
-    -- falls back to white and never recovers. Re-apply on the parent's target change
-    -- and on its UNIT_TARGET.
+    -- time -- when "targettarget"/"focustarget"/"pet" was not yet a resolvable unit --
+    -- falls back to white/reaction-nil and never recovers. Re-apply on the parent's
+    -- target change and on its UNIT_TARGET, and on UNIT_PET for the pet frame.
     local function ReapplyFrameTextClassColors(unitKey)
         local frame = frames[unitKey]
         local s = frame and db.profile[unitKey]
@@ -14222,12 +14225,15 @@ function InitializeFrames()
         frames._miniTextClassUpdater:RegisterEvent("PLAYER_TARGET_CHANGED")
         frames._miniTextClassUpdater:RegisterEvent("PLAYER_FOCUS_CHANGED")
         frames._miniTextClassUpdater:RegisterUnitEvent("UNIT_TARGET", "target", "focus")
+        frames._miniTextClassUpdater:RegisterUnitEvent("UNIT_PET", "player")
     end
     frames._miniTextClassUpdater:SetScript("OnEvent", function(_, event, arg1)
         if event == "PLAYER_TARGET_CHANGED" then
             ReapplyFrameTextClassColors("targettarget")
         elseif event == "PLAYER_FOCUS_CHANGED" then
             ReapplyFrameTextClassColors("focustarget")
+        elseif event == "UNIT_PET" then
+            ReapplyFrameTextClassColors("pet")
         elseif arg1 == "target" then
             ReapplyFrameTextClassColors("targettarget")
         elseif arg1 == "focus" then
