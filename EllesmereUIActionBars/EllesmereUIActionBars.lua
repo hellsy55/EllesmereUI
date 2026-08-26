@@ -8837,7 +8837,9 @@ local function BuildVisibilityString(info, s, visOverride)
     -- keeps this working in combat, and Lua cannot un-hide past the driver.
     if s.visOnlyMounted then visOptHide = visOptHide .. "[nomounted] hide; " end
     if s.visHideNoTarget then visOptHide = visOptHide .. "[noexists] hide; " end
+    if s.visHideWithTarget then visOptHide = visOptHide .. "[exists] hide; " end
     if s.visHideNoEnemy then visOptHide = visOptHide .. "[noharm] hide; " end
+    if s.visHideWithEnemy then visOptHide = visOptHide .. "[harm] hide; " end
 
     -- Authoritative multi-select set. Explicit overrides (toggle keybind,
     -- QuickKeybind, grid drag) substitute the whole mode term as for single

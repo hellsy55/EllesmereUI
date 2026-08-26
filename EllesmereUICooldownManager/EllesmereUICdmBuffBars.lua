@@ -5000,10 +5000,10 @@ local function TBBUsesVisCondition(cfg)
     if vis and vis ~= "always" then return true end
     local vm = cfg.visibilityModes
     if type(vm) == "table" and next(vm) then return true end
-    local items = EllesmereUI.VIS_OPT_ITEMS
-    if items then
-        for i = 1, #items do
-            if cfg[items[i].key] then return true end
+    local keys = EllesmereUI.VIS_OPT_KEYS
+    if keys then
+        for i = 1, #keys do
+            if cfg[keys[i]] then return true end
         end
     end
     return false
