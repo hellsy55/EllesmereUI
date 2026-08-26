@@ -233,14 +233,9 @@ local DB_DEFAULTS = {
             oorAlpha         = 0.45,
             showRaidMarker   = false,
             raidMarkerSize   = 14,
-            -- Where to Show: a key is present only when explicitly unchecked
-            -- (AuraBuffReminders convention). Default: Mythic Dungeons and
-            -- In Combat only -- every other bucket starts unchecked.
-            whereToShow      = {
-                open_world = false, raid_mythic = false, raid_heroic = false,
-                raid_normal_lfr = false, dungeon_nonmythic = false,
-                timewalking = false, delve = false,
-            },
+            -- Where to Show: positive filter -- a key is present (true) only
+            -- when selected; nothing selected = the bars show everywhere.
+            whereToShow      = {},
         },
         -- Target/Focus standalone cast bars (Mythic+ Tools tab): unlock-mode
         -- placeable cast bars carrying the nameplate interrupt color/effects

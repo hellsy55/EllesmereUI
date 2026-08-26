@@ -14121,9 +14121,6 @@ function InitializeFrames()
     frames._portraitBorderUpdater:SetScript("OnEvent", function(_, event)
         local unitKey = (event == "PLAYER_TARGET_CHANGED") and "target" or "focus"
         local frame = frames[unitKey]
-        -- A ping shown for the old target/focus must not carry over onto the new one;
-        -- Blizzard's own TargetFrame clears its ping icon on this same event.
-        if frame and frame._pingIcon then frame._pingIcon:ClearPing() end
         if frame and (unitKey == "target" or unitKey == "focus") then
             local s = db.profile[unitKey]
             if frame.LeftText and s and s.leftTextClassColor ~= nil then

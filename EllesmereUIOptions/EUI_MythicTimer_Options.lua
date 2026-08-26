@@ -988,19 +988,22 @@ initFrame:SetScript("OnEvent", function(self)
         { key="timewalking",       label="Timewalking" },
         { key="delve",             label="Delve" },
         { key="in_combat",         label="In Combat" },
+        { key="out_of_combat",     label="Out of Combat" },
     }
     local function TSBWhere()
         local c = TSB(); if not c then return nil end
         c.whereToShow = c.whereToShow or {}
         return c.whereToShow
     end
+    -- Positive filter: only selected entries are stored (true); nothing
+    -- selected = the bars show everywhere.
     local function TSBWhereGet(k)
         local t = TSBWhere()
-        return not (t and t[k] == false)
+        return t and t[k] == true or false
     end
     local function TSBWhereSet(k, v)
         local t = TSBWhere(); if not t then return end
-        t[k] = v and true or false
+        t[k] = v and true or nil
         TSBRefresh()
     end
 
@@ -1102,6 +1105,8 @@ initFrame:SetScript("OnEvent", function(self)
                   TSBRefresh(); EllesmereUI:RefreshPage()
               end },
             { type="dropdown", text="Where to Show",
+              disabled=Off, disabledTooltip=REQ,
+              tooltip="Limit the bars to the selected content and combat states; nothing selected shows them everywhere.",
               values={ _placeholder="..." }, order={ "_placeholder" },
               getValue=function() return "_placeholder" end, setValue=function() end });  y = y - h
         if not EllesmereUI._prebuilding then
@@ -1120,7 +1125,26 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.PP.Point(whereDD, "RIGHT", rrgn, "RIGHT", -20, 0)
             rrgn._control = whereDD
             rrgn._lastInline = nil
-            EllesmereUI.RegisterWidgetRefresh(whereRefresh)
+            -- Disabled while the feature is off: blocking overlay eats the
+            -- click and shows the requirement, dropdown dims.
+            local whereBlock = CreateFrame("Frame", nil, whereDD)
+            whereBlock:SetAllPoints()
+            whereBlock:SetFrameLevel(whereDD:GetFrameLevel() + 10)
+            whereBlock:EnableMouse(true)
+            whereBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(whereDD, EllesmereUI.DisabledTooltip(REQ))
+            end)
+            whereBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function SyncWhereDisabled()
+                local off = Off()
+                whereDD:SetAlpha(off and 0.3 or 1)
+                whereBlock:SetShown(off)
+            end
+            SyncWhereDisabled()
+            EllesmereUI.RegisterWidgetRefresh(function()
+                whereRefresh()
+                SyncWhereDisabled()
+            end)
         end
 
         _, h = W:DualRow(parent, y,

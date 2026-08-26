@@ -1401,10 +1401,8 @@ local function SkinCharacterSheet()
                 durEvents:SetScript("OnEvent", function() UpdateDurabilityDisplay() end)
             end
             durEvents:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
-            -- Blizzard's own DurabilityFrame (the minimap alert icon) refreshes off this
-            -- event, not UPDATE_INVENTORY_DURABILITY: a self-repair item (e.g. a repair
-            -- hammer toy) recalculates alert status without firing the durability event,
-            -- so the sheet only caught the change on the next vendor-repair pass.
+            -- Self-repair items recalculate alerts without firing the durability
+            -- event (Blizzard's DurabilityFrame itself rides the alert event).
             durEvents:RegisterEvent("UPDATE_INVENTORY_ALERTS")
         elseif durEvents then
             durEvents:UnregisterEvent("UPDATE_INVENTORY_DURABILITY")

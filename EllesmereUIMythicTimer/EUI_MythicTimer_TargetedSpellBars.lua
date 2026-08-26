@@ -75,7 +75,7 @@ local whereActive = false   -- location/combat watcher registered (tied to cfg.e
 local DEFAULT_X, DEFAULT_Y = -340, 60
 
 --------------------------------------------------------------------------------
---  Where to Show: content-type gate (AuraBuffReminders convention). Runs
+--  Where to Show: content-type gate (positive filter, see WhereShows). Runs
 --  independently of the nameplate-tracking lifecycle below -- entering or
 --  leaving a matching zone must be able to (de)activate the group even while
 --  the bucket the player is currently in is excluded, so this watcher stays
@@ -104,20 +104,43 @@ local function CurrentWhereBucket()
     return nil -- unmapped (PvP/arena/etc.) -- always shows, matching AuraBuffReminders
 end
 
+-- Positive filter: nothing selected = no filter (bars show everywhere, the
+-- original behavior). Selected location buckets limit WHERE, the two combat
+-- entries limit WHEN, and the two groups AND together. Unmapped content
+-- (PvP, arena) never hides.
+local LOCATION_KEYS = {
+    "open_world", "raid_mythic", "raid_heroic", "raid_normal_lfr",
+    "dungeon_mythic", "dungeon_nonmythic", "timewalking", "delve",
+}
+
 local function WhereShows(whereToShow)
-    if not whereToShow then return true end
-    if whereToShow.in_combat == false and InCombatLockdown and InCombatLockdown() then return false end
+    if not whereToShow or not next(whereToShow) then return true end
+    local wantIn  = whereToShow.in_combat == true
+    local wantOut = whereToShow.out_of_combat == true
+    if wantIn ~= wantOut then
+        local inCombat = (InCombatLockdown and InCombatLockdown()) and true or false
+        if inCombat ~= wantIn then return false end
+    end
+    local anyLoc = false
+    for i = 1, #LOCATION_KEYS do
+        if whereToShow[LOCATION_KEYS[i]] == true then anyLoc = true; break end
+    end
+    if not anyLoc then return true end
     local bucket = CurrentWhereBucket()
     if not bucket then return true end
-    return whereToShow[bucket] ~= false
+    return whereToShow[bucket] == true
 end
+
+-- Zone/combat edges only flip the group on or off (defined after Activate/
+-- Deactivate); a full restyle belongs to settings writes, not combat entry.
+local SyncWhereActive
 
 local whereEvt = CreateFrame("Frame")
 local WHERE_EVENTS = {
     "PLAYER_ENTERING_WORLD", "CHALLENGE_MODE_START", "CHALLENGE_MODE_COMPLETED",
     "ZONE_CHANGED_NEW_AREA", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
 }
-whereEvt:SetScript("OnEvent", function() ns.TSB_Refresh() end)
+whereEvt:SetScript("OnEvent", function() SyncWhereActive() end)
 
 local function SetWhereWatcherActive(on)
     on = on and true or false
@@ -441,24 +464,41 @@ end
 --  when enabled. All secret combines ride C_CurveUtil boolean curves or
 --  SetAlphaFromBoolean; nothing branches on a secret.
 --------------------------------------------------------------------------------
+-- Kick off-cooldown flag (possibly SECRET), read ONCE per slow pass and shared
+-- by every bar; nil when the API is unavailable (callers fall back to the
+-- shared per-call tint helper).
+local function KickOffCooldown()
+    local kick = GetActiveKickSpell and GetActiveKickSpell()
+    if not (kick and C_Spell and C_Spell.GetSpellCooldownDuration) then return nil end
+    local cd = C_Spell.GetSpellCooldownDuration(kick)
+    if not (cd and cd.IsZero) then return nil end
+    return cd:IsZero()
+end
+
 local impScratch = {}
-local function ApplyCastColor(e, cfg)
+-- offCd: pre-read KickOffCooldown() for batched passes; omitted on per-cast
+-- paints. Same blend as the shared helper (off cooldown = base, on = ready tint).
+local function ApplyCastColor(e, cfg, offCd)
     local holder = e.bar
     holder.overlay:SetAlphaFromBoolean(e._kickProtected)
     local base = cfg.barColor or { r = 0.70, g = 0.40, b = 0.90 }
-    if cfg.importantEnabled and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
+    local ev = C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean
+    if cfg.importantEnabled and ev then
         local imp = e._important
         if type(imp) == "nil" then imp = false end
         local ic = cfg.importantColor or { r = 1, g = 0.2, b = 0.2 }
-        local ev = C_CurveUtil.EvaluateColorValueFromBoolean
         impScratch.r = ev(imp, ic.r, base.r)
         impScratch.g = ev(imp, ic.g, base.g)
         impScratch.b = ev(imp, ic.b, base.b)
         base = impScratch
     end
     local cr, cg, cb = base.r, base.g, base.b
-    if ComputeCastBarTint then
-        local ready = cfg.interruptReady or { r = 0.92, g = 0.35, b = 0.20 }
+    local ready = cfg.interruptReady or { r = 0.92, g = 0.35, b = 0.20 }
+    if type(offCd) ~= "nil" and ev then
+        cr = ev(offCd, base.r, ready.r)
+        cg = ev(offCd, base.g, ready.g)
+        cb = ev(offCd, base.b, ready.b)
+    elseif ComputeCastBarTint then
         cr, cg, cb = ComputeCastBarTint(ready, base)
     end
     holder.sb:GetStatusBarTexture():SetVertexColor(cr, cg, cb)
@@ -581,10 +621,14 @@ local function TimerBody()
         slowAccum = slowAccum + 1
         if slowAccum >= 2 then
             slowAccum = 0
+            -- One cooldown read per pass, not per bar. Plain assignment: the
+            -- flag can be SECRET, and `x and flag or y` would boolean-test it.
+            local offCd
+            if wantColor then offCd = KickOffCooldown() end
             for i = 1, n do
                 local e = shown[i]
                 if not e.preview then
-                    if wantColor then ApplyCastColor(e, cfg) end
+                    if wantColor then ApplyCastColor(e, cfg, offCd) end
                     if wantRange then ApplyRangeAlpha(e, cfg) end
                 end
             end
@@ -919,8 +963,17 @@ local ALL_EVENTS = {
     "UNIT_SPELLCAST_EMPOWER_STOP", "UNIT_SPELLCAST_CHANNEL_STOP",
     "UNIT_SPELLCAST_INTERRUPTED",
     "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
-    "RAID_TARGET_UPDATE",
 }
+
+-- RAID_TARGET_UPDATE only while the marker feature is on (zero cost otherwise).
+local function SyncMarkerEvent(cfg)
+    if not active then return end
+    if cfg and cfg.showRaidMarker then
+        evt:RegisterEvent("RAID_TARGET_UPDATE")
+    else
+        evt:UnregisterEvent("RAID_TARGET_UPDATE")
+    end
+end
 
 local function ReleaseAll()
     for i = #shown, 1, -1 do
@@ -958,6 +1011,7 @@ local function Activate()
     active = true
     EnsureContainer()
     for i = 1, #ALL_EVENTS do evt:RegisterEvent(ALL_EVENTS[i]) end
+    SyncMarkerEvent(Cfg())
     SeedFromLivePlates()
 end
 
@@ -967,6 +1021,17 @@ local function Deactivate()
     evt:UnregisterAllEvents()
     ReleaseAll()
     wipe(plateUnits)
+end
+
+SyncWhereActive = function()
+    local cfg = Cfg()
+    local want = cfg and cfg.enabled == true and WhereShows(cfg.whereToShow)
+    if want and not active then
+        Activate()
+    elseif not want and active then
+        Deactivate()
+        previewOn = false
+    end
 end
 
 --------------------------------------------------------------------------------
@@ -1072,14 +1137,9 @@ end
 function ns.TSB_Refresh()
     local cfg = Cfg()
     SetWhereWatcherActive(cfg and cfg.enabled == true)
-    local want = cfg and cfg.enabled == true and WhereShows(cfg.whereToShow)
-    if want and not active then
-        Activate()
-    elseif not want and active then
-        Deactivate()
-        previewOn = false
-    end
+    SyncWhereActive()
     if not cfg then return end
+    SyncMarkerEvent(cfg)
     styleGen = styleGen + 1 -- O3: invalidate every bar's cached style stamp
     if container then
         container:SetSize(cfg.width or 240, cfg.height or 20)
