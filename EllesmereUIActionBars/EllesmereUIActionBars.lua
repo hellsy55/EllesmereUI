@@ -8573,7 +8573,12 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
     -- frame in lockstep. Cheap because FadeInOne routes hover fades through
     -- the shared manual fader (a table write) instead of a 0.7-4ms
     -- AnimationGroup start per bar. Iterative, not recursive: no reentrancy latch to get stuck.
-    if EAB.db.profile.mouseoverShowAll then
+    -- Gated on THIS bar being Mouseover itself -- AttachHoverHooks wires the
+    -- same OnEnter onto every bar regardless of its own visibility mode, so
+    -- without this check hovering an Always-visible bar broadcast the same
+    -- as hovering a real Mouseover one (tooltip promises the latter only).
+    local s = EAB_VTABLE.Hover.GetSettings(barKey)
+    if s and s.mouseoverEnabled and EAB.db.profile.mouseoverShowAll then
         local FadeInOne = EAB_VTABLE.Hover.FadeInOne
         for otherKey, otherState in pairs(hoverStates) do
             if otherKey ~= barKey then
