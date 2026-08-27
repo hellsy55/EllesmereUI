@@ -3895,8 +3895,16 @@ local function _ensureLustListener(enable)
                     _lustZoneGuard = GetTime() + 1.5
                     return
                 end
-                -- Sated lasts 10 minutes and nothing lifts it early, so a rise this
-                -- listener armed on pins the debuff for the next 590s: skip the
+                if event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
+                    -- Death strips the lockout debuff, so the 590s pin below has to be
+                    -- released here: a wipe followed by a fresh lust would otherwise be
+                    -- swallowed for the rest of the window the pin was stamped for.
+                    _satedPresent = _playerHasSated()
+                    _satedSince = nil
+                    return
+                end
+                -- Nothing but death lifts the lockout early (handled above), so a rise
+                -- this listener armed on pins the debuff for the next 590s: skip the
                 -- (allocating) aura probe until it can possibly have dropped.
                 if _satedPresent and _satedSince and GetTime() < _satedSince + 590 then return end
                 local present = _playerHasSated()
@@ -3931,6 +3939,8 @@ local function _ensureLustListener(enable)
             _satedSince = nil
             _lustListener:RegisterUnitEvent("UNIT_AURA", "player")
             _lustListener:RegisterEvent("PLAYER_ENTERING_WORLD")
+            _lustListener:RegisterEvent("PLAYER_DEAD")
+            _lustListener:RegisterEvent("PLAYER_ALIVE")
             _lustListenerActive = true
         end
     elseif _lustListener and _lustListenerActive then
