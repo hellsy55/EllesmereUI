@@ -12309,10 +12309,47 @@ function InitializeFrames()
                     or vis == "in_combat" or vis == "out_of_combat") then
                     drvSet = { [vis] = true }
                 end
+                -- Any match compiles a DIFFERENT tail: every constrained axis becomes
+                -- its own bracket group instead of sharing one AND bracket, and the
+                -- option lanes join the disjunction -- the ones with a macro
+                -- conditional inside the string, the Lua-only ones (instances, housing,
+                -- skyriding mount) resolved right here at registration time, which is
+                -- out of combat like every other Lua-side option on a secure frame.
+                local anyMatch = s.visibilityMatch == "any"
+                local anyModes, anyLuaC, anyLuaShow
+                if anyMatch then
+                    anyLuaC, anyLuaShow = 0, false
+                    if EllesmereUI.TallyVisibilityOptionAxes then
+                        local luaC, luaP = EllesmereUI.TallyVisibilityOptionAxes(s, "luaOnly")
+                        anyLuaC, anyLuaShow = luaC, luaP > 0
+                    end
+                    anyModes = drvSet
+                    if not anyModes then
+                        -- A single stored mode is one constrained axis.
+                        anyModes = {}
+                        if EllesmereUI.VIS_CONDITION_KEYS and EllesmereUI.VIS_CONDITION_KEYS[vis] then
+                            anyModes[vis] = true
+                        end
+                    end
+                end
+                -- The tail is built once and reused by the companion mini frame below:
+                -- both compilers only ever PREPEND their prefix, so a shared tail is
+                -- byte-identical to passing each frame's own prefix in.
+                local visTail
+                if anyMatch then
+                    if vis == "never" then
+                        visTail = "hide"
+                    elseif anyLuaShow then
+                        visTail = "show"
+                    elseif EllesmereUI.BuildVisibilityDriverStringAny then
+                        visTail = EllesmereUI.BuildVisibilityDriverStringAny("", anyModes, s, anyLuaC)
+                    end
+                elseif drvSet and EllesmereUI.BuildVisibilityDriverString then
+                    visTail = EllesmereUI.BuildVisibilityDriverString("", drvSet)
+                end
                 local wantDriver
-                if drvSet and EllesmereUI.BuildVisibilityDriverString then
-                    wantDriver = EllesmereUI.BuildVisibilityDriverString(
-                        "[@" .. unitKey .. ",noexists] hide; ", drvSet)
+                if visTail then
+                    wantDriver = "[@" .. unitKey .. ",noexists] hide; " .. visTail
                 end
                 if frame._euiVisDriver ~= wantDriver and not isLocked then
                     if wantDriver then
@@ -12488,9 +12525,8 @@ function InitializeFrames()
                 -- condition-hidden mini absorbs no clicks either.
                 if mini then
                     local miniWant
-                    if (not miniAlways) and drvSet and EllesmereUI.BuildVisibilityDriverString then
-                        miniWant = EllesmereUI.BuildVisibilityDriverString(
-                            "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; ", drvSet)
+                    if (not miniAlways) and visTail then
+                        miniWant = "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; " .. visTail
                     end
                     if mini._euiVisDriver ~= miniWant and not isLocked then
                         if miniWant then

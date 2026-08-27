@@ -3504,6 +3504,7 @@ initFrame:SetScript("OnEvent", function(self)
             cfg.hideBorder = nil
             cfg.visibility = "always"
             cfg.visibilityModes = nil
+            cfg.visibilityMatch = nil
             -- VIS_OPT_KEYS, not VIS_OPT_ITEMS: the counter-lane keys have no row in the
             -- legacy item list, and a reset that skipped them would leave a bar hidden.
             for _, k in ipairs(EllesmereUI.VIS_OPT_KEYS) do

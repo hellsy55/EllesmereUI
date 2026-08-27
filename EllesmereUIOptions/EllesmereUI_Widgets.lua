@@ -7439,7 +7439,10 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local total = 0
         local hiddenCount = 0
         for _, item in ipairs(items) do
-            if not item.isHeader and not item.isTopAction then
+            -- isModifier rows change how the OTHER rows combine (the Visibility row's
+            -- match toggle). They are not conditions, so they never appear in the
+            -- summary and never count towards the "All" shortcut.
+            if not item.isHeader and not item.isTopAction and not item.isModifier then
                 total = total + 1
                 if getFn(item.key) then names[#names + 1] = EllesmereUI.L(item.label) end
                 -- Dual-lane rows: the hide lane reads through getFn(key, true).
@@ -7449,9 +7452,12 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local base
         -- opts.emptyLabel: the unified Visibility row reads "Always" with no show lane
         -- checked (an unconstrained element still shows), never "None".
+        -- opts.separatorFn lets a modifier row rename the join, so the summary reads
+        -- the way the conditions actually combine.
+        local sep = opts.separatorFn and opts.separatorFn() or ", "
         if #names == 0 then base = opts.emptyLabel and EllesmereUI.L(opts.emptyLabel) or EllesmereUI.L("None")
         elseif #names == total then base = EllesmereUI.L("All")
-        else base = table.concat(names, ", ") end
+        else base = table.concat(names, sep) end
         if hiddenCount > 0 then base = base .. " (-" .. hiddenCount .. ")" end
         return base
     end
@@ -7961,8 +7967,10 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     if row._isLocked then return end
                     lbl:SetTextColor(1, 1, 1, 1)
                     hl:SetColorTexture(1, 1, 1, 0.04)
-                    EllesmereUI.ShowWidgetTooltip(negBox, opts.hideLaneTooltip
-                        and EllesmereUI.L(opts.hideLaneTooltip)
+                    local hlt = opts.hideLaneTooltip
+                    if type(hlt) == "function" then hlt = hlt() end
+                    EllesmereUI.ShowWidgetTooltip(negBox,
+                        hlt and EllesmereUI.L(hlt)
                         or EllesmereUI.L("Hide these instead of showing them"))
                 end)
                 negBox:SetScript("OnLeave", function()
@@ -8439,6 +8447,10 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "always",    label = "Always" },
     { key = "mouseover", label = "Mouseover",
       tooltip = "Reveal on hover only. Combines with the conditions below: hover-reveals while they all pass, stays hidden while any fails." },
+    -- Modifier, not a condition: it decides how the rows below combine, so it is kept
+    -- out of the summary label and out of the Show/Hide lane pairs.
+    { key = "matchAny", label = "Match Any Condition", modifier = true,
+      tooltip = "Off: every condition you set has to match. On: this element shows as soon as ONE of them matches, and a Hide lane then means show while that condition is false." },
     { isHeader = true, label = "Show", rightLabel = "Hide" },
     { key = "combat", label = "In Combat", axis = "mode",
       show = "in_combat", hide = "out_of_combat" },
@@ -8490,7 +8502,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             items[#items + 1] = def
         elseif not (def.key == "mouseover" and caps.noMouseover) then
             local item = { key = def.key, label = def.label, tooltip = def.tooltip,
-                           dual = def.axis and true or nil }
+                           dual = def.axis and true or nil,
+                           isModifier = def.modifier }
             if caps.noGroupModes and def.axis == "group" then
                 item.locked = true
                 item.lockedTooltip = (caps.lockedTooltips and caps.lockedTooltips[def.key])
@@ -8508,6 +8521,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
                 listed[def.show] = true; listed[def.hide] = true
             elseif def.axis == "group" then
                 listed[def.key] = true
+            elseif def.modifier then
+                -- Never a stored scalar, so it must not shadow the orphan rule.
             elseif not def.axis then
                 listed[def.key] = true
             end
@@ -8561,6 +8576,21 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         if store then store[k] = v or nil end
     end
 
+    -- The match is a store-level scalar rather than a lane, but it fans out exactly
+    -- like the option lanes do (Resource Bars writes health/primary/secondary through
+    -- these hooks), so it rides them instead of growing its own opts contract.
+    local function GetMatchAny()
+        if opts.getOption then return opts.getOption("visibilityMatch") == "any" end
+        local store = opts.getStore()
+        return (store and store.visibilityMatch) == "any"
+    end
+
+    local function SetMatchAny(on)
+        if opts.setOption then opts.setOption("visibilityMatch", on and "any" or nil); return end
+        local store = opts.getStore()
+        if store then store.visibilityMatch = on and "any" or nil end
+    end
+
     local cbDD, cbDDRefresh
     local pendingRefresh = false
 
@@ -8581,6 +8611,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local function GetChecked(k, neg)
         local def = defs[k]
         if not def then return false end
+        if def.modifier then return GetMatchAny() end
         if def.axis == "extra" then return def.get() == true end
         if def.axis == "opt" then return GetOpt(neg and def.hide or def.show) end
         local sel = Sel()
@@ -8602,6 +8633,14 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local function SetChecked(k, checked, neg)
         local def = defs[k]
         if not def then return end
+
+        -- Modifier: it only changes how the rows below combine, so it deliberately
+        -- clears nothing -- not the exclusive scalars, not a condition, not a lane.
+        if def.modifier then
+            SetMatchAny(checked)
+            AfterChange(false, true)
+            return
+        end
 
         if def.axis == "extra" then
             def.set(checked)
@@ -8677,6 +8716,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         if checked then
             if opts.applyScalarFn then opts.applyScalarFn(store, k) else store[legacyKey] = k end
             store.visibilityModes = nil
+            SetMatchAny(false)
             AfterChange(true)
         end
     end
@@ -8694,7 +8734,13 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         leftRgn, opts.width or 210, leftRgn:GetFrameLevel() + 2,
         items, GetChecked, SetChecked, nil, 12, nil, nil, OnMenuClosed,
         { emptyLabel = "Always",
-          hideLaneTooltip = "Hide while this condition is true" })
+          -- Both of these read the match live: under Any the conditions are OR'd, and
+          -- a Hide lane stops being a veto and becomes a disjunct of its own.
+          separatorFn = function() return GetMatchAny() and " or " or ", " end,
+          hideLaneTooltip = function()
+              return GetMatchAny() and "Show while this condition is false"
+                  or "Hide while this condition is true"
+          end })
     PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
     leftRgn._control = cbDD
     leftRgn._lastInline = nil
