@@ -9751,7 +9751,7 @@ function EAB:UpdateHousingVisibility()
                 -- self-correct in combat exactly like the real-mount case does.
                 if not (IsMounted and IsMounted())
                     and EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
-                    return "formhide"
+                    return "combathide"
                 end
             end
             -- Every other Lua-only option (both instance lanes, both housing lanes, both
@@ -9759,10 +9759,16 @@ function EAB:UpdateHousingVisibility()
             -- there is live here too instead of silently going stale on the next zone or
             -- mount edge. skipMountAxis keeps the driver's [mounted]/[nomounted] clauses
             -- authoritative, leaving the narrower shapeshift check above as the only
-            -- mount handling on this path.
-            if EllesmereUI and EllesmereUI.CheckVisibilityOptionsNonMacro
-                and EllesmereUI.CheckVisibilityOptionsNonMacro(s, true) then
-                return true
+            -- mount handling on this path. The skyriding-mount lanes are exactly as
+            -- combat-race-prone as the druid-form case above (root-caused 2026-08-27
+            -- alongside it: no secure macro token can express their "ground included"
+            -- semantics, so they hit the same bare-"hide"-freezes-through-combat bug
+            -- after a skyriding dismount), so the shared evaluator flags them with the
+            -- same "mountaxis" marker rather than a plain true.
+            if EllesmereUI and EllesmereUI.CheckVisibilityOptionsNonMacro then
+                local nonMacro = EllesmereUI.CheckVisibilityOptionsNonMacro(s, true)
+                if nonMacro == "mountaxis" then return "combathide" end
+                if nonMacro then return true end
             end
             return false
         end
@@ -9801,11 +9807,12 @@ function EAB:UpdateHousingVisibility()
                         end
                     elseif shouldHide then
                         if isSecure then
-                            -- "formhide" (druid mount-like form) bakes a [combat] show
-                            -- escape hatch into the string so the secure engine can
-                            -- un-hide on its own if combat starts before this handler
-                            -- gets to run again (see ShouldHideNonMacro above).
-                            local hideStr = (shouldHide == "formhide") and "[combat] show; hide" or "hide"
+                            -- "combathide" (druid mount-like form, or the skyriding-mount
+                            -- lanes) bakes a [combat] show escape hatch into the string so
+                            -- the secure engine can un-hide on its own if combat starts
+                            -- before this handler gets to run again (see ShouldHideNonMacro
+                            -- above).
+                            local hideStr = (shouldHide == "combathide") and "[combat] show; hide" or "hide"
                             if frame._eabLastVisStr ~= hideStr then
 
                                 frame._eabLastVisStr = hideStr

@@ -12786,13 +12786,21 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
 
     -- Skyriding-mount axis (glide capability, ground included -- NOT the airborne
     -- show_dragonriding / show_not_dragonriding mode pair, which additionally
-    -- requires IsFlying; see EllesmereUI.IsAirborneSkyriding).
+    -- requires IsFlying; see EllesmereUI.IsAirborneSkyriding). No secure macro
+    -- token can express "ground included" (the airborne-only [advflyable,flying]
+    -- pair used elsewhere is a different check), so this stays Lua-only for
+    -- every caller. Returns "mountaxis" instead of a plain true so a secure-driver
+    -- caller (Action Bars) can recognize it needs a [combat] show escape hatch
+    -- baked into whatever it writes -- root-caused 2026-08-27: a bare "hide" from
+    -- this branch froze the bar hidden through an entire fight after a skyriding
+    -- dismount-into-combat, because InCombatLockdown() defers the next Lua pass
+    -- that would otherwise re-evaluate it. Still truthy for every other caller.
     if opts.visHideDragonriding then
-        if EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding() then return true end
+        if EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding() then return "mountaxis" end
     end
 
     if opts.visOnlySkyriding then
-        if not (EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding()) then return true end
+        if not (EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding()) then return "mountaxis" end
     end
 
     return false
