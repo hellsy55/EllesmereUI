@@ -6410,6 +6410,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- Only the art moves; identity stays untouched.
     local function ResolveIconArt(sid, cdID)
         if not sid or sid <= 0 then return sid end
+        if ns.LustPresetIconSpellID then sid = ns.LustPresetIconSpellID(sid) end
         if ns.ResolvePlaceholderIconSID then
             local live = ns.ResolvePlaceholderIconSID(sid, cdID)
             if type(live) == "number" and live > 0 then return live end

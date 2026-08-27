@@ -375,13 +375,11 @@ end
 -- (special-case "timespiral"); warlock pets are excluded (no usable detection).
 local BUFF_BAR_PRESETS = {
     {
-        -- Faction label: Horde = Bloodlust (2825), Alliance = Heroism (32182).
+        -- Horde form; ns.RefreshLustPresetFaction rewrites it for Alliance below.
         key      = "bloodlust",
-        name     = (UnitFactionGroup("player") == "Horde") and "Bloodlust" or "Heroism",
-        icon     = (UnitFactionGroup("player") == "Horde")
-                       and "Interface\\Icons\\spell_nature_bloodlust"
-                       or  "Interface\\Icons\\ability_shaman_heroism",
-        spellIDs = { (UnitFactionGroup("player") == "Horde") and 2825 or 32182 },
+        name     = "Bloodlust",
+        icon     = "Interface\\Icons\\spell_nature_bloodlust",
+        spellIDs = { 2825 },
         duration = 40,
         tbbOnly  = true,  -- not a cooldown-usable preset (kept out of the CD/utility picker)
         customAuraToo = true,  -- but allowed on Custom Auras (icon) bars; debuff-driven 40s window
@@ -420,6 +418,38 @@ local BUFF_BAR_PRESETS = {
     },
 }
 ns.BUFF_BAR_PRESETS = BUFF_BAR_PRESETS
+
+-- Horde casts Bloodlust (2825), Alliance casts Heroism (32182). UnitFactionGroup
+-- can read nil this early in a client session, and a wrong read baked into the
+-- table would stick for the whole session (a Horde player got the Heroism name,
+-- icon and id in the picker), so OnEnable calls this again once the player loads.
+function ns.RefreshLustPresetFaction()
+    local alliance = UnitFactionGroup("player") == "Alliance"
+    local name = alliance and "Heroism" or "Bloodlust"
+    local icon = alliance and "Interface\\Icons\\ability_shaman_heroism"
+                          or  "Interface\\Icons\\spell_nature_bloodlust"
+    ns._lustPresetSpellID = alliance and 32182 or 2825
+    for _, p in ipairs(BUFF_BAR_PRESETS) do
+        if p.key == "bloodlust" then
+            p.name, p.icon = name, icon
+            p.spellIDs[1] = ns._lustPresetSpellID
+            break
+        end
+    end
+    -- The Tracking Bar list copies name/icon by value at load (spellIDs is the
+    -- same table), and is built after this file, so it is absent on the first call.
+    for _, e in ipairs(ns.TBB_POPULAR_BUFFS or {}) do
+        if e.key == "bloodlust" then e.name, e.icon = name, icon; break end
+    end
+end
+ns.RefreshLustPresetFaction()
+
+-- A profile shared between a Horde and an Alliance character keeps whichever lust
+-- id was stored first, so icon art resolves through here instead of off that id.
+function ns.LustPresetIconSpellID(sid)
+    if sid == 2825 or sid == 32182 then return ns._lustPresetSpellID or sid end
+    return sid
+end
 
 -- Item presets for CD/utility bars (potions that track cooldowns). displayOrder is a
 -- dynamic-display priority list, newest tier first: the icon resolves to the FIRST id
@@ -9353,6 +9383,7 @@ function ECME:OnEnable()
     ns._playerRace = _playerRace
     ns._playerClass = _playerClass
     ns._myRacialsSet = _myRacialsSet
+    ns.RefreshLustPresetFaction()
 
     -- Build cached racial spell list for this character (used for render-time substitution)
     table.wipe(_myRacials)
