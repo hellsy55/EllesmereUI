@@ -983,6 +983,10 @@ end
 -- with them. Follow the chat frames onto whichever host Blizzard picked, and
 -- back to UIParent when the editor closes. Every frame moved here is ours.
 local _panelHost = UIParent
+local function PanelHost()
+    return FCF_GetCurrentFullScreenFrame and FCF_GetCurrentFullScreenFrame() or UIParent
+end
+
 local function ReseatPanel(f, host)
     if not f then return end
     local p = f:GetParent()
@@ -992,7 +996,7 @@ local function ReseatPanel(f, host)
 end
 
 function ECHAT.ApplyPanelHost()
-    local host = FCF_GetCurrentFullScreenFrame and FCF_GetCurrentFullScreenFrame() or UIParent
+    local host = PanelHost()
     for i = 1, 20 do
         local cf = _G["ChatFrame" .. i]
         if cf then
@@ -1010,6 +1014,16 @@ function ECHAT.ApplyPanelHost()
     ReseatPanel(ns._sidebarSeparateBorder, host)
     ReseatPanel(ns._chatHoverOverlay, host)
     _panelHost = host
+end
+
+-- The on-demand popups are built the first time they are used and can be built
+-- on either side of an editor session, so they seat themselves on show instead
+-- of riding the pass above.
+function ECHAT.HostPopup(f)
+    local host = PanelHost()
+    if f:GetParent() ~= host then
+        FrameUtil.SetParentMaintainRenderLayering(f, host)
+    end
 end
 
 -- The main window ships with clamp-rect insets that extend its clamp box
@@ -2754,6 +2768,7 @@ function ECHAT.TogglePortalFlyout(anchorBtn)
             local bRight = anchorBtn:GetRight() * bs
             flyout:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (bRight + 4) / fs, (bTop + 4) / fs)
         end
+        ECHAT.HostPopup(flyout)
         flyout:Show()
     end
 end
@@ -3685,6 +3700,7 @@ local function ShowCopyPopup(text)
     local popup = copyDimmer._popup
     popup._textBox:SetText(text)
     popup._editBox._readOnlyText = text
+    ECHAT.HostPopup(copyDimmer)
     copyDimmer:Show()
     C_Timer.After(0.05, function()
         popup._editBox:SetFocus()
@@ -3807,6 +3823,8 @@ local function ShowUrlPopup(url)
     local cx, cy = GetCursorPosition()
     local scale = UIParent:GetEffectiveScale()
     urlPopup:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", cx / scale, cy / scale + 10)
+    ECHAT.HostPopup(urlBackdrop)
+    ECHAT.HostPopup(urlPopup)
     urlBackdrop:SetAlpha(0); urlBackdrop:Show(); urlBackdrop._fadeIn:Play()
     urlPopup:SetAlpha(0); urlPopup:Show(); urlPopup._fadeIn:Play()
     urlPopup._eb:SetFocus(); urlPopup._eb:HighlightText()
@@ -5617,6 +5635,9 @@ initFrame:SetScript("OnEvent", function(self)
         ECHAT.ApplyBackground()
         ECHAT.ApplyFonts()
         if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
+        -- The passes above can build panel chrome (borders, the tab-band
+        -- extension) that did not exist when the house editor opened.
+        ECHAT.ApplyPanelHost()
     end
 
     ---------------------------------------------------------------------------
