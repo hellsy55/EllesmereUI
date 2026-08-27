@@ -8104,13 +8104,20 @@ end  -- range fading section (do-block keeps its locals out of the 200-cap)
 --  Throttled 1s ticker clears stale debuff/BM/dispel indicators when a unit
 --  goes invisible (loadscreen, out of render range) or disconnects. Without
 --  this, indicators painted before the unit ghosted persist indefinitely
---  because UNIT_AURA stops firing for invisible/DC'd units.
+--  because UNIT_AURA stops firing for invisible/DC'd units. Also re-drives the
+--  assist/identity gate every tick, since it can degrade and recover for
+--  reasons render visibility never sees (faction, phasing, filter streaming).
 -------------------------------------------------------------------------------
 local ghostTicker = nil
 
 local function GhostAuraCheck()
     local function checkUnit(unit, btn)
         local d = GetFFD(btn)
+        -- ApplyAssistGate already forces an UpdateAllAuras regain refresh on its
+        -- own false->true edge; it just never gets RE-DRIVEN outside a real unit
+        -- reassignment, so a trip/clear with no accompanying reassignment goes
+        -- unseen otherwise. No-op (one pcall'd read) unless the state flipped.
+        if ns.RFC_ApplyAssistGate then ns.RFC_ApplyAssistGate(btn, d, unit) end
         if not UnitIsVisible(unit) or not UnitIsConnected(unit) then
             if not d.ghostCleared then
                 d.ghostCleared = true
