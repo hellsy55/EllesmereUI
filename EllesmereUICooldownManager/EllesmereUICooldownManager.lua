@@ -7095,6 +7095,16 @@ local _stableMode = false
 
 local function FormatKeybindKey(key)
     if not key or key == "" then return nil end
+    -- GetBindingKey hands back a gamepad button's raw id (PADDUP); only
+    -- GetBindingText resolves it to the controller's icon markup. Adopted just
+    -- when markup came back, so keyboard binds keep the raw token names the
+    -- substitutions below are written against. Those still run over a resolved
+    -- chord to condense its modifier -- no gamepad atlas name contains one of
+    -- their search strings.
+    local resolved = GetBindingText(key, 1)
+    if resolved and resolved:find("|A:", 1, true) then
+        key = resolved
+    end
     key = key:gsub("SHIFT%-", "S")
     key = key:gsub("CTRL%-",  "C")
     key = key:gsub("ALT%-",   "A")
