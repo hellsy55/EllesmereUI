@@ -7011,6 +7011,27 @@ L["    Unit Types"] = "대상 종류"
 L["Disabling both disables this binding."] = "둘 다 해제하면 이 단축키도 비활성화됩니다."
 L["Friendly"] = "아군"
 L["Enemy"] = "적군"
+L["Ping Marker"] = "신호 표시기"
+L["Ping Marker Size"] = "신호 표시기 크기"
+
+--공격대 /파티 - 툴팁
+L["Shows the ping mark on a member's frame when someone pings them (needs Blizzard's Show Pings on Raid Frames setting on)."] = "누군가 파티원을 지정해 신호를 보내면 해당 파티원 프레임에 신호 표시를 나타냅니다 (블리자드 설정의 '공격대 프레임에 신호 표시' 기능이 켜져 있어야 합니다)."
+
+--행동단축바
+L["Skyriding (Airborne)"] = "하늘 경주 (비행 중)"
+L["Skyriding Mount"] = "하늘 경주 탈것"
+L["Mounted"] = "탈것 탑승 중"
+L["Enemy Target"] = "적 대상"
+
+--행동단축바 - 툴팁
+L["While you are inside a house or plot."] = "집이나 개인 영지 내부에 있을 때 적용됩니다."
+L["A target you can attack."] = "공격 가능한 대상입니다."
+L["Hide while this condition is true"] = "이 조건이 참일 때 숨기기"
+L["Reveal on hover only. Combines with the conditions below: hover-reveals while they all pass, stays hidden while any fails."] = "마우스를 올렸을 때만 표시합니다. 아래 조건들과 결합되어 작동합니다. 조건을 '모두 만족'하면 마우스 오버 시 표시되고, 하나라도 만족하지 못하면 숨겨진 상태를 유지합니다."
+L["Only while AIRBORNE on a glide-capable mount or flight form. For the mount itself, ground included, use Skyriding Mount."] = "활공 가능한 탈것이나 비행 형태를 타고 '공중에 떠 있는' 동안에만 적용됩니다. 지상을 포함하여 탈것 자체를 조건으로 지정하려면 '하늘 경주 탈것'을 사용하세요."
+L["While on a glide-capable mount, ground included, where Blizzard shows its vigor HUD. Skyriding (Airborne) additionally requires you to be flying."] = "블리자드 기본 UI에 기력 바가 표시되는 활공 가능한 탈것에 탑승한 상태(지상 포함)에 적용됩니다. '하늘 경주 (비행 중)' 조건은 여기에 추가로 실제 비행 중이어야 합니다."
+L["Dungeons, raids, scenarios, arenas and battlegrounds. Garrisons do not count."] = "던전, 공격대, 시나리오, 투기장 및 전장입니다. 주둔지는 포함되지 않습니다."
+L["Druid travel, aquatic and flight forms count as mounted."] = "드루이드의 여행, 바다, 비행 형태도 탈것 탑승 상태로 간주합니다."
 
 --이름표
 L["Hide Border"] = "테두리 숨기기"
@@ -7030,6 +7051,18 @@ L["Copy Included/Excluded Spells From:"] = "포함/제외된 주문 복사 대�
 L["Debuffs Blizzard flags as important"] = "블리자드가 중요하다고 지정한 약화 효과"
 L["Fill Color Settings"] = "채우기 색상 설정"
 L["Dynamic Color"] = "동적 색상"
+L["Only Tracked Auras"] = "추적된 오라만"
+L["Important Only"] = "중요 디버프만"
+L["Important and Own"] = "중요 및 자신의 디버프"
+L["Important or Own"] = "중요 또는 자신의 디버프"
+
+-- 유닛 프레임 - 툴팁
+L["Shows only this frame's Tracked Auras; add them with Edit Tracked Auras at the top of this menu."] = "이 프레임의 추적된 오라만 표시합니다. 이 메뉴 상단의 '추적된 오라 편집'을 통해 추가할 수 있습니다."
+L["Shows every debuff on this frame."] = "이 프레임에 모든 디버프를 표시합니다."
+L["Shows only the debuffs you apply."] = "자신이 부여한 디버프만 표시합니다."
+L["Shows only debuffs Blizzard flags as important."] = "블리자드가 중요하게 지정한 디버프만 표시합니다."
+L["Shows only the debuffs you apply that Blizzard also flags as important."] = "블리자드가 중요하게 지정한 디버프 중 자신이 부여한 디버프만 표시합니다."
+L["Shows the debuffs you apply plus important debuffs from anyone."] = "자신이 부여한 디버프와 다른 사람이 부여한 중요 디버프를 함께 표시합니다."
 
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
