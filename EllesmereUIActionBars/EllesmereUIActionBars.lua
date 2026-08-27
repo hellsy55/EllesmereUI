@@ -820,6 +820,11 @@ ns.ResolveBorderThickness = ResolveBorderThickness
 -- Condense keybind text (CTRL-2 C2, Mouse Button 4 M4, etc.)
 local function FormatHotkeyText(text)
     if not text or text == "" then return "" end
+    -- GetBindingKey hands back a gamepad button's raw id (PADDUP); only
+    -- GetBindingText resolves it to the controller's icon markup.
+    if IsBindingForGamePad(text) then
+        return GetBindingText(text, 1) or ""
+    end
     text = text:gsub("CTRL%-", "C")
     text = text:gsub("ALT%-", "A")
     text = text:gsub("SHIFT%-", "S")

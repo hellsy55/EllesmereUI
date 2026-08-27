@@ -7095,6 +7095,12 @@ local _stableMode = false
 
 local function FormatKeybindKey(key)
     if not key or key == "" then return nil end
+    -- GetBindingKey hands back a gamepad button's raw id (PADDUP); only
+    -- GetBindingText resolves it to the controller's icon markup.
+    if IsBindingForGamePad(key) then
+        local text = GetBindingText(key, 1)
+        return text ~= "" and text or nil
+    end
     key = key:gsub("SHIFT%-", "S")
     key = key:gsub("CTRL%-",  "C")
     key = key:gsub("ALT%-",   "A")
