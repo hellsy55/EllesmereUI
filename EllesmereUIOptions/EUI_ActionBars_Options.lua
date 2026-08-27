@@ -1272,8 +1272,11 @@ initFrame:SetScript("OnEvent", function(self)
                       end
                   end,
                   -- Option axes recompile the secure driver through the same chain the
-                  -- old Visibility Options dropdown used.
+                  -- old Visibility Options dropdown used. The gate refresh first: a lane
+                  -- click can be what just armed (or disarmed) the soft-target machinery,
+                  -- and the two calls below must see the current flags, not last click's.
                   onOptionChanged = function()
+                      EAB:_RefreshSoftTargetGate()
                       EAB:UpdateHousingVisibility()
                       EAB:ApplyCombatVisibility()
                   end }
@@ -1717,8 +1720,11 @@ initFrame:SetScript("OnEvent", function(self)
                       EAB:ApplyCombatVisibility()
                   end,
                   -- Option axes recompile the secure driver through the same chain the
-                  -- old Visibility Options dropdown used.
+                  -- old Visibility Options dropdown used. The gate refresh first: a lane
+                  -- click can be what just armed (or disarmed) the soft-target machinery,
+                  -- and the two calls below must see the current flags, not last click's.
                   onOptionChanged = function()
+                      EAB:_RefreshSoftTargetGate()
                       EAB:UpdateHousingVisibility()
                       EAB:ApplyCombatVisibility()
                   end },

@@ -806,26 +806,26 @@ end
 -- Turns a store into an Any-match driver tail. Shared because Action Bars, Unit Frames
 -- and the Minimap need the identical sequence, and a fix landing in one consumer of a
 -- shared engine and not the others has bitten this codebase before.
--- Returns the tail (prefix-free; every compiler here only prepends) and a LOWER BOUND on
--- how many axes constrain the element, since the early-outs stop counting once the answer
--- is settled. Zero means "nothing constrains this at all", which is the one thing the
--- count is read for: telling that apart from "everything failed".
+-- Returns tail, constrained (a LOWER BOUND -- the early-outs stop counting once the
+-- answer is settled), and liveAxes (how many axes are LIVE macro terms in `tail`, zero
+-- for a constant). A driver-registering caller needs liveAxes: constrained can be
+-- positive purely from axes resolved in Lua, which a driver could never keep honest.
 function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     wrap = wrap or ""
     local wrappedShow = (wrap ~= "") and ("[" .. wrap .. "] show; hide") or "show"
     -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
-    if (store[legacyKey] or "always") == "never" then return "hide", 1 end
+    if (store[legacyKey] or "always") == "never" then return "hide", 1, 0 end
 
     local luaC, luaP = 0, 0
     if EUI.TallyVisibilityOptionAxes then
         luaC, luaP = EUI.TallyVisibilityOptionAxes(store, "luaOnly", edges)
     end
     -- Settled before the fixups run: their probes are the expensive ones.
-    if luaP > 0 then return wrappedShow, luaC end
+    if luaP > 0 then return wrappedShow, luaC, 0 end
 
     local drop, forceShow = AnyDriverLaneFixups(store, edges)
     -- A driver axis whose token cannot see what the probe sees; it is not in luaC.
-    if forceShow then return wrappedShow, luaC + 1 end
+    if forceShow then return wrappedShow, luaC + 1, 0 end
 
     local modes = vm
     if not modes then
@@ -837,9 +837,18 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     -- The compiler must see only the lanes THIS consumer compiles: an axis resolved in
     -- Lua is already in luaC, and a dropped one still constrains the element even though
     -- it cannot be a disjunct right now. Both have to be kept out of the compiled opts.
+    -- Filtering is skipped only when NEITHER applies to any axis -- named after "does
+    -- this axis list need trimming for these edges", not after any specific edge name,
+    -- so a future needsEdge axis cannot silently slip through unfiltered.
     local axisList = EUI.VIS_OPT_AXES
+    local needsFilter = drop ~= nil
+    if not needsFilter and axisList then
+        for i = 1, #axisList do
+            if EUI.VisAxisIsLuaOnly(axisList[i], edges) then needsFilter = true; break end
+        end
+    end
     local opts, dropped = store, 0
-    if axisList and (drop or not (edges and edges.softTarget)) then
+    if needsFilter then
         opts = {}
         for i = 1, #axisList do
             local ax = axisList[i]
@@ -854,7 +863,7 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
         end
     end
     local tail, axes = EUI.BuildVisibilityDriverStringAny("", modes, opts, luaC + dropped, wrap)
-    return tail, axes + luaC + dropped
+    return tail, axes + luaC + dropped, axes
 end
 
 -- Set-aware copy for the sync icons. dstCaps.noGroupModes strips group-axis
