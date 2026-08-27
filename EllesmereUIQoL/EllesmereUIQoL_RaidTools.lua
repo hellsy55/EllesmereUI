@@ -97,6 +97,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local _, ns = ...
 
 local InCombatLockdown = InCombatLockdown
+local IsEncounterInProgress = IsEncounterInProgress
 local UnitIsGroupLeader, UnitIsGroupAssistant = UnitIsGroupLeader, UnitIsGroupAssistant
 local IsInRaid, IsInGroup = IsInRaid, IsInGroup
 local GetNumGroupMembers, GetRaidRosterInfo = GetNumGroupMembers, GetRaidRosterInfo
@@ -151,6 +152,23 @@ local COG_GAP = 4
 -- both riders, not just the first.
 local RAIDCHECK_GAP = COG_GAP
 local GROUP_COG_RESERVE = (COG_GAP + COG_SZ) + (RAIDCHECK_GAP + COG_SZ) + 6  -- two riders, gap, clearance
+
+-- Consumable/repair report row: five more riders past Raid Check, same
+-- corner, chained further inward. Full name on each (not an abbreviation);
+-- width is measured per-label at layout time (see ApplyLayout) rather than
+-- fixed, since "Repair"/"Vantus" and "Food"/"Rune" are not the same length.
+-- REPORT_BTN_PAD is the horizontal padding inside each button, both sides.
+local REPORT_GAP = COG_GAP
+local REPORT_BTN_PAD = 5
+local REPORT_COLUMNS = {
+    { key = "flask",      title = "Flask" },
+    { key = "food",       title = "Food" },
+    -- Abbreviated on the button itself (still "Repair" in the tooltip) --
+    -- the longest full name here, and the one most worth trimming.
+    { key = "durability", title = "Repair", label = "Rep" },
+    { key = "rune",       title = "Rune" },
+    { key = "vantus",     title = "Vantus" },
+}
 
 -- Make Everyone Assistant checkbox: first row of Group & Pull content.
 local ASSIST_CHK_SZ = 14
@@ -272,6 +290,7 @@ local groupHolder, markersHolder   -- plain content holders (see header)
 local iconBtn                  -- collapsed-state square
 local raidGroupsCogBtn          -- opens the Raid Groups composition window (Group shell only)
 local raidCheckBtn              -- re-runs and shows the Raid Check window on demand (Group shell only)
+local reportBtns = {}           -- Flask/Food/Repair/Rune/Vantus report buttons (Group shell only)
 local assistCheckRow, assistCheckTex   -- Make Everyone Assistant row (Group shell, raid-only)
 -- Markers are fixed at build; the Group & Pull height follows the settings and
 -- is re-computed by LayoutGroupContent on every Apply.
@@ -1509,8 +1528,17 @@ local function BuildRaidGroupsCog()
     lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
     lbl:SetText("+")
     lbl:SetAlpha(0.7)
-    b:SetScript("OnEnter", function() lbl:SetAlpha(1) end)
-    b:SetScript("OnLeave", function() lbl:SetAlpha(0.7) end)
+    b:SetScript("OnEnter", function(self)
+        lbl:SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(EllesmereUI.L("Raid Groups"))
+        GameTooltip:AddLine(EllesmereUI.L("Opens the group composition window to view and rearrange raid subgroups."), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function()
+        lbl:SetAlpha(0.7)
+        GameTooltip:Hide()
+    end)
     b:SetScript("OnClick", function()
         if ns.ShowRaidGroupsWindow then ns.ShowRaidGroupsWindow() end
     end)
@@ -1551,6 +1579,71 @@ local function BuildRaidCheckButton()
     raidCheckBtn = b
 end
 
+-- Flask/Food/Repair/Rune/Vantus report buttons: left-click posts who is
+-- missing it (or, for Repair, everyone's durability percentage) to /raid or
+-- /party depending on the current group; right-click prints the same thing
+-- Flask/Food/Repair/Rune/Vantus report buttons: left-click posts who is
+-- missing it (or, for Repair, everyone's durability percentage) to /raid or
+-- /party depending on the current group; right-click prints the same thing
+-- to this client's own chat frame only. Small title-bar riders, same family
+-- as the Raid Groups cog and Raid Check button, but with the full name on
+-- each instead of a single glyph -- so every button is sized to its own
+-- measured label (see ApplyLayout) rather than a shared fixed width. Not
+-- gated on lead/assist -- reading auras and durability someone volunteered
+-- is not an action that needs rank -- but greyed out during a boss pull the
+-- same way Convert/Disband grey out without rank (SetButtonEnabled), since
+-- a raid should not be reading chat mid-fight.
+local function BuildReportButtons()
+    for _, def in ipairs(REPORT_COLUMNS) do
+        local b = CreateFrame("Button", nil, sections.Group)
+        b:SetHeight(COG_SZ)
+        b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        SkinButtonChrome(b)
+        local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 8, nil, 1, 1, 1), 8)
+        lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
+        lbl:SetText(EllesmereUI.L(def.label or def.title))
+        lbl:SetAlpha(0.7)
+        -- A first pass now (ApplyLayout re-measures and resizes every pass,
+        -- since a Global Font change moves GetStringWidth without a reload).
+        b:SetWidth(math.ceil((lbl:GetStringWidth() or 20) + REPORT_BTN_PAD * 2))
+        b:SetScript("OnEnter", function(self)
+            lbl:SetAlpha(1)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            GameTooltip:AddLine(EllesmereUI.L(def.title))
+            GameTooltip:AddLine(EllesmereUI.L("Left Click: report to raid/party chat."), 1, 1, 1)
+            GameTooltip:AddLine(EllesmereUI.L("Right Click: print to your own chat only."), 1, 1, 1)
+            if def.key == "durability" then
+                GameTooltip:AddLine(EllesmereUI.L("Lists anyone at 90% or below, worst first."), 0.7, 0.7, 0.7, true)
+            else
+                GameTooltip:AddLine(EllesmereUI.L("Lists who is missing it."), 0.7, 0.7, 0.7, true)
+            end
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function()
+            lbl:SetAlpha(0.7)
+            GameTooltip:Hide()
+        end)
+        b:SetScript("OnClick", function(_, button)
+            if ns.ReportConsumable then
+                ns.ReportConsumable(def.key, button ~= "RightButton")
+            end
+        end)
+        b._lbl = lbl
+        reportBtns[#reportBtns + 1] = b
+    end
+end
+
+-- Boss combat only -- IsEncounterInProgress(), the same predicate the
+-- BlizzardSkin module's "Out of Boss Combat" visibility option uses -- not
+-- InCombatLockdown(), which would also greyscale these on ordinary trash.
+local function RefreshReportButtons()
+    local enabled = not IsEncounterInProgress()
+    for _, b in ipairs(reportBtns) do
+        SetButtonEnabled(b, enabled)
+    end
+end
+
 local function BuildAll()
     if sections.Group then return end
     MakeShell("Group")
@@ -1560,6 +1653,7 @@ local function BuildAll()
     BuildCollapsedIcon()
     BuildRaidGroupsCog()
     BuildRaidCheckButton()
+    BuildReportButtons()
     iconBtn:ClearAllPoints()
     iconBtn:SetPoint("TOPLEFT", sections.Group, "TOPLEFT", 0, 0)
 
@@ -1631,6 +1725,17 @@ local function ApplyLayout()
     -- height so the button never sits over the last content row. The Group
     -- shell alone also carries the Raid Groups cog riding the button's inward
     -- side, so its own reserve is a little wider.
+    -- Report row: measured fresh every pass (not cached at build time) so a
+    -- Global Font change is picked up without a UI reload -- see
+    -- BuildReportButtons for REPORT_BTN_PAD/REPORT_GAP.
+    local reportReserve = 0
+    for _, b in ipairs(reportBtns) do
+        local w = math.ceil((b._lbl:GetStringWidth() or 20) + REPORT_BTN_PAD * 2)
+        b:SetWidth(w)
+        b._reportWidth = w
+        reportReserve = reportReserve + REPORT_GAP + w
+    end
+
     local corner = AnchorCorner()
     local isBottom = corner == "BOTTOMLEFT" or corner == "BOTTOMRIGHT"
     local function Reserve(hasBtn, extra)
@@ -1639,7 +1744,7 @@ local function ApplyLayout()
         local bottomReserve = (hasBtn and isBottom) and BTN_BOTTOM_RESERVE or 0
         return titleReserve, bottomReserve
     end
-    local groupTitleReserve, groupBottomReserve = Reserve(collapseUI, GROUP_COG_RESERVE)
+    local groupTitleReserve, groupBottomReserve = Reserve(collapseUI, GROUP_COG_RESERVE + reportReserve)
     local markersTitleReserve, markersBottomReserve = Reserve(markersHasBtn)
 
     if showAs == "one" then
@@ -1708,6 +1813,21 @@ local function ApplyLayout()
         local rcDx = off[1] + (isLeftCorner and inward or -inward)
         raidCheckBtn:ClearAllPoints()
         raidCheckBtn:SetPoint(corner, winGroup, corner, rcDx, off[2])
+    end
+
+    -- Report row: five more riders past Raid Check, same corner, same
+    -- outward-to-inward reading (close, Raid Groups, Raid Check, then
+    -- Flask/Food/Repair/Rune/Vantus) -- each sized to its own measured
+    -- label (see above) rather than a fixed width, so the full name fits.
+    if #reportBtns > 0 then
+        local isLeftCorner = corner:find("LEFT") ~= nil
+        local edge = (COG_GAP + 14) + (RAIDCHECK_GAP + COG_SZ) + COG_SZ + REPORT_GAP
+        for _, b in ipairs(reportBtns) do
+            local dx = off[1] + (isLeftCorner and edge or -edge)
+            b:ClearAllPoints()
+            b:SetPoint(corner, winGroup, corner, dx, off[2])
+            edge = edge + b._reportWidth + REPORT_GAP
+        end
     end
 
     -- The collapsed icon rides the shell the mode actually shows -- Markers-
@@ -2068,12 +2188,15 @@ local function EnsureEvents()
             RefreshPermissions()
             RefreshRaidGroups()
             RefreshAssistGate()
+            RefreshReportButtons()
         end)
     end
     ev:RegisterEvent("GROUP_ROSTER_UPDATE")
     ev:RegisterEvent("PARTY_LEADER_CHANGED")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:RegisterEvent("ENCOUNTER_START")
+    ev:RegisterEvent("ENCOUNTER_END")
 end
 local function DropEvents()
     if ev then ev:UnregisterAllEvents() end
@@ -2213,6 +2336,7 @@ function Apply()
     ApplyFonts()
     RefreshPermissions(true)
     RefreshRaidGroups(true)
+    RefreshReportButtons()
 end
 _G._EUI_RaidTools_Apply = Apply
 

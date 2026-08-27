@@ -454,6 +454,97 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "label", text = "" }
         );  y = y - h
 
+        -- COMPACT BAND (standalone)
+        --
+        -- Independent window, independent profile slice, independent Apply --
+        -- see EllesmereUIQoL_RaidToolsCompactBand.lua. It can run whatever the
+        -- "Show as" choice above is set to (including fully disabled), which
+        -- is why none of its controls are gated on Disabled().
+        _, h = W:SectionHeader(parent, "COMPACT BAND", y);  y = y - h
+
+        local function CBDB()
+            local get = _G._EUI_RaidToolsCompactBand_DB
+            local root = get and get()
+            return root and root.profile and root.profile.raidToolsCompactBand
+        end
+        local function CBCfg(key)
+            local p = CBDB()
+            return p and p[key]
+        end
+        local function CBSet(key, val)
+            local p = CBDB()
+            if p then p[key] = val end
+        end
+        local function CBRefresh()
+            if _G._EUI_RaidToolsCompactBand_Apply then _G._EUI_RaidToolsCompactBand_Apply() end
+        end
+        local function CBDisabled()
+            return not CBCfg("enabled")
+        end
+
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Enable Compact Band",
+              tooltip = "Adds the 9.0.7 Compact Band -- markers, ready check and pull timer in one resizable row -- as its OWN window. It runs alongside whichever Show as layout is picked above (or with Raid Tools fully off), and moves and resizes independently through Unlock Mode.",
+              getValue = function() return CBCfg("enabled") and true or false end,
+              setValue = function(v)
+                  CBSet("enabled", v)
+                  CBRefresh()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "dropdown", text = "Compact Band Display",
+              tooltip = "Always keeps it fully visible. Mouseover fades it out until the cursor is over it.",
+              disabled = CBDisabled,
+              values = { always = "Always", mouseover = "Mouseover" },
+              order = { "always", "mouseover" },
+              getValue = function() return CBCfg("display") or "always" end,
+              setValue = function(v)
+                  CBSet("display", v)
+                  CBRefresh()
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Compact Band Scale", min = 0.5, max = 2.0, step = 0.05,
+              disabled = CBDisabled,
+              getValue = function() return CBCfg("scale") or 1 end,
+              setValue = function(v)
+                  CBSet("scale", v)
+                  CBRefresh()
+              end },
+            { type = "toggle", text = "Reset Position",
+              disabled = CBDisabled,
+              getValue = function() return false end,
+              setValue = function()
+                  CBSet("pos", {})
+                  CBRefresh()
+              end }
+        );  y = y - h
+
+        -- Same flat overlay the 9.0.7 Compact Band always draws behind its
+        -- buttons (see ApplyBackground in EllesmereUIQoL_RaidToolsCompactBand.lua);
+        -- color and opacity are exposed here instead of hardcoded.
+        _, h = W:DualRow(parent, y,
+            { type = "colorpicker", text = "Compact Band Background Color", hasAlpha = false,
+              tooltip = "Color of the flat overlay behind the Compact Band's buttons.",
+              disabled = CBDisabled,
+              getValue = function()
+                  return CBCfg("bgR") or 0, CBCfg("bgG") or 0, CBCfg("bgB") or 0, 1
+              end,
+              setValue = function(r, g, b)
+                  CBSet("bgR", r); CBSet("bgG", g); CBSet("bgB", b)
+                  CBRefresh()
+              end },
+            { type = "slider", text = "Compact Band Background Opacity",
+              min = 0, max = 100, step = 5,
+              tooltip = "Opacity of the background overlay. 0 removes it entirely; the 9.0.7 default is 62.",
+              disabled = CBDisabled,
+              getValue = function() return math.floor(((CBCfg("bgA")) or 0.62) * 100 + 0.5) end,
+              setValue = function(v)
+                  CBSet("bgA", v / 100)
+                  CBRefresh()
+              end }
+        );  y = y - h
+
         return math.abs(y)
     end
 

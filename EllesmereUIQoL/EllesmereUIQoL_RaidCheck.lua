@@ -171,8 +171,7 @@ local CHECKS = {
               [1236767] = true, [1235111] = true, [1235110] = true, [1235108] = true } },
     { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS },
     { key = "rune",   label = "Rune",   seed = 1264426,
-      ids = { [1264426] = true, [1242347] = true, [1234969] = true, [453250] = true,
-              [393438]  = true } },
+      ids = { [1264426] = true } },
     -- Vantus runes apply to raid bosses, so in a Mythic+ key the column is not
     -- merely unlikely to be filled, it is meaningless.
     { key = "vantus", label = "Vantus", seed = VANTUS_SEED,
@@ -509,6 +508,136 @@ local function NoteDurability(percent, _, name)
 end
 
 -------------------------------------------------------------------------------
+--  On-demand reports -- driven by the Flask/Food/Repair/Rune/Vantus buttons
+--  on the Raid Tools panel (EllesmereUIQoL_RaidTools.lua). Independent of the
+--  grid window: none of this requires it to be open, or even enabled --
+--  everything it reads (the roster, the aura checks, LibDurability) already
+--  works standalone.
+-------------------------------------------------------------------------------
+local REPORT_TITLE = {
+    flask = "Flask", food = "Food", rune = "Rune",
+    vantus = "Vantus", durability = "Repair",
+}
+ns.REPORT_TITLE = REPORT_TITLE
+
+-- A durability request is a broadcast; give it a moment for other clients'
+-- LibDurability to answer before reading what came back. Flask/Food/Rune/
+-- Vantus need nothing like this -- they read live off the aura APIs.
+local DURABILITY_REPORT_DELAY = 1.5
+
+local function ReportChannel()
+    if IsInRaid() then return "RAID" end
+    if IsInGroup() then return "PARTY" end
+    return nil   -- solo: nobody to report to
+end
+
+-- toChat = true posts to /raid or /party (see ReportChannel); false (or
+-- solo, where there is no channel to post to) prints to the player's own
+-- chat frame only.
+local function SendOrPrint(text, toChat)
+    if not text then return end
+    if toChat then
+        local channel = ReportChannel()
+        if channel then
+            SendChatMessage(text, channel)
+            return
+        end
+    end
+    EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. text)
+end
+
+local function BooleanReportLine(key)
+    EnsureColumns()
+    local def
+    for _, d in ipairs(COLUMNS) do
+        if d.key == key then def = d; break end
+    end
+    local title = EllesmereUI.L(REPORT_TITLE[key] or key)
+    if not def then
+        return title .. ": " .. EllesmereUI.L("not available.")
+    end
+
+    local roster = ReadMembers()
+    local classPresent = {}
+    for _, e in ipairs(roster) do
+        if e.class then classPresent[e.class] = true end
+    end
+    local restricted = Restricted()
+    if not Answerable(def, restricted, classPresent) then
+        return title .. ": " .. EllesmereUI.L("no data available right now.")
+    end
+
+    local answerable = { [key] = true }
+    local missing = {}
+    for _, e in ipairs(roster) do
+        local checks = UnitChecks(e.unit, answerable, restricted)
+        if checks[key] == false then
+            missing[#missing + 1] = e.name
+        end
+    end
+
+    if #missing == 0 then
+        return title .. ": " .. EllesmereUI.L("everyone has it.")
+    end
+    table.sort(missing)
+    return EllesmereUI.Lf("Missing %s: %s", title, table.concat(missing, ", "))
+end
+
+-- Repair report only calls out gear that actually needs attention -- anyone
+-- already durability-healthy just adds noise to a raid-wide chat message.
+local DURABILITY_REPORT_THRESHOLD = 90
+
+local function DurabilityReportLine()
+    local title = EllesmereUI.L(REPORT_TITLE.durability)
+    if not LibDur() then
+        return title .. ": " .. EllesmereUI.L("not available.")
+    end
+
+    local roster = ReadMembers()
+    local rows, anyData = {}, false
+    for _, e in ipairs(roster) do
+        local r = reported[e.name]
+        local pct = r and r.dur
+        if pct then
+            anyData = true
+            if pct <= DURABILITY_REPORT_THRESHOLD then
+                rows[#rows + 1] = { name = e.name, pct = pct }
+            end
+        end
+    end
+    if not anyData then
+        return title .. ": " .. EllesmereUI.L("no data available right now.")
+    end
+    if #rows == 0 then
+        return EllesmereUI.Lf("%s: everyone is above %d%%.", title, DURABILITY_REPORT_THRESHOLD)
+    end
+    -- Worst durability first -- that is the row a raid lead actually needs
+    -- to act on, and the one that should not scroll off a long roster line.
+    table.sort(rows, function(a, b) return a.pct < b.pct end)
+
+    local parts = {}
+    for _, r in ipairs(rows) do
+        parts[#parts + 1] = r.name .. " " .. math.floor(r.pct + 0.5) .. "%"
+    end
+    return title .. ": " .. table.concat(parts, ", ")
+end
+
+-- key: "flask" | "food" | "rune" | "vantus" | "durability".
+-- toChat: true = left-click (post to /raid or /party); false = right-click
+-- (this client's own chat frame only).
+function ns.ReportConsumable(key, toChat)
+    if key == DURABILITY_KEY then
+        local LD = LibDur()
+        if LD then LD:RequestDurability() end
+        C_Timer.After(LD and DURABILITY_REPORT_DELAY or 0, function()
+            SendOrPrint(DurabilityReportLine(), toChat)
+        end)
+        return
+    end
+    SendOrPrint(BooleanReportLine(key), toChat)
+end
+
+-------------------------------------------------------------------------------
 --  Permission
 -------------------------------------------------------------------------------
 
@@ -561,6 +690,11 @@ local colHeader = {}   -- column key -> one frame per member column
 local sweeper
 local closeTimer   -- always armed while the window is shown, however it opened
 local CLOSE_DELAY = 30   -- seconds the window stays open before auto-closing
+
+local combatCloseTimer   -- armed only while combat is waiting out the grace period below
+local openedAt            -- GetTime() of the most recent Show
+local openedManually      -- true when Show came from the slash command, not a ready check
+local MIN_MANUAL_OPEN = 10   -- seconds a manually opened window is guaranteed to stay up, even into combat
 
 local function MakeRow(parent, index)
     local r = CreateFrame("Frame", nil, parent)
@@ -726,6 +860,7 @@ local function Build()
         -- Closed some other way (Escape, right-click, /euiraidcheck show
         -- toggling it off): whatever countdown was armed no longer applies.
         if closeTimer then closeTimer:Cancel(); closeTimer = nil end
+        if combatCloseTimer then combatCloseTimer:Cancel(); combatCloseTimer = nil end
     end)
 
     -- Right-click anywhere on the window closes it, so no dedicated close
@@ -1092,6 +1227,9 @@ function ns.ShowRaidCheck(fromReadyCheck)
 
     win:Show()
     Refresh()
+    openedAt = GetTime()
+    openedManually = not fromReadyCheck
+    if combatCloseTimer then combatCloseTimer:Cancel(); combatCloseTimer = nil end
     -- Always closes itself CLOSE_DELAY seconds after opening, no matter how
     -- it was opened -- a ready check, or the player manually toggling it
     -- with /euiraidcheck. Re-showing (another ready check, or opening it
@@ -1145,7 +1283,30 @@ ev:RegisterEvent("READY_CHECK")
 ev:RegisterEvent("READY_CHECK_CONFIRM")
 ev:RegisterEvent("READY_CHECK_FINISHED")
 ev:RegisterEvent("GROUP_ROSTER_UPDATE")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- Entering combat closes the window -- unless it was opened by hand
+        -- less than MIN_MANUAL_OPEN seconds ago, in which case it is
+        -- guaranteed to stay up until that grace period runs out. Right-click
+        -- and Escape still close it immediately either way (see win's own
+        -- OnMouseUp/RegisterEscapeClose), and the OnHide hook cancels this
+        -- timer if the window goes away some other way first.
+        if win and win:IsShown() then
+            local minOpen = openedManually and MIN_MANUAL_OPEN or 0
+            local remaining = minOpen - (GetTime() - (openedAt or 0))
+            if remaining <= 0 then
+                ns.HideRaidCheck()
+            else
+                if combatCloseTimer then combatCloseTimer:Cancel() end
+                combatCloseTimer = C_Timer.NewTimer(remaining, function()
+                    combatCloseTimer = nil
+                    if win and win:IsShown() then ns.HideRaidCheck() end
+                end)
+            end
+        end
+        return
+    end
     if event == "READY_CHECK" then
         readyCheckActive = true
         -- Volunteer on every ready check, feature enabled or not: a ready
