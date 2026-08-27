@@ -7095,12 +7095,8 @@ local _stableMode = false
 
 local function FormatKeybindKey(key)
     if not key or key == "" then return nil end
-    -- GetBindingKey hands back a gamepad button's raw id (PADDUP); only
-    -- GetBindingText resolves it to the controller's icon markup. Adopted just
-    -- when markup came back, so keyboard binds keep the raw token names the
-    -- substitutions below are written against. Those still run over a resolved
-    -- chord to condense its modifier -- no gamepad atlas name contains one of
-    -- their search strings.
+    -- Gamepad binds resolve to glyph markup (no atlas name matches a substitution
+    -- below); keyboard binds keep the raw tokens the substitutions are written against.
     local resolved = GetBindingText(key, 1)
     if resolved and resolved:find("|A:", 1, true) then
         key = resolved
@@ -8473,17 +8469,19 @@ local function _IsUsableSID(id)
     return id > 0 and id == math.floor(id)
 end
 
--- Reads the ALREADY-BUILT display table, never the getters that would build
--- it: provider:GetOrderedCooldownIDs()/GetCooldownInfoForID() run
--- CheckBuildDisplayData first, which rebuilds Blizzard's shared cooldown
--- tables when the provider is dirty -- and a PvP match boundary (talents
--- (de)activating) marks it dirty right when EUI reads it, poisoning
--- Blizzard's own state until reload. GetDisplayData is a plain field read,
--- so this can only observe what Blizzard already built; callers already
--- treat nil as "not ready" and fall back to keep-all/live-pool.
+-- Reads the ALREADY-BUILT display table, never the provider getters: those run
+-- CheckBuildDisplayData, which rebuilds Blizzard's shared tables (and writes the
+-- active layout) on OUR stack whenever the provider is dirty -- the HUD viewer
+-- drops its OnDataChanged rebuild while hidden, so a post-match read used to
+-- taint the viewer until reload. A dirty provider returns nil (not the previous
+-- build): callers treat nil as "not ready" and fall back to keep-all/live-pool.
 function ns.CDMGetProviderDisplayData(provider)
     if type(provider) ~= "table" or type(provider.GetDisplayData) ~= "function" then
         return nil, nil
+    end
+    if type(provider.IsDirty) == "function" then
+        local okD, dirty = pcall(provider.IsDirty, provider)
+        if not okD or dirty then return nil, nil end
     end
     local ok, displayData = pcall(provider.GetDisplayData, provider)
     if not ok or type(displayData) ~= "table" then return nil, nil end
@@ -10209,8 +10207,6 @@ end)
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
--- DEBUG: /cdmwatchbuffs to trace everything touching the buff bar
-
 SLASH_ECME1 = "/ecme"
 SLASH_ECME2 = "/cdmeffects"
 SLASH_ECME3 = "/ecdm"

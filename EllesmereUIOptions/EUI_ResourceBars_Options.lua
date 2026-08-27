@@ -7273,7 +7273,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- One control for all three bars: the scalar, the multi-select set and the option
         -- booleans all fan out to health/primary/secondary; reads come from secondary,
         -- the representative.
-        _, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
+        local visRow
+        visRow, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
             { getStore = function() local p = DB(); return p and p.secondary end,
               legacyKey = "visibility",
               caps = { partyIncludesRaid = false, luaDragonriding = true },
@@ -7292,8 +7293,41 @@ initFrame:SetScript("OnEvent", function(self)
                   MirrorVisModes()
                   Refresh()
               end,
-              onOptionChanged = function() Refresh() end }
+              onOptionChanged = function() Refresh() end },
+            -- Smooth Bars: placeholder slot, swapped for the checkbox dropdown below.
+            { type = "dropdown", text = "Smooth Bars",
+              values = { __placeholder = "..." }, order = { "__placeholder" },
+              getValue = function() return "__placeholder" end,
+              setValue = function() end }
         );  y = y - h
+
+        -- Smooth Bars checkbox dropdown. Each item enables native StatusBar interpolation
+        -- on its bar; off = a plain SetValue with zero added cost. Defaults all off.
+        if not EllesmereUI._prebuilding then
+            local rightRgn = visRow._rightRegion
+            if rightRgn._control then rightRgn._control:Hide() end
+            local smoothItems = {
+                { key = "secondary", label = "Class Resource Bar" },
+                { key = "primary",   label = "Power Bar" },
+                { key = "health",    label = "Health Bar" },
+            }
+            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
+                smoothItems,
+                function(k)
+                    local p = DB(); if not p then return false end
+                    return (p[k] and p[k].smoothBars) or false
+                end,
+                function(k, v)
+                    local p = DB(); if not p then return end
+                    if p[k] then p[k].smoothBars = v end
+                    if _G._ERB_ApplySmoothing then _G._ERB_ApplySmoothing() end
+                end)
+            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            rightRgn._control = cbDD
+            rightRgn._lastInline = nil
+            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+        end
 
         -- Row 2: Dark Mode Class Resource | Background Color. Dark mode applies ONLY to the class
         -- resource bar (secondary), using the same flat dark fill/bg as Unit Frames / Raid Frames;
@@ -7665,10 +7699,7 @@ initFrame:SetScript("OnEvent", function(self)
                   RebuildPower()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "dropdown", text = "Smooth Bars",
-              values = { __placeholder = "..." }, order = { "__placeholder" },
-              getValue = function() return "__placeholder" end,
-              setValue = function() end }
+            { type = "label", text = "" }
         );  y = y - h
         -- Inline reposition cog on "Shift Elements if No Power": Extra Y Offset
         if not EllesmereUI._prebuilding then
@@ -7692,33 +7723,6 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
             MakeCogBtn(rgn, cogShow, nil, EllesmereUI.DIRECTIONS_ICON)
-        end
-
-        -- Replace the dummy "Smooth Bars" right dropdown with a checkbox dropdown. Each item enables native StatusBar interpolation on its bar; off = a plain SetValue with zero added cost. Defaults all off.
-        if not EllesmereUI._prebuilding then
-            local rightRgn = shiftPowRow._rightRegion
-            if rightRgn._control then rightRgn._control:Hide() end
-            local smoothItems = {
-                { key = "secondary", label = "Class Resource Bar" },
-                { key = "primary",   label = "Power Bar" },
-                { key = "health",    label = "Health Bar" },
-            }
-            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
-                smoothItems,
-                function(k)
-                    local p = DB(); if not p then return false end
-                    return (p[k] and p[k].smoothBars) or false
-                end,
-                function(k, v)
-                    local p = DB(); if not p then return end
-                    if p[k] then p[k].smoothBars = v end
-                    if _G._ERB_ApplySmoothing then _G._ERB_ApplySmoothing() end
-                end)
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
-            rightRgn._control = cbDD
-            rightRgn._lastInline = nil
-            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
         _, h = W:Spacer(parent, y, 16);  y = y - h

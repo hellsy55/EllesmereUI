@@ -536,6 +536,11 @@ end
 -- Distance element, whose getFrame deliberately skips ApplyFrameSettings.
 local function ApplyPosition()
     if not S.proxy then return end
+    -- Anchored to another element: the unlock anchor system owns placement;
+    -- re-applying the stored absolute here would slam the frame back to a
+    -- stale spot on every apply (same guard as the GCD / totem bars).
+    local anchored = EllesmereUI.IsUnlockAnchored and EllesmereUI.IsUnlockAnchored(UNLOCK_KEY)
+    if anchored and S.proxy:GetLeft() then return end
 
     local p = P()
     local pos = (p and p.unlockPos) or DEFAULT_POS

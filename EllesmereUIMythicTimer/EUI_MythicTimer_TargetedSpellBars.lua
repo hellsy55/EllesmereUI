@@ -197,13 +197,8 @@ local function BuildBar()
     holder.icon:SetAllPoints(holder.iconFrame)
     holder.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    -- Optional icon/bar seam divider (opt-in "Show Icon Divider"), same seam
-    -- treatment as the resource bars cast bar's iconOnRight/showIconDivider pair.
-    -- Parented to a dedicated overlay frame raised well above holder.sb (a
-    -- child frame, which defaults to holder's own level + 1): a texture drawn
-    -- directly on holder renders at holder's frame level, which sits BELOW
-    -- holder.sb -- it would be invisible under it regardless of draw layer,
-    -- since draw layer only orders content within the SAME frame.
+    -- Icon/bar seam divider (opt-in). Rides its own frame above holder.sb:
+    -- a texture on holder itself would draw under the StatusBar child.
     holder.overlayFrame = CreateFrame("Frame", nil, holder)
     holder.overlayFrame:SetAllPoints(holder)
     holder.overlayFrame:SetFrameLevel(holder:GetFrameLevel() + 5)
@@ -301,7 +296,8 @@ local function StyleBar(holder, cfg)
     else holder.bg:SetColorTexture(0, 0, 0, 0.45) end
 
     local showIcon = cfg.showIcon ~= false
-    local iconOnRight = cfg.iconOnRight
+    -- Hidden icon stays on the left so the bar keeps its full-width anchors.
+    local iconOnRight = showIcon and cfg.iconOnRight
     holder.iconFrame:ClearAllPoints()
     if iconOnRight then
         holder.iconFrame:SetPoint("TOPRIGHT", holder, "TOPRIGHT", 0, 0)
@@ -314,7 +310,7 @@ local function StyleBar(holder, cfg)
     holder.iconFrame:SetShown(showIcon)
 
     holder.sb:ClearAllPoints()
-    if showIcon and iconOnRight then
+    if iconOnRight then
         holder.sb:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
         holder.sb:SetPoint("BOTTOMRIGHT", holder.iconFrame, "BOTTOMLEFT", 0, 0)
     else

@@ -695,12 +695,15 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
                 item:SetScript('OnClick', function() end)  -- no-op, subnav only
                 mH = mH + 26
             else
-            -- Annotated labels: dn = string or { text=..., note=..., font=... }
-            local mainText, noteText, itemFont
+            -- Annotated labels: dn = string or { text=..., note=..., font=..., action=fn }.
+            -- An action row runs its callback and closes the menu WITHOUT selecting a
+            -- value (the "Edit ..." entry pinned above a "---" divider); accent-colored.
+            local mainText, noteText, itemFont, dnAction
             if type(dn) == "table" then
                 mainText = dn.text
                 noteText = dn.note
                 itemFont = dn.font
+                dnAction = dn.action
             else
                 mainText = dn
             end
@@ -732,6 +735,11 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
                 iLbl:SetWidth(menuW * _moMaxTextPct)
             end
             iLbl:SetText(TR(mainText))
+            if dnAction then
+                local EG = EllesmereUI.ELLESMERE_GREEN
+                iLbl:SetTextColor(EG.r, EG.g, EG.b, 0.8)
+                item._isAction = true  -- Refresh keeps the accent across menu opens
+            end
             -- Optional icon, three sources: _menuOpts.icon(key) -> texture path (+ texcoord); .iconAtlas(key) -> atlas name; .iconPressedAtlas(key) -> pressed-state atlas. With .iconOnClick the icon becomes a clickable Button on its own frame level so clicks don't reach the item's OnClick.
             local _haveAtlas = _moIconAtlas and _moIconAtlas(key) or nil
             local _iconPath, _il, _ir, _it, _ib
@@ -836,13 +844,23 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             end)
             item:SetScript("OnLeave", function()
                 if disabledValuesFn and disabledValuesFn(key) then HideWidgetTooltip(); return end
-                iLbl:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A)
+                if dnAction then
+                    local EG = EllesmereUI.ELLESMERE_GREEN
+                    iLbl:SetTextColor(EG.r, EG.g, EG.b, 0.8)
+                else
+                    iLbl:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A)
+                end
                 if iNote then iNote:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, TEXT_DIM_A) end
                 iHl:SetAlpha((item._key == getValue()) and DD_ITEM_SEL_A or 0)
                 if _moOnItemLeave then _moOnItemLeave(key, item) end
             end)
             item:SetScript("OnClick", function()
                 if disabledValuesFn and disabledValuesFn(key) then return end
+                if dnAction then
+                    menu:Hide()
+                    dnAction()
+                    return
+                end
                 setValue(key); ddLbl:SetText(TR(mainText))
                 menu:Hide()
                 -- Deferred refresh: setValue may have mutually-excluded another dropdown (e.g. left/right text); the zero-delay timer updates its label after the menu fully closes.
@@ -1078,7 +1096,12 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             else
                 item._highlight:SetAlpha((item._key == cur and not off) and DD_ITEM_SEL_A or 0)
                 item._label:SetAlpha(1)
-                item._label:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, off and 0.18 or TEXT_DIM_A)
+                if item._isAction then
+                    local EG = EllesmereUI.ELLESMERE_GREEN
+                    item._label:SetTextColor(EG.r, EG.g, EG.b, 0.8)
+                else
+                    item._label:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, off and 0.18 or TEXT_DIM_A)
+                end
                 if item._note then
                     item._note:SetAlpha(1)
                     item._note:SetTextColor(TEXT_DIM_R, TEXT_DIM_G, TEXT_DIM_B, off and 0.12 or (TEXT_DIM_A * 0.75))
@@ -6618,6 +6641,8 @@ end  -- end deferred init
 -- callers pass list accessors and an onChanged applier. Used by the nameplate slot filters and the target/focus/boss unit frame debuff filters.
 -- opts = {
 --     eyebrow / title    (header strings)
+--     subtitle           (optional: one dim line under the title; the header
+--                         band and the lists shift down to make room)
 --     fontPath           (optional; defaults to the options font)
 --     includeGet/excludeGet  -> tri-state map { [spellID] = true|false }
 --     includePrompt/excludePrompt  (Add Spell ID popup messages)
@@ -6625,9 +6650,11 @@ end  -- end deferred init
 --     showAll = { label, get, set }        (optional header toggle)
 --     copyFrom = { label, choices = { {key=,label=}, ... }, apply(key) }
 --                                          (optional header copy row)
---     includeMine = { anyGet }             (optional: INCLUDED rows carry a MINE tag;
---                                          entries default to your own casts, anyGet()
---                                          returns the sibling any-caster opt-out map)
+--     includeMine = { anyGet } | { mineGet }  (optional: INCLUDED rows carry a MINE tag.
+--                                          anyGet(): entries default to your own casts,
+--                                          the map holds any-caster OPT-OUTS (boss);
+--                                          mineGet(): entries default to any caster,
+--                                          the map holds MINE OPT-INS (target/focus))
 -- }
 -- showAll and copyFrom are mutually exclusive header bands; with neither the list section shifts up and gains the height.
 local _trackedAurasDimmer
@@ -6686,6 +6713,20 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
     title:SetPoint("TOP", panel, "TOP", 0, -32)
     title:SetTextColor(1, 1, 1, 0.95)
     title:SetText(EllesmereUI.L(opts.title or "Tracked Auras"))
+    -- Optional one-line description under the title; everything below the
+    -- header (band + lists) shifts down by hdrY and the panel grows to match.
+    local hdrY = 0
+    if opts.subtitle then
+        local sub = panel:CreateFontString(nil, "OVERLAY")
+        sub:SetFont(fontPath, 12, "")
+        sub:SetPoint("TOP", title, "BOTTOM", 0, -4)
+        sub:SetWidth(470)
+        sub:SetJustifyH("CENTER")
+        sub:SetTextColor(1, 1, 1, 0.6)
+        sub:SetText(EllesmereUI.L(opts.subtitle))
+        hdrY = 18
+        panel:SetHeight(470 + hdrY)
+    end
 
     local function ClosePopup()
         dimmer:Hide()
@@ -6718,7 +6759,7 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
         local sa = opts.showAll
         local tog = CreateFrame("Button", nil, panel)
         tog:SetSize(170, 20)
-        tog:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -68)
+        tog:SetPoint("TOPLEFT", panel, "TOPLEFT", 24, -68 - hdrY)
         local box = CreateFrame("Frame", nil, tog)
         box:SetSize(16, 16); box:SetPoint("LEFT", tog, "LEFT", 0, 0)
         local bbg = box:CreateTexture(nil, "BACKGROUND")
@@ -6752,14 +6793,14 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
         local cf = opts.copyFrom
         local lbl = panel:CreateFontString(nil, "OVERLAY")
         lbl:SetFont(fontPath, 12, "")
-        lbl:SetPoint("LEFT", panel, "TOPLEFT", 24, -80)
+        lbl:SetPoint("LEFT", panel, "TOPLEFT", 24, -80 - hdrY)
         lbl:SetTextColor(0.85, 0.85, 0.85)
         lbl:SetText(EllesmereUI.L(cf.label or "Copy From:"))
 
         -- Apply (rightmost), source dropdown to its left.
         local applyBtn = CreateFrame("Button", nil, panel)
         applyBtn:SetSize(64, 24)
-        applyBtn:SetPoint("RIGHT", panel, "TOPRIGHT", -24, -80)
+        applyBtn:SetPoint("RIGHT", panel, "TOPRIGHT", -24, -80 - hdrY)
         local apBg = applyBtn:CreateTexture(nil, "BACKGROUND")
         apBg:SetAllPoints(); apBg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
         local apBrd = EllesmereUI.MakeBorder and EllesmereUI.MakeBorder(applyBtn, EG.r, EG.g, EG.b, 0.35, PP)
@@ -6836,7 +6877,7 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
     local hasBand = (opts.showAll or opts.copyFrom) and true or false
 
     -- The two tri-state spell lists. INCLUDED renders through the caller's include machinery; EXCLUDED rides the caller's exclude machinery. Without a header band the whole section shifts up and the lists gain the reclaimed height.
-    local secY = hasBand and -104 or -68
+    local secY = (hasBand and -104 or -68) - hdrY
     local div = panel:CreateTexture(nil, "ARTWORK")
     div:SetHeight(1)
     div:SetPoint("TOPLEFT", panel, "TOPLEFT", 20, secY)
@@ -6854,11 +6895,29 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
     vdiv:SetColorTexture(1, 1, 1, 0.08)
 
     local COL_W = 228
-    -- withMine: the caller's includeMine descriptor (INCLUDED column only) --
-    -- entries default to Only My Casts and the sibling map holds any-caster opt-outs.
+    -- withMine: the caller's includeMine descriptor (INCLUDED column only). Two
+    -- polarities: anyGet() = entries default to Only My Casts and the map holds
+    -- any-caster OPT-OUTS; mineGet() = entries default to any caster and the map
+    -- holds MINE OPT-INS. Either way the tag reads "MINE" and lights when the
+    -- entry is restricted to your casts.
     local function MakeSpellColumn(x, titleText, promptText, listFn, otherFn, withMine)
-        local function AnyMap()
-            return withMine and withMine.anyGet and withMine.anyGet()
+        local function ScopeMap()
+            if not withMine then return nil end
+            if withMine.mineGet then return withMine.mineGet() end
+            return withMine.anyGet and withMine.anyGet()
+        end
+        local function MineOn(id)
+            local map = ScopeMap()
+            if withMine and withMine.mineGet then
+                return map ~= nil and map[id] == true
+            end
+            return not (map and map[id])
+        end
+        -- Both polarities toggle by flipping the entry's presence in the map.
+        local function ToggleMine(id)
+            local map = ScopeMap()
+            if not map then return end
+            if map[id] then map[id] = nil else map[id] = true end
         end
         -- Section label (options-page section style: small gray caps).
         local colTitle = panel:CreateFontString(nil, "OVERLAY")
@@ -6947,8 +7006,8 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                     row.x:SetPoint("RIGHT", row, "RIGHT", -4, 0)
                     row.x:SetFrameLevel(row:GetFrameLevel() + 2)
                     if withMine then
-                        -- Only My Casts tag (DEFAULT ON): accent when restricted
-                        -- to your casts, gray when opted out to any caster.
+                        -- Only My Casts tag: accent when restricted to your
+                        -- casts, gray when the entry shows from any caster.
                         row.mine = CreateFrame("Button", nil, row)
                         row.mine:SetSize(30, 16)
                         row.mine:SetPoint("RIGHT", row.x, "LEFT", -2, 0)
@@ -6958,19 +7017,18 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                         row.mine.txt:SetPoint("CENTER")
                         row.mine.txt:SetText(EllesmereUI.L("MINE"))
                         row.mine:SetScript("OnClick", function()
-                            local am = AnyMap()
-                            if not am then return end
-                            if am[row._id] then am[row._id] = nil
-                            else am[row._id] = true end
+                            ToggleMine(row._id)
                             if opts.onChanged then opts.onChanged() end
                             RefreshList()
                         end)
                         row.mine:SetScript("OnEnter", function(self)
-                            local am = AnyMap()
-                            EllesmereUI.ShowWidgetTooltip(self,
-                                (am and am[row._id])
-                                and EllesmereUI.L("Showing this aura from any caster; click for your casts only.")
-                                or EllesmereUI.L("Showing this aura from your casts only; click for any caster."))
+                            local tip
+                            if MineOn(row._id) then
+                                tip = EllesmereUI.L("Showing this aura from your casts only; click for any caster.")
+                            else
+                                tip = EllesmereUI.L("Showing this aura from any caster; click for your casts only.")
+                            end
+                            EllesmereUI.ShowWidgetTooltip(self, tip)
                         end)
                         row.mine:SetScript("OnLeave", function()
                             EllesmereUI.HideWidgetTooltip()
@@ -7010,13 +7068,12 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                 row.icon:SetAlpha(entry.on and 1 or 0.45)
                 row.name:SetAlpha(entry.on and 0.9 or 0.45)
                 if row.mine then
-                    local am = AnyMap()
-                    if am and am[row._id] then
-                        -- Opted out to any caster: dim gray tag.
-                        row.mine.txt:SetTextColor(0.6, 0.6, 0.6, entry.on and 0.4 or 0.25)
-                    else
-                        -- Default: restricted to your own casts.
+                    if MineOn(row._id) then
+                        -- Restricted to your own casts: accent tag.
                         row.mine.txt:SetTextColor(EG.r, EG.g, EG.b, entry.on and 1 or 0.45)
+                    else
+                        -- Any caster: dim gray tag.
+                        row.mine.txt:SetTextColor(0.6, 0.6, 0.6, entry.on and 0.4 or 0.25)
                     end
                 end
                 row:SetScript("OnClick", function()
@@ -7031,8 +7088,8 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                     local l2 = listFn()
                     if l2 then l2[row._id] = nil end
                     if withMine then
-                        local am = AnyMap()
-                        if am then am[row._id] = nil end
+                        local map = ScopeMap()
+                        if map then map[row._id] = nil end
                     end
                     if opts.onChanged then opts.onChanged() end
                     RefreshList()
@@ -8354,7 +8411,7 @@ function EllesmereUI.BuildVisibilityModeRow(W, parent, y, opts, rightCfg)
 end
 
 -------------------------------------------------------------------------------
---  Unified Visibility Row  -- eui-style: allow comment-budget (opts contract for 10 callers)
+--  Unified Visibility Row (opts contract for the 10 module callers)
 --  ONE control replacing the "Visibility" + "Visibility Options" pair. Every condition is
 --  an AXIS with a Show and a Hide lane: Show means the axis must match, Hide means it must
 --  not, the two lanes are mutually exclusive per axis, an unconstrained axis imposes

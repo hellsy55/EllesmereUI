@@ -4075,3 +4075,34 @@ EllesmereUI.RegisterMigration({
         end
     end,
 })
+
+-- The target/focus/boss Debuff Filter became a single-select mode. Before it, a
+-- frame with NOTHING checked (Own Only off, Important off) that carried Tracked
+-- Auras rendered ONLY those spells -- the include link was the whole chain. The
+-- mode model treats Tracked Auras as additional in every mode and derives such
+-- a frame as Show All, so pin those frames to Only Tracked Auras once. Every
+-- other combination derives its old display from the untouched legacy keys
+-- (ns.UF_DebuffFilterMode in EUI_UnitFrames_AuraContainers.lua). An explicit
+-- mode is never touched, so a re-run is a no-op.
+EllesmereUI.RegisterMigration({
+    id          = "uf_debuff_filter_tracked_only_v1",
+    scope       = "profile",
+    description = "Pin target/focus/boss Debuff Filters that had nothing checked but carried Tracked Auras (they rendered only those spells) to the Only Tracked Auras mode.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if type(uf) ~= "table" then return end
+        for _, unitKey in ipairs({ "target", "focus", "boss" }) do
+            local s = uf[unitKey]
+            if type(s) == "table" and s.debuffFilterMode == nil
+                and s.onlyPlayerDebuffs ~= true and s.debuffPriorityAura ~= true
+                and type(s.debuffInclude) == "table" then
+                for _, on in pairs(s.debuffInclude) do
+                    if on then
+                        s.debuffFilterMode = "tracked"
+                        break
+                    end
+                end
+            end
+        end
+    end,
+})

@@ -947,12 +947,11 @@ initFrame:SetScript("OnEvent", function(self)
               order=compareModeOrder,
               getValue=function() return Cfg("objectiveCompareMode") or "NONE" end,
               setValue=function(v) Set("objectiveCompareMode", v); Refresh() end })
-        -- Cog on Split Compare: strict scoping. Only meaningful for the level
-        -- scopes, since Per Dungeon is itself the fallback the switch removes.
+        -- Strict scoping cog: only meaningful for the level scopes (Per Dungeon is the fallback it removes).
         if not EllesmereUI._prebuilding then
         _AttachPopupButton(row._rightRegion, EllesmereUI.COGS_ICON, "Split Compare", {
             { type="toggle", label="Strict Comparison Mode",
-              tooltip="Compares same key level splits only. When off, new key level splits compare against your dungeon best.",
+              tooltip="Compare only against splits from the same key level (off: new key levels compare against your dungeon best).",
               disabled=function()
                   local mode = Cfg("objectiveCompareMode") or "NONE"
                   return mode ~= "LEVEL" and mode ~= "LEVEL_AFFIX"

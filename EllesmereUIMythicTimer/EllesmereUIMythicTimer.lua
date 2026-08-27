@@ -509,13 +509,9 @@ local function GetReferenceObjectiveTime(run, objectiveIndex, mode)
     local store = EnsureProfileStore("bestObjectiveSplits")
     if not store then return nil end
 
-    -- Try exact scope first, then fall back to broader scopes.
-    -- LEVEL_AFFIX -> LEVEL -> DUNGEON
-    -- Strict mode drops the fallback so a run is only ever measured against a
-    -- previous run at the same scope. Without it, the first run at a new key
-    -- level has no same-scope record and silently borrows the dungeon-wide
-    -- best (set at any level), which reads as a slower split every time.
-    -- COMPARE_DUNGEON is already the broadest scope, so strict is a no-op there.
+    -- Try exact scope first, then fall back to broader scopes
+    -- (LEVEL_AFFIX -> LEVEL -> DUNGEON); strict mode = exact scope only, so a
+    -- new key level shows no comparison instead of the dungeon-wide best.
     local tryOrder
     if db.profile.objectiveCompareStrict == true then
         tryOrder = { mode }

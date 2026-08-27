@@ -7015,9 +7015,9 @@ L["Enemy"] = "적군"
 --이름표
 L["Hide Border"] = "테두리 숨기기"
 L["This option requires Blizzard's Assisted Highlight to be enabled"] = "이 옵션을 사용하려면 블리자드의 '보조 강조 효과'를 활성화해야 합니다"
-L["Assisted Highlignt"] = "보조 강조 효과"
+L["Assisted Highlight"] = "보조 강조 효과"
 L["Assisted Highlight Outset"] = "보조 강조 효과 돌출"
-L["This option requires a style that draws the Glow Ring"] = "이 옵션을 사용하려면 빛나는 고리를 그리는 스타일이 필요합니다"
+L["This option requires a style that draws the glow ring"] = "이 옵션을 사용하려면 빛나는 고리를 그리는 스타일이 필요합니다"
 
 --유닛 프레임 
 L["Hide these instead of showing them"] = "표시하는 대신 숨기기"

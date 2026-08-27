@@ -205,6 +205,13 @@ local CRESTS = {
     { key = "t5", id = 3446, hex = "FFD100", r = 1,     g = 0.820, b = 0     },
 }
 ns.CRESTS = CRESTS
+-- Currency id set: the crest block's CURRENCY_DISPLAY_UPDATE handler drops
+-- events that name some other currency (payload currencyType; nil = bulk).
+do
+    local ids = {}
+    for i = 1, #CRESTS do ids[CRESTS[i].id] = true end
+    ns.CREST_IDS = ids
+end
 
 -- SEASON UPDATE: rank-1 item level of each upgrade track, highest first;
 -- mirrors Data.tracks[*].ranks[1] in EllesmereUIQoL/EUI_UpgradeCalc.lua. Feeds
@@ -5676,7 +5683,10 @@ ns.BlockFactories.crests = function(blockCfg, slot, content, barCtx)
         end
     end)
 
-    inst.eventFrame = MakeEventFrame(inst, function(self)
+    -- Payload-gated: a single-currency update that is not a crest is skipped;
+    -- a nil currencyType (bulk update) refreshes.
+    inst.eventFrame = MakeEventFrame(inst, function(self, _, currencyType)
+        if currencyType and not ns.CREST_IDS[currencyType] then return end
         self:Refresh()
     end)
 

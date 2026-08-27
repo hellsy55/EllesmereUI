@@ -1808,13 +1808,15 @@ local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
     if cfg.showHoverTooltip == false then return end
     EnsureTooltipFrame()
 
+    -- Scale before populating: the row stride snaps against the frame's effective scale.
+    local scale = (cfg.hoverTooltipScale or 100) / 100
+    if scale ~= _ttLastScale then
+        _ttFrame:SetScale(scale)
+        _ttLastScale = scale
+    end
+
     -- Always rebuild from fresh data (no GUID cache); PopulatePreview costs ~0.5ms, fine for a hover action
     if PopulatePreview(bar, curSession, curSessionID, curDMType) then
-        local scale = (cfg.hoverTooltipScale or 100) / 100
-        if scale ~= _ttLastScale then
-            _ttFrame:SetScale(scale)
-            _ttLastScale = scale
-        end
         AnchorBreakdownFrame(bar.row, bar._win and bar._win.frame)
         _ttFrame:Show()
     else

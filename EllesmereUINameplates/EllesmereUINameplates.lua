@@ -680,9 +680,9 @@ if EllesmereUI then EllesmereUI.NameplatePandemicGlowStyles = PANDEMIC_GLOW_STYL
 -- PANDEMIC_GLOW_STYLES index -> shared EllesmereUI.Glows.STYLES index. The NP
 -- list omits Shape Glow (shared index 4), so every flipbook entry sits one lower
 -- here. Lives beside the list it translates FROM on purpose: a second copy is how
--- the two drift the first time a style is inserted into either one.
-local NP_TO_SHARED_GLOW = { 1, 2, 3, 5, 6, 7 }
-ns.NP_TO_SHARED_GLOW = NP_TO_SHARED_GLOW
+-- the two drift the first time a style is inserted into either one. On ns, not
+-- a file local: this chunk sits at the Lua 5.1 200-local cap.
+ns.NP_TO_SHARED_GLOW = { 1, 2, 3, 5, 6, 7 }
 
 local function GetPandemicGlowStyle()
     local raw = p and p.pandemicGlowStyle
@@ -7302,7 +7302,7 @@ function NameplateFrame:UpdateImportantCastGlow(spellID)
         -- the old direct call exactly: same lineLen formula, and an unset bg alpha
         -- resolves to 1 there, which is what omitting the argument used to do.
         local Start = StartGlow or Glows.StartGlow
-        Start(self._importantCastOverlay, NP_TO_SHARED_GLOW[style] or 1, pW, c.r, c.g, c.b,
+        Start(self._importantCastOverlay, ns.NP_TO_SHARED_GLOW[style] or 1, pW, c.r, c.g, c.b,
             style == 1 and {
                 N = impN, th = impTh, period = impPeriod,
                 bg = bgOn and { r = bgColor.r or 0, g = bgColor.g or 0, b = bgColor.b or 0 } or nil,
