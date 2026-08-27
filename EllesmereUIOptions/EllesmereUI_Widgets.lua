@@ -8525,19 +8525,22 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     -- Defined below, forward-declared because the rows built here close over them.
     local GetMatchAny
 
-    -- True while the stored scalar is a legacy alias this row cannot express. The Match
-    -- Mode rows lock in that state: Any hands the whole verdict to the shared evaluator,
-    -- which has to give an orphan back to the caller's own legacy chain -- and that chain
-    -- knows nothing about the option lanes, so they would silently stop applying. Never
-    -- and Always stay clickable, so an orphan is never a state without an exit.
-    local function OrphanActive()
+    -- The stored scalar when it is a legacy alias this row cannot express, else nil.
+    -- Read twice: at build time to give the orphan its own row, and live by the Match
+    -- Mode rows, which lock in that state -- Any hands the whole verdict to the shared
+    -- evaluator, which has to give an orphan back to the caller's own legacy chain, and
+    -- that chain knows nothing about the option lanes. Never and Always stay clickable,
+    -- so an orphan is never a state without an exit.
+    local function OrphanScalar()
         local store = opts.getStore()
-        if not store then return false end
+        if not store then return nil end
         local sel, isMulti = EllesmereUI.GetVisibilitySelection(store, legacyKey)
-        if isMulti then return false end
+        if isMulti then return nil end
         local cur = next(sel)
-        return (cur and not listed[cur]) and true or false
+        if cur and not listed[cur] then return cur end
+        return nil
     end
+    local function OrphanActive() return OrphanScalar() ~= nil end
     for _, def in ipairs(EllesmereUI.VIS_ROW_ITEMS) do
         if def.isHeader then
             items[#items + 1] = def
@@ -8590,16 +8593,10 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     -- Legacy-orphan rule, unchanged from the old checklist: a stored scalar this row
     -- cannot reach renders as a checked entry only while it is the current value.
     do
-        local store = opts.getStore()
-        if store then
-            local sel, isMulti = EllesmereUI.GetVisibilitySelection(store, legacyKey)
-            if not isMulti then
-                local cur = next(sel)
-                if cur and not listed[cur] then
-                    items[#items + 1] = { key = cur, label = cur }
-                    defs[cur] = { key = cur, orphan = true }
-                end
-            end
+        local cur = OrphanScalar()
+        if cur then
+            items[#items + 1] = { key = cur, label = cur }
+            defs[cur] = { key = cur, orphan = true }
         end
     end
 
@@ -8819,6 +8816,10 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             else
                 if opts.applyScalarFn then opts.applyScalarFn(s, v) else s[legacyKey] = v end
                 s.visibilityModes = nil
+                -- Same reset the row's own orphan branch does: Any cannot express an
+                -- orphan, and a spec capture must not restore the one state the row
+                -- locks precisely because the option lanes stop applying in it.
+                SetMatchAny(false)
             end
             if opts.onChanged then opts.onChanged() end
         end,

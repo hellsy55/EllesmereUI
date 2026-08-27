@@ -8831,6 +8831,13 @@ function EAB.BuildVisibilityStringMulti(hidePrefix, vm)
     return EllesmereUI.BuildVisibilityDriverString(hidePrefix, vm)
 end
 
+-- Event edges this addon watches, for the shared Any tail builder: it may compile the
+-- target and enemy axes into live macro tokens because the soft-target machinery below
+-- (three PLAYER_SOFT_* events plus the 0.1s poll) rebuilds the driver when they drift.
+-- Consumers without that machinery pass nil and get those axes resolved in Lua.
+-- EAB field, not a local: this chunk sits at Lua 5.1's 200-local cap.
+EAB.VIS_EDGES = { softTarget = true }
+
 local function BuildVisibilityString(info, s, visOverride)
     local key = info.key
     local vis = visOverride or s.barVisibility or "always"
@@ -8884,7 +8891,7 @@ local function BuildVisibilityString(info, s, visOverride)
         else
             anyPrefix = "[vehicleui][petbattle][overridebar] hide; "
         end
-        return anyPrefix .. EllesmereUI.BuildAnyMatchTail(s, "barVisibility", vm, anyWrap)
+        return anyPrefix .. EllesmereUI.BuildAnyMatchTail(s, "barVisibility", vm, anyWrap, EAB.VIS_EDGES)
     end
 
     -- Pet bar has unique logic: it only shows when a pet is active and
@@ -9315,7 +9322,11 @@ function EAB:_RefreshSoftTargetGate()
     for _, info in ipairs(ALL_BARS) do
         local s = self.db.profile.bars[info.key]
         if s then
-            if s.visHideNoTarget then anySoft = true end
+            -- Under Any the counter lane carries the soft-target correction too, so it
+            -- arms the same machinery; under All it never did and still does not.
+            if s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any") then
+                anySoft = true
+            end
             -- Driven off the shared key list rather than a hand-written subset: an
             -- option missing here silently skips the whole UpdateHousingVisibility pass
             -- for that bar. Deliberately over-inclusive (it also matches the
@@ -13877,10 +13888,15 @@ function EAB:FinishSetup()
         local softOnly = (hasSoftInteract or hasSoftEnemy or hasSoftFriend) and not hasHardTarget
         for _, info in ipairs(ALL_BARS) do
             local s = self.db.profile.bars[info.key]
-            if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
+            if s and (s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any"))
+                    and not (self._visOverride and self._visOverride[info.key]) then
                 local frame = barFrames[info.key]
                 if frame then
-                    if softOnly then
+                    -- Under Any this lane is one disjunct among several, so a literal
+                    -- "hide" would veto the whole disjunction on it -- the same veto that
+                    -- had to come out of ShouldHideNonMacro. The rebuild below is already
+                    -- the right answer there: the shared builder drops just this lane.
+                    if softOnly and s.visHideNoTarget and s.visibilityMatch ~= "any" then
                         if frame._eabLastVisStr ~= "hide" then
                             frame._eabLastVisStr = "hide"
                             RegisterAttributeDriver(frame, "state-visibility", "hide")
@@ -13961,7 +13977,8 @@ function EAB:FinishSetup()
         regenFrame:SetScript("OnEvent", function()
             for _, info in ipairs(ALL_BARS) do
                 local s = self.db.profile.bars[info.key]
-                if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
+                if s and (s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any"))
+                    and not (self._visOverride and self._visOverride[info.key]) then
                     local frame = barFrames[info.key]
                     if frame then
                         local newStr = BuildVisibilityString(info, s)

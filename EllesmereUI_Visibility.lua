@@ -759,62 +759,58 @@ function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, 
     return prefix .. out .. "hide", axes
 end
 
--- The option lanes BuildVisibilityDriverStringAny reads; the only ones that need
--- copying when a lane has to be dropped from the disjuncts.
-local DRIVER_LANE_KEYS = {
-    "visOnlyMounted", "visHideMounted",
-    "visHideNoTarget", "visHideWithTarget",
-    "visHideNoEnemy", "visHideWithEnemy",
-}
-
 -- Two macro tokens knowingly disagree with their own Lua probe: [exists] counts a soft
 -- target, and [mounted] cannot see a druid travel or flight form. The all-match path
--- reconciles both with a Lua force-hide (ShouldHideNonMacro in Action Bars); under Any a
--- veto would be wrong, since one axis must not silence the rest. So the fix is per axis:
--- a token that would wrongly PASS gets its disjunct dropped, one that would wrongly FAIL
--- shows outright. Limited to these two on purpose -- they are the divergences this
--- codebase documents. [harm]'s treatment of soft enemies is not established here and is
--- left alone rather than guessed at.
-local function AnyDriverLaneFixups(store)
+-- reconciles both with a Lua force-hide; under Any a veto would be wrong, since one axis
+-- must not silence the rest. So the fix is per axis: a token that would wrongly PASS gets
+-- its disjunct dropped, one that would wrongly FAIL shows outright. Each probe is reached
+-- only when its own lanes are set -- the mount one walks the druid form auras, and Action
+-- Bars runs this on a 0.1s poll.
+local function AnyDriverLaneFixups(store, edges)
     local drop, forceShow = nil, false
 
-    local softOnly = not UnitExists("target")
-        and (UnitExists("softinteract") or UnitExists("softenemy") or UnitExists("softfriend"))
-    if softOnly then
-        -- Show lane: [exists] would show on the soft target the probe does not count.
-        if store.visHideNoTarget and not store.visHideWithTarget then
-            drop = drop or {}
-            drop.visHideNoTarget = true
-        -- Hide lane: [noexists] stays false, but "no target" is true to the probe.
-        elseif store.visHideWithTarget and not store.visHideNoTarget then
-            forceShow = true
+    local wantsTarget = (edges and edges.softTarget)
+        and (store.visHideNoTarget or store.visHideWithTarget)
+    if wantsTarget then
+        local softOnly = not UnitExists("target")
+            and (UnitExists("softinteract") or UnitExists("softenemy") or UnitExists("softfriend"))
+        if softOnly then
+            -- Show lane: [exists] would show on the soft target the probe does not count.
+            if store.visHideNoTarget and not store.visHideWithTarget then
+                drop = { visHideNoTarget = true }
+            -- Hide lane: [noexists] stays false, but "no target" is true to the probe.
+            elseif store.visHideWithTarget and not store.visHideNoTarget then
+                forceShow = true
+            end
         end
     end
 
-    local formOnly = not (IsMounted and IsMounted())
-        and EUI.IsPlayerMountedLike and EUI.IsPlayerMountedLike()
-    if formOnly then
-        -- Show lane: [mounted] misses the form the probe counts as mounted.
-        if store.visOnlyMounted and not store.visHideMounted then
-            forceShow = true
-        -- Hide lane: [nomounted] would show while the probe says mounted.
-        elseif store.visHideMounted and not store.visOnlyMounted then
-            drop = drop or {}
-            drop.visHideMounted = true
+    if store.visOnlyMounted or store.visHideMounted then
+        local formOnly = not (IsMounted and IsMounted())
+            and EUI.IsPlayerMountedLike and EUI.IsPlayerMountedLike()
+        if formOnly then
+            -- Show lane: [mounted] misses the form the probe counts as mounted.
+            if store.visOnlyMounted and not store.visHideMounted then
+                forceShow = true
+            -- Hide lane: [nomounted] would show while the probe says mounted.
+            elseif store.visHideMounted and not store.visOnlyMounted then
+                drop = drop or {}
+                drop.visHideMounted = true
+            end
         end
     end
 
     return drop, forceShow
 end
 
--- The steps every secure consumer repeats to turn a store into an Any-match driver
--- tail. Kept here rather than in each consumer: Action Bars, Unit Frames and the
--- Minimap all need the identical sequence, and this codebase has been bitten before by
--- a fix landing in one consumer of a shared engine and not the others.
--- Returns the tail (prefix-free; every compiler here only ever prepends) and how many
--- axes actually constrain the element -- a caller that should not register a driver at
--- all when nothing is constrained needs to tell that apart from "everything failed".
-function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap)
+-- Turns a store into an Any-match driver tail. Shared because Action Bars, Unit Frames
+-- and the Minimap need the identical sequence, and a fix landing in one consumer of a
+-- shared engine and not the others has bitten this codebase before.
+-- Returns the tail (prefix-free; every compiler here only prepends) and a LOWER BOUND on
+-- how many axes constrain the element, since the early-outs stop counting once the answer
+-- is settled. Zero means "nothing constrains this at all", which is the one thing the
+-- count is read for: telling that apart from "everything failed".
+function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     wrap = wrap or ""
     local wrappedShow = (wrap ~= "") and ("[" .. wrap .. "] show; hide") or "show"
     -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
@@ -822,15 +818,14 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap)
 
     local luaC, luaP = 0, 0
     if EUI.TallyVisibilityOptionAxes then
-        luaC, luaP = EUI.TallyVisibilityOptionAxes(store, "luaOnly")
+        luaC, luaP = EUI.TallyVisibilityOptionAxes(store, "luaOnly", edges)
     end
-    local drop, forceShow = AnyDriverLaneFixups(store)
-    if luaP > 0 or forceShow then
-        -- A lane the driver cannot express already matches, so the disjunction is
-        -- satisfied whatever the compiled axes would say. luaC already counts the
-        -- Lua-only axes; a forceShow axis is a driver one, so it adds itself.
-        return wrappedShow, luaC + (forceShow and 1 or 0)
-    end
+    -- Settled before the fixups run: their probes are the expensive ones.
+    if luaP > 0 then return wrappedShow, luaC end
+
+    local drop, forceShow = AnyDriverLaneFixups(store, edges)
+    -- A driver axis whose token cannot see what the probe sees; it is not in luaC.
+    if forceShow then return wrappedShow, luaC + 1 end
 
     local modes = vm
     if not modes then
@@ -839,13 +834,23 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap)
         local scalar = store[legacyKey]
         if VIS_CONDITION_KEYS[scalar] then modes[scalar] = true end
     end
-    -- A dropped lane still constrains the element, it just cannot be a disjunct now.
+    -- The compiler must see only the lanes THIS consumer compiles: an axis resolved in
+    -- Lua is already in luaC, and a dropped one still constrains the element even though
+    -- it cannot be a disjunct right now. Both have to be kept out of the compiled opts.
+    local axisList = EUI.VIS_OPT_AXES
     local opts, dropped = store, 0
-    if drop then
+    if axisList and (drop or not (edges and edges.softTarget)) then
         opts = {}
-        for i = 1, #DRIVER_LANE_KEYS do
-            local k = DRIVER_LANE_KEYS[i]
-            if drop[k] then dropped = dropped + 1 else opts[k] = store[k] end
+        for i = 1, #axisList do
+            local ax = axisList[i]
+            if not EUI.VisAxisIsLuaOnly(ax, edges) then
+                if drop and (drop[ax.show] or drop[ax.hide]) then
+                    dropped = dropped + 1
+                else
+                    opts[ax.show] = store[ax.show]
+                    opts[ax.hide] = store[ax.hide]
+                end
+            end
         end
     end
     local tail, axes = EUI.BuildVisibilityDriverStringAny("", modes, opts, luaC + dropped, wrap)

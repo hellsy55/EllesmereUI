@@ -12858,25 +12858,39 @@ EllesmereUI.VIS_OPT_AXES = {
       probe = function() return EllesmereUI.IsPlayerMountedLike() end },
     { show = "visOnlySkyriding", hide = "visHideDragonriding", luaOnly = true,
       probe = function() return EllesmereUI.IsPlayerSkyriding() end },
-    { show = "visHideNoTarget", hide = "visHideWithTarget",
+    -- needsEdge: the macro conditional is LIVE where the Lua probe is not. [exists] and
+    -- [harm] re-evaluate on soft-target changes; UnitExists("target") ignores those. A
+    -- consumer that does not watch the soft-target edges cannot keep a compiled disjunct
+    -- honest once it drifts, so for those the axis is resolved in Lua -- which is exactly
+    -- what the all-match path always did with it.
+    { show = "visHideNoTarget", hide = "visHideWithTarget", needsEdge = "softTarget",
       probe = function() return UnitExists("target") and true or false end },
-    { show = "visHideNoEnemy", hide = "visHideWithEnemy",
+    { show = "visHideNoEnemy", hide = "visHideWithEnemy", needsEdge = "softTarget",
       probe = function()
           return (UnitExists("target") and UnitCanAttack("player", "target")) and true or false
       end },
 }
 
+-- Whether this axis has to be resolved in Lua for a consumer with these edges.
+-- `edges` is the set of event edges the consumer actually watches, e.g.
+-- { softTarget = true } for Action Bars, which owns that machinery.
+function EllesmereUI.VisAxisIsLuaOnly(ax, edges)
+    if ax.luaOnly then return true end
+    return ax.needsEdge ~= nil and not (edges and edges[ax.needsEdge])
+end
+
 -- Per-axis tally for the "any" match. filter: nil counts every axis, "luaOnly" only
--- the ones the secure driver cannot express, "driver" only the ones it can. Returns
--- how many axes are constrained and how many of those currently match.
-function EllesmereUI.TallyVisibilityOptionAxes(opts, filter)
+-- the ones this consumer must resolve in Lua, "driver" only the ones it can compile.
+-- Returns how many axes are constrained and how many of those currently match.
+function EllesmereUI.TallyVisibilityOptionAxes(opts, filter, edges)
     local constrained, passed = 0, 0
     if not opts then return constrained, passed end
     local axes = EllesmereUI.VIS_OPT_AXES
     for i = 1, #axes do
         local ax = axes[i]
-        local skip = (filter == "luaOnly" and not ax.luaOnly)
-                  or (filter == "driver" and ax.luaOnly)
+        local luaOnly = EllesmereUI.VisAxisIsLuaOnly(ax, edges)
+        local skip = (filter == "luaOnly" and not luaOnly)
+                  or (filter == "driver" and luaOnly)
         if not skip then
             local wantShow, wantHide = opts[ax.show], opts[ax.hide]
             -- Both lanes at once is the contradiction the row already prevents on
