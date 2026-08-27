@@ -9738,15 +9738,20 @@ function EAB:UpdateHousingVisibility()
             if s.visHideMounted then
                 -- Regular mounts are handled entirely by the secure "[mounted] hide"
                 -- clause, which self-updates even in combat, so the bar reappears the
-                -- instant the player is dazed off a mount. Clobbering the driver with a
-                -- literal "hide" here would freeze it hidden until combat ends: this
-                -- handler bails during InCombatLockdown and
-                -- PLAYER_MOUNT_DISPLAY_CHANGED can't re-evaluate a dead constant
-                -- string. Only shapeshift travel/flight forms need this non-secure
-                -- fallback, since [mounted] doesn't match them.
+                -- instant the player is dazed off a mount. Druid travel/flight forms
+                -- don't match [mounted], so they fall back to this non-secure clobber --
+                -- but a bare "hide" is a dead constant once written: shifting out of
+                -- form to attack fires UPDATE_SHAPESHIFT_FORM into combat almost
+                -- immediately, this handler's deferred callback bails on
+                -- InCombatLockdown(), and nothing re-evaluates the literal string until
+                -- combat ends (root-caused 2026-08-27: bars stayed hidden for a whole
+                -- fight after dropping out of Flight Form onto an enemy). Returning this
+                -- marker instead of a plain true lets the write site bake a "[combat]
+                -- show" escape hatch into the string itself, so the engine can
+                -- self-correct in combat exactly like the real-mount case does.
                 if not (IsMounted and IsMounted())
                     and EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
-                    return true
+                    return "formhide"
                 end
             end
             -- Every other Lua-only option (both instance lanes, both housing lanes, both
@@ -9796,10 +9801,15 @@ function EAB:UpdateHousingVisibility()
                         end
                     elseif shouldHide then
                         if isSecure then
-                            if frame._eabLastVisStr ~= "hide" then
+                            -- "formhide" (druid mount-like form) bakes a [combat] show
+                            -- escape hatch into the string so the secure engine can
+                            -- un-hide on its own if combat starts before this handler
+                            -- gets to run again (see ShouldHideNonMacro above).
+                            local hideStr = (shouldHide == "formhide") and "[combat] show; hide" or "hide"
+                            if frame._eabLastVisStr ~= hideStr then
 
-                                frame._eabLastVisStr = "hide"
-                                RegisterAttributeDriver(frame, "state-visibility", "hide")
+                                frame._eabLastVisStr = hideStr
+                                RegisterAttributeDriver(frame, "state-visibility", hideStr)
                             end
                         elseif info.blizzOwnedVisibility then
                             local bf = _G[info.frameName]
