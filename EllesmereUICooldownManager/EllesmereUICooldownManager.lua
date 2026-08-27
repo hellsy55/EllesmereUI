@@ -375,11 +375,13 @@ end
 -- (special-case "timespiral"); warlock pets are excluded (no usable detection).
 local BUFF_BAR_PRESETS = {
     {
-        -- Horde form; ns.RefreshLustPresetFaction rewrites it for Alliance below.
+        -- Horde order; ns.RefreshLustPresetFaction flips it for Alliance below.
+        -- BOTH ids are listed so the "already on this bar" tests recognise a lust
+        -- icon added by the other faction on a shared profile.
         key      = "bloodlust",
         name     = "Bloodlust",
         icon     = "Interface\\Icons\\spell_nature_bloodlust",
-        spellIDs = { 2825 },
+        spellIDs = { 2825, 32182 },
         duration = 40,
         tbbOnly  = true,  -- not a cooldown-usable preset (kept out of the CD/utility picker)
         customAuraToo = true,  -- but allowed on Custom Auras (icon) bars; debuff-driven 40s window
@@ -432,7 +434,10 @@ function ns.RefreshLustPresetFaction()
     for _, p in ipairs(BUFF_BAR_PRESETS) do
         if p.key == "bloodlust" then
             p.name, p.icon = name, icon
+            -- This character's id leads: everything that stores a preset takes
+            -- spellIDs[1], while the membership tests read the whole list.
             p.spellIDs[1] = ns._lustPresetSpellID
+            p.spellIDs[2] = alliance and 2825 or 32182
             break
         end
     end
@@ -447,7 +452,9 @@ ns.RefreshLustPresetFaction()
 -- A profile shared between a Horde and an Alliance character keeps whichever lust
 -- id was stored first, so icon art resolves through here instead of off that id.
 function ns.LustPresetIconSpellID(sid)
-    if sid == 2825 or sid == 32182 then return ns._lustPresetSpellID or sid end
+    if ns.IsLustPresetSpell and ns.IsLustPresetSpell(sid) then
+        return ns._lustPresetSpellID or sid
+    end
     return sid
 end
 

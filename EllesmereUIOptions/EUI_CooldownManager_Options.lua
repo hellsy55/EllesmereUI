@@ -7473,17 +7473,11 @@ initFrame:SetScript("OnEvent", function(self)
         -- custom buffs via AddPresetToBar; the buff phase injects an own-frame so
         -- they render alongside Blizzard-tracked buffs.
         do
-            local alreadyTracked = {}
-            local sdPS = ns.GetBarSpellData(targetBarKey)
-            if sdPS and sdPS.assignedSpells then
-                for _, sid in ipairs(sdPS.assignedSpells) do alreadyTracked[sid] = true end
-            end
             local _, _pClass = UnitClass("player")
             for _, preset in ipairs(ns.BUFF_BAR_PRESETS or {}) do
                 if (not preset.class or preset.class == _pClass)
                    and (not preset.tbbOnly or preset.customAuraToo) then
-                    local primaryID = preset.spellIDs and preset.spellIDs[1]
-                    local isAdded = primaryID and alreadyTracked[primaryID]
+                    local isAdded = ns.IsPresetOnBar(targetBarKey, preset)
                     local si = CreateFrame("Button", nil, inner)
                     si:SetHeight(ITEM_H)
                     si:SetPoint("TOPLEFT", inner, "TOPLEFT", 1, -mH)
@@ -13165,12 +13159,6 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Presets (Heroism, potions, etc.) -- flat list in custom buff bar picker
         if isCustomBuff then
-            local alreadyTracked = {}
-            local sdPS = bd and ns.GetBarSpellData(bd.key)
-            if sdPS and sdPS.assignedSpells then
-                for _, sid in ipairs(sdPS.assignedSpells) do alreadyTracked[sid] = true end
-            end
-
             -- Divider before presets
             local psDiv = inner:CreateTexture(nil, "ARTWORK")
             psDiv:SetHeight(1)
@@ -13186,8 +13174,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- self-timed icon, armed off the Sated edge instead of a cast).
                 if (not preset.class or preset.class == _pClass)
                     and (not preset.tbbOnly or preset.customAuraToo) then
-                    local primaryID = preset.spellIDs and preset.spellIDs[1]
-                    local isAdded = primaryID and alreadyTracked[primaryID]
+                    local isAdded = ns.IsPresetOnBar(barKey, preset)
 
                     local si = CreateFrame("Button", nil, inner)
                     si:SetHeight(ITEM_H)
