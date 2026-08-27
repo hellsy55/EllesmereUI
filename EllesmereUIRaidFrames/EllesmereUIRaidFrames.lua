@@ -8113,11 +8113,19 @@ local ghostTicker = nil
 local function GhostAuraCheck()
     local function checkUnit(unit, btn)
         local d = GetFFD(btn)
-        -- ApplyAssistGate already forces an UpdateAllAuras regain refresh on its
-        -- own false->true edge; it just never gets RE-DRIVEN outside a real unit
-        -- reassignment, so a trip/clear with no accompanying reassignment goes
-        -- unseen otherwise. No-op (one pcall'd read) unless the state flipped.
-        if ns.RFC_ApplyAssistGate then ns.RFC_ApplyAssistGate(btn, d, unit) end
+        -- unitToButton et al. only ever gain entries on reassignment, never drop
+        -- the old one, so unit/btn here can be a stale pairing; anything below
+        -- that writes to this button's own state reconfirms against its live
+        -- attribute first.
+        local liveUnit = btn:GetAttribute("unit")
+        if liveUnit == unit and ns.RFC_ApplyAssistGate then
+            -- ApplyAssistGate already forces an UpdateAllAuras regain refresh on
+            -- its own false->true edge; it just never gets RE-DRIVEN outside a
+            -- real unit reassignment, so a trip/clear with no accompanying
+            -- reassignment goes unseen otherwise. No-op (one pcall'd read)
+            -- unless the state flipped.
+            ns.RFC_ApplyAssistGate(btn, d, unit)
+        end
         if not UnitIsVisible(unit) or not UnitIsConnected(unit) then
             if not d.ghostCleared then
                 d.ghostCleared = true
@@ -8125,14 +8133,12 @@ local function GhostAuraCheck()
         else
             if d.ghostCleared then
                 d.ghostCleared = false
-                -- UNIT_AURA doesn't fire while ghosted, so any aura that fell off during
-                -- that window (LoS break, loading screen) never reached the containers.
-                -- unitToButton et al. only ever gain entries on reassignment, never drop
-                -- the old one, so btn here can be stale for this token; re-confirm against
-                -- the button's own live attribute before touching anything. Re-parse
-                -- current content in place (unit didn't change) rather than a SetUnit
-                -- rebind -- same shape as ApplyAssistGate's own regain refresh.
-                if btn:GetAttribute("unit") == unit then
+                -- UNIT_AURA doesn't fire while ghosted, so any aura that fell off
+                -- during that window (LoS break, loading screen) never reached
+                -- the containers. Re-parse current content in place (unit didn't
+                -- change) rather than a SetUnit rebind -- same shape as
+                -- ApplyAssistGate's own regain refresh.
+                if liveUnit == unit then
                     if d.rfcDebuffs then d.rfcDebuffs:UpdateAllAuras() end
                     if d.rfcDispLoc then d.rfcDispLoc:UpdateAllAuras() end
                     if d.rfcDispel then d.rfcDispel:UpdateAllAuras() end
