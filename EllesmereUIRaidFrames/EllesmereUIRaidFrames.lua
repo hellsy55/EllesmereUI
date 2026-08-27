@@ -3583,9 +3583,36 @@ local function StyleButton(button)
     -- can be positioned and toggled independently from the rest of the status icon stack.
     local readyCheck = markerCarrier:CreateTexture(nil, "OVERLAY")
     readyCheck:SetSize(PixelSnap(s.readyCheckSize or 20), PixelSnap(s.readyCheckSize or 20))
-    readyCheck:EnableMouse(true)  -- required for OnEnter/OnLeave to fire on a plain texture region
     readyCheck:Hide()
     d.readyCheck = readyCheck
+
+    -- Separate hit-frame for the tooltip instead of EnableMouse(true) directly
+    -- on the texture: a mouse-enabled region normally absorbs clicks, which
+    -- was blocking target/menu clicks on the unit button underneath whenever
+    -- the ready check (or incoming rez / in-other-phase / in-other-party)
+    -- icon was visible. SetPropagateMouseClicks(true) is the documented way
+    -- to let a mouse-enabled frame still hand click events down to whatever
+    -- is behind it, while OnEnter/OnLeave (motion) keep firing normally so
+    -- the tooltip still works.
+    local readyCheckHit = CreateFrame("Frame", nil, markerCarrier)
+    readyCheckHit:SetAllPoints(readyCheck) -- tracks readyCheck's position/size dynamically
+    readyCheckHit:EnableMouse(true)
+    readyCheckHit:SetPropagateMouseClicks(true)
+    readyCheckHit:Hide()
+
+    -- Keep the hit-frame's visibility in sync with the texture (UpdateReadyCheck
+    -- shows/hides d.readyCheck directly).
+    do
+        local origShow, origHide = readyCheck.Show, readyCheck.Hide
+        readyCheck.Show = function(self, ...)
+            origShow(self, ...)
+            readyCheckHit:Show()
+        end
+        readyCheck.Hide = function(self, ...)
+            origHide(self, ...)
+            readyCheckHit:Hide()
+        end
+    end
 
     local function AnchorReadyCheck()
         local s = LiveS()   -- party/extra-aware (see LiveS note above)
@@ -3617,23 +3644,23 @@ local function StyleButton(button)
     AnchorReadyCheck()
     d.AnchorReadyCheck = AnchorReadyCheck
 
-    -- In Other Phase / In Other Party tooltip (tex.tooltip is set by UpdateReadyCheck;
-    -- nil for every other state, so OnEnter is a no-op then). Respects the existing
-    -- "Show Raid Frames Tooltip" mode/combat gating like every other RF tooltip.
-    readyCheck:SetScript("OnEnter", function(self)
-        if ns.RaidFrameTooltipAllowed(button) and self.tooltip then
+    -- In Other Phase / In Other Party tooltip (readyCheck.tooltip is set by
+    -- UpdateReadyCheck; nil for every other state, so OnEnter is a no-op then).
+    -- Respects the existing "Show Raid Frames Tooltip" mode/combat gating like
+    -- every other RF tooltip. Hooked on readyCheckHit (see above) rather than
+    -- the texture itself so clicks still reach the unit button underneath.
+    readyCheckHit:SetScript("OnEnter", function(self)
+        if ns.RaidFrameTooltipAllowed(button) and readyCheck.tooltip then
             local tooltip = GetAppropriateTooltip()
-            tooltip:SetOwner(self, "ANCHOR_RIGHT")
-            tooltip:SetText(self.tooltip, nil, nil, nil, nil, true)
+            tooltip:SetOwner(readyCheck, "ANCHOR_RIGHT")
+            tooltip:SetText(readyCheck.tooltip, nil, nil, nil, nil, true)
             tooltip:Show()
         end
-        return true -- propagate to parent
     end)
-    readyCheck:SetScript("OnLeave", function(self)
-        if ns.RaidFrameTooltipAllowed(button) and self.tooltip then
+    readyCheckHit:SetScript("OnLeave", function(self)
+        if ns.RaidFrameTooltipAllowed(button) and readyCheck.tooltip then
             GetAppropriateTooltip():Hide()
         end
-        return true -- propagate to parent
     end)
 
     -- Summon icon (Incoming Summon: pending / accepted / declined). Independent slot, own

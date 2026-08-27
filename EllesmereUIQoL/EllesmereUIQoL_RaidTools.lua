@@ -1579,13 +1579,10 @@ local function BuildRaidCheckButton()
     raidCheckBtn = b
 end
 
--- Flask/Food/Repair/Rune/Vantus report buttons: left-click posts who is
--- missing it (or, for Repair, everyone's durability percentage) to /raid or
--- /party depending on the current group; right-click prints the same thing
--- Flask/Food/Repair/Rune/Vantus report buttons: left-click posts who is
--- missing it (or, for Repair, everyone's durability percentage) to /raid or
--- /party depending on the current group; right-click prints the same thing
--- to this client's own chat frame only. Small title-bar riders, same family
+-- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
+-- missing it (or, for Repair, everyone's durability percentage) to this
+-- client's own chat frame only; right-click posts the same thing to /raid
+-- or /party depending on the current group. Small title-bar riders, same family
 -- as the Raid Groups cog and Raid Check button, but with the full name on
 -- each instead of a single glyph -- so every button is sized to its own
 -- measured label (see ApplyLayout) rather than a shared fixed width. Not
@@ -1611,8 +1608,8 @@ local function BuildReportButtons()
             lbl:SetAlpha(1)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(EllesmereUI.L(def.title))
-            GameTooltip:AddLine(EllesmereUI.L("Left Click: report to raid/party chat."), 1, 1, 1)
-            GameTooltip:AddLine(EllesmereUI.L("Right Click: print to your own chat only."), 1, 1, 1)
+            GameTooltip:AddLine(EllesmereUI.L("Left Click: print to your own chat only."), 1, 1, 1)
+            GameTooltip:AddLine(EllesmereUI.L("Right Click: report to raid/party chat."), 1, 1, 1)
             if def.key == "durability" then
                 GameTooltip:AddLine(EllesmereUI.L("Lists anyone at 90% or below, worst first."), 0.7, 0.7, 0.7, true)
             else
@@ -1626,7 +1623,7 @@ local function BuildReportButtons()
         end)
         b:SetScript("OnClick", function(_, button)
             if ns.ReportConsumable then
-                ns.ReportConsumable(def.key, button ~= "RightButton")
+                ns.ReportConsumable(def.key, button == "RightButton")
             end
         end)
         b._lbl = lbl

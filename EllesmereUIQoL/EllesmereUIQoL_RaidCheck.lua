@@ -679,7 +679,7 @@ local function DurabilityReportLine()
 end
 
 -- key: "flask" | "food" | "rune" | "vantus" | "durability".
--- toChat: true = left-click (post to /raid or /party); false = right-click
+-- toChat: true = right-click (post to /raid or /party); false = left-click
 -- (this client's own chat frame only).
 function ns.ReportConsumable(key, toChat)
     if key == DURABILITY_KEY then
