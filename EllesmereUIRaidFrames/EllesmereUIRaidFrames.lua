@@ -13110,8 +13110,7 @@ local function ApplyPreviewData(f, index)
             if olMode == "fill" then
                 local fillTex = f._health:GetStatusBarTexture()
                 if fillTex then
-                    olTex:SetPoint("TOPLEFT", f._health, "TOPLEFT", 0, 0)
-                    olTex:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 0)
+                    olTex:SetAllPoints(fillTex)
                 else
                     olTex:SetAllPoints(f._health)
                 end
