@@ -1793,6 +1793,7 @@ local RegisterPABUnlock -- forward-declared; defined after CreateBars, called fr
 local SyncCancelCVar -- forward-declared; defined after RestyleBars, called from CreateBars/RestyleBars/ReloadCustomBuffBarImpl
 local vehicleHidden = false -- vehicle ride state (assigned in the recovery section at file bottom); feeds pabSuppressed below
 local pabSuppressed = false -- vehicle ride OR degraded-filter window: SetParentShownSafe dims the parents instead of hiding them (see ApplyVehicleHidden)
+local ClearDegraded -- forward-declared; defined in the recovery section at file bottom, called from PAB_SetEnabled
 -- Last label the Buffs mover was registered under, so ApplyLiveConfig can
 -- re-register on a name change without doing it on every slider drag.
 local lastUnlockBuffLabel
@@ -5401,6 +5402,9 @@ function ns.PAB_SetEnabled(v)
     if not s then return end
     s.enabled = v and true or nil
     if v then
+        -- A stand-down latched before the module went off has no lane to lift
+        -- it while disabled, and the rebuild below would come up dimmed.
+        ClearDegraded()
         CreateBars()
         return
     end
@@ -5557,7 +5561,26 @@ end
 local function SetVehicleHidden(hidden)
     if vehicleHidden == hidden then return end
     vehicleHidden = hidden
+    -- Lifting: the containers kept parsing behind alpha 0 (dimmed, not hidden,
+    -- so their engine events stayed live) and the spell-ID filters are still
+    -- degraded through the exit transition -- un-dimming on the raw event edge
+    -- would paint the full-set parse. Hand the stand-down to the degraded lane
+    -- instead: the same event arms it, and it un-dims and forces the clean
+    -- re-parse in one execution. Both callers reach the lane immediately, and
+    -- every lane exit clears the latch (ClearDegraded below).
+    if not hidden then pabDegraded = true end
     ApplyVehicleHidden(hidden)
+end
+
+-- The latch is only ever meaningful while the recovery lane is live: every
+-- early exit down there hands it back, or a stand-down set on a transition
+-- outlives the thing that caused it and every later bar comes up dimmed.
+-- Forward-declared at the top of the state section (the enable path clears a
+-- latch that was set while the module was off, where no lane runs at all).
+function ClearDegraded()
+    if not pabDegraded then return end
+    pabDegraded = false
+    ApplyVehicleHidden(vehicleHidden)
 end
 
 local cineFixPending = false
@@ -5567,20 +5590,24 @@ local function ReapplyAllAfterCinematic()
     -- Buffs the default containers never exist, but custom bars still need
     -- the filter-degradation repair.
     if not (buffsContainer or debuffsContainer
-        or next(customBuffContainers) or next(customDebuffContainers)) then return end
+        or next(customBuffContainers) or next(customDebuffContainers)) then
+        ClearDegraded()
+        return
+    end
     cineFixPending = true
     C_Timer.After(0, function()
         cineFixPending = false
         -- Master-disabled (awaiting reload): nothing to repair, and the
         -- re-drives below must not touch parked frames.
         local sM = PAB()
-        if not sM or sM.enabled ~= true then return end
-        -- Suppressed ride: a re-drive is pointless (the parents are hidden;
-        -- the exit edge re-drives for real) AND actively harmful -- the
-        -- reload paths Show() the parents, silently undoing the vehicle
-        -- suppression (field: bars reappeared with degraded content moments
-        -- after boarding, because UNIT_FACTION fires on the same transition
-        -- and funnels here). Re-assert the hide and stop.
+        if not sM or sM.enabled ~= true then
+            ClearDegraded()
+            return
+        end
+        -- Suppressed ride: a re-drive is pointless -- the bars are dimmed and
+        -- the exit edge re-drives for real. UNIT_FACTION fires on the boarding
+        -- transition and funnels straight here, so this is the common path.
+        -- Re-assert and stop.
         if vehicleHidden then
             ApplyVehicleHidden(true)
             return
@@ -5614,9 +5641,8 @@ local function ReapplyAllAfterCinematic()
         end
         if pabSettleTicker then pabSettleTicker:Cancel(); pabSettleTicker = nil end
         if pabDegraded then
-            -- Verified regain: un-hide first so the re-drives below act on
-            -- shown parents (their Show also retakes engine-side, the same
-            -- free re-parse the vehicle exit always had).
+            -- Verified regain: un-dim here and force the re-parse below in the
+            -- same execution, so no frame paints the stand-down's stale content.
             pabDegraded = false
             ApplyVehicleHidden(vehicleHidden)
         end
