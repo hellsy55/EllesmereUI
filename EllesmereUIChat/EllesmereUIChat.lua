@@ -140,6 +140,7 @@ local CHAT_DEFAULTS = {
             lockChatSize = false,
             abbreviateChannels = true,  -- same key as live: saved settings carry over
             classColorNames = true,
+            classColorSystem = true,
             hideSidebarBg = false,
             sidebarIconScale = 1.0,
             sidebarIconSpacing = 10,
@@ -683,6 +684,16 @@ end
 function ECHAT.ApplyClassColorNames(on)
     if ECHAT.EngineSetClassColorNames then
         ECHAT.EngineSetClassColorNames(on == true)
+    end
+end
+
+-- Class-colored names in SYSTEM lines only (guild members / WoW friends
+-- coming online). Independent of ApplyClassColorNames above: this one reads
+-- the guild roster and friends list instead of the group roster, and only
+-- transforms CHAT_MSG_SYSTEM text on our display copy.
+function ECHAT.ApplyClassColorSystem(on)
+    if ECHAT.EngineSetSystemClassColor then
+        ECHAT.EngineSetSystemClassColor(on == true)
     end
 end
 
@@ -4980,6 +4991,9 @@ initFrame:SetScript("OnEvent", function(self)
     end
     if p.classColorNames == true then
         ECHAT.ApplyClassColorNames(true)
+    end
+    if p.classColorSystem == true then
+        ECHAT.ApplyClassColorSystem(true)
     end
     if ECHAT.EngineIntegrateAll then ECHAT.EngineIntegrateAll() end
     -- Owned tab strip: hides Blizzard's strip, builds ours from the same

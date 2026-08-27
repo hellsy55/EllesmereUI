@@ -607,6 +607,129 @@ function ECHAT.EngineSetClassColorNames(on)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Class-colored LOGIN/SYSTEM names (guild + WoW friends going online).
+--  Separate table/toggle from the group CCN above -- independent feature,
+--  independent option -- but reuses ColorRosterNames verbatim (same escape-
+--  span protection, same read-only lookup, same "our SMF only" rendering
+--  lane), so it inherits the same taint doctrine for free:
+--    - GetGuildRosterInfo / C_FriendList are plain read-only info getters,
+--      never protected/secure, never return secret values for name/class.
+--    - The result only ever touches SYS_LOW (a plain addon-owned table) and
+--      the text handed to OUR ScrollingMessageFrame via DisplayText below --
+--      Blizzard's real chat frame / MessageEventHandler is never touched.
+--    - issecretvalue guards mirror the ones already used for ROSTER_LOW.
+-------------------------------------------------------------------------------
+local _sysOn = false
+local SYS_LOW = {} -- lowered short name -> class colorStr ("ffrrggbb")
+local _classNameToFile -- localized class name -> classFileName, built once
+
+local function BuildClassNameToFileMap()
+    if _classNameToFile then return _classNameToFile end
+    _classNameToFile = {}
+    for _, tbl in ipairs({ LOCALIZED_CLASS_NAMES_MALE, LOCALIZED_CLASS_NAMES_FEMALE }) do
+        if type(tbl) == "table" then
+            for fileName, localized in pairs(tbl) do
+                if type(localized) == "string" then
+                    _classNameToFile[localized] = fileName
+                end
+            end
+        end
+    end
+    return _classNameToFile
+end
+
+-- Guild roster names can arrive as "Name-Realm"; only the short name is ever
+-- what shows up in the login system-message text, so that's what we index.
+local function ShortName(name)
+    return name and name:match("^([^%-]+)") or name
+end
+
+local function SysRosterAddGuild(colors)
+    if not IsInGuild() then return end
+    local num = GetNumGuildMembers and GetNumGuildMembers() or 0
+    for i = 1, num do
+        local name, _, _, _, _, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
+        if issecretvalue and issecretvalue(name) then name = nil end
+        if type(name) == "string" and name ~= "" and classFileName then
+            local c = colors[classFileName]
+            if c and c.colorStr then
+                SYS_LOW[ShortName(name):lower()] = c.colorStr
+            end
+        end
+    end
+end
+
+local function SysRosterAddFriends(colors)
+    if not (C_FriendList and C_FriendList.GetNumFriends and C_FriendList.GetFriendInfoByIndex) then return end
+    local classNameToFile = BuildClassNameToFileMap()
+    local num = C_FriendList.GetNumFriends() or 0
+    for i = 1, num do
+        local info = C_FriendList.GetFriendInfoByIndex(i)
+        if info then
+            local name = info.name
+            if issecretvalue and issecretvalue(name) then name = nil end
+            local className = info.className
+            if issecretvalue and issecretvalue(className) then className = nil end
+            if type(name) == "string" and name ~= "" and type(className) == "string" then
+                -- info.className is normally the LOCALIZED display name
+                -- ("Guerreiro"), so it has to go through the reverse map to
+                -- reach a RAID_CLASS_COLORS key ("WARRIOR"). But if a future
+                -- client ever hands back the file token directly, the map
+                -- lookup simply misses and this falls through to try the
+                -- value as-is -- same forgiving double-check Prat's
+                -- GetClassColor(class, true) does, so this works either way
+                -- instead of silently dropping the color.
+                local classFile = classNameToFile[className] or className
+                local c = colors[classFile]
+                if c and c.colorStr then
+                    SYS_LOW[ShortName(name):lower()] = c.colorStr
+                end
+            end
+        end
+    end
+end
+
+local function RebuildSysRoster()
+    wipe(SYS_LOW)
+    local colors = _G.RAID_CLASS_COLORS
+    if not colors then return end
+    SysRosterAddGuild(colors)
+    SysRosterAddFriends(colors)
+end
+
+local sysRosterFrame = CreateFrame("Frame")
+local _sysRosterQueued = false
+local function QueueSysRosterRebuild()
+    if _sysRosterQueued then return end
+    _sysRosterQueued = true
+    C_Timer.After(0, function()
+        _sysRosterQueued = false
+        RebuildSysRoster()
+    end)
+end
+sysRosterFrame:SetScript("OnEvent", QueueSysRosterRebuild)
+
+function ECHAT.EngineSetSystemClassColor(on)
+    _sysOn = on == true
+    if _sysOn then
+        sysRosterFrame:RegisterEvent("GUILD_ROSTER_UPDATE")
+        sysRosterFrame:RegisterEvent("FRIENDLIST_UPDATE")
+        sysRosterFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        -- Ask the server for a fresh guild roster once; GUILD_ROSTER_UPDATE
+        -- firing back in response is what QueueSysRosterRebuild is for, so
+        -- this is a one-shot kick, not a loop -- RebuildSysRoster itself
+        -- never calls GuildRoster() again.
+        if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then
+            C_GuildInfo.GuildRoster()
+        end
+        RebuildSysRoster()
+    else
+        sysRosterFrame:UnregisterAllEvents()
+        wipe(SYS_LOW)
+    end
+end
+
 -- Escape spans the name scanner must never touch. Hyperlinks are protected
 -- through their LABEL too: corrupting a |H target breaks the link, and
 -- sender-name labels are already colored by Blizzard's own composer.
@@ -665,12 +788,36 @@ local function IsBoundary(text, idx)
     return true
 end
 
-local function ColorRosterNames(text)
-    if next(ROSTER_LOW) == nil then return text end
+-- Player-link labels ([Name] inside |Hplayer:Name-Realm|h[Name]|h) are
+-- deliberately treated as protected by ColorRosterNames/CollectProtected
+-- above (touching a |H...|h span would risk corrupting the click target).
+-- But that's exactly the shape Blizzard uses for "X has come online" system
+-- notices (clickable so you can whisper right away) -- unlike "X has left
+-- the game", which is plain text and already gets caught by ColorRosterNames.
+-- This colors ONLY the label text between the two |h markers, leaving the
+-- |Hplayer:...|h target and the closing |h completely untouched, so the
+-- link's click behavior is unaffected -- the same "color inside the label,
+-- never the escape codes" approach Blizzard's own class-colored links use.
+local function ColorPlayerLinkLabels(text, rosterTable)
+    if next(rosterTable) == nil then return text end
+    if not text:find("|Hplayer:", 1, true) then return text end
+    return (text:gsub("(|Hplayer:(.-)|h)(.-)(|h)", function(openTag, target, label, closeTag)
+        local shortName = target:match("^([^:%-]+)") or target
+        local colorStr = rosterTable[shortName:lower()]
+        if colorStr then
+            return openTag .. "|c" .. colorStr .. label .. "|r" .. closeTag
+        end
+        return openTag .. label .. closeTag
+    end))
+end
+
+local function ColorRosterNames(text, rosterTable)
+    rosterTable = rosterTable or ROSTER_LOW
+    if next(rosterTable) == nil then return text end
     local lower = text:lower()
     local nProt = CollectProtected(text)
     local nHits = 0
-    for nameLow, colorStr in pairs(ROSTER_LOW) do
+    for nameLow, colorStr in pairs(rosterTable) do
         local nameLen = #nameLow
         local from = 1
         while true do
@@ -729,7 +876,7 @@ end
 -- history passes no event, so name coloring never runs there (stored lines
 -- were captured in display form already).
 local function DisplayText(msg, event)
-    if not _abbrevOn and not _ccnOn then return msg end
+    if not _abbrevOn and not _ccnOn and not _sysOn then return msg end
     if issecretvalue and issecretvalue(msg) then return msg end
     if type(msg) ~= "string" then return msg end
     if _abbrevOn and not _protActive and msg:find("|Hchannel:", 1, true) then
@@ -738,7 +885,20 @@ local function DisplayText(msg, event)
     if _ccnOn and event ~= nil
         and not (issecretvalue and issecretvalue(event))
         and CCN_EVENTS[event] then
-        msg = ColorRosterNames(msg)
+        msg = ColorRosterNames(msg, ROSTER_LOW)
+    end
+    -- NOT event-gated on purpose: Blizzard's system-message call path
+    -- (ChatFrame_SystemEventHandler) invokes AddMessage with a different/
+    -- shorter argument list than the normal chat handler, so the positional
+    -- "event" this hook captures for a CHAT_MSG_SYSTEM line is unreliable
+    -- (often not the literal string "CHAT_MSG_SYSTEM"). Matching against
+    -- SYS_LOW's small, addon-owned name set costs one cheap loop even on
+    -- unrelated lines, so scanning unconditionally is safe and is what
+    -- actually makes this fire -- same posture as the channel-abbreviation
+    -- pass above, which also doesn't gate on event.
+    if _sysOn then
+        msg = ColorPlayerLinkLabels(msg, SYS_LOW)
+        msg = ColorRosterNames(msg, SYS_LOW)
     end
     return msg
 end
