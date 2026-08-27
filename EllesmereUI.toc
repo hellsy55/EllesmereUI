@@ -27,6 +27,10 @@ EllesmereUI_Lite.lua
 # loaded by the engine at ADDON_LOADED for non-English locales only.
 EllesmereUI_Locale.lua
 
+# Central number-abbreviation engine (K/M/B, or a locale's own algorithm --
+# e.g. CJK 万/亿 grouping -- registered from EllesmereUILocales/<code>.lua).
+EllesmereUI_NumberFormat.lua
+
 # One-time data migration (runs before child addons init)
 EllesmereUI_Migration.lua
 

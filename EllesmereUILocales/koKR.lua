@@ -8,6 +8,18 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local L = EllesmereUI.RegisterLocale("koKR")
 if not L then return end
 
+-- Number abbreviation: 만/억 grouping instead of K/M/B, shared by every module
+-- through EllesmereUI.AbbreviateNumber() (EllesmereUI_NumberFormat.lua). Lives
+-- here, not in the number-format engine, so the algorithm and its glyphs travel
+-- together with this file -- which never loads at all for an English client.
+EllesmereUI.RegisterNumberAbbreviation("koKR", function()
+    return {
+        { breakpoint = 100000000, abbreviation = "억", significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
+        { breakpoint = 10000,     abbreviation = "만", significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
+        { breakpoint = 1,         abbreviation = "",   significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
+    }
+end)
+
 L["BLIZZARD POPUPS & GAME MENU"] = "블리자드 팝업 및 게임 메뉴"
 
 -- == Common labels (공용 라벨) =============================================
