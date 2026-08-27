@@ -2510,15 +2510,22 @@ do
         end
     end
 
+    local RegisterFPSUnlockElement  -- forward: defined below
+
     -- A settings change can move the readout between its two owners, so every
     -- FPS option writes through here rather than calling one side directly.
     EllesmereUI._applyFPSDisplay = function()
         if EllesmereUI._applyFPSCounter then EllesmereUI._applyFPSCounter() end
         if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
+        -- Re-registering is how an open unlock session gains or loses a mover,
+        -- so a showFPS flip (options toggle or the keybind, both of which land
+        -- here) takes effect without leaving and re-entering.
+        if EllesmereUI._unlockActive then RegisterFPSUnlockElement() end
     end
 
-    C_Timer.After(2, function()
+    RegisterFPSUnlockElement = function()
         local MK = EllesmereUI.MakeUnlockElement
+        if not MK then return end
         EllesmereUI:RegisterUnlockElements({
             MK({
                 key = "EUI_FPS",
@@ -2526,8 +2533,8 @@ do
                 group = "General",
                 order = 700,
                 -- Off, or dragged by the Secondary Stats element while
-                -- attached. Read live, so enabling or detaching restores the
-                -- mover without re-registering.
+                -- attached. Read live, so detaching restores the mover without
+                -- re-registering.
                 isHidden = function()
                     return not EllesmereUI.QoLExtrasGet("showFPS") or IsAttached()
                 end,
@@ -2564,7 +2571,8 @@ do
                 end,
             }),
         })
-    end)
+    end
+    C_Timer.After(2, RegisterFPSUnlockElement)
 
     C_Timer.After(2.5, function()
         local MK = EllesmereUI.MakeUnlockElement
