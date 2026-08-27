@@ -2902,6 +2902,17 @@ initFrame:SetScript("OnEvent", function(self)
                     MkToggle("Abbreviate Amount", "abbreviate",
                         "Shows large amounts using K/M suffixes (284,208g becomes 284.2Kg) instead of the full grouped number. The tooltip always shows the exact amount."),
                 }
+                -- Force English Units: CJK clients only (zhCN/zhTW/koKR group
+                -- numbers by 万/亿 instead of K/M); every other locale already
+                -- gets K/M, so the toggle would be a no-op there. Mirrors the
+                -- Damage Meters options row (EUI_DamageMeters_Options.lua).
+                do
+                    local clientLocale = GetLocale()
+                    if clientLocale == "zhCN" or clientLocale == "zhTW" or clientLocale == "koKR" then
+                        typeRows[#typeRows + 1] = MkToggle("Force English Units (K/M)", "forceEnglishUnits",
+                            "Always use K/M instead of localized units.")
+                    end
+                end
             elseif b.type == "xprep" then
                 typeRows = {
                     { type = "dropdown", text = "Mode",
