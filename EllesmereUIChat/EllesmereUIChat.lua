@@ -2751,7 +2751,10 @@ end
 function ECHAT.TogglePortalFlyout(anchorBtn)
     if InCombatLockdown() then return end
     local flyout = CreatePortalFlyout()
-    if flyout:IsShown() then
+    -- Visibility, not the shown flag: leaving the house editor hides our host
+    -- out from under a flyout that is still flagged shown, and a stale flag
+    -- would eat the next click.
+    if flyout:IsVisible() then
         flyout:Hide()
     else
         -- Absolute screen position: a protected frame cannot anchor to a
