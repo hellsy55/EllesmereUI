@@ -19017,9 +19017,9 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
 
-        -- Show Non-On Use Trinkets | Hide Rotation Helper
+        -- Show Non On-Use Trinkets | Hide Rotation Helper
         _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Non-On Use Trinkets",
+            { type="toggle", text="Show Non On-Use Trinkets",
               tooltip = "Show equipped trinkets even if they don't have an on-use effect.",
               getValue=function() return BD().showPassiveTrinkets == true end,
               setValue=function(v)

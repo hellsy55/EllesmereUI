@@ -4096,6 +4096,18 @@ local function ReassertBaseReverseSwipe(cd, key)
 end
 ns.ReassertBaseReverseSwipe = ReassertBaseReverseSwipe
 
+-- Trinkets that ARE genuine on-use items but whose "Use:" effect the scan
+-- below can misread as passive (e.g. the use spell's tooltip/cooldown text
+-- not matching the patterns it looks for). Add an item's numeric ID here to
+-- force it to always be treated as on-use -- and thus always shown on the
+-- CDM bar even with "Show Non On-Use Trinkets" turned off -- without
+-- affecting any other trinket. Do NOT add trinkets here just because they
+-- have a cooldown-gated passive proc; this is only for real on-use items
+-- that the automatic detection gets wrong.
+local FORCED_ON_USE_TRINKET_IDS = {
+    [270169] = true, -- Hex Lord's Dooming Idol (Use: consume Hex Lord's Doom stacks; the use effect isn't picked up by the scan below)
+}
+
 local function UpdateTrinketFrame(slotID)
     local f = _trinketFrames[slotID]
     if not f then return end
@@ -4135,6 +4147,14 @@ local function UpdateTrinketFrame(slotID)
     -- disturbs a currently-active reversed swipe for the same trinket.
     if itemID ~= prevItemID then
         ReassertBaseReverseSwipe(f.Cooldown, -slotID)
+    end
+    if FORCED_ON_USE_TRINKET_IDS[itemID] then
+        -- Skip the automatic on-use scan entirely for whitelisted items --
+        -- always treat them as on-use, regardless of what the tooltip/spell
+        -- scan below would have concluded.
+        f._trinketIsOnUse = true
+        f._slotScanPending = nil
+        return
     end
     if slotID ~= 13 and slotID ~= 14 then
         -- User-added equipment slot: the use effect usually comes from an

@@ -3952,7 +3952,7 @@ L["Show a glow on icons when the remaining duration is in the pandemic window (l
 L["Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)"] = "Mostra um brilho na barra quando a duração restante está na janela de pandemia (últimos 30%)"
 L["Show equipped trinkets even if they don't have an on-use effect."] = "Mostra bugigangas equipadas mesmo que não tenham um efeito de uso."
 L["Show Keybind"] = "Mostrar Atalho"
-L["Show Non-On Use Trinkets"] = "Mostrar Bugigangas Sem Uso"
+L["Show Non On-Use Trinkets"] = "Mostrar Bugigangas Sem Uso"
 L["Show on Target"] = "Mostrar no Alvo"
 L["Show the charge and stack counters on this bar's icons."] = "Mostra os contadores de carga e pilha nos ícones desta barra."
 L["Show the crafted quality rank on tracked items, matching the rank icon on the action bars. Items with no crafted quality are unaffected."] = "Mostra o nível de qualidade de fabricação em itens rastreados, correspondendo ao ícone de nível nas barras de ação. Itens sem qualidade de fabricação não são afetados."
