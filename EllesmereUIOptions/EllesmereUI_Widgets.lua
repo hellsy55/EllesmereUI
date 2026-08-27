@@ -7816,9 +7816,20 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                 lblAnchor = ico
             end
+            -- Modifier rows (item.isModifier) rest in the same accent used for isAction
+            -- rows, but only while THIS is the active one -- the inactive partner in the
+            -- radio pair looks like any other unchecked row. Checked state can change
+            -- from a sibling row's click (UpdateCheck runs on every row after any
+            -- click), so this reads live rather than caching a fixed tint.
+            local function RestColor()
+                if item.isModifier and getFn(item.key) then
+                    return EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b
+                end
+                return 0.75, 0.75, 0.75
+            end
             local lbl = row:CreateFontString(nil, "OVERLAY")
             lbl:SetFont(fontPath, 13, "")
-            lbl:SetTextColor(0.75, 0.75, 0.75, 1)
+            lbl:SetTextColor(RestColor())
             if lblAnchor then
                 lbl:SetPoint("LEFT", lblAnchor, "RIGHT", item.icon and 6 or 8, 0)
             else
@@ -7884,6 +7895,9 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                         negBrd:SetColor(0.4, 0.4, 0.4, 0.6)
                     end
                 end
+                if item.isModifier and not row._isLocked then
+                    lbl:SetTextColor(RestColor())
+                end
             end
             UpdateCheck()
             row._updateCheck = UpdateCheck
@@ -7910,7 +7924,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     end
                     return
                 end
-                lbl:SetTextColor(0.75, 0.75, 0.75, 1)
+                lbl:SetTextColor(RestColor())
                 hl:SetColorTexture(1, 1, 1, 0)
                 if item.tooltip then
                     EllesmereUI.HideWidgetTooltip()
@@ -7923,7 +7937,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 if isLocked then
                     lbl:SetTextColor(0.4, 0.4, 0.4, 0.5)
                 else
-                    lbl:SetTextColor(0.75, 0.75, 0.75, 1)
+                    lbl:SetTextColor(RestColor())
                 end
             end
             row._updateLocked = UpdateLocked
@@ -7974,7 +7988,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                         or EllesmereUI.L("Hide these instead of showing them"))
                 end)
                 negBox:SetScript("OnLeave", function()
-                    if not row._isLocked then lbl:SetTextColor(0.75, 0.75, 0.75, 1) end
+                    if not row._isLocked then lbl:SetTextColor(RestColor()) end
                     hl:SetColorTexture(1, 1, 1, 0)
                     EllesmereUI.HideWidgetTooltip()
                 end)
@@ -7991,7 +8005,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                         if tt then EllesmereUI.ShowWidgetTooltip(box, tt) end
                     end)
                     box:SetScript("OnLeave", function()
-                        if not row._isLocked then lbl:SetTextColor(0.75, 0.75, 0.75, 1) end
+                        if not row._isLocked then lbl:SetTextColor(RestColor()) end
                         hl:SetColorTexture(1, 1, 1, 0)
                         EllesmereUI.HideWidgetTooltip()
                     end)
@@ -8447,10 +8461,15 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "always",    label = "Always" },
     { key = "mouseover", label = "Mouseover",
       tooltip = "Reveal on hover only. Combines with the conditions below: hover-reveals while they all pass, stays hidden while any fails." },
-    -- Modifier, not a condition: it decides how the rows below combine, so it is kept
-    -- out of the summary label and out of the Show/Hide lane pairs.
-    { key = "matchAny", label = "Match Any Condition", modifier = true,
-      tooltip = "Off: every condition you set has to match. On: this element shows as soon as ONE of them matches, and a Hide lane then means show while that condition is false." },
+    -- Modifiers, not conditions: they decide how the rows below combine, so both are
+    -- kept out of the summary label and out of the Show/Hide lane pairs. Radio-style
+    -- exclusive pair (matchValue), same underlying scalar as Never/Always -- picking
+    -- one is what unpicks the other, there is no third "neither" state.
+    { isHeader = true, label = "Match Mode" },
+    { key = "matchAll", label = "Match All Conditions", modifier = true, matchValue = "all",
+      tooltip = "Every condition you set has to match. The default." },
+    { key = "matchAny", label = "Match Any Condition", modifier = true, matchValue = "any",
+      tooltip = "This element shows as soon as ONE condition matches, and a Hide lane then means show while that condition is false." },
     { isHeader = true, label = "Show", rightLabel = "Hide" },
     { key = "combat", label = "In Combat", axis = "mode",
       show = "in_combat", hide = "out_of_combat" },
@@ -8611,7 +8630,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local function GetChecked(k, neg)
         local def = defs[k]
         if not def then return false end
-        if def.modifier then return GetMatchAny() end
+        if def.modifier then
+            return (def.matchValue == "any") == GetMatchAny()
+        end
         if def.axis == "extra" then return def.get() == true end
         if def.axis == "opt" then return GetOpt(neg and def.hide or def.show) end
         local sel = Sel()
@@ -8634,10 +8655,11 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         local def = defs[k]
         if not def then return end
 
-        -- Modifier: it only changes how the rows below combine, so it deliberately
-        -- clears nothing -- not the exclusive scalars, not a condition, not a lane.
+        -- Modifier: picking one of the pair is what unpicks the other (the radio read
+        -- of a single scalar), and it deliberately clears nothing else -- not the
+        -- exclusive scalars, not a condition, not a lane.
         if def.modifier then
-            SetMatchAny(checked)
+            SetMatchAny(def.matchValue == "any")
             AfterChange(false, true)
             return
         end
