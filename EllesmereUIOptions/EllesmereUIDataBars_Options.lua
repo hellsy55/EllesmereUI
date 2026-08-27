@@ -2899,6 +2899,8 @@ initFrame:SetScript("OnEvent", function(self)
                       values = { __placeholder = "..." }, order = { "__placeholder" },
                       getValue = function() return "__placeholder" end,
                       setValue = function() end },
+                    MkToggle("Abbreviate Amount", "abbreviate",
+                        "Shows large amounts using K/M suffixes (284,208g becomes 284.2Kg) instead of the full grouped number. The tooltip always shows the exact amount."),
                 }
             elseif b.type == "xprep" then
                 typeRows = {

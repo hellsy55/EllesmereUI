@@ -221,7 +221,7 @@ ns.BLOCK_DEFAULTS = {
     -- which the options page pulses about.
     location   = { showIcon = true, showSubZone = true },
     coords     = { showIcon = true, precision = 0, hideInInstance = true },
-    gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false },
+    gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false, abbreviate = false },
     durability = { showIcon = true },
     combat     = { onlyInCombat = false },
     xprep      = { mode = "auto" },
@@ -357,6 +357,58 @@ local function CoinMarker(i, coinIcons, coloured)
     return d.symbol
 end
 
+-- Gold abbreviation (SI units): 284208 -> "284.2K". CJK clients group by
+-- 万 (萬, 만) instead of K/M, matching EllesmereUIDamageMeters' number
+-- formatting so the addon reads consistently across modules. The gold cap is
+-- 99,999,999 -- under the M/亿 rollover for a full 9-digit value, so there's
+-- no "B"/亿 breakpoint to carry.
+local CJK_GOLD = ({
+    zhCN = { wan = "万" },
+    zhTW = { wan = "萬" },
+    koKR = { wan = "만" },
+})[GetLocale()]
+
+local _goldAbbrevCfg
+if CreateAbbreviateConfig then
+    local opts
+    if CJK_GOLD then
+        opts = {
+            { breakpoint = 10000, abbreviation = CJK_GOLD.wan, significandDivisor = 100, fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1,     abbreviation = "",           significandDivisor = 1,   fractionDivisor = 1,   abbreviationIsGlobal = false },
+        }
+    else
+        opts = {
+            { breakpoint = 1000000, abbreviation = "M", significandDivisor = 10000, fractionDivisor = 100, abbreviationIsGlobal = false },
+            { breakpoint = 1000,    abbreviation = "K", significandDivisor = 100,   fractionDivisor = 10,  abbreviationIsGlobal = false },
+            { breakpoint = 1,       abbreviation = "",  significandDivisor = 1,     fractionDivisor = 1,   abbreviationIsGlobal = false },
+        }
+    end
+    _goldAbbrevCfg = { config = CreateAbbreviateConfig(opts) }
+end
+
+-- Fallback for clients missing AbbreviateNumbers/CreateAbbreviateConfig.
+local function AbbrevGoldFallback(gold)
+    if CJK_GOLD then
+        if gold >= 1e4 then return format("%.2f%s", gold / 1e4, CJK_GOLD.wan)
+        else return tostring(gold) end
+    end
+    if gold >= 1e6 then return format("%.2fM", gold / 1e6)
+    elseif gold >= 1e3 then return format("%.1fK", gold / 1e3)
+    else return tostring(gold) end
+end
+
+local function AbbrevGold(gold)
+    if AbbreviateNumbers then
+        return AbbreviateNumbers(gold, _goldAbbrevCfg) or tostring(gold)
+    end
+    return AbbrevGoldFallback(gold)
+end
+
+local function GoldDisplay(val, abbreviate)
+    if abbreviate then return AbbrevGold(val) end
+    return BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
+end
+
 -- Money split per denomination: one token per coin, so callers can align them
 -- in columns (tooltip) or separate lines (vertical bar) -- a single formatted
 -- string can't, since the proportional font makes "9g" and "1 234g" different
@@ -364,12 +416,11 @@ end
 -- Tip_AddColumns copies it, so one buffer serves all rows.
 local _moneyTokens = {}
 
-function ns.MoneyTokens(amount, showSmall, coinIcons, coloured)
+function ns.MoneyTokens(amount, showSmall, coinIcons, coloured, abbreviate)
     amount = floor(abs(amount or 0))
     wipe(_moneyTokens)
     local gold = floor(amount / DENOMINATIONS[1].divisor)
-    local gStr = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
-    _moneyTokens[1] = gStr .. CoinMarker(1, coinIcons, coloured)
+    _moneyTokens[1] = GoldDisplay(gold, abbreviate) .. CoinMarker(1, coinIcons, coloured)
     if showSmall ~= false then
         local silver = floor((amount % DENOMINATIONS[1].divisor) / DENOMINATIONS[2].divisor)
         _moneyTokens[2] = silver .. CoinMarker(2, coinIcons, coloured)
@@ -378,7 +429,7 @@ function ns.MoneyTokens(amount, showSmall, coinIcons, coloured)
     return _moneyTokens
 end
 
-function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
+function ns.FormatMoneyPlain(amount, showSmall, coinIcons, abbreviate)
     amount = floor(abs(amount or 0))
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
@@ -386,8 +437,7 @@ function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
         amount = amount % denom.divisor
         if i == 1 and val > 0 then
             foundGold = true
-            local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, false)
+            parts[#parts + 1] = GoldDisplay(val, abbreviate) .. CoinMarker(i, coinIcons, false)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
             parts[#parts + 1] = val .. CoinMarker(i, coinIcons, false)
         end
@@ -396,7 +446,7 @@ function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
     return "0" .. CoinMarker(3, coinIcons, false)
 end
 
-function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
+function ns.FormatMoney(amount, useColors, showSmall, coinIcons, abbreviate)
     amount = floor(abs(amount or 0))
     local coloured = useColors ~= false
     local parts, foundGold = {}, false
@@ -405,8 +455,7 @@ function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
         amount = amount % denom.divisor
         if i == 1 and val > 0 then
             foundGold = true
-            local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, coloured)
+            parts[#parts + 1] = GoldDisplay(val, abbreviate) .. CoinMarker(i, coinIcons, coloured)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
             parts[#parts + 1] = val .. CoinMarker(i, coinIcons, coloured)
         end

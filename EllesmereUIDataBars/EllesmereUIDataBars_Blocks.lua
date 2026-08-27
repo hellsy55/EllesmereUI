@@ -2005,13 +2005,14 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
 
         local money = GetMoney()
         local ci = dg.coinIcons == true
+        local ab = dg.abbreviate == true
         if isSide then
             local slotW = VSlotW(inst)
             local innerW = max(30, slotW - 8)
             -- One token per coin, one coin per line. Coin Colored tints the suffix letters
             -- (nothing to tint once Coin Icons is on, so the two compose); hovering drops it so the accent wash reads.
             local lines = ns.MoneyTokens(money, dg.showSmall == true, ci,
-                blockCfg.useCoinColor == true and not mouseOver)
+                blockCfg.useCoinColor == true and not mouseOver, ab)
             local startSize = min(fontSize, max(10, floor(CONTENT_BASE * 0.52 + 0.5)))
             local goldFontSize = startSize
             ns.SetFont(goldText, goldFontSize, barCfg)
@@ -2022,11 +2023,11 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
             else r, g, b = BlockColorOf(blockCfg) end
             goldText:SetTextColor(r, g, b, 1)
         elseif mouseOver then
-            goldText:SetText(ns.FormatMoneyPlain(money, dg.showSmall == true, ci))
+            goldText:SetText(ns.FormatMoneyPlain(money, dg.showSmall == true, ci, ab))
             local r, g, b = ns.GetAccent()
             goldText:SetTextColor(r, g, b, 1)
         else
-            goldText:SetText(ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true, ci))
+            goldText:SetText(ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true, ci, ab))
             if blockCfg.useCoinColor then
                 goldText:SetTextColor(1, 1, 1, 1)
             else
@@ -2093,8 +2094,8 @@ ns.BlockFactories.gold = function(blockCfg, slot, content, barCtx)
         else
             local slotW = HBudget(inst, 100)
             -- Fit against BOTH money formats so font/icon size and frame width stay identical hovered or not; otherwise it resizes on mouseover.
-            local plainText = ns.FormatMoneyPlain(money, dg.showSmall == true, ci)
-            local fancyText = ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true, ci)
+            local plainText = ns.FormatMoneyPlain(money, dg.showSmall == true, ci, ab)
+            local fancyText = ns.FormatMoney(money, blockCfg.useCoinColor == true, dg.showSmall == true, ci, ab)
             local moneyText
             if mouseOver then moneyText = plainText else moneyText = fancyText end
             local bagTextValue = ""
