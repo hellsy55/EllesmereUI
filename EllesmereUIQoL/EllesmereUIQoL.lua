@@ -2525,9 +2525,12 @@ do
                 label = "FPS Counter",
                 group = "General",
                 order = 700,
-                -- Dragged by the Secondary Stats element while attached. Read
-                -- live, so detaching restores the mover without re-registering.
-                isHidden = IsAttached,
+                -- Off, or dragged by the Secondary Stats element while
+                -- attached. Read live, so enabling or detaching restores the
+                -- mover without re-registering.
+                isHidden = function()
+                    return not EllesmereUI.QoLExtrasGet("showFPS") or IsAttached()
+                end,
                 getFrame = function()
                     if not fpsFrame then CreateFPSCounter() end
                     return fpsFrame
