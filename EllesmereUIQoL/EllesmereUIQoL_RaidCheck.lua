@@ -166,15 +166,20 @@ end
 -- Only flask and rune carry ids, and they are the only entries here that will
 -- ever need a patch-day edit. /euiraidcheck is the maintenance tool.
 local CHECKS = {
-    { key = "flask",  label = "Flask",  seed = 1235110,
+    -- nameTooltip: which specific flask/food a player has up is worth
+    -- surfacing on hover, the same way Vantus already names its rune.
+    { key = "flask",  label = "Flask",  seed = 1235110, nameTooltip = true,
       ids = { [1236763] = true, [1239355] = true, [1235057] = true, [1239755] = true,
               [1236767] = true, [1235111] = true, [1235110] = true, [1235108] = true } },
-    { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS },
-    { key = "rune",   label = "Rune",   seed = 1264426,
+    { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS, nameTooltip = true },
+    { key = "rune",   label = "Rune",   seed = 1264426, nameTooltip = true,
       ids = { [1264426] = true } },
     -- Vantus runes apply to raid bosses, so in a Mythic+ key the column is not
     -- merely unlikely to be filled, it is meaningless.
-    { key = "vantus", label = "Vantus", seed = VANTUS_SEED,
+    -- icon is fixed rather than derived from the seed spell: the seed exists
+    -- only to read the localized "Vantus Rune:" prefix, and its own icon is
+    -- an arbitrary old rune's art, not a good header glyph.
+    { key = "vantus", label = "Vantus", seed = VANTUS_SEED, icon = 7549087,
       prefix = VantusPrefix, raidOnly = true },
 }
 
@@ -239,6 +244,7 @@ local SELF_COLS = {}   -- columns that read your own row locally
 local ID_TO_KEY = {}   -- spell id -> column key, flattened from every id set
 local ICON_COLS = {}   -- columns matched on aura icon
 local NAME_COLS = {}   -- columns matched on an aura name prefix
+local WANTS_NAME = {}  -- column key -> true, for id/icon columns that also want the matched aura's name (e.g. Flask, Food)
 local columnsBuilt
 
 local function LibDur()
@@ -309,6 +315,7 @@ local function EnsureColumns()
         end
         if def.icons  then ICON_COLS[#ICON_COLS + 1] = def end
         if def.prefix then NAME_COLS[#NAME_COLS + 1] = def end
+        if def.nameTooltip then WANTS_NAME[def.key] = true end
     end
 end
 
@@ -370,11 +377,35 @@ local function SweepBody(unit, out)
         local id = aura.spellId
         if id and not (issecretvalue and issecretvalue(id)) then
             local key = ID_TO_KEY[id]
-            if key then out[key] = true end
+            if key then
+                out[key] = true
+                if aura.name and WANTS_NAME[key] then
+                    out._names = out._names or {}
+                    out._names[key] = out._names[key] or aura.name
+                    -- expirationTime is an absolute GetTime() timestamp, 0 for
+                    -- a buff with no expiry; the tooltip does the subtraction
+                    -- at hover time so the number is never stale by the time
+                    -- it is read.
+                    if aura.expirationTime and aura.expirationTime > 0 then
+                        out._expires = out._expires or {}
+                        out._expires[key] = out._expires[key] or aura.expirationTime
+                    end
+                end
+            end
             if aura.icon then
                 for j = 1, #ICON_COLS do
                     local def = ICON_COLS[j]
-                    if def.icons[aura.icon] then out[def.key] = true end
+                    if def.icons[aura.icon] then
+                        out[def.key] = true
+                        if aura.name and def.nameTooltip then
+                            out._names = out._names or {}
+                            out._names[def.key] = out._names[def.key] or aura.name
+                            if aura.expirationTime and aura.expirationTime > 0 then
+                                out._expires = out._expires or {}
+                                out._expires[def.key] = out._expires[def.key] or aura.expirationTime
+                            end
+                        end
+                    end
                 end
             end
             if aura.name then
@@ -383,7 +414,15 @@ local function SweepBody(unit, out)
                     -- Each column resolves its own prefix; the lookup is
                     -- memoised, so this is a table read per aura.
                     local p = def.prefix()
-                    if p and aura.name:find(p, 1, true) == 1 then out[def.key] = true end
+                    if p and aura.name:find(p, 1, true) == 1 then
+                        out[def.key] = true
+                        -- Kept alongside the boolean so the grid can show WHICH
+                        -- Vantus rune (or future prefix column) is active, not just
+                        -- that one is. First match wins; a second application would
+                        -- be a bug elsewhere, not a reason to overwrite a good name.
+                        out._names = out._names or {}
+                        out._names[def.key] = out._names[def.key] or aura.name
+                    end
                 end
             end
         end
@@ -392,7 +431,11 @@ end
 
 -- Restricted path. Returns true, false, or nil when the client refused to
 -- answer -- and nil matters: see the header.
-local function UnitHasAny(unit, ids)
+-- wantName: also try to return the specific aura's name alongside the
+-- verdict (used for Flask, the one id-based column still answerable under
+-- restriction). A secret aura still counts toward "unknown" even when a
+-- name was not asked for -- that behavior is unchanged.
+local function UnitHasAny(unit, ids, wantName)
     local unknown = false
     for id in pairs(ids) do
         local ok, aura = pcall(GetUnitAuraBySpellID, unit, id)
@@ -402,7 +445,11 @@ local function UnitHasAny(unit, ids)
             if issecretvalue and issecretvalue(aura) then
                 unknown = true
             else
-                return true
+                local expires
+                if wantName and aura.expirationTime and aura.expirationTime > 0 then
+                    expires = aura.expirationTime
+                end
+                return true, wantName and aura.name, expires
             end
         end
     end
@@ -415,7 +462,16 @@ local function UnitChecks(unit, answerable, restricted)
     if restricted then
         for _, def in ipairs(COLUMNS) do
             if answerable[def.key] and def.ids then
-                out[def.key] = UnitHasAny(unit, def.ids)
+                local found, name, expires = UnitHasAny(unit, def.ids, def.nameTooltip)
+                out[def.key] = found
+                if name then
+                    out._names = out._names or {}
+                    out._names[def.key] = name
+                end
+                if expires then
+                    out._expires = out._expires or {}
+                    out._expires[def.key] = expires
+                end
             end
         end
     else
@@ -764,6 +820,45 @@ local function MakeRow(parent, index)
             tex:SetSize(ICON_SZ, ICON_SZ)
             tex:SetAlpha(0.9)
             r._cells[c] = tex
+
+            -- Prefix columns (Vantus) and nameTooltip columns (Flask, Food)
+            -- know not just THAT the buff is up but WHICH one -- the name
+            -- comes off the aura itself, see SweepBody / UnitHasAny. A
+            -- texture cannot take mouse input on its own, so a transparent
+            -- frame sits over the icon just to catch the hover; Relayout
+            -- keeps it pinned to the same spot as the icon.
+            if def.prefix or def.nameTooltip then
+                local hit = CreateFrame("Frame", nil, r)
+                hit:SetSize(ICON_SZ, ICON_SZ)
+                hit:EnableMouse(true)
+                hit:Hide()
+                hit:SetScript("OnEnter", function(self)
+                    local name = r._auraNames and r._auraNames[def.key]
+                    if not name then return end
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(ColumnName(def) .. ": " .. name, 1, 1, 1)
+                    -- Recomputed at hover time from the absolute expiration
+                    -- timestamp, so the minutes are always accurate to the
+                    -- moment the tooltip is actually read, not to whenever
+                    -- the last Refresh happened to run.
+                    local expires = r._auraExpires and r._auraExpires[def.key]
+                    if expires then
+                        local remain = expires - GetTime()
+                        if remain > 0 then
+                            local mins = math.ceil(remain / 60)
+                            if mins <= 1 then
+                                GameTooltip:AddLine("< 1 min remaining", 0.8, 0.8, 0.8)
+                            else
+                                GameTooltip:AddLine(mins .. " min remaining", 0.8, 0.8, 0.8)
+                            end
+                        end
+                    end
+                    GameTooltip:Show()
+                end)
+                hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                r._cellHit = r._cellHit or {}
+                r._cellHit[c] = hit
+            end
         end
     end
 
@@ -934,6 +1029,11 @@ local function Relayout(visible, slotOf, memberCols, bodyW, rowsPerCol)
                     tex:SetPoint("LEFT", r, "LEFT", x + (CELL_W - ICON_SZ) / 2, 0)
                 else
                     cell:SetPoint("LEFT", r, "LEFT", x + (CELL_W - ICON_SZ) / 2, 0)
+                    local hit = r._cellHit and r._cellHit[ci]
+                    if hit then
+                        hit:ClearAllPoints()
+                        hit:SetPoint("LEFT", r, "LEFT", x + (CELL_W - ICON_SZ) / 2, 0)
+                    end
                 end
             end
         end
@@ -1078,6 +1178,7 @@ local function Refresh()
                 if not slotOf[def.key] then
                     cell:Hide()
                     if tex then tex:Hide() end
+                    if r._cellHit and r._cellHit[ci] then r._cellHit[ci]:Hide() end
                 elseif def.numeric then
                     -- The number is shown at every reading, including 100 --
                     -- a plain number reads faster at a glance than a tick
@@ -1096,15 +1197,27 @@ local function Refresh()
                     -- nil and a missing consumable would draw nothing at all.
                     local v
                     if answerable[def.key] then v = e.checks[def.key] end
+                    if def.prefix or def.nameTooltip then
+                        r._auraNames = r._auraNames or {}
+                        r._auraNames[def.key] = e.checks._names and e.checks._names[def.key]
+                        r._auraExpires = r._auraExpires or {}
+                        r._auraExpires[def.key] = e.checks._expires and e.checks._expires[def.key]
+                    end
+                    local hit = r._cellHit and r._cellHit[ci]
                     if v == true then
                         cell:SetTexture(TEX_OK)
                         cell:Show()
+                        -- Only the tick is hoverable: a MISS or a blank cell
+                        -- has no buff name behind it to report.
+                        if hit then hit:Show() end
                     elseif v == false then
                         cell:SetTexture(TEX_MISS)
                         cell:Show()
+                        if hit then hit:Hide() end
                     else
                         -- Unanswerable, or the client would not say.
                         cell:Hide()
+                        if hit then hit:Hide() end
                     end
                 end
             end
