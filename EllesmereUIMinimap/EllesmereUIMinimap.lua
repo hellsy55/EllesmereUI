@@ -5053,24 +5053,8 @@ local function MinimapDriverString(p, vm)
     -- (instances, housing, skyriding mount) are resolved here, which the caller only
     -- ever reaches out of combat, and a later zone or mount edge re-runs the dispatcher
     -- and re-registers the string.
-    if p.visibilityMatch == "any" and EllesmereUI.BuildVisibilityDriverStringAny then
-        local mode = p.visibility or "always"
-        -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
-        if mode == "never" then return "hide" end
-        local luaC, luaP = 0, 0
-        if EllesmereUI.TallyVisibilityOptionAxes then
-            luaC, luaP = EllesmereUI.TallyVisibilityOptionAxes(p, "luaOnly")
-        end
-        if luaP > 0 then return "show" end
-        local modes = vm
-        if not modes then
-            -- A single stored mode is one constrained axis.
-            modes = {}
-            if EllesmereUI.VIS_CONDITION_KEYS and EllesmereUI.VIS_CONDITION_KEYS[mode] then
-                modes[mode] = true
-            end
-        end
-        return EllesmereUI.BuildVisibilityDriverStringAny("", modes, p, luaC)
+    if p.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+        return (EllesmereUI.BuildAnyMatchTail(p, "visibility", vm))
     end
     if vm then
         return EllesmereUI.BuildVisibilityDriverString

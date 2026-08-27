@@ -12309,41 +12309,17 @@ function InitializeFrames()
                     or vis == "in_combat" or vis == "out_of_combat") then
                     drvSet = { [vis] = true }
                 end
-                -- Any match compiles a DIFFERENT tail: every constrained axis becomes
-                -- its own bracket group instead of sharing one AND bracket, and the
-                -- option lanes join the disjunction -- the ones with a macro
-                -- conditional inside the string, the Lua-only ones (instances, housing,
-                -- skyriding mount) resolved right here at registration time, which is
-                -- out of combat like every other Lua-side option on a secure frame.
-                local anyMatch = s.visibilityMatch == "any"
-                local anyModes, anyLuaC, anyLuaShow
-                if anyMatch then
-                    anyLuaC, anyLuaShow = 0, false
-                    if EllesmereUI.TallyVisibilityOptionAxes then
-                        local luaC, luaP = EllesmereUI.TallyVisibilityOptionAxes(s, "luaOnly")
-                        anyLuaC, anyLuaShow = luaC, luaP > 0
-                    end
-                    anyModes = drvSet
-                    if not anyModes then
-                        -- A single stored mode is one constrained axis.
-                        anyModes = {}
-                        if EllesmereUI.VIS_CONDITION_KEYS and EllesmereUI.VIS_CONDITION_KEYS[vis] then
-                            anyModes[vis] = true
-                        end
-                    end
-                end
-                -- The tail is built once and reused by the companion mini frame below:
-                -- both compilers only ever PREPEND their prefix, so a shared tail is
-                -- byte-identical to passing each frame's own prefix in.
+                -- Any compiles a different tail (each axis its own bracket group, option
+                -- lanes joining the disjunction); the shared builder owns that. Built
+                -- once and reused by the mini frame below, which is safe because both
+                -- compilers only ever PREPEND their prefix.
                 local visTail
-                if anyMatch then
-                    if vis == "never" then
-                        visTail = "hide"
-                    elseif anyLuaShow then
-                        visTail = "show"
-                    elseif EllesmereUI.BuildVisibilityDriverStringAny then
-                        visTail = EllesmereUI.BuildVisibilityDriverStringAny("", anyModes, s, anyLuaC)
-                    end
+                if s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+                    local tail, constrained = EllesmereUI.BuildAnyMatchTail(s, "barVisibility", drvSet)
+                    -- An Any selection that constrains nothing must not take the frame
+                    -- off its unit watch: the modifier alone changes no visibility, so
+                    -- it must not change the mechanism that delivers it either.
+                    if constrained > 0 then visTail = tail end
                 elseif drvSet and EllesmereUI.BuildVisibilityDriverString then
                     visTail = EllesmereUI.BuildVisibilityDriverString("", drvSet)
                 end

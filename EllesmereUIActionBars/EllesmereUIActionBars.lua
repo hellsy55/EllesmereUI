@@ -8872,7 +8872,7 @@ local function BuildVisibilityString(info, s, visOverride)
     -- disjunction outright, one that fails drops out of it. That verdict is only as
     -- fresh as the last driver rebuild, like every Lua-side option on a secure bar.
     -- Explicit overrides keep the legacy path, as they do for the multi-select set.
-    if not visOverride and s.visibilityMatch == "any" then
+    if not visOverride and s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
         local anyPrefix, anyWrap
         if info.isPetBar then
             anyPrefix = "[petbattle] hide; "
@@ -8884,24 +8884,7 @@ local function BuildVisibilityString(info, s, visOverride)
         else
             anyPrefix = "[vehicleui][petbattle][overridebar] hide; "
         end
-        -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
-        if vis == "never" then return anyPrefix .. "hide" end
-        local luaC, luaP = 0, 0
-        if EllesmereUI.TallyVisibilityOptionAxes then
-            luaC, luaP = EllesmereUI.TallyVisibilityOptionAxes(s, "luaOnly")
-        end
-        if luaP > 0 then
-            return anyPrefix .. (anyWrap and ("[" .. anyWrap .. "] show; hide") or "show")
-        end
-        local anyModes = vm
-        if not anyModes then
-            -- A single stored mode is one constrained axis, same shape a set would have.
-            anyModes = {}
-            if EllesmereUI.VIS_CONDITION_KEYS and EllesmereUI.VIS_CONDITION_KEYS[vis] then
-                anyModes[vis] = true
-            end
-        end
-        return EllesmereUI.BuildVisibilityDriverStringAny(anyPrefix, anyModes, s, luaC, anyWrap)
+        return anyPrefix .. EllesmereUI.BuildAnyMatchTail(s, "barVisibility", vm, anyWrap)
     end
 
     -- Pet bar has unique logic: it only shows when a pet is active and
