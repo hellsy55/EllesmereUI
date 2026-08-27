@@ -151,6 +151,7 @@ local DB_DEFAULTS = {
         showCompletedMilliseconds = true,
         objectiveCompareMode = "NONE",
         objectiveCompareDeltaOnly = false,
+        objectiveCompareStrict = false,
         showUpcomingSplitTargets = false,
         frameWidth        = 260,
         barWidth          = 210,
@@ -510,8 +511,15 @@ local function GetReferenceObjectiveTime(run, objectiveIndex, mode)
 
     -- Try exact scope first, then fall back to broader scopes.
     -- LEVEL_AFFIX -> LEVEL -> DUNGEON
+    -- Strict mode drops the fallback so a run is only ever measured against a
+    -- previous run at the same scope. Without it, the first run at a new key
+    -- level has no same-scope record and silently borrows the dungeon-wide
+    -- best (set at any level), which reads as a slower split every time.
+    -- COMPARE_DUNGEON is already the broadest scope, so strict is a no-op there.
     local tryOrder
-    if mode == COMPARE_LEVEL_AFFIX then
+    if db.profile.objectiveCompareStrict == true then
+        tryOrder = { mode }
+    elseif mode == COMPARE_LEVEL_AFFIX then
         tryOrder = { COMPARE_LEVEL_AFFIX, COMPARE_LEVEL, COMPARE_DUNGEON }
     elseif mode == COMPARE_LEVEL then
         tryOrder = { COMPARE_LEVEL, COMPARE_DUNGEON }
