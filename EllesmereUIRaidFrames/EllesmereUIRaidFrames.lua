@@ -3598,7 +3598,17 @@ local function StyleButton(button)
     readyCheckHit:SetAllPoints(readyCheck) -- tracks readyCheck's position/size dynamically
     readyCheckHit:EnableMouse(true)
     readyCheckHit:SetPropagateMouseClicks(true)
+    -- SetPropagateMouseClicks only forwards click events -- it does NOT forward mouse
+    -- MOTION, so this hit-frame still won the engine's mouse focus for hover purposes
+    -- and shadowed the real unit button underneath, which is what @mouseover macros
+    -- and mouseover spell casts key off of (not just the "unit" attribute). Same fix
+    -- already used elsewhere in this codebase for stacked hit-frames (see the minimap
+    -- ping blocker): SetPropagateMouseMotion(true) lets motion (OnEnter/OnLeave, and
+    -- with it mouseover eligibility) fall through to the button while this frame still
+    -- gets its own OnEnter/OnLeave for the tooltip below.
+    readyCheckHit:SetPropagateMouseMotion(true)
     readyCheckHit:Hide()
+    d.readyCheckHit = readyCheckHit
 
     -- Keep the hit-frame's visibility in sync with the texture (UpdateReadyCheck
     -- shows/hides d.readyCheck directly).
