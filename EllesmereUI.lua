@@ -4415,6 +4415,23 @@ function EllesmereUI.GetClassColorForRestrictedUnit(unit, secretClassToken)
     return true, r, g, b
 end
 
+-- Group role with the local player's spec as the authority. The role picked
+-- when listing a premade group sticks server-side through spec swaps (list a
+-- key as tank, swap to dps: UnitGroupRolesAssigned still answers TANK for the
+-- life of the group, surviving /reload and a manual role set), so for the
+-- player the spec-derived role wins whenever spec data is readable. Other
+-- units have no readable spec, so they keep the assigned role; call sites
+-- keep their own secret guards on that value (the player's spec role is
+-- never secret).
+function EllesmereUI.UnitEffectiveRole(unit)
+    if UnitIsUnit(unit, "player") then
+        local spec = GetSpecialization and GetSpecialization()
+        local role = spec and GetSpecializationRole and GetSpecializationRole(spec)
+        if role then return role end
+    end
+    return UnitGroupRolesAssigned(unit)
+end
+
 -- Get power color (cached, darken baked in). Returns nil for unknown keys.
 function EllesmereUI.GetPowerColor(powerKey)
     if EllesmereUI._colorCacheDirty then EllesmereUI._RebuildColorCache() end
@@ -11271,7 +11288,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "8.9.8"
+EllesmereUI.VERSION = "9.0.7"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12639,6 +12656,20 @@ EllesmereUI.VIS_OPT_ITEMS = {
       tooltip = "This bar will only show if you have an enemy targeted" },
 }
 
+-- Every visibility-option DB field, including the four counter-lane keys that have
+-- no row in the legacy VIS_OPT_ITEMS list above (they exist only as Hide/Show lanes
+-- in the unified Visibility row, EllesmereUI.VIS_ROW_ITEMS). Sync copies and equality
+-- checks iterate THIS list so a lane set through the unified row is never dropped by
+-- a module still building the legacy pair of dropdowns.
+EllesmereUI.VIS_OPT_KEYS = {
+    "visOnlyInstances", "visHideInstances",
+    "visHideHousing", "visOnlyHousing",
+    "visHideMounted", "visOnlyMounted",
+    "visHideDragonriding", "visOnlySkyriding",
+    "visHideNoTarget", "visHideWithTarget",
+    "visHideNoEnemy", "visHideWithEnemy",
+}
+
 -- Cache player class once at load time (never changes).
 local _, _playerClass = UnitClass("player")
 
@@ -12701,11 +12732,16 @@ end
 
 -- Non-macro visibility subset: the options that CAN'T be expressed in a secure [macro] condition
 -- and must be evaluated in Lua. Used by secure action bar frames that delegate the macro-expressible options (target/combat/group) to their state-visibility driver and only need Lua handling for these three.
-function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
+-- skipMountAxis: the caller's secure state driver already carries [mounted]/[nomounted]
+-- clauses that self-update inside combat. Evaluating the mount axis here too would let
+-- Lua clobber the driver with a literal "hide" that cannot re-evaluate until combat ends
+-- (see BuildVisibilityString in EllesmereUIActionBars.lua). Such callers pass true and
+-- keep their own narrower mount check for the shapeshift forms [mounted] cannot see.
+function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
     if not opts then return false end
 
-    -- Only Show in Instances
-    if opts.visOnlyInstances then
+    -- Instances axis: Only Show in Instances / Hide in Instances share one probe.
+    if opts.visOnlyInstances or opts.visHideInstances then
         local _, iType, diffID = GetInstanceInfo()
         diffID = tonumber(diffID) or 0
         local inInstance = false
@@ -12716,7 +12752,8 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
                 inInstance = true
             end
         end
-        if not inInstance then return true end
+        if opts.visOnlyInstances and not inInstance then return true end
+        if opts.visHideInstances and inInstance then return true end
     end
 
     -- Hide in Housing
@@ -12733,20 +12770,29 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts)
         end
     end
 
-    -- Hide when Mounted (includes druid travel/flight/aquatic forms)
-    if opts.visHideMounted then
-        if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
+    if not skipMountAxis then
+        -- Hide when Mounted (includes druid travel/flight/aquatic forms)
+        if opts.visHideMounted then
+            if EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then return true end
+        end
+
+        -- Only Show when Mounted (inverse; druid mount-like forms count as mounted
+        -- here too -- secure action bars carry a [nomounted] clause instead, which
+        -- cannot see forms, see BuildVisibilityString)
+        if opts.visOnlyMounted then
+            if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return true end
+        end
     end
 
-    -- Only Show when Mounted (inverse; druid mount-like forms count as mounted
-    -- here too -- secure action bars carry a [nomounted] clause instead, which
-    -- cannot see forms, see BuildVisibilityString)
-    if opts.visOnlyMounted then
-        if not (EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike()) then return true end
-    end
-
+    -- Skyriding-mount axis (glide capability, ground included -- NOT the airborne
+    -- show_dragonriding / show_not_dragonriding mode pair, which additionally
+    -- requires IsFlying; see EllesmereUI.IsAirborneSkyriding).
     if opts.visHideDragonriding then
         if EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding() then return true end
+    end
+
+    if opts.visOnlySkyriding then
+        if not (EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding()) then return true end
     end
 
     return false
@@ -12758,14 +12804,20 @@ function EllesmereUI.CheckVisibilityOptions(opts)
     -- Instances / housing / mounted (shared with secure-frame fast path).
     if EllesmereUI.CheckVisibilityOptionsNonMacro(opts) then return true end
 
-    -- Hide without Target
+    -- Target axis
     if opts.visHideNoTarget then
         if not UnitExists("target") then return true end
     end
+    if opts.visHideWithTarget then
+        if UnitExists("target") then return true end
+    end
 
-    -- Hide without Enemy Target
+    -- Enemy-target axis
     if opts.visHideNoEnemy then
         if not (UnitExists("target") and UnitCanAttack("player", "target")) then return true end
+    end
+    if opts.visHideWithEnemy then
+        if UnitExists("target") and UnitCanAttack("player", "target") then return true end
     end
 
     return false

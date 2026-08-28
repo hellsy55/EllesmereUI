@@ -89,31 +89,24 @@ initFrame:SetScript("OnEvent", function(self)
         -- ── DISPLAY ─────────────────────────────────────────────────────
         _, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
 
-        -- Visibility | Visibility Options
+        -- Visibility (one control)
+        local function VisApply()
+            if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end
+        end
         local visRow
-        visRow, h = EllesmereUI.BuildVisibilityModeRow(W, parent, y,
+        visRow, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
             { getStore = DB, legacyKey = "visibility",
               caps = { partyIncludesRaid = false, luaDragonriding = true },
-              onChanged = function()
-                  if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end
-              end },
-            { type="dropdown", text="Visibility Options",
-              values={ __placeholder = "..." }, order={ "__placeholder" },
-              getValue=function() return "__placeholder" end,
-              setValue=function() end })
-        if not EllesmereUI._prebuilding then
-            local rightRgn = visRow._rightRegion
-            if rightRgn._control then rightRgn._control:Hide() end
-            local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                rightRgn, 210, rightRgn:GetFrameLevel() + 2,
-                EllesmereUI.VIS_OPT_ITEMS,
-                function(k) return Cfg(k) or false end,
-                function(k, v) Set(k, v); if EllesmereUI.RequestVisibilityUpdate then EllesmereUI.RequestVisibilityUpdate() end end)
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
-            rightRgn._control = cbDD
-            rightRgn._lastInline = nil
-            EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
-        end
+              onChanged = VisApply,
+              onOptionChanged = VisApply },
+            -- Refresh Rate moved up into the slot the Visibility Options dropdown left
+            -- behind; its "(seconds)" suffix is attached below.
+            { type="slider", text="Refresh Rate",
+              tooltip = "Increase to improve performance, Decrease to update meters faster",
+              min = 0.1, max = 2, step = 0.1,
+              getValue = function() return Cfg("refreshRate") or 0.5 end,
+              setValue = function(v) Set("refreshRate", v) end,
+              fmt = function(v) return format("%.2fs", v) end })
         y = y - h
 
         -- Window Border Style (+ directions submenu) | Border Size (+ color)
@@ -218,18 +211,16 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Refresh Rate (+ seconds) | Reset Data Keybind (+ inline cog: hide reset button)
+        -- Reset Data Keybind (+ inline cog: hide reset button) | (free). Refresh Rate and
+        -- its "(seconds)" suffix moved up to the Visibility row.
         local rrRow
         rrRow, h = W:DualRow(parent, y,
-            { type="slider", text="Refresh Rate",
-              tooltip = "Increase to improve performance, Decrease to update meters faster",
-              min = 0.1, max = 2, step = 0.1,
-              getValue = function() return Cfg("refreshRate") or 0.5 end,
-              setValue = function(v) Set("refreshRate", v) end,
-              fmt = function(v) return format("%.2fs", v) end },
-            { type="label", text="Reset Data Keybind" })
+            { type="label", text="Reset Data Keybind" },
+            { type="label", text="" })
+        -- "(seconds)" suffix for Refresh Rate, which lives in the Visibility row's right
+        -- slot -- not this row.
         do
-            local rgn = rrRow._leftRegion
+            local rgn = visRow._rightRegion
             local suffix = rgn:CreateFontString(nil, "OVERLAY")
             suffix:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
             suffix:SetTextColor(1, 1, 1, 0.35)
@@ -250,7 +241,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         if not EllesmereUI._prebuilding then
-            local rgn = rrRow._rightRegion
+            local rgn = rrRow._leftRegion
             local KB_W, KB_H = 120, 26
             local kbBtn = CreateFrame("Button", nil, rgn)
             PP.Size(kbBtn, KB_W, KB_H)
@@ -1454,30 +1445,68 @@ initFrame:SetScript("OnEvent", function(self)
                         return Cfg("standaloneTimerUseAccent") and 1 or 0.3
                     end },
               } })
-        -- Inline cog on Standalone Combat Timer for font size
+        -- Inline cog: focused visual controls for the standalone timer.
         if not EllesmereUI._prebuilding then
             local rgn = satRow._leftRegion
+            local satFontValues, satFontOrder = EllesmereUI.BuildFontDropdownData()
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Standalone Timer Settings",
+                minWidth = 300,
                 rows = {
+                    { type = "dropdown", label = "Font",
+                      values = satFontValues,
+                      order = satFontOrder,
+                      get = function() return Cfg("standaloneTimerFont") or "__global" end,
+                      set = function(v) Set("standaloneTimerFont", v); ApplySAT() end },
                     { type = "slider", label = "Font Size", min = 10, max = 40, step = 1,
                       get = function() return Cfg("standaloneTimerSize") or 26 end,
                       set = function(v) Set("standaloneTimerSize", v); ApplySAT() end },
+                    { type = "dropdown", label = "Font Outline",
+                      values = { INHERIT = "Default", NONE = "None", OUTLINE = "Thin", THICKOUTLINE = "Thick" },
+                      order = { "INHERIT", "NONE", "OUTLINE", "THICKOUTLINE" },
+                      get = function() return Cfg("standaloneTimerOutline") or "INHERIT" end,
+                      set = function(v) Set("standaloneTimerOutline", v); ApplySAT() end },
+                    { type = "dropdown", label = "Alignment",
+                      values = { LEFT = "Left", CENTER = "Center", RIGHT = "Right" },
+                      order = { "LEFT", "CENTER", "RIGHT" },
+                      get = function()
+                          local alignment = Cfg("standaloneTimerTextAlign")
+                          if alignment then return alignment end
+                          local anchor = Cfg("standaloneTimerAnchor") or "free"
+                          if anchor == "free" then
+                              return Cfg("standaloneTimerAlignLeft") and "LEFT" or "RIGHT"
+                          end
+                          return (anchor == "topleft" or anchor == "bottomleft") and "LEFT" or "RIGHT"
+                      end,
+                      set = function(v) Set("standaloneTimerTextAlign", v); ApplySAT() end },
                     { type = "toggle", label = "Show Decimal",
                       get = function() return Cfg("standaloneTimerDecimal") or false end,
                       set = function(v) Set("standaloneTimerDecimal", v); ApplySAT() end },
-                    { type = "toggle", label = "Align Text Left",
-                      disabled = function() return (Cfg("standaloneTimerAnchor") or "free") ~= "free" end,
-                      disabledTooltip = "Available only when Anchor to Windows is set to Free Move.",
-                      rawTooltip = true,
+                    { type = "slider", label = "Frame Width", min = 40, max = 200, step = 1,
+                      get = function() return Cfg("standaloneTimerWidth") or 70 end,
+                      set = function(v) Set("standaloneTimerWidth", v); ApplySAT() end },
+                    { type = "slider", label = "Frame Height", min = 20, max = 80, step = 1,
+                      get = function() return Cfg("standaloneTimerHeight") or 32 end,
+                      set = function(v) Set("standaloneTimerHeight", v); ApplySAT() end },
+                    { type = "colorpicker", label = "Background Color", hasAlpha = true,
                       get = function()
-                          local anchor = Cfg("standaloneTimerAnchor") or "free"
-                          if anchor ~= "free" then
-                              return anchor == "topleft" or anchor == "bottomleft"
-                          end
-                          return Cfg("standaloneTimerAlignLeft") or false
+                          local c = Cfg("standaloneTimerBackgroundColor") or { r = 0, g = 0, b = 0, a = 0 }
+                          return c.r, c.g, c.b, c.a
                       end,
-                      set = function(v) Set("standaloneTimerAlignLeft", v); ApplySAT() end },
+                      set = function(r, g, b, a)
+                          Set("standaloneTimerBackgroundColor", { r = r, g = g, b = b, a = a }); ApplySAT()
+                      end },
+                    { type = "colorpicker", label = "Border Color", hasAlpha = true,
+                      get = function()
+                          local c = Cfg("standaloneTimerBorderColor") or { r = 0, g = 0, b = 0, a = 1 }
+                          return c.r, c.g, c.b, c.a
+                      end,
+                      set = function(r, g, b, a)
+                          Set("standaloneTimerBorderColor", { r = r, g = g, b = b, a = a }); ApplySAT()
+                      end },
+                    { type = "slider", label = "Border Size", min = 0, max = 4, step = 1,
+                      get = function() return Cfg("standaloneTimerBorderSize") or 0 end,
+                      set = function(v) Set("standaloneTimerBorderSize", v); ApplySAT() end },
                     { type = "dropdown", label = "Frame Strata",
                       values = EllesmereUI.FRAME_STRATA_LABELS,
                       order = EllesmereUI.FRAME_STRATA_ORDER_BASE,
@@ -1619,6 +1648,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return SHDB().iconEnabled end,
               setValue = function(v)
                   SHDB().iconEnabled = v; RefreshSH()
+                  if ns.RegisterDMUnlock then ns.RegisterDMUnlock() end
                   EllesmereUI:RefreshPage()
               end },
             { type = "label", text = "Hold Shift+Click to Freely Move Icons" }

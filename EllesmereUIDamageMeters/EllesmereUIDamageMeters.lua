@@ -517,14 +517,24 @@ ns.RegisterDMUnlock = function()
     if DB().standaloneTimer and ns.MakeSATimerUnlockElement then
         elements[#elements + 1] = ns.MakeSATimerUnlockElement(MK)
     end
+    -- Icon History is owned by the spell-history file, but participates in the
+    -- same first-class unlock system as the meter windows and combat timer.
+    local spellHistory = DB().spellHistory
+    if spellHistory and spellHistory.iconEnabled and ns.MakeIconHistoryUnlockElement then
+        elements[#elements + 1] = ns.MakeIconHistoryUnlockElement(MK)
+    end
     EUI:RegisterUnlockElements(elements, "EllesmereUIDamageMeters")
-    -- Drop registrations for window slots beyond the live count and the timer while disabled (symmetric across profile swaps)
+    -- Drop registrations for window slots beyond the live count and optional
+    -- elements while disabled (symmetric across profile swaps).
     if EUI.UnregisterUnlockElement then
         for i = #_windows + 1, MAX_WINDOWS do
             EUI:UnregisterUnlockElement("EDM_Win" .. i)
         end
         if not DB().standaloneTimer then
             EUI:UnregisterUnlockElement("EDM_CombatTimer")
+        end
+        if not (spellHistory and spellHistory.iconEnabled) then
+            EUI:UnregisterUnlockElement("EDM_IconHistory")
         end
     end
 end
@@ -814,10 +824,11 @@ local function GetDMOutline()
     return (EUI and EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("damageMeters")) or ""
 end
 
-local function SetDMFont(fs, size)
+local function SetDMFont(fs, size, flagsOverride, fontOverride)
     if not (fs and fs.SetFont) then return end
-    local font = GetDMFont()
-    local flags = GetDMOutline()
+    local font = fontOverride or GetDMFont()
+    local flags = flagsOverride
+    if flags == nil then flags = GetDMOutline() end
     if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(fs, flags == "") end
     fs:SetFont(font, size, flags)
 end
@@ -933,11 +944,15 @@ local function ApplyBarTexture(fill, texPath, texKey)
     end
 end
 
--- Physical pixel spacing: convert user values to physical pixels (user setting = physical pixel count)
+-- Physical pixel spacing: convert user values to physical pixels (user setting = physical pixel count).
+-- Snapped through PP.Scale so accumulated row offsets (stride * index) don't drift off the pixel
+-- grid from float dust -- without this, a spacing of 1 can round to 0px on some rows and 2px on others.
 local function PhysicalPixels(userValue)
     local PP = EUI and EUI.PP
     local mult = (PP and PP.mult) or 1
-    return (userValue or 0) * mult
+    local value = (userValue or 0) * mult
+    if PP and PP.Scale then return PP.Scale(value) end
+    return value
 end
 
 -- Number formatting
@@ -1306,6 +1321,19 @@ local _activeRow = nil
 
 local TT_HDR_H = 20
 
+-- Same conversion as PhysicalPixels(), but snapped against the tooltip frame's own
+-- effective scale. The hover tooltip has its own user-configurable hoverTooltipScale
+-- (SetScale), independent of the addon-wide UI scale that PP.mult is derived from --
+-- using the global PhysicalPixels() here rounds bar spacing to the wrong pixel grid
+-- whenever hoverTooltipScale isn't 100%.
+local function TTPhysicalPixels(userValue)
+    local PP = EUI and EUI.PP
+    if not PP or not PP.perfect or not PP.SnapForES or not _ttFrame then return PhysicalPixels(userValue) end
+    local es = _ttFrame:GetEffectiveScale()
+    local onePixel = PP.perfect / es
+    return PP.SnapForES((userValue or 0) * onePixel, es)
+end
+
 local function BlizzardSkinBordersAvailable()
     return C_AddOns and C_AddOns.IsAddOnLoaded
         and C_AddOns.IsAddOnLoaded("EllesmereUIBlizzardSkin")
@@ -1375,7 +1403,7 @@ end
 local function EnsureTTBar(i)
     if _ttBars[i] then return _ttBars[i] end
     EnsureTooltipFrame()
-    local ttSp = PhysicalPixels(1)
+    local ttSp = TTPhysicalPixels(1)
     local b = {}
     b.row = CreateFrame("Frame", nil, _ttFrame)
     b.row:SetHeight(TT_BAR_H)
@@ -1414,7 +1442,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     if not C_DamageMeter then return false end
 
     -- Reposition tooltip bars with physical-pixel spacing (only when spacing changes)
-    local ttSp = PhysicalPixels(1)
+    local ttSp = TTPhysicalPixels(1)
     local ttStride = TT_BAR_H + ttSp
     if ttSp ~= _ttLastSp then
         _ttLastSp = ttSp
@@ -1464,7 +1492,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
         -- Reverse to oldest-first
         local reversed = {}
         for ri = #raw, 1, -1 do reversed[#reversed + 1] = raw[ri] end
-        ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", EllesmereUI.L("Death Recap"))
+        ApplyTTHeader(StripRealm(bar._src.name), EllesmereUI.L("Death Recap"))
         local texPath, texKey = GetBreakdownBarTexturePath()
         local deathTime = reversed[#reversed] and reversed[#reversed].timestamp
         if IsSecret(deathTime) then deathTime = nil end
@@ -1619,7 +1647,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     end
     if not srcData or not srcData.combatSpells or #srcData.combatSpells == 0 then return false end
 
-    ApplyTTHeader(StripRealm(bar._src.name) or "Unknown", L(DM_TYPE_NAMES[curDMType] or "Damage Done"))
+    ApplyTTHeader(StripRealm(bar._src.name), L(DM_TYPE_NAMES[curDMType] or "Damage Done"))
 
     wipe(_ttSorted)
     for _, spell in ipairs(srcData.combatSpells) do
@@ -1690,7 +1718,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
             -- Lazy-create tooltip target elements
             if not _ttFrame._tgtDivider then
                 _ttFrame._tgtDivider = _ttFrame:CreateTexture(nil, "ARTWORK")
-                _ttFrame._tgtDivider:SetHeight(PhysicalPixels(1)); _ttFrame._tgtDivider:SetColorTexture(1, 1, 1, 0.15)
+                _ttFrame._tgtDivider:SetHeight(TTPhysicalPixels(1)); _ttFrame._tgtDivider:SetColorTexture(1, 1, 1, 0.15)
                 _ttFrame._tgtLabel = _ttFrame:CreateFontString(nil, "OVERLAY")
                 SetDMFont(_ttFrame._tgtLabel, 9); _ttFrame._tgtLabel:SetTextColor(0.6, 0.6, 0.6, 1)
                 _ttFrame._tgtLabel:SetText(EllesmereUI.L("Targets"))
@@ -1780,13 +1808,15 @@ local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
     if cfg.showHoverTooltip == false then return end
     EnsureTooltipFrame()
 
+    -- Scale before populating: the row stride snaps against the frame's effective scale.
+    local scale = (cfg.hoverTooltipScale or 100) / 100
+    if scale ~= _ttLastScale then
+        _ttFrame:SetScale(scale)
+        _ttLastScale = scale
+    end
+
     -- Always rebuild from fresh data (no GUID cache); PopulatePreview costs ~0.5ms, fine for a hover action
     if PopulatePreview(bar, curSession, curSessionID, curDMType) then
-        local scale = (cfg.hoverTooltipScale or 100) / 100
-        if scale ~= _ttLastScale then
-            _ttFrame:SetScale(scale)
-            _ttLastScale = scale
-        end
         AnchorBreakdownFrame(bar.row, bar._win and bar._win.frame)
         _ttFrame:Show()
     else
@@ -2245,7 +2275,7 @@ local function CreateDMWindow(winIdx)
                 end
                 if not hasRecap then
                     EnsureTooltipFrame()
-                    local playerName = StripRealm(bar._src.name) or "Unknown"
+                    local playerName = StripRealm(bar._src.name)
                     _ttFrame._hdrText:SetText(EllesmereUI.Lf("%1$s's Death Recap", playerName))
                     local cfg2 = DB()
                     local hc = cfg2.hdrBgColor; local hR = hc and hc.r or 0x1B/255; local hG = hc and hc.g or 0x1B/255; local hB = hc and hc.b or 0x1B/255
@@ -2270,7 +2300,7 @@ local function CreateDMWindow(winIdx)
                and W.curDMType ~= Enum.DamageMeterType.Deaths then
                 EnsureTooltipFrame()
                 -- Show header with player name + type
-                local playerName = StripRealm(bar._src and bar._src.name) or "Unknown"
+                local playerName = StripRealm(bar._src and bar._src.name)
                 local typeName = L(DM_TYPE_NAMES[W.curDMType] or "Damage Done")
                 _ttFrame._hdrText:SetText(EllesmereUI.Lf("%1$s's %2$s Breakdown", playerName, typeName))
                 local cfg2 = DB()
@@ -2947,7 +2977,7 @@ local function CreateDMWindow(winIdx)
     local _scrollRefreshPending = false
     viewport:EnableMouseWheel(true)
     viewport:SetScript("OnMouseWheel", function(_, delta)
-        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + PhysicalPixels(c.barSpacing)) * 2
+        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + (c.barSpacing or 2)) * 2
         local cur = viewport:GetVerticalScroll() or 0
         local newVal = math.max(0, math.min(_scrollMax, cur - delta * step))
         viewport:SetVerticalScroll(newVal)
@@ -2993,7 +3023,7 @@ local function CreateDMWindow(winIdx)
     local _srcScrollMax = 0
     W.srcViewport:EnableMouseWheel(true)
     W.srcViewport:SetScript("OnMouseWheel", function(_, delta)
-        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + PhysicalPixels(c.barSpacing)) * 2
+        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + (c.barSpacing or 2)) * 2
         local cur = W.srcViewport:GetVerticalScroll() or 0
         W.srcViewport:SetVerticalScroll(math.max(0, math.min(_srcScrollMax, cur - delta * step)))
     end)
@@ -3225,7 +3255,7 @@ local function CreateDMWindow(winIdx)
 
     local function RecalcViewport(dataCount)
         if not viewport or not content then return end
-        local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing)
+        local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = c.barSpacing or 2
         local totalH = dataCount * (barH + barSp)
         content:SetHeight(math.max(10, totalH))
         local viewH = viewport:GetHeight(); if viewH < 1 then viewH = 1 end
@@ -3251,7 +3281,7 @@ local function CreateDMWindow(winIdx)
         local playerIdx
         for i, src in ipairs(sources) do if src.isLocalPlayer then playerIdx = i; break end end
         if not playerIdx then W.stickyPlayer.row:Hide(); W.stickySep:Hide(); ResetScrollAnchors(); W.stickyAtTop = false; return end
-        local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+        local barH = PhysicalPixels(c.barHeight or 18); local barSp = c.barSpacing or 2; local stride = barH + barSp
         local scrollVal = viewport:GetVerticalScroll() or 0
         local fullViewH = frame:GetHeight() - GetHeaderH()
         if fullViewH < 1 then fullViewH = 1 end
@@ -3352,11 +3382,11 @@ local function CreateDMWindow(winIdx)
         -- Name: only when source name changes (guard secret values)
         local srcName = src.name
         if issecretvalue and issecretvalue(srcName) then
-            bar.label:SetText(StripRealm(srcName) or "You")
+            bar.label:SetText(StripRealm(srcName))
             W._stickyNameCache = nil
         elseif srcName ~= W._stickyNameCache then
             W._stickyNameCache = srcName
-            bar.label:SetText(StripRealm(srcName) or "You")
+            bar.label:SetText(StripRealm(srcName))
         end
         if isDeaths then
             local isOverall = (not W.curSessionID and W.curSession == Enum.DamageMeterSessionType.Overall)
@@ -3381,7 +3411,7 @@ local function CreateDMWindow(winIdx)
         if session and session.combatSources then
 
             local sources = session.combatSources
-            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = c.barSpacing or 2; local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local fontSize = leftFS -- compat for cacheKey
             local showIcon = (c.iconStyle or "spec") ~= "none"
@@ -3684,7 +3714,7 @@ local function CreateDMWindow(winIdx)
             local reversed = {}
             for ri = #events, 1, -1 do reversed[#reversed + 1] = events[ri] end
             local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
-            local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local barSp = c.barSpacing or 2; local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local texPath, texKey = GetBarTexturePath()
             local deathTime = reversed[#reversed] and reversed[#reversed].timestamp
@@ -3797,7 +3827,7 @@ local function CreateDMWindow(winIdx)
                 if W.spellPool then for i = 1, BAR_POOL_SIZE do W.spellPool[i].row:Hide() end end
                 return
             end
-            local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local barSp = c.barSpacing or 2; local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local texPath, texKey = GetBarTexturePath()
             local maxAmt = players[1].total
@@ -3849,7 +3879,7 @@ local function CreateDMWindow(winIdx)
             return
         end
         local spells = srcData.combatSpells; local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
-        local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp; local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11; local texPath, texKey = GetBarTexturePath()
+        local barSp = c.barSpacing or 2; local stride = barH + barSp; local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11; local texPath, texKey = GetBarTexturePath()
         local sorted = {}
         for _, spell in ipairs(spells) do local ok, amt = pcall(function() return spell.totalAmount end); sorted[#sorted + 1] = { spell = spell, amount = (ok and amt) or 0 } end
         -- API returns combatSpells pre-sorted; no table.sort needed
@@ -4510,8 +4540,25 @@ end
 -- Standalone Combat Timer
 local _saTimer  -- frame reference
 local _saTimerFS -- fontstring
+local _saTimerBG -- backdrop texture
+local _saTimerBorder -- PP border child frame
 local _saTimerPreview = false
 local _saTimerLive = false  -- last live/idle state seen (drives OOC desaturation)
+
+local function GetSATimerPreviewText()
+    return DB().standaloneTimerDecimal and "11:37.0" or "11:37"
+end
+
+-- Per-user font override for the standalone timer only (standaloneTimerFont,
+-- a dropdown key: "__global"/nil = follow the Damage Meters module font).
+local function GetSATimerFontOverride()
+    local key = DB().standaloneTimerFont
+    if key and key ~= "__global" and EllesmereUI and EllesmereUI.ResolveFontName then
+        local path = EllesmereUI.ResolveFontName(key)
+        if path and path ~= "" then return path end
+    end
+    return nil
+end
 
 local function GetSATimerColor()
     local cfg = DB()
@@ -4536,23 +4583,64 @@ local function ApplySATimerStyle()
     if not _saTimer or not _saTimerFS then return end
     local cfg = DB()
     _saTimer:SetFrameStrata(cfg.standaloneTimerStrata or "HIGH")
-    SetDMFont(_saTimerFS, cfg.standaloneTimerSize or 14)
+
+    local outline = cfg.standaloneTimerOutline or "INHERIT"
+    local outlineFlags
+    if outline == "NONE" then
+        outlineFlags = ""
+    elseif outline == "THICKOUTLINE" then
+        outlineFlags = "THICKOUTLINE"
+    elseif outline == "INHERIT" then
+        outlineFlags = nil
+    else
+        outlineFlags = "OUTLINE"
+    end
+    SetDMFont(_saTimerFS, cfg.standaloneTimerSize or 26, outlineFlags, GetSATimerFontOverride())
     ApplySATimerColor()
+
+    local previousText = _saTimerFS:GetText()
+    -- Auto-size worst case must cover the decimal form, or live tenths clip.
+    _saTimerFS:SetText(cfg.standaloneTimerDecimal and "99:99.9" or "99:99")
+    local autoWidth = (_saTimerFS:GetStringWidth() or 30) + 4
+    local autoHeight = (_saTimerFS:GetStringHeight() or 14) + 4
+    _saTimerFS:SetText(previousText)
+    _saTimer:SetSize(cfg.standaloneTimerWidth and math.max(40, cfg.standaloneTimerWidth) or autoWidth,
+                     cfg.standaloneTimerHeight and math.max(20, cfg.standaloneTimerHeight) or autoHeight)
+
+    if _saTimerBG then
+        local c = cfg.standaloneTimerBackgroundColor or { r = 0, g = 0, b = 0, a = 0 }
+        _saTimerBG:SetColorTexture(c.r or 0, c.g or 0, c.b or 0, c.a or 0)
+    end
+
+    if _saTimerBorder then
+        local PP = EllesmereUI and EllesmereUI.PP
+        local c = cfg.standaloneTimerBorderColor or { r = 0, g = 0, b = 0, a = 1 }
+        local borderSize = math.max(0, math.floor((cfg.standaloneTimerBorderSize or 0) + 0.5))
+        if borderSize > 0 and PP and PP.UpdateBorder then
+            PP.UpdateBorder(_saTimerBorder, borderSize, c.r or 0, c.g or 0, c.b or 0, c.a == nil and 1 or c.a)
+            _saTimerBorder:Show()
+        else
+            _saTimerBorder:Hide()
+        end
+    end
+
     _saTimerFS:ClearAllPoints()
-    local anchor = cfg.standaloneTimerAnchor or "free"
-    local alignLeft
-    if anchor == "free" then
-        alignLeft = cfg.standaloneTimerAlignLeft
-    else
-        alignLeft = anchor == "topleft" or anchor == "bottomleft"
+    local borderSize = cfg.standaloneTimerBorderSize or 0
+    local inset = borderSize > 0 and borderSize + 3 or 0
+    _saTimerFS:SetPoint("LEFT", _saTimer, "LEFT", inset, 0)
+    _saTimerFS:SetPoint("RIGHT", _saTimer, "RIGHT", -inset, 0)
+    -- Preserve the old binary left-align preference until the user chooses
+    -- a value in the new three-way alignment control.
+    local textAlign = cfg.standaloneTimerTextAlign
+    if not textAlign then
+        local anchor = cfg.standaloneTimerAnchor or "free"
+        if anchor == "free" then
+            textAlign = cfg.standaloneTimerAlignLeft and "LEFT" or "RIGHT"
+        else
+            textAlign = (anchor == "topleft" or anchor == "bottomleft") and "LEFT" or "RIGHT"
+        end
     end
-    if alignLeft then
-        _saTimerFS:SetPoint("LEFT")
-        _saTimerFS:SetJustifyH("LEFT")
-    else
-        _saTimerFS:SetPoint("RIGHT")
-        _saTimerFS:SetJustifyH("RIGHT")
-    end
+    _saTimerFS:SetJustifyH(textAlign)
 end
 
 -- Decimal display: API duration is whole seconds, so tenths are derived from a GetTime() anchor
@@ -4698,20 +4786,17 @@ local function CreateSATimer()
         end
     end)
 
-    _saTimerFS = _saTimer:CreateFontString(nil, "OVERLAY")
-    _saTimerFS:SetPoint("RIGHT")
-    ApplySATimerStyle()
-    _saTimerFS:SetText("0:00")
+    _saTimerBG = _saTimer:CreateTexture(nil, "BACKGROUND")
+    _saTimerBG:SetAllPoints()
 
-    -- Size to text
-    _saTimer:SetScript("OnSizeChanged", nil)
-    local function ResizeToText()
-        local w = (_saTimerFS:GetStringWidth() or 30) + 4
-        local h = (_saTimerFS:GetStringHeight() or 14) + 4
-        _saTimer:SetSize(w, h)
-    end
-    _saTimerFS:SetText("99:99")
-    ResizeToText()
+    _saTimerBorder = CreateFrame("Frame", nil, _saTimer)
+    _saTimerBorder:SetAllPoints(_saTimer)
+    _saTimerBorder:SetFrameLevel(_saTimer:GetFrameLevel() + 5)
+    local PP = EllesmereUI and EllesmereUI.PP
+    if PP and PP.CreateBorder then PP.CreateBorder(_saTimerBorder, 0, 0, 0, 1, 1) end
+
+    _saTimerFS = _saTimer:CreateFontString(nil, "OVERLAY")
+    ApplySATimerStyle()
     _saTimerFS:SetText("0:00")
 
     RepositionSATimer()
@@ -4725,15 +4810,10 @@ ns.ApplySATimer = function()
     if cfg.standaloneTimer then
         if not _saTimer then CreateSATimer() end
         ApplySATimerStyle()
-        -- Resize for new font size (measure with worst-case, then restore)
         local prevText = _saTimerFS:GetText()
-        _saTimerFS:SetText("99:99")
-        local w = (_saTimerFS:GetStringWidth() or 30) + 4
-        local h = (_saTimerFS:GetStringHeight() or 14) + 4
-        _saTimer:SetSize(w, h)
         RepositionSATimer()
         if _saTimerPreview then
-            _saTimerFS:SetText("11:37")
+            _saTimerFS:SetText(GetSATimerPreviewText())
         else
             _saTimerFS:SetText(prevText or "0:00")
             UpdateSATimerText()
@@ -4752,7 +4832,7 @@ ns.ShowSATimerPreview = function()
         return
     end
     _saTimerPreview = true
-    _saTimerFS:SetText("11:37")
+    _saTimerFS:SetText(GetSATimerPreviewText())
     _saTimer:Show()
 end
 ns.HideSATimerPreview = function()
@@ -5182,6 +5262,9 @@ initFrame:SetScript("OnEvent", function(self)
             _windows[i] = CreateDMWindow(i)
             ns.ApplyWindowBorder()
         end
+        -- Spell History caches its profile table; refresh it before rebuilding
+        -- optional unlock registrations so enable state and positions agree.
+        if ns.RefreshSpellHistoryProfile then ns.RefreshSpellHistoryProfile() end
         -- Refresh unlock registrations for the new profile's window count
         ns.RegisterDMUnlock()
         -- Recreate standalone timer if enabled

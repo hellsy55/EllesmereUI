@@ -32,39 +32,6 @@ local GetTime = GetTime
 local _, _playerClass = UnitClass("player")
 local _isDruid = (_playerClass == "DRUID")
 
--------------------------------------------------------------------------------
---  Memory Profiling (temporary)
--------------------------------------------------------------------------------
-local _memProf = {}
-local _memProfLast = 0
-local function MemSnap(label)
-    local kb = collectgarbage("count")
-    if not _memProf[label] then _memProf[label] = { total = 0, calls = 0, peak = 0 } end
-    _memProf[label]._pre = kb
-end
-local function MemDelta(label)
-    local p = _memProf[label]
-    if not p or not p._pre then return end
-    local delta = collectgarbage("count") - p._pre
-    p.total = p.total + delta
-    p.calls = p.calls + 1
-    if delta > p.peak then p.peak = delta end
-    p._pre = nil
-end
-local function MemReport()
-    local now = GetTime()
-    if now - _memProfLast < 10 then return end
-    _memProfLast = now
-    local sorted = {}
-    for k, v in pairs(_memProf) do
-        sorted[#sorted + 1] = { name = k, total = v.total, calls = v.calls, peak = v.peak }
-    end
-    table.sort(sorted, function(a, b) return a.total > b.total end)
-    for k in pairs(_memProf) do _memProf[k] = { total = 0, calls = 0, peak = 0 } end
-end
-ns._MemSnap = MemSnap
-ns._MemDelta = MemDelta
-
 ns._spellOrderDirty = true  -- start dirty so first reanchor builds caches
 
 -- Per-frame decoration state (weak-keyed)
@@ -522,7 +489,11 @@ end
 -- entry) at one getmetatable+compare cost; nil-frame callers bypass the memo.
 local function ResolveSpellSettings(frame, sid2, sd2, barKey)
     local fc0 = frame and _ecmeFC[frame]
+    -- sd2 == false is the LAZY sentinel: the per-repaint hooks pass it instead of
+    -- fetching the bar's spell data up front, so the store walk behind
+    -- GetBarSpellData runs only on a memo miss (the hit path never needs it).
     if not fc0 or not sid2 then
+        if sd2 == false then sd2 = (barKey and ns.GetBarSpellData) and ns.GetBarSpellData(barKey) or nil end
         return ResolveSpellSettingsUncached(frame, sid2, sd2, barKey)
     end
     local bk = barKey or fc0.barKey
@@ -533,6 +504,7 @@ local function ResolveSpellSettings(frame, sid2, sd2, barKey)
         ns.ChainSettings(v, fc0.ssRTier)
         return v
     end
+    if sd2 == false then sd2 = ns.GetBarSpellData and ns.GetBarSpellData(bk) end
     local res = ResolveSpellSettingsUncached(frame, sid2, sd2, barKey)
     fc0.ssRGen = ns._cdmResGen
     fc0.ssRSid = sid2
@@ -1348,7 +1320,7 @@ function ns._ResolveCdmSS(frame)
     local sid2 = fc2 and fc2.spellID
     local bk2 = fc2 and fc2.barKey
     if not sid2 or not bk2 then return nil end
-    return ResolveSpellSettings(frame, sid2, ns.GetBarSpellData and ns.GetBarSpellData(bk2))
+    return ResolveSpellSettings(frame, sid2, false)
 end
 
 -- Draw the styled cooldown edge -- one texture for every edge lane: the
@@ -1725,7 +1697,24 @@ local function CdReadyIsReady(liveSid, strict)
     end
     local cd = C_Spell.GetSpellCooldown(liveSid)
     if not cd then return true end
-    if strict then return not cd.isActive end
+    if strict then
+        -- Not ready while a REAL (non-GCD) cooldown runs. A filler GCD alone
+        -- must NOT block the edge: the old "any active cooldown" strict test
+        -- deferred the ready sound through continuous GCD spam until the
+        -- player stopped casting entirely.
+        if cd.isActive and not cd.isOnGCD then return false end
+        -- The one GCD-only state that is NOT ready: this spell's own hard cast
+        -- in flight (a cast-time spell raises its cooldown only on cast
+        -- SUCCESS). Exact identity check; a secret cast id fails toward
+        -- suppress -- the armed state survives and the next event retries.
+        if UnitCastingInfo then
+            local castSid = select(9, UnitCastingInfo("player"))
+            if castSid and ((issecretvalue and issecretvalue(castSid)) or castSid == liveSid) then
+                return false
+            end
+        end
+        return true
+    end
     return not (cd.isActive and not cd.isOnGCD)
 end
 
@@ -2761,7 +2750,7 @@ local function DecorateFrame(frame, barData)
                     local sidB = fcB and fcB.spellID
                     local bkB = fcB and fcB.barKey
                     local ssB = (sidB and bkB and ns.ResolveSpellSettings)
-                        and ns.ResolveSpellSettings(frame, sidB, ns.GetBarSpellData(bkB), bkB) or nil
+                        and ns.ResolveSpellSettings(frame, sidB, false, bkB) or nil
                     local sr, sg, sb
                     -- CURRENT bar's swipe alpha, not the decorate-time closure
                     -- barData: pooled frames decorate once, so it holds whichever
@@ -2792,7 +2781,7 @@ local function DecorateFrame(frame, barData)
                 -- this resolve always ran once per hook pass, just later).
                 local ss2
                 if sid2 and bk2 then
-                    ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+                    ss2 = ResolveSpellSettings(frame, sid2, false)
                 end
                 local _gcdSuppressed = false
                 -- Recharge duration of a charge spell whose recharge is running
@@ -2901,23 +2890,27 @@ local function DecorateFrame(frame, barData)
                     -- pushes a GCD via SetCooldown, whose geometry the PERSISTENT
                     -- black colour sweeps as a visible bar (SetCooldown changes
                     -- geometry, not colour, so nothing re-hides it). Paint fully
-                    -- transparent for exactly that case. Gated on Suppress GCD; normal
-                    -- hide-active spells and transforms whose proc is on its own real
-                    -- CD keep the black swipe, and a charge proc mid-recharge is
-                    -- carved out (its swipe IS the recharge).
+                    -- transparent for exactly that case, and also for a plain
+                    -- hide-active spell whose swipe color never zeroes out
+                    -- (e.g. Prismatic Barrier), which pins fd._hideActiveOverriding
+                    -- and otherwise leaks a bare GCD once charges max out. Gated
+                    -- on Suppress GCD; a spell genuinely on its own real CD keeps
+                    -- the black swipe, and a charge proc mid-recharge is carved
+                    -- out (its swipe IS the recharge).
                     local hideActiveAlpha = barData.swipeAlpha or 0.7
                     if ((bd2 and bd2.suppressGCD) or (ss2 and ss2.suppressGCD)) and sid2
                        and C_SpellBook and C_SpellBook.FindSpellOverrideByID
                        and C_Spell and C_Spell.GetSpellCooldown then
-                        local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
-                        if ovrID and ovrID > 0 and ovrID ~= sid2 then
-                            local chargeRecharging = false
-                            do
-                                local ci = CdmChargeInfoFor(frame, sid2)
-                                chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
-                            end
-                            local oc = C_Spell.GetSpellCooldown(ovrID)
-                            if not chargeRecharging and oc and not (oc.isActive and not oc.isOnGCD) then
+                        local chargeRecharging = false
+                        do
+                            local ci = CdmChargeInfoFor(frame, sid2)
+                            chargeRecharging = (ci and (ci.maxCharges or 0) > 1 and ci.isActive == true) or false
+                        end
+                        if not chargeRecharging then
+                            local ovrID = C_SpellBook.FindSpellOverrideByID(sid2)
+                            local checkID = (ovrID and ovrID > 0 and ovrID ~= sid2) and ovrID or sid2
+                            local oc = C_Spell.GetSpellCooldown(checkID)
+                            if oc and not (oc.isActive and not oc.isOnGCD) then
                                 hideActiveAlpha = 0
                             end
                         end
@@ -3149,15 +3142,6 @@ local function DecorateFrame(frame, barData)
                 local fc2 = _ecmeFC[frame]
                 local sid2 = fc2 and fc2.spellID
                 if not sid2 then return end
-                local effID = sid2
-                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
-                    local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
-                    if ovr and ovr > 0 and ovr ~= sid2 then effID = ovr end
-                end
-                -- Only re-assert for a genuine, non-GCD cooldown still running.
-                -- isActive / isOnGCD are clean bools (read bare elsewhere).
-                local cdInfo = C_Spell.GetSpellCooldown(effID) or C_Spell.GetSpellCooldown(sid2)
-                if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
                 -- Act only when the widget is cleared to ~0 (never fight a real
                 -- cooldown, GCD, or aura-display time). The secret check MUST
                 -- precede any truthiness/comparison (a secret errors on either);
@@ -3169,6 +3153,11 @@ local function DecorateFrame(frame, barData)
                 -- could never act -- see CdmStaleLinkedSpell). A stale linked spell
                 -- means Blizzard clears this widget on EVERY refresh, so there is
                 -- nothing to fight and no duration read is required to know it.
+                --
+                -- These free reads run BEFORE the spell queries below: every Clear on
+                -- every non-charge icon lands here, and the cooldown query allocates a
+                -- table per call, so the common exits (secret duration in instanced
+                -- combat, a widget still carrying a real swipe) must cost no query.
                 local staleLink = CdmStaleLinkedSpell(frame)
                 if not staleLink and cd.GetCooldownDuration then
                     local ok, curDur = pcall(cd.GetCooldownDuration, cd)
@@ -3176,6 +3165,15 @@ local function DecorateFrame(frame, barData)
                     if issecretvalue and issecretvalue(curDur) then return end
                     if curDur and curDur > 100 then return end
                 end
+                local effID = sid2
+                if C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                    local ovr = C_SpellBook.FindSpellOverrideByID(sid2)
+                    if ovr and ovr > 0 and ovr ~= sid2 then effID = ovr end
+                end
+                -- Only re-assert for a genuine, non-GCD cooldown still running.
+                -- isActive / isOnGCD are clean bools (read bare elsewhere).
+                local cdInfo = C_Spell.GetSpellCooldown(effID) or C_Spell.GetSpellCooldown(sid2)
+                if not (cdInfo and cdInfo.isActive and not cdInfo.isOnGCD) then return end
                 local durObj = C_Spell.GetSpellCooldownDuration(effID)
                     or C_Spell.GetSpellCooldownDuration(sid2)
                 if not durObj then return end
@@ -3248,7 +3246,7 @@ local function DecorateFrame(frame, barData)
                 -- only at max) and the glow lights as the last charge returns.
                 if ns._cdmAnyMaxStacksGlow then
                     local bkm = fc2 and fc2.barKey
-                    local ssm = bkm and ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bkm)) or nil
+                    local ssm = bkm and ResolveSpellSettings(frame, sid2, false) or nil
                     if ssm and ssm.maxStacksGlow and ssm.maxStacksGlow > 0 then
                         WatchMaxStacksFrame(frame, fd)
                         EvalMaxStacksFrame(frame, fd)
@@ -3655,7 +3653,7 @@ local function DecorateFrame(frame, barData)
                     end
                     return
                 end
-                local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+                local ss2 = ResolveSpellSettings(frame, sid2, false)
                 local cse = ss2 and ss2.cdStateEffect
                 -- Shift-Icons variants = base hidden mode + a bar-relayout
                 -- flag; normalize here so every comparison below is unchanged.
@@ -3668,15 +3666,14 @@ local function DecorateFrame(frame, barData)
                         fd._cdStateGlowOn = false
                     end
                     -- A preset's cdState lives in customActiveStates (Fake-Active
-                    -- engine), not per-bar spellSettings -- do not clear its hidden
-                    -- flag here or it flashes visible every desat tick.
-                    if fc2 and fc2._cdStateHidden
-                       and not (ns.PresetHasCdState and ns.PresetHasCdState(frame)) then
+                    -- engine), not per-bar spellSettings -- clearing its hidden flag
+                    -- here would flash it visible every desat tick. Those frames
+                    -- already returned through the PresetHasCdState hand-off above,
+                    -- so no re-check is needed on this path.
+                    if fc2 and fc2._cdStateHidden then
                         fc2._cdStateHidden = false
                     end
-                    if fc2 and fc2._cdStateShiftHidden
-                       and not (ns.PresetHasCdState and ns.PresetHasCdState(frame))
-                       and ns.SetCdStateShiftHidden then
+                    if fc2 and fc2._cdStateShiftHidden and ns.SetCdStateShiftHidden then
                         ns.SetCdStateShiftHidden(fc2, false)
                     end
                     return
@@ -3851,7 +3848,7 @@ local function DecorateFrame(frame, barData)
                 local sid2 = fc2 and fc2.spellID
                 local bk2 = fc2 and fc2.barKey
                 if not sid2 or not bk2 then return end
-                local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+                local ss2 = ResolveSpellSettings(frame, sid2, false)
                 if not (ss2 and ss2.desatNotActive) then
                     -- Setting turned off: re-saturate if WE greyed this icon, so it
                     -- doesn't stay desaturated until the next cooldown event.
@@ -3897,7 +3894,7 @@ local function DecorateFrame(frame, barData)
                 local sid2 = fc2 and fc2.spellID
                 local bk2 = fc2 and fc2.barKey
                 if not sid2 or not bk2 then return end
-                local ss2 = ResolveSpellSettings(frame, sid2, ns.GetBarSpellData(bk2))
+                local ss2 = ResolveSpellSettings(frame, sid2, false)
                 if not (ss2 and ss2.noDesatOnCD) then return end
                 if ss2.desatNotActive then return end
                 fd._isProcessingOverride = true
@@ -3963,6 +3960,7 @@ end
 local _trinketFrames = {}
 ns._trinketFrames = _trinketFrames
 local _trinketItemCache = { [13] = nil, [14] = nil }
+local _trinketEventFrame = CreateFrame("Frame")
 
 local function GetOrCreateTrinketFrame(slotID)
     local f = _trinketFrames[slotID]
@@ -4062,9 +4060,21 @@ local function UpdateTrinketFrame(slotID)
     local itemID = GetInventoryItemID("player", slotID)
     _trinketItemCache[slotID] = itemID
     if not itemID then
+        f._slotScanPending = nil
         f:Hide()
         return
     end
+    -- Item data not in the client cache yet (cold cache at login): GetItemSpell
+    -- reads nil for an on-use item, which the passive test below would take as
+    -- conclusive and nothing would ever re-scan. Keep the previous state,
+    -- request the load and let ITEM_DATA_LOAD_RESULT re-run the scan.
+    if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
+        f._slotScanPending = true
+        C_Item.RequestLoadItemDataByID(itemID)
+        _trinketEventFrame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+        return
+    end
+    f._slotScanPending = nil
     local icon = C_Item.GetItemIconByID(itemID)
     if icon and f._tex then f._tex:SetTexture(icon) end
     local _, spellID = C_Item.GetItemSpell(itemID)
@@ -4108,14 +4118,40 @@ local function UpdateTrinketFrame(slotID)
     if spellID and spellID > 0 then
         local locale = GetLocale()
         if locale == "enUS" or locale == "enGB" then
+            -- The "Use: ... (X Min Cooldown)" line is the use spell's
+            -- DESCRIPTION, loaded separately from the item data: on a cold
+            -- spell cache the tooltip omits the line entirely and the scan
+            -- would read an on-use trinket as passive. Blizzard's signal is an
+            -- empty description until SPELL_TEXT_UPDATE fires for the spell
+            -- (nil when the spell record itself is not loaded yet).
+            local desc = C_Spell.GetSpellDescription(spellID)
+            local descLoaded = desc ~= nil and desc ~= ""
+            if not descLoaded then
+                f._slotScanPending = true
+                if C_Spell.RequestLoadSpellData then C_Spell.RequestLoadSpellData(spellID) end
+                _trinketEventFrame:RegisterEvent("SPELL_TEXT_UPDATE")
+                _trinketEventFrame:RegisterEvent("SPELL_DATA_LOAD_RESULT")
+                return
+            end
             local tipData = C_TooltipInfo and C_TooltipInfo.GetItemByID(itemID)
             if tipData and tipData.lines then
-                scanConclusive = true
+                -- Conclusive only once the tooltip actually carries the Use
+                -- line (GetItemSpell only reports on-use spells, so the line
+                -- always arrives once the spell text is in); until then the
+                -- text is still loading and SPELL_TEXT_UPDATE re-runs us.
+                local usePrefix = ITEM_SPELL_TRIGGER_ONUSE
                 for _, tipLine in ipairs(tipData.lines) do
                     local lt = tipLine.leftText
+                    if lt and usePrefix and lt:sub(1, #usePrefix) == usePrefix then
+                        scanConclusive = true
+                    end
                     if lt and lt:find("Cooldown%)") then
                         local cdStr = lt:match("%((.+Cooldown)%)")
                         if cdStr then
+                            -- Tooltip data carries raw grammar tokens
+                            -- ("2 |4Min:Min; Cooldown"); reduce to the
+                            -- singular so the unit parse sees "2 Min".
+                            cdStr = cdStr:gsub("|4(%a+):[^;]*;", "%1")
                             local totalSec = 0
                             for num, unit in cdStr:gmatch("(%d+)%s*(%a+)") do
                                 local n = tonumber(num)
@@ -4130,6 +4166,12 @@ local function UpdateTrinketFrame(slotID)
                             if totalSec >= 10 then isRealOnUse = true end
                         end
                     end
+                end
+                if not scanConclusive then
+                    f._slotScanPending = true
+                    if C_Spell.RequestLoadSpellData then C_Spell.RequestLoadSpellData(spellID) end
+                    _trinketEventFrame:RegisterEvent("SPELL_TEXT_UPDATE")
+                    _trinketEventFrame:RegisterEvent("SPELL_DATA_LOAD_RESULT")
                 end
             end
         else
@@ -4191,7 +4233,6 @@ local function UpdateTrinketCooldown(slotID)
 end
 ns.UpdateTrinketCooldown = UpdateTrinketCooldown
 
-local _trinketEventFrame = CreateFrame("Frame")
 _trinketEventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 _trinketEventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 _trinketEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -4202,8 +4243,38 @@ local function SlotScanIncomplete(f)
     return (f._trinketSpellID and not f._trinketIsOnUse) or f._slotScanPending
 end
 
-_trinketEventFrame:SetScript("OnEvent", function(_, event, arg1)
-    if event == "PLAYER_EQUIPMENT_CHANGED" then
+_trinketEventFrame:SetScript("OnEvent", function(_, event, arg1, arg2)
+    if event == "ITEM_DATA_LOAD_RESULT" or event == "SPELL_DATA_LOAD_RESULT"
+       or event == "SPELL_TEXT_UPDATE" then
+        -- Registered only while a slot scan waits on the item or use-spell
+        -- data; a failed load just drops the pending flag (previous state
+        -- stands). Item loads match on the cached item id, spell loads and
+        -- description arrivals on the frame's use spell.
+        local byItem = event == "ITEM_DATA_LOAD_RESULT"
+        local ok = arg2
+        if event == "SPELL_TEXT_UPDATE" then ok = true end
+        local pending = false
+        for slot, f in pairs(_trinketFrames) do
+            if f._slotScanPending then
+                local key
+                if byItem then key = _trinketItemCache[slot] else key = f._trinketSpellID end
+                if key == arg1 then
+                    if ok then
+                        UpdateTrinketFrame(slot)
+                    else
+                        f._slotScanPending = nil
+                    end
+                    if ns.QueueReanchor then ns.QueueReanchor() end
+                end
+            end
+            if f._slotScanPending then pending = true end
+        end
+        if not pending then
+            _trinketEventFrame:UnregisterEvent("ITEM_DATA_LOAD_RESULT")
+            _trinketEventFrame:UnregisterEvent("SPELL_DATA_LOAD_RESULT")
+            _trinketEventFrame:UnregisterEvent("SPELL_TEXT_UPDATE")
+        end
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         if arg1 == 13 or arg1 == 14 or _trinketFrames[arg1] then
             UpdateTrinketFrame(arg1)
             if ns.QueueReanchor then ns.QueueReanchor() end
@@ -7180,7 +7251,17 @@ local function CollectAndReanchor()
                             local slot = ns.SlotIDFromKey(sid)
                             local tf = _trinketFrames[slot]
                             if not tf then tf = GetOrCreateTrinketFrame(slot) end
-                            UpdateTrinketFrame(slot)
+                            -- Re-decorate (icon, use spell, tooltip scan) only when the
+                            -- equipped item changed or an earlier scan was inconclusive;
+                            -- a plain re-anchor keeps the decoration and only drops the
+                            -- cooldown push memo so the next event re-derives desaturation.
+                            local itemID = GetInventoryItemID("player", slot)
+                            if itemID ~= _trinketItemCache[slot]
+                               or (itemID and tf._trinketIsOnUse == nil) or tf._slotScanPending then
+                                UpdateTrinketFrame(slot)
+                            else
+                                tf._cdMemoStart, tf._cdMemoDur = nil, nil
+                            end
                             -- Show Passive Trinkets covers the trinket slots only;
                             -- user-added slots auto-hide without a use effect.
                             local showPassive = (slot == 13 or slot == 14)
@@ -9149,6 +9230,8 @@ function ns.SetupViewerHooks()
                 -- becomes active/inactive. Run a full reanchor so new/removed
                 -- icons get collected and centered. Batched via C_Timer to
                 -- collapse the spam (fires many times per frame).
+                -- Use the throttled queue here, not a direct call, so bursts
+                -- of state changes can't stack up multiple full reanchors.
                 if frame.OnActiveStateChanged then
                     local _asDeferFrame = CreateFrame("Frame")
                     _asDeferFrame:Hide()
@@ -9158,7 +9241,7 @@ function ns.SetupViewerHooks()
                         if _asDeferTicks < 2 then return end
                         self:Hide()
                         _activeStateReanchorPending = false
-                        CollectAndReanchor()
+                        QueueReanchor()
                     end)
                     hooksecurefunc(frame, "OnActiveStateChanged", function()
                         ReapplyPositions()
@@ -9391,7 +9474,6 @@ function ns.SetupViewerHooks()
             end
             ns._btCleanFires = 0
             ns._btDirty = nil
-            MemSnap("BuffTicker")
             local p = ECME and ECME.db and ECME.db.profile
             if not p or not p.cdmBars or not p.cdmBars.bars then return true end
             local needsReanchor = false
@@ -9759,7 +9841,6 @@ function ns.SetupViewerHooks()
                 ns._pcLast = _btNow
                 ns._ProcessPresetCooldowns()
             end
-            MemDelta("BuffTicker")
             return true
         end
         -- Dirty sources with dedicated events: aura and totem flips change buff/glow
@@ -10276,6 +10357,14 @@ do
         local actionType, id, subType = GetActionInfo(slot)
         if actionType == "spell" then
             return id
+        elseif actionType == "item" then
+            -- On-use trinkets/potions/healthstones placed directly on the
+            -- action bar: hand back the itemID as a second return. Bar icons
+            -- for these track by NEGATIVE identity (-itemID for item presets,
+            -- -invSlot for "whatever's equipped in slot X" -- see
+            -- ns.INV_SLOT_NAMES / the <= -100 item-preset branch above), not a
+            -- resolved spellID, so the caller builds the matching keys itself.
+            return nil, id
         elseif actionType == "macro" then
             if subType == "spell" then
                 return id
@@ -10302,10 +10391,27 @@ do
     local function OnPress(btn, bindCmd)
         if not btn or not _anyPressMirror then return end
         local slot = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
-        local sid = SlotSpellID(slot)
-        if not sid then return end
+        local sid, itemID = SlotSpellID(slot)
+        if not sid and not itemID then return end
 
-        local pressedSet = SpellIdSet(sid)
+        local pressedSet = sid and SpellIdSet(sid) or {}
+        if itemID then
+            -- Item-preset icons (potions, healthstones, custom item ids) key
+            -- off -itemID; equipment-slot icons (trinkets -13/-14, or any
+            -- user-added slot) key off -invSlot for whatever's equipped there.
+            -- Match both, plus the item's own on-use spell for the rarer case
+            -- of it being tracked as a plain Custom Spell entry instead.
+            pressedSet[-itemID] = true
+            for invSlot in pairs(ns.INV_SLOT_NAMES) do
+                if GetInventoryItemID("player", invSlot) == itemID then
+                    pressedSet[-invSlot] = true
+                end
+            end
+            local _, useSpellID = C_Item.GetItemSpell(itemID)
+            if useSpellID then
+                for k in pairs(SpellIdSet(useSpellID)) do pressedSet[k] = true end
+            end
+        end
         local overlays
         if cdmBarIcons then
             for barKey, list in pairs(cdmBarIcons) do
