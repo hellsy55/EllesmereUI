@@ -291,9 +291,10 @@ end
 --     ns.PAB_Filters() list order (map iteration via bar.filters alone is
 --     unordered -- would make the tile flicker between refreshes). If 3+
 --     filters are selected the 3rd shown name is truncated to its first 3
---     characters + "..." as an overflow hint. Falls back to the old
---     resolved-count phrasing when no filters are selected at all (e.g. a
---     bar with only Extra Spells and Show All Buffs off).
+--     characters + "..." as an overflow hint. Falls back to the Extra
+--     Spells count when no filters are selected at all (e.g. a bar with
+--     only Extra Spells and Show All Buffs off) -- the ASSIGNED count, not
+--     the resolved one, which expands curated spell families.
 local function TruncateFilterName(name)
     return (name or ""):sub(1, 3) .. "..."
 end
@@ -372,8 +373,7 @@ local function BuildBuffBarSubtitle(bar)
     end
 
     if #names == 0 then
-        local resolved = ns.PAB_ResolveSpells and ns.PAB_ResolveSpells(bar) or (bar.spells or {})
-        return tostring(#resolved) .. " " .. L("spells")
+        return tostring(extraCount) .. " " .. L("spells")
     end
 
     if totalSelected >= 3 then

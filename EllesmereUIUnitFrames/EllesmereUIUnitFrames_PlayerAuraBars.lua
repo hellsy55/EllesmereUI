@@ -2993,6 +2993,22 @@ end
 -- Union of a buff-side cfg's direct spells (cfg.spells) and the enabled spells of
 -- every filter it references (cfg.filters), minus own-only tracking (see above).
 -- Sorted so the caller's signature diffing stays deterministic.
+--
+-- Curated FAMILIES (a primary plus its `alts`: rank/talent ids for one buff, and
+-- multi-state buffs like Aspect of Harmony whose aura swaps spell ID as it advances)
+-- expand here, as the Raid Frames Buff Manager does in BmIncludeMap. Not at write
+-- time: the Filter Editor and both spell dropdowns collapse a family into ONE
+-- same-named row, so only one member is ever reachable to add or toggle, and saved
+-- filters hold that member alone. An explicit `false` still wins, so unchecking a
+-- member whose name differs from its primary's (the only kind with its own row) sticks.
+local function ExpandFamily(set, id, blocked)
+    local fam = ns.PAB_SPELL_FAMILY and ns.PAB_SPELL_FAMILY[id]
+    if not fam then return end
+    for i = 1, #fam do
+        if not (blocked and blocked[fam[i]] == false) then set[fam[i]] = true end
+    end
+end
+
 function ns.PAB_ResolveSpells(cfg)
     local set = {}
     local direct
@@ -3002,6 +3018,8 @@ function ns.PAB_ResolveSpells(cfg)
         for i = 1, #spells do
             set[spells[i]] = true
             direct[spells[i]] = true
+            ExpandFamily(direct, spells[i])
+            ExpandFamily(set, spells[i])
         end
     end
     -- Under the broad modes (All Buffs / Has Duration) the hide-lane filters leave via
@@ -3015,20 +3033,30 @@ function ns.PAB_ResolveSpells(cfg)
             local f = ns.PAB_GetFilter(filterId)
             if f then
                 for id, on in pairs(f.spells) do
-                    if on then set[id] = true end
+                    if on then
+                        set[id] = true
+                        ExpandFamily(set, id, f.spells)
+                    end
                 end
             end
         end
     end
     local negFilters = addMode and cfg.negFilters or nil
     if negFilters then
+        local hide = {}
         for filterId in pairs(negFilters) do
             local f = ns.PAB_GetFilter(filterId)
             if f then
                 for id, on in pairs(f.spells) do
-                    if on and not (direct and direct[id]) then set[id] = nil end
+                    if on then
+                        hide[id] = true
+                        ExpandFamily(hide, id, f.spells)
+                    end
                 end
             end
+        end
+        for id in pairs(hide) do
+            if not (direct and direct[id]) then set[id] = nil end
         end
     end
     local out = {}
@@ -3222,6 +3250,16 @@ do
         BM2_FILTER_SEED[#BM2_FILTER_SEED + 1] =
             { name = def.name, enabled = enabled, disabled = disabled }
     end
+    -- Every member of a curated family (primary + its alternates) maps to the whole
+    -- member list, so PAB_ResolveSpells can expand from whichever id the user has.
+    -- Families are disjoint, so one carried by two preset filters rewrites an equal entry.
+    local fams = {}
+    for primary, alts in pairs(PRESET_ALTS) do
+        local fam = { primary }
+        for i = 1, #alts do fam[#fam + 1] = alts[i] end
+        for i = 1, #fam do fams[fam[i]] = fam end
+    end
+    ns.PAB_SPELL_FAMILY = fams
 end
 ns.PAB_SPELL_CLASS_HINTS = SPELL_CLASS_HINTS
 
