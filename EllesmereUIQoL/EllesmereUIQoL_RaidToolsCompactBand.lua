@@ -9,6 +9,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --    * Its own Enable switch -- it can run at the same time as ANY Raid
 --      Tools "Show as" layout (One Window, Two Windows, Only Group & Pull,
 --      Only Markers), or with Raid Tools fully disabled ("Never").
+--    * Only ever shown while actually in a raid group -- Enable just arms
+--      it; the band itself stays hidden in a party or solo and appears/
+--      disappears automatically as raid membership changes (see
+--      InRaidGroup/Apply and the GROUP_ROSTER_UPDATE handler below).
 --    * Its own Always / Mouseover display option, set from the options page.
 --    * Its own saved position, size and background color/opacity,
 --      independent of Raid Tools' windows.
@@ -105,6 +109,13 @@ end
 local function Enabled()
     local p = P()
     return p and p.enabled or false
+end
+
+-- The band is only useful with raid tools (markers, ready check, pull
+-- timer) to hand out, so it only ever shows while actually in a raid group
+-- -- same as it hides itself outside a raid even if the Enable switch is on.
+local function InRaidGroup()
+    return IsInRaid() and true or false
 end
 
 local function Visibility()
@@ -661,7 +672,7 @@ end
 -------------------------------------------------------------------------------
 function Apply()
     if not db then return end
-    if not Enabled() then
+    if not Enabled() or not InRaidGroup() then
         if shell.frame then shell.frame:Hide() end
         return
     end
@@ -687,6 +698,10 @@ ev:SetScript("OnEvent", function(_, event)
     if not Enabled() then return end
     if event == "RAID_TARGET_UPDATE" then
         RefreshMarkerState()
+    elseif event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+        -- Membership just changed (or we just loaded in) -- re-run Apply so
+        -- the band shows/hides itself depending on whether we're in a raid.
+        Apply()
     else
         RefreshPermissions()
     end
@@ -714,9 +729,9 @@ local function RegisterUnlock()
             label = "Compact Band",
             group = "Raid Tools",
             order = 545,
-            isHidden = function() return not Enabled() end,
+            isHidden = function() return not Enabled() or not InRaidGroup() end,
             getFrame = function()
-                if not Enabled() then return nil end
+                if not Enabled() or not InRaidGroup() then return nil end
                 Build()
                 return shell.frame
             end,

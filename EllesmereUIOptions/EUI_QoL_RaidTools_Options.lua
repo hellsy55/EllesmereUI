@@ -484,7 +484,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Enable Compact Band",
-              tooltip = "Adds the 9.0.7 Compact Band -- markers, ready check and pull timer in one resizable row -- as its OWN window. It runs alongside whichever Show as layout is picked above (or with Raid Tools fully off), and moves and resizes independently through Unlock Mode.",
+              tooltip = "Adds a compact Raid Tools window -- target/world markers, ready check, role check and pull timer in one resizable row. It runs alongside whichever Show as layout is picked above (or with Raid Tools fully off), moves and resizes independently through Unlock Mode, and only appears while you're actually in a raid group.",
               getValue = function() return CBCfg("enabled") and true or false end,
               setValue = function(v)
                   CBSet("enabled", v)
