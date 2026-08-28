@@ -8639,6 +8639,19 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         if store then store.visibilityMatch = on and "any" or nil end
     end
 
+    -- A Show-lane option axis narrows showing to a subset, which is precisely what Always
+    -- claims not to do, so the two must never read as checked together. Mode and group rows
+    -- drop always from the selection itself; the option axes live outside it, so the
+    -- contradiction is reconciled in GetChecked/SetChecked instead. This holds under either
+    -- match mode: always is not one of the tallied axes, so under Any it adds no disjunct
+    -- and a Show lane is left as the only one -- the same narrowing, reached differently.
+    local function AnyShowOptActive()
+        for _, d in pairs(defs) do
+            if d.axis == "opt" and GetOpt(d.show) then return true end
+        end
+        return false
+    end
+
     local cbDD, cbDDRefresh
     local pendingRefresh = false
 
@@ -8646,12 +8659,18 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     -- REBUILD waits for menu close: rebuilding under the open menu destroys the button
     -- it is anchored to, and the point of a checklist is setting several axes in one
     -- visit. Terminal picks (Never/Always, orphans) close the menu themselves.
-    local function AfterChange(closeMenu, isOption)
-        if isOption and opts.onOptionChanged then
-            opts.onOptionChanged()
-        elseif opts.onChanged then
-            opts.onChanged()
-        end
+    -- alsoOther: this click wrote a mode AND an option (an option axis that had to clear
+    -- Never, or Always clearing the Show lanes), so both chains run. Neither is a subset of
+    -- the other -- Action Bars' option chain recompiles the housing driver its mode chain
+    -- never touches, and its mode chain rebuilds the page on a Never flip.
+    local function AfterChange(closeMenu, isOption, alsoOther)
+        local optionFn = (isOption or alsoOther) and opts.onOptionChanged
+        local modeFn = ((not isOption) or alsoOther) and opts.onChanged
+        if optionFn then optionFn() end
+        if modeFn then modeFn() end
+        -- Fallback kept from before: an option write on a caller that only supplies
+        -- onChanged still gets that chain rather than nothing.
+        if not optionFn and not modeFn and opts.onChanged then opts.onChanged() end
         pendingRefresh = true
         if closeMenu and cbDD and cbDD._ddMenu then cbDD._ddMenu:Hide() end
     end
@@ -8677,6 +8696,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             end
             return true
         end
+        if k == "always" then return sel.always == true and not AnyShowOptActive() end
         return sel[k] == true
     end
 
@@ -8704,7 +8724,21 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             if neg then lane, other = def.hide, def.show end
             SetOpt(lane, checked)
             if checked then SetOpt(other, false) end
-            AfterChange(false, true)
+            -- Switching a lane on while Never is picked would be a no-op, so the click leaves
+            -- Never: the selection empties and WriteSel's never-empty invariant lands on
+            -- Always, which is the base a Hide lane needs and the one a Show lane then narrows
+            -- (GetChecked unchecks Always for it). Unchecking a lane leaves Never alone --
+            -- clearing a condition is not a request to start showing.
+            local clearedNever = false
+            if checked then
+                local sel, store = Sel()
+                if store and sel.never then
+                    sel.never = nil
+                    WriteSel(sel, store)
+                    clearedNever = true
+                end
+            end
+            AfterChange(false, true, clearedNever)
             return
         end
 
@@ -8754,12 +8788,24 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         end
 
         if k == "never" or k == "always" then
-            -- Exclusive and terminal, like a plain single-select. Deliberately does NOT
-            -- clear the option axes: they are separate constraints, same as before.
+            -- Exclusive and terminal, like a plain single-select.
             for key in pairs(sel) do sel[key] = nil end
             if checked then sel[k] = true end
             WriteSel(sel, store)
-            AfterChange(true)
+            -- Always is the unrestricted state, so it clears the Show lanes that would
+            -- otherwise keep its own box unchecked (GetChecked) and make this click a no-op.
+            -- Hide lanes are exceptions on top of showing and survive, as do both lanes under
+            -- Never: picking Never suppresses the option axes, it does not reset them.
+            local clearedOpts = false
+            if k == "always" and checked then
+                for _, d in pairs(defs) do
+                    if d.axis == "opt" and GetOpt(d.show) then
+                        SetOpt(d.show, false)
+                        clearedOpts = true
+                    end
+                end
+            end
+            AfterChange(true, false, clearedOpts)
             return
         end
 
