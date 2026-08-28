@@ -1594,9 +1594,10 @@ end
 -- each instead of a single glyph -- so every button is sized to its own
 -- measured label (see ApplyLayout) rather than a shared fixed width. Not
 -- gated on lead/assist -- reading auras and durability someone volunteered
--- is not an action that needs rank -- but greyed out during a boss pull the
--- same way Convert/Disband grey out without rank (SetButtonEnabled), since
--- a raid should not be reading chat mid-fight.
+-- is not an action that needs rank -- and, unlike Convert/Disband, NOT
+-- greyed out during a boss pull either: reporting a status line mid-fight
+-- carries no game-state risk, so these stay clickable through combat and
+-- encounters (see RefreshReportButtons).
 local function BuildReportButtons()
     for _, def in ipairs(REPORT_COLUMNS) do
         local b = CreateFrame("Button", nil, sections.Group)
@@ -1638,13 +1639,13 @@ local function BuildReportButtons()
     end
 end
 
--- Boss combat only -- IsEncounterInProgress(), the same predicate the
--- BlizzardSkin module's "Out of Boss Combat" visibility option uses -- not
--- InCombatLockdown(), which would also greyscale these on ordinary trash.
+-- No combat gate: reporting who is missing a flask/food/rune/vantus, or
+-- everyone's durability, is read-only chat output, not an action the game
+-- restricts in combat -- so these always stay enabled, in or out of a boss
+-- encounter.
 local function RefreshReportButtons()
-    local enabled = not IsEncounterInProgress()
     for _, b in ipairs(reportBtns) do
-        SetButtonEnabled(b, enabled)
+        SetButtonEnabled(b, true)
     end
 end
 
