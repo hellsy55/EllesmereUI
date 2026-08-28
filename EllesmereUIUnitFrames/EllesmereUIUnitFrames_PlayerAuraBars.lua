@@ -371,6 +371,22 @@ local function ClassEnabled(class, isBuff, cfg)
     return cfg.classFilters and cfg.classFilters[class.skey] == true
 end
 
+-- Curated FAMILIES (a primary plus its `alts`: rank/talent ids for one buff, and
+-- multi-state buffs like Aspect of Harmony whose aura swaps spell ID as it advances)
+-- expand at RESOLUTION, as the Raid Frames Buff Manager does in BmIncludeMap. Not at
+-- write time: the Filter Editor and both spell dropdowns collapse a family into ONE
+-- same-named row, so only one member is ever reachable to add, and saved filters hold
+-- that member alone. `blocked` is the owning filter's spell map, where an explicit
+-- `false` wins. Show lane and hide lane both expand, or a hide filter carrying one id
+-- of a family would leak the rest.
+local function ExpandFamily(set, id, blocked)
+    local fam = ns.PAB_SPELL_FAMILY and ns.PAB_SPELL_FAMILY[id]
+    if not fam then return end
+    for i = 1, #fam do
+        if not (blocked and blocked[fam[i]] == false) then set[fam[i]] = true end
+    end
+end
+
 -- BuildChain contract: includeCatchAll (default true) appends "every remaining aura
 -- of this polarity" after the per-class groups; callers pass false wherever the UI
 -- promises the Base Filters dropdown restricts what is shown (Custom Debuff Bars with
@@ -404,6 +420,7 @@ local function BuffBarChain(cfg)
                     if on then
                         ex = ex or {}
                         ex[id] = true
+                        ExpandFamily(ex, id, f.spells)
                     end
                 end
             end
@@ -2974,6 +2991,16 @@ function ns.PAB_SetSpellState(filterId, spellID, state)
         end
     end
     Write(spellID)
+    -- Members of a curated family follow the clicked row, deletes included: the editor
+    -- shows one row per NAME, so a member under a different name has a row of its own
+    -- but is still the same buff, and would otherwise linger as a tracked id with no
+    -- row left to clear it from. Only ids the filter already holds are rewritten.
+    local fam = ns.PAB_SPELL_FAMILY and ns.PAB_SPELL_FAMILY[spellID]
+    if fam then
+        for i = 1, #fam do
+            if fam[i] ~= spellID and f.spells[fam[i]] ~= nil then Write(fam[i]) end
+        end
+    end
     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
     if name then
         for id in pairs(f.spells) do
@@ -2993,22 +3020,6 @@ end
 -- Union of a buff-side cfg's direct spells (cfg.spells) and the enabled spells of
 -- every filter it references (cfg.filters), minus own-only tracking (see above).
 -- Sorted so the caller's signature diffing stays deterministic.
---
--- Curated FAMILIES (a primary plus its `alts`: rank/talent ids for one buff, and
--- multi-state buffs like Aspect of Harmony whose aura swaps spell ID as it advances)
--- expand here, as the Raid Frames Buff Manager does in BmIncludeMap. Not at write
--- time: the Filter Editor and both spell dropdowns collapse a family into ONE
--- same-named row, so only one member is ever reachable to add or toggle, and saved
--- filters hold that member alone. An explicit `false` still wins, so unchecking a
--- member whose name differs from its primary's (the only kind with its own row) sticks.
-local function ExpandFamily(set, id, blocked)
-    local fam = ns.PAB_SPELL_FAMILY and ns.PAB_SPELL_FAMILY[id]
-    if not fam then return end
-    for i = 1, #fam do
-        if not (blocked and blocked[fam[i]] == false) then set[fam[i]] = true end
-    end
-end
-
 function ns.PAB_ResolveSpells(cfg)
     local set = {}
     local direct
@@ -4637,6 +4648,7 @@ local function BuildMixedRealSpells(cfg)
                         if on then
                             negSet = negSet or {}
                             negSet[id] = true
+                            ExpandFamily(negSet, id, nf.spells)
                         end
                     end
                 end
@@ -4748,6 +4760,7 @@ local function BuildPreviewSlots(isBuff, cfg, list, listLen, count)
                             if on then
                                 subSet = subSet or {}
                                 subSet[id] = true
+                                ExpandFamily(subSet, id, f.spells)
                             end
                         end
                     end

@@ -752,8 +752,16 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply, isDefau
                 if v then
                     if not HasDirect(k) then cfg.spells[#cfg.spells + 1] = k end
                 else
+                    -- Unchecking drops the whole curated family, not just this id:
+                    -- PAB_ResolveSpells expands a family from any member, so a
+                    -- differently-named sibling left in the list would keep the buff
+                    -- tracked behind an unchecked box. Same family = same table.
+                    local fam = ns.PAB_SPELL_FAMILY and ns.PAB_SPELL_FAMILY[k]
                     for i = #cfg.spells, 1, -1 do
-                        if cfg.spells[i] == k then table.remove(cfg.spells, i) end
+                        local id = cfg.spells[i]
+                        if id == k or (fam and ns.PAB_SPELL_FAMILY[id] == fam) then
+                            table.remove(cfg.spells, i)
+                        end
                     end
                 end
                 apply()
