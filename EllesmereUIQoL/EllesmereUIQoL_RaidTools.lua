@@ -1021,6 +1021,13 @@ local function RefreshPermissions(force)
     -- an actual group to be assist or leader of.
     for _, b in ipairs(groupButtons) do
         local on = grouped and (b.needsLeader and leader or assist)
+        -- Convert to Party can't succeed with more than 5 members in the
+        -- raid group -- the server just refuses it -- so grey the button out
+        -- in that case regardless of leader/assist, the same way the other
+        -- buttons grey out for a permission the server would refuse.
+        if b == convertButton and raid and GetNumGroupMembers() > 5 then
+            on = false
+        end
         SetButtonEnabled(b, on)
     end
 

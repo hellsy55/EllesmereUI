@@ -6696,8 +6696,11 @@ initFrame:SetScript("OnEvent", function(self)
                     local info = frame.cooldownInfo
                     local baseSID = info and info.spellID
                     local canon = ns.GetCanonicalSpellIDForFrame(frame)
-                    if type(baseSID) == "number" and baseSID > 0
-                       and type(canon) == "number" and canon > 0 then
+                    -- cooldownInfo.spellID can come back as a WoW "secret" number for
+                    -- certain protected/hardened frames; comparing a secret value with
+                    -- > throws, so filter those out before doing any math on it.
+                    if type(baseSID) == "number" and not (issecretvalue and issecretvalue(baseSID)) and baseSID > 0
+                       and type(canon) == "number" and not (issecretvalue and issecretvalue(canon)) and canon > 0 then
                         local nb, nc = NormalizeToBase(baseSID), NormalizeToBase(canon)
                         if nb ~= nc then
                             canonOf = canonOf or {}
