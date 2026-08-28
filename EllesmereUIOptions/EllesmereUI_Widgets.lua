@@ -8426,6 +8426,10 @@ end
 --      applyScalarFn       = optional fn(store, mode) for scalar side effects
 --      getOption/setOption = optional fn(key)/fn(key, value) when option booleans live
 --                            outside getStore() (Resource Bars writes three stores)
+--      trueDefaultOpts     = optional set { [visOptKey] = true, ... } for opt-axis keys whose
+--                            shipped DEFAULTS value is true; unchecking such a key persists an
+--                            explicit false instead of nil, so DeepMergeDefaults on next login
+--                            does not re-fill it back to true (CDM housing-hide, 2026-08-28)
 --      onChanged/onOptionChanged = fired after a mode / option write (latter falls back)
 --      extraItems          = { { key, label, tooltip, get, set }, ... } single-lane rows
 --      label/width/tooltip/disabledFn/disabledTooltip/rawTooltip/refreshPageArg
@@ -8556,9 +8560,20 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     end
 
     local function SetOpt(k, v)
-        if opts.setOption then opts.setOption(k, v or nil); return end
+        -- Uncheck normally persists as nil ("never set"), which is correct for every
+        -- shipped-off key. A key whose DEFAULTS entry is true needs an explicit false
+        -- instead, or DeepMergeDefaults re-fills the nil back to true on next login.
+        local storedValue
+        if v then
+            storedValue = true
+        elseif opts.trueDefaultOpts and opts.trueDefaultOpts[k] then
+            storedValue = false
+        else
+            storedValue = nil
+        end
+        if opts.setOption then opts.setOption(k, storedValue); return end
         local store = opts.getStore()
-        if store then store[k] = v or nil end
+        if store then store[k] = storedValue end
     end
 
     -- A Show-lane option axis narrows showing to a subset, which is precisely what Always
