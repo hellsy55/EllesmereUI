@@ -256,12 +256,13 @@ _G._EBS_UpdateVisEventRegistration = function() end
 --    dragon axis:  show_dragonriding / show_not_dragonriding
 --  An axis with none (or all) of its items checked imposes no constraint.
 --  Never / Always are exclusive single selections and never appear in a set.
---  Mouseover combines as one more AND gate (hover-gated conditions): the
+--  Mouseover under All is one more AND gate (hover-gated conditions): the
 --  element is hover-revealed while every condition axis passes and hidden
---  outright while any fails. A set containing mouseover stores the scalar
---  "mouseover" as its representative, so every legacy mouseover mechanism
---  (Action Bars' mouseoverEnabled fade, UF hover handlers, the dispatcher
---  poll) engages without per-module rewiring.
+--  outright while any fails. Under Any it is a disjunct of its own instead: a
+--  passing condition shows the element outright, and hover stays available when
+--  none passes. A set containing mouseover stores the scalar "mouseover" as its
+--  representative, so every legacy mouseover mechanism (Action Bars' fade, UF
+--  hover handlers, the dispatcher poll) engages without per-module rewiring.
 -------------------------------------------------------------------------------
 
 EUI.VIS_AXES = {
