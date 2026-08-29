@@ -7032,6 +7032,7 @@ L["Only while AIRBORNE on a glide-capable mount or flight form. For the mount it
 L["While on a glide-capable mount, ground included, where Blizzard shows its vigor HUD. Skyriding (Airborne) additionally requires you to be flying."] = "블리자드 기본 UI에 기력 바가 표시되는 활공 가능한 탈것에 탑승한 상태(지상 포함)에 적용됩니다. '하늘 경주 (비행 중)' 조건은 여기에 추가로 실제 비행 중이어야 합니다."
 L["Dungeons, raids, scenarios, arenas and battlegrounds. Garrisons do not count."] = "던전, 공격대, 시나리오, 투기장 및 전장입니다. 주둔지는 포함되지 않습니다."
 L["Druid travel, aquatic and flight forms count as mounted."] = "드루이드의 여행, 바다, 비행 형태도 탈것 탑승 상태로 간주합니다."
+L["This option requires an Assisted Highlight glow to be selected"] = "이 옵션을 사용하려면 지원되는 강조 표시 오라 효과를 선택해야 합니다."
 
 --핵심 애드온 - 이름표
 L["Hide Border"] = "테두리 숨기기"
