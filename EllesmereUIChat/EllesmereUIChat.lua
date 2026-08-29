@@ -2941,7 +2941,9 @@ local function GetMouseChannels(f)
     local click
     if f.IsMouseClickEnabled then click = f:IsMouseClickEnabled()
     else click = f:IsMouseEnabled() end
+    if issecretvalue and issecretvalue(click) then click = false end
     local motion = f.IsMouseMotionEnabled and f:IsMouseMotionEnabled()
+    if issecretvalue and issecretvalue(motion) then motion = false end
     return click and true or false, motion and true or false
 end
 -- Forward declaration: the write helpers below arm it when a lockdown-
