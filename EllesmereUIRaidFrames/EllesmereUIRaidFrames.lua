@@ -8337,13 +8337,28 @@ end  -- range fading section (do-block keeps its locals out of the 200-cap)
 --  Throttled 1s ticker clears stale debuff/BM/dispel indicators when a unit
 --  goes invisible (loadscreen, out of render range) or disconnects. Without
 --  this, indicators painted before the unit ghosted persist indefinitely
---  because UNIT_AURA stops firing for invisible/DC'd units.
+--  because UNIT_AURA stops firing for invisible/DC'd units. Also re-drives the
+--  assist/identity gate every tick, since it can degrade and recover for
+--  reasons render visibility never sees (faction, phasing, filter streaming).
 -------------------------------------------------------------------------------
 local ghostTicker = nil
 
 local function GhostAuraCheck()
     local function checkUnit(unit, btn)
         local d = GetFFD(btn)
+        -- unitToButton et al. only ever gain entries on reassignment, never drop
+        -- the old one, so unit/btn here can be a stale pairing; anything below
+        -- that writes to this button's own state reconfirms against its live
+        -- attribute first.
+        local liveUnit = btn:GetAttribute("unit")
+        if liveUnit == unit and ns.RFC_ApplyAssistGate then
+            -- ApplyAssistGate already forces an UpdateAllAuras regain refresh on
+            -- its own false->true edge; it just never gets RE-DRIVEN outside a
+            -- real unit reassignment, so a trip/clear with no accompanying
+            -- reassignment goes unseen otherwise. No-op (one pcall'd read)
+            -- unless the state flipped.
+            ns.RFC_ApplyAssistGate(btn, d, unit)
+        end
         if not UnitIsVisible(unit) or not UnitIsConnected(unit) then
             if not d.ghostCleared then
                 d.ghostCleared = true
@@ -8351,6 +8366,24 @@ local function GhostAuraCheck()
         else
             if d.ghostCleared then
                 d.ghostCleared = false
+                -- UNIT_AURA doesn't fire while ghosted, so any aura that fell off
+                -- during that window (LoS break, loading screen) never reached
+                -- the containers. Re-parse current content in place (unit didn't
+                -- change) rather than a SetUnit rebind -- same shape as
+                -- ApplyAssistGate's own regain refresh.
+                if liveUnit == unit then
+                    if d.rfcDebuffs then d.rfcDebuffs:UpdateAllAuras() end
+                    if d.rfcDispLoc then d.rfcDispLoc:UpdateAllAuras() end
+                    if d.rfcDispel then d.rfcDispel:UpdateAllAuras() end
+                    if d.rfcBm then d.rfcBm:UpdateAllAuras() end
+                    if d.rfcBmChain then
+                        for _, cc in pairs(d.rfcBmChain) do cc:UpdateAllAuras() end
+                    end
+                    if d.rfcBmSimple then d.rfcBmSimple:UpdateAllAuras() end
+                    if d.dmTiles then
+                        for _, c in pairs(d.dmTiles) do c:UpdateAllAuras() end
+                    end
+                end
             end
         end
     end
