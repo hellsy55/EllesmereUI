@@ -1520,11 +1520,12 @@ local function ApplyDispelSlotStyle(button, d, style)
         tex:SetVertexColor(c.r, c.g, c.b, alpha)
     elseif style.mode == "fill" then
         local fillTex = health.GetStatusBarTexture and health:GetStatusBarTexture()
-        tex:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
+        -- Both corners come off the fill texture so the overlay follows vertical and
+        -- reverse fills; anchoring TOPLEFT to the bar only tracks left-to-right.
         if fillTex then
-            tex:SetPoint("BOTTOMRIGHT", fillTex, "BOTTOMRIGHT", 0, 0)
+            tex:SetAllPoints(fillTex)
         else
-            tex:SetPoint("BOTTOMRIGHT", health, "BOTTOMRIGHT", 0, 0)
+            tex:SetAllPoints(health)
         end
         tex:SetColorTexture(c.r, c.g, c.b, alpha)
         tex:SetVertexColor(1, 1, 1, 1)

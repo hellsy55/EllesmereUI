@@ -3318,8 +3318,7 @@ initFrame:SetScript("OnEvent", function(self)
                             or "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-tb.tga")
                         dispelOverlayPreview:SetVertexColor(c.r, c.g, c.b, alpha)
                     else
-                        dispelOverlayPreview:SetPoint("TOPLEFT", health, "TOPLEFT", 0, 0)
-                        dispelOverlayPreview:SetPoint("BOTTOMRIGHT", healthFill, "BOTTOMRIGHT", 0, 0)
+                        dispelOverlayPreview:SetAllPoints(healthFill)
                         dispelOverlayPreview:SetColorTexture(c.r, c.g, c.b, alpha)
                     end
                     dispelOverlayPreview:Show()
