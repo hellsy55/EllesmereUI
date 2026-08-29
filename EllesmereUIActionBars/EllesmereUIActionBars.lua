@@ -11930,11 +11930,75 @@ do
     local btn = MainMenuBarVehicleLeaveButton
     if btn then
         btn:SetParent(UIParent)
+        -- Reparenting alone doesn't drop it from Blizzard's micro-menu layout
+        -- group (same story as QueueStatusButton below): it stays registered
+        -- as a layout child even though it now lives under UIParent, so every
+        -- time it shows/hides (i.e. every vehicle enter/exit) the container
+        -- recomputes its row with a phantom member and can wrap the micro
+        -- buttons onto a second row. Explicitly pull it out of layout flow.
+        btn.ignoreInLayout = true
+        if btn.SetIsLayoutFrame then btn:SetIsLayoutFrame(false) end
+        btn.IsLayoutFrame = nil
+
+        -- Blizzard's own fix-up for a wrapped micro menu is UpdateMicroButtonsParent()
+        -- (UIParent.lua): it re-evaluates whether the micro buttons combine
+        -- with the bag bar and re-flows them onto one row at the current
+        -- available width. It runs on login/reload (which is why /reload
+        -- always fixes the split) but nothing re-runs it on a vehicle
+        -- enter/exit, so a stale wrap from that transition sticks until the
+        -- next reload.
+        --
+        -- The wrap happens on ENTER (not exit) and then just persists: that
+        -- means Blizzard itself sets MicroMenuContainer to a NARROWER real
+        -- width the moment the vehicle bar shows up, and nothing ever widens
+        -- it back. Nudging the CURRENT width (SetWidth(w-1) -> SetWidth(w))
+        -- does nothing in that case: w is already the wrong, shrunk value, so
+        -- reapplying it is a no-op by definition. Cache the container's real
+        -- (in-vehicle-free) width whenever we know it's trustworthy, and
+        -- force-restore THAT value instead of whatever GetWidth() currently
+        -- reports.
+        local goodWidth, goodHeight
+        local function CacheMicroMenuWidth()
+            local c = MicroMenuContainer
+            if not c or not c.GetWidth then return end
+            if HasVehicleActionBar and HasVehicleActionBar() then return end
+            local w, h = c:GetWidth(), c:GetHeight()
+            if w and w > 1 then goodWidth = w end
+            if h and h > 1 then goodHeight = h end
+        end
+
+        local function FixMicroMenuRow()
+            if InCombatLockdown() then return end
+            local c = MicroMenuContainer
+            if c and c.SetSize then
+                -- The wrap doubles the container's HEIGHT (second row) and
+                -- shrinks its WIDTH -- both have to be restored together, or
+                -- the buttons keep sitting in a two-row arrangement inside a
+                -- taller box even once the width looks right.
+                local tw = goodWidth or c:GetWidth()
+                local th = goodHeight or c:GetHeight()
+                if tw and tw > 1 and th and th > 1 then
+                    c:SetSize(tw - 1, th)
+                    c:SetSize(tw, th)
+                end
+            end
+            if type(UpdateMicroButtonsParent) == "function" then
+                UpdateMicroButtonsParent()
+            end
+            if c and c.Layout then
+                c:Layout()
+            end
+        end
+
         local vehVis = ns.TakeShell()
         vehVis:RegisterEvent("UNIT_ENTERED_VEHICLE")
         vehVis:RegisterEvent("UNIT_EXITED_VEHICLE")
         vehVis:RegisterEvent("PLAYER_ENTERING_WORLD")
         vehVis:RegisterEvent("PLAYER_REGEN_ENABLED")
+        -- Also grab a baseline shortly after this file loads, in case the
+        -- player is already fully in the world by then (e.g. a mid-session
+        -- addon reload) and no fresh PLAYER_ENTERING_WORLD is coming soon.
+        C_Timer_After(1, CacheMicroMenuWidth)
         vehVis:SetScript("OnEvent", function(self, event, unit)
             -- Only the UNIT_ events carry a unit; PLAYER_ENTERING_WORLD's first
             -- arg is isInitialLogin, so testing it as a unit skipped the whole
@@ -11962,6 +12026,47 @@ do
             -- the block, so only issue the protected op on a real transition.
             if btn:IsShown() ~= show then
                 btn:SetShown(show)
+            end
+            if event == "PLAYER_ENTERING_WORLD" then
+                -- Some vehicles (this one included) trigger a full loading
+                -- screen on entry. That loading screen rebuilds frames the
+                -- same way a login/reload does -- but it does so WHILE the
+                -- vehicle bar is already active, so Blizzard's own fresh
+                -- layout pass computes the wrong (narrow) width right then
+                -- and there, instead of us ever having to un-wrap a stale
+                -- cache. If we're still in the vehicle bar when the world
+                -- finishes loading, treat it exactly like a fresh
+                -- UNIT_ENTERED_VEHICLE and re-fix; otherwise this is a
+                -- genuinely clean state and safe to cache as the baseline.
+                if HasVehicleActionBar and HasVehicleActionBar() then
+                    FixMicroMenuRow()
+                    C_Timer_After(0, FixMicroMenuRow)
+                    C_Timer_After(0.2, FixMicroMenuRow)
+                    C_Timer_After(0.5, FixMicroMenuRow)
+                    C_Timer_After(1.0, FixMicroMenuRow)
+                else
+                    C_Timer_After(0, CacheMicroMenuWidth)
+                end
+            elseif event == "UNIT_ENTERED_VEHICLE" then
+                -- The wrap happens right here. Fire at a few staggered points
+                -- since Blizzard's own vehicle transition handlers (including
+                -- a possible loading screen, handled above) can still run
+                -- after ours and re-shrink it if we're too early.
+                FixMicroMenuRow()
+                C_Timer_After(0, FixMicroMenuRow)
+                C_Timer_After(0.2, FixMicroMenuRow)
+                C_Timer_After(0.5, FixMicroMenuRow)
+            elseif event == "UNIT_EXITED_VEHICLE" then
+                FixMicroMenuRow()
+                C_Timer_After(0, FixMicroMenuRow)
+                C_Timer_After(0.2, FixMicroMenuRow)
+                -- Refresh the cached width once we're safely back to normal,
+                -- in case Blizzard legitimately changes it between sessions
+                -- (new micro button added/removed, resolution change, etc).
+                C_Timer_After(0.5, function()
+                    FixMicroMenuRow()
+                    CacheMicroMenuWidth()
+                end)
             end
         end)
     end
