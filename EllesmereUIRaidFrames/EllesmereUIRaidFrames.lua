@@ -13619,7 +13619,10 @@ local function ApplyPreviewData(f, index)
         else
             f._statusText:SetPoint("CENTER", stHost, "CENTER", stOX, stOY)
         end
-        if isRezCorpse then
+        if stPos == "none" then
+            -- Status text display is turned off
+            f._statusText:Hide()
+        elseif isRezCorpse then
             -- Being resurrected: the rez icon takes this spot, so no DEAD text.
             f._statusText:Hide()
         elseif isDead then
@@ -13632,6 +13635,7 @@ local function ApplyPreviewData(f, index)
             f._statusText:SetText(EllesmereUI.L("AFK"))
             f._statusText:Show()
         else
+            -- No status to show
             f._statusText:Hide()
         end
     end
