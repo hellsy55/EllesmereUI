@@ -12309,10 +12309,28 @@ function InitializeFrames()
                     or vis == "in_combat" or vis == "out_of_combat") then
                     drvSet = { [vis] = true }
                 end
+                -- Any compiles a different tail (each axis its own bracket group, option
+                -- lanes joining the disjunction); the shared builder owns that. Built
+                -- once and reused by the mini frame below, which is safe because both
+                -- compilers only ever PREPEND their prefix.
+                local visTail
+                if s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+                    local tail, _, liveAxes = EllesmereUI.BuildAnyMatchTail(s, "barVisibility", drvSet)
+                    -- Gated on liveAxes, not the lower-bound constrained count: a
+                    -- selection can be constrained purely by axes THIS module resolves
+                    -- in Lua (target/enemy -- no soft-target event edge here), and a
+                    -- driver compiled from those would be a frozen constant that never
+                    -- reacts to the next PLAYER_TARGET_CHANGED. Zero live axes means the
+                    -- tail is exactly such a constant, so the frame is left on ext/alpha
+                    -- instead -- the same live path every option-only selection already
+                    -- took before Any existed.
+                    if liveAxes > 0 then visTail = tail end
+                elseif drvSet and EllesmereUI.BuildVisibilityDriverString then
+                    visTail = EllesmereUI.BuildVisibilityDriverString("", drvSet)
+                end
                 local wantDriver
-                if drvSet and EllesmereUI.BuildVisibilityDriverString then
-                    wantDriver = EllesmereUI.BuildVisibilityDriverString(
-                        "[@" .. unitKey .. ",noexists] hide; ", drvSet)
+                if visTail then
+                    wantDriver = "[@" .. unitKey .. ",noexists] hide; " .. visTail
                 end
                 if frame._euiVisDriver ~= wantDriver and not isLocked then
                     if wantDriver then
@@ -12488,9 +12506,8 @@ function InitializeFrames()
                 -- condition-hidden mini absorbs no clicks either.
                 if mini then
                     local miniWant
-                    if (not miniAlways) and drvSet and EllesmereUI.BuildVisibilityDriverString then
-                        miniWant = EllesmereUI.BuildVisibilityDriverString(
-                            "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; ", drvSet)
+                    if (not miniAlways) and visTail then
+                        miniWant = "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; " .. visTail
                     end
                     if mini._euiVisDriver ~= miniWant and not isLocked then
                         if miniWant then

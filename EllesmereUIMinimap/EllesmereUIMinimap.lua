@@ -5048,6 +5048,14 @@ local _mmDriverStr
 
 -- Compile the profile's selection into macro-conditional grammar for the secure driver, or nil when it cannot be expressed as one.
 local function MinimapDriverString(p, vm)
+    -- Any match compiles a different tail: each constrained axis becomes its own
+    -- bracket group and the option lanes join the disjunction. The Lua-only ones
+    -- (instances, housing, skyriding mount) are resolved here, which the caller only
+    -- ever reaches out of combat, and a later zone or mount edge re-runs the dispatcher
+    -- and re-registers the string.
+    if p.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+        return (EllesmereUI.BuildAnyMatchTail(p, "visibility", vm))
+    end
     if vm then
         return EllesmereUI.BuildVisibilityDriverString
             and EllesmereUI.BuildVisibilityDriverString("", vm)
