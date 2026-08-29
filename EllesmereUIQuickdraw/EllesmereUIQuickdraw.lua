@@ -2048,31 +2048,40 @@ end
 -- until their item has. A palette paints once per open, so an entry drawn ahead
 -- of its data kept the question mark for the whole of that open, and the second
 -- open was right only because the first one's failed lookup had fetched it.
--- True means the load is still outstanding. ns-hosted for the reason
--- ns.SetIconTexture is: this chunk is at Lua 5.1's 200-local cap.
-function ns.WarmSlot(slot)
-    if not slot then return false end
+-- Both ns-hosted for the reason ns.SetIconTexture is: this chunk is at Lua
+-- 5.1's 200-local cap.
+function ns.SlotDataReady(slot)
+    if not slot then return true end
     local k = slot.kind
 
     if k == "spell" or k == "dynamicrez" or k == "dynamicprofession" then
         local id = SlotSpellID(slot)
-        if not id or C_Spell.IsSpellDataCached(id) then return false end
-        C_Spell.RequestLoadSpellData(id)
-        return true
+        return not id or C_Spell.IsSpellDataCached(id)
     end
 
-    -- A toy's id IS its itemID, so the two kinds share the one cache.
+    -- A toy's id IS its itemID, so the two kinds share the one cache. An item's
+    -- icon comes off the client's own table and is right either way; its NAME
+    -- is what the load is for, and the hub caption reads that.
     if k == "item" or k == "toy" then
-        if type(slot.id) ~= "number" or C_Item.IsItemDataCachedByID(slot.id) then
-            return false
-        end
-        C_Item.RequestLoadItemDataByID(slot.id)
-        return true
+        return type(slot.id) ~= "number" or C_Item.IsItemDataCachedByID(slot.id)
     end
 
     -- Every other kind reads a client-side table -- the mount journal, the pet
     -- journal, the spec and profession lists -- and answers on the first ask.
-    return false
+    return true
+end
+
+-- Ask for it, and say whether the answer is still outstanding. Separate from the
+-- test above because AdvancePendingIcons retests every frame and must not send
+-- the request again with each one.
+function ns.WarmSlot(slot)
+    if ns.SlotDataReady(slot) then return false end
+    if slot.kind == "item" or slot.kind == "toy" then
+        C_Item.RequestLoadItemDataByID(slot.id)
+    else
+        C_Spell.RequestLoadSpellData(SlotSpellID(slot))
+    end
+    return true
 end
 
 local function SlotCooldown(slot)
@@ -5727,7 +5736,7 @@ function PaletteView:AdvancePendingIcons()
     for k = #cells, 1, -1 do
         local index = cells[k]
         local slot = self:CellSlot(index)
-        if not ns.WarmSlot(slot) then
+        if ns.SlotDataReady(slot) then
             local w = self.widgets[index]
             if w then
                 local icon = SlotDisplay(slot)
@@ -8931,6 +8940,9 @@ local function PushPalette(index)
         for j = 1, c.n do
             total = total + 1
             PushCell(btn, total, c.slots[j], p)
+            -- A palette reached only by being nested carries no keybind, so it
+            -- gets no push of its own and this is the only warm its entries see.
+            ns.WarmSlot(c.slots[j])
             -- A block layout's nests carry a BOX. Half-extents are what tells
             -- the snippet these cells are tested by containment rather than by
             -- nearness -- the palette's own entries have no half-extents, and
