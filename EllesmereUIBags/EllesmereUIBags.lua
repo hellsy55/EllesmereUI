@@ -7159,6 +7159,22 @@ local function StartAddon()
     EUI_Bags:RegisterEvent("PLAYER_MONEY")
     EUI_Bags:RegisterEvent("ITEM_LOCK_CHANGED")
     EUI_Bags:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+    -- A keystone's encoded level changing (downgrade on completion, or on reset)
+    -- doesn't reliably fire BAG_UPDATE for its slot, so the keystone level text
+    -- painted by RefreshInventory goes stale while bags stay open across the
+    -- run -- GameTooltip looks correct because it re-queries fresh on every
+    -- hover, independent of our repaint cycle. Force a refresh on these too.
+    EUI_Bags:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+    EUI_Bags:RegisterEvent("CHALLENGE_MODE_RESET")
+    -- Lindormi's NPC-dialogue keystone downgrade is the same in-place encoded-
+    -- level change as above, just triggered outside any dungeon run -- neither
+    -- CHALLENGE_MODE event applies (both are scoped to an active M+ run's
+    -- lifecycle). GOSSIP_CLOSED is the generic "an NPC dialogue just ended"
+    -- signal and fires reliably around her interaction (confirmed live via an
+    -- event probe); it also fires for every unrelated NPC gossip close, but
+    -- ScheduleRefresh below is cheap and gated on bags being visible, so that's
+    -- a harmless no-op rather than a real cost.
+    EUI_Bags:RegisterEvent("GOSSIP_CLOSED")
     -- Set created/renamed/deleted: rebuild split categories / refresh name labels.
     -- Registered only while a set feature is on: zero event cost when disabled
     -- (merged-mode routing stays correct without it -- the lookup rebuilds per
@@ -7323,6 +7339,14 @@ local function StartAddon()
             -- Invalidate even while hidden: the next open must not classify with
             -- categories built from the old set list.
             EUI_Bags.InvalidateSetCategories()
+            if EUI_Bags:IsVisible() then ScheduleRefresh() end
+            return
+        end
+        if event == "CHALLENGE_MODE_COMPLETED" or event == "CHALLENGE_MODE_RESET"
+           or event == "GOSSIP_CLOSED" then
+            -- A keystone downgrade here doesn't need a hidden-side invalidation:
+            -- the next manual open already forces a full RefreshInventory
+            -- (ToggleEUI). This only matters while bags are already visible.
             if EUI_Bags:IsVisible() then ScheduleRefresh() end
             return
         end
