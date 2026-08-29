@@ -8466,7 +8466,7 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "always",    label = "Always" },
     { key = "mouseover", label = "Mouseover",
       tooltip = "Reveal on hover only. Combines with the conditions below: hover-reveals while they all pass, stays hidden while any fails.",
-      tooltipAny = "Reveal on hover only. Combines with the conditions below: hover-reveals while at least ONE passes, stays hidden while none does." },
+      tooltipAny = "Combines with the conditions below: shows outright once at least one passes, otherwise still reveals on hover." },
     -- Modifiers, not conditions: they decide how the rows below combine, so they stay
     -- out of the summary and the Show/Hide lane pairs. Radio pair (matchValue) over one
     -- scalar: picking one unpicks the other, there is no "neither" state.
