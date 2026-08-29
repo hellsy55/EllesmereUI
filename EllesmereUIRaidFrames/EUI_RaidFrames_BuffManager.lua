@@ -266,7 +266,13 @@ local HEALER_SPECS = {
             { id = 410686, name = "Symbiotic Bloom" },
             { id = 395152, name = "Ebon Might" },
             { id = 369459, name = "Source of Magic" },
-            { id = 361022, name = "Sense Power", secret = true, sig = "0:1:0:0" },
+            { id = 361021, name = "Sense Power" },
+            -- 361021 is the caster's own permanent toggle buff; 361022 is the
+            -- effect that lands on whichever ally triggers Sense Power's
+            -- "powerful ability" detection. Distinct spell IDs, same client
+            -- display name -- kept as separate entries so both are
+            -- selectable (see SPELL_NAME_BY_ID for how the UI tells them apart).
+            { id = 361022, name = "Sense Power (Ally)" },
         },
     },
 }
@@ -362,6 +368,11 @@ local SPELL_NAME_BY_ID = setmetatable({}, {
         return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
     end,
 })
+-- Shared with EllesmereUIOptions/EUI_RaidFrames_ManagerPages.lua (same ns):
+-- the Filter Editor and its dropdowns build spell row labels off this too, so
+-- curated names (e.g. distinguishing two client-side-identical spell names)
+-- apply there as well, not just in this file's own dropdowns.
+ns.SPELL_NAME_BY_ID = SPELL_NAME_BY_ID
 
 local SPEC_DD_VALUES = {}
 local SPEC_DD_ORDER = {}
@@ -543,8 +554,6 @@ local SECRET_SPELL_ICONS = {
     [431381] = 5927633,  -- Dawnlight
     [357170] = 4630500,  -- Time Dilation
     [363534] = 4630498,  -- Rewind
-    [361022] = 132160,   -- Sense Power
-
 }
 
 -------------------------------------------------------------------------------
@@ -692,7 +701,7 @@ local DEFAULT_INDICATORS = {
     },
     EVOKER_AUGMENTATION = {
         { pos = "TOPLEFT",  spells = { 410089, 360827, 369459 } },             -- Prescience, Blistering Scales, Source of Magic
-        { pos = "TOPRIGHT", spells = { 413984, 410263, 410686, 395152, 361022 } }, -- Shifting Sands, Infernos Blessing, Symbiotic Bloom, Ebon Might, Sense Power
+        { pos = "TOPRIGHT", spells = { 413984, 410263, 410686, 395152, 361021 } }, -- Shifting Sands, Infernos Blessing, Symbiotic Bloom, Ebon Might, Sense Power
     },
 }
 
@@ -1304,7 +1313,7 @@ local previewSpellIcons = {}
 local function GetSpellIcon(spellID)
     if previewSpellIcons[spellID] then return previewSpellIcons[spellID] end
     local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellID)
-    -- Secret auras (e.g. Sense Power) often lack a resolvable spell-info icon; fall back to the known fingerprint icon before the generic question mark.
+    -- Secret auras (e.g. Ironbark) often lack a resolvable spell-info icon; fall back to the known fingerprint icon before the generic question mark.
     local icon = (info and info.iconID) or SECRET_SPELL_ICONS[spellID] or 136243
     previewSpellIcons[spellID] = icon
     return icon
@@ -3293,7 +3302,11 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         popup._fltDD = fltDD
 
                         local function SpellEntry(id)
-                            local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                            -- Curated name first (distinguishes variants the client
+                            -- API can't, e.g. two spell IDs both named "Sense Power"
+                            -- by Blizzard); SPELL_NAME_BY_ID already falls back to
+                            -- the live API internally when no curated name exists.
+                            local name = SPELL_NAME_BY_ID[id]
                             return { key = id, label = (name or ("Spell " .. tostring(id))),
                                 icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) }
                         end
