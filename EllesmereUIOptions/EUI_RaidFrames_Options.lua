@@ -715,6 +715,8 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
+            -- Exposed for onModuleLeave below.
+            ns.StopHealthAnim = StopHealthAnim
 
             local function StartHealthAnim()
                 if ns._healthAnimTicker then return end
@@ -1784,6 +1786,8 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
+            -- Exposed for onModuleLeave below.
+            ns.StopPowerAnim = StopPowerAnim
 
             local function StartPowerAnim()
                 if ns._powerAnimTicker then return end
@@ -6151,6 +6155,17 @@ initFrame:SetScript("OnEvent", function(self)
             if db.sv then db.sv._capturedOnce_RF = nil end
             db:ResetProfile()
             ReloadUI()
+        end,
+        -- Tears down all 6 Raid Frames preview mechanisms on cross-module
+        -- switch (Real/Party/Size/HealthAnim/PowerAnim/HM previews).
+        onModuleLeave = function()
+            if ns.HidePreview then ns.HidePreview() end
+            if ns.HidePartyPreview then ns.HidePartyPreview() end
+            ns._sizePreviewTier = nil
+            if ns._HideSizePreview then ns._HideSizePreview() end
+            if ns._healthAnimActive and ns.StopHealthAnim then ns.StopHealthAnim() end
+            if ns._powerAnimActive and ns.StopPowerAnim then ns.StopPowerAnim() end
+            if ns._hmPreview and ns.HM_SetPreview then ns.HM_SetPreview(false) end
         end,
     })
 
