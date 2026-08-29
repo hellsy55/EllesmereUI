@@ -3970,8 +3970,13 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
         end
     end)
 
-    inst.eventFrame = MakeEventFrame(inst, function(self, event)
-        if pendingSwapConfigID then
+    inst.eventFrame = MakeEventFrame(inst, function(self, event, eventConfigID)
+        -- Both events carry the configID they're actually about; a raid/dungeon's
+        -- background trait churn (other loadouts syncing, hero-talent updates)
+        -- fires TRAIT_CONFIG_UPDATED for configs that are not our pending swap far
+        -- more often than solo open-world play, and an unmatched one was being
+        -- read as "commit landed", writing the pointer to a still-uncommitted swap.
+        if pendingSwapConfigID and eventConfigID == pendingSwapConfigID then
             if event == "TRAIT_CONFIG_UPDATED" then
                 -- Commit landed: write the pointer now (the write hook refreshes).
                 local specId, configID = pendingSwapSpecId, pendingSwapConfigID
