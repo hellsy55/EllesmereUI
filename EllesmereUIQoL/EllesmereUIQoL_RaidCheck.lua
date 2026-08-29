@@ -582,12 +582,12 @@ ns.REPORT_TITLE = REPORT_TITLE
 local DURABILITY_REPORT_DELAY = 1.5
 
 local function ReportChannel()
-    if IsInRaid() then return "RAID" end
+    if IsInRaid() then return "GUILD" end
     if IsInGroup() then return "PARTY" end
     return nil   -- solo: nobody to report to
 end
 
--- toChat = true posts to /raid or /party (see ReportChannel); false (or
+-- toChat = true posts to /guild (in a raid) or /party (see ReportChannel); false (or
 -- solo, where there is no channel to post to) prints to the player's own
 -- chat frame only.
 local function SendOrPrint(text, toChat)
@@ -679,7 +679,7 @@ local function DurabilityReportLine()
 end
 
 -- key: "flask" | "food" | "rune" | "vantus" | "durability".
--- toChat: true = right-click (post to /raid or /party); false = left-click
+-- toChat: true = right-click (post to /guild in a raid, /party in a party); false = left-click
 -- (this client's own chat frame only).
 function ns.ReportConsumable(key, toChat)
     if key == DURABILITY_KEY then

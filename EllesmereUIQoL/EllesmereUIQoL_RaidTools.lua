@@ -1588,8 +1588,8 @@ end
 
 -- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
 -- missing it (or, for Repair, everyone's durability percentage) to this
--- client's own chat frame only; right-click posts the same thing to /raid
--- or /party depending on the current group. Small title-bar riders, same family
+-- client's own chat frame only; right-click posts the same thing to /guild
+-- (in a raid) or /party (in a party) depending on the current group. Small title-bar riders, same family
 -- as the Raid Groups cog and Raid Check button, but with the full name on
 -- each instead of a single glyph -- so every button is sized to its own
 -- measured label (see ApplyLayout) rather than a shared fixed width. Not
