@@ -4725,18 +4725,15 @@ local function UpdateReadyCheck(button, unit)
     if s.showReadyCheck and readyCheckActive then
         local status = GetReadyCheckStatus(unit)
         if status == "ready" then
-            tex:SetTexCoord(0, 1, 0, 1)
-            tex:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
+            tex:SetAtlas("UI-LFG-ReadyMark-Raid")
             tex:Show()
             return
         elseif status == "notready" then
-            tex:SetTexCoord(0, 1, 0, 1)
-            tex:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
+            tex:SetAtlas("UI-LFG-DeclineMark-Raid")
             tex:Show()
             return
         elseif status == "waiting" then
-            tex:SetTexCoord(0, 1, 0, 1)
-            tex:SetTexture("Interface\\RaidFrame\\ReadyCheck-Waiting")
+            tex:SetAtlas("UI-LFG-PendingMark-Raid")
             tex:Show()
             return
         end
@@ -4763,8 +4760,7 @@ local function UpdateReadyCheck(button, unit)
     -- Incoming resurrection (cast in flight, or the latched unaccepted-offer window
     -- -- see ns._RFRezShown). Lowest priority; shows a body is already being picked up.
     if s.showIncomingRez and unit and ns._RFRezShown(unit) then
-        tex:SetTexCoord(0, 1, 0, 1)
-        tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+        tex:SetAtlas("RaidFrame-Icon-Rez")
         tex:Show()
         return
     end
@@ -13365,14 +13361,11 @@ local function ApplyPreviewData(f, index)
                 f._readyCheck:SetPoint("CENTER", rcHost, "CENTER", ox, oy)
             end
             if rcStatus == "ready" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\ReadyCheck-Ready")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
+                f._readyCheck:SetAtlas("UI-LFG-ReadyMark-Raid")
             elseif rcStatus == "notready" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\ReadyCheck-NotReady")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
+                f._readyCheck:SetAtlas("UI-LFG-DeclineMark-Raid")
             elseif rcStatus == "pending" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\ReadyCheck-Waiting")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
+                f._readyCheck:SetAtlas("UI-LFG-PendingMark-Raid")
             elseif rcStatus == "summon_pending" then
                 f._readyCheck:SetAtlas("RaidFrame-Icon-SummonPending")
             elseif rcStatus == "summon_accepted" then
@@ -13380,8 +13373,7 @@ local function ApplyPreviewData(f, index)
             elseif rcStatus == "summon_declined" then
                 f._readyCheck:SetAtlas("RaidFrame-Icon-SummonDeclined")
             elseif rcStatus == "rez" then
-                f._readyCheck:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
-                f._readyCheck:SetTexCoord(0, 1, 0, 1)
+                f._readyCheck:SetAtlas("RaidFrame-Icon-Rez")
             end
             f._readyCheck:Show()
         else
