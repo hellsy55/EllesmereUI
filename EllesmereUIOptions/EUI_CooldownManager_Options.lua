@@ -16416,6 +16416,11 @@ initFrame:SetScript("OnEvent", function(self)
         local visRow, visH = EllesmereUI.BuildVisibilityRow(W, parent, y,
             { getStore = BD, legacyKey = "barVisibility",
               caps = { partyIncludesRaid = false, noMouseover = true, luaDragonriding = true },
+              -- The three built-in bars ship visHideHousing = true in DEFAULTS, so an
+              -- explicit uncheck must persist false or DeepMergeDefaults re-fills it to
+              -- true on next login. Harmless for other bars: they never go through that
+              -- merge, so the checkbox reads store[k] == true either way.
+              trueDefaultOpts = { visHideHousing = true },
               onChanged = function()
                   ns.CDMApplyVisibility()
               end,
