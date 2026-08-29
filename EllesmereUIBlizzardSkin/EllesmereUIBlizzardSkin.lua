@@ -1510,13 +1510,10 @@ end
         end
 
         -- The "Confirm your role" popup shown to the whole party when ANYONE queues
-        -- (leader or otherwise) and roles aren't already locked in. Root-caused
-        -- 2026-08-27: this frame was never wired into the queue-popup reskin at all --
-        -- LFG_PROPOSAL_SHOW only fires for the group-found step, not this earlier
-        -- role-check step, so it stayed stock Blizzard for every party member
-        -- regardless of who initiated the queue. Only the outer chrome is stripped;
-        -- the role icons live on separate child buttons (RoleButtonTank/Healer/DPS),
-        -- not direct regions of this frame, so the generic strip below never touches them.
+        -- (leader or otherwise) and roles aren't already locked in. LFG_PROPOSAL_SHOW
+        -- only fires for the later group-found step, so this frame is hooked directly.
+        -- Only the outer chrome is stripped; the role icons live on separate child
+        -- buttons (RoleButtonTank/Healer/DPS), never direct regions of this frame.
         local function SkinRoleCheckPopup()
             local popup = _G.LFDRoleCheckPopup
             if not popup or not IsQueueReskinOn() then return end

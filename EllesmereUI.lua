@@ -11288,7 +11288,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "9.0.7"
+EllesmereUI.VERSION = "9.0.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -12754,10 +12754,8 @@ end
 function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
     if not opts then return false end
 
-    -- "Any" match: the option lanes are disjuncts, not vetoes, and the combined
-    -- verdict belongs to EllesmereUI.EvalVisibilityExtended (and, for the secure
-    -- action bar driver, to its own build path). Vetoing here would hide the element
-    -- the moment a single lane failed, which is the opposite of what Any means.
+    -- Any match: the lanes are disjuncts, not vetoes; EvalVisibilityExtended (or the
+    -- secure driver build path) owns the combined verdict.
     if opts.visibilityMatch == "any" then return false end
 
     -- Instances axis: Only Show in Instances / Hide in Instances share one probe.
@@ -12797,15 +12795,10 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
 
     -- Skyriding-mount axis (glide capability, ground included -- NOT the airborne
     -- show_dragonriding / show_not_dragonriding mode pair, which additionally
-    -- requires IsFlying; see EllesmereUI.IsAirborneSkyriding). No secure macro
-    -- token can express "ground included" (the airborne-only [advflyable,flying]
-    -- pair used elsewhere is a different check), so this stays Lua-only for
-    -- every caller. Returns "mountaxis" instead of a plain true so a secure-driver
-    -- caller (Action Bars) can recognize it needs a [combat] show escape hatch
-    -- baked into whatever it writes -- root-caused 2026-08-27: a bare "hide" from
-    -- this branch froze the bar hidden through an entire fight after a skyriding
-    -- dismount-into-combat, because InCombatLockdown() defers the next Lua pass
-    -- that would otherwise re-evaluate it. Still truthy for every other caller.
+    -- requires IsFlying; see EllesmereUI.IsAirborneSkyriding). No secure macro token
+    -- expresses "ground included", so this stays Lua-only for every caller; it returns
+    -- the truthy marker "mountaxis" so a secure-driver caller can bake a combat escape
+    -- hatch into what it writes (a bare "hide" cannot re-evaluate once combat starts).
     if opts.visHideDragonriding then
         if EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding() then return "mountaxis" end
     end
@@ -12820,10 +12813,8 @@ end
 function EllesmereUI.CheckVisibilityOptions(opts)
     if not opts then return false end
 
-    -- "Any" match: the option lanes are disjuncts, not vetoes, and the combined
-    -- verdict belongs to EllesmereUI.EvalVisibilityExtended (and, for the secure
-    -- action bar driver, to its own build path). Vetoing here would hide the element
-    -- the moment a single lane failed, which is the opposite of what Any means.
+    -- Any match: the lanes are disjuncts, not vetoes; EvalVisibilityExtended (or the
+    -- secure driver build path) owns the combined verdict.
     if opts.visibilityMatch == "any" then return false end
 
     -- Instances / housing / mounted (shared with secure-frame fast path).
@@ -12848,12 +12839,9 @@ function EllesmereUI.CheckVisibilityOptions(opts)
     return false
 end
 
--- Option-lane axes for the unified Visibility row. Every condition is ONE axis with a
--- Show lane and a Hide lane, and probe() answers whether the condition holds right
--- now. The default "all" match keeps the veto chain above untouched; this table exists
--- so the "any" match can ask each axis for a verdict instead of a veto. luaOnly marks
--- the axes the secure action bar driver has no macro conditional for, so it resolves
--- them in Lua when it builds the driver string.
+-- Option-lane axes: one axis per condition (Show lane, Hide lane, probe() = holds now),
+-- read by the "any" match for per-axis verdicts; the "all" veto chain above is untouched.
+-- luaOnly = no macro conditional exists, so the secure driver resolves the axis in Lua.
 EllesmereUI.VIS_OPT_AXES = {
     { show = "visOnlyInstances", hide = "visHideInstances", luaOnly = true,
       probe = function() return EllesmereUI.IsInInstancedContent() end },
@@ -12866,11 +12854,8 @@ EllesmereUI.VIS_OPT_AXES = {
       probe = function() return EllesmereUI.IsPlayerMountedLike() end },
     { show = "visOnlySkyriding", hide = "visHideDragonriding", luaOnly = true,
       probe = function() return EllesmereUI.IsPlayerSkyriding() end },
-    -- needsEdge: the macro conditional is LIVE where the Lua probe is not. [exists] and
-    -- [harm] re-evaluate on soft-target changes; UnitExists("target") ignores those. A
-    -- consumer that does not watch the soft-target edges cannot keep a compiled disjunct
-    -- honest once it drifts, so for those the axis is resolved in Lua -- which is exactly
-    -- what the all-match path always did with it.
+    -- needsEdge: [exists]/[harm] re-evaluate on soft-target changes that
+    -- UnitExists("target") ignores; a consumer without those edges resolves the axis in Lua.
     { show = "visHideNoTarget", hide = "visHideWithTarget", needsEdge = "softTarget",
       probe = function() return UnitExists("target") and true or false end },
     { show = "visHideNoEnemy", hide = "visHideWithEnemy", needsEdge = "softTarget",

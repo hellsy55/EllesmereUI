@@ -2909,8 +2909,8 @@ initFrame:SetScript("OnEvent", function(self)
                 do
                     local clientLocale = GetLocale()
                     if clientLocale == "zhCN" or clientLocale == "zhTW" or clientLocale == "koKR" then
-                        typeRows[#typeRows + 1] = MkToggle("Force English Units (K/M)", "forceEnglishUnits",
-                            "Always use K/M instead of localized units.")
+                        typeRows[#typeRows + 1] = MkToggle("Force English Units (K/M/B)", "forceEnglishUnits",
+                            "Always use K/M/B instead of localized units.")
                     end
                 end
             elseif b.type == "xprep" then

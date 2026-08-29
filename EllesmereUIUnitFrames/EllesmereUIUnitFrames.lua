@@ -12321,21 +12321,14 @@ function InitializeFrames()
                     or vis == "in_combat" or vis == "out_of_combat") then
                     drvSet = { [vis] = true }
                 end
-                -- Any compiles a different tail (each axis its own bracket group, option
-                -- lanes joining the disjunction); the shared builder owns that. Built
-                -- once and reused by the mini frame below, which is safe because both
-                -- compilers only ever PREPEND their prefix.
+                -- Tail built once and reused by the mini frame below (both compilers only
+                -- PREPEND their prefix).
                 local visTail
                 if s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
                     local tail, _, liveAxes = EllesmereUI.BuildAnyMatchTail(s, "barVisibility", drvSet)
-                    -- Gated on liveAxes, not the lower-bound constrained count: a
-                    -- selection can be constrained purely by axes THIS module resolves
-                    -- in Lua (target/enemy -- no soft-target event edge here), and a
-                    -- driver compiled from those would be a frozen constant that never
-                    -- reacts to the next PLAYER_TARGET_CHANGED. Zero live axes means the
-                    -- tail is exactly such a constant, so the frame is left on ext/alpha
-                    -- instead -- the same live path every option-only selection already
-                    -- took before Any existed.
+                    -- Gated on liveAxes: with no soft-target edge here, target/enemy axes
+                    -- resolve in Lua, and a driver compiled from those alone would be a
+                    -- frozen constant. Zero live axes keeps the frame on the live ext/alpha path.
                     if liveAxes > 0 then visTail = tail end
                 elseif drvSet and EllesmereUI.BuildVisibilityDriverString then
                     visTail = EllesmereUI.BuildVisibilityDriverString("", drvSet)

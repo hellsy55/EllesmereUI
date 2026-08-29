@@ -7439,9 +7439,8 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local total = 0
         local hiddenCount = 0
         for _, item in ipairs(items) do
-            -- isModifier rows change how the OTHER rows combine (the Visibility row's
-            -- match toggle). They are not conditions, so they never appear in the
-            -- summary and never count towards the "All" shortcut.
+            -- isModifier rows (the Visibility match toggle) are not conditions: excluded
+            -- from the summary and from the "All" shortcut.
             if not item.isHeader and not item.isTopAction and not item.isModifier then
                 total = total + 1
                 if getFn(item.key) then names[#names + 1] = EllesmereUI.L(item.label) end
@@ -7816,11 +7815,8 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                 lblAnchor = ico
             end
-            -- Modifier rows (item.isModifier) rest in the same accent used for isAction
-            -- rows, but only while THIS is the active one -- the inactive partner in the
-            -- radio pair looks like any other unchecked row. Checked state can change
-            -- from a sibling row's click (UpdateCheck runs on every row after any
-            -- click), so this reads live rather than caching a fixed tint.
+            -- Modifier rows rest in the accent only while active; read live, since a
+            -- sibling's click flips the checked state (UpdateCheck runs on every row).
             local function RestColor()
                 if item.isModifier and getFn(item.key) then
                     return EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b
@@ -7895,9 +7891,8 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                         negBrd:SetColor(0.4, 0.4, 0.4, 0.6)
                     end
                 end
-                -- Radio partners refresh each other, so this runs on the row the cursor
-                -- is sitting on too -- repainting it would drop its hover white until the
-                -- mouse left and came back.
+                -- Radio partners refresh each other, so this also runs on the hovered row;
+                -- repainting that one would drop its hover white until the mouse re-enters.
                 if item.isModifier and not row._isLocked and not row:IsMouseOver() then
                     lbl:SetTextColor(RestColor())
                 end
@@ -8456,7 +8451,8 @@ end
 --      trueDefaultOpts     = optional set { [visOptKey] = true, ... } for opt-axis keys whose
 --                            shipped DEFAULTS value is true; unchecking such a key persists an
 --                            explicit false instead of nil, so DeepMergeDefaults on next login
---                            does not re-fill it back to true (CDM housing-hide, 2026-08-28)
+--                            does not re-fill it back to true (the built-in CDM bars ship
+--                            housing-hide on, so they need this)
 --      onChanged/onOptionChanged = fired after a mode / option write (latter falls back)
 --      extraItems          = { { key, label, tooltip, get, set }, ... } single-lane rows
 --      label/width/tooltip/disabledFn/disabledTooltip/rawTooltip/refreshPageArg
@@ -8471,10 +8467,9 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "mouseover", label = "Mouseover",
       tooltip = "Reveal on hover only. Combines with the conditions below: hover-reveals while they all pass, stays hidden while any fails.",
       tooltipAny = "Reveal on hover only. Combines with the conditions below: hover-reveals while at least ONE passes, stays hidden while none does." },
-    -- Modifiers, not conditions: they decide how the rows below combine, so both are
-    -- kept out of the summary label and out of the Show/Hide lane pairs. Radio-style
-    -- exclusive pair (matchValue), same underlying scalar as Never/Always -- picking
-    -- one is what unpicks the other, there is no third "neither" state.
+    -- Modifiers, not conditions: they decide how the rows below combine, so they stay
+    -- out of the summary and the Show/Hide lane pairs. Radio pair (matchValue) over one
+    -- scalar: picking one unpicks the other, there is no "neither" state.
     { isHeader = true, label = "Match Mode" },
     { key = "matchAll", label = "Match All Conditions", modifier = true, matchValue = "all",
       tooltip = "Every condition you set has to match. The default." },
@@ -8530,11 +8525,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local GetMatchAny
 
     -- The stored scalar when it is a legacy alias this row cannot express, else nil.
-    -- Read twice: at build time to give the orphan its own row, and live by the Match
-    -- Mode rows, which lock in that state -- Any hands the whole verdict to the shared
-    -- evaluator, which has to give an orphan back to the caller's own legacy chain, and
-    -- that chain knows nothing about the option lanes. Never and Always stay clickable,
-    -- so an orphan is never a state without an exit.
+    -- Read at build (the orphan's own row) and live by the Match Mode rows, which lock
+    -- while an orphan is stored: Any hands an orphan back to the caller's legacy chain,
+    -- which knows nothing about the option lanes. Never/Always stay clickable as the exit.
     local function OrphanScalar()
         local store = opts.getStore()
         if not store then return nil end
@@ -8639,9 +8632,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         if store then store[k] = storedValue end
     end
 
-    -- The match is a store-level scalar rather than a lane, but it fans out exactly
-    -- like the option lanes do (Resource Bars writes health/primary/secondary through
-    -- these hooks), so it rides them instead of growing its own opts contract.
+    -- The match is a store-level scalar, but it fans out like the option lanes do
+    -- (Resource Bars writes health/primary/secondary through these hooks), so it rides them.
     GetMatchAny = function()
         if opts.getOption then return opts.getOption("visibilityMatch") == "any" end
         local store = opts.getStore()
@@ -8654,12 +8646,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         if store then store.visibilityMatch = on and "any" or nil end
     end
 
-    -- A Show-lane option axis narrows showing to a subset, which is precisely what Always
-    -- claims not to do, so the two must never read as checked together. Mode and group rows
-    -- drop always from the selection itself; the option axes live outside it, so the
-    -- contradiction is reconciled in GetChecked/SetChecked instead. This holds under either
-    -- match mode: always is not one of the tallied axes, so under Any it adds no disjunct
-    -- and a Show lane is left as the only one -- the same narrowing, reached differently.
+    -- Option axes live outside the selection, so Always vs. an active Show lane (which
+    -- narrows what Always claims is unrestricted) is reconciled in GetChecked/SetChecked.
+    -- Same under Any: always is not a tallied axis, so a lone Show lane narrows the same way.
     local function AnyShowOptActive()
         for _, d in pairs(defs) do
             if d.axis == "opt" and GetOpt(d.show) then return true end
@@ -8674,17 +8663,15 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     -- REBUILD waits for menu close: rebuilding under the open menu destroys the button
     -- it is anchored to, and the point of a checklist is setting several axes in one
     -- visit. Terminal picks (Never/Always, orphans) close the menu themselves.
-    -- alsoOther: this click wrote a mode AND an option (an option axis that had to clear
-    -- Never, or Always clearing the Show lanes), so both chains run. Neither is a subset of
-    -- the other -- Action Bars' option chain recompiles the housing driver its mode chain
-    -- never touches, and its mode chain rebuilds the page on a Never flip.
+    -- alsoOther: the click wrote a mode AND an option (a lane clearing Never, or Always
+    -- clearing the Show lanes), so both caller chains run; neither is a subset of the other
+    -- (Action Bars recompiles its housing driver only in the option chain).
     local function AfterChange(closeMenu, isOption, alsoOther)
         local optionFn = (isOption or alsoOther) and opts.onOptionChanged
         local modeFn = ((not isOption) or alsoOther) and opts.onChanged
         if optionFn then optionFn() end
         if modeFn then modeFn() end
-        -- Fallback kept from before: an option write on a caller that only supplies
-        -- onChanged still gets that chain rather than nothing.
+        -- A caller that supplies only onChanged still gets that chain for option writes.
         if not optionFn and not modeFn and opts.onChanged then opts.onChanged() end
         pendingRefresh = true
         if closeMenu and cbDD and cbDD._ddMenu then cbDD._ddMenu:Hide() end
@@ -8719,9 +8706,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         local def = defs[k]
         if not def then return end
 
-        -- Modifier: picking one of the pair is what unpicks the other (the radio read
-        -- of a single scalar), and it deliberately clears nothing else -- not the
-        -- exclusive scalars, not a condition, not a lane.
+        -- Modifier: a radio pair over one scalar; picking one unpicks the other and
+        -- deliberately clears nothing else.
         if def.modifier then
             SetMatchAny(def.matchValue == "any")
             AfterChange(false, true)
@@ -8739,11 +8725,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             if neg then lane, other = def.hide, def.show end
             SetOpt(lane, checked)
             if checked then SetOpt(other, false) end
-            -- Switching a lane on while Never is picked would be a no-op, so the click leaves
-            -- Never: the selection empties and WriteSel's never-empty invariant lands on
-            -- Always, which is the base a Hide lane needs and the one a Show lane then narrows
-            -- (GetChecked unchecks Always for it). Unchecking a lane leaves Never alone --
-            -- clearing a condition is not a request to start showing.
+            -- Checking a lane under Never leaves Never (WriteSel's never-empty invariant
+            -- lands on Always, which the lane then narrows); unchecking one leaves Never alone.
             local clearedNever = false
             if checked then
                 local sel, store = Sel()
@@ -8807,10 +8790,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             for key in pairs(sel) do sel[key] = nil end
             if checked then sel[k] = true end
             WriteSel(sel, store)
-            -- Always is the unrestricted state, so it clears the Show lanes that would
-            -- otherwise keep its own box unchecked (GetChecked) and make this click a no-op.
-            -- Hide lanes are exceptions on top of showing and survive, as do both lanes under
-            -- Never: picking Never suppresses the option axes, it does not reset them.
+            -- Always clears the Show lanes (else GetChecked keeps its box unchecked and the
+            -- click is a no-op); Hide lanes survive, and Never leaves every lane untouched.
             local clearedOpts = false
             if k == "always" and checked then
                 for _, d in pairs(defs) do
@@ -8877,9 +8858,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             else
                 if opts.applyScalarFn then opts.applyScalarFn(s, v) else s[legacyKey] = v end
                 s.visibilityModes = nil
-                -- Same reset the row's own orphan branch does: Any cannot express an
-                -- orphan, and a spec capture must not restore the one state the row
-                -- locks precisely because the option lanes stop applying in it.
+                -- Same reset as the row's orphan branch: Any cannot express an orphan.
                 SetMatchAny(false)
             end
             if opts.onChanged then opts.onChanged() end

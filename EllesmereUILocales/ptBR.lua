@@ -6609,6 +6609,4 @@ L["World Marker: Triangle"] = "Marcador de Mundo: Triângulo"
 
 -- == Data Bars / Gold ===========================================================
 L["Abbreviate Amount"] = "Abreviar Quantidade"
-L["Always use K/M instead of localized units."] = "Sempre usar K/M em vez de unidades localizadas."
-L["Force English Units (K/M)"] = "Forçar unidades em inglês (K/M)"
 L["Shows large amounts using K/M suffixes (284,208g becomes 284.2Kg) instead of the full grouped number. The tooltip always shows the exact amount."] = "Mostra grandes quantidades usando sufixos K/M (284.208 vira 284,2K) em vez do número completo agrupado. A dica sempre mostra a quantia exata."

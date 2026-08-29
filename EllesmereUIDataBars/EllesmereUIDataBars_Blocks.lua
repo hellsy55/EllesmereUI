@@ -3971,18 +3971,23 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
     end)
 
     inst.eventFrame = MakeEventFrame(inst, function(self, event, eventConfigID)
-        -- Both events carry the configID they're actually about; a raid/dungeon's
-        -- background trait churn (other loadouts syncing, hero-talent updates)
-        -- fires TRAIT_CONFIG_UPDATED for configs that are not our pending swap far
-        -- more often than solo open-world play, and an unmatched one was being
-        -- read as "commit landed", writing the pointer to a still-uncommitted swap.
-        if pendingSwapConfigID and eventConfigID == pendingSwapConfigID then
+        if pendingSwapConfigID then
             if event == "TRAIT_CONFIG_UPDATED" then
-                -- Commit landed: write the pointer now (the write hook refreshes).
-                local specId, configID = pendingSwapSpecId, pendingSwapConfigID
-                pendingSwapSpecId, pendingSwapConfigID = nil, nil
-                C_ClassTalents.UpdateLastSelectedSavedConfigID(specId, configID)
+                -- The commit-landing event carries the ACTIVE combat config's id,
+                -- never the loadout's. Updates for any other config (loadout
+                -- saves/syncs, hero-talent data -- instance background churn) are
+                -- not the commit; the pointer is written from the remembered
+                -- loadout id once the active config reports the landing.
+                local active = C_ClassTalents.GetActiveConfigID
+                    and C_ClassTalents.GetActiveConfigID()
+                if active and eventConfigID == active then
+                    local specId, configID = pendingSwapSpecId, pendingSwapConfigID
+                    pendingSwapSpecId, pendingSwapConfigID = nil, nil
+                    C_ClassTalents.UpdateLastSelectedSavedConfigID(specId, configID)
+                end
             elseif event == "CONFIG_COMMIT_FAILED" then
+                -- Payload deliberately not consulted: a failed commit while we are
+                -- pending is ours, whichever id it names.
                 pendingSwapSpecId, pendingSwapConfigID = nil, nil
             end
         end
