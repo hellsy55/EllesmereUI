@@ -8556,6 +8556,27 @@ function EAB_VTABLE.Hover.GetState(barKey, frame)
     return state
 end
 
+-- The alpha a bar RESTS at while the cursor is not on it, plus whether that resting state
+-- is a hover gate. Single source of truth for every alpha writer here, so a fade-out
+-- cannot land on a different verdict than the visibility refresh would. mouseoverEnabled
+-- is STATIC (true whenever mouseover is selected at all, any Match Mode), so it can only
+-- answer "is the hover mechanism wired"; VisWantsMouseover answers "is it gating now".
+-- _savedBarAlpha is load-bearing: ApplyMode parks mouseoverAlpha at 0 and stashes the real
+-- value there while a mouseover selection is stored, so the shown branch would paint 0.
+-- On the vtable, not a chunk local (main chunk is at the 200-local cap).
+function EAB_VTABLE.Hover.RestingAlpha(barKey, s)
+    s = s or EAB_VTABLE.Hover.GetSettings(barKey)
+    if not s then return 1, false end
+    local wantsHover
+    if s.mouseoverEnabled and EllesmereUI.VisWantsMouseover then
+        wantsHover = EllesmereUI.VisWantsMouseover(s, "barVisibility", nil, EllesmereUI.VIS_CAPS_DEFAULT)
+    else
+        wantsHover = s.mouseoverEnabled
+    end
+    if wantsHover then return 0, true end
+    return s._savedBarAlpha or s.mouseoverAlpha or 1, false
+end
+
 -- Fade ONE bar in, no broadcast. The fadeDir memo makes repeat calls while
 -- already fading/faded O(1) table reads, so a sweep across a bar's 12 buttons
 -- costs 12 memo hits and one real fade. On the vtable, not a chunk local
@@ -8599,11 +8620,15 @@ function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
+        -- Fade back to the bar's RESTING alpha, not a hardcoded 0: under Any a passing
+        -- disjunct keeps the bar visible with no hover involved, and fading it away here
+        -- would leave it wrong until the next visibility refresh.
+        local resting = EAB_VTABLE.Hover.RestingAlpha(barKey, s)
         state.fadeDir = "out"
         StopFade(state.frame)
         -- `manual`: same lockstep rationale as FadeInOne.
-        FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15, true)
-        if barKey == "MainBar" then SyncPagingAlpha(0) end
+        FadeTo(state.frame, resting, s.mouseoverSpeed or 0.15, true)
+        if barKey == "MainBar" then SyncPagingAlpha(resting) end
     end
 end
 
@@ -8764,11 +8789,14 @@ local function AttachHoverHooks(barKey)
     end
 end
 
-function EAB:RefreshMouseover()
+-- onlyHoverGated: visit ONLY the bars whose hover gate can move on a state edge (Match
+-- Any plus mouseover). The edge-driven caller passes it so a target change does not drag
+-- every other bar through a StopFade/SetAlpha it cannot need.
+function EAB:RefreshMouseover(onlyHoverGated)
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
-        if s then
+        if s and (not onlyHoverGated or (s.mouseoverEnabled and s.visibilityMatch == "any")) then
             local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
             if frame then
                 -- For extra bars (MicroBar, BagBar), fade the Blizzard frame directly
@@ -8792,11 +8820,18 @@ function EAB:RefreshMouseover()
                     if info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable then
                         AttachExtraBarHoverHooks(info)
                     end
-                    StopFade(frame)
-                    frame:SetAlpha(0)
                     local state = hoverStates[key]
-                    if state then state.fadeDir = "out" end
-                    if key == "MainBar" then SyncPagingAlpha(0) end
+                    -- A bar the cursor is sitting on keeps what the hover gave it. This
+                    -- used to be safe by accident (the function only ran on settings
+                    -- changes); it now also runs on combat/group/mount edges, where
+                    -- repainting would yank a hovered bar invisible mid-hover.
+                    if not (state and state.isHovered) then
+                        local resting = EAB_VTABLE.Hover.RestingAlpha(key, s)
+                        StopFade(frame)
+                        frame:SetAlpha(resting)
+                        if state then state.fadeDir = (resting == 0) and "out" or nil end
+                        if key == "MainBar" then SyncPagingAlpha(resting) end
+                    end
                 else
                     StopFade(frame)
                     frame:SetAlpha(s.mouseoverAlpha or 1)
@@ -9123,16 +9158,17 @@ function EAB_VTABLE.ExtraBars.ApplyManagedNonSecureAlpha(info, frame, s)
     if not frame or not s or not frame:IsShown() then return end
 
     local hstate = hoverStates[info.key]
-    if s.mouseoverEnabled then
+    local resting, hoverGated = EAB_VTABLE.Hover.RestingAlpha(info.key, s)
+    if hoverGated then
         if hstate and hstate.isHovered then
             frame:SetAlpha(1)
             hstate.fadeDir = "in"
         else
-            frame:SetAlpha(0)
+            frame:SetAlpha(resting)
             if hstate then hstate.fadeDir = "out" end
         end
     else
-        frame:SetAlpha(s.mouseoverAlpha or 1)
+        frame:SetAlpha(resting)
         if hstate then hstate.fadeDir = nil end
     end
 end
@@ -9311,10 +9347,17 @@ function EAB:_RefreshSoftTargetGate()
     --   _anyNonMacroVis  -- any bar using ANY non-macro visibility option, or
     --   a managed non-secure bar; when false, UpdateHousingVisibility has
     --   nothing it could ever change and skips entirely.
-    local anySoft, anyNonMacro = false, false
+    --   _anyHoverGated   -- any bar whose hover gate can OPEN and CLOSE on a state edge
+    --   (Match Any plus mouseover). Only those need the resting alpha re-derived when
+    --   combat/group/mount state moves; under All a mouseover bar is hover-gated for as
+    --   long as the setting stands, so its alpha never changes off an edge.
+    local anySoft, anyNonMacro, anyHoverGated = false, false, false
     for _, info in ipairs(ALL_BARS) do
         local s = self.db.profile.bars[info.key]
         if s then
+            if s.mouseoverEnabled and s.visibilityMatch == "any" then
+                anyHoverGated = true
+            end
             -- Under Any the counter lane carries the soft-target correction too, so it
             -- arms the same machinery; under All it never did and still does not.
             if s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any") then
@@ -9336,6 +9379,18 @@ function EAB:_RefreshSoftTargetGate()
     end
     self._anyHideNoTarget = anySoft
     self._anyNonMacroVis = anyNonMacro
+    self._anyHoverGated = anyHoverGated
+end
+
+-- Re-derive the resting alpha of every hover-gated bar. Registered once with the shared
+-- visibility dispatcher (below), which already watches the exact edge set this depends on
+-- (combat, group, target, mount, zone, shapeshift, gliding) and fans out one frame later.
+-- Alpha only: no Show/Hide, no driver registration, so this is safe inside combat lockdown
+-- and carries no taint exposure. Fully gated -- users with no Any-plus-mouseover bar pay
+-- one flag read per dispatcher event.
+function EAB:RefreshHoverGatedAlpha()
+    if not self._anyHoverGated then return end
+    self:RefreshMouseover(true)
 end
 
 function EAB:RefreshRuntimeVisibility()
@@ -13949,6 +14004,16 @@ function EAB:FinishSetup()
     -- machinery costs nothing. The state token is four cached booleans (no per-tick
     -- allocation); refresh only runs when a token actually flips.
     self:_RefreshSoftTargetGate()
+    -- Hover-gated bars (Match Any plus mouseover) need their resting alpha re-derived
+    -- whenever the state their other disjuncts read moves. Rather than hand-wiring the
+    -- five relevant events here, ride the shared visibility dispatcher: it already watches
+    -- exactly that set, pcall-wraps each updater and defers one frame (imperceptible for
+    -- alpha). Same registration Friends, Quest Tracker and Damage Meters use.
+    if EllesmereUI.RegisterVisibilityUpdater then
+        EllesmereUI.RegisterVisibilityUpdater(function()
+            EAB:RefreshHoverGatedAlpha()
+        end)
+    end
     local lastI, lastE, lastF, lastT
     local function PollSoftTargetState()
         if InCombatLockdown() then return end
