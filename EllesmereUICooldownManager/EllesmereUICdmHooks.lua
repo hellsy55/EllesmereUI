@@ -4938,7 +4938,8 @@ local function GetOrCreateCustomBuffFrame(barKey, sid)
             if ns.QueueCustomBuffUpdate then C_Timer.After(0, ns.QueueCustomBuffUpdate) end
             if ns.QueueReanchor then C_Timer.After(0, ns.QueueReanchor) end
         end)
-        local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+        local iconSID = ns.LustPresetIconSpellID and ns.LustPresetIconSpellID(sid) or sid
+        local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(iconSID)
         if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
         _presetFrames[fkey] = f
         _injectedCustomBuffFrames[f] = true
@@ -8849,7 +8850,9 @@ local function UpdateCustomBuffBars()
                                     cd:HookScript("OnCooldownDone", function()
                                         C_Timer.After(0, QueueCustomBuffUpdate)
                                     end)
-                                    local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(sid)
+                                    local iconSID = ns.LustPresetIconSpellID
+                                        and ns.LustPresetIconSpellID(sid) or sid
+                                    local spInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(iconSID)
                                     if spInfo and spInfo.iconID and f._tex then f._tex:SetTexture(spInfo.iconID) end
                                 end
                                 if isActive and timer then
