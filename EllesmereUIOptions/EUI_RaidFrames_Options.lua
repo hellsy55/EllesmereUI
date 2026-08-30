@@ -4900,6 +4900,36 @@ initFrame:SetScript("OnEvent", function(self)
             targetSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(targetSwatch, "Target") end)
             targetSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
+            -- Highlight thickness. Shown only while the frame is borderless (Border Size 0):
+            -- with a border drawn the highlight recolors THAT and these sizes do nothing.
+            local _, hlCogShow = EllesmereUI.BuildCogPopup({
+                title = "Highlight Border",
+                rows = {
+                    { type="slider", label="Hover Border Size", min=1, max=4, step=1,
+                      get=function() return SVal("hoverBorderSize", 1) end,
+                      set=function(v) SSet("hoverBorderSize", v) end },
+                    { type="slider", label="Target Border Size", min=1, max=4, step=1,
+                      get=function() return SVal("targetBorderSize", 1) end,
+                      set=function(v) SSet("targetBorderSize", v) end },
+                },
+            })
+            local hlCog = CreateFrame("Button", nil, rightRgn)
+            hlCog:SetSize(26, 26)
+            hlCog:SetPoint("RIGHT", rightRgn._lastInline, "LEFT", -8, 0)
+            rightRgn._lastInline = hlCog
+            hlCog:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            hlCog:SetAlpha(0.4)
+            local hlCogTex = hlCog:CreateTexture(nil, "OVERLAY")
+            hlCogTex:SetAllPoints(); hlCogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            hlCog:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
+            hlCog:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
+            hlCog:SetScript("OnClick", function(s) hlCogShow(s) end)
+            local function UpdateHLCogVis()
+                if SVal("borderSize", 1) > 0 then hlCog:Hide() else hlCog:Show() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateHLCogVis)
+            UpdateHLCogVis()
+
             -- Gray a swatch when its border state is off but keep it clickable so the color can be pre-set (matches the Heal Prediction swatch).
             UpdateHBSwatchVis = function()
                 hoverSwatch:SetAlpha(SVal("hoverBorderEnabled", true) and 1 or 0.3)
