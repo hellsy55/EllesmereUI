@@ -3233,8 +3233,9 @@ function ns.ApplyHighlightBorder(bf, s, size, r, g, b, a)
     local texKey = s.borderTexture or "solid"
     if not size or size <= 0 then
         if bf._hlBorderSize then
-            bf._hlBorderSize = nil
             EllesmereUI.ApplyBorderStyle(bf, 0, r, g, b, a, texKey)
+            -- Keep the cache when the style call bailed (still shown) so the next one retries the hide.
+            if not bf:IsShown() then bf._hlBorderSize = nil end
         end
         return
     end
