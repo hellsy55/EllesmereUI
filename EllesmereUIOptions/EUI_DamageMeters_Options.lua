@@ -2068,6 +2068,16 @@ initFrame:SetScript("OnEvent", function(self)
             local d = _G._EDM_DB
             if d and d.ResetProfile then d:ResetProfile() end
         end,
+        -- Mirrors RegisterOnHide below: SA Timer Preview + forced-visible
+        -- meter windows, on module switch instead of just window close.
+        onModuleLeave = function()
+            if ns.HideSATimerPreview then ns.HideSATimerPreview() end
+            ns._optionsOpen = false
+            for _, w in ipairs(ns._windows or {}) do
+                if w.UpdateVisibility then w.UpdateVisibility() end
+            end
+            if ns.ApplySpellHistory then ns.ApplySpellHistory() end
+        end,
     })
 
     -- Show preview when panel opens on DM page, hide when panel closes

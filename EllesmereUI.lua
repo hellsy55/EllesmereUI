@@ -10813,6 +10813,11 @@ function EllesmereUI:SelectModule(folderName)
         EllesmereUI:SaveContentHeaderToCache(oldKey)
     end
 
+    -- Notify the module being left (mirrors onReset). No-op if unset.
+    if activeModule and modules[activeModule] and modules[activeModule].onModuleLeave then
+        modules[activeModule].onModuleLeave()
+    end
+
     -- Restore the old module page's inline-search filter and clear the search box BEFORE
     -- switching modules, while activeModule/activePage still point to the filtered page.
     -- SetText("") fires ApplyInlineSearch("") via OnTextChanged; doing this after the switch would target the new module and leave the old page stuck in its filtered layout.
