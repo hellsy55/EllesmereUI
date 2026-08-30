@@ -12581,6 +12581,9 @@ function InitializeFrames()
         frames._visFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         frames._visFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
         frames._visFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+        -- Resting: IsResting() has no dedicated poll, so without this the Resting
+        -- axis only re-evaluated when some unrelated event above happened to fire.
+        frames._visFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
         frames._visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
         frames._visFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
         -- Dragonriding visibility modes: capability edge plus the airborne

@@ -9926,6 +9926,9 @@ eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+-- Resting: IsResting() has no dedicated poll, so without this the Resting
+-- axis only re-evaluated when some unrelated event above happened to fire.
+eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
 -- Dragonriding visibility modes: capability edge (mount/dismount/zone) plus
 -- the airborne edge (takeoff/landing while staying mounted; probed at load
 -- in EllesmereUI_Visibility.lua -- absent = the checklist items lock).
@@ -10129,7 +10132,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if ns.QueueReanchor then ns.QueueReanchor() end
         return
     end
-    if event == "PLAYER_TARGET_CHANGED" then
+    if event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_UPDATE_RESTING" then
         _CDMApplyVisibility()
         return
     end

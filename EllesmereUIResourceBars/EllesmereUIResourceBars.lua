@@ -9121,7 +9121,7 @@ local function OnEvent(self, event, ...)
     elseif event == "PLAYER_TARGET_CHANGED" then
         UpdateVisibility()
     elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_CAN_GLIDE_CHANGED"
-        or event == "PLAYER_IS_GLIDING_CHANGED" then
+        or event == "PLAYER_IS_GLIDING_CHANGED" or event == "PLAYER_UPDATE_RESTING" then
         UpdateVisibility()
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         -- Re-check secondary max power: UnitPowerMax can change across zone
@@ -9447,6 +9447,9 @@ function ERB:OnEnable()
     -- Visibility option events
     eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
     eventFrame:RegisterEvent("PLAYER_CAN_GLIDE_CHANGED")
+    -- Resting: IsResting() has no dedicated poll, so without this the Resting
+    -- axis only re-evaluated when some unrelated event above happened to fire.
+    eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
     -- Airborne edge for the dragonriding visibility modes (probed at load
     -- in EllesmereUI_Visibility.lua; absent = the checklist items lock)
     if EllesmereUI._hasGlidingEvent then
