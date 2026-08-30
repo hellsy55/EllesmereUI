@@ -7120,17 +7120,29 @@ local function StartAddon()
     end)
 
     -- Recent Items: session-only tracking (resets on login/reload)
-    local RECENT_MAX = 12
+    -- Raised from 12 to 15.
+    local RECENT_MAX = 15
     EUI_Bags._recentItems = {}      -- itemID -> true (set of recent item IDs)
     EUI_Bags._recentOrder = {}      -- ordered list of itemIDs (oldest first)
-    local _knownItemCounts = {} -- itemID -> highest stack count seen this session
+    local _knownItemCounts = {} -- itemID -> highest bag-visible count since the last bank/mail resync
     local _snapshotReady = false
 
-    -- Track the highest count ever seen per itemID, not current presence: a stack
-    -- merge (already have 3, loot 1 more) must register as a new pickup, and a
-    -- plain presence set can't see that. Tracking the max instead of the live
-    -- count (and never lowering it) also means unequipping/re-equipping, banking,
-    -- or mailing an item back to yourself doesn't re-flag it as new.
+    -- Both are interaction state, not frame visibility -- a third-party bank/mail
+    -- addon can hide the stock frame, but the server-tracked interaction stays
+    -- accurate. Bank/warband bank contents are only queryable while physically
+    -- there (or via a Personal Distance Inhibitor), so unlike mail there's no
+    -- way to count them from a distance -- detection just freezes at the bank
+    -- instead, the same as it does for mail.
+    local function MailOpen()
+        return (C_PlayerInteractionManager and C_PlayerInteractionManager.IsInteractingWithNpcOfType
+            and C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.MailInfo)) and true or false
+    end
+    local function BankOpen()
+        if not (C_PlayerInteractionManager and C_PlayerInteractionManager.IsInteractingWithNpcOfType) then return false end
+        return (C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.Banker)
+            or C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.AccountBanker)) and true or false
+    end
+
     local function TallyItemCounts()
         local counts, order = {}, {}
         for bag = 0, 5 do
@@ -7151,21 +7163,36 @@ local function StartAddon()
         _snapshotReady = true
     end
 
+    -- A rise flags a new pickup; a drop (sold/used/deleted) lowers the known
+    -- total so a later re-acquisition below the old peak still registers as
+    -- new. Frozen entirely at a mailbox or bank/warband bank -- sending,
+    -- receiving, depositing, or withdrawing would otherwise look identical to
+    -- disposing of or looting an item, since bag contents are all this can
+    -- see. MAIL_CLOSED, BANKFRAME_CLOSED, and
+    -- PLAYER_INTERACTION_MANAGER_FRAME_HIDE below silently resync once the
+    -- mailbox/bank closes, so none of that traffic falsely flags or evicts
+    -- anything.
     local function DetectNewItems()
-        if not _snapshotReady then return end
+        if not _snapshotReady or MailOpen() or BankOpen() then return end
         local counts, order = TallyItemCounts()
         for _, itemID in ipairs(order) do
             local count = counts[itemID]
-            if count > (_knownItemCounts[itemID] or 0) then
-                _knownItemCounts[itemID] = count
-                if not EUI_Bags._recentItems[itemID] then
-                    EUI_Bags._recentItems[itemID] = true
-                    EUI_Bags._recentOrder[#EUI_Bags._recentOrder + 1] = itemID
-                    while #EUI_Bags._recentOrder > RECENT_MAX do
-                        local old = table.remove(EUI_Bags._recentOrder, 1)
-                        EUI_Bags._recentItems[old] = nil
-                    end
+            local known = _knownItemCounts[itemID] or 0
+            if count > known and not EUI_Bags._recentItems[itemID] then
+                EUI_Bags._recentItems[itemID] = true
+                EUI_Bags._recentOrder[#EUI_Bags._recentOrder + 1] = itemID
+                while #EUI_Bags._recentOrder > RECENT_MAX do
+                    local old = table.remove(EUI_Bags._recentOrder, 1)
+                    EUI_Bags._recentItems[old] = nil
                 end
+            end
+            _knownItemCounts[itemID] = count
+        end
+        -- Items gone from bags entirely (sold/used/deleted) no longer appear
+        -- in `counts`; drop their known peak too.
+        for itemID in pairs(_knownItemCounts) do
+            if not counts[itemID] then
+                _knownItemCounts[itemID] = nil
             end
         end
     end
@@ -7222,6 +7249,10 @@ local function StartAddon()
     EUI_Bags.UpdateSetEventRegistration()
     -- Replays a refresh that was deferred during combat (secure-button taint guard).
     EUI_Bags:RegisterEvent("PLAYER_REGEN_ENABLED")
+    -- Drives the post-mailbox/bank Recent Items resync (see MailOpen/BankOpen/DetectNewItems above).
+    if C_PlayerInteractionManager then
+        EUI_Bags:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+    end
 
     -- Panels that move items one bag slot at a time (see SetItemPanelOpen).
     local ITEM_PANEL_EVENTS = {
@@ -7348,7 +7379,7 @@ local function StartAddon()
     -- DetectNewItems: run synchronously but at most once per frame (zone changes fire many BAG_UPDATEs)
     local _lastDetectFrame = 0
 
-    EUI_Bags:SetScript("OnEvent", function(self, event)
+    EUI_Bags:SetScript("OnEvent", function(self, event, interactionType)
         if event == "PLAYER_REGEN_ENABLED" then
             -- Combat ended: replay any refresh deferred during combat, and top up the pre-warmed pool in case bag count grew while locked.
             if EUI_Bags._refreshPendingCombat then
@@ -7357,6 +7388,22 @@ local function StartAddon()
                 if EUI_BagsReagent:IsVisible() and EUI_BagsReagent.RefreshInventory then
                     EUI_BagsReagent:RefreshInventory()
                 end
+            end
+            return
+        end
+        if event == "MAIL_CLOSED" or event == "BANKFRAME_CLOSED" then
+            -- Legacy, doesn't reliably fire on retail (kept for older clients);
+            -- the interaction-manager HIDE below is the live driver. Settle
+            -- first: mail's own delivery, or a bank auto-deposit, can still be
+            -- landing items just after close.
+            C_Timer.After(0.5, function() SnapshotKnownIDs() end)
+            -- No return: falls through to the ITEM_PANEL_EVENTS handling below.
+        end
+        if event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
+            if interactionType == Enum.PlayerInteractionType.MailInfo
+                or interactionType == Enum.PlayerInteractionType.Banker
+                or interactionType == Enum.PlayerInteractionType.AccountBanker then
+                C_Timer.After(0.5, function() SnapshotKnownIDs() end)
             end
             return
         end
