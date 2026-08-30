@@ -691,6 +691,19 @@ local function Park()
     if S.proxy then S.proxy:Hide() end
 end
 
+-- Mover callbacks are NOT unlock-mode-only: the spec-override layer flush
+-- re-applies stored positions on every spec/talent change, and GetBarFrame
+-- resolves anchors at any time. Both used to call Activate() behind nothing but
+-- EnabledForClass(), and Activate() ends in proxy:Show() -- so a swap away from
+-- Sunfury parked the display and the very same flush turned it straight back
+-- on. Spellslinger casts Arcane Surge too, so the Surge slot kept matching and
+-- the countdown rendered for real. Placement is always safe; SHOWING is the
+-- gate's to decide, and unlock mode is the one caller that overrides it (the
+-- mover has to be grabbable for any Mage).
+local function MoverShowOK()
+    return (EllesmereUI and EllesmereUI._unlockActive) or GateOK()
+end
+
 local function Activate()
     EnsureProxy()
     ApplyLook()
@@ -821,8 +834,16 @@ function ns.AS_MakeUnlockElement(MK)
         isHidden = function() return not EnabledForClass() end,
         getFrame = function()
             if not EnabledForClass() then return nil end
-            Activate()
-            if EllesmereUI._unlockActive then ShowSample() end
+            if EllesmereUI._unlockActive then
+                Activate()
+                ShowSample()
+            else
+                -- Outside unlock mode this is a pure geometry request (anchor
+                -- resolution), so it hands back the proxy WITHOUT showing it.
+                -- See MoverShowOK: Activate() ends in proxy:Show().
+                EnsureProxy()
+                if MoverShowOK() then Activate() end
+            end
             return S.proxy
         end,
         getSize = function() return ProxySize() end,
@@ -847,9 +868,10 @@ function ns.AS_MakeUnlockElement(MK)
         end,
         applyPos = function()
             if not EnabledForClass() then return end
-            Activate()
-            -- applyPos IS the "put it where it is stored" request, so it places
-            -- unconditionally -- unlike getFrame/Activate above.
+            EnsureProxy()
+            -- applyPos IS the "put it where it is stored" request, so it PLACES
+            -- unconditionally -- but placing is not showing (see MoverShowOK).
+            if MoverShowOK() then Activate() end
             ApplyPosition()
             if EllesmereUI._unlockActive then ShowSample() end
         end,
