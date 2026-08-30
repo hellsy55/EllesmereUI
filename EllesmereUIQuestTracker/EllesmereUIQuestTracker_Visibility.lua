@@ -321,14 +321,14 @@ local function ApplyTopDivider()
     tex:Show()
 end
 
--- Find the frame that sits at the absolute bottom of all visible content
--- across every tracker module. Used to anchor the BG's bottom edge.
+-- Find the module that sits at the bottom of the tracker. Used to anchor the
+-- BG's bottom edge.
 --
 -- Reference-only: no coordinate is read here, because Blizzard's block geometry
 -- turns into a secret value once our execution is tainted and comparing one
--- throws. Blizzard's container anchors each displayed module below the previous
--- one in ipairs(modules) order, so the last displayed module owns the bottom
--- edge, and its GetLastBlock returns that module's lowest block.
+-- throws. The container anchors each displayed module below the previous one in
+-- ipairs(modules) order, so the last displayed one owns the bottom edge -- the
+-- same frame Blizzard anchors its own NineSlice background to.
 local function IsUsableAnchor(frame)
     if not frame or type(frame) ~= "table" then return false end
     if not frame.IsShown or not frame.GetObjectType then return false end
@@ -340,7 +340,7 @@ local function GetLowestContentFrame()
     if not otf then return nil end
     local modules = otf.modules or otf.MODULES
     if not modules then return nil end
-    local lowestFrame
+    local lowestModule
     local _scenarioTracker = _G.ScenarioObjectiveTracker
     local _widgetTracker = _G.UIWidgetObjectiveTracker
     for _, tracker in ipairs(modules) do
@@ -356,22 +356,16 @@ local function GetLowestContentFrame()
         -- refuses to touch these frames for the same reason.
         if tracker == _scenarioTracker or tracker == _widgetTracker then
             -- skip
-        -- hasContents is the same gate the old block scan effectively used:
-        -- Blizzard sets it when a module adds a block, clears it on relayout.
-        elseif tracker.hasContents and IsUsableAnchor(tracker) then
-            local candidate = tracker.GetLastBlock and tracker:GetLastBlock()
-            if not IsUsableAnchor(candidate) then
-                -- Collapsed section: its blocks are freed and hidden while the
-                -- Header stays visible as the section's bottom edge.
-                candidate = tracker.Header
-            end
-            if IsUsableAnchor(candidate) then
-                -- Later module == further down, so the last one wins.
-                lowestFrame = candidate
-            end
+        -- EndLayout hides a module that has nothing to display, so IsShown is
+        -- the content gate, and a later module sits further down. Anchoring to
+        -- the module rather than to its lowest block matters: blocks go back
+        -- into Blizzard's pool on collapse, which clears their points and drags
+        -- an anchored BG along; module frames are permanent.
+        elseif IsUsableAnchor(tracker) then
+            lowestModule = tracker
         end
     end
-    return lowestFrame
+    return lowestModule
 end
 
 -- Event-driven resize with a debounce. Every QueueResize call coalesces into a single
@@ -440,13 +434,16 @@ local function ResizeBGToContent()
         bg._divider:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
         bg._divider:SetPoint("TOPRIGHT", anchorFrame, anchorPoint .. "RIGHT", 11, topOfs)
     end
-    -- Third anchor instead of SetHeight: the bottom edge was "anchor top +
-    -- topOfs - lowest bottom + 15" fed into SetHeight, so pointing BOTTOM at the
-    -- same frame with the same gap lands it in the same place, coordinate-free.
+    -- UpdateHeight sizes a module to contentsHeight + bottomSpacing, so its
+    -- bottom sits bottomSpacing below its last block. Adding that back keeps the
+    -- 15px gap the old SetHeight calculation produced, still coordinate-free.
+    local bottomSpacing = lowest.bottomSpacing
+    if issecretvalue and issecretvalue(bottomSpacing) then bottomSpacing = nil end
+    if type(bottomSpacing) ~= "number" then bottomSpacing = 0 end
     bg:ClearAllPoints()
     bg:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
     bg:SetPoint("TOPRIGHT", anchorFrame, anchorPoint .. "RIGHT", 11, topOfs)
-    bg:SetPoint("BOTTOM",   lowest,      "BOTTOM",               0,       -15)
+    bg:SetPoint("BOTTOM",   lowest,      "BOTTOM",               0, bottomSpacing - 15)
     bg._lastLowest = lowest
 end
 EQT.ResizeBGToContent = ResizeBGToContent
