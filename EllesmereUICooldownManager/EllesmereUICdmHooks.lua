@@ -4225,7 +4225,23 @@ local function UpdateTrinketFrame(slotID)
             scanConclusive = true
         end
     else
-        scanConclusive = (spellID == nil or spellID == 0)
+        -- GetItemSpell reports nothing for an item that carries a passive
+        -- Equip proc alongside a separate on-use ability (Hex Lord's Dooming
+        -- Idol), so the slot read as passive and the icon was dropped. Fall
+        -- back to the localized "Use:" tooltip line the user-added equipment
+        -- slot path above already relies on.
+        local prefix = ITEM_SPELL_TRIGGER_ONUSE
+        local tipData = C_TooltipInfo and C_TooltipInfo.GetItemByID(itemID)
+        if tipData and tipData.lines and prefix then
+            scanConclusive = true
+            for _, tipLine in ipairs(tipData.lines) do
+                local lt = tipLine.leftText
+                if lt and lt:sub(1, #prefix) == prefix then
+                    isRealOnUse = true
+                    break
+                end
+            end
+        end
     end
     if scanConclusive then
         f._trinketIsOnUse = isRealOnUse
