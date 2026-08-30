@@ -8245,11 +8245,22 @@ local function UpdateButtonRange(unit, btn)
     elseif UnitPhaseReason and UnitPhaseReason(unit) then
         ApplyRangeAlpha(btn, oorAlpha)
     elseif UnitIsDeadOrGhost(unit) then
-        -- Dead units use the standard ~40yd interact range (UnitInRange), the same
-        -- secret-safe path living non-spell-range units take, so corpses fade with
-        -- distance. (A rez-spell-only check would force full alpha for players with
-        -- no rez or an indeterminate rez range.)
-        ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
+        -- Ghost units need to be checked using a rez-spell because UnitInRange checks the ghost's range, not the corpse's.
+        -- We want to provide rez-range feedback based on the corpse's position.
+        if playerHasRez then
+            local r = C_Spell_IsSpellInRange(playerRezSpell, unit)
+            if r == true then
+                ApplyRangeAlpha(btn, 1)
+            elseif r == false then
+                ApplyRangeAlpha(btn, oorAlpha)
+            else
+                -- Use the standard ~40yd interact range (UnitInRange) as fallback
+                ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
+            end
+        else
+            -- Use the standard ~40yd interact range (UnitInRange) when player has no rez spell
+            ApplyRangeAlphaSecret(btn, UnitInRange(unit), 1, oorAlpha)
+        end
     elseif usesSpellRange then
         local r = C_Spell_IsSpellInRange(playerFriendlySpell, unit)
         if r == true then
