@@ -357,62 +357,11 @@ local function CoinMarker(i, coinIcons, coloured)
     return d.symbol
 end
 
--- Gold abbreviation (SI units): 284208 -> "284.2K". CJK clients group by the
--- ten-thousand unit (wan) instead of K/M, matching the Damage Meters number
--- formatting. The gold cap is 99,999,999, under the hundred-million (yi)
--- rollover, so there is no "B"/yi breakpoint to carry.
-local CJK_GOLD = ({
-    zhCN = { wan = "万" },
-    zhTW = { wan = "萬" },
-    koKR = { wan = "만" },
-})[GetLocale()]
-
-local function BuildGoldAbbrevOpts(forceEnglish)
-    if CJK_GOLD and not forceEnglish then
-        return {
-            { breakpoint = 10000, abbreviation = CJK_GOLD.wan, significandDivisor = 100, fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1,     abbreviation = "",           significandDivisor = 1,   fractionDivisor = 1,   abbreviationIsGlobal = false },
-        }
-    end
-    return {
-        { breakpoint = 1000000, abbreviation = "M", significandDivisor = 10000, fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 1000,    abbreviation = "K", significandDivisor = 100,   fractionDivisor = 10,  abbreviationIsGlobal = false },
-        { breakpoint = 1,       abbreviation = "",  significandDivisor = 1,     fractionDivisor = 1,   abbreviationIsGlobal = false },
-    }
-end
-
--- Two cached configs: the locale's own (CJK wan, or K/M if not CJK) and the
--- English-forced one (Force English Units option). Non-CJK clients never
--- differ between the two, so the second build is skipped for them.
-local _goldAbbrevCfgLocal, _goldAbbrevCfgEnglish
-if CreateAbbreviateConfig then
-    _goldAbbrevCfgLocal = { config = CreateAbbreviateConfig(BuildGoldAbbrevOpts(false)) }
-    _goldAbbrevCfgEnglish = CJK_GOLD
-        and { config = CreateAbbreviateConfig(BuildGoldAbbrevOpts(true)) }
-        or _goldAbbrevCfgLocal
-end
-
--- Fallback for clients missing AbbreviateNumbers/CreateAbbreviateConfig.
-local function AbbrevGoldFallback(gold, forceEnglish)
-    if CJK_GOLD and not forceEnglish then
-        if gold >= 1e4 then return format("%.2f%s", gold / 1e4, CJK_GOLD.wan)
-        else return tostring(gold) end
-    end
-    if gold >= 1e6 then return format("%.2fM", gold / 1e6)
-    elseif gold >= 1e3 then return format("%.1fK", gold / 1e3)
-    else return tostring(gold) end
-end
-
-local function AbbrevGold(gold, forceEnglish)
-    if AbbreviateNumbers then
-        local cfg = forceEnglish and _goldAbbrevCfgEnglish or _goldAbbrevCfgLocal
-        return AbbreviateNumbers(gold, cfg) or tostring(gold)
-    end
-    return AbbrevGoldFallback(gold, forceEnglish)
-end
-
+-- Gold abbreviation (SI units): 284208 -> "284.2K". The breakpoint table and
+-- any locale-specific algorithm (e.g. CJK 万/萬/만 grouping) live in the
+-- shared EllesmereUI_NumberFormat.lua, so every module abbreviates the same way.
 local function GoldDisplay(val, abbreviate, forceEnglish)
-    if abbreviate then return AbbrevGold(val, forceEnglish) end
+    if abbreviate then return EllesmereUI.AbbreviateNumber(val, forceEnglish) end
     return BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
 end
 
