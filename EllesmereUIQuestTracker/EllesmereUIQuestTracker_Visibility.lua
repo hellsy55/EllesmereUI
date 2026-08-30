@@ -14,6 +14,13 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local _, ns = ...
 local EQT = ns.EQT
 
+-- Frame geometry getters (GetBottom/GetTop) can return secret numbers once our
+-- execution is tainted -- seen on Blizzard quest blocks after leaving an arena,
+-- where every layout pass then threw "attempt to compare a secret number value".
+-- Reading a secret is safe; comparing or doing arithmetic with one is not, so
+-- every measured coordinate is filtered through this before it is used.
+local isSecret = issecretvalue or function() return false end
+
 -- Hidden reparent target -- NEVER recursed into.
 local hiddenFrame = CreateFrame("Frame", "EllesmereUIQTHiddenParent", UIParent)
 hiddenFrame:Hide()
@@ -329,6 +336,7 @@ local function GetLowestContentFrame()
     local modules = otf.modules or otf.MODULES
     if not modules then return nil end
     local lowestFrame, lowestY
+    local sawSecret = false
     local _scenarioTracker = _G.ScenarioObjectiveTracker
     local _widgetTracker = _G.UIWidgetObjectiveTracker
     for _, tracker in ipairs(modules) do
@@ -353,6 +361,10 @@ local function GetLowestContentFrame()
             if not ok then return end
             if otype ~= "Frame" and otype ~= "Button" then return end
             local y = frame:GetBottom()
+            if isSecret(y) then
+                sawSecret = true
+                return
+            end
             if y and (not lowestY or y < lowestY) then
                 lowestY, lowestFrame = y, frame
             end
@@ -376,7 +388,7 @@ local function GetLowestContentFrame()
         end
         end -- else (skip scenario / widget-pool trackers)
     end
-    return lowestFrame
+    return lowestFrame, sawSecret
 end
 
 -- Event-driven resize with a debounce. Every QueueResize call coalesces into a single
@@ -413,7 +425,12 @@ local function ResizeBGToContent()
         if bg:IsShown() then bg:Hide() end
         return
     end
-    local lowest = GetLowestContentFrame()
+    local lowest, sawSecret = GetLowestContentFrame()
+    -- Every candidate's position came back secret (tainted execution): there is
+    -- nothing measurable this pass and no later pass will fix it before a
+    -- reload, so leave the BG exactly as it is instead of entering the
+    -- transient-content retry below, which would re-queue itself forever.
+    if not lowest and sawSecret then return end
     -- Transient "no visible content" states happen for a frame during
     -- track/untrack/collapse/expand while blocks are recycled. Keep the
     -- BG at its last position to avoid a hide/show blink.
@@ -442,6 +459,11 @@ local function ResizeBGToContent()
     anchorFrame = anchorFrame or otf
     local topY = (anchorPoint == "BOTTOM") and anchorFrame:GetBottom() or anchorFrame:GetTop()
     local lowestBottom = lowest:GetBottom()
+    if isSecret(topY) or isSecret(lowestBottom) then
+        -- Cannot measure this pass. Keep the last known geometry rather than
+        -- risking arithmetic on a secret value.
+        topY, lowestBottom = nil, nil
+    end
     if bg._divider then
         bg._divider:ClearAllPoints()
         bg._divider:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
