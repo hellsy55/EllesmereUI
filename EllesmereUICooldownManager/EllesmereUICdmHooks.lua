@@ -2152,6 +2152,52 @@ function ns.WatchZeroChargeTextIfEnabled(frame)
 end
 
 -------------------------------------------------------------------------------
+--  Charge counter on SPELL_UPDATE_CHARGES. Blizzard_CooldownViewer (12.1.0)
+--  does not register the event, so a proc that hands charges to a chargeless
+--  spell reaches the icon only at its next RefreshData, seconds later. Mirrors
+--  RefreshSpellChargeInfo's charge branch (maxCharges > 1, NeverSecret) from
+--  the frame's own GetSpellChargeInfo; SetText takes a secret count. Not
+--  routed through RefreshSpellChargeInfo: SetCachedChargeValues compares
+--  currentCharges, secret while cooldowns are restricted. Show() is
+--  unconditional because the counter's shown aspect is secret once Blizzard
+--  set it from a secret cast count. Frames this wrote are hidden again when
+--  maxCharges drops back; the rest stays with Blizzard. No payload.
+-------------------------------------------------------------------------------
+do
+    local wrote = setmetatable({}, { __mode = "k" })
+
+    local function WriteChargeCount(frame)
+        local cc = frame.ChargeCount
+        local fs = cc and cc.Current
+        if not fs then return end
+        local ci = CdmChargeInfoFor(frame, nil)
+        if ci and (ci.maxCharges or 0) > 1 then
+            fs:SetText(ci.currentCharges)
+            cc:Show()
+            wrote[frame] = true
+        elseif wrote[frame] then
+            wrote[frame] = nil
+            cc:Hide()
+        end
+    end
+
+    local ef = ns.TakeShell()
+    ef:RegisterEvent("SPELL_UPDATE_CHARGES")
+    ef:SetScript("OnEvent", function()
+        if IsCDMSettingsOpen() then return end
+        for vi = 1, 2 do
+            local viewer = GetViewerFrame(vi)
+            local pool = viewer and viewer.itemFramePool
+            if pool and pool.EnumerateActive then
+                for frame in pool:EnumerateActive() do
+                    WriteChargeCount(frame)
+                end
+            end
+        end
+    end)
+end
+
+-------------------------------------------------------------------------------
 --  Cooldown State Effect -- charge-aware readiness for Hidden (CD Ready)
 --  For a CHARGE spell "CD Ready" must mean AT MAX CHARGES, not "a charge in
 --  hand": GetSpellCooldown().isActive is false with a charge left, so a plain
