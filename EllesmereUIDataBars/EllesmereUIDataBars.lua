@@ -135,6 +135,13 @@ local L = {
     COMPANION_LEVEL      = "Companion Level",
     SELECT_CURRENCY      = "Select a currency",
     OPEN_SETTINGS        = "Open Settings",
+    CRESTS               = "Crests",
+    SEASON_MAXIMUM       = "Current Season Maximum",
+    ILVL                 = "ILVL",
+    ITEM_LEVEL           = "Item Level",
+    EQUIPPED             = "Equipped",
+    PVP_ITEM_LEVEL       = "PvP Item Level",
+    OPEN_CHARACTER       = "Open Character Sheet",
     WHISPER              = "Whisper",
     WHISPER_BNET         = "Whisper BNet",
     INVITE               = "Invite",
@@ -198,6 +205,8 @@ ns.BLOCK_TYPES = {
     { key = "travel",     label = "Travel Cooldowns" },
     { key = "micromenu",  label = "Micro Menu" },
     { key = "currency",   label = "Currency" },
+    { key = "crests",     label = "Crests" },
+    { key = "ilvl",       label = "Item Level" },
     { key = "greatvault", label = "Great Vault" },
     { key = "audio",      label = "Audio" },
     { key = "spacer",     label = "Spacer" },
@@ -212,7 +221,7 @@ ns.BLOCK_DEFAULTS = {
     -- which the options page pulses about.
     location   = { showIcon = true, showSubZone = true },
     coords     = { showIcon = true, precision = 0, hideInInstance = true },
-    gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false },
+    gold       = { showIcons = true, showBagSpace = false, showSmall = false, coinIcons = false, abbreviate = false, forceEnglishUnits = false },
     durability = { showIcon = true },
     combat     = { onlyInCombat = false },
     xprep      = { mode = "auto" },
@@ -224,6 +233,12 @@ ns.BLOCK_DEFAULTS = {
                    menu = true, guild = true, social = true, char = true, spell = true, ach = true, quest = true, lfg = true,
                    pvp = true, housing = true, journal = true, pet = true, shop = true, help = true },
     currency   = { currencyId = nil, showIcon = true, showDescription = true },
+    -- t1..t5 are TIER slots, not currency ids: a season swap replaces the ids
+    -- in the blocks file and the player's checklist selection still applies.
+    crests     = { t1 = true, t2 = true, t3 = true, t4 = true, t5 = true,
+                   showIcons = true, separator = "slash", showSeasonProgress = false,
+                   hideEmpty = false, reverse = false },
+    ilvl       = { prefix = "short", value = "equipped", precision = 0 },
     greatvault = {},
     audio      = { channel = "master" },
     spacer     = {},
@@ -342,6 +357,14 @@ local function CoinMarker(i, coinIcons, coloured)
     return d.symbol
 end
 
+-- Gold abbreviation (SI units): 284208 -> "284.2K". The breakpoint table and
+-- any locale-specific algorithm (e.g. CJK 万/萬/만 grouping) live in the
+-- shared EllesmereUI_NumberFormat.lua, so every module abbreviates the same way.
+local function GoldDisplay(val, abbreviate, forceEnglish)
+    if abbreviate then return EllesmereUI.AbbreviateNumber(val, forceEnglish) end
+    return BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
+end
+
 -- Money split per denomination: one token per coin, so callers can align them
 -- in columns (tooltip) or separate lines (vertical bar) -- a single formatted
 -- string can't, since the proportional font makes "9g" and "1 234g" different
@@ -349,12 +372,11 @@ end
 -- Tip_AddColumns copies it, so one buffer serves all rows.
 local _moneyTokens = {}
 
-function ns.MoneyTokens(amount, showSmall, coinIcons, coloured)
+function ns.MoneyTokens(amount, showSmall, coinIcons, coloured, abbreviate, forceEnglish)
     amount = floor(abs(amount or 0))
     wipe(_moneyTokens)
     local gold = floor(amount / DENOMINATIONS[1].divisor)
-    local gStr = BreakUpLargeNumbers and BreakUpLargeNumbers(gold) or tostring(gold)
-    _moneyTokens[1] = gStr .. CoinMarker(1, coinIcons, coloured)
+    _moneyTokens[1] = GoldDisplay(gold, abbreviate, forceEnglish) .. CoinMarker(1, coinIcons, coloured)
     if showSmall ~= false then
         local silver = floor((amount % DENOMINATIONS[1].divisor) / DENOMINATIONS[2].divisor)
         _moneyTokens[2] = silver .. CoinMarker(2, coinIcons, coloured)
@@ -363,7 +385,7 @@ function ns.MoneyTokens(amount, showSmall, coinIcons, coloured)
     return _moneyTokens
 end
 
-function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
+function ns.FormatMoneyPlain(amount, showSmall, coinIcons, abbreviate, forceEnglish)
     amount = floor(abs(amount or 0))
     local parts, foundGold = {}, false
     for i, denom in ipairs(DENOMINATIONS) do
@@ -371,8 +393,7 @@ function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
         amount = amount % denom.divisor
         if i == 1 and val > 0 then
             foundGold = true
-            local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, false)
+            parts[#parts + 1] = GoldDisplay(val, abbreviate, forceEnglish) .. CoinMarker(i, coinIcons, false)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
             parts[#parts + 1] = val .. CoinMarker(i, coinIcons, false)
         end
@@ -381,7 +402,7 @@ function ns.FormatMoneyPlain(amount, showSmall, coinIcons)
     return "0" .. CoinMarker(3, coinIcons, false)
 end
 
-function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
+function ns.FormatMoney(amount, useColors, showSmall, coinIcons, abbreviate, forceEnglish)
     amount = floor(abs(amount or 0))
     local coloured = useColors ~= false
     local parts, foundGold = {}, false
@@ -390,8 +411,7 @@ function ns.FormatMoney(amount, useColors, showSmall, coinIcons)
         amount = amount % denom.divisor
         if i == 1 and val > 0 then
             foundGold = true
-            local display = BreakUpLargeNumbers and BreakUpLargeNumbers(val) or tostring(val)
-            parts[#parts + 1] = display .. CoinMarker(i, coinIcons, coloured)
+            parts[#parts + 1] = GoldDisplay(val, abbreviate, forceEnglish) .. CoinMarker(i, coinIcons, coloured)
         elseif i > 1 and (not foundGold or showSmall ~= false) and (val > 0 or (i == 3 and #parts == 0)) then
             parts[#parts + 1] = val .. CoinMarker(i, coinIcons, coloured)
         end

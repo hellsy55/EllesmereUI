@@ -173,6 +173,20 @@ local function IsGearItem(itemLink)
     local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
     return classID == ITEM_CLASS_WEAPON or classID == ITEM_CLASS_ARMOR
 end
+-- Pin identity: bare itemID can't distinguish two different upgrade tracks
+-- (e.g. Mythic vs Hero) of the same base item -- those share one itemID and
+-- only differ in the bonus IDs encoded on the item LINK. The link itself is
+-- unique per track/rank (and byte-identical for genuine duplicates of the
+-- SAME track, correctly sharing one pin-count entry), so it's the real key.
+-- itemID stays supported read-only as a legacy fallback: bagPinnedItems
+-- entries written before this fix are itemID-keyed, and reading them still
+-- needs to work (matching every track, same as before -- not a fix for
+-- those old entries, just not a silent loss of them either). Every NEW pin
+-- from here on writes under the link key only.
+local function IsItemPinned(pinnedSet, itemLink, itemID)
+    if not pinnedSet then return nil end
+    return (itemLink and pinnedSet[itemLink]) or (itemID and pinnedSet[itemID])
+end
 local function GetItemLevelAtLocation(loc, itemLink)
     if loc and loc:IsValid() and C_Item.DoesItemExist(loc) then
         local level = C_Item.GetCurrentItemLevel(loc)
@@ -2276,21 +2290,34 @@ local function GetOrCreateSlot(idx)
         local pinned = EllesmereUIDB.bagPinnedItems
         local itemLink = C_Container.GetContainerItemLink(bagID, slotID)
         local isGear = IsGearItem(itemLink)
-        local cur = pinned[info.itemID] or 0
+        -- Pin key is the link (distinguishes upgrade tracks -- see IsItemPinned
+        -- above); pinKey == info.itemID when no link is available. A legacy
+        -- itemID-keyed pin (written before this fix, conflating every track)
+        -- is adopted into `cur` once and then always cleared here, regardless
+        -- of which specific track was clicked -- there's no way to know which
+        -- track a legacy entry originally meant, so the honest self-heal is
+        -- "this interaction resolves the ambiguity," not "this interaction
+        -- guesses which track it was." Re-pin afterward to set a precise,
+        -- track-specific entry.
+        local pinKey = itemLink or info.itemID
+        local legacyCur = pinned[info.itemID] or 0
+        local cur = pinned[pinKey] or 0
+        if legacyCur > 0 and cur == 0 then cur = legacyCur end
+        pinned[info.itemID] = nil
         if isGear then
             -- Gear: per-stack count toggle
             if cur > 0 then
                 cur = cur - 1
-                pinned[info.itemID] = cur > 0 and cur or nil
+                pinned[pinKey] = cur > 0 and cur or nil
             else
-                pinned[info.itemID] = cur + 1
+                pinned[pinKey] = cur + 1
             end
         else
             -- Non-gear: pin/unpin all stacks at once
             if cur > 0 then
-                pinned[info.itemID] = nil
+                pinned[pinKey] = nil
             else
-                pinned[info.itemID] = 999
+                pinned[pinKey] = 999
             end
         end
         if EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
@@ -2901,29 +2928,33 @@ local function GetOrCreatePinOverlay()
     end)
     ov:RegisterForDrag("LeftButton")
     ov:SetScript("OnReceiveDrag", function()
-        local cursorType, itemID = GetCursorInfo()
+        -- select(3, ...), not select(2, ...): GetCursorInfo() for "item" returns
+        -- type, itemID, itemLink -- select(2, ...) into a single local re-grabs
+        -- itemID, not the link (see the correct 3-value capture at line ~6988).
+        -- Needed here for a real link now that pins are link-keyed.
+        local cursorType, itemID, cursorLink = GetCursorInfo()
         if cursorType == "item" and itemID then
             if not EllesmereUIDB then EllesmereUIDB = {} end
             if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
             local pinned = EllesmereUIDB.bagPinnedItems
-            if not pinned[itemID] or pinned[itemID] == 0 then
-                local itemLink = select(2, GetCursorInfo())
-                pinned[itemID] = IsGearItem(itemLink) and 1 or 999
+            local pinKey = cursorLink or itemID
+            if not IsItemPinned(pinned, cursorLink, itemID) then
+                pinned[pinKey] = IsGearItem(cursorLink) and 1 or 999
             end
             ClearCursor()
             if EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
         end
     end)
     ov:SetScript("OnClick", function()
-        local cursorType, itemID = GetCursorInfo()
+        local cursorType, itemID, cursorLink = GetCursorInfo()
         if cursorType == "item" and itemID then
             -- Click-to-place also pins
             if not EllesmereUIDB then EllesmereUIDB = {} end
             if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
             local pinned = EllesmereUIDB.bagPinnedItems
-            if not pinned[itemID] or pinned[itemID] == 0 then
-                local itemLink = select(2, GetCursorInfo())
-                pinned[itemID] = IsGearItem(itemLink) and 1 or 999
+            local pinKey = cursorLink or itemID
+            if not IsItemPinned(pinned, cursorLink, itemID) then
+                pinned[pinKey] = IsGearItem(cursorLink) and 1 or 999
             end
             ClearCursor()
             if EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
@@ -3299,7 +3330,9 @@ EnterPinSelectMode = function()
                     if info and info.itemID then
                         if not EllesmereUIDB then EllesmereUIDB = {} end
                         if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
-                        EllesmereUIDB.bagPinnedItems[info.itemID] = (EllesmereUIDB.bagPinnedItems[info.itemID] or 0) + 1
+                        local itemLink = C_Container.GetContainerItemLink(bagID, slotID)
+                        local pinKey = itemLink or info.itemID
+                        EllesmereUIDB.bagPinnedItems[pinKey] = (EllesmereUIDB.bagPinnedItems[pinKey] or 0) + 1
                         ClearPinHover()
                         ExitPinSelectMode()
                         EUI_Bags:RefreshInventory()
@@ -5245,7 +5278,7 @@ function EUI_Bags:RefreshInventory()
     if pinnedCatIdx and pinnedSet and showPinned then
         local pinnedCount = 0
         for _, data in ipairs(tempItems) do
-            if data.info and data.info.itemID and pinnedSet[data.info.itemID] then
+            if data.info and data.info.itemID and IsItemPinned(pinnedSet, data.itemLink, data.info.itemID) then
                 pinnedCount = pinnedCount + 1
             end
         end
@@ -5293,7 +5326,7 @@ function EUI_Bags:RefreshInventory()
         if isRecentView then
             show = data.info and data.info.itemID and EUI_Bags._recentItems and EUI_Bags._recentItems[data.info.itemID]
         elseif isPinnedView then
-            show = data.info and data.info.itemID and pinnedSet and pinnedSet[data.info.itemID]
+            show = data.info and data.info.itemID and pinnedSet and IsItemPinned(pinnedSet, data.itemLink, data.info.itemID)
         elseif filterSet then
             show = data.categoryIndex and filterSet[data.categoryIndex]
         end
@@ -5738,7 +5771,7 @@ function EUI_Bags:RefreshInventory()
             local pinItems = {}
             if pinnedSet then
                 for _, d in ipairs(tempItems) do
-                    if d.info and d.info.itemID and pinnedSet[d.info.itemID] then
+                    if d.info and d.info.itemID and IsItemPinned(pinnedSet, d.itemLink, d.info.itemID) then
                         pinItems[#pinItems + 1] = d
                     end
                 end
@@ -6253,7 +6286,7 @@ function EUI_Bags:RefreshInventory()
                 if pinnedSet and showPinned then
                     local pinItems = {}
                     for _, data in ipairs(displayItems) do
-                        if data.info and data.info.itemID and pinnedSet[data.info.itemID] then
+                        if data.info and data.info.itemID and IsItemPinned(pinnedSet, data.itemLink, data.info.itemID) then
                             pinItems[#pinItems + 1] = data
                         end
                     end
@@ -7159,6 +7192,22 @@ local function StartAddon()
     EUI_Bags:RegisterEvent("PLAYER_MONEY")
     EUI_Bags:RegisterEvent("ITEM_LOCK_CHANGED")
     EUI_Bags:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+    -- A keystone's encoded level changing (downgrade on completion, or on reset)
+    -- doesn't reliably fire BAG_UPDATE for its slot, so the keystone level text
+    -- painted by RefreshInventory goes stale while bags stay open across the
+    -- run -- GameTooltip looks correct because it re-queries fresh on every
+    -- hover, independent of our repaint cycle. Force a refresh on these too.
+    EUI_Bags:RegisterEvent("CHALLENGE_MODE_COMPLETED")
+    EUI_Bags:RegisterEvent("CHALLENGE_MODE_RESET")
+    -- Lindormi's NPC-dialogue keystone downgrade is the same in-place encoded-
+    -- level change as above, just triggered outside any dungeon run -- neither
+    -- CHALLENGE_MODE event applies (both are scoped to an active M+ run's
+    -- lifecycle). GOSSIP_CLOSED is the generic "an NPC dialogue just ended"
+    -- signal and fires reliably around her interaction (confirmed live via an
+    -- event probe); it also fires for every unrelated NPC gossip close, but
+    -- ScheduleRefresh below is cheap and gated on bags being visible, so that's
+    -- a harmless no-op rather than a real cost.
+    EUI_Bags:RegisterEvent("GOSSIP_CLOSED")
     -- Set created/renamed/deleted: rebuild split categories / refresh name labels.
     -- Registered only while a set feature is on: zero event cost when disabled
     -- (merged-mode routing stays correct without it -- the lookup rebuilds per
@@ -7323,6 +7372,14 @@ local function StartAddon()
             -- Invalidate even while hidden: the next open must not classify with
             -- categories built from the old set list.
             EUI_Bags.InvalidateSetCategories()
+            if EUI_Bags:IsVisible() then ScheduleRefresh() end
+            return
+        end
+        if event == "CHALLENGE_MODE_COMPLETED" or event == "CHALLENGE_MODE_RESET"
+           or event == "GOSSIP_CLOSED" then
+            -- A keystone downgrade here doesn't need a hidden-side invalidation:
+            -- the next manual open already forces a full RefreshInventory
+            -- (ToggleEUI). This only matters while bags are already visible.
             if EUI_Bags:IsVisible() then ScheduleRefresh() end
             return
         end

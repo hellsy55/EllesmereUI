@@ -327,6 +327,7 @@ function EAB.VisibilityCompat.Copy(dst, src, dstNoGroupModes)
             EAB.VisibilityCompat.ApplyMode)
     else
         dst.visibilityModes = nil
+        dst.visibilityMatch = src.visibilityMatch or nil
     end
 end
 
@@ -820,6 +821,12 @@ ns.ResolveBorderThickness = ResolveBorderThickness
 -- Condense keybind text (CTRL-2 C2, Mouse Button 4 M4, etc.)
 local function FormatHotkeyText(text)
     if not text or text == "" then return "" end
+    -- Gamepad binds resolve to glyph markup (no atlas name matches a substitution
+    -- below); keyboard binds keep the raw tokens the substitutions are written against.
+    local resolved = GetBindingText(text, 1)
+    if resolved and resolved:find("|A:", 1, true) then
+        text = resolved
+    end
     text = text:gsub("CTRL%-", "C")
     text = text:gsub("ALT%-", "A")
     text = text:gsub("SHIFT%-", "S")
@@ -8571,6 +8578,27 @@ function EAB_VTABLE.Hover.GetState(barKey, frame)
     return state
 end
 
+-- The alpha a bar RESTS at while the cursor is not on it, plus whether that resting state
+-- is a hover gate. Single source of truth for every alpha writer here, so a fade-out
+-- cannot land on a different verdict than the visibility refresh would. mouseoverEnabled
+-- is STATIC (true whenever mouseover is selected at all, any Match Mode), so it can only
+-- answer "is the hover mechanism wired"; VisWantsMouseover answers "is it gating now".
+-- _savedBarAlpha is load-bearing: ApplyMode parks mouseoverAlpha at 0 and stashes the real
+-- value there while a mouseover selection is stored, so the shown branch would paint 0.
+-- On the vtable, not a chunk local (main chunk is at the 200-local cap).
+function EAB_VTABLE.Hover.RestingAlpha(barKey, s)
+    s = s or EAB_VTABLE.Hover.GetSettings(barKey)
+    if not s then return 1, false end
+    local wantsHover
+    if s.mouseoverEnabled and EllesmereUI.VisWantsMouseover then
+        wantsHover = EllesmereUI.VisWantsMouseover(s, "barVisibility", nil, EllesmereUI.VIS_CAPS_DEFAULT)
+    else
+        wantsHover = s.mouseoverEnabled
+    end
+    if wantsHover then return 0, true end
+    return s._savedBarAlpha or s.mouseoverAlpha or 1, false
+end
+
 -- Fade ONE bar in, no broadcast. The fadeDir memo makes repeat calls while
 -- already fading/faded O(1) table reads, so a sweep across a bar's 12 buttons
 -- costs 12 memo hits and one real fade. On the vtable, not a chunk local
@@ -8595,7 +8623,12 @@ function EAB_VTABLE.Hover.FadeIn(barKey, state)
     -- frame in lockstep. Cheap because FadeInOne routes hover fades through
     -- the shared manual fader (a table write) instead of a 0.7-4ms
     -- AnimationGroup start per bar. Iterative, not recursive: no reentrancy latch to get stuck.
-    if EAB.db.profile.mouseoverShowAll then
+    -- Gated on THIS bar being Mouseover itself -- AttachHoverHooks wires the
+    -- same OnEnter onto every bar regardless of its own visibility mode, so
+    -- without this check hovering an Always-visible bar broadcast the same
+    -- as hovering a real Mouseover one (tooltip promises the latter only).
+    local s = EAB_VTABLE.Hover.GetSettings(barKey)
+    if s and s.mouseoverEnabled and EAB.db.profile.mouseoverShowAll then
         local FadeInOne = EAB_VTABLE.Hover.FadeInOne
         for otherKey, otherState in pairs(hoverStates) do
             if otherKey ~= barKey then
@@ -8609,11 +8642,15 @@ function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
+        -- Fade back to the bar's RESTING alpha, not a hardcoded 0: under Any a passing
+        -- disjunct keeps the bar visible with no hover involved, and fading it away here
+        -- would leave it wrong until the next visibility refresh.
+        local resting = EAB_VTABLE.Hover.RestingAlpha(barKey, s)
         state.fadeDir = "out"
         StopFade(state.frame)
         -- `manual`: same lockstep rationale as FadeInOne.
-        FadeTo(state.frame, 0, s.mouseoverSpeed or 0.15, true)
-        if barKey == "MainBar" then SyncPagingAlpha(0) end
+        FadeTo(state.frame, resting, s.mouseoverSpeed or 0.15, true)
+        if barKey == "MainBar" then SyncPagingAlpha(resting) end
     end
 end
 
@@ -8774,11 +8811,14 @@ local function AttachHoverHooks(barKey)
     end
 end
 
-function EAB:RefreshMouseover()
+-- onlyHoverGated: visit ONLY the bars whose hover gate can move on a state edge (Match
+-- Any plus mouseover). The edge-driven caller passes it so a target change does not drag
+-- every other bar through a StopFade/SetAlpha it cannot need.
+function EAB:RefreshMouseover(onlyHoverGated)
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
-        if s then
+        if s and (not onlyHoverGated or (s.mouseoverEnabled and s.visibilityMatch == "any")) then
             local frame = barFrames[key] or (info.isDataBar and dataBarFrames[key]) or (info.isBlizzardMovable and blizzMovableHolders[key]) or (extraBarHolders[key]) or (info.visibilityOnly and _G[info.frameName])
             if frame then
                 -- For extra bars (MicroBar, BagBar), fade the Blizzard frame directly
@@ -8802,11 +8842,18 @@ function EAB:RefreshMouseover()
                     if info.visibilityOnly and not info.isDataBar and not info.isBlizzardMovable then
                         AttachExtraBarHoverHooks(info)
                     end
-                    StopFade(frame)
-                    frame:SetAlpha(0)
                     local state = hoverStates[key]
-                    if state then state.fadeDir = "out" end
-                    if key == "MainBar" then SyncPagingAlpha(0) end
+                    -- A bar the cursor is sitting on keeps what the hover gave it. This
+                    -- used to be safe by accident (the function only ran on settings
+                    -- changes); it now also runs on combat/group/mount edges, where
+                    -- repainting would yank a hovered bar invisible mid-hover.
+                    if not (state and state.isHovered) then
+                        local resting = EAB_VTABLE.Hover.RestingAlpha(key, s)
+                        StopFade(frame)
+                        frame:SetAlpha(resting)
+                        if state then state.fadeDir = (resting == 0) and "out" or nil end
+                        if key == "MainBar" then SyncPagingAlpha(resting) end
+                    end
                 else
                     StopFade(frame)
                     frame:SetAlpha(s.mouseoverAlpha or 1)
@@ -8841,6 +8888,11 @@ function EAB.BuildVisibilityStringMulti(hidePrefix, vm)
     return EllesmereUI.BuildVisibilityDriverString(hidePrefix, vm)
 end
 
+-- Edges this addon watches, for the shared Any tail builder: the target/enemy axes may
+-- compile to live macro tokens because the soft-target machinery (PLAYER_SOFT_* events
+-- + the 0.1s poll) rebuilds the driver when they drift. EAB field: 200-local cap.
+EAB.VIS_EDGES = { softTarget = true }
+
 local function BuildVisibilityString(info, s, visOverride)
     local key = info.key
     local vis = visOverride or s.barVisibility or "always"
@@ -8850,16 +8902,21 @@ local function BuildVisibilityString(info, s, visOverride)
     end
 
     -- Visibility-option hide clauses expressed as macro conditionals; run
-    -- inside the secure state driver so they work in combat without taint.
+    -- inside the secure state driver so they work in combat without taint. Under Any
+    -- they are disjuncts, compiled by the Any tail below, never a gate.
     local visOptHide = ""
-    if s.visHideMounted then visOptHide = visOptHide .. "[mounted] hide; " end
-    -- Inverse of the above. [nomounted] cannot see druid travel/flight forms
-    -- (they are shapeshifts), so a druid in a mount-like form reads unmounted
-    -- here and the bar hides -- accepted asymmetry: the secure clause is what
-    -- keeps this working in combat, and Lua cannot un-hide past the driver.
-    if s.visOnlyMounted then visOptHide = visOptHide .. "[nomounted] hide; " end
-    if s.visHideNoTarget then visOptHide = visOptHide .. "[noexists] hide; " end
-    if s.visHideNoEnemy then visOptHide = visOptHide .. "[noharm] hide; " end
+    if s.visibilityMatch ~= "any" then
+        if s.visHideMounted then visOptHide = visOptHide .. "[mounted] hide; " end
+        -- Inverse of the above. [nomounted] cannot see druid travel/flight forms
+        -- (they are shapeshifts), so a druid in a mount-like form reads unmounted
+        -- here and the bar hides -- accepted asymmetry: the secure clause is what
+        -- keeps this working in combat, and Lua cannot un-hide past the driver.
+        if s.visOnlyMounted then visOptHide = visOptHide .. "[nomounted] hide; " end
+        if s.visHideNoTarget then visOptHide = visOptHide .. "[noexists] hide; " end
+        if s.visHideWithTarget then visOptHide = visOptHide .. "[exists] hide; " end
+        if s.visHideNoEnemy then visOptHide = visOptHide .. "[noharm] hide; " end
+        if s.visHideWithEnemy then visOptHide = visOptHide .. "[harm] hide; " end
+    end
 
     -- Authoritative multi-select set. Explicit overrides (toggle keybind,
     -- QuickKeybind, grid drag) substitute the whole mode term as for single
@@ -8867,6 +8924,24 @@ local function BuildVisibilityString(info, s, visOverride)
     local vm
     if not visOverride and EllesmereUI.GetActiveVisibilityModes then
         vm = EllesmereUI.GetActiveVisibilityModes(s, "barVisibility")
+    end
+
+    -- Any match: the shared builder compiles the whole tail; Lua-only lanes (instances,
+    -- housing, skyriding mount) are resolved at build time, so their verdict is only as
+    -- fresh as the last driver rebuild. Explicit overrides keep the legacy path.
+    if not visOverride and s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+        local anyPrefix, anyWrap
+        if info.isPetBar then
+            anyPrefix = "[petbattle] hide; "
+            anyWrap = "novehicleui,pet,nooverridebar,nopossessbar"
+        elseif key == "MainBar" then
+            anyPrefix = "[petbattle] hide; "
+        elseif info.isStance then
+            anyPrefix = "[vehicleui][petbattle] hide; "
+        else
+            anyPrefix = "[vehicleui][petbattle][overridebar] hide; "
+        end
+        return anyPrefix .. EllesmereUI.BuildAnyMatchTail(s, "barVisibility", vm, anyWrap, EAB.VIS_EDGES)
     end
 
     -- Pet bar has unique logic: it only shows when a pet is active and
@@ -9105,16 +9180,17 @@ function EAB_VTABLE.ExtraBars.ApplyManagedNonSecureAlpha(info, frame, s)
     if not frame or not s or not frame:IsShown() then return end
 
     local hstate = hoverStates[info.key]
-    if s.mouseoverEnabled then
+    local resting, hoverGated = EAB_VTABLE.Hover.RestingAlpha(info.key, s)
+    if hoverGated then
         if hstate and hstate.isHovered then
             frame:SetAlpha(1)
             hstate.fadeDir = "in"
         else
-            frame:SetAlpha(0)
+            frame:SetAlpha(resting)
             if hstate then hstate.fadeDir = "out" end
         end
     else
-        frame:SetAlpha(s.mouseoverAlpha or 1)
+        frame:SetAlpha(resting)
         if hstate then hstate.fadeDir = nil end
     end
 end
@@ -9293,13 +9369,29 @@ function EAB:_RefreshSoftTargetGate()
     --   _anyNonMacroVis  -- any bar using ANY non-macro visibility option, or
     --   a managed non-secure bar; when false, UpdateHousingVisibility has
     --   nothing it could ever change and skips entirely.
-    local anySoft, anyNonMacro = false, false
+    --   _anyHoverGated   -- any bar whose hover gate can OPEN and CLOSE on a state edge
+    --   (Match Any plus mouseover). Only those need the resting alpha re-derived when
+    --   combat/group/mount state moves; under All a mouseover bar is hover-gated for as
+    --   long as the setting stands, so its alpha never changes off an edge.
+    local anySoft, anyNonMacro, anyHoverGated = false, false, false
     for _, info in ipairs(ALL_BARS) do
         local s = self.db.profile.bars[info.key]
         if s then
-            if s.visHideNoTarget then anySoft = true end
-            if s.visHideNoTarget or s.visOnlyInstances or s.visHideHousing
-               or s.visOnlyHousing or s.visHideMounted then
+            if s.mouseoverEnabled and s.visibilityMatch == "any" then
+                anyHoverGated = true
+            end
+            -- Under Any the counter lane carries the soft-target correction too, so it
+            -- arms the same machinery; under All it never did and still does not.
+            if s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any") then
+                anySoft = true
+            end
+            -- Driven off the shared key list rather than a hand-written subset: an
+            -- option missing here silently skips the whole UpdateHousingVisibility pass
+            -- for that bar. Deliberately over-inclusive (it also matches the
+            -- macro-expressible lanes) -- a needless walk on a rare zone/mount edge is
+            -- cheap, a missed one leaves the bar stale until the next settings change.
+            if not anyNonMacro and EllesmereUI.VisHasAnyOption
+               and EllesmereUI.VisHasAnyOption(s) then
                 anyNonMacro = true
             end
         end
@@ -9309,6 +9401,18 @@ function EAB:_RefreshSoftTargetGate()
     end
     self._anyHideNoTarget = anySoft
     self._anyNonMacroVis = anyNonMacro
+    self._anyHoverGated = anyHoverGated
+end
+
+-- Re-derive the resting alpha of every hover-gated bar. Registered once with the shared
+-- visibility dispatcher (below), which already watches the exact edge set this depends on
+-- (combat, group, target, mount, zone, shapeshift, gliding) and fans out one frame later.
+-- Alpha only: no Show/Hide, no driver registration, so this is safe inside combat lockdown
+-- and carries no taint exposure. Fully gated -- users with no Any-plus-mouseover bar pay
+-- one flag read per dispatcher event.
+function EAB:RefreshHoverGatedAlpha()
+    if not self._anyHoverGated then return end
+    self:RefreshMouseover(true)
 end
 
 function EAB:RefreshRuntimeVisibility()
@@ -9731,6 +9835,9 @@ function EAB:UpdateHousingVisibility()
         -- forms are also handled here to cover cases [mounted] does not match.
         local function ShouldHideNonMacro(s)
             if not s then return false end
+            -- Under Any the lanes are disjuncts folded into the driver string; a literal
+            -- "hide" here would veto the whole disjunction on one failing lane.
+            if s.visibilityMatch == "any" then return false end
             if s.visHideNoTarget then
                 -- [noexists] in the state driver covers the basic has-target
                 -- check even in combat. Out of combat also hide when a soft
@@ -9739,42 +9846,29 @@ function EAB:UpdateHousingVisibility()
                 -- UnitExists("target") doesn't, so test those tokens directly.
                 if not UnitExists("target") and (UnitExists("softinteract") or UnitExists("softenemy") or UnitExists("softfriend")) then return true end
             end
-            if s.visOnlyInstances then
-                local _, iType, diffID = GetInstanceInfo()
-                diffID = tonumber(diffID) or 0
-                local inInstance = false
-                if diffID > 0 then
-                    if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
-                        inInstance = false
-                    elseif iType == "party" or iType == "raid" or iType == "scenario" or iType == "arena" or iType == "pvp" then
-                        inInstance = true
-                    end
-                end
-                if not inInstance then return true end
-            end
-            if s.visHideHousing then
-                if C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot() then
-                    return true
-                end
-            end
-            if s.visOnlyHousing then
-                if not (C_Housing and C_Housing.IsInsideHouseOrPlot and C_Housing.IsInsideHouseOrPlot()) then
-                    return true
-                end
-            end
             if s.visHideMounted then
                 -- Regular mounts are handled entirely by the secure "[mounted] hide"
-                -- clause, which self-updates even in combat, so the bar reappears the
-                -- instant the player is dazed off a mount. Clobbering the driver with a
-                -- literal "hide" here would freeze it hidden until combat ends: this
-                -- handler bails during InCombatLockdown and
-                -- PLAYER_MOUNT_DISPLAY_CHANGED can't re-evaluate a dead constant
-                -- string. Only shapeshift travel/flight forms need this non-secure
-                -- fallback, since [mounted] doesn't match them.
+                -- clause, which self-updates even in combat. Druid travel/flight forms
+                -- don't match [mounted] and fall back to this non-secure clobber, and a
+                -- bare "hide" is a dead constant once written (the shift-out edge lands
+                -- in combat, where this handler bails), so the marker lets the write
+                -- site bake a combat escape hatch into the string instead.
                 if not (IsMounted and IsMounted())
                     and EllesmereUI and EllesmereUI.IsPlayerMountedLike and EllesmereUI.IsPlayerMountedLike() then
-                    return true
+                    return "combathide"
                 end
+            end
+            -- Every other Lua-only option (both instance lanes, both housing lanes, both
+            -- skyriding-mount lanes) comes from the shared evaluator, so a lane added
+            -- there is live here too instead of silently going stale on the next zone or
+            -- mount edge. skipMountAxis keeps the driver's [mounted]/[nomounted] clauses
+            -- authoritative, leaving the narrower shapeshift check above as the only
+            -- mount handling on this path. The skyriding-mount lanes can flip into
+            -- combat like the form case, so the evaluator flags them "mountaxis".
+            if EllesmereUI and EllesmereUI.CheckVisibilityOptionsNonMacro then
+                local nonMacro = EllesmereUI.CheckVisibilityOptionsNonMacro(s, true)
+                if nonMacro == "mountaxis" then return "combathide" end
+                if nonMacro then return true end
             end
             return false
         end
@@ -9813,10 +9907,20 @@ function EAB:UpdateHousingVisibility()
                         end
                     elseif shouldHide then
                         if isSecure then
-                            if frame._eabLastVisStr ~= "hide" then
+                            -- "combathide" (druid mount-like form, skyriding-mount lanes): a
+                            -- lane that can flip INTO combat must not be a dead constant, so
+                            -- hide out of combat and fall back to the real driver in combat
+                            -- (mode, prefixes and any [mounted] clause keep working there).
+                            -- Never / always-hidden bars keep the plain hide.
+                            local hideStr = "hide"
+                            if shouldHide == "combathide" and not s.alwaysHidden
+                                and (s.barVisibility or "always") ~= "never" then
+                                hideStr = "[nocombat] hide; " .. BuildVisibilityString(info, s)
+                            end
+                            if frame._eabLastVisStr ~= hideStr then
 
-                                frame._eabLastVisStr = "hide"
-                                RegisterAttributeDriver(frame, "state-visibility", "hide")
+                                frame._eabLastVisStr = hideStr
+                                RegisterAttributeDriver(frame, "state-visibility", hideStr)
                             end
                         elseif info.blizzOwnedVisibility then
                             local bf = _G[info.frameName]
@@ -13382,9 +13486,13 @@ function EAB:FinishSetup()
                     local frame = barFrames[info.key]
                     if s and frame and not s.alwaysHidden then
                         local vis = s.barVisibility or "always"
+                        -- Any visibility option at all counts: a bar the player cannot
+                        -- see is a bar they cannot drop a spell onto, so surfacing one
+                        -- that did not strictly need it is the harmless direction.
                         local hasCondition = vis ~= "always" and vis ~= "never"
-                            or s.visHideNoTarget or s.visHideNoEnemy
-                            or s.visHideMounted or s.visOnlyMounted or s.visOnlyInstances
+                        if not hasCondition and EllesmereUI.VisHasAnyOption then
+                            hasCondition = EllesmereUI.VisHasAnyOption(s)
+                        end
                         if hasCondition then
                             _gridSurfacedBars[info.key] = true
                             RegisterAttributeDriver(frame, "state-visibility", "show")
@@ -13859,10 +13967,13 @@ function EAB:FinishSetup()
         local softOnly = (hasSoftInteract or hasSoftEnemy or hasSoftFriend) and not hasHardTarget
         for _, info in ipairs(ALL_BARS) do
             local s = self.db.profile.bars[info.key]
-            if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
+            if s and (s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any"))
+                    and not (self._visOverride and self._visOverride[info.key]) then
                 local frame = barFrames[info.key]
                 if frame then
-                    if softOnly then
+                    -- Under Any a literal "hide" would veto the whole disjunction on this
+                    -- one lane; the rebuild below lets the shared builder drop just it.
+                    if softOnly and s.visHideNoTarget and s.visibilityMatch ~= "any" then
                         if frame._eabLastVisStr ~= "hide" then
                             frame._eabLastVisStr = "hide"
                             RegisterAttributeDriver(frame, "state-visibility", "hide")
@@ -13915,6 +14026,16 @@ function EAB:FinishSetup()
     -- machinery costs nothing. The state token is four cached booleans (no per-tick
     -- allocation); refresh only runs when a token actually flips.
     self:_RefreshSoftTargetGate()
+    -- Hover-gated bars (Match Any plus mouseover) need their resting alpha re-derived
+    -- whenever the state their other disjuncts read moves. Rather than hand-wiring the
+    -- five relevant events here, ride the shared visibility dispatcher: it already watches
+    -- exactly that set, pcall-wraps each updater and defers one frame (imperceptible for
+    -- alpha). Same registration Friends, Quest Tracker and Damage Meters use.
+    if EllesmereUI.RegisterVisibilityUpdater then
+        EllesmereUI.RegisterVisibilityUpdater(function()
+            EAB:RefreshHoverGatedAlpha()
+        end)
+    end
     local lastI, lastE, lastF, lastT
     local function PollSoftTargetState()
         if InCombatLockdown() then return end
@@ -13943,7 +14064,8 @@ function EAB:FinishSetup()
         regenFrame:SetScript("OnEvent", function()
             for _, info in ipairs(ALL_BARS) do
                 local s = self.db.profile.bars[info.key]
-                if s and s.visHideNoTarget and not (self._visOverride and self._visOverride[info.key]) then
+                if s and (s.visHideNoTarget or (s.visHideWithTarget and s.visibilityMatch == "any"))
+                    and not (self._visOverride and self._visOverride[info.key]) then
                     local frame = barFrames[info.key]
                     if frame then
                         local newStr = BuildVisibilityString(info, s)

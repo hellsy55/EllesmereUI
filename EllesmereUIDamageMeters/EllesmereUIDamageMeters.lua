@@ -944,51 +944,30 @@ local function ApplyBarTexture(fill, texPath, texKey)
     end
 end
 
--- Physical pixel spacing: convert user values to physical pixels (user setting = physical pixel count)
+-- Physical pixel spacing: convert user values to physical pixels (user setting = physical pixel count).
+-- Snapped through PP.Scale so accumulated row offsets (stride * index) don't drift off the pixel
+-- grid from float dust -- without this, a spacing of 1 can round to 0px on some rows and 2px on others.
 local function PhysicalPixels(userValue)
     local PP = EUI and EUI.PP
     local mult = (PP and PP.mult) or 1
-    return (userValue or 0) * mult
+    local value = (userValue or 0) * mult
+    if PP and PP.Scale then return PP.Scale(value) end
+    return value
 end
 
--- Number formatting
-local _abbreviateCfg
--- East Asian clients group large numbers by ten-thousands (wan) and hundred-millions (yi) rather than K/M/B; Simplified/Traditional Chinese share the math, only the wan/yi glyphs differ
-local CJK = ({
-    zhCN = { thousand = "千", wan = "万", yi = "亿" },
-    zhTW = { thousand = "千", wan = "萬", yi = "億" },
-    koKR = { thousand = "천", wan = "만", yi = "억" },
-})[GetLocale()]
--- Choose the abbreviation breakpoint table: CJK clients normally group by 萬/억, but fall
--- through to K/M/B if forceEnglish is on. Non-CJK clients always get K/M/B (forceEnglish is a no-op).
-local function BuildAbbrevOpts(forceEnglish)
-    if CJK and not forceEnglish then
-        return {
-            { breakpoint = 100000000, abbreviation = CJK.yi,       significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 10000,     abbreviation = CJK.wan,      significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1000,      abbreviation = CJK.thousand, significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
-            { breakpoint = 1,         abbreviation = "",           significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
-        }
-    else
-        return {
-            { breakpoint = 1000000000, abbreviation = "B", significandDivisor = 10000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1000000,    abbreviation = "M", significandDivisor = 10000,    fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1000,       abbreviation = "K", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
-            { breakpoint = 1,          abbreviation = "",  significandDivisor = 1,         fractionDivisor = 1,   abbreviationIsGlobal = false },
-        }
-    end
-end
+-- Number formatting: delegates to the shared EllesmereUI_NumberFormat.lua engine
+-- (breakpoint tables, locale-specific algorithms -- e.g. CJK 萬/억 grouping --
+-- and the AbbreviateNumbers/CreateAbbreviateConfig plumbing all live there now,
+-- shared with EllesmereUIDataBars' gold abbreviation).
+local _forceEnglishUnits = false
 
--- Rebuild _abbreviateCfg from the saved setting: once at load (DB not ready yet -> reads
--- false), once after DB creation, and on every options toggle flip. Cheap: one config object, never touches per-bar/per-refresh work.
+-- Re-read the saved setting: once at load (DB not ready yet -> reads false),
+-- once after DB creation, and on every options toggle flip.
 local function RebuildAbbrevCfg()
-    local forceEnglish = false
+    _forceEnglishUnits = false
     if ns.EDM and ns.EDM.DB then
         local db = ns.EDM.DB()
-        if db and db.forceEnglishUnits then forceEnglish = true end
-    end
-    if CreateAbbreviateConfig then
-        _abbreviateCfg = { config = CreateAbbreviateConfig(BuildAbbrevOpts(forceEnglish)) }
+        if db and db.forceEnglishUnits then _forceEnglishUnits = true end
     end
 end
 RebuildAbbrevCfg()
@@ -996,21 +975,7 @@ ns.RebuildNumberFormat = RebuildAbbrevCfg
 
 local function AbbrevNumber(n)
     if n == nil then return "0" end
-    if AbbreviateNumbers then
-        return AbbreviateNumbers(n, _abbreviateCfg) or "0"
-    end
-    local num = tonumber(n)
-    if not num then return "?" end
-    if CJK then
-        if num >= 1e8 then return format("%.2f%s", num / 1e8, CJK.yi)
-        elseif num >= 1e4 then return format("%.2f%s", num / 1e4, CJK.wan)
-        elseif num >= 1e3 then return format("%.1f%s", num / 1e3, CJK.thousand)
-        else return format("%.0f", num) end
-    end
-    if num >= 1e9 then return format("%.1fB", num / 1e9)
-    elseif num >= 1e6 then return format("%.1fM", num / 1e6)
-    elseif num >= 1e3 then return format("%.1fK", num / 1e3)
-    else return format("%.0f", num) end
+    return EllesmereUI.AbbreviateNumber(n, _forceEnglishUnits)
 end
 
 local function FormatBarValue(amt, perSec, numFmt)
@@ -1317,6 +1282,19 @@ local _activeRow = nil
 
 local TT_HDR_H = 20
 
+-- Same conversion as PhysicalPixels(), but snapped against the tooltip frame's own
+-- effective scale. The hover tooltip has its own user-configurable hoverTooltipScale
+-- (SetScale), independent of the addon-wide UI scale that PP.mult is derived from --
+-- using the global PhysicalPixels() here rounds bar spacing to the wrong pixel grid
+-- whenever hoverTooltipScale isn't 100%.
+local function TTPhysicalPixels(userValue)
+    local PP = EUI and EUI.PP
+    if not PP or not PP.perfect or not PP.SnapForES or not _ttFrame then return PhysicalPixels(userValue) end
+    local es = _ttFrame:GetEffectiveScale()
+    local onePixel = PP.perfect / es
+    return PP.SnapForES((userValue or 0) * onePixel, es)
+end
+
 local function BlizzardSkinBordersAvailable()
     return C_AddOns and C_AddOns.IsAddOnLoaded
         and C_AddOns.IsAddOnLoaded("EllesmereUIBlizzardSkin")
@@ -1386,7 +1364,7 @@ end
 local function EnsureTTBar(i)
     if _ttBars[i] then return _ttBars[i] end
     EnsureTooltipFrame()
-    local ttSp = PhysicalPixels(1)
+    local ttSp = TTPhysicalPixels(1)
     local b = {}
     b.row = CreateFrame("Frame", nil, _ttFrame)
     b.row:SetHeight(TT_BAR_H)
@@ -1425,7 +1403,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
     if not C_DamageMeter then return false end
 
     -- Reposition tooltip bars with physical-pixel spacing (only when spacing changes)
-    local ttSp = PhysicalPixels(1)
+    local ttSp = TTPhysicalPixels(1)
     local ttStride = TT_BAR_H + ttSp
     if ttSp ~= _ttLastSp then
         _ttLastSp = ttSp
@@ -1701,7 +1679,7 @@ local function PopulatePreview(bar, curSession, curSessionID, curDMType)
             -- Lazy-create tooltip target elements
             if not _ttFrame._tgtDivider then
                 _ttFrame._tgtDivider = _ttFrame:CreateTexture(nil, "ARTWORK")
-                _ttFrame._tgtDivider:SetHeight(PhysicalPixels(1)); _ttFrame._tgtDivider:SetColorTexture(1, 1, 1, 0.15)
+                _ttFrame._tgtDivider:SetHeight(TTPhysicalPixels(1)); _ttFrame._tgtDivider:SetColorTexture(1, 1, 1, 0.15)
                 _ttFrame._tgtLabel = _ttFrame:CreateFontString(nil, "OVERLAY")
                 SetDMFont(_ttFrame._tgtLabel, 9); _ttFrame._tgtLabel:SetTextColor(0.6, 0.6, 0.6, 1)
                 _ttFrame._tgtLabel:SetText(EllesmereUI.L("Targets"))
@@ -1791,13 +1769,15 @@ local function ShowBarTooltip(bar, curSession, curSessionID, curDMType)
     if cfg.showHoverTooltip == false then return end
     EnsureTooltipFrame()
 
+    -- Scale before populating: the row stride snaps against the frame's effective scale.
+    local scale = (cfg.hoverTooltipScale or 100) / 100
+    if scale ~= _ttLastScale then
+        _ttFrame:SetScale(scale)
+        _ttLastScale = scale
+    end
+
     -- Always rebuild from fresh data (no GUID cache); PopulatePreview costs ~0.5ms, fine for a hover action
     if PopulatePreview(bar, curSession, curSessionID, curDMType) then
-        local scale = (cfg.hoverTooltipScale or 100) / 100
-        if scale ~= _ttLastScale then
-            _ttFrame:SetScale(scale)
-            _ttLastScale = scale
-        end
         AnchorBreakdownFrame(bar.row, bar._win and bar._win.frame)
         _ttFrame:Show()
     else
@@ -2958,7 +2938,7 @@ local function CreateDMWindow(winIdx)
     local _scrollRefreshPending = false
     viewport:EnableMouseWheel(true)
     viewport:SetScript("OnMouseWheel", function(_, delta)
-        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + PhysicalPixels(c.barSpacing)) * 2
+        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + (c.barSpacing or 2)) * 2
         local cur = viewport:GetVerticalScroll() or 0
         local newVal = math.max(0, math.min(_scrollMax, cur - delta * step))
         viewport:SetVerticalScroll(newVal)
@@ -3004,7 +2984,7 @@ local function CreateDMWindow(winIdx)
     local _srcScrollMax = 0
     W.srcViewport:EnableMouseWheel(true)
     W.srcViewport:SetScript("OnMouseWheel", function(_, delta)
-        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + PhysicalPixels(c.barSpacing)) * 2
+        local c = DB(); local step = (PhysicalPixels(c.barHeight or 18) + (c.barSpacing or 2)) * 2
         local cur = W.srcViewport:GetVerticalScroll() or 0
         W.srcViewport:SetVerticalScroll(math.max(0, math.min(_srcScrollMax, cur - delta * step)))
     end)
@@ -3236,7 +3216,7 @@ local function CreateDMWindow(winIdx)
 
     local function RecalcViewport(dataCount)
         if not viewport or not content then return end
-        local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing)
+        local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = c.barSpacing or 2
         local totalH = dataCount * (barH + barSp)
         content:SetHeight(math.max(10, totalH))
         local viewH = viewport:GetHeight(); if viewH < 1 then viewH = 1 end
@@ -3262,7 +3242,7 @@ local function CreateDMWindow(winIdx)
         local playerIdx
         for i, src in ipairs(sources) do if src.isLocalPlayer then playerIdx = i; break end end
         if not playerIdx then W.stickyPlayer.row:Hide(); W.stickySep:Hide(); ResetScrollAnchors(); W.stickyAtTop = false; return end
-        local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+        local barH = PhysicalPixels(c.barHeight or 18); local barSp = c.barSpacing or 2; local stride = barH + barSp
         local scrollVal = viewport:GetVerticalScroll() or 0
         local fullViewH = frame:GetHeight() - GetHeaderH()
         if fullViewH < 1 then fullViewH = 1 end
@@ -3392,7 +3372,7 @@ local function CreateDMWindow(winIdx)
         if session and session.combatSources then
 
             local sources = session.combatSources
-            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local c = DB(); local barH = PhysicalPixels(c.barHeight or 18); local barSp = c.barSpacing or 2; local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local fontSize = leftFS -- compat for cacheKey
             local showIcon = (c.iconStyle or "spec") ~= "none"
@@ -3695,7 +3675,7 @@ local function CreateDMWindow(winIdx)
             local reversed = {}
             for ri = #events, 1, -1 do reversed[#reversed + 1] = events[ri] end
             local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
-            local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local barSp = c.barSpacing or 2; local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local texPath, texKey = GetBarTexturePath()
             local deathTime = reversed[#reversed] and reversed[#reversed].timestamp
@@ -3808,7 +3788,7 @@ local function CreateDMWindow(winIdx)
                 if W.spellPool then for i = 1, BAR_POOL_SIZE do W.spellPool[i].row:Hide() end end
                 return
             end
-            local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp
+            local barSp = c.barSpacing or 2; local stride = barH + barSp
             local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11
             local texPath, texKey = GetBarTexturePath()
             local maxAmt = players[1].total
@@ -3860,7 +3840,7 @@ local function CreateDMWindow(winIdx)
             return
         end
         local spells = srcData.combatSpells; local c = DB(); local barH = PhysicalPixels(c.barHeight or 18)
-        local barSp = PhysicalPixels(c.barSpacing); local stride = barH + barSp; local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11; local texPath, texKey = GetBarTexturePath()
+        local barSp = c.barSpacing or 2; local stride = barH + barSp; local leftFS = c.leftFontSize or c.fontSize or 11; local rightFS = c.rightFontSize or c.fontSize or 11; local texPath, texKey = GetBarTexturePath()
         local sorted = {}
         for _, spell in ipairs(spells) do local ok, amt = pcall(function() return spell.totalAmount end); sorted[#sorted + 1] = { spell = spell, amount = (ok and amt) or 0 } end
         -- API returns combatSpells pre-sorted; no table.sort needed

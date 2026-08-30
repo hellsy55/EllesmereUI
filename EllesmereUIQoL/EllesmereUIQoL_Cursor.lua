@@ -630,8 +630,10 @@ UpdateVisibility = function()
                 gcdRoot:SetScript("OnUpdate", nil)
             else
                 gcdRoot:Show()
-                -- Re-apply cursor tracking since cursor visibility may have changed
-                if g.attached ~= false then
+                -- Re-apply cursor tracking since cursor visibility may have changed.
+                -- Skip while unlocked: the mover owns position, and re-arming this
+                -- would fight it (see the same gate in ApplyGCDCircle).
+                if g.attached ~= false and not EllesmereUI._unlockActive then
                     local cursorVisible = f and f:IsShown()
                     if cursorVisible then
                         gcdRoot:SetScript("OnUpdate", nil)
@@ -645,6 +647,8 @@ UpdateVisibility = function()
                             gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
                         end)
                     end
+                elseif g.attached ~= false then
+                    gcdRoot:SetScript("OnUpdate", nil)
                 end
             end
         end
@@ -660,8 +664,10 @@ UpdateVisibility = function()
                 castRoot:SetScript("OnUpdate", nil)
             else
                 castRoot:Show()
-                -- Re-apply cursor tracking since cursor visibility may have changed
-                if c.attached ~= false then
+                -- Re-apply cursor tracking since cursor visibility may have changed.
+                -- Skip while unlocked: the mover owns position, and re-arming this
+                -- would fight it (see the same gate in ApplyCastCircle).
+                if c.attached ~= false and not EllesmereUI._unlockActive then
                     local cursorVisible = f and f:IsShown()
                     if cursorVisible then
                         castRoot:SetScript("OnUpdate", nil)
@@ -675,6 +681,8 @@ UpdateVisibility = function()
                             castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
                         end)
                     end
+                elseif c.attached ~= false then
+                    castRoot:SetScript("OnUpdate", nil)
                 end
             end
         end
@@ -1059,6 +1067,15 @@ local function RegisterUnlockElements()
                 _G._ECL_ApplyGCDPosition()
             end,
         })
+    elseif EllesmereUI.UnregisterUnlockElement then
+        -- RegisterUnlockElements (the framework call below) is purely
+        -- additive -- it has no way to know "ECL_GCD" no longer qualifies,
+        -- so toggling back to attached (or disabling the circle) after any
+        -- time spent detached would otherwise leave a stale mover entry
+        -- registered forever, still pointing at gcdRoot. Explicitly drop it
+        -- the moment it stops qualifying instead of letting it linger into
+        -- the next unlock-mode session.
+        EllesmereUI:UnregisterUnlockElement("ECL_GCD")
     end
 
     local c = Cast_DB()
@@ -1111,6 +1128,9 @@ local function RegisterUnlockElements()
                 _G._ECL_ApplyCastPosition()
             end,
         })
+    elseif EllesmereUI.UnregisterUnlockElement then
+        -- Same stale-mover-entry gap as ECL_GCD above.
+        EllesmereUI:UnregisterUnlockElement("ECL_Cast")
     end
 
     if #elements > 0 then
@@ -1346,6 +1366,37 @@ function ECL:OnEnable()
         ApplyTrail()
         ApplyOnlyWhenHidden()
         RegisterUnlockElements()
+
+        -- Every _unlockActive check in this file only stops a FUTURE re-arm
+        -- of the attached cursor-tracking OnUpdate -- none of them tear down
+        -- one that's already running. CursorWatchBody (the 0.15s tick above)
+        -- is meant to hide an attached circle once unlock mode starts, but
+        -- it only ticks while the base cursor frame (f) is itself
+        -- subscribed/visible, so a user running GCD/Cast circles without the
+        -- base cursor dot gets no safety net at all: toggle Attach to Cursor
+        -- off then on (arms the OnUpdate while _unlockActive is still false,
+        -- correctly), then open unlock mode, and the circle just keeps
+        -- chasing the mouse forever with nothing to ever stop it. Hook the
+        -- real open/close event directly instead of depending on that tick.
+        if EllesmereUI and EllesmereUI.RegisterUnlockModeListener then
+            EllesmereUI:RegisterUnlockModeListener("EllesmereUIQoL_Cursor", function(active)
+                if active then
+                    if gcdRoot then
+                        gcdRoot:SetScript("OnUpdate", nil)
+                        if gcdAttached then gcdRoot:Hide() end
+                    end
+                    if castRoot then
+                        castRoot:SetScript("OnUpdate", nil)
+                        if castAttached then castRoot:Hide() end
+                    end
+                else
+                    -- Re-apply: an attached circle resumes live cursor
+                    -- tracking, a detached one snaps back to its saved spot.
+                    ApplyGCDCircle()
+                    ApplyCastCircle()
+                end
+            end)
+        end
     end)
 
     self:RegisterEvent("PLAYER_ENTERING_WORLD", UpdateVisibility)
