@@ -2433,7 +2433,7 @@ do
         "PLAYER_TARGET_CHANGED", "GROUP_ROSTER_UPDATE",
         "PLAYER_MOUNT_DISPLAY_CHANGED", "PLAYER_CAN_GLIDE_CHANGED",
         "ZONE_CHANGED_NEW_AREA", "UPDATE_SHAPESHIFT_FORM",
-        "PLAYER_ENTERING_WORLD",
+        "PLAYER_ENTERING_WORLD", "PLAYER_UPDATE_RESTING",
     }
 
     -- Legacy scalar evaluation for the modes the multi engine declines.

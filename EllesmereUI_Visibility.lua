@@ -143,6 +143,11 @@ visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 visFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 visFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 visFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+-- Resting edge: IsResting() itself has no dedicated poll, so without this the Resting
+-- checklist row only re-evaluates when some unrelated event (mount/zone/combat) happens
+-- to fire the dispatcher afterward -- e.g. it looked "bound to landing" because dismounting
+-- fires PLAYER_MOUNT_DISPLAY_CHANGED, not because resting is actually tied to mounting.
+visFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
 -- Dragonriding edges: mount-capability changes fire PLAYER_CAN_GLIDE_CHANGED
 -- (repo-proven event); takeoff/landing while staying mounted fires
 -- PLAYER_IS_GLIDING_CHANGED, which is probed because nothing registered it before this
