@@ -3327,14 +3327,22 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     if not minimap.Layout then minimap.Layout = function() end end
 
     if circleMode then
-        -- Circle layout: horizontal row around the clock
-        if ci.tracking and not p.hideTrackingButton then
-            ci.tracking:ClearAllPoints()
-            if clockBg and clockBg:IsShown() then
-                ci.tracking:SetPoint("RIGHT", clockBg, "LEFT", 0, 0)
+        -- Circle layout: horizontal row growing left from the clock. Each element chains
+        -- to the previous shown one; a hidden element is skipped, since anchoring to a
+        -- frame that was never positioned leaves the whole chain undrawn.
+        local leftAnchor = (clockBg and clockBg:IsShown()) and clockBg or nil
+        local function PlaceLeft(btn)
+            btn:ClearAllPoints()
+            if leftAnchor then
+                btn:SetPoint("RIGHT", leftAnchor, "LEFT", 0, 0)
             else
-                ci.tracking:SetPoint("TOP", mapAnchor, "TOP", -20, -3)
+                btn:SetPoint("TOP", mapAnchor, "TOP", -20, -3)
             end
+            leftAnchor = btn
+        end
+
+        if ci.tracking and not p.hideTrackingButton then
+            PlaceLeft(ci.tracking)
             ci.tracking:Show()
         elseif ci.tracking then
             ci.tracking:Hide()
@@ -3350,19 +3358,16 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         end
 
         if ci.mail and ci.mail:IsShown() then
-            ci.mail:ClearAllPoints()
             if mailCorner then
+                ci.mail:ClearAllPoints()
                 ci.mail:SetPoint(mailCorner, mapAnchor, mailCorner, p.mailOffsetX or 0, p.mailOffsetY or 0)
             else
-                ci.mail:SetPoint("RIGHT", ci.tracking, "LEFT", 0, 0)
+                PlaceLeft(ci.mail)
             end
         end
 
         if ci.crafting and ci.crafting:IsShown() then
-            ci.crafting:ClearAllPoints()
-            -- Corner-pinned mail is out of the row, so crafting chains to tracking
-            local anchor = (ci.mail and ci.mail:IsShown() and not mailCorner) and ci.mail or ci.tracking
-            ci.crafting:SetPoint("RIGHT", anchor, "LEFT", 0, 0)
+            PlaceLeft(ci.crafting)
         end
 
         if indicatorBg then indicatorBg:Hide() end
