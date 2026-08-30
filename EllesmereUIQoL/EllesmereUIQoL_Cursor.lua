@@ -237,13 +237,11 @@ local function ApplyTrail()
         trailContainer:SetScript("OnUpdate", function(_, elapsed)
             if not trailEnabled then return end
 
-            local p = ECL.db and ECL.db.profile
-            local circleEnabled = p and p.enabled ~= false
-            local inInstance = not (p and p.instanceOnly) or InRealInstancedContent()
-
-            -- Only spawn new dots when the cursor circle would be visible
-            local hiddenGate = not (p and p.onlyWhenHidden) or mouselookActive
-            if circleEnabled and inInstance and hiddenGate then
+            -- Only spawn dots while the cursor circle itself is visible, so the
+            -- trail follows every gate on the circle (Combat Only, Only Show in
+            -- Instances, Only Show When Hidden, the Visibility block) rather
+            -- than re-deriving a subset of them.
+            if isVisible then
                 local cx, cy = GetCursorPosition()
                 trailTimer = trailTimer + elapsed
                 local dx = cx - trailLastCX
