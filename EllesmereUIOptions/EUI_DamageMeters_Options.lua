@@ -1368,11 +1368,11 @@ initFrame:SetScript("OnEvent", function(self)
         y = y - h
 
         -- Force English Number Units (K/M/B) | (spacer)
-        -- CJK clients only: zhCN/zhTW/koKR group numbers by wan/eok, so this
-        -- offers K/M/B instead. Every other locale already gets K/M/B and the
-        -- toggle would be a no-op, so the row is skipped for them.
-        local clientLocale = GetLocale()
-        if clientLocale == "zhCN" or clientLocale == "zhTW" or clientLocale == "koKR" then
+        -- Only where the effective locale actually has its own abbreviation
+        -- algorithm (currently CJK's wan/eok grouping, registered from
+        -- EllesmereUILocales/<code>.lua): every other locale already gets
+        -- K/M/B and the toggle would be a no-op, so the row is skipped for them.
+        if EllesmereUI.LocaleHasNumberAbbreviation and EllesmereUI.LocaleHasNumberAbbreviation() then
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Force English Units (K/M/B)",
                   tooltip = "Always use K/M/B instead of localized units.",

@@ -955,44 +955,19 @@ local function PhysicalPixels(userValue)
     return value
 end
 
--- Number formatting
-local _abbreviateCfg
--- East Asian clients group large numbers by ten-thousands (wan) and hundred-millions (yi) rather than K/M/B; Simplified/Traditional Chinese share the math, only the wan/yi glyphs differ
-local CJK = ({
-    zhCN = { thousand = "千", wan = "万", yi = "亿" },
-    zhTW = { thousand = "千", wan = "萬", yi = "億" },
-    koKR = { thousand = "천", wan = "만", yi = "억" },
-})[GetLocale()]
--- Choose the abbreviation breakpoint table: CJK clients normally group by 萬/억, but fall
--- through to K/M/B if forceEnglish is on. Non-CJK clients always get K/M/B (forceEnglish is a no-op).
-local function BuildAbbrevOpts(forceEnglish)
-    if CJK and not forceEnglish then
-        return {
-            { breakpoint = 100000000, abbreviation = CJK.yi,       significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 10000,     abbreviation = CJK.wan,      significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1000,      abbreviation = CJK.thousand, significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
-            { breakpoint = 1,         abbreviation = "",           significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
-        }
-    else
-        return {
-            { breakpoint = 1000000000, abbreviation = "B", significandDivisor = 10000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1000000,    abbreviation = "M", significandDivisor = 10000,    fractionDivisor = 100, abbreviationIsGlobal = false },
-            { breakpoint = 1000,       abbreviation = "K", significandDivisor = 100,      fractionDivisor = 10,  abbreviationIsGlobal = false },
-            { breakpoint = 1,          abbreviation = "",  significandDivisor = 1,         fractionDivisor = 1,   abbreviationIsGlobal = false },
-        }
-    end
-end
+-- Number formatting: delegates to the shared EllesmereUI_NumberFormat.lua engine
+-- (breakpoint tables, locale-specific algorithms -- e.g. CJK 萬/억 grouping --
+-- and the AbbreviateNumbers/CreateAbbreviateConfig plumbing all live there now,
+-- shared with EllesmereUIDataBars' gold abbreviation).
+local _forceEnglishUnits = false
 
--- Rebuild _abbreviateCfg from the saved setting: once at load (DB not ready yet -> reads
--- false), once after DB creation, and on every options toggle flip. Cheap: one config object, never touches per-bar/per-refresh work.
+-- Re-read the saved setting: once at load (DB not ready yet -> reads false),
+-- once after DB creation, and on every options toggle flip.
 local function RebuildAbbrevCfg()
-    local forceEnglish = false
+    _forceEnglishUnits = false
     if ns.EDM and ns.EDM.DB then
         local db = ns.EDM.DB()
-        if db and db.forceEnglishUnits then forceEnglish = true end
-    end
-    if CreateAbbreviateConfig then
-        _abbreviateCfg = { config = CreateAbbreviateConfig(BuildAbbrevOpts(forceEnglish)) }
+        if db and db.forceEnglishUnits then _forceEnglishUnits = true end
     end
 end
 RebuildAbbrevCfg()
@@ -1000,21 +975,7 @@ ns.RebuildNumberFormat = RebuildAbbrevCfg
 
 local function AbbrevNumber(n)
     if n == nil then return "0" end
-    if AbbreviateNumbers then
-        return AbbreviateNumbers(n, _abbreviateCfg) or "0"
-    end
-    local num = tonumber(n)
-    if not num then return "?" end
-    if CJK then
-        if num >= 1e8 then return format("%.2f%s", num / 1e8, CJK.yi)
-        elseif num >= 1e4 then return format("%.2f%s", num / 1e4, CJK.wan)
-        elseif num >= 1e3 then return format("%.1f%s", num / 1e3, CJK.thousand)
-        else return format("%.0f", num) end
-    end
-    if num >= 1e9 then return format("%.1fB", num / 1e9)
-    elseif num >= 1e6 then return format("%.1fM", num / 1e6)
-    elseif num >= 1e3 then return format("%.1fK", num / 1e3)
-    else return format("%.0f", num) end
+    return EllesmereUI.AbbreviateNumber(n, _forceEnglishUnits)
 end
 
 local function FormatBarValue(amt, perSec, numFmt)
