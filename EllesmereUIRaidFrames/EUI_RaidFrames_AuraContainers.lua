@@ -2496,6 +2496,7 @@ local function BmAcquireChain(button, d, health, ch, iscale, counters)
 
     local cc = entry.container
     entry.parked = nil
+    cc:SetEnabled(true)
     cc:SetUnit(button:GetAttribute("unit") or NO_UNIT)
     -- anchorMembers is per-GROUP (one entry per segment); memberIndex/segIndex
     -- let the anchor pass tell member boundaries from intra-member segments.
@@ -2540,6 +2541,14 @@ local function BmParkUnbound(d, counters)
                         (j == 1) and "chain" or ("chain" .. j), 0)
                 end
                 entry.container:SetShown(false)
+                -- Visibility is shared with presentation, so a park that rests on
+                -- it alone is undone by any later SetShown. IsEnabled is the other
+                -- half of the engine's registration test and nothing but us drives
+                -- it. Dropping the binding too forces a real reparse on re-acquire:
+                -- parking and re-acquiring on the SAME unit used to leave SetUnit a
+                -- no-op and restore the caps over whatever was parsed before.
+                entry.container:SetEnabled(false)
+                entry.container:SetUnit(NO_UNIT)
             end
         end
     end
@@ -3264,10 +3273,13 @@ local function RepointStale(d, unit)
     RebindContainer(d.rfcDispel, unit)
     RebindContainer(d.rfcBm, unit)
     RebindContainer(d.rfcBmSimple, unit)
-    -- Every chain container comes from the pool, parked ones included.
+    -- Every chain container comes from the pool; a parked one sits on NO_UNIT
+    -- deliberately, so leave it there.
     if d.rfcBmPool then
         for _, entry in pairs(d.rfcBmPool) do
-            if type(entry) == "table" then RebindContainer(entry.container, unit) end
+            if type(entry) == "table" and not entry.parked then
+                RebindContainer(entry.container, unit)
+            end
         end
     end
     -- Debuff Manager tiles keep their own per-container stamp beside the binding;
