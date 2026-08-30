@@ -10,6 +10,12 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local _, ns = ...
 
 local AK -- EllesmereUI.AuraKit, resolved at first use
+-- The engine's own null binding: the AuraContainer intrinsic is born on unitToken
+-- "none" (Blizzard_AuraContainer.xml KeyValues). A button with no unit attribute
+-- yet has to land back on that, never on "player" -- that is a unit whose auras
+-- really do stream, so an unbound container renders the local player's buffs onto
+-- whoever the button later shows.
+local NO_UNIT = "none"
 local FALLBACK_FONT = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
 
 -- Marks debuff rendering as container-owned; the legacy UpdateDebuffs body
@@ -2470,7 +2476,7 @@ local function BmAcquireChain(button, d, health, ch, iscale, counters)
         local shell = d.rfcBmShellPool and table.remove(d.rfcBmShellPool)
         if shell then
             DeclareGroups(shell)
-            AK.FinishContainer(shell, button:GetAttribute("unit") or "player")
+            AK.FinishContainer(shell, button:GetAttribute("unit") or NO_UNIT)
             entry = { container = shell, groups = totalGroups }
             pool[poolKey] = entry
         else
@@ -2478,7 +2484,7 @@ local function BmAcquireChain(button, d, health, ch, iscale, counters)
             AK.QueueBuildJob(function()
                 local cc = AK.CreateContainerShell(button, { point = { "CENTER", health, "CENTER" } })
                 DeclareGroups(cc)
-                AK.FinishContainer(cc, button:GetAttribute("unit") or "player")
+                AK.FinishContainer(cc, button:GetAttribute("unit") or NO_UNIT)
                 pool[poolKey] = { container = cc, groups = totalGroups }
                 BmPoolReloadSoon() -- rebind the buttons waiting on this shell
             end, "rf:bmpool-shell")
@@ -2490,7 +2496,7 @@ local function BmAcquireChain(button, d, health, ch, iscale, counters)
 
     local cc = entry.container
     entry.parked = nil
-    cc:SetUnit(button:GetAttribute("unit") or "player")
+    cc:SetUnit(button:GetAttribute("unit") or NO_UNIT)
     -- anchorMembers is per-GROUP (one entry per segment); memberIndex/segIndex
     -- let the anchor pass tell member boundaries from intra-member segments.
     local anchorMembers = {}
@@ -2780,7 +2786,7 @@ local function ReloadBm(button, d, s, cls)
             -- pool shells are pending -- rebuilding again would orphan it).
             if d.rfcBm or d.rfcBmSig ~= nil then return end
             if InCombatLockdown() then d.rfcBmPending = true; return end
-            local unit = button:GetAttribute("unit") or "player"
+            local unit = button:GetAttribute("unit") or NO_UNIT
             CreateBmContainer(button, d.rfcHealth, d, unit)
             -- Fresh/retargeted containers may default shown at alpha 1;
             -- clear the readable state cache and re-drive the trust gate so
@@ -2970,7 +2976,7 @@ local function QueueDebuffPhase(button, health, d)
         local c = d.rfcDebuffShell
         if not c then return end
         d.rfcDebuffShell = nil
-        local unit = button:GetAttribute("unit") or "player"
+        local unit = button:GetAttribute("unit") or NO_UNIT
         AK.FinishContainer(c, unit)
         d.rfcHealth = health
         d.rfcDebuffs = c
@@ -3010,7 +3016,7 @@ local function QueueDispLocPhase(button, health, d)
         local c = d.rfcDispLocShell
         if not c then return end
         d.rfcDispLocShell = nil
-        local unit = button:GetAttribute("unit") or "player"
+        local unit = button:GetAttribute("unit") or NO_UNIT
         AK.FinishContainer(c, unit)
         d.rfcDispLoc = c
         local sNow = ProxyFor(d)
@@ -3038,7 +3044,7 @@ local function QueueButtonGroups(button, health, d)
         local c = d.rfcDispelShell
         if not c then return end
         d.rfcDispelShell = nil
-        local unit = button:GetAttribute("unit") or "player"
+        local unit = button:GetAttribute("unit") or NO_UNIT
         AK.FinishContainer(c, unit)
         d.rfcDispel = c
         local sNow = ProxyFor(d)
@@ -3052,7 +3058,7 @@ local function QueueButtonGroups(button, health, d)
     AK.QueueBuildJob(function()
         d.rfcPending = nil
         d.rfcGroupsPending = nil
-        local unit = button:GetAttribute("unit") or "player"
+        local unit = button:GetAttribute("unit") or NO_UNIT
         CreateBmContainer(button, health, d, unit)
         d.rfcUnit = unit
         -- Shells baked the dispel filters from rfcTotemKnown at build time; if a
