@@ -64,8 +64,8 @@ local ACTION_ICONS = {
 }
 
 -- Dispel spells by class (friendly dispels only). One entry per spec that has a
--- distinct spell; IsPresetSpellAvailable drops the ones this character has not
--- got before they reach the macro.
+-- distinct spell; ClassPresetSpells drops the ones this character has not got
+-- before they reach the macro.
 local DISPEL_SPELLS = {
     { id = 527,    name = "Purify",        class = "PRIEST" },  -- Disc & Holy
     { id = 213634, name = "Purify Disease", class = "PRIEST" }, -- Shadow
@@ -93,20 +93,27 @@ local EXTERNAL_SPELLS = {
     { id = 116849, name = "Life Cocoon",            class = "MONK" },  -- Mistweaver
 }
 
--- True when this character can actually cast a preset entry. The macro builder
--- emits a /cast line per entry, and a line naming a spell the character has not
--- got matches its condition and then casts nothing -- eating the fallback the
--- next line was there to be -- so an unavailable entry has to be dropped, not
--- just ordered last. Pet-bank entries are always kept: that book holds only the
--- summoned demon's spells and nothing re-applies bindings on a pet swap, so
--- filtering on it would leave the binding dead until the next spec change.
-local function IsPresetSpellAvailable(sp)
-    if sp.pet then return true end
+-- This class's preset entries, narrowed to what the character can cast. A /cast
+-- line naming a spell they have not got matches its condition and then casts
+-- nothing, eating the fallback the next line was there to be, so an unavailable
+-- entry has to be dropped rather than ordered last. Empty falls back to the
+-- unfiltered list: bindings rebuild on spec change but not on a talent or
+-- loadout swap, so "nothing available" is as likely stale as true, and an
+-- all-unknown list shadows nothing anyway. Singe Magic is exempt -- the pet book
+-- holds only the summoned demon's spells.
+local function ClassPresetSpells(spellList, class)
     local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
-    if C_SpellBook.IsSpellInSpellBook and bank then
-        return C_SpellBook.IsSpellInSpellBook(sp.id, bank, true)
+    local canCheck = C_SpellBook.IsSpellInSpellBook and bank
+    local usable, all = {}, {}
+    for _, sp in ipairs(spellList) do
+        if sp.class == class then
+            all[#all + 1] = sp
+            if sp.pet or not canCheck or C_SpellBook.IsSpellInSpellBook(sp.id, bank, true) then
+                usable[#usable + 1] = sp
+            end
+        end
     end
-    return true
+    return #usable > 0 and usable or all
 end
 
 -- Resurrection spells by class: single (ooc), group (ooc), battle (combat)
@@ -665,11 +672,18 @@ local function BuildRezLines(binding, guard, standalone)
     -- [combat] only when there is an out-of-combat rez after it to be the answer
     -- instead. A death knight or a warlock, whose only rez IS the battle one,
     -- would otherwise cast nothing out of combat -- where that spell works
-    -- perfectly well, so theirs is not combat-gated and survives oocOnly.
+    -- perfectly well, so theirs takes oocOnly's [nocombat] rather than dropping.
+    -- That conditional has to live on the line: Smart Rez prepends these ahead of
+    -- the base macro, and so ahead of its /stopmacro [combat].
     local hasOOCRez = groupName or singleName
     if battleName and not (hasOOCRez and binding.oocOnly) then
-        local combatOnly = hasOOCRez and ",combat" or ""
-        lines[#lines + 1] = "/cast [@mouseover,help,dead" .. combatOnly .. guard .. "] " .. battleName
+        local combatCond = ""
+        if hasOOCRez then
+            combatCond = ",combat"
+        elseif binding.oocOnly then
+            combatCond = ",nocombat"
+        end
+        lines[#lines + 1] = "/cast [@mouseover,help,dead" .. combatCond .. guard .. "] " .. battleName
     end
     if groupName then
         lines[#lines + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. groupName
@@ -680,7 +694,8 @@ local function BuildRezLines(binding, guard, standalone)
     -- never reach. Standalone only: Smart Rez prepends these lines to another
     -- action and depends on all of them failing on a living unit.
     if standalone and pClass == "WARLOCK" and battleName then
-        lines[#lines + 1] = "/cast [@mouseover,help,exists,nodead" .. guard .. "] " .. battleName
+        local oocCond = binding.oocOnly and ",nocombat" or ""
+        lines[#lines + 1] = "/cast [@mouseover,help,exists,nodead" .. oocCond .. guard .. "] " .. battleName
     end
     return lines
 end
@@ -799,14 +814,12 @@ local function BuildBaseMacroText(binding)
         if binding.oocOnly then
             lines[#lines + 1] = "/stopmacro [combat]"
         end
-        for _, sp in ipairs(spellList) do
-            if sp.class == pClass and IsPresetSpellAvailable(sp) then
-                -- /cast resolves by localized name; hardcoded English sp.name
-                -- would silently fail on non-English clients. Fall back to
-                -- sp.name only if the API is unavailable/empty.
-                local castName = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
-                lines[#lines + 1] = "/cast [@mouseover,exists,nodead" .. guard .. "] " .. castName
-            end
+        for _, sp in ipairs(ClassPresetSpells(spellList, pClass)) do
+            -- /cast resolves by localized name; hardcoded English sp.name would
+            -- silently fail on non-English clients. Fall back to sp.name only if
+            -- the API is unavailable/empty.
+            local castName = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+            lines[#lines + 1] = "/cast [@mouseover,exists,nodead" .. guard .. "] " .. castName
         end
         if #lines == 0 then return nil end
         return table.concat(lines, "\n")
@@ -845,20 +858,16 @@ end
 function ns.CC_GetBindingIcon(b)
     if b.type == "dispel" then
         local _, pc = UnitClass("player")
-        for _, sp in ipairs(DISPEL_SPELLS) do
-            if sp.class == pc and IsPresetSpellAvailable(sp) then
-                local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
-                if tex then return tex end
-            end
+        for _, sp in ipairs(ClassPresetSpells(DISPEL_SPELLS, pc)) do
+            local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
+            if tex then return tex end
         end
         return ACTION_ICONS.dispel
     elseif b.type == "external" then
         local _, pc = UnitClass("player")
-        for _, sp in ipairs(EXTERNAL_SPELLS) do
-            if sp.class == pc and IsPresetSpellAvailable(sp) then
-                local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
-                if tex then return tex end
-            end
+        for _, sp in ipairs(ClassPresetSpells(EXTERNAL_SPELLS, pc)) do
+            local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
+            if tex then return tex end
         end
         return ACTION_ICONS.external
     elseif b.type == "trinket1" then
@@ -2261,21 +2270,17 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
         end
     end
     if hasDispel then
-        for _, sp in ipairs(DISPEL_SPELLS) do
-            if sp.class == pClass and IsPresetSpellAvailable(sp) then
-                -- Matches the localized name stored by the spell picker, so
-                -- "already bound" dimming works on non-English clients.
-                local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
-                boundSpells[n] = true
-            end
+        for _, sp in ipairs(ClassPresetSpells(DISPEL_SPELLS, pClass)) do
+            -- Matches the localized name stored by the spell picker, so
+            -- "already bound" dimming works on non-English clients.
+            local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+            boundSpells[n] = true
         end
     end
     if hasExternal then
-        for _, sp in ipairs(EXTERNAL_SPELLS) do
-            if sp.class == pClass and IsPresetSpellAvailable(sp) then
-                local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
-                boundSpells[n] = true
-            end
+        for _, sp in ipairs(ClassPresetSpells(EXTERNAL_SPELLS, pClass)) do
+            local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+            boundSpells[n] = true
         end
     end
     if hasDynamicRez then
