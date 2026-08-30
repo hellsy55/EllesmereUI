@@ -447,10 +447,11 @@ local EBON_MIGHT_DURATION = 20
 
 local ICICLES_SPELL_ID = 205473
 
--- Prot Warrior Ignore Pain: stacking buff 190456 (0-100 stacks), but ALL player aura
--- fields are SECRET even out of combat (field-confirmed: spellId, name, applications),
--- so stacks are unreadable. Absorb amount IS readable and IP caps at 30% max health
--- (CAP), so absorbs vs that cap gives the same 0-100% fullness. DURATION drives the
+-- Prot Warrior Ignore Pain: stacking buff 190456 (0-100 stacks). ALL player aura fields
+-- are SECRET even out of combat (field-confirmed: spellId, name, applications) and the
+-- id is restriction-flagged, so the aura API gives nothing; Blizzard's tracked-buff icon
+-- is the only stack source. IP caps at 30% max health (CAP), so stacks and absorbs-vs-
+-- cap are the same 0-100% fullness -- see UpdateSecondaryResource. DURATION drives the
 -- moving hash line, reset on cast since aura expiry is secret (same approach as Ironfur
 -- ticks). One namespace table for the feature (200-local cap).
 local IP = {
@@ -5279,19 +5280,27 @@ local function UpdateSecondaryResource()
                 if maxTainted then maxC = maxPts end
                 if not maxTainted and maxC <= 0 then maxC = 1 end
             elseif powerType == "IGNOREPAIN_BAR" then
-                -- Prot Ignore Pain: total absorbs vs the IP cap (30% max health) --
-                -- the only readable source, since aura stack data is fully secret.
-                -- A secret absorb value flows into SetValue via the smooth target.
-                -- That absorb is EVERY shield on the player (absorb trinkets, Rallying
-                -- Cry, an external shield) and it is secret, so Ignore Pain's own share
-                -- cannot be subtracted back out -- gate the fill on Ignore Pain
-                -- actually being up instead.
-                cur = IP.Active() and (UnitGetTotalAbsorbs("player") or 0) or 0
+                -- Prot Ignore Pain. Preferred: the tracked-buff icon's stack count --
+                -- IP caps at 30% max health, so 0-100 stacks are percent-of-cap, i.e.
+                -- IP's own share with no foreign shield mixed in. It exists only while
+                -- the user tracks IP in the CDM, so UnitGetTotalAbsorbs stays as the
+                -- fallback: EVERY shield on the player, and secret, so IP cannot be
+                -- subtracted out -- gated on IP being up, still over-reads in uptime.
+                -- 190456 is restriction-flagged and GetPlayerAuraBySpellID returns
+                -- NOTHING for it (field-probed): aura points are not an exact source.
                 maxC = UnitHealthMax("player")
                 if (issecretvalue and issecretvalue(maxC)) or not maxC or maxC <= 0 then
                     maxC = maxPts
                 else
                     maxC = maxC * IP.CAP
+                end
+                if IP.value and IP.viewerFS and IP.viewerFS:IsVisible() then
+                    -- Kept for the value-mode threshold rescale below.
+                    IP.stackAxis = maxC
+                    cur, maxC = IP.value, 100
+                else
+                    IP.stackAxis = nil
+                    cur = IP.Active() and (UnitGetTotalAbsorbs("player") or 0) or 0
                 end
             end
             -- Brewmaster stagger ceiling
@@ -5413,7 +5422,14 @@ local function UpdateSecondaryResource()
                         -- StatusBar-overlay technique (as Vengeance pips): the fill
                         -- texture is the "cell", each overlay repaints the visible fill.
                         local function _ipBound(to)
-                            return (_tsBandMode == "value") and (to or 0) or (maxC * (to or 0) / 100)
+                            if _tsBandMode ~= "value" then return maxC * (to or 0) / 100 end
+                            -- A value-mode bound is an absorb amount. On the stack axis
+                            -- maxC is 0-100, so rescale it against the absorb-scale cap
+                            -- (both clean: user config and max health).
+                            if IP.stackAxis and IP.stackAxis > 0 then
+                                return (to or 0) / IP.stackAxis * 100
+                            end
+                            return to or 0
                         end
                         IP.layerN = 0
                         if _tsBandOn and _tsBands and #_tsBands > 0 then
