@@ -13853,6 +13853,11 @@ function EAB:FinishSetup()
     self:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED", function()
         self:UpdateHousingVisibility()
     end)
+    -- Resting: IsResting() has no dedicated poll, so without this the Resting axis only
+    -- re-evaluated when some unrelated event above happened to fire afterward.
+    self:RegisterEvent("PLAYER_UPDATE_RESTING", function()
+        self:UpdateHousingVisibility()
+    end)
     self:RegisterEvent("UPDATE_SHAPESHIFT_FORM", function()
         self:UpdateHousingVisibility()
     end)
