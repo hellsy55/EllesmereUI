@@ -5267,7 +5267,11 @@ local function UpdateSecondaryResource()
                 -- Prot Ignore Pain: total absorbs vs the IP cap (30% max health) --
                 -- the only readable source, since aura stack data is fully secret.
                 -- A secret absorb value flows into SetValue via the smooth target.
-                cur = UnitGetTotalAbsorbs("player") or 0
+                -- That absorb is EVERY shield on the player (absorb trinkets, Rallying
+                -- Cry, an external shield) and it is secret, so Ignore Pain's own share
+                -- cannot be subtracted back out -- gate the fill on the cast-driven IP
+                -- window the hash line already rides.
+                cur = (IP.hashEndTime > GetTime()) and (UnitGetTotalAbsorbs("player") or 0) or 0
                 maxC = UnitHealthMax("player")
                 if (issecretvalue and issecretvalue(maxC)) or not maxC or maxC <= 0 then
                     maxC = maxPts
