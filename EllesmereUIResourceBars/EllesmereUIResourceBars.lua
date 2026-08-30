@@ -4333,8 +4333,9 @@ IP.HandleCast = function(spellID)
     -- fallback (frames-as-truth, works under restriction when the user tracks
     -- the proc) backs it up. Called at SUCCEEDED: if the proc aura is already
     -- consumed by then BOTH probes can miss -- field question; the escalation
-    -- is a SENT-time latch, not a wider guess. A miss degrades to the
-    -- pre-fix behavior (stale tick), never a false refresh.
+    -- is a SENT-time latch, not a wider guess. A miss leaves a stale tick and,
+    -- since the bar fill rides this same window, an early-empty bar; IP.Active
+    -- covers both from the tracked-buff icon when the user tracks IP.
     if spellID == IP.SHIELD_SLAM then
         local aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
             and C_UnitAuras.GetPlayerAuraBySpellID(IP.VO_PROC)
@@ -4738,6 +4739,30 @@ IP.ScanViewer = function(force)
     end
 end
 
+-- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle); also rescan
+-- while the captured FS is invisible, since a viewer pool rebuild (tracked buffs
+-- proccing/expiring, e.g. Thunder Blast) can strand the capture on a released
+-- hidden frame that never fires SetText, while the icon lives on in another pool
+-- frame -- otherwise text stays blank until the orphan happens to be reused. Driven
+-- from MotionTick, not from UpdateText: the fill gate below reads the capture too,
+-- so it has to stay current with the count text switched off.
+IP.EnsureViewer = function()
+    local staleFS = IP.viewerFS and not IP.viewerFS:IsVisible()
+    if (not IP.viewerFrame or staleFS) and GetTime() >= IP.nextScan then
+        IP.nextScan = GetTime() + 2
+        IP.ScanViewer(staleFS)
+    end
+end
+
+-- Is Ignore Pain up? Blizzard's tracked-buff icon is the authoritative answer -- it
+-- survives a reload, a spec swap and a Violent Outburst refresh the cast handler
+-- missed -- but it only exists while the user tracks IP in the CDM, so the
+-- cast-driven window backs it up.
+IP.Active = function()
+    if IP.viewerFS and IP.viewerFS:IsVisible() then return true end
+    return IP.hashEndTime > GetTime()
+end
+
 -- Per-frame stack text for the IP bar. Preferred source: the exact stack number
 -- captured from Blizzard's tracked-buff icon above; fallback: rendered fill width
 -- (fill/bar = percent of cap = stacks) when values read clean but the viewer is
@@ -4751,16 +4776,6 @@ IP.UpdateText = function()
             IP.lastTextStacks = nil
         end
         return
-    end
-    -- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle); also rescan
-    -- while the captured FS is invisible, since a viewer pool rebuild (tracked buffs
-    -- proccing/expiring, e.g. Thunder Blast) can strand the capture on a released
-    -- hidden frame that never fires SetText, while the icon lives on in another pool
-    -- frame -- otherwise text stays blank until the orphan happens to be reused.
-    local staleFS = IP.viewerFS and not IP.viewerFS:IsVisible()
-    if (not IP.viewerFrame or staleFS) and GetTime() >= IP.nextScan then
-        IP.nextScan = GetTime() + 2
-        IP.ScanViewer(staleFS)
     end
     -- The captured viewer value is usually a SECRET number (type() says "number"
     -- and truthiness works, but comparisons/format error). SetText renders secret
@@ -5269,9 +5284,9 @@ local function UpdateSecondaryResource()
                 -- A secret absorb value flows into SetValue via the smooth target.
                 -- That absorb is EVERY shield on the player (absorb trinkets, Rallying
                 -- Cry, an external shield) and it is secret, so Ignore Pain's own share
-                -- cannot be subtracted back out -- gate the fill on the cast-driven IP
-                -- window the hash line already rides.
-                cur = (IP.hashEndTime > GetTime()) and (UnitGetTotalAbsorbs("player") or 0) or 0
+                -- cannot be subtracted back out -- gate the fill on Ignore Pain
+                -- actually being up instead.
+                cur = IP.Active() and (UnitGetTotalAbsorbs("player") or 0) or 0
                 maxC = UnitHealthMax("player")
                 if (issecretvalue and issecretvalue(maxC)) or not maxC or maxC <= 0 then
                     maxC = maxPts
@@ -6200,6 +6215,7 @@ ns.MotionTick = EllesmereUI.Tick.NewAnimTicker(CreateFrame("Frame"), function() 
         UpdateIronfurBar()
         return true
     elseif cs.power == "IGNOREPAIN_BAR" then
+        IP.EnsureViewer()
         IP.UpdateHash()
         IP.UpdateText()
         return true
