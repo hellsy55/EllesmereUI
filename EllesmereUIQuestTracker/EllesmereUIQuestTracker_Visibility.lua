@@ -14,13 +14,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local _, ns = ...
 local EQT = ns.EQT
 
--- Frame geometry getters (GetBottom/GetTop) can return secret numbers once our
--- execution is tainted -- seen on Blizzard quest blocks after leaving an arena,
--- where every layout pass then threw "attempt to compare a secret number value".
--- Reading a secret is safe; comparing or doing arithmetic with one is not, so
--- every measured coordinate is filtered through this before it is used.
-local isSecret = issecretvalue or function() return false end
-
 -- Hidden reparent target -- NEVER recursed into.
 local hiddenFrame = CreateFrame("Frame", "EllesmereUIQTHiddenParent", UIParent)
 hiddenFrame:Hide()
@@ -330,13 +323,24 @@ end
 
 -- Find the frame that sits at the absolute bottom of all visible content
 -- across every tracker module. Used to anchor the BG's bottom edge.
+--
+-- Reference-only: no coordinate is read here, because Blizzard's block geometry
+-- turns into a secret value once our execution is tainted and comparing one
+-- throws. Blizzard's container anchors each displayed module below the previous
+-- one in ipairs(modules) order, so the last displayed module owns the bottom
+-- edge, and its GetLastBlock returns that module's lowest block.
+local function IsUsableAnchor(frame)
+    if not frame or type(frame) ~= "table" then return false end
+    if not frame.IsShown or not frame.GetObjectType then return false end
+    return frame:IsShown()
+end
+
 local function GetLowestContentFrame()
     local otf = GetTracker()
     if not otf then return nil end
     local modules = otf.modules or otf.MODULES
     if not modules then return nil end
-    local lowestFrame, lowestY
-    local sawSecret = false
+    local lowestFrame
     local _scenarioTracker = _G.ScenarioObjectiveTracker
     local _widgetTracker = _G.UIWidgetObjectiveTracker
     for _, tracker in ipairs(modules) do
@@ -352,43 +356,22 @@ local function GetLowestContentFrame()
         -- refuses to touch these frames for the same reason.
         if tracker == _scenarioTracker or tracker == _widgetTracker then
             -- skip
-        else
-        local function consider(frame)
-            if not frame or type(frame) ~= "table" then return end
-            if not frame.GetBottom or not frame.GetObjectType then return end
-            if not (frame.IsShown and frame:IsShown()) then return end
-            local ok, otype = pcall(frame.GetObjectType, frame)
-            if not ok then return end
-            if otype ~= "Frame" and otype ~= "Button" then return end
-            local y = frame:GetBottom()
-            if isSecret(y) then
-                sawSecret = true
-                return
+        -- hasContents is the same gate the old block scan effectively used:
+        -- Blizzard sets it when a module adds a block, clears it on relayout.
+        elseif tracker.hasContents and IsUsableAnchor(tracker) then
+            local candidate = tracker.GetLastBlock and tracker:GetLastBlock()
+            if not IsUsableAnchor(candidate) then
+                -- Collapsed section: its blocks are freed and hidden while the
+                -- Header stays visible as the section's bottom edge.
+                candidate = tracker.Header
             end
-            if y and (not lowestY or y < lowestY) then
-                lowestY, lowestFrame = y, frame
+            if IsUsableAnchor(candidate) then
+                -- Later module == further down, so the last one wins.
+                lowestFrame = candidate
             end
         end
-        if tracker.usedBlocks then
-            for _, v in pairs(tracker.usedBlocks) do
-                if type(v) == "table" then
-                    if v.GetBottom then
-                        consider(v)
-                    else
-                        for _, block in pairs(v) do consider(block) end
-                    end
-                end
-            end
-        end
-        -- Only consider the Header as content if the tracker actually has something to
-        -- display. Empty trackers leave their Header shown at stale positions and would
-        -- otherwise stretch the BG past real content when a section clears.
-        if tracker.hasContents then
-            consider(tracker.Header)
-        end
-        end -- else (skip scenario / widget-pool trackers)
     end
-    return lowestFrame, sawSecret
+    return lowestFrame
 end
 
 -- Event-driven resize with a debounce. Every QueueResize call coalesces into a single
@@ -425,12 +408,7 @@ local function ResizeBGToContent()
         if bg:IsShown() then bg:Hide() end
         return
     end
-    local lowest, sawSecret = GetLowestContentFrame()
-    -- Every candidate's position came back secret (tainted execution): there is
-    -- nothing measurable this pass and no later pass will fix it before a
-    -- reload, so leave the BG exactly as it is instead of entering the
-    -- transient-content retry below, which would re-queue itself forever.
-    if not lowest and sawSecret then return end
+    local lowest = GetLowestContentFrame()
     -- Transient "no visible content" states happen for a frame during
     -- track/untrack/collapse/expand while blocks are recycled. Keep the
     -- BG at its last position to avoid a hide/show blink.
@@ -457,32 +435,18 @@ local function ResizeBGToContent()
     local leftOfs = GetBGLeftOffset()
     local anchorFrame, anchorPoint = GetBGTopAnchor()
     anchorFrame = anchorFrame or otf
-    local topY = (anchorPoint == "BOTTOM") and anchorFrame:GetBottom() or anchorFrame:GetTop()
-    local lowestBottom = lowest:GetBottom()
-    if isSecret(topY) or isSecret(lowestBottom) then
-        -- Cannot measure this pass. Keep the last known geometry rather than
-        -- risking arithmetic on a secret value.
-        topY, lowestBottom = nil, nil
-    end
     if bg._divider then
         bg._divider:ClearAllPoints()
         bg._divider:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
         bg._divider:SetPoint("TOPRIGHT", anchorFrame, anchorPoint .. "RIGHT", 11, topOfs)
     end
-    if topY and lowestBottom then
-        local h = topY + topOfs - lowestBottom + 15
-        if h < 1 then h = 1 end
-        bg:ClearAllPoints()
-        bg:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
-        bg:SetPoint("TOPRIGHT", anchorFrame, anchorPoint .. "RIGHT", 11, topOfs)
-        bg:SetHeight(h)
-        bg._lastHeight = h
-    elseif bg._lastHeight then
-        bg:ClearAllPoints()
-        bg:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
-        bg:SetPoint("TOPRIGHT", anchorFrame, anchorPoint .. "RIGHT", 11, topOfs)
-        bg:SetHeight(bg._lastHeight)
-    end
+    -- Third anchor instead of SetHeight: the bottom edge was "anchor top +
+    -- topOfs - lowest bottom + 15" fed into SetHeight, so pointing BOTTOM at the
+    -- same frame with the same gap lands it in the same place, coordinate-free.
+    bg:ClearAllPoints()
+    bg:SetPoint("TOPLEFT",  anchorFrame, anchorPoint .. "LEFT",  leftOfs, topOfs)
+    bg:SetPoint("TOPRIGHT", anchorFrame, anchorPoint .. "RIGHT", 11, topOfs)
+    bg:SetPoint("BOTTOM",   lowest,      "BOTTOM",               0,       -15)
     bg._lastLowest = lowest
 end
 EQT.ResizeBGToContent = ResizeBGToContent
