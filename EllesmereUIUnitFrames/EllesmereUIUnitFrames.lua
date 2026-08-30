@@ -10884,19 +10884,59 @@ function ns.ResolveFrameAlpha(s, inCombat)
     return 1
 end
 
+-- The alpha a unit frame RESTS at while the cursor is not on it, plus whether that resting
+-- state is a hover gate (an alpha 0 a hover may legitimately lift). Single source of truth:
+-- the visibility pass and both hover handlers derive from it, so a mouse leave cannot land
+-- on a different verdict than the pass would. On ns for the 200-locals cap. hiddenByOpts
+-- leads because it did in the pass too (it re-forced 0 at the end of the chain); returning
+-- hoverGated false with it stops a hover from revealing what an option lane has hidden.
+function ns.ResolveVisResting(s, frame, ext, hiddenByOpts, inCombat)
+    if hiddenByOpts then return 0, false end
+    local shownAlpha = ns.ResolveFrameAlpha(s, inCombat)
+    if ext == "mouseover" then return 0, true end
+    if ext ~= nil then
+        -- Driver registered: it owns hiding, so alpha only carries the ooc fade.
+        if frame and frame._euiVisDriver then return shownAlpha, false end
+        return ext and shownAlpha or 0, false
+    end
+    local vis = s.barVisibility or "always"
+    if vis == "in_combat" then return inCombat and shownAlpha or 0, false end
+    if vis == "out_of_combat" then return (not inCombat) and shownAlpha or 0, false end
+    if vis == "mouseover" then
+        -- Legacy single mouseover: a configured "Hide if" override that is NOT currently
+        -- triggering counts as a positive show, so the frame does not require hover
+        -- (fixes "dismount in combat keeps frame hidden" / "hide if no target inverted").
+        local hasAnyHideOpt = EllesmereUI and EllesmereUI.VisHasAnyOption
+                           and EllesmereUI.VisHasAnyOption(s)
+        if hasAnyHideOpt then return shownAlpha, false end
+        return 0, true
+    end
+    return shownAlpha, false
+end
+
+-- Same verdict for callers outside the visibility pass (the hover handlers): derives the
+-- two inputs the pass would have handed over. State is left nil so the shared engine fills
+-- it from its own combat/group tracking.
+function ns.ResolveVisRestingLive(s, frame)
+    local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions
+                      and EllesmereUI.CheckVisibilityOptions(s)
+    local ext = EllesmereUI.EvalVisibilityExtended
+        and EllesmereUI.EvalVisibilityExtended(s, "barVisibility", nil, EllesmereUI.VIS_CAPS_DEFAULT)
+    return ns.ResolveVisResting(s, frame, ext, hiddenByOpts, InCombatLockdown())
+end
+
 local function UnitFrame_OnEnter(self)
     local unit = self._euiUnit
     if not unit then return end
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
-        -- Hover-gated sets only reveal while their conditions pass; a
-        -- legacy single "mouseover" reveals unconditionally as before.
-        local eligible = true
-        if EllesmereUI.VisWantsMouseover then
-            eligible = EllesmereUI.VisWantsMouseover(s, "barVisibility", nil, EllesmereUI.VIS_CAPS_DEFAULT)
-        end
-        if eligible then
+        -- Reveal only what is actually hover-gated right now. Under Any the frame may
+        -- already be shown on another passing disjunct, in which case there is nothing to
+        -- reveal and OnLeave must not undo anything either -- both handlers read the same
+        -- resting verdict so they cannot disagree.
+        local _, hoverGated = ns.ResolveVisRestingLive(s, self)
+        if hoverGated then
             local a = ns.ResolveFrameAlpha(s, InCombatLockdown())
             ;(self._visWrap or self):SetAlpha(a)
             -- 3D models don't inherit parent alpha: reveal the portrait too
@@ -10939,26 +10979,10 @@ local function UnitFrame_OnLeave(self)
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
     if s and (s.barVisibility or "always") == "mouseover" then
-        local vmActive = EllesmereUI.GetActiveVisibilityModes
-            and EllesmereUI.GetActiveVisibilityModes(s, "barVisibility")
-        local leaveAlpha
-        if vmActive then
-            -- Hover-gated set: hidden again on leave; the visibility pass
-            -- re-evaluates the conditions on the next event.
-            leaveAlpha = 0
-        else
-            -- Mirror UpdateFrameVisibility's mouseover logic: when a positive
-            -- "Hide if" override is configured and currently not triggering,
-            -- keep the frame shown on mouse leave instead of re-hiding it.
-            local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions
-                                 and EllesmereUI.CheckVisibilityOptions(s)
-            -- Shared walk over every option lane: a hand-written subset here left a frame
-            -- fading out on mouse leave whenever it used a lane the list had not caught up to.
-            local hasAnyHideOpt = EllesmereUI and EllesmereUI.VisHasAnyOption
-                               and EllesmereUI.VisHasAnyOption(s)
-            local keepShown = (not hiddenByOpts) and hasAnyHideOpt
-            leaveAlpha = keepShown and ns.ResolveFrameAlpha(s, InCombatLockdown()) or 0
-        end
+        -- Return to the resting alpha the visibility pass would paint, never a hardcoded
+        -- 0: under Any a passing disjunct keeps the frame visible with no hover involved,
+        -- and hiding it here would leave it wrong until the next visibility event fires.
+        local leaveAlpha = ns.ResolveVisRestingLive(s, self)
         ;(self._visWrap or self):SetAlpha(leaveAlpha)
         -- 3D models don't inherit parent alpha: hide/dim the portrait too
         local bd3d = self.Portrait and self.Portrait.backdrop and self.Portrait.backdrop._3d
@@ -12348,13 +12372,6 @@ function InitializeFrames()
                     frame._euiVisDriver = wantDriver
                 end
 
-                -- Whole-frame out-of-combat fade: the alpha to use whenever the frame is
-                -- "shown" below. 1 unless "Fade Out of Combat" is on and we're out of
-                -- combat, in which case the chosen oocAlpha. Uses the event-tracked
-                -- _ufInCombat (authoritative on regen transitions, which lead
-                -- InCombatLockdown()) so the fade flips instantly.
-                local shownAlpha = ns.ResolveFrameAlpha(s, _ufInCombat)
-
                 -- Combat-sensitive and mouseover modes use SetAlpha to show/hide
                 -- (not a restricted API); the frame stays technically shown so it can
                 -- transition instantly, alpha controls visibility. For the player frame
@@ -12362,54 +12379,11 @@ function InitializeFrames()
                 -- the inner frame's alpha (oUF updates, secure templates) can fight us --
                 -- alpha inherits down the parent chain so wrapper alpha 0 always wins.
                 local alphaTarget = frame._visWrap or frame
-                local bodyAlpha
-                if ext == "mouseover" then
-                    -- Hover-gated set with passing conditions: hidden until
-                    -- hovered (the hover handlers reveal it).
-                    bodyAlpha = 0
-                elseif ext ~= nil then
-                    if frame._euiVisDriver then
-                        -- The driver owns hiding; alpha only carries the
-                        -- ooc fade (hide-options still force 0 below).
-                        bodyAlpha = shownAlpha
-                    else
-                        -- Driver not registered yet (selection changed in
-                        -- combat): alpha covers until the regen pass.
-                        bodyAlpha = (not hiddenByOpts and ext) and shownAlpha or 0
-                    end
-                elseif vis == "in_combat" then
-                    bodyAlpha = (not hiddenByOpts and _ufInCombat) and shownAlpha or 0
-                elseif vis == "out_of_combat" then
-                    bodyAlpha = (not hiddenByOpts and not _ufInCombat) and shownAlpha or 0
-                elseif vis == "mouseover" then
-                    -- Mouseover: hidden by default; hover toggles alpha. But when the user
-                    -- has configured any positive "Hide if" override (no target, no enemy,
-                    -- mounted, etc.) and it's NOT currently triggering, treat the frame as
-                    -- a positive-show so it doesn't require hover to see (fixes "dismount
-                    -- in combat keeps frame hidden" / "hide if no target inverted").
-                    local hasAnyHideOpt = EllesmereUI and EllesmereUI.VisHasAnyOption
-                                       and EllesmereUI.VisHasAnyOption(s)
-                    if hiddenByOpts then
-                        bodyAlpha = 0
-                    elseif hasAnyHideOpt then
-                        bodyAlpha = shownAlpha
-                    else
-                        bodyAlpha = 0
-                    end
-                else
-                    -- Non-combat modes: restore the resting alpha (full, or the
-                    -- out-of-combat fade); Show/Hide controls visibility below.
-                    bodyAlpha = shownAlpha
-                end
-
-                -- Alpha-only hide for the "visHide*" overrides (mounted, no target,
-                -- housing, etc). Force alpha 0 now so the frame still looks hidden, but
-                -- leave the secure Show/Hide state alone below -- otherwise a dismount
-                -- landing inside a combat lockdown would leave the frame permanently
-                -- hidden (Show/SetAttribute are restricted in combat).
-                if hiddenByOpts then
-                    bodyAlpha = 0
-                end
+                -- Shared with both hover handlers. Forces 0 for the visHide* overrides too,
+                -- so the frame looks hidden while the secure bucket below stays untouched:
+                -- a dismount inside a lockdown would otherwise hide it permanently.
+                -- _ufInCombat leads InCombatLockdown() on regen, so the ooc fade is instant.
+                local bodyAlpha = ns.ResolveVisResting(s, frame, ext, hiddenByOpts, _ufInCombat)
                 alphaTarget:SetAlpha(bodyAlpha)
 
                 -- 3D PlayerModel frames don't inherit parent alpha, so the model must
