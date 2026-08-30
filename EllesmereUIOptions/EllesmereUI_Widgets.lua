@@ -8502,6 +8502,12 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "enemyTarget", label = "Enemy Target", axis = "opt",
       show = "visHideNoEnemy", hide = "visHideWithEnemy",
       tooltip = "A target you can attack." },
+    { key = "resting", label = "Resting", axis = "opt",
+      show = "visOnlyResting", hide = "visHideResting",
+      tooltip = "While resting, in a city or at an inn." },
+    { key = "vehicle", label = "In Vehicle", axis = "opt",
+      show = "visOnlyVehicle", hide = "visHideVehicle",
+      tooltip = "While seated in a vehicle." },
 }
 
 -------------------------------------------------------------------------------

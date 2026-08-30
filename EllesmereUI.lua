@@ -12656,7 +12656,7 @@ EllesmereUI.VIS_OPT_ITEMS = {
       tooltip = "This bar will only show if you have an enemy targeted" },
 }
 
--- Every visibility-option DB field, including the four counter-lane keys that have
+-- Every visibility-option DB field, including the counter-lane keys that have
 -- no row in the legacy VIS_OPT_ITEMS list above (they exist only as Hide/Show lanes
 -- in the unified Visibility row, EllesmereUI.VIS_ROW_ITEMS). Sync copies and equality
 -- checks iterate THIS list so a lane set through the unified row is never dropped by
@@ -12668,6 +12668,8 @@ EllesmereUI.VIS_OPT_KEYS = {
     "visHideDragonriding", "visOnlySkyriding",
     "visHideNoTarget", "visHideWithTarget",
     "visHideNoEnemy", "visHideWithEnemy",
+    "visOnlyResting", "visHideResting",
+    "visOnlyVehicle", "visHideVehicle",
 }
 
 -- Cache player class once at load time (never changes).
@@ -12807,6 +12809,20 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
         if not (EllesmereUI.IsPlayerSkyriding and EllesmereUI.IsPlayerSkyriding()) then return "mountaxis" end
     end
 
+    -- Resting axis: Only Show while Resting / Hide while Resting share one probe.
+    if opts.visOnlyResting or opts.visHideResting then
+        local resting = IsResting() and true or false
+        if opts.visOnlyResting and not resting then return true end
+        if opts.visHideResting and resting then return true end
+    end
+
+    -- Vehicle axis: Only Show in Vehicle / Hide in Vehicle share one probe.
+    if opts.visOnlyVehicle or opts.visHideVehicle then
+        local inVehicle = UnitInVehicle("player") and true or false
+        if opts.visOnlyVehicle and not inVehicle then return true end
+        if opts.visHideVehicle and inVehicle then return true end
+    end
+
     return false
 end
 
@@ -12854,6 +12870,10 @@ EllesmereUI.VIS_OPT_AXES = {
       probe = function() return EllesmereUI.IsPlayerMountedLike() end },
     { show = "visOnlySkyriding", hide = "visHideDragonriding", luaOnly = true,
       probe = function() return EllesmereUI.IsPlayerSkyriding() end },
+    { show = "visOnlyResting", hide = "visHideResting", luaOnly = true,
+      probe = function() return IsResting() and true or false end },
+    { show = "visOnlyVehicle", hide = "visHideVehicle", luaOnly = true,
+      probe = function() return UnitInVehicle("player") and true or false end },
     -- needsEdge: [exists]/[harm] re-evaluate on soft-target changes that
     -- UnitExists("target") ignores; a consumer without those edges resolves the axis in Lua.
     { show = "visHideNoTarget", hide = "visHideWithTarget", needsEdge = "softTarget",
