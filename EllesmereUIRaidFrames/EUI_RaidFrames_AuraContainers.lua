@@ -3229,6 +3229,42 @@ local function ApplyAssistGate(button, d, unit)
 end
 ns.RFC_ApplyAssistGate = ApplyAssistGate
 
+-- Per-container binding audit. Every build job reads the button's live unit
+-- attribute at its OWN run time and stamps d.rfcUnit, so a reassignment landing
+-- between two jobs leaves the containers that finished earlier bound to the
+-- previous occupant while d.rfcUnit already reads current -- the d.rfcUnit
+-- comparison every reassignment path uses can never see that. A container left
+-- on a token that no longer fires UNIT_AURA freezes on whatever it last parsed;
+-- SetUnit re-registers and reparses.
+local function RebindContainer(c, unit)
+    if c and c:GetUnit() ~= unit then c:SetUnit(unit) end
+end
+
+local function RepointStale(d, unit)
+    RebindContainer(d.rfcDebuffs, unit)
+    RebindContainer(d.rfcDispLoc, unit)
+    RebindContainer(d.rfcDispel, unit)
+    RebindContainer(d.rfcBm, unit)
+    RebindContainer(d.rfcBmSimple, unit)
+    -- Every chain container comes from the pool, parked ones included.
+    if d.rfcBmPool then
+        for _, entry in pairs(d.rfcBmPool) do
+            if type(entry) == "table" then RebindContainer(entry.container, unit) end
+        end
+    end
+    -- Debuff Manager tiles keep their own per-container stamp beside the binding;
+    -- rebinding them here behind its back would desync the two, so let it re-point.
+    if d.dmTiles and ns.DM_OnUnitAssigned then
+        for _, c in pairs(d.dmTiles) do
+            if c:GetUnit() ~= unit then
+                ns.DM_OnUnitAssigned(d, unit)
+                break
+            end
+        end
+    end
+end
+ns.RFC_RepointStale = RepointStale
+
 -- Called from the OnAttributeChanged("unit") watch when the secure header
 -- (re)assigns a button. SetUnit re-registers events; the explicit refresh
 -- covers assignments where the new unit's auras produce no UNIT_AURA edge.
@@ -3251,6 +3287,10 @@ function ns.RFC_OnUnitAssigned(button, d, unit)
     -- Assist state can still flip without a unit change; its same-state early-out
     -- keeps that call near-free.
     if d.rfcUnit == unit then
+        -- No binding audit here: this branch is the roster-reprocess storm path
+        -- (every button, every roster/name event, several times at pull start)
+        -- and the audit is a per-container read. The 1s sweep owns it instead,
+        -- which bounds a stale binding to one second either way.
         ApplyAssistGate(button, d, unit)
         return
     end
