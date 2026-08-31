@@ -10001,6 +10001,70 @@ function ns.ApplyOverrideRangeTint(icon, overrideSpellID)
     end
 end
 
+-- Blizzard arms its check on the BASE spell only, so a melee base with a 15yd
+-- override never dispatches when you cross 15yd. Arming the override id closes that.
+--
+-- The registration is per SPELL, not per caller, and an override can be a CDM entry
+-- in its own right (Hammer of Wrath overrides Judgment and is also its own icon), so
+-- an id Blizzard holds is left alone in both directions -- re-checked at disarm time,
+-- since a spell can become theirs while ours is armed.
+function ns.BlizzardArmsRange(spellID)
+    for _, icons in pairs(cdmBarIcons) do
+        for _, icon in ipairs(icons) do
+            if icon.rangeCheckSpellID == spellID then return true end
+        end
+    end
+    return false
+end
+
+function ns.ArmOverrideRange(baseSpellID, overrideSpellID)
+    local armed = ns._oorArmed
+    if not armed then armed = {}; ns._oorArmed = armed end
+    local prev = armed[baseSpellID]
+    if prev == overrideSpellID then return end
+    if prev then
+        if not ns.BlizzardArmsRange(prev) then
+            C_Spell.EnableSpellRangeCheck(prev, false)
+        end
+        armed[baseSpellID] = nil
+    end
+    if overrideSpellID and not ns.BlizzardArmsRange(overrideSpellID) then
+        C_Spell.EnableSpellRangeCheck(overrideSpellID, true)
+        armed[baseSpellID] = overrideSpellID
+    end
+end
+
+-- Every registration dropped at once (spec change, logout): a leaked one costs a
+-- dispatch we ignore, but they would accumulate across a session of swaps.
+function ns.DisarmOverrideRanges()
+    local armed = ns._oorArmed
+    if not armed then return end
+    for base, ov in pairs(armed) do
+        if not ns.BlizzardArmsRange(ov) then
+            C_Spell.EnableSpellRangeCheck(ov, false)
+        end
+        armed[base] = nil
+    end
+end
+
+-- SPELL_RANGE_CHECK_UPDATE. Keyed off the icon's own stored override id rather than
+-- our armed set, so it still repaints for an override Blizzard arms itself. The
+-- payload's isInRange is ignored in favour of ApplyOverrideRangeTint's own poll,
+-- which already guards a secret answer. Falls through immediately for the base-spell
+-- registrations Blizzard makes, which is nearly every dispatch.
+function ns.RepaintOverrideRange(spellID)
+    if type(spellID) ~= "number" then return end
+    if issecretvalue and issecretvalue(spellID) then return end
+    for _, icons in pairs(cdmBarIcons) do
+        for _, icon in ipairs(icons) do
+            local fd = _getFD(icon)
+            if fd and fd._oorSpellID == spellID then
+                ns.ApplyOverrideRangeTint(icon, spellID)
+            end
+        end
+    end
+end
+
 -- rangeCheckSpellID is READ, never written: the law is about writes.
 function ns.ResyncCdmRange(baseSpellID, overrideSpellID)
     -- Secret payload fails open, before any truthiness test or comparison
@@ -10013,6 +10077,7 @@ function ns.ResyncCdmRange(baseSpellID, overrideSpellID)
     -- own check is armed on the base spell and is right again from that moment.
     local liveOverride = (overrideSpellID and overrideSpellID ~= baseSpellID)
         and overrideSpellID or nil
+    ns.ArmOverrideRange(baseSpellID, liveOverride)
     for _, icons in pairs(cdmBarIcons) do
         for _, icon in ipairs(icons) do
             if icon.rangeCheckSpellID == baseSpellID then
@@ -10038,6 +10103,9 @@ eventFrame:RegisterEvent("SPELLS_CHANGED")
 -- Live override flips (proc-based hero-talent transforms): resolution memos
 -- derived from override state go stale the moment this fires.
 eventFrame:RegisterEvent("COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED")
+-- Only ever acted on for an override id we armed ourselves; Blizzard's own base-spell
+-- registrations dispatch here too and fall straight through.
+eventFrame:RegisterEvent("SPELL_RANGE_CHECK_UPDATE")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
@@ -10179,6 +10247,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if not ECME.db then return end
     if event == "PLAYER_LOGOUT" then
         ns.SaveCachedBarSizes()
+        return
+    end
+    if event == "SPELL_RANGE_CHECK_UPDATE" then
+        ns.RepaintOverrideRange(unit)   -- payload is (spellID, isInRange, checksRange)
         return
     end
     if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" then
@@ -10388,6 +10460,7 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         return
     end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and unit == "player" then
+        ns.DisarmOverrideRanges()   -- the new spec's overrides re-arm on their own events
         -- Non-rebuild work only. The actual spec change rebuild is driven by SPELLS_CHANGED above
         -- (which fires for both manual and auto swaps). This handler just invalidates caches that need immediate clearing.
         if EllesmereUI and EllesmereUI.InvalidateFrameCache then
