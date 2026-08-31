@@ -8913,8 +8913,9 @@ local function BuildVisibilityString(info, s, visOverride)
     end
 
     -- Visibility-option hide clauses expressed as macro conditionals; run
-    -- inside the secure state driver so they work in combat without taint. Under Any
-    -- they are disjuncts, compiled by the Any tail below, never a gate.
+    -- inside the secure state driver so they work in combat without taint. Under Any the
+    -- Any tail below compiles both halves itself: Show lanes as disjuncts, Hide lanes as
+    -- its own leading gates, so this block would only duplicate them.
     local visOptHide = ""
     if s.visibilityMatch ~= "any" then
         if s.visHideMounted then visOptHide = visOptHide .. "[mounted] hide; " end
@@ -9876,8 +9877,11 @@ function EAB:UpdateHousingVisibility()
         -- forms are also handled here to cover cases [mounted] does not match.
         local function ShouldHideNonMacro(s)
             if not s then return false end
-            -- Under Any the lanes are disjuncts folded into the driver string; a literal
-            -- "hide" here would veto the whole disjunction on one failing lane.
+            -- Under Any the driver string already carries both halves (Show lanes as
+            -- disjuncts, Hide lanes as leading gates, the Lua-only ones resolved at build
+            -- time with their own combat escape hatch), and the rebuild below refreshes
+            -- it on exactly these events. A literal "hide" here would add nothing and
+            -- would veto the whole disjunction on a lane that is not even firing.
             if s.visibilityMatch == "any" then return false end
             if s.visHideNoTarget then
                 -- [noexists] in the state driver covers the basic has-target

@@ -7982,7 +7982,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     lbl:SetTextColor(1, 1, 1, 1)
                     hl:SetColorTexture(1, 1, 1, 0.04)
                     local hlt = opts.hideLaneTooltip
-                    if type(hlt) == "function" then hlt = hlt() end
+                    if type(hlt) == "function" then hlt = hlt(item.key) end
                     EllesmereUI.ShowWidgetTooltip(negBox,
                         hlt and EllesmereUI.L(hlt)
                         or EllesmereUI.L("Hide these instead of showing them"))
@@ -8466,7 +8466,7 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "always",    label = "Always" },
     { key = "mouseover", label = "Mouseover",
       tooltip = "Reveal on hover only. Combines with the conditions below: hover-reveals while they all pass, stays hidden while any fails.",
-      tooltipAny = "Combines with the conditions below: shows outright once at least one passes, otherwise still reveals on hover." },
+      tooltipAny = "Combines with the conditions below: shows outright once at least one passes, otherwise still reveals on hover. A checked Hide state still hides it, hover included." },
     -- Modifiers, not conditions: they decide how the rows below combine, so they stay
     -- out of the summary and the Show/Hide lane pairs. Radio pair (matchValue) over one
     -- scalar: picking one unpicks the other, there is no "neither" state.
@@ -8474,7 +8474,7 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "matchAll", label = "Match All Conditions", modifier = true, matchValue = "all",
       tooltip = "Every condition you set has to match. The default." },
     { key = "matchAny", label = "Match Any Condition", modifier = true, matchValue = "any",
-      tooltip = "This element shows as soon as ONE condition matches, and a Hide lane then means show while that condition is false." },
+      tooltip = "This element shows as soon as ONE Show condition matches. Hide keeps its meaning in both match modes: a checked Hide on a state row (Instances, Mounted, Target, Resting, ...) always hides." },
     { isHeader = true, label = "Show", rightLabel = "Hide" },
     { key = "combat", label = "In Combat", axis = "mode",
       show = "in_combat", hide = "out_of_combat" },
@@ -8833,12 +8833,17 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         leftRgn, opts.width or 210, leftRgn:GetFrameLevel() + 2,
         items, GetChecked, SetChecked, nil, 12, nil, nil, OnMenuClosed,
         { emptyLabel = "Always",
-          -- Both of these read the match live: under Any the conditions are OR'd, and
-          -- a Hide lane stops being a veto and becomes a disjunct of its own.
+          -- The separator reads the match live: under Any the conditions are OR'd.
           separatorFn = function() return GetMatchAny() and " or " or ", " end,
-          hideLaneTooltip = function()
-              return GetMatchAny() and "Show while this condition is false"
-                  or "Hide while this condition is true"
+          hideLaneTooltip = function(key)
+              -- A MODE row's Hide lane is the opposite condition of the same axis, so
+              -- under Any it reads as one more disjunct. A state row's Hide lane is a
+              -- veto in both match modes.
+              local d = defs[key]
+              if GetMatchAny() and d and d.axis ~= "opt" then
+                  return "Show while this condition is false"
+              end
+              return "Hide while this condition is true"
           end })
     PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
     leftRgn._control = cbDD

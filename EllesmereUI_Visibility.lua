@@ -511,9 +511,10 @@ local function FillDispatchState()
     return _dispatchState
 end
 
--- Any match: every constrained axis is a disjunct; mode axes and option lanes tally
--- TOGETHER (CheckVisibilityOptions steps aside for such a store). _anySel is a reused
--- scalar view so a single stored mode costs no allocation per dispatcher event.
+-- Any match: every constrained axis is a disjunct; mode axes and option SHOW lanes tally
+-- TOGETHER (CheckVisibilityOptions steps aside for such a store, except for its hide
+-- veto). _anySel is a reused scalar view so a single stored mode costs no allocation per
+-- dispatcher event.
 local _anySel, _anySelKey = {}, nil
 
 local function EvalAnyMatch(store, legacyKey, vm, state, caps)
@@ -527,6 +528,10 @@ local function EvalAnyMatch(store, legacyKey, vm, state, caps)
     -- Never stays terminal: an exclusive scalar is not an axis, so no other lane can
     -- out-vote it.
     if sel.never then return false end
+    -- So is a firing Hide lane: the match mode governs how the SHOW side combines, a
+    -- Hide lane always hides. Mouseover included -- a hover must not reveal what a Hide
+    -- lane hid (same rule as UF-3 in VisibilityCombineOr_MasterBriefing.md).
+    if EUI.VisOptionHideVeto and EUI.VisOptionHideVeto(store) then return false end
     state = state or FillDispatchState()
     local constrained, passed = EUI.TallyVisibilityModeAxes(sel, state, caps, "any")
     -- One passing disjunct settles it; the option probes (instance, housing, the druid
@@ -691,10 +696,18 @@ end
 -- frame outright falls back to showing it instead -- a hard-hidden secure frame can
 -- never be revealed again by the unprotected Lua hover poll. The alpha layer (outside
 -- this compiler) is what actually decides full opacity vs. hover-gated 0 from there.
-function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, wrap, hasMouseover)
+function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, wrap, hasMouseover, forceShow)
     vm, opts, wrap = vm or {}, opts or {}, wrap or ""
     local lead = (wrap ~= "") and (wrap .. ",") or ""
     local out, axes = "", 0
+    -- Hide lanes are vetoes, not disjuncts: they lead the whole string.
+    local gates, gateCount = EUI.BuildVisOptHideGates(opts)
+    prefix = prefix .. gates
+    -- A show lane whose macro token cannot see what its probe sees (druid travel form vs.
+    -- [mounted]): the disjunction is settled, but the gates above still apply.
+    if forceShow then
+        return prefix .. ((wrap ~= "") and ("[" .. wrap .. "] show; hide") or "show"), 0, gateCount
+    end
     local emitted = {}
     local function emit(tok)
         if emitted[tok] then return end
@@ -721,21 +734,16 @@ function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, 
         if g3 then emit("nogroup") end
     end
 
-    -- Option axes with a macro conditional of their own.
+    -- Option axes with a macro conditional of their own. SHOW lanes only: their Hide
+    -- counterparts are the leading gates above, so no negated disjunct is emitted.
     if opts.visOnlyMounted and not opts.visHideMounted then
         axes = axes + 1; emit("mounted")
-    elseif opts.visHideMounted and not opts.visOnlyMounted then
-        axes = axes + 1; emit("nomounted")
     end
     if opts.visHideNoTarget and not opts.visHideWithTarget then
         axes = axes + 1; emit("exists")
-    elseif opts.visHideWithTarget and not opts.visHideNoTarget then
-        axes = axes + 1; emit("noexists")
     end
     if opts.visHideNoEnemy and not opts.visHideWithEnemy then
         axes = axes + 1; emit("harm")
-    elseif opts.visHideWithEnemy and not opts.visHideNoEnemy then
-        axes = axes + 1; emit("noharm")
     end
 
     -- Dragonriding axis. NOT(advflyable AND flying) has no single bracket form, so the
@@ -754,8 +762,8 @@ function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, 
     if axes == 0 then
         -- Nothing this string can decide: either nothing is constrained anywhere
         -- (Always), or the only constrained axes are Lua-only ones that all failed.
-        if (extraConstrained or 0) > 0 then return prefix .. noMatch, 0 end
-        return prefix .. wrappedShow, 0
+        if (extraConstrained or 0) > 0 then return prefix .. noMatch, 0, gateCount end
+        return prefix .. wrappedShow, 0, gateCount
     end
     if dragonTail then
         -- Under mouseover the negative-dragon veto would just be dead weight: dropping
@@ -763,20 +771,42 @@ function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, 
         -- airborne case too, instead of nesting wrappedShow's own bracket/semicolons
         -- inside this clause's action slot.
         if hasMouseover then
-            return prefix .. out .. wrappedShow, axes
+            return prefix .. out .. wrappedShow, axes, gateCount
         end
-        return prefix .. out .. "[" .. lead .. "advflyable,flying] hide; " .. wrappedShow, axes
+        return prefix .. out .. "[" .. lead .. "advflyable,flying] hide; " .. wrappedShow, axes, gateCount
     end
-    return prefix .. out .. noMatch, axes
+    return prefix .. out .. noMatch, axes, gateCount
+end
+
+-- Leading hide gates for the macro-expressible HIDE lanes. They veto in every match
+-- mode, so they precede the Any disjuncts (first matching clause wins) and are never
+-- softened by the mouseover fallback: a hover must not reveal what a Hide lane hid.
+-- Deliberately unwrapped -- `wrap` is an AND term of the SHOW side (Pet Bar), not
+-- something a veto has to wait for. Returns the gate string and how many gates it holds.
+function EUI.BuildVisOptHideGates(opts)
+    local out, n = "", 0
+    if opts.visHideMounted and not opts.visOnlyMounted then
+        out = out .. "[mounted] hide; "; n = n + 1
+    end
+    if opts.visHideWithTarget and not opts.visHideNoTarget then
+        out = out .. "[exists] hide; "; n = n + 1
+    end
+    if opts.visHideWithEnemy and not opts.visHideNoEnemy then
+        out = out .. "[harm] hide; "; n = n + 1
+    end
+    return out, n
 end
 
 -- Two macro tokens disagree with their Lua probe: [exists] counts a soft target and
--- [mounted] cannot see druid travel/flight forms. Under Any a veto would silence the
--- other axes, so the fix is per axis: a token that would wrongly PASS has its disjunct
--- dropped, one that would wrongly FAIL shows outright. Each probe runs only when its
--- own lanes are set (the mount one walks the druid form auras).
+-- [mounted] cannot see druid travel/flight forms. The correction is per lane, never a
+-- blanket veto that would silence the other axes:
+--   show lane, token would wrongly PASS -> drop the disjunct
+--   show lane, token would wrongly FAIL -> show outright
+--   hide lane, gate would wrongly FIRE  -> drop the gate
+--   hide lane, gate would wrongly STAY  -> hide outright (forceHide)
+-- Each probe runs only when its own lanes are set (the mount one walks the druid auras).
 local function AnyDriverLaneFixups(store, edges)
-    local drop, forceShow = nil, false
+    local drop, forceShow, forceHide = nil, false, false
 
     local wantsTarget = (edges and edges.softTarget)
         and (store.visHideNoTarget or store.visHideWithTarget)
@@ -787,9 +817,10 @@ local function AnyDriverLaneFixups(store, edges)
             -- Show lane: [exists] would show on the soft target the probe does not count.
             if store.visHideNoTarget and not store.visHideWithTarget then
                 drop = { visHideNoTarget = true }
-            -- Hide lane: [noexists] stays false, but "no target" is true to the probe.
+            -- Hide lane: the [exists] gate would hide on a soft target the probe does not
+            -- count as one; drop the gate and leave the axis to the Lua veto.
             elseif store.visHideWithTarget and not store.visHideNoTarget then
-                forceShow = true
+                drop = { visHideWithTarget = true }
             end
         end
     end
@@ -801,18 +832,19 @@ local function AnyDriverLaneFixups(store, edges)
             -- Show lane: [mounted] misses the form the probe counts as mounted.
             if store.visOnlyMounted and not store.visHideMounted then
                 forceShow = true
-            -- Hide lane: [nomounted] would show while the probe says mounted.
+            -- Hide lane: the [mounted] gate cannot see the form, so it never fires while
+            -- the probe says mounted. The caller hides and bakes the combat escape hatch.
             elseif store.visHideMounted and not store.visOnlyMounted then
-                drop = drop or {}
-                drop.visHideMounted = true
+                forceHide = true
             end
         end
     end
 
-    return drop, forceShow
+    return drop, forceShow, forceHide
 end
 
 -- Store -> Any-match driver tail, shared by Action Bars, Unit Frames and the Minimap.
+-- SHOW lanes and mode axes compile to disjuncts, HIDE lanes to leading vetoes.
 -- Returns tail, constrained (a LOWER BOUND: the early-outs stop counting once settled)
 -- and liveAxes (axes that are LIVE macro terms in `tail`; 0 for a constant). A
 -- driver-registering caller gates on liveAxes: constrained can be positive purely from
@@ -823,16 +855,42 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
     if (store[legacyKey] or "always") == "never" then return "hide", 1, 0 end
 
+    -- Hide lanes veto in every match mode, so they settle the verdict before any
+    -- disjunct is looked at. The ones this consumer cannot compile are resolved here, at
+    -- build time -- as fresh as the last driver rebuild, exactly like the Lua-only show
+    -- lanes below. combatFlip (mount, skyriding mount, vehicle) means the probe can flip
+    -- while a driver cannot be rewritten, so those must not freeze as a dead "hide":
+    -- they hide out of combat and hand the rest of the string back in combat, the same
+    -- escape hatch the Action Bars "combathide" path bakes under All.
+    local combatEscape = false
+    if EUI.VisOptionHideVeto then
+        local vetoed, vetoFlip = EUI.VisOptionHideVeto(store, "luaOnly", edges)
+        if vetoed then
+            if not vetoFlip then return "hide", 1, 0 end
+            combatEscape = true
+        end
+    end
+
+    -- Runs before the Lua-only show lanes settle anything: its mount branch can produce a
+    -- veto of its own, and a veto outranks a passing disjunct. Its probes only run when
+    -- the matching lanes are set.
+    local drop, forceShow, forceHide = AnyDriverLaneFixups(store, edges)
+    if forceHide then combatEscape = true end
+
+    -- Wraps every return below: out of combat the veto stands, in combat the compiled
+    -- string decides (mode axes, prefixes and any live gate keep working there).
+    local function Finish(tail, constrained, live)
+        if combatEscape then
+            return "[nocombat] hide; " .. tail, constrained + 1, live + 1
+        end
+        return tail, constrained, live
+    end
+
     local luaC, luaP = 0, 0
     if EUI.TallyVisibilityOptionAxes then
         luaC, luaP = EUI.TallyVisibilityOptionAxes(store, "luaOnly", edges)
     end
-    -- Settled before the fixups run: their probes are the expensive ones.
-    if luaP > 0 then return wrappedShow, luaC, 0 end
-
-    local drop, forceShow = AnyDriverLaneFixups(store, edges)
-    -- A driver axis whose token cannot see what the probe sees; it is not in luaC.
-    if forceShow then return wrappedShow, luaC + 1, 0 end
+    if luaP > 0 then return Finish(wrappedShow, luaC, 0) end
 
     local modes = vm
     if not modes then
@@ -857,7 +915,10 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
             local ax = axisList[i]
             if not EUI.VisAxisIsLuaOnly(ax, edges) then
                 if drop and (drop[ax.show] or drop[ax.hide]) then
-                    dropped = dropped + 1
+                    -- A dropped SHOW lane is still a constrained disjunct this string
+                    -- cannot decide; a dropped HIDE gate is a veto that is NOT firing,
+                    -- which constrains nothing at all.
+                    if drop[ax.show] then dropped = dropped + 1 end
                 else
                     opts[ax.show] = store[ax.show]
                     opts[ax.hide] = store[ax.hide]
@@ -866,8 +927,11 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
         end
     end
     local hasMouseover = (vm and vm.mouseover) or (store[legacyKey] == "mouseover") or false
-    local tail, axes = EUI.BuildVisibilityDriverStringAny("", modes, opts, luaC + dropped, wrap, hasMouseover)
-    return tail, axes + luaC + dropped, axes
+    local tail, axes, gates = EUI.BuildVisibilityDriverStringAny("", modes, opts,
+        luaC + dropped, wrap, hasMouseover, forceShow)
+    -- liveAxes counts the gates too: a string that carries nothing but "[mounted] hide"
+    -- is still a live driver worth registering.
+    return Finish(tail, axes + luaC + dropped, axes + gates)
 end
 
 -- Set-aware copy for the sync icons. dstCaps.noGroupModes strips group-axis
