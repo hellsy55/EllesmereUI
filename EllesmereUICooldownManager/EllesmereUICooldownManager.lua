@@ -5311,6 +5311,69 @@ function ns.CdmEnsureCooldownTextClone(icon, cd, fd)
     hooksecurefunc(cd, "SetCooldown", function(_, start, duration, modRate)
         local t = fd.cdTextClone
         if not t then return end
+        -- Raw cooldown numbers are AllowedWhenUntainted ONLY: in restricted
+        -- content Blizzard arms the real widget with SECRET start/duration,
+        -- and forwarding them from this tainted hook is a hard error (live
+        -- 9.1.1 storm). Duration objects are the secret-safe carrier and
+        -- keep riding the SetCooldownFromDurationObject forward; for a
+        -- secret RAW arm, fall back to the real widget's own number for
+        -- this arm (the old under-the-glow layering) instead of showing
+        -- none. Flip edges only; the routing guard keeps the choke hook
+        -- from undoing our writes.
+        if issecretvalue and (issecretvalue(start) or issecretvalue(duration)
+            or issecretvalue(modRate)) then
+            -- Secret raw arm: raw numbers cannot cross tainted execution, but
+            -- a DURATION OBJECT can -- the AB swipe channel's carrier
+            -- (C_Spell.GetSpellCooldownDuration -> SetCooldownFromDuration
+            -- Object, engine fills the secret timing C-side). ONE fetch per
+            -- icon per frame: a same-frame duplicate arm keeps the first
+            -- outcome (plain GetTime compare; never memo across frames --
+            -- every arm edge re-decides).
+            local now = GetTime()
+            if fd._cdDurFetchAt == now then return end
+            fd._cdDurFetchAt = now
+            local sid = icon.GetSpellID and icon:GetSpellID()
+            if sid and not (issecretvalue(sid))
+               and C_Spell and C_Spell.GetSpellCooldownDuration
+               and t.SetCooldownFromDurationObject then
+                local okD, durObj = pcall(C_Spell.GetSpellCooldownDuration, sid)
+                if okD and durObj then
+                    t:SetCooldownFromDurationObject(durObj)
+                    BootstrapStyle()
+                    if fd._cdRealNumShown then
+                        -- Object lane carried it: number back on the clone.
+                        fd._cdRealNumShown = nil
+                        fd._cdTextRouting = true
+                        cd:SetHideCountdownNumbers(true)
+                        fd._cdTextRouting = false
+                        t:SetHideCountdownNumbers(false)
+                    end
+                    return
+                end
+            end
+            -- No object (item-sourced icons, odd arms): the real widget's own
+            -- number for this arm -- present under the glow beats absent.
+            if not fd._cdRealNumShown then
+                fd._cdRealNumShown = true
+                fd._cdTextRouting = true
+                cd:SetHideCountdownNumbers(false)
+                fd._cdTextRouting = false
+                t:SetHideCountdownNumbers(true)
+                local st = fd._cdTextStyle
+                if st and ns.CdmStyleCooldownNumber then
+                    ns.CdmStyleCooldownNumber(cd, st.barData, st.ssb, st.fontScale)
+                end
+            end
+            return
+        end
+        if fd._cdRealNumShown then
+            -- Plain again (restriction lifted): numbers back on the clone.
+            fd._cdRealNumShown = nil
+            fd._cdTextRouting = true
+            cd:SetHideCountdownNumbers(true)
+            fd._cdTextRouting = false
+            t:SetHideCountdownNumbers(false)
+        end
         t:SetCooldown(start, duration, modRate)
         BootstrapStyle()
     end)
