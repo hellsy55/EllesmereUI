@@ -1380,9 +1380,7 @@ end
 
         local timerBorder, timerBg
 
-        -- Applied after either style branch, so the look holds with the queue
-        -- popup reskin on or off. Exported so the options cog can repaint a
-        -- countdown that is already on screen.
+        -- Applied after either style branch, so the look holds with the reskin on or off.
         local function ApplyTimerStyle()
             if not timerBar then return end
             local db = EllesmereUIDB or {}
@@ -1436,8 +1434,7 @@ end
             local dialog = LFGDungeonReadyDialog
             local anchorFrame = dialog or popup
 
-            -- The bar's parent sits a level below the dialog so its backdrop
-            -- draws under the dialog art; a raised countdown must not.
+            -- The bar's parent sits a level below the dialog so its backdrop draws under the dialog art; a raised countdown must not.
             timerBar:SetFrameLevel(anchorFrame:GetFrameLevel() + 5)
 
             timerBar:ClearAllPoints()

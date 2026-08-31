@@ -1908,8 +1908,7 @@ EllesmereUI.RESKIN = {
     BRD_ALPHA  = 0.18,   -- border alpha (white)
 }
 
--- LFG queue accept countdown defaults. Read by both the skin that paints the
--- bar and the options sliders that display the unset value.
+-- LFG queue accept countdown defaults (shared by the skin and its options)
 EllesmereUI.QUEUE_TIMER = {
     TEXT_R = 1, TEXT_G = 0.831, TEXT_B = 0,   -- #ffd400
     TEXT_SIZE = 9, BAR_HEIGHT = 11, TEXT_OFFSET_Y = 0,
