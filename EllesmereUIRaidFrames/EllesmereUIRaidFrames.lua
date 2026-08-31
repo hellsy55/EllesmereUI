@@ -8382,13 +8382,21 @@ end  -- range fading section (do-block keeps its locals out of the 200-cap)
 --  render-visibility edge has no event, so a unit that ghosts (loadscreen, out
 --  of render range, disconnect) keeps whatever its containers last parsed. On
 --  regain the containers are re-parsed in place (the same UpdateAllAuras lever
---  the assist gate uses on its own false->true edge).
+--  the assist gate uses on its own false->true edge). The same pass audits each
+--  container's own unit binding, which nothing else re-drives once the header
+--  stops re-asserting the token.
 -------------------------------------------------------------------------------
 local ghostTicker = nil
 
 local function GhostAuraCheck()
     local function checkUnit(unit, btn)
         local d = GetFFD(btn)
+        -- unitToButton et al. only ever gain entries on reassignment, never drop
+        -- the old one, so unit/btn here can be a stale pairing; re-confirm against
+        -- the button's own live attribute before writing to it.
+        if btn:GetAttribute("unit") == unit and ns.RFC_RepointStale then
+            ns.RFC_RepointStale(d, unit)
+        end
         if not UnitIsVisible(unit) or not UnitIsConnected(unit) then
             if not d.ghostCleared then
                 d.ghostCleared = true
