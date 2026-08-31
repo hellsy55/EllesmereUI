@@ -301,11 +301,65 @@ local VIS_CONDITION_KEYS = {}
 for _, k in ipairs(VIS_REPRESENTATIVE_ORDER) do VIS_CONDITION_KEYS[k] = true end
 EUI.VIS_CONDITION_KEYS = VIS_CONDITION_KEYS
 
--- Keys allowed inside a visibilityModes set: the seven conditions plus
--- mouseover (the hover-gate). Never/Always stay exclusive scalars.
+-- Mode-row axes: one entry per condition ROW of the shared Visibility checklist, the
+-- mirror of EllesmereUI.VIS_OPT_AXES for the option rows. show = the key that acts as a
+-- conjunct under All and a disjunct under Any; hide = the veto key, which hides whenever
+-- the row's condition holds, in EVERY match mode; token = the macro conditional that is
+-- true while the condition holds, so a hide gate compiles to "[token] hide"; probe = the
+-- same answer in Lua. luaOnly = no positive bracket form exists, so a driver-building
+-- caller has to resolve the veto in Lua. combatFlip = the probe can change INSIDE combat,
+-- where a driver can no longer be rewritten. group = part of the three-way group row set.
+EUI.VIS_MODE_AXES = {
+    { show = "in_combat", hide = "hide_in_combat", token = "combat",
+      probe = function(state) return state.inCombat and true or false end },
+    { show = "out_of_combat", hide = "hide_out_of_combat", token = "nocombat",
+      probe = function(state) return not state.inCombat end },
+    { show = "in_raid", hide = "hide_in_raid", token = "group:raid", group = true,
+      probe = function(state) return state.inRaid and true or false end },
+    -- [group:party] alone is TRUE inside a raid; nogroup:raid narrows it to a real party,
+    -- exactly as the driver compilers below do for the show lane.
+    { show = "in_party", hide = "hide_in_party", token = "group:party,nogroup:raid", group = true,
+      probe = function(state, caps)
+          if state.inParty then return true end
+          return (caps and caps.partyIncludesRaid and state.inRaid) and true or false
+      end },
+    { show = "solo", hide = "hide_solo", token = "nogroup", group = true,
+      probe = function(state) return not state.inRaid and not state.inParty end },
+    { show = "show_dragonriding", hide = "hide_dragonriding", token = "advflyable,flying",
+      combatFlip = true,
+      probe = function() return EUI.IsAirborneSkyriding() end },
+    -- NOT(advflyable AND flying) has no single positive bracket, so this veto is the one
+    -- mode lane a secure driver cannot carry; it is resolved in Lua at build time.
+    { show = "show_not_dragonriding", hide = "hide_not_dragonriding", luaOnly = true,
+      combatFlip = true,
+      probe = function() return not EUI.IsAirborneSkyriding() end },
+}
+
+-- The seven hide keys as a flat list for the set walks below, and as a lookup for
+-- callers that have to tell a veto lane from a show lane (the options checklist).
+local VIS_MODE_HIDE = {}
+EUI.VIS_MODE_HIDE_KEYS = {}
+for i = 1, #EUI.VIS_MODE_AXES do
+    VIS_MODE_HIDE[i] = EUI.VIS_MODE_AXES[i].hide
+    EUI.VIS_MODE_HIDE_KEYS[VIS_MODE_HIDE[i]] = true
+end
+
+-- Keys allowed inside a visibilityModes set: the seven conditions, their seven hide
+-- lanes, plus mouseover (the hover-gate). Never/Always stay exclusive scalars. Hide keys
+-- deliberately stay out of VIS_CONDITION_KEYS / VIS_REPRESENTATIVE_ORDER: a veto lane has
+-- no legacy scalar representation, so it can only ever live inside a stored set.
 local VIS_COMBINABLE_KEYS = { mouseover = true }
 for _, k in ipairs(VIS_REPRESENTATIVE_ORDER) do VIS_COMBINABLE_KEYS[k] = true end
+for i = 1, #VIS_MODE_HIDE do VIS_COMBINABLE_KEYS[VIS_MODE_HIDE[i]] = true end
 EUI.VIS_COMBINABLE_KEYS = VIS_COMBINABLE_KEYS
+
+-- True when the set carries at least one mode hide lane.
+local function VisHasModeHide(vm)
+    for i = 1, #VIS_MODE_HIDE do
+        if vm[VIS_MODE_HIDE[i]] then return true end
+    end
+    return false
+end
 
 -- Airborne skyriding predicate shared by CheckVisibilityMode's dragonriding
 -- branches and the multi-select engine. Mirrors the secure driver's
@@ -348,8 +402,15 @@ local function ActiveModes(store, legacyKey)
     local vm = store.visibilityModes
     if type(vm) ~= "table" then return nil end
     local rep = VisRepresentative(vm)
-    if not rep then return nil end
     local scalar = store[legacyKey]
+    if not rep then
+        -- Hide-only set: a veto lane has no scalar of its own, so the pair the setter
+        -- writes is "always" plus the set. The heal rule still applies -- any other
+        -- scalar proves an out-of-band write that must win.
+        if not VisHasModeHide(vm) then return nil end
+        if scalar ~= nil and scalar ~= "always" then return nil end
+        return vm
+    end
     if scalar ~= nil and scalar ~= rep then return nil end
     return vm
 end
@@ -370,7 +431,8 @@ function EUI.VisDependsOnCombat(store, legacyKey)
     if not store then return false end
     local vm = ActiveModes(store, legacyKey)
     if vm then
-        return (vm.in_combat or vm.out_of_combat) and true or false
+        return (vm.in_combat or vm.out_of_combat
+            or vm.hide_in_combat or vm.hide_out_of_combat) and true or false
     end
     local scalar = store[legacyKey]
     return scalar == "in_combat" or scalar == "out_of_combat"
@@ -408,6 +470,16 @@ function EUI.SetVisibilitySelection(store, legacyKey, selection, applyScalarFn)
             count = count + 1
         end
     end
+    -- Hide lanes ride along in the same set. They never contribute to `count`: that
+    -- counts the keys a scalar could represent, and a veto lane cannot be one.
+    local hideCount = 0
+    for i = 1, #VIS_MODE_HIDE do
+        local k = VIS_MODE_HIDE[i]
+        if selection[k] then
+            conditions[k] = true
+            hideCount = hideCount + 1
+        end
+    end
     local hasMouseover = selection.mouseover and true or false
     local scalar
     if count == 0 then
@@ -419,19 +491,24 @@ function EUI.SetVisibilitySelection(store, legacyKey, selection, applyScalarFn)
     elseif hasMouseover then
         -- Hover-gated conditions: the set carries mouseover alongside the conditions
         -- and the scalar reads "mouseover" so every legacy mouseover mechanism engages.
-        conditions.mouseover = true
         scalar = "mouseover"
     else
         scalar = VisRepresentative(conditions)
     end
+    -- Whenever the scalar reads "mouseover" the set has to carry it too, or the pair
+    -- would not match and ActiveModes would drop the set, hide lanes included.
+    if scalar == "mouseover" then conditions.mouseover = true end
     if applyScalarFn then
         applyScalarFn(store, scalar)
     else
         store[legacyKey] = scalar
     end
-    -- A set is stored for >=2 conditions, or for any condition + mouseover
-    -- (which cannot collapse to a single scalar).
-    store.visibilityModes = (count >= 2 or (count >= 1 and hasMouseover)) and conditions or nil
+    -- A set is stored for >=2 conditions, for any condition + mouseover (which cannot
+    -- collapse to a single scalar), and for any hide lane (which has no scalar at all).
+    -- Never is terminal, so nothing is stored alongside it.
+    local storeSet = scalar ~= "never"
+        and (count >= 2 or (count >= 1 and hasMouseover) or hideCount >= 1)
+    store.visibilityModes = storeSet and conditions or nil
     -- Direct belt for the shared Visibility widget: a mouseover-mode edit
     -- must re-arm the scan without waiting for a dispatcher event.
     _moGen = _moGen + 1
@@ -487,6 +564,11 @@ end
 -- Default "all" match: every constrained axis has to pass. Public entry point (other
 -- files evaluate mode sets with it).
 function EUI.EvalVisibilityModes(selection, state, caps)
+    -- A checked Hide lane vetoes in every match mode. Under All that is equivalent to the
+    -- AND-conjunct of the negated condition the tally already computes for the opposite
+    -- SHOW key, so selections without hide lanes -- every pre-existing one -- are
+    -- unaffected by this gate.
+    if EUI.VisModeHideVeto(selection, state, caps) then return false end
     local constrained, passed = EUI.TallyVisibilityModeAxes(selection, state, caps, "fail")
     return constrained == passed
 end
@@ -511,6 +593,27 @@ local function FillDispatchState()
     return _dispatchState
 end
 
+-- Hide-lane veto for the mode rows, the mirror of EllesmereUI.VisOptionHideVeto for the
+-- option rows: Match Mode governs how the SHOW side combines, a checked Hide lane always
+-- hides. filter: nil walks every axis, "luaOnly" only the ones a secure driver cannot
+-- express, "driver" only the ones it can. Both lanes of one row checked counts as
+-- unconstrained, the same rule the option tally uses. Second return: the firing axis is
+-- combatFlip, so a driver-building caller must bake a combat escape hatch.
+function EUI.VisModeHideVeto(sel, state, caps, filter)
+    if not sel then return false end
+    local axes = EUI.VIS_MODE_AXES
+    for i = 1, #axes do
+        local ax = axes[i]
+        local skip = (filter == "luaOnly" and not ax.luaOnly)
+                  or (filter == "driver" and ax.luaOnly)
+        if not skip and sel[ax.hide] and not sel[ax.show] then
+            state = state or FillDispatchState()
+            if ax.probe(state, caps) then return true, ax.combatFlip or false end
+        end
+    end
+    return false
+end
+
 -- Any match: every constrained axis is a disjunct; mode axes and option SHOW lanes tally
 -- TOGETHER (CheckVisibilityOptions steps aside for such a store, except for its hide
 -- veto). _anySel is a reused scalar view so a single stored mode costs no allocation per
@@ -533,6 +636,8 @@ local function EvalAnyMatch(store, legacyKey, vm, state, caps)
     -- lane hid (same rule as UF-3 in VisibilityCombineOr_MasterBriefing.md).
     if EUI.VisOptionHideVeto and EUI.VisOptionHideVeto(store) then return false end
     state = state or FillDispatchState()
+    -- Same rule for the mode rows' Hide lanes.
+    if EUI.VisModeHideVeto(sel, state, caps) then return false end
     local constrained, passed = EUI.TallyVisibilityModeAxes(sel, state, caps, "any")
     -- One passing disjunct settles it; the option probes (instance, housing, the druid
     -- form walk) only run when no mode axis passed.
@@ -637,19 +742,44 @@ end
 -- axis, AND across axes; a saturated or empty axis contributes nothing.
 function EUI.BuildVisModeConjuncts(vm)
     local conj, negGate = "", ""
-    local d1, d2 = vm.show_dragonriding, vm.show_not_dragonriding
+    -- Hide lanes are vetoes, but under All a veto is exactly the AND-conjunct of the
+    -- negated condition, so each one folds into the term its opposite SHOW lane already
+    -- emits instead of needing a gate of its own. Both lanes of one row at once cancels
+    -- out here the same way a saturated axis does.
+    local d1 = vm.show_dragonriding or vm.hide_not_dragonriding
+    local d2 = vm.show_not_dragonriding or vm.hide_dragonriding
     if d1 and not d2 then
         conj = conj .. "advflyable,flying,"
     elseif d2 and not d1 then
         negGate = "[advflyable,flying] hide; "
     end
-    local c1, c2 = vm.in_combat, vm.out_of_combat
+    local c1 = vm.in_combat or vm.hide_out_of_combat
+    local c2 = vm.out_of_combat or vm.hide_in_combat
     if c1 and not c2 then
         conj = conj .. "combat,"
     elseif c2 and not c1 then
         conj = conj .. "nocombat,"
     end
     return conj, negGate
+end
+
+-- Leading hide gates for the macro-expressible mode Hide lanes, the mirror of
+-- BuildVisOptHideGates below. `which` = "group" limits the walk to the three group rows,
+-- which is all the All-match compiler needs (it folds the combat and dragon lanes into
+-- its conjuncts above). The luaOnly lane has no token and is never emitted here.
+-- Returns the gate string and how many gates it holds.
+function EUI.BuildVisModeHideGates(vm, which)
+    local out, n = "", 0
+    local axes = EUI.VIS_MODE_AXES
+    for i = 1, #axes do
+        local ax = axes[i]
+        if ax.token and (which ~= "group" or ax.group)
+            and vm[ax.hide] and not vm[ax.show] then
+            out = out .. "[" .. ax.token .. "] hide; "
+            n = n + 1
+        end
+    end
+    return out, n
 end
 
 -- Compiles the driver tail appended after `prefix` (caller-supplied leading hide gates:
@@ -659,7 +789,10 @@ end
 -- group; In Raid Group must be checked separately for that.
 function EUI.BuildVisibilityDriverString(prefix, vm)
     local conj, negGate = EUI.BuildVisModeConjuncts(vm)
-    prefix = prefix .. negGate
+    -- The group rows' Hide lanes cannot fold into `conj` (their show side distributes
+    -- into separate bracket groups), so they lead as gates. Under All that is the same
+    -- verdict either way -- a hide clause and an AND term both veto.
+    prefix = prefix .. negGate .. EUI.BuildVisModeHideGates(vm, "group")
 
     local g1, g2, g3 = vm.in_raid, vm.in_party, vm.solo
     if (g1 or g2 or g3) and not (g1 and g2 and g3) then
@@ -700,9 +833,12 @@ function EUI.BuildVisibilityDriverStringAny(prefix, vm, opts, extraConstrained, 
     vm, opts, wrap = vm or {}, opts or {}, wrap or ""
     local lead = (wrap ~= "") and (wrap .. ",") or ""
     local out, axes = "", 0
-    -- Hide lanes are vetoes, not disjuncts: they lead the whole string.
+    -- Hide lanes are vetoes, not disjuncts: they lead the whole string. Mode rows and
+    -- option rows follow the same rule, so both gate sets are emitted here.
+    local modeGates, modeGateCount = EUI.BuildVisModeHideGates(vm)
     local gates, gateCount = EUI.BuildVisOptHideGates(opts)
-    prefix = prefix .. gates
+    prefix = prefix .. modeGates .. gates
+    gateCount = gateCount + modeGateCount
     -- A show lane whose macro token cannot see what its probe sees (druid travel form vs.
     -- [mounted]): the disjunction is settled, but the gates above still apply.
     if forceShow then
@@ -871,6 +1007,18 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
         end
     end
 
+    -- The mode rows' Hide lanes veto the same way. All but one compile to a leading gate
+    -- inside BuildVisibilityDriverStringAny; hide_not_dragonriding has no positive bracket
+    -- form and is resolved here, as fresh as the last driver rebuild. It is combatFlip
+    -- (takeoff and landing happen mid-combat), so it always takes the escape hatch.
+    if vm and EUI.VisModeHideVeto then
+        local mVetoed, mFlip = EUI.VisModeHideVeto(vm, nil, nil, "luaOnly")
+        if mVetoed then
+            if not mFlip then return "hide", 1, 0 end
+            combatEscape = true
+        end
+    end
+
     -- Runs before the Lua-only show lanes settle anything: its mount branch can produce a
     -- veto of its own, and a veto outranks a passing disjunct. Its probes only run when
     -- the matching lanes are set.
@@ -951,6 +1099,7 @@ function EUI.VisCopySelection(dst, src, legacyKey, dstCaps, applyScalarFn)
         end
         if dstCaps and dstCaps.noGroupModes then
             sel.in_raid, sel.in_party, sel.solo = nil, nil, nil
+            sel.hide_in_raid, sel.hide_in_party, sel.hide_solo = nil, nil, nil
         end
         if dstCaps and dstCaps.noMouseover then
             sel.mouseover = nil

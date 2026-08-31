@@ -4535,6 +4535,13 @@ initFrame:SetScript("OnEvent", function(self)
         -- showInRaid/showInParty/showSolo trio: only group items constrain it
         -- (unconstrained = true), matching ToggleFrame's group gating for multi-select.
         local function GroupAxisPasses(vm, inRaid, inParty)
+            -- A checked Hide lane vetoes whatever the Show lanes say, in both match
+            -- modes; both lanes of one row at once counts as unconstrained.
+            if (vm.hide_in_raid and not vm.in_raid and inRaid)
+                or (vm.hide_in_party and not vm.in_party and inParty)
+                or (vm.hide_solo and not vm.solo and not inRaid and not inParty) then
+                return false
+            end
             local g1, g2, g3 = vm.in_raid, vm.in_party, vm.solo
             if not (g1 or g2 or g3) or (g1 and g2 and g3) then return true end
             if g1 and inRaid then return true end

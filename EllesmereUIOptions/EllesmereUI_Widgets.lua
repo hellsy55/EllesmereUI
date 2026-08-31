@@ -8474,16 +8474,24 @@ EllesmereUI.VIS_ROW_ITEMS = {
     { key = "matchAll", label = "Match All Conditions", modifier = true, matchValue = "all",
       tooltip = "Every condition you set has to match. The default." },
     { key = "matchAny", label = "Match Any Condition", modifier = true, matchValue = "any",
-      tooltip = "This element shows as soon as ONE Show condition matches. Hide keeps its meaning in both match modes: a checked Hide on a state row (Instances, Mounted, Target, Resting, ...) always hides." },
+      tooltip = "This element shows as soon as ONE Show condition matches. Hide keeps its meaning in both match modes: a checked Hide always hides, on every row." },
     { isHeader = true, label = "Show", rightLabel = "Hide" },
+    -- Every condition gets its own row, the inverse ones included, because a Hide lane is
+    -- a veto rather than "show while this is false": without an "Out of Combat" row there
+    -- would be no way left to say "show while out of combat" as one Any disjunct.
     { key = "combat", label = "In Combat", axis = "mode",
-      show = "in_combat", hide = "out_of_combat" },
-    { key = "in_raid",  label = "In Raid Group", axis = "group" },
-    { key = "in_party", label = "In Party",      axis = "group" },
-    { key = "solo",     label = "Solo",          axis = "group" },
+      show = "in_combat", hide = "hide_in_combat" },
+    { key = "outOfCombat", label = "Out of Combat", axis = "mode",
+      show = "out_of_combat", hide = "hide_out_of_combat" },
+    { key = "in_raid",  label = "In Raid Group", axis = "group", hide = "hide_in_raid" },
+    { key = "in_party", label = "In Party",      axis = "group", hide = "hide_in_party" },
+    { key = "solo",     label = "Solo",          axis = "group", hide = "hide_solo" },
     { key = "skyAirborne", label = "Skyriding (Airborne)", axis = "mode",
-      show = "show_dragonriding", hide = "show_not_dragonriding",
+      show = "show_dragonriding", hide = "hide_dragonriding",
       tooltip = "Only while AIRBORNE on a glide-capable mount or flight form. For the mount itself, ground included, use Skyriding Mount." },
+    { key = "notSkyAirborne", label = "Not Skyriding (Airborne)", axis = "mode",
+      show = "show_not_dragonriding", hide = "hide_not_dragonriding",
+      tooltip = "The exact inverse of Skyriding (Airborne): anything that is not airborne on a glide-capable mount or flight form, standing on the ground included." },
     { key = "skyMount", label = "Skyriding Mount", axis = "opt",
       show = "visOnlySkyriding", hide = "visHideDragonriding",
       tooltip = "While on a glide-capable mount, ground included, where Blizzard shows its vigor HUD. Skyriding (Airborne) additionally requires you to be flying." },
@@ -8556,9 +8564,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
                 item.lockedTooltip = (caps.lockedTooltips and caps.lockedTooltips[def.key])
                     or "This element cannot use group-based visibility."
             end
-            -- Only the airborne row needs the takeoff/landing edge; the mount row
+            -- Only the two airborne rows need the takeoff/landing edge; the mount row
             -- rides PLAYER_CAN_GLIDE_CHANGED, which is always registered.
-            if caps.luaDragonriding and def.key == "skyAirborne" then
+            if caps.luaDragonriding and (def.key == "skyAirborne" or def.key == "notSkyAirborne") then
                 item.lockedFn = function() return not EllesmereUI._hasGlidingEvent end
                 item.lockedTooltip = "Requires a client with gliding events."
             end
@@ -8603,10 +8611,31 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         end
     end
 
+    -- Legacy group Hide encoding: before the Hide lanes had keys of their own, "Hide: In
+    -- Raid Group" was stored as the other two Show lanes. Under Match All the two are
+    -- equivalent, so the row keeps presenting it as the Hide lane and the next write
+    -- persists the normalized form through WriteSel. Under Any they are NOT equivalent
+    -- (two Show lanes are two disjuncts, a Hide lane is a veto), so those stores are left
+    -- exactly as they are. Hide keys are "hide_" .. the show key, per VIS_MODE_AXES.
+    local function NormalizeGroupHide(sel)
+        if GetMatchAny() then return sel end
+        local missing, shown = nil, 0
+        for i = 1, #GROUP_KEYS do
+            local k = GROUP_KEYS[i]
+            if sel["hide_" .. k] then return sel end
+            if sel[k] then shown = shown + 1 else missing = k end
+        end
+        if missing and shown == #GROUP_KEYS - 1 then
+            for i = 1, #GROUP_KEYS do sel[GROUP_KEYS[i]] = nil end
+            sel["hide_" .. missing] = true
+        end
+        return sel
+    end
+
     local function Sel()
         local store = opts.getStore()
         if not store then return nil end
-        return EllesmereUI.GetVisibilitySelection(store, legacyKey), store
+        return NormalizeGroupHide(EllesmereUI.GetVisibilitySelection(store, legacyKey)), store
     end
 
     local function WriteSel(sel, store)
@@ -8655,6 +8684,18 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     -- Option axes live outside the selection, so Always vs. an active Show lane (which
     -- narrows what Always claims is unrestricted) is reconciled in GetChecked/SetChecked.
     -- Same under Any: always is not a tallied axis, so a lone Show lane narrows the same way.
+    -- A selection whose only members are Hide lanes reads as Always: nothing restricts
+    -- where the element shows, a veto just carves out where it does not. Same shape the
+    -- option Hide lanes have always had (they live outside the selection entirely).
+    local function OnlyHideLanes(sel)
+        local hasHide = false
+        for k in pairs(sel) do
+            if not EllesmereUI.VIS_MODE_HIDE_KEYS[k] then return false end
+            hasHide = true
+        end
+        return hasHide
+    end
+
     local function AnyShowOptActive()
         for _, d in pairs(defs) do
             if d.axis == "opt" and GetOpt(d.show) then return true end
@@ -8694,17 +8735,10 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         local sel = Sel()
         if not sel then return k == "always" end
         if def.axis == "mode" then return sel[neg and def.hide or def.show] == true end
-        if def.axis == "group" then
-            if not neg then return sel[def.key] == true end
-            -- Hide-lane sugar: in a three-way OR-group, "not in a raid" IS "in a party
-            -- or solo". No key of its own, no evaluator branch, no driver change.
-            if sel[def.key] then return false end
-            for i = 1, #GROUP_KEYS do
-                if GROUP_KEYS[i] ~= def.key and not sel[GROUP_KEYS[i]] then return false end
-            end
-            return true
+        if def.axis == "group" then return sel[neg and def.hide or def.key] == true end
+        if k == "always" then
+            return (sel.always == true or OnlyHideLanes(sel)) and not AnyShowOptActive()
         end
-        if k == "always" then return sel.always == true and not AnyShowOptActive() end
         return sel[k] == true
     end
 
@@ -8767,18 +8801,10 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         end
 
         if def.axis == "group" then
-            if not neg then
-                sel[def.key] = checked or nil
-            elseif checked then
-                sel[def.key] = nil
-                for i = 1, #GROUP_KEYS do
-                    if GROUP_KEYS[i] ~= def.key then sel[GROUP_KEYS[i]] = true end
-                end
-            else
-                -- Unchecking Hide drops the whole group constraint: the state it
-                -- encoded (the other two checked) has no other representation.
-                for i = 1, #GROUP_KEYS do sel[GROUP_KEYS[i]] = nil end
-            end
+            local lane, other = def.key, def.hide
+            if neg then lane, other = def.hide, def.key end
+            sel[lane] = checked or nil
+            if checked then sel[other] = nil end
             WriteSel(sel, store)
             AfterChange(false)
             return
@@ -8792,8 +8818,14 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         end
 
         if k == "never" or k == "always" then
-            -- Exclusive and terminal, like a plain single-select.
-            for key in pairs(sel) do sel[key] = nil end
+            -- Exclusive and terminal, like a plain single-select. Always clears the SHOW
+            -- side only -- a Hide lane survives it, exactly as an option Hide lane does.
+            -- Never is terminal for everything, vetoes included.
+            for key in pairs(sel) do
+                if k == "never" or not EllesmereUI.VIS_MODE_HIDE_KEYS[key] then
+                    sel[key] = nil
+                end
+            end
             if checked then sel[k] = true end
             WriteSel(sel, store)
             -- Always clears the Show lanes (else GetChecked keeps its box unchecked and the
@@ -8835,16 +8867,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         { emptyLabel = "Always",
           -- The separator reads the match live: under Any the conditions are OR'd.
           separatorFn = function() return GetMatchAny() and " or " or ", " end,
-          hideLaneTooltip = function(key)
-              -- A MODE row's Hide lane is the opposite condition of the same axis, so
-              -- under Any it reads as one more disjunct. A state row's Hide lane is a
-              -- veto in both match modes.
-              local d = defs[key]
-              if GetMatchAny() and d and d.axis ~= "opt" then
-                  return "Show while this condition is false"
-              end
-              return "Hide while this condition is true"
-          end })
+          -- Every row follows the same rule now: a checked Hide lane hides while its
+          -- condition holds, in both match modes.
+          hideLaneTooltip = function() return "Hide while this condition is true" end })
     PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
     leftRgn._control = cbDD
     leftRgn._lastInline = nil
