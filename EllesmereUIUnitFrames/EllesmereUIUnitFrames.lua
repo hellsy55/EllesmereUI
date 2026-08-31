@@ -3054,7 +3054,7 @@ end
 -- inherited border, texture and font settings. A frame that is disabled, or that
 -- Visibility keeps off screen entirely, is not a donor -- before Visibility and
 -- enabledFrames were split, "never" cleared that flag and fell out here for free.
-local function GetMiniDonorSettings()
+function ns.GetMiniDonorSettings()
     local ef = db.profile.enabledFrames
     local function usable(unitKey)
         local s = db.profile[unitKey]
@@ -3062,6 +3062,7 @@ local function GetMiniDonorSettings()
     end
     return usable("focus") or usable("target") or db.profile.player
 end
+local GetMiniDonorSettings = ns.GetMiniDonorSettings
 
 -- Boss "Simple Debuff Display" mode: "none"|"left"|"right". Tolerates legacy booleans
 -- (true/nil="left", false="none") so existing/imported profiles read correctly with no
@@ -12450,7 +12451,13 @@ function InitializeFrames()
                     visTail = EllesmereUI.BuildVisibilityDriverString("", drvSet)
                 end
                 local wantDriver
-                if visTail then
+                if vis == "never" then
+                    -- Never is terminal, so it pins the secure driver instead of
+                    -- riding the Show/Hide bucket below: that bucket is lockdown-
+                    -- gated, and acquiring a target in combat would otherwise let
+                    -- the unit watch show an alpha-0 click blocker until regen.
+                    wantDriver = "hide"
+                elseif visTail then
                     wantDriver = "[@" .. unitKey .. ",noexists] hide; " .. visTail
                 end
                 if frame._euiVisDriver ~= wantDriver and not isLocked then
@@ -12621,7 +12628,7 @@ function InitializeFrames()
                     mini:SetAlpha(miniAlways and 1 or (frame:IsShown() and bodyAlpha or 0))
                 end
             elseif frame then
-                -- Parent disabled ("Never" clears enabledFrames): a leftover condition
+                -- Parent disabled (the "Enable X Frame" toggles): a leftover condition
                 -- driver must not keep re-showing the frame, so pin it to a constant
                 -- hide. Frames that never had a driver keep the legacy disabled path
                 -- untouched. The mini inherits both.
@@ -13594,6 +13601,10 @@ local function RegisterUFUnlockElements()
 
         local function Rebuild() ns.ReloadFrames() end
 
+        -- Which frame's Visibility governs each mover (the minis follow their
+        -- parent, and so does a class resource bar unlocked from the player frame).
+        local MOVER_VIS_OF = { pet = "player", targettarget = "target",
+                               focustarget = "focus", classPower = "player" }
         local function MakeUFElement(key, order)
             return MK({
                 key = key,
@@ -13602,10 +13613,14 @@ local function RegisterUFUnlockElements()
                 order = orderBase + order,
                 -- Visibility "never" keeps the frame built but never on screen, so
                 -- there is nothing to drag. Re-read on each unlock-mode open, so
-                -- lifting it (a spec override, the dropdown) needs no /reload. Units
-                -- without a Visibility dropdown have no barVisibility and never gate.
+                -- lifting it (a spec override, the dropdown) needs no /reload. The
+                -- minis and an unlocked class resource bar have no Visibility of
+                -- their own and ride the frame they follow; Always Show Pet opts out.
                 isHidden = function()
-                    local s = db.profile[key]
+                    if key == "pet" and db.profile.pet and db.profile.pet.alwaysShow then
+                        return false
+                    end
+                    local s = db.profile[MOVER_VIS_OF[key] or key]
                     return s ~= nil and s.barVisibility == "never"
                 end,
                 getFrame = function(k)

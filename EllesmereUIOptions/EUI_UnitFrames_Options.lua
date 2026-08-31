@@ -2393,10 +2393,7 @@ initFrame:SetScript("OnEvent", function(self)
             local isMini = (unitKey == "pet" or unitKey == "boss" or unitKey == "targettarget" or unitKey == "focustarget")
             local ds = s
             if isMini then
-                local ef = db.profile.enabledFrames
-                if ef.focus ~= false and db.profile.focus then ds = db.profile.focus
-                elseif ef.target ~= false and db.profile.target then ds = db.profile.target
-                else ds = db.profile.player end
+                ds = ns.GetMiniDonorSettings and ns.GetMiniDonorSettings() or db.profile.player
             end
 
             -- The preview mocks the EUI frame, so it counts as "enabled" only when the
@@ -12613,13 +12610,12 @@ initFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Mini frame donor settings helper
-    --  Returns the settings table from focus (if enabled) target player
+    --  Returns the settings table from focus (if usable) target player. Routed
+    --  through the runtime resolver so the options preview and the live frames
+    --  can never disagree about which frame is on screen to inherit from.
     ---------------------------------------------------------------------------
     local function GetMiniDonorSettings()
-        local ef = db.profile.enabledFrames
-        if ef.focus ~= false and db.profile.focus then return db.profile.focus end
-        if ef.target ~= false and db.profile.target then return db.profile.target end
-        return db.profile.player
+        return ns.GetMiniDonorSettings and ns.GetMiniDonorSettings() or db.profile.player
     end
 
     ---------------------------------------------------------------------------
