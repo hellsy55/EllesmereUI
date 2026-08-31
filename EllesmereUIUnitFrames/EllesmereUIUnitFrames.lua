@@ -12486,12 +12486,16 @@ function InitializeFrames()
                 -- next re-evaluation -- so this whole bucket steps aside.
                 if not isLocked and not frame._euiVisDriver then
                     local shouldShow
-                    if ext ~= nil then
+                    if vis == "never" then
+                        -- Ahead of the engine verdict: Never is exclusive, but under
+                        -- a leftover Any match the engine evaluates the scalar and
+                        -- answers false rather than nil, which would keep the frame
+                        -- secure-Shown at alpha 0 and still eating clicks.
+                        shouldShow = false
+                    elseif ext ~= nil then
                         -- Engine-owned: frame stays secure-Shown; the alpha
                         -- bucket above drives visibility.
                         shouldShow = true
-                    elseif vis == "never" then
-                        shouldShow = false
                     elseif vis == "in_combat" or vis == "out_of_combat" or vis == "mouseover" then
                         -- Frame is kept shown; alpha (above) drives visibility.
                         shouldShow = true
@@ -13575,6 +13579,14 @@ local function RegisterUFUnlockElements()
                 label = UNIT_LABELS[key] or key,
                 group = "Unit Frames",
                 order = orderBase + order,
+                -- Visibility "never" keeps the frame built but never on screen, so
+                -- there is nothing to drag. Re-read on each unlock-mode open, so
+                -- lifting it (a spec override, the dropdown) needs no /reload. Units
+                -- without a Visibility dropdown have no barVisibility and never gate.
+                isHidden = function()
+                    local s = db.profile[key]
+                    return s ~= nil and s.barVisibility == "never"
+                end,
                 getFrame = function(k)
                     if k == "boss" then return frames["boss1"] end
                     if k == "classPower" then return frames._classPowerBar end
@@ -13815,6 +13827,7 @@ local function RegisterUFUnlockElements()
                     -- effect without a /reload.
                     local s = GetCBSettings()
                     if not s then return true end
+                    if s.barVisibility == "never" then return true end
                     if unitKey == "player" then return not s.showPlayerCastbar end
                     return s.showCastbar == false
                 end,

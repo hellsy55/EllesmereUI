@@ -4187,11 +4187,42 @@ EllesmereUI.RegisterMigration({
     scope       = "profile",
     description = "Clear the enabledFrames flag Visibility \"Never\" used to write for player/target/focus, so the frame is built and a Spec Override can lift the hide without a reload.",
     body = function(ctx)
+        local UNITS = { "player", "target", "focus" }
         local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
         local ef = uf and uf.enabledFrames
-        if type(ef) ~= "table" then return end
-        for _, unitKey in ipairs({ "player", "target", "focus" }) do
-            if ef[unitKey] == false then ef[unitKey] = nil end
+        if type(ef) == "table" then
+            for _, unitKey in ipairs(UNITS) do
+                if ef[unitKey] == false then ef[unitKey] = nil end
+            end
         end
+        -- Auto-capture banked the key alongside barVisibility while the two were
+        -- written together, and nothing blacklists it -- left in place, the next
+        -- spec apply writes false back and the frame goes missing again at the
+        -- following login. Other units keep theirs: their Enable toggles own it.
+        local stale = {}
+        for _, unitKey in ipairs(UNITS) do
+            stale["EllesmereUIUnitFrames\31enabledFrames\30" .. unitKey] = true
+        end
+        local function strip(store)
+            if type(store) ~= "table" then return end
+            for i = #store, 1, -1 do
+                local e = store[i]
+                local vals = type(e) == "table" and e.values
+                if type(vals) == "table" then
+                    for _, m in pairs(vals) do
+                        if type(m) == "table" then
+                            for fkey in pairs(m) do
+                                if stale[fkey] then m[fkey] = nil end
+                            end
+                        end
+                    end
+                    if type(vals.default) ~= "table" or next(vals.default) == nil then
+                        table.remove(store, i)
+                    end
+                end
+            end
+        end
+        strip(ctx.profile.specOverrides)
+        strip(ctx.profile.condOverrides)
     end,
 })
