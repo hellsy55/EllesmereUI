@@ -353,6 +353,20 @@ for _, k in ipairs(VIS_REPRESENTATIVE_ORDER) do VIS_COMBINABLE_KEYS[k] = true en
 for i = 1, #VIS_MODE_HIDE do VIS_COMBINABLE_KEYS[VIS_MODE_HIDE[i]] = true end
 EUI.VIS_COMBINABLE_KEYS = VIS_COMBINABLE_KEYS
 
+-- An override session can only carry one of the three EXCLUSIVE states, and it
+-- REPLACES the element's whole Visibility configuration instead of merging with it:
+-- while this key holds a value, the legacy scalar, the mode set, the match mode and
+-- every option lane are ignored. Absent -- every normal profile -- it changes nothing.
+-- A plain scalar on purpose, so the override value system captures and restores it
+-- like any other setting, and clearing it is an ordinary revert.
+local VIS_OVERRIDE_VALUES = { never = true, always = true, mouseover = true }
+
+function EUI.VisOverrideValue(store)
+    if not store then return nil end
+    local v = store.visibilityOverride
+    return VIS_OVERRIDE_VALUES[v] and v or nil
+end
+
 -- True when the set carries at least one mode hide lane.
 local function VisHasModeHide(vm)
     for i = 1, #VIS_MODE_HIDE do
@@ -399,6 +413,8 @@ end
 -- ignored, never wiped -- a transient partial state (profile sync applying keys one
 -- by one) heals itself once both keys arrive.
 local function ActiveModes(store, legacyKey)
+    -- An override replaces the whole configuration, the stored set included.
+    if EUI.VisOverrideValue(store) then return nil end
     local vm = store.visibilityModes
     if type(vm) ~= "table" then return nil end
     local rep = VisRepresentative(vm)
@@ -429,6 +445,8 @@ end
 -- mechanism for them rather than skip the update.
 function EUI.VisDependsOnCombat(store, legacyKey)
     if not store then return false end
+    -- None of the three override states can flip on a combat edge.
+    if EUI.VisOverrideValue(store) then return false end
     local vm = ActiveModes(store, legacyKey)
     if vm then
         return (vm.in_combat or vm.out_of_combat
@@ -659,6 +677,14 @@ end
 
 function EUI.EvalVisibilityExtended(store, legacyKey, state, caps)
     if not store then return nil end
+    -- An applied override settles it alone: this is the one path every Lua consumer
+    -- runs through, so the three states reach all of them without a per-module edit.
+    local ov = EUI.VisOverrideValue(store)
+    if ov then
+        if ov == "never" then return false end
+        if ov == "mouseover" then return "mouseover" end
+        return true
+    end
     local vm = ActiveModes(store, legacyKey)
     -- Any owns the whole verdict (option lanes included, even with no mode set). The one
     -- case handed back is a legacy ORPHAN scalar: the caller's chain resolves the mode
@@ -694,6 +720,8 @@ end
 -- additionally requires its condition axes to pass right now.
 function EUI.VisWantsMouseover(store, legacyKey, state, caps)
     if not store then return false end
+    local ov = EUI.VisOverrideValue(store)
+    if ov then return ov == "mouseover" end
     -- Under Any the hover gate arms only while the disjunction (option lanes included)
     -- passes, so the verdict comes from the one evaluator that sees both halves.
     if store.visibilityMatch == "any" then
@@ -997,6 +1025,11 @@ end
 -- Lua-resolved axes, which a driver could never keep honest.
 function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     wrap = wrap or ""
+    -- An override replaces the selection, so the tail is a constant. Reported as one
+    -- live axis: it IS a driver worth registering, and it cannot go stale (the value
+    -- only changes when the override system rewrites it, which rebuilds the driver).
+    local ov = EUI.VisOverrideValue(store)
+    if ov then return (ov == "never") and "hide" or "show", 1, 1 end
     -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
     if (store[legacyKey] or "always") == "never" then return "hide", 1, 0 end
 

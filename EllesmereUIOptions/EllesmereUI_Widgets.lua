@@ -8643,7 +8643,8 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         return (EllesmereUI.SpecOverrides_EditSessionActive
             and EllesmereUI.SpecOverrides_EditSessionActive()) and true or false
     end
-    local OV_LOCK_TIP = "Not overridable. An override can only set Visibility to Never, Always or Mouseover. Everything else here is shared: it applies the same in every override, and can only be changed while no override is being edited."
+    local OV_LOCK_TIP = "Not overridable. These conditions are shared and can only be changed while no override is being edited. An override replaces the Visibility setting outright -- Never, Always or Mouseover -- and ignores everything set here while it applies."
+    local OV_PICK_TIP = "Makes this the override. It replaces the whole Visibility setting, so the conditions below no longer apply while it does. Click it again to remove the override."
 
     -- Per-module row list. `listed` collects the legacy SCALAR values this row can
     -- actually reach, so the orphan rule below only fires for genuinely foreign ones.
@@ -8698,6 +8699,16 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             if def.tooltipAny then
                 item.tooltip = function()
                     return GetMatchAny() and def.tooltipAny or def.tooltip
+                end
+            end
+            -- The three exclusive states behave differently inside a session, so they
+            -- say so instead of showing their normal text.
+            if def.key == "never" or def.key == "always" or def.key == "mouseover" then
+                local baseTip = item.tooltip
+                item.tooltip = function()
+                    if OvSessionActive() then return OV_PICK_TIP end
+                    if type(baseTip) == "function" then return baseTip() end
+                    return baseTip
                 end
             end
             items[#items + 1] = item
@@ -8852,8 +8863,17 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         end
         if def.axis == "extra" then return def.get() == true end
         if def.axis == "opt" then return GetOpt(neg and def.hide or def.show) end
-        local sel = Sel()
+        local sel, store = Sel()
         if not sel then return k == "always" end
+        -- While an override is being edited the three exclusive rows show what IT holds.
+        -- Read from the store Sel() just resolved rather than calling opts.getStore()
+        -- again: a getter is not guaranteed free (CDM's tracked buff bars CREATE their
+        -- table on read), and inside a session such a write becomes a capture of its own.
+        if k == "never" or k == "always" or k == "mouseover" then
+            local ov = store and EllesmereUI.VisOverrideValue
+                and EllesmereUI.VisOverrideValue(store)
+            if ov then return (not neg) and (k == ov) end
+        end
         if def.axis == "mode" then return sel[neg and def.hide or def.show] == true end
         if def.axis == "group" then return sel[neg and def.hide or def.key] == true end
         if k == "always" then
@@ -8865,6 +8885,28 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local function SetChecked(k, checked, neg)
         local def = defs[k]
         if not def then return end
+
+        -- Inside an override session the three exclusive states are the only thing an
+        -- override can carry, and they REPLACE the configuration instead of editing it.
+        -- Exactly ONE key is written and nothing else: the shared scalar, the stored
+        -- selection, the match mode and the option lanes stay untouched, so nothing
+        -- underneath can be lost or swept into the override by accident. Picking the
+        -- state the override already holds clears it again.
+        if (k == "never" or k == "always" or k == "mouseover") and OvSessionActive() then
+            local _, store = Sel()
+            if not store then return end
+            local held = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(store)
+            if held == k then
+                store.visibilityOverride = nil
+                if EllesmereUI.SpecOverrides_ClearStoreKey then
+                    EllesmereUI.SpecOverrides_ClearStoreKey(store, "visibilityOverride")
+                end
+            else
+                store.visibilityOverride = k
+            end
+            AfterChange(true)
+            return
+        end
 
         -- Modifier: a radio pair over one scalar; picking one unpicks the other and
         -- deliberately clears nothing else.

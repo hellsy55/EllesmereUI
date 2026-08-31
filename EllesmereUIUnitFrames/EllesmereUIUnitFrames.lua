@@ -12381,7 +12381,12 @@ function InitializeFrames()
                 -- Tail built once and reused by the mini frame below (both compilers only
                 -- PREPEND their prefix).
                 local visTail
-                if s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+                -- An applied Visibility override replaces the whole setting, so the tail
+                -- is a constant and the shared selection never reaches the driver.
+                local visOv = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
+                if visOv then
+                    visTail = (visOv == "never") and "hide" or "show"
+                elseif s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
                     local tail, _, liveAxes = EllesmereUI.BuildAnyMatchTail(s, "barVisibility", drvSet)
                     -- Gated on liveAxes: with no soft-target edge here, target/enemy axes
                     -- resolve in Lua, and a driver compiled from those alone would be a

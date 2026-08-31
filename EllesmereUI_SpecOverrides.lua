@@ -5069,6 +5069,68 @@ local function AutoCapture(changes)
     end
 end
 
+-- The table an fkey's leaf lives in, plus that leaf's key, or nil when the path does
+-- not resolve (module not loaded, array entry deleted). Same walk ReadLive does.
+local function OwnerOf(fkey)
+    local folder, path = SplitFKey(fkey)
+    local t = folder and DBFor(folder)
+    if type(t) ~= "table" or not path then return nil end
+    local segs = { strsplit(PS, path) }
+    for i = 1, #segs - 1 do
+        t = t[SegKey(t, segs[i])]
+        if type(t) ~= "table" then return nil end
+    end
+    return t, SegKey(t, segs[#segs])
+end
+
+--- Drop what the CURRENT session captured for ONE key of ONE settings table and put
+--- the recorded pre-override value back live. Attribution is by TABLE IDENTITY on
+--- purpose: AutoCapture attributes an entry by slot label, but the exit sweep mints
+--- entries from the fkey alone with no slot fields at all, and only identity matches
+--- both shapes. Returns true when something was cleared.
+function EllesmereUI.SpecOverrides_ClearStoreKey(store, key)
+    if type(store) ~= "table" or type(key) ~= "string" then return false end
+    local condSession = Cond._edit
+    if not (_editGroup or condSession) then return false end
+    local sStore = condSession and Cond.GetStore() or GetStore()
+    if not sStore then return false end
+
+    local cleared = false
+    for i = #sStore, 1, -1 do
+        local e = sStore[i]
+        local def = e.values and e.values.default
+        local hit
+        if def then
+            for fkey in pairs(def) do
+                local owner, leaf = OwnerOf(fkey)
+                if owner == store and leaf == key then hit = fkey; break end
+            end
+        end
+        if hit then
+            local dv = def[hit]
+            if dv == NIL_SENT then dv = nil end
+            -- Same guard the apply sites use: a stored removal is never honored for a
+            -- key the module registers a default for.
+            if dv ~= nil or not HasRegisteredDefault(hit) then WriteLive(hit, dv) end
+            for _, m in pairs(e.values) do
+                if type(m) == "table" then m[hit] = nil end
+            end
+            cleared = true
+            if not next(def) then table.remove(sStore, i) end
+        end
+    end
+
+    if cleared then
+        if condSession then Cond.RebuildIndex() else RebuildFKeyIndex() end
+        -- The restore write is ours, not the user's: re-snapshot so neither the ticker
+        -- nor the queued notified pass can diff it straight back into a capture.
+        _watchSnap = SnapshotProfiles()
+        _watchResync = true
+        RequestGoldWalk()
+    end
+    return cleared
+end
+
 local function WatchTick()
     if not _editGroup and not Cond._edit then return end
     SampleAttribution()

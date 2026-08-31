@@ -8907,6 +8907,11 @@ EAB.VIS_EDGES = { softTarget = true }
 local function BuildVisibilityString(info, s, visOverride)
     local key = info.key
     local vis = visOverride or s.barVisibility or "always"
+    -- An applied Visibility override replaces the whole setting, the shared option
+    -- lanes included. The runtime toggle keybind still wins over it, the same way it
+    -- wins over the saved mode.
+    local visOv = (not visOverride) and EllesmereUI.VisOverrideValue
+        and EllesmereUI.VisOverrideValue(s) or nil
 
     if info.isStance and (GetNumShapeshiftForms() or 0) == 0 then
         return "hide" -- classes/specs with no forms have no stance bar to show
@@ -8917,7 +8922,7 @@ local function BuildVisibilityString(info, s, visOverride)
     -- Any tail below compiles both halves itself: Show lanes as disjuncts, Hide lanes as
     -- its own leading gates, so this block would only duplicate them.
     local visOptHide = ""
-    if s.visibilityMatch ~= "any" then
+    if s.visibilityMatch ~= "any" and not visOv then
         if s.visHideMounted then visOptHide = visOptHide .. "[mounted] hide; " end
         -- Inverse of the above. [nomounted] cannot see druid travel/flight forms
         -- (they are shapeshifts), so a druid in a mount-like form reads unmounted
@@ -9002,6 +9007,11 @@ local function BuildVisibilityString(info, s, visOverride)
 
     -- Inject visibility-option hide clauses after the standard hide-prefix
     hidePrefix = hidePrefix .. visOptHide
+
+    -- One constant, with the standard pet battle / vehicle prefix still in front.
+    if visOv then
+        return hidePrefix .. ((visOv == "never") and "hide" or "show")
+    end
 
     -- Multi-select set: compiled tail; the legacy single-mode chain below
     -- stays byte-identical for every scalar value.

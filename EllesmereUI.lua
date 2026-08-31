@@ -12191,6 +12191,7 @@ end
 -- keep their own narrower mount check for the shapeshift forms [mounted] cannot see.
 function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
     if not opts then return false end
+    if EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(opts) then return false end
 
     -- Any match: only the SHOW lanes are disjuncts, owned by EvalVisibilityExtended (or
     -- the secure driver build path). The HIDE lanes stay vetoes in every match mode, so
@@ -12269,6 +12270,9 @@ end
 
 function EllesmereUI.CheckVisibilityOptions(opts)
     if not opts then return false end
+    -- An override replaces the whole Visibility configuration, option lanes included:
+    -- "Always" set on an override means always, whatever the shared value hides.
+    if EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(opts) then return false end
 
     -- Any match: only the SHOW lanes are disjuncts; the HIDE lanes veto here as they do
     -- under All (EllesmereUI.VisOptionHideVeto), which is what makes "Hide when X" mean
@@ -12348,6 +12352,7 @@ end
 -- combat escape hatch instead of writing a bare "hide".
 function EllesmereUI.VisOptionHideVeto(opts, filter, edges, skipMount)
     if not opts then return false end
+    if EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(opts) then return false end
     local axes = EllesmereUI.VIS_OPT_AXES
     for i = 1, #axes do
         local ax = axes[i]
@@ -12373,6 +12378,9 @@ end
 function EllesmereUI.TallyVisibilityOptionAxes(opts, filter, edges)
     local constrained, passed = 0, 0
     if not opts then return constrained, passed end
+    if EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(opts) then
+        return constrained, passed
+    end
     local axes = EllesmereUI.VIS_OPT_AXES
     for i = 1, #axes do
         local ax = axes[i]
