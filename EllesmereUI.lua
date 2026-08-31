@@ -12196,6 +12196,13 @@ function EllesmereUI.CheckVisibilityOptionsNonMacro(opts, skipMountAxis)
     -- Any match: only the SHOW lanes are disjuncts, owned by EvalVisibilityExtended (or
     -- the secure driver build path). The HIDE lanes stay vetoes in every match mode, so
     -- they run here too -- see EllesmereUI.VisOptionHideVeto.
+    -- No live caller: every Action Bars site gates on visibilityMatch ~= "any", and
+    -- CheckVisibilityOptions settles Any before calling in. Kept anyway, because removing
+    -- it would drop an Any store into the All veto chain, where SHOW lanes read as vetoes.
+    -- Divergence on purpose: the All chain flags only the skyriding lanes "mountaxis",
+    -- this one every combatFlip lane. combatFlip is the honest test, a bare "hide" from
+    -- any of them being a constant no driver can re-evaluate in combat, so widen the All
+    -- chain to match if this ever gains a caller; do not narrow this one.
     if opts.visibilityMatch == "any" then
         local fired, combatFlip = EllesmereUI.VisOptionHideVeto(opts, "nonMacro", nil, skipMountAxis)
         if not fired then return false end

@@ -34,10 +34,22 @@ local DISPATCHER_CAPS = { partyIncludesRaid = false }
 -- Returns true = show, false = hide, "mouseover" = mouseover mode
 local function EvalVisibility(cfg)
     if not cfg then return true end
+    -- Under Any, EvalVisibilityExtended owns the whole verdict, the option HIDE veto
+    -- included, so asking CheckVisibilityOptions first re-ran every set lane's probe (the
+    -- instance lookup, IsResting, the druid aura walk) once per updater per dispatcher
+    -- event for no second opinion. Under All the veto still has to LEAD: the mode engine
+    -- knows nothing about option lanes there, so a passing set must not settle it.
+    -- A nil result under Any is the legacy-ORPHAN hand-back, and that case drops through
+    -- to exactly the chain an All store takes, veto included.
+    local ext
+    if cfg.visibilityMatch == "any" then
+        ext = EUI.EvalVisibilityExtended and EUI.EvalVisibilityExtended(cfg, "visibility", nil, DISPATCHER_CAPS)
+        if ext ~= nil then return ext end
+    end
     if EUI.CheckVisibilityOptions and EUI.CheckVisibilityOptions(cfg) then
         return false
     end
-    local ext = EUI.EvalVisibilityExtended and EUI.EvalVisibilityExtended(cfg, "visibility", nil, DISPATCHER_CAPS)
+    ext = EUI.EvalVisibilityExtended and EUI.EvalVisibilityExtended(cfg, "visibility", nil, DISPATCHER_CAPS)
     if ext ~= nil then return ext end
     local mode = cfg.visibility or "always"
     if mode == "mouseover" then return "mouseover" end
@@ -330,6 +342,13 @@ EUI.VIS_MODE_AXES = {
       probe = function() return EUI.IsAirborneSkyriding() end },
     -- NOT(advflyable AND flying) has no single positive bracket, so this veto is the one
     -- mode lane a secure driver cannot carry; it is resolved in Lua at build time.
+    -- Under Match ANY only, that means the combat escape hatch: entering combat on the
+    -- ground reveals the element until the next out-of-combat rebuild. Under All it folds
+    -- into an "advflyable,flying," conjunct and stays live, as does the same intent
+    -- written as Show on Skyriding (Airborne). A gate would need a two-bracket clause
+    -- ("[noadvflyable][noflying] hide; ") rather than the single `token` here, and whether
+    -- [noadvflyable] parses is NOT established: macro conditionals are C-side and in no
+    -- Lua source. Confirm it in game before widening this on the assumption alone.
     { show = "show_not_dragonriding", hide = "hide_not_dragonriding", luaOnly = true,
       combatFlip = true,
       probe = function() return not EUI.IsAirborneSkyriding() end },
@@ -364,6 +383,13 @@ local VIS_OVERRIDE_VALUES = { never = true, always = true, mouseover = true }
 function EUI.VisOverrideValue(store)
     if not store then return nil end
     local v = store.visibilityOverride
+    return VIS_OVERRIDE_VALUES[v] and v or nil
+end
+
+-- Same validation for a caller holding the raw value rather than the store: the options
+-- row reads it through the module's own fan-out hooks (Resource Bars mirrors one control
+-- onto three bar stores), which hand back a value, not a table.
+function EUI.VisOverrideNormalize(v)
     return VIS_OVERRIDE_VALUES[v] and v or nil
 end
 
@@ -412,9 +438,14 @@ end
 -- Visibility change made on an older addon version) that must win. Stale sets are
 -- ignored, never wiped -- a transient partial state (profile sync applying keys one
 -- by one) heals itself once both keys arrive.
-local function ActiveModes(store, legacyKey)
+-- ignoreOverride: read the SHARED selection even while an override applies. The options
+-- checklist, the sync-icon compare and the sync copy all edit or compare the shared value
+-- (the override is a separate marker they never touch), so hiding the set from them made
+-- the row render a bare scalar and the next click write that rump back over the stored
+-- set. Evaluators and driver compilers pass nothing and keep the replacing behaviour.
+local function ActiveModes(store, legacyKey, ignoreOverride)
     -- An override replaces the whole configuration, the stored set included.
-    if EUI.VisOverrideValue(store) then return nil end
+    if not ignoreOverride and EUI.VisOverrideValue(store) then return nil end
     local vm = store.visibilityModes
     if type(vm) ~= "table" then return nil end
     local rep = VisRepresentative(vm)
@@ -457,11 +488,12 @@ function EUI.VisDependsOnCombat(store, legacyKey)
 end
 
 -- Read view: the current selection as a set (always freshly allocated).
--- Second return is true when a multi-selection is active.
-function EUI.GetVisibilitySelection(store, legacyKey)
+-- Second return is true when a multi-selection is active. ignoreOverride: see ActiveModes
+-- -- the options row passes it, because it edits the shared value an override replaces.
+function EUI.GetVisibilitySelection(store, legacyKey, ignoreOverride)
     local sel = {}
     if not store then sel.always = true; return sel, false end
-    local vm = ActiveModes(store, legacyKey)
+    local vm = ActiveModes(store, legacyKey, ignoreOverride)
     if vm then
         for k in pairs(vm) do
             if VIS_COMBINABLE_KEYS[k] then sel[k] = true end
@@ -736,12 +768,14 @@ function EUI.VisWantsMouseover(store, legacyKey, state, caps)
 end
 
 -- Set-aware equality for the sync icons: compares the effective selection of
--- two stores (multi set vs multi set, else scalar vs scalar).
+-- two stores (multi set vs multi set, else scalar vs scalar). The SHARED selection on
+-- both sides (ignoreOverride): the icon reports whether the copy would make them equal,
+-- and a copy carries the shared value, never the per-spec override marker.
 function EUI.VisSelectionEquals(a, aKey, b, bKey)
     if not a or not b then return false end
     if (a.visibilityMatch == "any") ~= (b.visibilityMatch == "any") then return false end
-    local ma = ActiveModes(a, aKey)
-    local mb = ActiveModes(b, bKey)
+    local ma = ActiveModes(a, aKey, true)
+    local mb = ActiveModes(b, bKey, true)
     if ma or mb then
         if not (ma and mb) then return false end
         for k in pairs(ma) do
@@ -1137,7 +1171,8 @@ function EUI.VisCopySelection(dst, src, legacyKey, dstCaps, applyScalarFn)
     if not dst or not src then return end
     -- The match travels with every copy, mode-only ones included.
     dst.visibilityMatch = (src.visibilityMatch == "any") and "any" or nil
-    local ms = ActiveModes(src, legacyKey)
+    -- The shared selection, not what an override on the source currently replaces it with.
+    local ms = ActiveModes(src, legacyKey, true)
     if ms then
         local sel = {}
         for k in pairs(ms) do

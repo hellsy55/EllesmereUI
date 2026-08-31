@@ -2839,9 +2839,24 @@ end
 -- spawn, actively disable Blizzard's too). "hidden" has highest precedence so a
 -- legacy disabled frame (enabledFrames[unit]==false: Visibility "never" or an
 -- "Enable X Frame" toggle off) keeps meaning "no frame at all".
+--- True when the unit has no EllesmereUI frame at all. That is the enabledFrames flag,
+--- with the one exception an applied Visibility override carves out: the same flag is how
+--- a shared Visibility of "never" is stored (applyScalarFn writes it), and an override
+--- REPLACES the whole Visibility setting, "never" included. A frame source of "hidden" is
+--- the cog's own choice rather than a Visibility setting, so it still wins. On ns for the
+--- 200-locals cap.
+function ns.VisUnitDisabled(profile, unitKey)
+    local ef = profile and profile.enabledFrames
+    if not ef or ef[unitKey] ~= false then return false end
+    if (profile.frameSource and profile.frameSource[unitKey]) == "hidden" then return true end
+    local s = profile[unitKey]
+    local ov = s and EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
+    return not (ov and ov ~= "never")
+end
+
 function ns.GetUnitFrameSource(unit)
     if not db or not db.profile then return "eui" end
-    if db.profile.enabledFrames[unit] == false then return "hidden" end
+    if ns.VisUnitDisabled(db.profile, unit) then return "hidden" end
     local fs = db.profile.frameSource and db.profile.frameSource[unit]
     if fs == "blizzard" then
         -- ToT/focus-target have no standalone Blizzard frame (native one is a child
@@ -12353,7 +12368,6 @@ function InitializeFrames()
         -- (SetAlpha) are not restricted and must run on combat transitions.
         -- Show/Hide and SetAttribute ARE restricted; those are guarded below.
         local isLocked = InCombatLockdown()
-        local enabled2 = db.profile.enabledFrames
         local inRaid = IsInRaid()
         local inParty = not inRaid and IsInGroup()
         local solo = not inRaid and not inParty
@@ -12362,7 +12376,9 @@ function InitializeFrames()
         for _, unitKey in ipairs({"player", "target", "focus"}) do
             local s = db.profile[unitKey]
             local frame = frames[unitKey]
-            if frame and enabled2[unitKey] ~= false and s then
+            -- The enabledFrames gate through VisUnitDisabled: a unit disabled purely by a
+            -- shared Visibility of "never" comes back while an override replaces it.
+            if frame and not ns.VisUnitDisabled(db.profile, unitKey) and s then
                 local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(s)
                 local vis = s.barVisibility or "always"
 

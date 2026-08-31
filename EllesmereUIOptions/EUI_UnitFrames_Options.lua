@@ -4591,8 +4591,11 @@ initFrame:SetScript("OnEvent", function(self)
                   if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end
                   ReloadAndUpdate()
                   -- Un-hiding a frame whose EUI frame isn't spawned this session
-                  -- (source was Blizzard/Hidden at login) needs a /reload.
-                  if (s.barVisibility or "always") ~= "never" then PromptReloadIfUnspawned({ selectedUnit }) end
+                  -- (source was Blizzard/Hidden at login) needs a /reload. The EFFECTIVE
+                  -- value decides: an override replaces the shared scalar, so an override
+                  -- of Always on a unit whose shared value is "never" un-hides it too.
+                  local visOv = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
+                  if (visOv or s.barVisibility or "always") ~= "never" then PromptReloadIfUnspawned({ selectedUnit }) end
               end,
               onOptionChanged = function()
                   if ns.UpdateFrameVisibility then ns.UpdateFrameVisibility() end

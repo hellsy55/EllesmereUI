@@ -8196,6 +8196,15 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 end
                 -- Hide trailing header with no visible children
                 if lastHdr and not hdrHasVisible then lastHdr:Hide() end
+                -- The override seal is anchored to the FIRST and LAST row of its run,
+                -- which this filter hides and repositions without touching the seal. Drop
+                -- it while a filter is active rather than re-deriving the run: with rows
+                -- missing there is no contiguous block left to mark, and a stale seal is a
+                -- mouse-enabled frame parked over whatever rows did survive.
+                if menu._ovSeal then
+                    menu._ovSeal:SetShown(t == "" and opts.ovLockedFn
+                        and opts.ovLockedFn() or false)
+                end
                 child:SetHeight(math.max(1, math.abs(visY)))
                 sf:SetVerticalScroll(0)
                 UpdateCBThumb()
@@ -8558,7 +8567,13 @@ end
 --  prior counterpart use a new key (EllesmereUI.VIS_OPT_KEYS).
 --  opts = {
 --      getStore/legacyKey  = store accessor + scalar key (required)
---      caps                = { noMouseover, noGroupModes, luaDragonriding, lockedTooltips }
+--      getStores           = optional fn() -> array of every store this control writes the
+--                            override marker to, getStore()'s first (Resource Bars drives
+--                            health/primary/secondary from one row). Defaults to that one
+--                            store; the marker replaces the shared value, so it has to
+--                            reach exactly the stores that value does.
+--      caps                = { noMouseover, noGroupModes, noOverrideMouseover,
+--                              luaDragonriding, lockedTooltips }
 --      applyScalarFn       = optional fn(store, mode) for scalar side effects
 --      getOption/setOption = optional fn(key)/fn(key, value) when option booleans live
 --                            outside getStore() (Resource Bars writes three stores)
@@ -8650,9 +8665,15 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     -- the legacy scalar, which the value system can hold. Everything else lives in the
     -- mode SET, the match mode or an option lane, all excluded from it, so a session
     -- locks those rows instead of letting a click land that would be dropped.
+    -- SlotOverridable, not EditSessionActive: the session flag is global, but this row
+    -- also sits on pages that are excluded from the override systems (Quest Tracker,
+    -- Damage Meters, the CDM Tracking Bars tab). There a picked state would write a
+    -- marker the capture gates drop as blacklisted, leaving it stranded in the shared
+    -- profile with nothing owning it. On those pages the row simply behaves as it does
+    -- outside a session.
     local function OvSessionActive()
-        return (EllesmereUI.SpecOverrides_EditSessionActive
-            and EllesmereUI.SpecOverrides_EditSessionActive()) and true or false
+        return (EllesmereUI.SpecOverrides_SlotOverridable
+            and EllesmereUI.SpecOverrides_SlotOverridable()) and true or false
     end
     local OV_LOCK_TIP = "Not overridable. These conditions are shared and can only be changed while no override is being edited. An override replaces the Visibility setting outright -- Never, Always or Mouseover -- and ignores everything set here while it applies."
     local OV_PICK_TIP = "Makes this the override. It replaces the whole Visibility setting, so the conditions below no longer apply while it does. Click it again to remove the override."
@@ -8673,7 +8694,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local function OrphanScalar()
         local store = opts.getStore()
         if not store then return nil end
-        local sel, isMulti = EllesmereUI.GetVisibilitySelection(store, legacyKey)
+        -- Shared value (ignoreOverride): an orphan is a stored SCALAR this row cannot
+        -- express, and an applied override neither creates nor cures one.
+        local sel, isMulti = EllesmereUI.GetVisibilitySelection(store, legacyKey, true)
         if isMulti then return nil end
         local cur = next(sel)
         if cur and not listed[cur] then return cur end
@@ -8783,10 +8806,52 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         return sel
     end
 
+    -- Every store the override marker has to reach. One by default; a module that drives
+    -- several stores from ONE control (Resource Bars writes health/primary/secondary in
+    -- lockstep) lists them all through opts.getStores, with the store opts.getStore
+    -- returns first. The marker replaces the shared value, so it has to travel exactly as
+    -- far as that value does, or the mirrored elements keep obeying what it took over.
+    local function OvStores()
+        if opts.getStores then return opts.getStores() or {} end
+        local store = opts.getStore()
+        if not store then return {} end
+        return { store }
+    end
+
+    -- The SHARED selection, which is what every row below edits. Read with ignoreOverride
+    -- on purpose: while an override applies, the evaluator-facing read hides the stored
+    -- set, and taking that view here rendered the rows as the bare legacy scalar and let
+    -- the next click write that rump back over the set. The override itself is reported by
+    -- the summary (ovHeldFn) and by GetChecked's exclusive-row branch, never from here.
     local function Sel()
         local store = opts.getStore()
         if not store then return nil end
-        return NormalizeGroupHide(EllesmereUI.GetVisibilitySelection(store, legacyKey)), store
+        return NormalizeGroupHide(EllesmereUI.GetVisibilitySelection(store, legacyKey, true)), store
+    end
+
+    -- Read-only view for GetChecked, memoized. Every refresh sweep and every menu open
+    -- calls GetChecked twice per condition row, and each call allocated a fresh selection
+    -- table. The key is everything Sel()'s answer depends on, and SetVisibilitySelection
+    -- assigns a NEW visibilityModes table on every write, so an identity compare catches
+    -- this row's writes and everyone else's alike (an override applying, a profile switch,
+    -- a sync copy). Callers that MUTATE the selection keep using Sel().
+    local _selCache, _selStore, _selModes, _selScalar, _selMatch, _selOv
+    local function SelRead()
+        local store = opts.getStore()
+        if not store then return nil, nil end
+        if _selCache and store == _selStore
+            and store.visibilityModes == _selModes
+            and store[legacyKey] == _selScalar
+            and store.visibilityMatch == _selMatch
+            and store.visibilityOverride == _selOv then
+            return _selCache, store
+        end
+        _selStore, _selModes = store, store.visibilityModes
+        _selScalar, _selMatch = store[legacyKey], store.visibilityMatch
+        _selOv = store.visibilityOverride
+        _selCache = NormalizeGroupHide(
+            EllesmereUI.GetVisibilitySelection(store, legacyKey, true))
+        return _selCache, store
     end
 
     local function WriteSel(sel, store)
@@ -8798,8 +8863,39 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         -- applied carries the key into every import of it. Either way nothing owns the
         -- key any more and the element would be stuck on it; a real applied override
         -- simply writes it back on its next apply.
-        if not OvSessionActive() then store.visibilityOverride = nil end
+        if not OvSessionActive() and store.visibilityOverride ~= nil then
+            local stores = OvStores()
+            for i = 1, #stores do stores[i].visibilityOverride = nil end
+        end
         EllesmereUI.SetVisibilitySelection(store, legacyKey, sel, opts.applyScalarFn)
+    end
+
+    -- Stranded-marker heal, once per page build. A live override marker nothing owns any
+    -- more pins the element on that state with no path back: the management list's Remove
+    -- drops the entry but deliberately leaves applied values alone, and a profile exported
+    -- while an override applied carries the marker into every import that did not also
+    -- take the overrides. Never inside a session -- the marker being edited is exactly the
+    -- one no map holds yet -- and never for a marker a real override still owns, which
+    -- simply gets written back on its next apply. WriteSel's clear stays as the belt.
+    if not EllesmereUI._prebuilding
+        and not (EllesmereUI.SpecOverrides_EditSessionActive
+            and EllesmereUI.SpecOverrides_EditSessionActive()) then
+        local stores, healed = OvStores(), false
+        for i = 1, #stores do
+            local st = stores[i]
+            if st.visibilityOverride ~= nil and EllesmereUI.SpecOverrides_KeyIsOwned
+                and not EllesmereUI.SpecOverrides_KeyIsOwned(st, "visibilityOverride") then
+                st.visibilityOverride = nil
+                healed = true
+            end
+        end
+        -- The element is sitting on the state the marker pinned it to, so it needs the
+        -- module's visibility pass to catch up. onOptionChanged, not onChanged: the light
+        -- re-apply chain, none of whose callers rebuild the page. Deferred a frame anyway,
+        -- so nothing runs a module refresh from inside the page build that started it.
+        if healed and opts.onOptionChanged then
+            C_Timer.After(0, opts.onOptionChanged)
+        end
     end
 
     local function GetOpt(k)
@@ -8890,7 +8986,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         end
         if def.axis == "extra" then return def.get() == true end
         if def.axis == "opt" then return GetOpt(neg and def.hide or def.show) end
-        local sel, store = Sel()
+        local sel, store = SelRead()
         if not sel then return k == "always" end
         -- While an override is being EDITED the three exclusive rows show what it holds.
         -- Outside a session they show the shared value again, because that is what these
@@ -8923,16 +9019,20 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         -- underneath can be lost or swept into the override by accident. Picking the
         -- state the override already holds clears it again.
         if (k == "never" or k == "always" or k == "mouseover") and OvSessionActive() then
-            local _, store = Sel()
+            local stores = OvStores()
+            local store = stores[1]
             if not store then return end
             local held = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(store)
             if held == k then
-                store.visibilityOverride = nil
+                -- Cleared on every store first, so the re-snapshot ClearStoreKey takes
+                -- at the end already sees the finished state and nothing diffs back into
+                -- a capture of its own.
+                for i = 1, #stores do stores[i].visibilityOverride = nil end
                 if EllesmereUI.SpecOverrides_ClearStoreKey then
-                    EllesmereUI.SpecOverrides_ClearStoreKey(store, "visibilityOverride")
+                    EllesmereUI.SpecOverrides_ClearStoreKey(stores, "visibilityOverride")
                 end
             else
-                store.visibilityOverride = k
+                for i = 1, #stores do stores[i].visibilityOverride = k end
             end
             AfterChange(true)
             return
@@ -9067,7 +9167,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
           -- The value a live override holds, applied or edited: the summary shows it
           -- instead of the shared selection it replaces.
           ovHeldFn = function()
-              local _, store = Sel()
+              local _, store = SelRead()
               return store and EllesmereUI.VisOverrideValue
                   and EllesmereUI.VisOverrideValue(store) or nil
           end,
@@ -9099,6 +9199,19 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         setValue = function(v)
             local s = opts.getStore()
             if not s then return end
+            -- Round-trip with getValue above: while a marker is live the value this slot
+            -- REPORTS is the override, so a value handed back belongs there too. Writing
+            -- it into the shared scalar instead would replace a setting the override was
+            -- only standing in front of. A value no override can hold falls through and
+            -- edits the shared side, exactly as every other slot does under an override.
+            local ovIn = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
+                and EllesmereUI.VisOverrideNormalize and EllesmereUI.VisOverrideNormalize(v)
+            if ovIn then
+                local stores = OvStores()
+                for i = 1, #stores do stores[i].visibilityOverride = ovIn end
+                if opts.onChanged then opts.onChanged() end
+                return
+            end
             if EllesmereUI.VIS_CONDITION_KEYS[v] or v == "never" or v == "always" or v == "mouseover" then
                 local one = {}
                 one[v] = true

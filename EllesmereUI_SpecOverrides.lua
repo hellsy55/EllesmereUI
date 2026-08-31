@@ -4413,6 +4413,18 @@ local function IsExcludedContext(section)
     return false
 end
 
+--- True while a session is live AND the page in front of the user can actually bank a
+--- value into it. A bespoke control that writes its own key on click (the Visibility
+--- row's override marker) must gate on THIS, not on SpecOverrides_EditSessionActive:
+--- session state is global, so on an excluded page that write would land in the shared
+--- profile, be dropped by every capture gate as blacklisted, and strand there with
+--- nothing owning it. The editing-as overlay is decoration only (EnableMouse(false)),
+--- so nothing else stops such a click.
+function EllesmereUI.SpecOverrides_SlotOverridable()
+    if not EllesmereUI.SpecOverrides_EditSessionActive() then return false end
+    return not IsExcludedContext()
+end
+
 -------------------------------------------------------------------------------
 --  Golden borders: slots with an active override get a 1px gold PP border. Slots
 --  match entries by READ-TRACING: getters are side-effect-free by convention (the
@@ -5083,13 +5095,55 @@ local function OwnerOf(fkey)
     return t, SegKey(t, segs[#segs])
 end
 
---- Drop what the CURRENT session captured for ONE key of ONE settings table and put
---- the recorded pre-override value back live. Attribution is by TABLE IDENTITY on
---- purpose: AutoCapture attributes an entry by slot label, but the exit sweep mints
---- entries from the fkey alone with no slot fields at all, and only identity matches
---- both shapes. Returns true when something was cleared.
-function EllesmereUI.SpecOverrides_ClearStoreKey(store, key)
+-- do ... end: this file sits at Lua 5.1's ~200-local-per-chunk ceiling, so the helper
+-- below is released at `end` instead of taking a top-level slot. The global it wires up
+-- stays, as always.
+do
+-- Does any entry in `sStore` hold a VALUE (not just a recorded default) for `key` of
+-- `store`? Attribution by table identity, the same rule ClearStoreKey uses.
+local function StoreHoldsKey(sStore, store, key)
+    for _, e in ipairs(sStore or {}) do
+        local def = e.values and e.values.default
+        if def then
+            for fkey in pairs(def) do
+                local owner, leaf = OwnerOf(fkey)
+                if owner == store and leaf == key then
+                    for mapKey, m in pairs(e.values) do
+                        if mapKey ~= "default" and type(m) == "table" and m[fkey] ~= nil then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+--- True while SOME override -- spec or conditional -- still holds a value for `key` of
+--- `store`. A control that writes its own marker key (the Visibility row's override)
+--- asks before trusting a live one: removing an entry from the management list leaves
+--- its applied value in place on purpose, and a profile exported while an override
+--- applied carries the marker into every import that does not also take the overrides.
+--- In both cases nothing owns the key any more and the element would stay pinned on it
+--- with no path back.
+function EllesmereUI.SpecOverrides_KeyIsOwned(store, key)
     if type(store) ~= "table" or type(key) ~= "string" then return false end
+    return StoreHoldsKey(GetStore(), store, key)
+        or StoreHoldsKey(Cond.GetStore(), store, key)
+end
+end
+
+--- Drop what the CURRENT session captured for ONE key across the given settings TABLES
+--- and put the recorded pre-override values back live. `stores` is an ARRAY so a control
+--- writing one key to several tables (Resource Bars mirrors the Visibility row onto
+--- health/primary/secondary) clears them in one pass: the finalization below re-snapshots
+--- every module profile, far too expensive to repeat once per table. Attribution is by
+--- TABLE IDENTITY: AutoCapture attributes an entry by slot label, the exit sweep mints
+--- entries from the fkey alone with no slot fields, and only identity matches both
+--- shapes. Returns true when something was cleared.
+function EllesmereUI.SpecOverrides_ClearStoreKey(stores, key)
+    if type(stores) ~= "table" or type(key) ~= "string" then return false end
     local condSession = Cond._edit
     if not (_editGroup or condSession) then return false end
     local sStore = condSession and Cond.GetStore() or GetStore()
@@ -5109,14 +5163,25 @@ function EllesmereUI.SpecOverrides_ClearStoreKey(store, key)
     for i = #sStore, 1, -1 do
         local e = sStore[i]
         local def = e.values and e.values.default
-        local hit
+        -- One entry can hold the key for SEVERAL of the stores (a mirrored row banks all
+        -- of them into the same slot), so every hit is collected rather than the first.
+        local hits
         if def then
             for fkey in pairs(def) do
                 local owner, leaf = OwnerOf(fkey)
-                if owner == store and leaf == key then hit = fkey; break end
+                if leaf == key and owner ~= nil then
+                    for si = 1, #stores do
+                        if owner == stores[si] then
+                            hits = hits or {}
+                            hits[#hits + 1] = fkey
+                            break
+                        end
+                    end
+                end
             end
         end
-        if hit then
+        for h = 1, (hits and #hits or 0) do
+            local hit = hits[h]
             -- Only the maps the EDITED session owns are cleared. One entry is shared by
             -- every group that customized the same slot (AutoCapture looks it up by slot,
             -- not by group, and adds a per-group value map), so wiping all of them would
@@ -5140,12 +5205,12 @@ function EllesmereUI.SpecOverrides_ClearStoreKey(store, key)
             -- key the module registers a default for. Written either way: the session
             -- has to show the value it just gave up.
             if dv ~= nil or not HasRegisteredDefault(hit) then WriteLive(hit, dv) end
-            if not stillHeld then
-                def[hit] = nil
-                if not next(def) then table.remove(sStore, i) end
-            end
+            if not stillHeld then def[hit] = nil end
             cleared = true
         end
+        -- Hoisted out of the hits loop: removing inside it would delete a DIFFERENT entry
+        -- on the second pass, index i no longer being this one.
+        if hits and def and not next(def) then table.remove(sStore, i) end
     end
 
     if cleared then

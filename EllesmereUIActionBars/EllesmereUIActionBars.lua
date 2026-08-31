@@ -9902,6 +9902,11 @@ function EAB:UpdateHousingVisibility()
         -- forms are also handled here to cover cases [mounted] does not match.
         local function ShouldHideNonMacro(s)
             if not s then return false end
+            -- An applied Visibility override replaces the whole setting, the shared option
+            -- lanes included, and BuildVisibilityString already compiles it into a
+            -- constant. Checked before the two raw lane reads below, which would otherwise
+            -- keep hiding the bar on a lane the override took over.
+            if EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s) then return false end
             -- Under Any the driver string already carries both halves (Show lanes as
             -- disjuncts, Hide lanes as leading gates, the Lua-only ones resolved at build
             -- time with their own combat escape hatch), and the rebuild below refreshes
