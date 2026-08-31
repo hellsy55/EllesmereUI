@@ -11723,9 +11723,9 @@ end
 function EAB:CacheMicroMenuHome()
     if self._eabMicroHome then return end
     if not (MicroMenu and MicroMenu.GetPoint) then return end
-    -- Never snapshot while docked: a /reload inside a vehicle would record
-    -- the DOCKED anchor as "home" in the write-once cache.
-    if self:MicroMenuDockedIn(OverrideActionBar) then return end
+    -- Never snapshot while docked: a /reload inside a vehicle or pet battle
+    -- would record the DOCKED anchor as "home" in the write-once cache.
+    if self:MicroMenuDockedIn(OverrideActionBar) or self:MicroMenuDockedIn(PetBattleFrame) then return end
     local p, rel, relP, x, y = MicroMenu:GetPoint(1)
     if p then
         self._eabMicroHome = { p, rel, relP, x or 0, y or 0 }
@@ -11747,14 +11747,17 @@ function EAB:MicroMenuDockedIn(root)
 end
 
 -- Hand MicroMenu back to its own container: left docked it inherits alpha 0
--- and sits invisible over the vehicle exit button, still taking clicks.
+-- and sits invisible over the vehicle exit button (or, for pet battles,
+-- stays parented under PetBattleFrame and never comes back at all -- MicroMenuContainer
+-- stays shown and draggable in Edit Mode, but empty), still taking clicks.
 -- ResetMicroMenuPosition() is NOT the right call: it re-derives the dock from
--- current game state, which mid-vehicle resolves back into the bar (no-op).
+-- current game state, which mid-vehicle/mid-battle resolves back into the
+-- docked frame (no-op).
 function EAB:ReclaimMicroMenu()
     if InCombatLockdown() then return end
     if not (MicroMenu and MicroMenuContainer) then return end
     self:CacheMicroMenuHome()
-    if not self:MicroMenuDockedIn(OverrideActionBar) then return end
+    if not (self:MicroMenuDockedIn(OverrideActionBar) or self:MicroMenuDockedIn(PetBattleFrame)) then return end
     MicroMenu:SetParent(MicroMenuContainer)
     local h = self._eabMicroHome
     if h then
@@ -11762,6 +11765,37 @@ function EAB:ReclaimMicroMenu()
         MicroMenu:SetPoint(h[1], h[2] or MicroMenuContainer, h[3], h[4], h[5])
     end
     MicroMenu:SetAlpha(1)
+end
+
+-- Blizzard docks MicroMenu into PetBattleFrame for the duration of a pet
+-- battle, the same multi-level docking behavior as OverrideActionBar for
+-- vehicles -- confirmed via a live capture: MicroMenu's parent chain still
+-- ran through PetBattleFrame two full seconds after PET_BATTLE_CLOSE, with
+-- MicroMenuContainer sitting empty (but shown/draggable) the whole time.
+-- Wild battles hold combat lockdown through their own close event, so the
+-- reclaim (which no-ops in combat, see above) is retried once on the next
+-- PLAYER_REGEN_ENABLED, same pattern as QueuePetBattleUnsuppress uses for
+-- the sibling suppression bug this branch was originally about.
+do
+    local pending
+    local function TryReclaimAfterPetBattle()
+        if InCombatLockdown() then
+            if pending then return end
+            pending = true
+            local shell = ns.TakeShell()
+            shell:RegisterEvent("PLAYER_REGEN_ENABLED")
+            shell:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                pending = nil
+                EAB:ReclaimMicroMenu()
+            end)
+            return
+        end
+        EAB:ReclaimMicroMenu()
+    end
+    local petBattleReclaimFrame = CreateFrame("Frame")
+    petBattleReclaimFrame:RegisterEvent("PET_BATTLE_CLOSE")
+    petBattleReclaimFrame:SetScript("OnEvent", TryReclaimAfterPetBattle)
 end
 
 function EAB:ApplyVehicleBarVisibility()
