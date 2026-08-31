@@ -85,7 +85,7 @@ local function InRealInstancedContent()
 end
 
 -------------------------------------------------------------------------------
---  Cursor visibility (forward declaration — defined after trail/GCD/cast locals)
+--  Cursor visibility (forward declaration -- defined after trail/GCD/cast locals)
 -------------------------------------------------------------------------------
 local UpdateVisibility
 
@@ -1011,14 +1011,34 @@ local function RegisterUnlockElements()
 
     local elements = {}
 
-    local g = GCD_DB()
-    if g.enabled and g.attached == false then
+    -- Both keys register whenever the module runs and qualify LIVE through
+    -- isHidden/getFrame (a circle only has a mover while enabled and detached).
+    -- Never unregister a key that can come back: UnregisterUnlockElement runs
+    -- PruneStaleLinks, which deletes the key's saved anchor links, so toggling
+    -- Attach to Cursor would silently destroy a detached circle's anchor. The
+    -- mover sync reads isHidden every pass, and the options setters re-run
+    -- this registration on every Attach flip, so the mover follows the toggle
+    -- inside an open unlock session too.
+    local function GCDDetached()
+        local g2 = GCD_DB()
+        return g2.enabled and g2.attached == false
+    end
+    local function CastDetached()
+        local c2 = Cast_DB()
+        return c2.enabled and c2.attached == false
+    end
+
+    do
         elements[#elements + 1] = MK({
             key = "ECL_GCD",
             label = "GCD Circle",
             group = "Cursor Lite",
             order = 500,
-            getFrame = function() return gcdRoot end,
+            isHidden = function() return not GCDDetached() end,
+            getFrame = function()
+                if not GCDDetached() then return nil end
+                return gcdRoot
+            end,
             getSize = function()
                 local g2 = GCD_DB()
                 local r = g2.radius or 30
@@ -1065,25 +1085,19 @@ local function RegisterUnlockElements()
                 _G._ECL_ApplyGCDPosition()
             end,
         })
-    elseif EllesmereUI.UnregisterUnlockElement then
-        -- RegisterUnlockElements (the framework call below) is purely
-        -- additive -- it has no way to know "ECL_GCD" no longer qualifies,
-        -- so toggling back to attached (or disabling the circle) after any
-        -- time spent detached would otherwise leave a stale mover entry
-        -- registered forever, still pointing at gcdRoot. Explicitly drop it
-        -- the moment it stops qualifying instead of letting it linger into
-        -- the next unlock-mode session.
-        EllesmereUI:UnregisterUnlockElement("ECL_GCD")
     end
 
-    local c = Cast_DB()
-    if c.enabled and c.attached == false then
+    do
         elements[#elements + 1] = MK({
             key = "ECL_Cast",
             label = "Cast Bar Circle",
             group = "Cursor Lite",
             order = 501,
-            getFrame = function() return castRoot end,
+            isHidden = function() return not CastDetached() end,
+            getFrame = function()
+                if not CastDetached() then return nil end
+                return castRoot
+            end,
             getSize = function()
                 local c2 = Cast_DB()
                 local r = c2.radius or 36
@@ -1126,9 +1140,6 @@ local function RegisterUnlockElements()
                 _G._ECL_ApplyCastPosition()
             end,
         })
-    elseif EllesmereUI.UnregisterUnlockElement then
-        -- Same stale-mover-entry gap as ECL_GCD above.
-        EllesmereUI:UnregisterUnlockElement("ECL_Cast")
     end
 
     if #elements > 0 then

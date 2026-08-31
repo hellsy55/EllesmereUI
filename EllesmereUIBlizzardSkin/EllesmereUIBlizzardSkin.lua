@@ -2709,8 +2709,8 @@ do
 
     local function ClearSuppressedComparisons()
         -- Only clear comparisons while this controller is actually parking the
-        -- global tooltip. Explicitly-owned tips that are allowed by the mode
-        -- stay unparked, so their legitimate comparisons are not touched.
+        -- global tooltip. Unparked shows (mode off, or a transient rebuild)
+        -- keep their legitimate comparisons untouched.
         if not _parked or not EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end
 
         -- Clear the manager's state and its owned shopping frames through the
@@ -2735,9 +2735,8 @@ do
     end
     local function QueueSuppressedComparisonClear()
         if not _comparisonSupportActive then return end
-        -- The combat mode is global, but allowed GameTooltip builds remain
-        -- unparked. Do not queue a delayed clear for those
-        -- comparisons or they will be cleared after their owner refreshes.
+        -- Queue only while parked: an unparked build's comparisons are
+        -- legitimate and must not be cleared after their owner refreshes.
         if not _parked then return end
         if not ComparisonSuppressionModeEnabled()
             or not EllesmereUI._tooltipSuppressedByMode(GameTooltip) then return end

@@ -369,7 +369,7 @@ local function CoinMarker(i, coinIcons, coloured)
 end
 
 -- Gold abbreviation (SI units): 284208 -> "284.2K". The breakpoint table and
--- any locale-specific algorithm (e.g. CJK 万/萬/만 grouping) live in the
+-- any locale-specific algorithm (e.g. CJK wan/yi grouping) live in the
 -- shared EllesmereUI_NumberFormat.lua, so every module abbreviates the same way.
 local function GoldDisplay(val, abbreviate, forceEnglish)
     if abbreviate then return EllesmereUI.AbbreviateNumber(val, forceEnglish) end
@@ -2445,6 +2445,7 @@ do
         "PLAYER_MOUNT_DISPLAY_CHANGED", "PLAYER_CAN_GLIDE_CHANGED",
         "ZONE_CHANGED_NEW_AREA", "UPDATE_SHAPESHIFT_FORM",
         "PLAYER_ENTERING_WORLD", "PLAYER_UPDATE_RESTING",
+        "UNIT_ENTERED_VEHICLE", "UNIT_EXITED_VEHICLE",
     }
 
     -- Legacy scalar evaluation for the modes the multi engine declines.

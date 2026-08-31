@@ -11810,18 +11810,23 @@ end
 -- PLAYER_REGEN_ENABLED, same pattern as QueuePetBattleUnsuppress uses for
 -- the sibling suppression bug this branch was originally about.
 do
-    local pending
+    -- One shared shell, taken once and kept (shells are never returned to a
+    -- pool): the QueuePetBattleUnsuppress shape above. Taking a fresh shell
+    -- per lockdown-closed battle would leak a frame each time.
+    local pending, shell
     local function TryReclaimAfterPetBattle()
         if InCombatLockdown() then
             if pending then return end
             pending = true
-            local shell = ns.TakeShell()
+            if not shell then
+                shell = ns.TakeShell()
+                shell:SetScript("OnEvent", function(self)
+                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    pending = nil
+                    EAB:ReclaimMicroMenu()
+                end)
+            end
             shell:RegisterEvent("PLAYER_REGEN_ENABLED")
-            shell:SetScript("OnEvent", function(self)
-                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-                pending = nil
-                EAB:ReclaimMicroMenu()
-            end)
             return
         end
         EAB:ReclaimMicroMenu()
@@ -13978,6 +13983,14 @@ function EAB:FinishSetup()
     -- Resting: IsResting() has no dedicated poll, so without this the Resting axis only
     -- re-evaluated when some unrelated event above happened to fire afterward.
     self:RegisterEvent("PLAYER_UPDATE_RESTING", function()
+        self:UpdateHousingVisibility()
+    end)
+    -- Vehicle edges for the In Vehicle axis (same reasoning as Resting; the
+    -- sync is gated + coalesced, so the rare fire costs a flag check).
+    self:RegisterEvent("UNIT_ENTERED_VEHICLE", function()
+        self:UpdateHousingVisibility()
+    end)
+    self:RegisterEvent("UNIT_EXITED_VEHICLE", function()
         self:UpdateHousingVisibility()
     end)
     self:RegisterEvent("UPDATE_SHAPESHIFT_FORM", function()

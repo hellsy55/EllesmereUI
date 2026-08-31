@@ -2908,9 +2908,9 @@ initFrame:SetScript("OnEvent", function(self)
                         "Shows large amounts using K/M suffixes (284,208g becomes 284.2Kg) instead of the full grouped number. The tooltip always shows the exact amount."),
                 }
                 -- Force English Units: only where the effective locale actually
-                -- has its own abbreviation algorithm (currently CJK's 万/亿
-                -- grouping, registered from EllesmereUILocales/<code>.lua); every
-                -- other locale already gets K/M/B, so the toggle would be a no-op.
+                -- has its own abbreviation algorithm (currently the CJK wan/yi
+                -- grouping tables in EllesmereUI_NumberFormat.lua); every other
+                -- locale already gets K/M/B, so the toggle would be a no-op.
                 -- Mirrors the Damage Meters options row (EUI_DamageMeters_Options.lua).
                 if EllesmereUI.LocaleHasNumberAbbreviation and EllesmereUI.LocaleHasNumberAbbreviation() then
                     typeRows[#typeRows + 1] = MkToggle("Force English Units (K/M/B)", "forceEnglishUnits",

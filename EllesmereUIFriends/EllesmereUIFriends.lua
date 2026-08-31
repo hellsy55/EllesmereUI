@@ -2548,17 +2548,21 @@ local function SkinFriendsFrame()
         end)
     end
 
-    local scrollBox = FriendsListFrame and FriendsListFrame.ScrollBox
-    if scrollBox then
-        scrollBox:HookScript("OnShow", function()
+    -- Visibility edges ride FriendsListFrame (the tab content frame), NEVER
+    -- the ScrollBox: that object's interaction surface is mapped radioactive
+    -- for whisper taint (see the module history above), and the parent
+    -- carries the exact same show/hide edge -- the ScrollBox is visible iff
+    -- its tab content frame is.
+    if FriendsListFrame then
+        FriendsListFrame:HookScript("OnShow", function()
             _friendCacheDirty = true
             MarkSkinDirty(true)
         end)
-        scrollBox:HookScript("OnHide", function()
+        FriendsListFrame:HookScript("OnHide", function()
             skinDriver:Hide()
             _forceFriendSkin = false
         end)
-        if scrollBox:IsVisible() then MarkSkinDirty(true) end
+        if FriendsListFrame:IsVisible() then MarkSkinDirty(true) end
     end
 
     local friendsEventFrame = CreateFrame("Frame")

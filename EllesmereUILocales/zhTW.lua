@@ -5,19 +5,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -- to generate the full remaining key list. Untranslated keys fall back to English.
 local L = EllesmereUI.RegisterLocale("zhTW")
 if not L then return end
-
--- Number abbreviation: 萬/億 grouping instead of K/M/B, shared by every module
--- through EllesmereUI.AbbreviateNumber() (EllesmereUI_NumberFormat.lua). Lives
--- here, not in the number-format engine, so the algorithm and its glyphs travel
--- together with this file -- which never loads at all for an English client.
-EllesmereUI.RegisterNumberAbbreviation("zhTW", function()
-    return {
-        { breakpoint = 100000000, abbreviation = "億", significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 10000,     abbreviation = "萬", significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 1,         abbreviation = "",   significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
-    }
-end)
-
 L["Behind Unit Frame"] = "顯示於單位框架後方"
 
 -- == Common labels =========================================================

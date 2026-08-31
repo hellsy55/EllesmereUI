@@ -175,17 +175,48 @@ local function IsGearItem(itemLink)
 end
 -- Pin identity: bare itemID can't distinguish two different upgrade tracks
 -- (e.g. Mythic vs Hero) of the same base item -- those share one itemID and
--- only differ in the bonus IDs encoded on the item LINK. The link itself is
--- unique per track/rank (and byte-identical for genuine duplicates of the
--- SAME track, correctly sharing one pin-count entry), so it's the real key.
--- itemID stays supported read-only as a legacy fallback: bagPinnedItems
--- entries written before this fix are itemID-keyed, and reading them still
--- needs to work (matching every track, same as before -- not a fix for
--- those old entries, just not a silent loss of them either). Every NEW pin
--- from here on writes under the link key only.
+-- only differ in the bonus IDs encoded on the item LINK. The RAW link is not
+-- a safe persistent key either: it also embeds linkLevel, specializationID,
+-- enchant and gem fields, so the same item's link drifts on level-up, spec
+-- swap or re-gem -- a raw-link pin would silently stop matching AND leak its
+-- stale entry in the account-global store forever (unpin only removes the
+-- current key). The pin key is therefore itemID + the bonus ID list: bonus
+-- IDs carry the upgrade track (the exact thing being distinguished) and hold
+-- steady across spec, level, enchants and gems. Cached per link string, the
+-- same shape as the sort cache -- IsItemPinned runs per item per refresh.
+-- itemID stays supported read-only as a legacy fallback: entries written
+-- before the link-era fix are itemID-keyed and still match every track, same
+-- as before, until the middle-click self-heal clears them.
+local pinKeyCache = {}
+local function NormalizePinKey(itemLink, itemID)
+    if type(itemLink) ~= "string" then return itemID end
+    local cached = pinKeyCache[itemLink]
+    if cached then return cached end
+    local key
+    local payload = itemLink:match("|Hitem:([^|]*)|h")
+    if payload then
+        -- Split keeping empty fields. After "item:": 1 itemID, 2 enchant,
+        -- 3-6 gems, 7 suffix, 8 uniqueID, 9 linkLevel, 10 specID,
+        -- 11 modifiersMask, 12 itemContext, 13 numBonusIDs, 14.. bonusIDs.
+        local f = {}
+        for field in (payload .. ":"):gmatch("([^:]*):") do f[#f + 1] = field end
+        local id = f[1]
+        if id and id ~= "" then
+            local n = tonumber(f[13]) or 0
+            key = "p" .. id
+            for i = 1, n do
+                key = key .. ":" .. (f[13 + i] or "")
+            end
+        end
+    end
+    key = key or itemID
+    if key then pinKeyCache[itemLink] = key end
+    return key
+end
 local function IsItemPinned(pinnedSet, itemLink, itemID)
     if not pinnedSet then return nil end
-    return (itemLink and pinnedSet[itemLink]) or (itemID and pinnedSet[itemID])
+    local nk = itemLink and NormalizePinKey(itemLink, nil)
+    return (nk and pinnedSet[nk]) or (itemID and pinnedSet[itemID])
 end
 local function GetItemLevelAtLocation(loc, itemLink)
     if loc and loc:IsValid() and C_Item.DoesItemExist(loc) then
@@ -2290,16 +2321,16 @@ local function GetOrCreateSlot(idx)
         local pinned = EllesmereUIDB.bagPinnedItems
         local itemLink = C_Container.GetContainerItemLink(bagID, slotID)
         local isGear = IsGearItem(itemLink)
-        -- Pin key is the link (distinguishes upgrade tracks -- see IsItemPinned
-        -- above); pinKey == info.itemID when no link is available. A legacy
-        -- itemID-keyed pin (written before this fix, conflating every track)
-        -- is adopted into `cur` once and then always cleared here, regardless
-        -- of which specific track was clicked -- there's no way to know which
-        -- track a legacy entry originally meant, so the honest self-heal is
-        -- "this interaction resolves the ambiguity," not "this interaction
-        -- guesses which track it was." Re-pin afterward to set a precise,
-        -- track-specific entry.
-        local pinKey = itemLink or info.itemID
+        -- Pin key is the normalized itemID+bonusIDs identity (distinguishes
+        -- upgrade tracks -- see NormalizePinKey above); pinKey == info.itemID
+        -- when no link is available. A legacy itemID-keyed pin (written before
+        -- this fix, conflating every track) is adopted into `cur` once and
+        -- then always cleared here, regardless of which specific track was
+        -- clicked -- there's no way to know which track a legacy entry
+        -- originally meant, so the honest self-heal is "this interaction
+        -- resolves the ambiguity," not "this interaction guesses which track
+        -- it was." Re-pin afterward to set a precise, track-specific entry.
+        local pinKey = NormalizePinKey(itemLink, info.itemID)
         local legacyCur = pinned[info.itemID] or 0
         local cur = pinned[pinKey] or 0
         if legacyCur > 0 and cur == 0 then cur = legacyCur end
@@ -2937,7 +2968,7 @@ local function GetOrCreatePinOverlay()
             if not EllesmereUIDB then EllesmereUIDB = {} end
             if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
             local pinned = EllesmereUIDB.bagPinnedItems
-            local pinKey = cursorLink or itemID
+            local pinKey = NormalizePinKey(cursorLink, itemID)
             if not IsItemPinned(pinned, cursorLink, itemID) then
                 pinned[pinKey] = IsGearItem(cursorLink) and 1 or 999
             end
@@ -2952,7 +2983,7 @@ local function GetOrCreatePinOverlay()
             if not EllesmereUIDB then EllesmereUIDB = {} end
             if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
             local pinned = EllesmereUIDB.bagPinnedItems
-            local pinKey = cursorLink or itemID
+            local pinKey = NormalizePinKey(cursorLink, itemID)
             if not IsItemPinned(pinned, cursorLink, itemID) then
                 pinned[pinKey] = IsGearItem(cursorLink) and 1 or 999
             end
@@ -3331,7 +3362,7 @@ EnterPinSelectMode = function()
                         if not EllesmereUIDB then EllesmereUIDB = {} end
                         if not EllesmereUIDB.bagPinnedItems then EllesmereUIDB.bagPinnedItems = {} end
                         local itemLink = C_Container.GetContainerItemLink(bagID, slotID)
-                        local pinKey = itemLink or info.itemID
+                        local pinKey = NormalizePinKey(itemLink, info.itemID)
                         EllesmereUIDB.bagPinnedItems[pinKey] = (EllesmereUIDB.bagPinnedItems[pinKey] or 0) + 1
                         ClearPinHover()
                         ExitPinSelectMode()
@@ -7237,9 +7268,12 @@ local function StartAddon()
             _knownItemCounts[itemID] = count
         end
         -- Items gone from bags entirely (sold/used/deleted) no longer appear
-        -- in `counts`; drop their known peak too.
+        -- in `counts`; drop their known peak too. Equipped is not disposed:
+        -- without the guard, swapping gear on (peak pruned) and later off
+        -- again (count rises from 0) would re-flag every swapped piece as
+        -- recent and FIFO-evict genuine loot.
         for itemID in pairs(_knownItemCounts) do
-            if not counts[itemID] then
+            if not counts[itemID] and not C_Item.IsEquippedItem(itemID) then
                 _knownItemCounts[itemID] = nil
             end
         end
@@ -7287,10 +7321,9 @@ local function StartAddon()
     -- level change as above, just triggered outside any dungeon run -- neither
     -- CHALLENGE_MODE event applies (both are scoped to an active M+ run's
     -- lifecycle). GOSSIP_CLOSED is the generic "an NPC dialogue just ended"
-    -- signal and fires reliably around her interaction (confirmed live via an
-    -- event probe); it also fires for every unrelated NPC gossip close, but
-    -- ScheduleRefresh below is cheap and gated on bags being visible, so that's
-    -- a harmless no-op rather than a real cost.
+    -- signal and fires reliably around her interaction; it also fires for every
+    -- unrelated NPC gossip close, but ScheduleRefresh below is cheap and gated
+    -- on bags being visible, so that's a harmless no-op rather than a real cost.
     EUI_Bags:RegisterEvent("GOSSIP_CLOSED")
     -- Set created/renamed/deleted: rebuild split categories / refresh name labels.
     -- Registered only while a set feature is on: zero event cost when disabled
@@ -7433,8 +7466,14 @@ local function StartAddon()
         end, EUI_Bags)
     end
 
-    -- DetectNewItems: run synchronously but at most once per frame (zone changes fire many BAG_UPDATEs)
-    local _lastDetectFrame = 0
+    -- DetectNewItems: one deferred pass per BAG_UPDATE burst, on the next
+    -- frame. Same-frame dedupe alone stranded misses: the first event of a
+    -- loot burst can tally before every bag involved is readable, and the
+    -- skipped duplicates never re-ran the scan -- an item consumed before the
+    -- next bag change (KP studies, planted seeds, learned cosmetics) was then
+    -- missed forever. The deferred flush scans once, with the burst settled.
+    local _detectQueued = false
+    local function _DetectFlush() _detectQueued = false; DetectNewItems() end
 
     EUI_Bags:SetScript("OnEvent", function(self, event, interactionType)
         if event == "PLAYER_REGEN_ENABLED" then
@@ -7449,18 +7488,24 @@ local function StartAddon()
             return
         end
         if event == "MAIL_CLOSED" or event == "BANKFRAME_CLOSED" then
-            -- Legacy, doesn't reliably fire on retail (kept for older clients);
-            -- the interaction-manager HIDE below is the live driver. Settle
-            -- first: mail's own delivery, or a bank auto-deposit, can still be
-            -- landing items just after close.
-            C_Timer.After(0.5, function() SnapshotKnownIDs() end)
+            -- Legacy belt, doesn't reliably fire on retail; the interaction-
+            -- manager HIDE below is the live driver. Settle first: mail's own
+            -- delivery, or a bank auto-deposit, can still be landing items just
+            -- after close -- and hold detection down through the settle window
+            -- too (_snapshotReady gates DetectNewItems), or those in-flight
+            -- items would flag against the stale frozen baselines the moment
+            -- the interaction check reads closed.
+            _snapshotReady = false
+            C_Timer.After(0.5, SnapshotKnownIDs)
             -- No return: falls through to the ITEM_PANEL_EVENTS handling below.
         end
         if event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" then
             if interactionType == Enum.PlayerInteractionType.MailInfo
                 or interactionType == Enum.PlayerInteractionType.Banker
                 or interactionType == Enum.PlayerInteractionType.AccountBanker then
-                C_Timer.After(0.5, function() SnapshotKnownIDs() end)
+                -- Same settle-window hold as the legacy branch above.
+                _snapshotReady = false
+                C_Timer.After(0.5, SnapshotKnownIDs)
             end
             return
         end
@@ -7487,12 +7532,9 @@ local function StartAddon()
             if EUI_Bags:IsVisible() then ScheduleRefresh() end
             return
         end
-        if event == "BAG_UPDATE" and EUI_Bags.refreshEnabled ~= false then
-            local now = GetTime()
-            if now ~= _lastDetectFrame then
-                _lastDetectFrame = now
-                DetectNewItems()
-            end
+        if event == "BAG_UPDATE" and EUI_Bags.refreshEnabled ~= false and not _detectQueued then
+            _detectQueued = true
+            C_Timer.After(0, _DetectFlush)
         end
         if not EUI_Bags:IsVisible() then return end
         if event == "BAG_UPDATE" then

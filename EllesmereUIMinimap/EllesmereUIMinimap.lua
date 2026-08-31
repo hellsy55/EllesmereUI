@@ -232,10 +232,19 @@ end)
 -------------------------------------------------------------------------------
 --  Minimap Skin
 -------------------------------------------------------------------------------
+-- MinimapBackdrop (the frame) is deliberately NOT in this list: hiding the
+-- texture regions is enough (its only other art, StaticOverlayTexture, ships
+-- hidden; its one child button is managed separately below), and third-party
+-- encounter tools read the player's facing from
+-- MinimapCompassTexture:GetRotation() -- the instanced-content stand-in for
+-- the restricted GetPlayerFacing(). The compass is a REGION of the backdrop:
+-- with the parent frame hidden it never renders, the client stops rotating
+-- it, and those tools' facing reads freeze. They re-Show the texture
+-- themselves (raw metatable Show, at alpha 0), so hiding the TEXTURE here is
+-- fully compatible; hiding its PARENT is not.
 local minimapDecorations = {
     "MinimapBorder",
     "MinimapBorderTop",
-    "MinimapBackdrop",
     "MinimapNorthTag",
     "MinimapCompassTexture",
     "TimeManagerClockButton",

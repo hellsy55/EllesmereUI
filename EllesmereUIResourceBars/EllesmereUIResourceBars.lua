@@ -3370,11 +3370,10 @@ local function BuildBars()
             elseif powerType == "TIP_OF_THE_SPEAR" and EllesmereUI.GetTipOfTheSpear then
                 local _, realMax = EllesmereUI.GetTipOfTheSpear()
                 if realMax and realMax > 0 then maxPts = realMax end
-            elseif powerType == "WHIRLWIND_STACKS" and EllesmereUI.GetWhirlwindStacks then
-                local _, realMax = EllesmereUI.GetWhirlwindStacks()
-                if realMax and realMax > 0 then maxPts = realMax end
-            elseif powerType == "SWEEPING_STRIKES" and EllesmereUI.GetSweepingStrikes then
-                local _, realMax = EllesmereUI.GetSweepingStrikes()
+            elseif (powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES")
+                   and _G._EWC then
+                -- Talent-aware cap from the engine-slot module (Broad Strokes).
+                local realMax = _G._EWC.MaxApps(powerType)
                 if realMax and realMax > 0 then maxPts = realMax end
             elseif powerType == "ICICLES" then
                 maxPts = 5
@@ -3795,6 +3794,13 @@ local function BuildBars()
             secondaryFrame._barBg:SetColorTexture(0, 0, 0, 1)
         else
             secondaryFrame._barBg:SetColorTexture(sp.barBgR or 0, sp.barBgG or 0, sp.barBgB or 0, sp.barBgA or 0.5)
+        end
+
+        -- Warrior charge buffs: hand the engine-slot module the resolved build
+        -- (it parks itself for every other power type and non-warriors; see
+        -- EUI_ResourceBars_WarriorCharges.lua).
+        if ns.WC_Sync then
+            ns.WC_Sync(secondaryFrame, sp, cachedSecondary and cachedSecondary.power, g)
         end
 
         if sp.showText then
@@ -5561,6 +5567,7 @@ local function UpdateSecondaryResource()
     elseif cachedSecondary.type == "custom" or _ptsSecret then
         local cur, maxC = 0, maxPts
         local isSecret = false
+        local _wcEngine = false
         if _ptsSecret then
             cur = _ptsCur
             maxC = maxPts
@@ -5582,15 +5589,16 @@ local function UpdateSecondaryResource()
             if sp.enhanceFiveBar and maxC > 5 then maxC = 5 end
         elseif powerType == "TIP_OF_THE_SPEAR" and EllesmereUI and EllesmereUI.GetTipOfTheSpear then
             cur, maxC = EllesmereUI.GetTipOfTheSpear()
-        elseif powerType == "WHIRLWIND_STACKS" and EllesmereUI and EllesmereUI.GetWhirlwindStacks then
-            cur, maxC = EllesmereUI.GetWhirlwindStacks()
-            if not maxC or maxC <= 0 then
-                for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
-                return
-            end
-        elseif powerType == "SWEEPING_STRIKES" and EllesmereUI and EllesmereUI.GetSweepingStrikes then
-            cur, maxC = EllesmereUI.GetSweepingStrikes()
-            if not maxC or maxC <= 0 then
+        elseif powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES" then
+            -- Engine slot owns the display (EllesmereUI_WarriorCharges): the
+            -- true count fills the overlay bar C-side. Fall through the shared
+            -- color chain below so the fill inherits the exact resolved color;
+            -- the handoff before the render paths does the rest. Until the
+            -- deferred build lands the row simply shows empty (the cast-count
+            -- simulator is retired).
+            if ns.WC_EngineOn and ns.WC_EngineOn(powerType) then
+                _wcEngine = true
+            else
                 for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
                 return
             end
@@ -5616,6 +5624,21 @@ local function UpdateSecondaryResource()
             end
         end
 
+        -- Warrior charge powers: hand the module the fully resolved color on
+        -- EVERY pass, engine-owned or not. Pre-build passes stash it, so the
+        -- creation-window bake paints the painter's exact color -- under
+        -- restriction that window is the ONLY legal color write into the slot
+        -- subtree. Engine-owned passes then park the legacy pips and legacy
+        -- count text (the engine slot carries its own) and stop before any
+        -- value read.
+        if ns.WC_Recolor and (powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES") then
+            ns.WC_Recolor(powerType, r, g, b, a)
+        end
+        if _wcEngine then
+            for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
+            if secondaryFrame._countText then secondaryFrame._countText:SetText("") end
+            return
+        end
         if isSecret then
             -- Secret-value path: each pip is driven by a StatusBar overlay, which
             -- accepts the secret number natively -- a value inside [i-1, i] fills
@@ -9147,17 +9170,11 @@ local function OnEvent(self, event, ...)
     elseif event == "PLAYER_REGEN_ENABLED" then
         isInCombat = false
         UpdateVisibility()
-        -- Clean up Whirlwind / Sweeping Strikes GUID caches on combat end
-        if EllesmereUI and EllesmereUI.HandleWhirlwindStacks then
-            EllesmereUI.HandleWhirlwindStacks(event)
-        end
-        if EllesmereUI and EllesmereUI.HandleSweepingStrikes then
-            EllesmereUI.HandleSweepingStrikes(event)
-        end
     elseif event == "PLAYER_TARGET_CHANGED" then
         UpdateVisibility()
     elseif event == "PLAYER_MOUNT_DISPLAY_CHANGED" or event == "PLAYER_CAN_GLIDE_CHANGED"
-        or event == "PLAYER_IS_GLIDING_CHANGED" or event == "PLAYER_UPDATE_RESTING" then
+        or event == "PLAYER_IS_GLIDING_CHANGED" or event == "PLAYER_UPDATE_RESTING"
+        or event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" then
         UpdateVisibility()
     elseif event == "ZONE_CHANGED_NEW_AREA" then
         -- Re-check secondary max power: UnitPowerMax can change across zone
@@ -9234,12 +9251,6 @@ local function OnEvent(self, event, ...)
                 if EllesmereUI.HandleTipOfTheSpear then
                     EllesmereUI.HandleTipOfTheSpear(event, unit, castGUID, spellID)
                 end
-                if EllesmereUI.HandleWhirlwindStacks then
-                    EllesmereUI.HandleWhirlwindStacks(event, unit, castGUID, spellID)
-                end
-                if EllesmereUI.HandleSweepingStrikes then
-                    EllesmereUI.HandleSweepingStrikes(event, unit, castGUID, spellID)
-                end
             end
             if cachedSecondary and (cachedSecondary.type == "custom"
                or cachedSecondary.power == "IRONFUR_BAR") then
@@ -9254,12 +9265,6 @@ local function OnEvent(self, event, ...)
         if EllesmereUI then
             if EllesmereUI.HandleTipOfTheSpear then
                 EllesmereUI.HandleTipOfTheSpear(event)
-            end
-            if EllesmereUI.HandleWhirlwindStacks then
-                EllesmereUI.HandleWhirlwindStacks(event)
-            end
-            if EllesmereUI.HandleSweepingStrikes then
-                EllesmereUI.HandleSweepingStrikes(event)
             end
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
@@ -9486,6 +9491,9 @@ function ERB:OnEnable()
     -- Resting: IsResting() has no dedicated poll, so without this the Resting
     -- axis only re-evaluated when some unrelated event above happened to fire.
     eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+    -- Vehicle edges for the In Vehicle axis (player-filtered; same reasoning).
+    eventFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+    eventFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
     -- Airborne edge for the dragonriding visibility modes (probed at load
     -- in EllesmereUI_Visibility.lua; absent = the checklist items lock)
     if EllesmereUI._hasGlidingEvent then

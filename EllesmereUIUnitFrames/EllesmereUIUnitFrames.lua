@@ -8512,6 +8512,9 @@ ns._cpWatchTick = EllesmereUI.Tick.NewAnimTicker(ns._cpCastWatcher, function()
 end, 0.1)
 
 local function DestroyCustomClassPower()
+    -- Park the engine-slot warrior charge overlay: its proxy is parented to
+    -- the container being torn down; the next _WCUF_Sync re-adopts it.
+    if _G._EWC then _G._EWC.Gate("uf") end
     ns._cpTickFn = nil
     ns._cpDriverTick.Stop()
     ns._cpWatchFn = nil
@@ -8573,10 +8576,9 @@ local function CreateCustomClassPower(playerFrame, style)
             maxPower = (mMax and mMax > 0) and mMax or customMax
         elseif powerType == "TIP_OF_THE_SPEAR" then
             maxPower = customMax
-        elseif powerType == "WHIRLWIND_STACKS" then
-            maxPower = customMax
-        elseif powerType == "SWEEPING_STRIKES" then
-            maxPower = customMax
+        elseif powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES" then
+            -- Talent-aware cap from the engine-slot module (Broad Strokes).
+            maxPower = (_G._EWC and _G._EWC.MaxApps(powerType)) or customMax
         elseif powerType == "ICICLES" then
             maxPower = customMax or 5
         elseif powerType == "SOUL_FRAGMENTS_DEVOURER" then
@@ -8792,10 +8794,12 @@ local function CreateCustomClassPower(playerFrame, style)
                 cur, max = EllesmereUI.GetMaelstromWeapon()
             elseif powerType == "TIP_OF_THE_SPEAR" and EllesmereUI and EllesmereUI.GetTipOfTheSpear then
                 cur, max = EllesmereUI.GetTipOfTheSpear()
-            elseif powerType == "WHIRLWIND_STACKS" and EllesmereUI and EllesmereUI.GetWhirlwindStacks then
-                cur, max = EllesmereUI.GetWhirlwindStacks()
-            elseif powerType == "SWEEPING_STRIKES" and EllesmereUI and EllesmereUI.GetSweepingStrikes then
-                cur, max = EllesmereUI.GetSweepingStrikes()
+            elseif powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES" then
+                -- Engine slot owns the display (EllesmereUI_WarriorCharges):
+                -- the true count fills the overlay bar C-side; legacy pips
+                -- stay hidden (empty row until the deferred build lands).
+                for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
+                return
             elseif powerType == "ICICLES" then
                 -- Frost Mage Icicles: stack count from the Icicles aura (205473).
                 local count = 0
@@ -8902,10 +8906,12 @@ local function CreateCustomClassPower(playerFrame, style)
         -- needs. Icicles and Maelstrom Weapon are aura-driven; everything else polls
         -- via OnUpdate (either Lua API changes mid-combat, or no reliable event exists).
         local auraDriven    = (powerType == "MAELSTROM_WEAPON" or powerType == "ICICLES")
-        local needsOnUpdate = not auraDriven
+        -- Warrior charge buffs are engine-driven end to end (the overlay owns
+        -- the row: EllesmereUI_WarriorCharges): no poll, no cast events.
+        local engineDriven  = (powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES")
+        local needsOnUpdate = not auraDriven and not engineDriven
         local needsAura     = auraDriven
-        local needsCasts    = (powerType == "TIP_OF_THE_SPEAR" or powerType == "WHIRLWIND_STACKS"
-                               or powerType == "SWEEPING_STRIKES")
+        local needsCasts    = (powerType == "TIP_OF_THE_SPEAR")
 
         if needsOnUpdate then
             -- 10 Hz poll on the shared anim ticker (see ns._cpDriverTick):
@@ -8931,10 +8937,6 @@ local function CreateCustomClassPower(playerFrame, style)
             eventFrame:RegisterEvent("PLAYER_DEAD")
             eventFrame:RegisterEvent("PLAYER_ALIVE")
         end
-        if powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES" then
-            eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        end
-
         eventFrame:SetScript("OnEvent", function(_, event, ...)
             if event == "UNIT_SPELLCAST_SUCCEEDED" then
                 if not _G._ERB_AceDB and EllesmereUI then
@@ -8943,33 +8945,12 @@ local function CreateCustomClassPower(playerFrame, style)
                         if EllesmereUI.HandleTipOfTheSpear then
                             EllesmereUI.HandleTipOfTheSpear(event, unit, castGUID, spellID)
                         end
-                        if EllesmereUI.HandleWhirlwindStacks then
-                            EllesmereUI.HandleWhirlwindStacks(event, unit, castGUID, spellID)
-                        end
-                        if EllesmereUI.HandleSweepingStrikes then
-                            EllesmereUI.HandleSweepingStrikes(event, unit, castGUID, spellID)
-                        end
                     end
                 end
             elseif event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" then
                 if not _G._ERB_AceDB and EllesmereUI then
                     if EllesmereUI.HandleTipOfTheSpear then
                         EllesmereUI.HandleTipOfTheSpear(event)
-                    end
-                    if EllesmereUI.HandleWhirlwindStacks then
-                        EllesmereUI.HandleWhirlwindStacks(event)
-                    end
-                    if EllesmereUI.HandleSweepingStrikes then
-                        EllesmereUI.HandleSweepingStrikes(event)
-                    end
-                end
-            elseif event == "PLAYER_REGEN_ENABLED" then
-                if not _G._ERB_AceDB and EllesmereUI then
-                    if EllesmereUI.HandleWhirlwindStacks then
-                        EllesmereUI.HandleWhirlwindStacks(event)
-                    end
-                    if EllesmereUI.HandleSweepingStrikes then
-                        EllesmereUI.HandleSweepingStrikes(event)
                     end
                 end
             end
@@ -9021,6 +9002,14 @@ local function CreateCustomClassPower(playerFrame, style)
     container._pipH = pipH
     container._gap = gap
     container._pad = pad
+    -- Stash for the engine-slot warrior charge overlay (ns._WCUF_Sync below):
+    -- power identity, style gate and the resolved look, so the sync adapter
+    -- never re-derives them.
+    container._powerType = powerType
+    container._style = style
+    container._cpR, container._cpG, container._cpB = cr, cg, cb
+    container._emptyCol = emptyCol
+    container._sepCol = bgCol
 
     -- Reposition pips to fill a given width (for "above" position)
     -- Uses Snap() to round all positions to physical pixel boundaries
@@ -9049,6 +9038,48 @@ local function CreateCustomClassPower(playerFrame, style)
     end
 
     return container
+end
+
+-- Warrior charge buffs: hand the engine-slot module (ResourceBars) the built
+-- class-power row so the true server count fills it C-side (see
+-- EUI_ResourceBars_WarriorCharges.lua). Guarded on _G._EWC: with ResourceBars
+-- disabled the simulator path stays in charge untouched. The circles style
+-- keeps the legacy pips too -- a continuous engine fill cannot render per-pip
+-- circle sprites. Called at the class-power call sites AFTER
+-- PositionClassPowerBar, so "above" stretching has already settled the width.
+ns._WCUF_Sync = function(container)
+    local ewc = _G._EWC
+    if not (ewc and container) then return end
+    local powerType = container._powerType
+    if (powerType ~= "WHIRLWIND_STACKS" and powerType ~= "SWEEPING_STRIKES")
+       or container._style == "circles" then
+        ewc.Gate("uf")
+        return
+    end
+    local position = db.profile.player.classPowerPosition or "top"
+    local stretched = (container._style == "modern" and position == "above")
+        and container:GetWidth() or nil
+    ewc.Sync("uf", container, powerType, {
+        texPath = "Interface\\Buttons\\WHITE8x8",
+        r = container._cpR, g = container._cpG, b = container._cpB, a = 1,
+        ori = "HORIZONTAL",
+        sep = {
+            r = container._sepCol and container._sepCol.r or 0.082,
+            g = container._sepCol and container._sepCol.g or 0.082,
+            b = container._sepCol and container._sepCol.b or 0.082,
+            a = container._sepCol and container._sepCol.a or 1,
+            w = container._gap or 2,
+            cellW = container._pipSize,
+            gap = container._gap,
+            pad = container._pad,
+            stretch = stretched,
+            empty = container._emptyCol,
+            emptyInset = (container._pad or 0) / 2,
+        },
+    })
+    -- After arming: stash the live color for the queued build's bake and the
+    -- out-of-restriction live-recolor path (opts colors are the belt).
+    ewc.Recolor("uf", powerType, container._cpR or 1, container._cpG or 1, container._cpB or 1, 1)
 end
 
 -- Custom enemy reaction colors: override the shared reaction/tapped color table from
@@ -11522,6 +11553,7 @@ function InitializeFrames()
                 frames._customClassPower = custom
                 frames._classPowerBar = custom
                 PositionClassPowerBar(custom)
+                if ns._WCUF_Sync then ns._WCUF_Sync(custom) end
             else
                 -- Spec has no class resource: reset frame sizing
                 ResizeFrameForClassPower(0)
@@ -11596,6 +11628,7 @@ function InitializeFrames()
                 frames._customClassPower = custom
                 frames._classPowerBar = custom
                 PositionClassPowerBar(custom)
+                if ns._WCUF_Sync then ns._WCUF_Sync(custom) end
             else
                 -- Spec has no class resource: reset frame sizing
                 ResizeFrameForClassPower(0)
@@ -12558,6 +12591,9 @@ function InitializeFrames()
         -- Resting: IsResting() has no dedicated poll, so without this the Resting
         -- axis only re-evaluated when some unrelated event above happened to fire.
         frames._visFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+        -- Vehicle edges for the In Vehicle axis (player-filtered; same reasoning).
+        frames._visFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+        frames._visFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
         frames._visFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
         frames._visFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
         -- Dragonriding visibility modes: capability edge plus the airborne

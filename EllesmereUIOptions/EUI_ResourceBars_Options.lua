@@ -176,12 +176,9 @@ initFrame:SetScript("OnEvent", function(self)
         local info = gsr and gsr()
         if not info or info.type == "bar" then return 5 end
         local m = info.max
-        -- Talent-dependent maxes come from the live trackers
-        if info.power == "SWEEPING_STRIKES" and EllesmereUI and EllesmereUI.GetSweepingStrikes then
-            local _, realMax = EllesmereUI.GetSweepingStrikes()
-            if realMax and realMax > 0 then m = realMax end
-        elseif info.power == "WHIRLWIND_STACKS" and EllesmereUI and EllesmereUI.GetWhirlwindStacks then
-            local _, realMax = EllesmereUI.GetWhirlwindStacks()
+        -- Talent-dependent maxes come from the live sources
+        if info.power == "SWEEPING_STRIKES" or info.power == "WHIRLWIND_STACKS" then
+            local realMax = _G._EWC and _G._EWC.MaxApps(info.power)
             if realMax and realMax > 0 then m = realMax end
         elseif info.power == "MAELSTROM_WEAPON" and EllesmereUI and EllesmereUI.GetMaelstromWeapon then
             local _, realMax = EllesmereUI.GetMaelstromWeapon()

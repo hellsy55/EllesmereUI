@@ -692,14 +692,12 @@ local function Park()
 end
 
 -- Mover callbacks are NOT unlock-mode-only: the spec-override layer flush
--- re-applies stored positions on every spec/talent change, and GetBarFrame
--- resolves anchors at any time. Both used to call Activate() behind nothing but
--- EnabledForClass(), and Activate() ends in proxy:Show() -- so a swap away from
--- Sunfury parked the display and the very same flush turned it straight back
--- on. Spellslinger casts Arcane Surge too, so the Surge slot kept matching and
--- the countdown rendered for real. Placement is always safe; SHOWING is the
--- gate's to decide, and unlock mode is the one caller that overrides it (the
--- mover has to be grabbable for any Mage).
+-- re-applies stored positions on spec/talent changes, and GetBarFrame resolves
+-- anchors at any time. Activate() ends in proxy:Show(), so those callbacks must
+-- not reach it on a non-Sunfury tree (Spellslinger still casts Arcane Surge, so
+-- the Surge slot would render). Placement is always safe; SHOWING is the gate's
+-- to decide, and unlock mode is the one caller that overrides it (the mover has
+-- to be grabbable for any Mage).
 local function MoverShowOK()
     return (EllesmereUI and EllesmereUI._unlockActive) or GateOK()
 end

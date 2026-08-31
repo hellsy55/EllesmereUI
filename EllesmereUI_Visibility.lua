@@ -148,6 +148,11 @@ visFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 -- to fire the dispatcher afterward -- e.g. it looked "bound to landing" because dismounting
 -- fires PLAYER_MOUNT_DISPLAY_CHANGED, not because resting is actually tied to mounting.
 visFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+-- Vehicle edges: same reasoning as Resting -- the In Vehicle axis needs its
+-- own edge or it only re-evaluates on incidental traffic. Player-filtered:
+-- other units' vehicle changes are irrelevant to these axes.
+visFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+visFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
 -- Dragonriding edges: mount-capability changes fire PLAYER_CAN_GLIDE_CHANGED
 -- (repo-proven event); takeoff/landing while staying mounted fires
 -- PLAYER_IS_GLIDING_CHANGED, which is probed because nothing registered it before this

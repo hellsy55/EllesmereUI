@@ -3919,7 +3919,6 @@ local CHAT_MSG_EVENTS = {
 -------------------------------------------------------------------------------
 --  Chat-state callbacks: header font, input-top strips, sent-line capture,
 --  recall-cursor reset, idle-fade and hover focus tracking.
---  eui-style: allow comment-budget (section contract for the whole file)
 --
 --  Deliberately NOT widget HookScripts on a Blizzard edit box. THE RULE: no
 --  EUI code may execute inside a Blizzard chat-state execution. An addon

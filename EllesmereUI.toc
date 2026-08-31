@@ -2,7 +2,7 @@
 ## Title: |cff0cd29fEllesmereUI|r
 ## Notes: Shared framework for the EllesmereUI addon suite
 ## Author: Ellesmere
-## Version: 9.0.8
+## Version: 9.0.9
 ## SavedVariables: EllesmereUIDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
 ## X-Curse-Project-ID: 1477613
@@ -28,8 +28,8 @@ EllesmereUI_Lite.lua
 # loaded by the engine at ADDON_LOADED for non-English locales only.
 EllesmereUI_Locale.lua
 
-# Central number-abbreviation engine (K/M/B, or a locale's own algorithm --
-# e.g. CJK 万/亿 grouping -- registered from EllesmereUILocales/<code>.lua).
+# Central number-abbreviation engine (K/M/B by default; CJK wan/yi grouping
+# tables keyed by locale; a locale file may register its own algorithm).
 EllesmereUI_NumberFormat.lua
 
 # One-time data migration (runs before child addons init)
@@ -57,6 +57,7 @@ EUI_UnlockMode.lua
 EllesmereUI_Glows.lua
 EllesmereUI_Range.lua
 EllesmereUI_AuraKit.lua
+EllesmereUI_WarriorCharges.lua
 EllesmereUI_FirstInstall.lua
 EllesmereUI_RaidFramesPopup.lua
 EllesmereUI_PatchNotesPopup.lua

@@ -7,18 +7,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local L = EllesmereUI.RegisterLocale("zhCN")
 if not L then return end
 
--- Number abbreviation: 万/亿 grouping instead of K/M/B, shared by every module
--- through EllesmereUI.AbbreviateNumber() (EllesmereUI_NumberFormat.lua). Lives
--- here, not in the number-format engine, so the algorithm and its glyphs travel
--- together with this file -- which never loads at all for an English client.
-EllesmereUI.RegisterNumberAbbreviation("zhCN", function()
-    return {
-        { breakpoint = 100000000, abbreviation = "亿", significandDivisor = 1000000, fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 10000,     abbreviation = "万", significandDivisor = 100,      fractionDivisor = 100, abbreviationIsGlobal = false },
-        { breakpoint = 1,         abbreviation = "",   significandDivisor = 1,        fractionDivisor = 1,   abbreviationIsGlobal = false },
-    }
-end)
-
 -- == 常用标签 (Common labels) ===============================================
 L["Anchor"] = "锚点"
 L["Anchor Point"] = "锚点位置"
