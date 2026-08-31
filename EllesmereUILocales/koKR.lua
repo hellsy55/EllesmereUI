@@ -7303,6 +7303,9 @@ L["Range Fade Settings"] = "사거리 흐려짐 설정"
 L["Raid Target Marker"] = "공격대 징표"
 L["Important Cast Glow Settings"] = "중요 시전 반짝임 설정"
 
+-- UI 모양 변경 -- 가방
+L["Show Clear Button"] = "초기화 버튼 표시"
+
 -- ui 모양 변경 - 기본 ui 개선 - 툴팁,메뉴&팝업
 L["Restyles Blizzard's on-screen progress bars (event objectives, nameplate counters) to the EUI look. Requires reload to apply.\n\nThese bars are drawn over rather than modified, so if the game ever reports their contents as protected the original bar is shown instead.\n\nUse the cog to set a minimum size, so bars on shrunken nameplates stay readable."] = "블리자드의 기본 화면 진행 바(이벤트 목표, 이름표 카운터 등)를 EUI 스타일로 재디자인합니다. 적용하려면 애드온을 새로고침(리로드)해야 합니다.\n\n이 바들은 기존 바를 수정하는 게 아니라 그 위에 덧그리는 방식이므로, 게임 내에서 해당 콘텐츠를 보호 항목으로 지정할 경우 원래의 기본 바가 대신 표시됩니다.\n\n톱니바퀴 아이콘을 눌러 최소 크기를 설정하면, 작아진 이름표 위의 바도 가독성을 유지할 수 있습니다."
 
