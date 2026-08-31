@@ -10138,7 +10138,71 @@ end
 -- boolean fields (allowOnCooldownAlert), and map registrations made inside
 -- the chain, which then convert every later event dispatch on the viewer
 -- into tainted execution. A stale-range repaint is never worth that. The
--- range-on-override-swap staleness this replaced is cosmetic and stays.
+-- range-on-override-swap staleness it replaced is cosmetic, and is repainted
+-- below WITHIN this law: our own texture only, no frame field, no paint call.
+
+-- Blizzard arms the range check on the BASE spell, so an override that swaps the
+-- live spell leaves the icon painted for whichever one was up at the last range
+-- crossing. Repainted on fd.tex and the side table, never the frame, and coming
+-- back into range uses Blizzard's colour constants rather than their resolver,
+-- which the law above forbids calling. A secret usability answer leaves the icon
+-- for their next pass. On ns.* because the main chunk is at Lua 5.1's 200-local cap.
+function ns.ApplyOverrideRangeTint(icon, outOfRange, liveSpellID)
+    local fd = _getFD(icon)
+    local tex = fd and fd.tex
+    local C = CooldownViewerConstants
+    if not (tex and C) then return end
+    fd._oorOverride = outOfRange or nil
+    if not fd._oorHooked then
+        fd._oorHooked = true
+        local guard = false
+        hooksecurefunc(tex, "SetVertexColor", function()
+            if guard or not fd._oorOverride then return end
+            guard = true
+            tex:SetVertexColor(C.ITEM_NOT_IN_RANGE_COLOR:GetRGBA())
+            guard = false
+        end)
+    end
+    if outOfRange then
+        tex:SetVertexColor(C.ITEM_NOT_IN_RANGE_COLOR:GetRGBA())
+        return
+    end
+    local usable, notEnoughMana = C_Spell.IsSpellUsable(liveSpellID)
+    if issecretvalue and (issecretvalue(usable) or issecretvalue(notEnoughMana)) then
+        return
+    end
+    if usable then
+        tex:SetVertexColor(C.ITEM_USABLE_COLOR:GetRGBA())
+    elseif notEnoughMana then
+        tex:SetVertexColor(C.ITEM_NOT_ENOUGH_MANA_COLOR:GetRGBA())
+    else
+        tex:SetVertexColor(C.ITEM_NOT_USABLE_COLOR:GetRGBA())
+    end
+end
+
+-- rangeCheckSpellID is READ, never written: the law is about writes.
+function ns.ResyncCdmRange(baseSpellID, overrideSpellID)
+    -- Secret payload fails open, before any truthiness test or comparison
+    -- touches it: same guard the action bar dispatcher puts on this event.
+    if issecretvalue and (issecretvalue(baseSpellID) or issecretvalue(overrideSpellID)) then
+        return
+    end
+    local IsSpellInRange = C_Spell and C_Spell.IsSpellInRange
+    if not (baseSpellID and IsSpellInRange) then return end
+    -- Poll the live override id: a base id whose spell is currently replaced
+    -- can answer nil.
+    local liveSpellID = overrideSpellID or baseSpellID
+    local inRange = IsSpellInRange(liveSpellID)
+    if issecretvalue and issecretvalue(inRange) then return end
+    local outOfRange = (inRange == false)
+    for _, icons in pairs(cdmBarIcons) do
+        for _, icon in ipairs(icons) do
+            if icon.rangeCheckSpellID == baseSpellID then
+                ns.ApplyOverrideRangeTint(icon, outOfRange, liveSpellID)
+            end
+        end
+    end
+end
 
 -------------------------------------------------------------------------------
 --  Event-Driven Runtime Maintenance
@@ -10302,6 +10366,10 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
     if event == "COOLDOWN_VIEWER_SPELL_OVERRIDE_UPDATED" then
         -- Bump-only: painting is driven by the cooldown/desat hooks, which re-resolve on their next fire. No repaint request from here.
         ns._cdmResGen = ns._cdmResGen + 1
+        -- Except the range tint, which no hook re-resolves -- Blizzard's own check
+        -- is armed on the base id and never re-polls for the override.
+        -- Payload here is (baseSpellID, overrideSpellID).
+        ns.ResyncCdmRange(unit, updateInfo)
         return
     end
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
