@@ -7438,18 +7438,15 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local names = {}
         local total = 0
         local hiddenCount = 0
-        -- An override session splits the menu in two: the rows it sealed belong to the
-        -- shared value, the rest to the override. Mixing them reads as one selection that
-        -- exists nowhere ("Always or Solo"), so while a session is live the summary is the
-        -- override's own row when it holds one -- and otherwise the shared summary below,
-        -- because that is what still applies. Falling back to the empty label instead
-        -- would claim an override of "Always" that was never set.
-        if opts.ovLockedFn and opts.ovLockedFn() then
+        -- A LIVE override replaces the whole setting, whether it is being edited or just
+        -- applied, so the summary is what it holds and nothing else. Mixing it with the
+        -- rows below reads as one selection that exists nowhere ("Always or Solo"), and
+        -- it is also the only place that still tells the truth while the rows underneath
+        -- show the shared value they edit.
+        local held = opts.ovHeldFn and opts.ovHeldFn()
+        if held then
             for _, item in ipairs(items) do
-                if not item.isHeader and not item.isTopAction and not item.isModifier
-                   and not (item.ovLockedFn and item.ovLockedFn()) and getFn(item.key) then
-                    return EllesmereUI.L(item.label)
-                end
+                if item.key == held then return EllesmereUI.L(item.label) end
             end
         end
         for _, item in ipairs(items) do
@@ -8879,11 +8876,14 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         if def.axis == "opt" then return GetOpt(neg and def.hide or def.show) end
         local sel, store = Sel()
         if not sel then return k == "always" end
-        -- While an override is being edited the three exclusive rows show what IT holds.
-        -- Read from the store Sel() just resolved rather than calling opts.getStore()
-        -- again: a getter is not guaranteed free (CDM's tracked buff bars CREATE their
-        -- table on read), and inside a session such a write becomes a capture of its own.
-        if k == "never" or k == "always" or k == "mouseover" then
+        -- While an override is being EDITED the three exclusive rows show what it holds.
+        -- Outside a session they show the shared value again, because that is what these
+        -- rows edit -- an applied override is announced by the summary and the panel's
+        -- own gold marker, not by checking a row the click would not change. Read from
+        -- the store Sel() just resolved rather than calling opts.getStore() again: a
+        -- getter is not guaranteed free (CDM's tracked buff bars CREATE their table on
+        -- read), and inside a session such a write becomes a capture of its own.
+        if OvSessionActive() and (k == "never" or k == "always" or k == "mouseover") then
             local ov = store and EllesmereUI.VisOverrideValue
                 and EllesmereUI.VisOverrideValue(store)
             if ov then return (not neg) and (k == ov) end
@@ -9048,6 +9048,13 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
           -- once instead of by every row.
           ovLockedFn = OvSessionActive,
           ovLockedTooltip = OV_LOCK_TIP,
+          -- The value a live override holds, applied or edited: the summary shows it
+          -- instead of the shared selection it replaces.
+          ovHeldFn = function()
+              local _, store = Sel()
+              return store and EllesmereUI.VisOverrideValue
+                  and EllesmereUI.VisOverrideValue(store) or nil
+          end,
           -- The separator reads the match live: under Any the conditions are OR'd.
           separatorFn = function() return GetMatchAny() and " or " or ", " end,
           -- Every row follows the same rule now: a checked Hide lane hides while its
