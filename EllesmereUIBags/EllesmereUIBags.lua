@@ -4948,6 +4948,40 @@ local function GetOrCreateCatHeader(idx)
     return f
 end
 
+-- "Clear" link on a Recent Items header, sitting just left of its "Hide" link.
+-- Opt-in (bagShowRecentClear, default off): callers gate on the setting, so a
+-- user who never enables it never has the button built. Pooled on the header
+-- like _hideBtn; hidden by the per-refresh header reset.
+local function ShowRecentClearButton(hdr, hideBtn)
+    if not hdr._clearBtn then
+        local cb = CreateFrame("Button", nil, hdr)
+        cb:SetSize(34, 16)
+        cb._fs = cb:CreateFontString(nil, "OVERLAY")
+        SetBagFont(cb._fs, 9)
+        cb._fs:SetAllPoints()
+        cb._fs:SetText(EllesmereUI.L("Clear"))
+        cb._fs:SetTextColor(0.5, 0.5, 0.5, 0.7)
+        cb:SetScript("OnEnter", function(self)
+            self._fs:SetTextColor(1, 1, 1, 0.9)
+            if EUI.ShowWidgetTooltip then
+                EUI.ShowWidgetTooltip(self, "Clears the Recent Items list.")
+            end
+        end)
+        cb:SetScript("OnLeave", function(self)
+            self._fs:SetTextColor(0.5, 0.5, 0.5, 0.7)
+            if EUI.HideWidgetTooltip then EUI.HideWidgetTooltip() end
+        end)
+        cb:SetScript("OnClick", function()
+            if EUI_Bags.ClearRecentItems then EUI_Bags:ClearRecentItems() end
+        end)
+        hdr._clearBtn = cb
+    end
+    hdr._clearBtn:ClearAllPoints()
+    hdr._clearBtn:SetPoint("RIGHT", hideBtn, "LEFT", -6, 0)
+    hdr._clearBtn:Show()
+    return hdr._clearBtn
+end
+
 -- Indented subheaders under a category (expansion names) for All Items nesting
 local _expSubHeaders = {}
 
@@ -5381,6 +5415,7 @@ function EUI_Bags:RefreshInventory()
     for _, hdr in pairs(_catHeaders) do
         hdr:Hide(); hdr._hint:SetText("")
         if hdr._hideBtn then hdr._hideBtn:Hide() end
+        if hdr._clearBtn then hdr._clearBtn:Hide() end
         hdr._line:ClearAllPoints()
         hdr._line:SetPoint("LEFT", hdr._hint, "RIGHT", 6, 0)
         hdr._line:SetPoint("RIGHT", hdr, "RIGHT", -SPACING, 0)
@@ -5904,9 +5939,14 @@ function EUI_Bags:RefreshInventory()
                 EUI_Bags:RefreshInventory()
             end)
             recHdr._hideBtn:Show()
+            local recLineAnchor = recHdr._hideBtn
+            if BP().bagShowRecentClear == true
+               and EUI_Bags._recentItems and next(EUI_Bags._recentItems) then
+                recLineAnchor = ShowRecentClearButton(recHdr, recHdr._hideBtn)
+            end
             recHdr._line:ClearAllPoints()
             recHdr._line:SetPoint("LEFT", recHdr._hint, "RIGHT", 6, 0)
-            recHdr._line:SetPoint("RIGHT", recHdr._hideBtn, "LEFT", -6, 0)
+            recHdr._line:SetPoint("RIGHT", recLineAnchor, "LEFT", -6, 0)
             recHdr:Show()
             curY = curY - 22
 
@@ -6126,9 +6166,17 @@ function EUI_Bags:RefreshInventory()
                 hdr._hideBtn:ClearAllPoints()
                 hdr._hideBtn:SetPoint("RIGHT", hdr, "RIGHT", 0, 0)
                 hdr._hideBtn:Show()
+                -- Recent Items only, opt-in: "Clear" left of "Hide", and only when
+                -- there is something to clear.
+                local lineAnchor = hdr._hideBtn
+                if alwaysShow and not showPinAdd
+                   and BP().bagShowRecentClear == true
+                   and EUI_Bags._recentItems and next(EUI_Bags._recentItems) then
+                    lineAnchor = ShowRecentClearButton(hdr, hdr._hideBtn)
+                end
                 hdr._line:ClearAllPoints()
                 hdr._line:SetPoint("LEFT", hdr._hint, "RIGHT", 6, 0)
-                hdr._line:SetPoint("RIGHT", hdr._hideBtn, "LEFT", -6, 0)
+                hdr._line:SetPoint("RIGHT", lineAnchor, "LEFT", -6, 0)
             end
             hdr:Show()
             curY = curY - 22
@@ -7195,6 +7243,15 @@ local function StartAddon()
                 _knownItemCounts[itemID] = nil
             end
         end
+    end
+
+    -- "Clear" link on the Recent Items headers. Only the tracked set is dropped --
+    -- _knownItemCounts already holds each item's current bag total, so nothing
+    -- sitting in bags re-flags as new on the next DetectNewItems pass.
+    function EUI_Bags:ClearRecentItems()
+        wipe(EUI_Bags._recentItems)
+        wipe(EUI_Bags._recentOrder)
+        if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end
     end
 
     C_Timer.After(1, function() SnapshotKnownIDs() end)
