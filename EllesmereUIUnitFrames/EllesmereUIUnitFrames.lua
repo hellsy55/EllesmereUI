@@ -2875,21 +2875,17 @@ end
 -- Per-unit frame source resolver. Returns "eui" (spawn skinned frame, default),
 -- "blizzard" (don't spawn, leave Blizzard's default in place), or "hidden" (don't
 -- spawn, actively disable Blizzard's too). "hidden" has highest precedence so a
--- legacy disabled frame (enabledFrames[unit]==false: Visibility "never" or an
--- "Enable X Frame" toggle off) keeps meaning "no frame at all".
---- True when the unit has no EllesmereUI frame at all. That is the enabledFrames flag,
---- with the one exception an applied Visibility override carves out: the same flag is how
---- a shared Visibility of "never" is stored (applyScalarFn writes it), and an override
---- REPLACES the whole Visibility setting, "never" included. A frame source of "hidden" is
---- the cog's own choice rather than a Visibility setting, so it still wins. On ns for the
---- 200-locals cap.
+-- disabled frame (enabledFrames[unit]==false, the "Enable X Frame" toggles) keeps
+-- meaning "no frame at all". Visibility "never" is NOT one of these: it hides our
+-- frame at runtime and the frame stays built, so a Spec Override can lift it again
+-- without a /reload.
+
+--- True when the unit has no EllesmereUI frame at all -- the enabledFrames flag, which
+--- only the "Enable X Frame" toggles write now that Visibility no longer touches it.
+--- On ns for the 200-locals cap.
 function ns.VisUnitDisabled(profile, unitKey)
     local ef = profile and profile.enabledFrames
-    if not ef or ef[unitKey] ~= false then return false end
-    if (profile.frameSource and profile.frameSource[unitKey]) == "hidden" then return true end
-    local s = profile[unitKey]
-    local ov = s and EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
-    return not (ov and ov ~= "never")
+    return (ef and ef[unitKey] == false) or false
 end
 
 function ns.GetUnitFrameSource(unit)
@@ -2897,6 +2893,10 @@ function ns.GetUnitFrameSource(unit)
     if ns.VisUnitDisabled(db.profile, unit) then return "hidden" end
     local fs = db.profile.frameSource and db.profile.frameSource[unit]
     if fs == "blizzard" then
+        -- Visibility "never" over Blizzard's frame: we spawn nothing of our own to
+        -- hide, so suppressing Blizzard's is the only way to honor it.
+        local s = db.profile[unit]
+        if s and s.barVisibility == "never" then return "hidden" end
         -- ToT/focus-target have no standalone Blizzard frame (native one is a child
         -- of TargetFrame/FocusFrame, lives only while that parent does), so
         -- "blizzard" is honored for them ONLY when the parent is itself on
@@ -2911,38 +2911,16 @@ function ns.GetUnitFrameSource(unit)
     return "eui"
 end
 
--- Write a unit's frame source, keeping the legacy enabledFrames flag and per-unit
--- "never" visibility in sync so existing readers stay correct. Only takes full effect
--- after a UI reload (oUF permanently disables the Blizzard frame at spawn, and secure
--- frames can't be created/torn down in combat) -- callers should also prompt a reload.
+-- Write a unit's frame source, keeping the legacy enabledFrames flag in sync so
+-- existing readers stay correct (and so the cog is the way back for a frame an old
+-- profile left disabled). Only takes full effect after a UI reload -- the spawn
+-- permanently disables the Blizzard frame, and secure frames can't be created or
+-- torn down in combat -- so callers should also prompt a reload.
 function ns.SetUnitFrameSource(unit, source)
     if not db or not db.profile then return end
     db.profile.frameSource = db.profile.frameSource or {}
     db.profile.frameSource[unit] = source
     db.profile.enabledFrames[unit] = (source ~= "hidden")
-    -- Keep the player/target/focus "Visibility" dropdown ("never") consistent
-    -- with the hidden state; other units have no barVisibility key.
-    local s = db.profile[unit]
-    if s and s.barVisibility ~= nil then
-        if source == "hidden" then
-            -- Stash the visible mode so hidden->visible keeps an "in_combat"/"mouseover"
-            -- preference. Multi-selection sets stash the same way and MUST also clear,
-            -- or they stay authoritative over the forced "never" and the frame keeps showing.
-            if type(s.visibilityModes) == "table" and next(s.visibilityModes) then
-                s._preHiddenVisibilityModes = s.visibilityModes
-            end
-            s.visibilityModes = nil
-            if s.barVisibility ~= "never" then
-                s._preHiddenBarVisibility = s.barVisibility
-            end
-            s.barVisibility = "never"
-        elseif s.barVisibility == "never" then
-            s.barVisibility = s._preHiddenBarVisibility or "always"
-            s._preHiddenBarVisibility = nil
-            s.visibilityModes = s._preHiddenVisibilityModes
-            s._preHiddenVisibilityModes = nil
-        end
-    end
 end
 
 -- Cast-bar icon "part of the bar" resolver. True = icon counts inside the cast bar's
@@ -10948,8 +10926,11 @@ local function ApplyBlizzCastbarState()
     if EllesmereUI and EllesmereUI.SetPlayerCastBarSuppressed and db and db.profile and db.profile.player then
         -- Only suppress Blizzard's player cast bar when EUI actually provides a
         -- replacement. If the player is on the Blizzard (or hidden) frame source,
-        -- there is no EUI cast bar, so leave Blizzard's alone.
+        -- there is no EUI cast bar, so leave Blizzard's alone. Visibility "never"
+        -- counts as no replacement too: our cast bar is built now but hides with the
+        -- frame, and taking Blizzard's away would leave no player cast bar at all.
         local suppress = (db.profile.player.showPlayerCastbar
+            and db.profile.player.barVisibility ~= "never"
             and ns.GetUnitFrameSource("player") == "eui") or false
         EllesmereUI.SetPlayerCastBarSuppressed("UnitFrames", suppress)
     end

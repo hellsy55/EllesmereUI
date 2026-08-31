@@ -4175,3 +4175,23 @@ EllesmereUI.RegisterMigration({
         end
     end,
 })
+
+-- Visibility "Never" used to write enabledFrames[unit] = false, and that key decides
+-- whether the frame is BUILT, once, at login -- so a Spec Override carrying it left
+-- the frame uncreated for the whole session with no way back but a /reload.
+-- Visibility no longer touches it and the visibility pass hides the frame at runtime
+-- instead, so clear the flag the old pairing left behind. player/target/focus have no
+-- Enable toggle of their own, so a stored false there can only have come from it.
+EllesmereUI.RegisterMigration({
+    id          = "uf_visibility_never_keeps_frame_v1",
+    scope       = "profile",
+    description = "Clear the enabledFrames flag Visibility \"Never\" used to write for player/target/focus, so the frame is built and a Spec Override can lift the hide without a reload.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        local ef = uf and uf.enabledFrames
+        if type(ef) ~= "table" then return end
+        for _, unitKey in ipairs({ "player", "target", "focus" }) do
+            if ef[unitKey] == false then ef[unitKey] = nil end
+        end
+    end,
+})

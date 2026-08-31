@@ -4581,12 +4581,13 @@ initFrame:SetScript("OnEvent", function(self)
               legacyKey = "barVisibility",
               caps = { partyIncludesRaid = false, luaDragonriding = true },
               refreshPageArg = true,
-              -- Visibility owns only the hidden/not-hidden axis: "never" disables
-              -- the frame, any visible mode re-enables it. frameSource (the inline
-              -- cog's EUI/Blizzard choice) is left intact so it resumes on re-enable.
+              -- Visibility is a RUNTIME axis and never touches enabledFrames: that
+              -- key decides whether the frame is built at all, once, at login, so a
+              -- Spec Override carrying "never" used to leave the frame uncreated for
+              -- the session with no way back but a /reload. "never" is hidden by the
+              -- visibility pass instead (ns.UpdateFrameVisibility), which reverses.
               applyScalarFn = function(s, mode)
                   s.barVisibility = mode
-                  db.profile.enabledFrames[selectedUnit] = (mode ~= "never")
               end,
               onChanged = function()
                   local s = UNIT_DB_MAP[selectedUnit]()
@@ -4678,8 +4679,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- ONE sync icon now that both halves share a control: set-aware for correct
-        -- multi-selection compare/copy, and VisFullCopy carries the option booleans too;
-        -- runs each target's scalar side effects (enabledFrames) + boolean-trio derivation.
+        -- multi-selection compare/copy, and VisFullCopy carries the option booleans too,
+        -- plus each target's boolean-trio derivation.
         if not EllesmereUI._prebuilding then
             local rgn = visRow._leftRegion
             local function CopyVisToUnit(key)
@@ -4688,7 +4689,6 @@ initFrame:SetScript("OnEvent", function(self)
                 if dst == src then return end
                 EllesmereUI.VisFullCopy(dst, src, "barVisibility", nil, function(t, mode)
                     t.barVisibility = mode
-                    db.profile.enabledFrames[key] = (mode ~= "never")
                 end)
                 SyncUnitVisBooleans(dst)
             end
