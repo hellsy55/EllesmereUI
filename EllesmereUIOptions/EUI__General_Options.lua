@@ -963,14 +963,16 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "9.0.9",
+        version = "9.1.0",
         heroes = {
             {
                 module = "Cooldown Manager",
                 title  = "Glow at Stacks",
-                desc   = "A per-spell toggle that holds the Buff Glow back until the buff reaches the stack count you set, in your chosen glow style. Set it from the spell's cog under Charge/Stack Text; it replaces the normal presence glow on that spell.",
-                -- Per-buff cog popup rows cannot pulse: page-only nav to the buff bars page hosting the cogs.
-                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars" },
+                desc   = "A per-spell toggle that holds the Buff Glow back until the buff reaches the stack count you set, in your chosen glow style. Set it from the spell's dropdown on the CDM Bars tab; it replaces the normal presence glow on that spell.",
+                -- Rows live in each spell's dropdown (cannot pulse): land on CDM Bars with the
+                -- default Buffs bar selected, the same _setCDMBar route global search uses.
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars",
+                           preSelect = function() if EllesmereUI._setCDMBar then EllesmereUI._setCDMBar("buffs") end end },
             },
             {
                 module = "DataBars",
