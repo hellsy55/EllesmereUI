@@ -7090,6 +7090,10 @@ L["Countdown length in seconds. Compact Band uses First with Ctrl + Left Click, 
 
 -- 편의 기능 - 데이터 바
 L["Combat Status"] = "전투 상태"
+L["Broker Plugin"] = "애드온 단축 아이콘"
+L["Plugin"] = "플러그인"
+L["Select a plugin"] = "표시할 애드온 선택"
+L["Strip Colors"] = "색상 코드 제거"
 L["Match Mode"] = "일치 조건 방식"
 L["Match All Conditions"] = "모든 조건 일치"
 L["Match Any Condition"] = "아무 조건이나 일치"
@@ -7097,6 +7101,12 @@ L["Match Any Condition"] = "아무 조건이나 일치"
 -- 편의 기능 - 데이터 바 - 툴팁
 L["Every condition you set has to match. The default."] = "설정한 모든 조건이 충족되어야 합니다. (기본값)"
 L["This element shows as soon as ONE condition matches, and a Hide lane then means show while that condition is false."] = "이 요소는 하나의 조건이라도 충족되면 즉시 표시되며, 여기서 '숨기기 라인은 해당 조건이 거짓일 때 표시함을 의미합니다."
+L["Any LibDataBroker plugin registered right now. One block per plugin -- add the block again for a second one."] = "현재 등록된 모든 LibDataBroker 애드온(플러그인)입니다. 플러그인당 하나의 블록이 생성되며, 두 번째 블록을 원하시면 블록을 다시 추가하세요."
+L["Shows the plugin's text. Off leaves an icon-only block that still carries the plugin's tooltip and clicks."] = "플러그인의 텍스트를 표시합니다. 끄면 툴팁과 클릭 기능은 유지되면서 아이콘만 표시되는 블록이 됩니다."
+L["Removes the color codes the plugin writes into its own text, so this block's Text Color applies. Off keeps the plugin's colors."] = "플러그인이 자체 텍스트에 지정한 색상 코드를 제거하여 이 블록의 텍스트 색상이 적용되도록 합니다. 끄면 플러그인 원래의 색상이 유지됩니다."
+L["Holds the block at this width and clips longer text, so a plugin whose text keeps changing length never shifts the blocks beside it. Zero sizes the block to whatever the plugin currently says."] = "블록의 너비를 고정하고 긴 텍스트는 잘라냅니다. 텍스트 길이가 자주 바뀌는 플러그인 때문에 옆의 블록들이 밀려나는 현상을 방지합니다. 0으로 설정하면 플러그인의 현재 텍스트 크기에 맞춰 자동 조절됩니다."
+L["Prefixes the plugin's own name to its text."] = "플러그인의 이름을 텍스트 앞에 접두사로 붙입니다."
+L["Shows the plugin's own icon next to its text."] = "텍스트 옆에 플러그인 고유의 아이콘을 표시합니다."
 
 -- 전체 설정 - 글꼴 
 L["Fonts"] = "글꼴"
