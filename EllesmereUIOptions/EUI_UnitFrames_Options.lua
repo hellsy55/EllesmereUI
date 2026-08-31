@@ -1318,7 +1318,9 @@ initFrame:SetScript("OnEvent", function(self)
                 return cfg and AbbreviateNumbers(v, cfg) or AbbreviateNumbers(v)
             end
             local function _pvPct(p01)
-                return _G._EUI_TextDecimals and string.format("%.1f", p01 * 100) or tostring(math.floor(p01 * 100))
+                if not _G._EUI_TextDecimals then return tostring(math.floor(p01 * 100)) end
+                if _G._EUI_PctTrim then return tostring(math.floor(p01 * 1000 + 0.5) / 10) end
+                return string.format("%.1f", p01 * 100)
             end
             local function _pvName()
                 if unitKey == "player" then return UnitName("player") or "Player" end
@@ -5228,6 +5230,13 @@ initFrame:SetScript("OnEvent", function(self)
                       get=function() return db.profile.showDecimalBoss2 ~= false end,
                       set=function(v)
                           db.profile.showDecimalBoss2 = v
+                          if ns.ApplyTextDecimalGlobals then ns.ApplyTextDecimalGlobals() end
+                          ReloadAndUpdate(); UpdatePreview()
+                      end },
+                    { type="toggle", label="Hide Trailing Zeros",
+                      get=function() return db.profile.showDecimalTrimZeros == true end,
+                      set=function(v)
+                          db.profile.showDecimalTrimZeros = v
                           if ns.ApplyTextDecimalGlobals then ns.ApplyTextDecimalGlobals() end
                           ReloadAndUpdate(); UpdatePreview()
                       end },

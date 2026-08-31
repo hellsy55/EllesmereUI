@@ -222,6 +222,8 @@ local defaults = {
         showDecimalBoss2 = true,
         -- With decimals on, "Only Show for % Health" keeps the decimal on PERCENT (77.3%) but leaves VALUES whole (240k); same inline cog.
         showDecimalPercentOnly = false,
+        -- With decimals on, "Hide Trailing Zeros" drops a zero decimal from the PERCENT (100.0% -> 100%, 99.5% unchanged); same inline cog.
+        showDecimalTrimZeros = false,
         -- Player Threat (Non-Tank): additive "Shadow" border on the PLAYER frame while
         -- pulling/holding aggro, instanced content only; global, default off (zero cost
         -- until enabled). Colors mirror the nameplate non-tank threat defaults (has/near aggro).
@@ -2167,9 +2169,10 @@ EllesmereUI.IsSmartPowerPercent = EUI_IsSmartPowerPercent
 -- Show Decimal on Text (global): AbbreviateNumbers config emitting one decimal per
 -- magnitude band (240500 -> "240.5k", 2405000 -> "2.4m"). AbbreviateNumbers runs in
 -- Blizzard's secure context, so a secret value plus this config stays secret-safe
--- (like the no-config call on secret health/power). Tags read two _G flags:
+-- (like the no-config call on secret health/power). Tags read these _G flags:
 --   _G._EUI_AbbrevDecimalCfg = this table when on, nil when off
 --   _G._EUI_TextDecimals     = true/false, selects "%.1f" vs "%d" for percents
+--   _G._EUI_PctTrim          = the trailing-zero percent pair below, nil when off
 ns._decimalAbbrevConfig = { breakpointData = {
     { breakpoint = 1e9, abbreviation = "b", significandDivisor = 1e8, fractionDivisor = 10, abbreviationIsGlobal = false },
     { breakpoint = 1e6, abbreviation = "m", significandDivisor = 1e5, fractionDivisor = 10, abbreviationIsGlobal = false },
@@ -2182,6 +2185,26 @@ ns._decimalAbbrevConfig2 = { breakpointData = {
     { breakpoint = 1e6, abbreviation = "m", significandDivisor = 1e4, fractionDivisor = 100, abbreviationIsGlobal = false },
     { breakpoint = 1e3, abbreviation = "k", significandDivisor = 1e1, fractionDivisor = 100, abbreviationIsGlobal = false },
 } }
+-- "Hide Trailing Zeros": AbbreviateNumbers drops a zero fraction ("100") but keeps a
+-- real one ("99.5"), which "%.1f" cannot do and a SECRET percent forbids doing with
+-- Lua string ops. It TRUNCATES though, so a fractional significandDivisor misreads
+-- (0.1 turns 33.3 into "33.2"); the curve does the scaling instead, handing over whole
+-- tenths/hundredths, +0.5 so truncation lands on the same value "%.1f" would round to.
+local function MakePctTrim(scale, fractionDivisor)
+    if not (C_CurveUtil and C_CurveUtil.CreateCurve and Enum and Enum.LuaCurveType) then return nil end
+    local curve = C_CurveUtil.CreateCurve()
+    curve:SetType(Enum.LuaCurveType.Linear)
+    curve:AddPoint(0.0, 0.5)
+    curve:AddPoint(1.0, scale + 0.5)
+    return {
+        curve = curve,
+        cfg = { breakpointData = {
+            { breakpoint = 0, abbreviation = "", significandDivisor = 1, fractionDivisor = fractionDivisor, abbreviationIsGlobal = false },
+        } },
+    }
+end
+ns._pctTrim  = MakePctTrim(1000, 10)
+ns._pctTrim2 = MakePctTrim(10000, 100)
 function ns.ApplyTextDecimalGlobals()
     if db and db.profile and db.profile.showDecimalOnText then
         _G._EUI_TextDecimals = true
@@ -2191,21 +2214,28 @@ function ns.ApplyTextDecimalGlobals()
         local percentOnly = db.profile.showDecimalPercentOnly
         _G._EUI_AbbrevDecimalCfg = ns._decimalAbbrevConfig
         if percentOnly then _G._EUI_AbbrevDecimalCfg = nil end
+        -- Percent-only, so "Only Show for % Health" never withholds these.
+        local trimZeros = db.profile.showDecimalTrimZeros
+        _G._EUI_PctTrim = trimZeros and ns._pctTrim or nil
         -- Boss frames get a second decimal place. Tags use the 1-decimal path
         -- for non-boss units when the flag is set, and ignore it when nil.
         if db.profile.showDecimalBoss2 ~= false then
             _G._EUI_BossExtraDecimal = true
             _G._EUI_AbbrevDecimalCfg2 = ns._decimalAbbrevConfig2
             if percentOnly then _G._EUI_AbbrevDecimalCfg2 = nil end
+            _G._EUI_PctTrim2 = trimZeros and ns._pctTrim2 or nil
         else
             _G._EUI_BossExtraDecimal = false
             _G._EUI_AbbrevDecimalCfg2 = nil
+            _G._EUI_PctTrim2 = nil
         end
     else
         _G._EUI_TextDecimals = false
         _G._EUI_AbbrevDecimalCfg = nil
         _G._EUI_BossExtraDecimal = false
         _G._EUI_AbbrevDecimalCfg2 = nil
+        _G._EUI_PctTrim = nil
+        _G._EUI_PctTrim2 = nil
     end
 end
 
@@ -2234,9 +2264,17 @@ do
     if not unit or not UnitExists(unit) then return "" end
     if not UnitIsConnected(unit) then return "OFFLINE" end
     if UnitIsDeadOrGhost(unit) then return "DEAD" end
+    local boss = _G._EUI_BossExtraDecimal and string.sub(unit, 1, 4) == "boss"
+    local trim
+    if boss then trim = _G._EUI_PctTrim2 else trim = _G._EUI_PctTrim end
+    if trim then
+      local scaled = UnitHealthPercent(unit, true, trim.curve)
+      if not scaled then return "0" end
+      return AbbreviateNumbers(scaled, trim.cfg)
+    end
     local pct = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
     if not pct then return "0" end
-    if _G._EUI_BossExtraDecimal and string.sub(unit, 1, 4) == "boss" then
+    if boss then
       return string_format("%.2f", pct)
     end
     return string_format(_G._EUI_TextDecimals and "%.1f" or "%d", pct)
@@ -2626,8 +2664,14 @@ do
     -- _EUI_ globals; the compiled strings stay registered only while the tag
     -- engine still runs).
     P.perhp = function(u)
+        local boss = _G._EUI_BossExtraDecimal and string.sub(u, 1, 4) == "boss"
+        local trim
+        if boss then trim = _G._EUI_PctTrim2 else trim = _G._EUI_PctTrim end
+        if trim then
+            return AbbreviateNumbers(UnitHealthPercent(u, true, trim.curve), trim.cfg)
+        end
         local fmt = _G._EUI_TextDecimals and "%.1f" or "%d"
-        if _G._EUI_BossExtraDecimal and string.sub(u, 1, 4) == "boss" then fmt = "%.2f" end
+        if boss then fmt = "%.2f" end
         return sf(fmt, UnitHealthPercent(u, true, CurveConstants.ScaleTo100))
     end
     P.perpp = function(u)
