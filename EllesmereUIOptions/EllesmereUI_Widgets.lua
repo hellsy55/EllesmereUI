@@ -7440,8 +7440,11 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local hiddenCount = 0
         for _, item in ipairs(items) do
             -- isModifier rows (the Visibility match toggle) are not conditions: excluded
-            -- from the summary and from the "All" shortcut.
-            if not item.isHeader and not item.isTopAction and not item.isModifier then
+            -- from the summary and from the "All" shortcut. A row an override session
+            -- has sealed off is excluded too: it belongs to the shared value, not to what
+            -- the override holds, and mixing the two reads as one nonsense selection.
+            if not item.isHeader and not item.isTopAction and not item.isModifier
+               and not (item.ovLockedFn and item.ovLockedFn()) then
                 total = total + 1
                 if getFn(item.key) then names[#names + 1] = EllesmereUI.L(item.label) end
                 -- Dual-lane rows: the hide lane reads through getFn(key, true).
