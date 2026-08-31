@@ -1908,6 +1908,13 @@ EllesmereUI.RESKIN = {
     BRD_ALPHA  = 0.18,   -- border alpha (white)
 }
 
+-- LFG queue accept countdown defaults. Read by both the skin that paints the
+-- bar and the options sliders that display the unset value.
+EllesmereUI.QUEUE_TIMER = {
+    TEXT_R = 1, TEXT_G = 0.831, TEXT_B = 0,   -- #ffd400
+    TEXT_SIZE = 9, BAR_HEIGHT = 11, TEXT_OFFSET_Y = 0,
+}
+
 -- Unified tooltip background for BOTH the Blizzard tooltip reskin and EUI widget tooltips.
 -- Customizable via Blizz UI Enhanced > Blizzard Tooltip (tooltipBgColor/tooltipBgOpacity in
 -- EllesmereUIDB); unset = RESKIN palette. Returns r,g,b,a (0 is valid: Lua 0 is truthy, so `or` fallback fires on nil only).
