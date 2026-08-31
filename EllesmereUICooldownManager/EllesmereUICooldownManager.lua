@@ -9950,33 +9950,45 @@ end
 -- range-on-override-swap staleness it replaced is cosmetic, and is repainted
 -- below WITHIN this law: our own texture only, no frame field, no paint call.
 
--- Blizzard arms the range check on the BASE spell, so an override that swaps the
--- live spell leaves the icon painted for whichever one was up at the last range
--- crossing. Repainted on fd.tex and the side table, never the frame, and coming
--- back into range uses Blizzard's colour constants rather than their resolver,
--- which the law above forbids calling. A secret usability answer leaves the icon
--- for their next pass. On ns.* because the main chunk is at Lua 5.1's 200-local cap.
-function ns.ApplyOverrideRangeTint(icon, outOfRange, liveSpellID)
+-- Blizzard arms the range check on the BASE spell, so while an override is up the
+-- icon tracks the wrong spell's range. Repainted on fd.tex and the side table,
+-- never the frame. The hook RE-POLLS instead of replaying a stored answer: it
+-- fires on every Blizzard repaint, including the one their own range event drives,
+-- so walking back into range clears the tint without a second event of our own. A
+-- secret or unknown answer leaves their colour alone. Cleared to nil when no
+-- override is live, since Blizzard's own check is correct for the base spell.
+-- On ns.* because the main chunk is at Lua 5.1's 200-local cap.
+function ns.ApplyOverrideRangeTint(icon, overrideSpellID)
     local fd = _getFD(icon)
     local tex = fd and fd.tex
     local C = CooldownViewerConstants
     if not (tex and C) then return end
-    fd._oorOverride = outOfRange or nil
+    fd._oorSpellID = overrideSpellID
     if not fd._oorHooked then
         fd._oorHooked = true
         local guard = false
         hooksecurefunc(tex, "SetVertexColor", function()
-            if guard or not fd._oorOverride then return end
+            local sid = fd._oorSpellID
+            if guard or not sid then return end
+            local r = C_Spell.IsSpellInRange(sid)
+            if issecretvalue and issecretvalue(r) then return end
+            if r ~= false then return end
             guard = true
             tex:SetVertexColor(C.ITEM_NOT_IN_RANGE_COLOR:GetRGBA())
             guard = false
         end)
     end
-    if outOfRange then
+    -- Repaint once now: the hook only rides Blizzard's own writes, and the swap
+    -- that brought us here does not produce one.
+    local inRange = overrideSpellID and C_Spell.IsSpellInRange(overrideSpellID)
+    if issecretvalue and issecretvalue(inRange) then return end
+    if inRange == false then
         tex:SetVertexColor(C.ITEM_NOT_IN_RANGE_COLOR:GetRGBA())
         return
     end
-    local usable, notEnoughMana = C_Spell.IsSpellUsable(liveSpellID)
+    local sid = overrideSpellID or icon.rangeCheckSpellID
+    if not sid then return end
+    local usable, notEnoughMana = C_Spell.IsSpellUsable(sid)
     if issecretvalue and (issecretvalue(usable) or issecretvalue(notEnoughMana)) then
         return
     end
@@ -9996,18 +10008,15 @@ function ns.ResyncCdmRange(baseSpellID, overrideSpellID)
     if issecretvalue and (issecretvalue(baseSpellID) or issecretvalue(overrideSpellID)) then
         return
     end
-    local IsSpellInRange = C_Spell and C_Spell.IsSpellInRange
-    if not (baseSpellID and IsSpellInRange) then return end
-    -- Poll the live override id: a base id whose spell is currently replaced
-    -- can answer nil.
-    local liveSpellID = overrideSpellID or baseSpellID
-    local inRange = IsSpellInRange(liveSpellID)
-    if issecretvalue and issecretvalue(inRange) then return end
-    local outOfRange = (inRange == false)
+    if not (baseSpellID and C_Spell and C_Spell.IsSpellInRange) then return end
+    -- nil once the override lapses, which hands the icon back to Blizzard: their
+    -- own check is armed on the base spell and is right again from that moment.
+    local liveOverride = (overrideSpellID and overrideSpellID ~= baseSpellID)
+        and overrideSpellID or nil
     for _, icons in pairs(cdmBarIcons) do
         for _, icon in ipairs(icons) do
             if icon.rangeCheckSpellID == baseSpellID then
-                ns.ApplyOverrideRangeTint(icon, outOfRange, liveSpellID)
+                ns.ApplyOverrideRangeTint(icon, liveOverride)
             end
         end
     end
