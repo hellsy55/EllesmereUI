@@ -8869,7 +8869,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
           separatorFn = function() return GetMatchAny() and " or " or ", " end,
           -- Every row follows the same rule now: a checked Hide lane hides while its
           -- condition holds, in both match modes.
-          hideLaneTooltip = function() return "Hide while this condition is true" end })
+          hideLaneTooltip = "Hide while this condition is true" })
     PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
     leftRgn._control = cbDD
     leftRgn._lastInline = nil

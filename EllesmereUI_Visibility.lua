@@ -744,17 +744,27 @@ function EUI.BuildVisModeConjuncts(vm)
     local conj, negGate = "", ""
     -- Hide lanes are vetoes, but under All a veto is exactly the AND-conjunct of the
     -- negated condition, so each one folds into the term its opposite SHOW lane already
-    -- emits instead of needing a gate of its own. Both lanes of one row at once cancels
-    -- out here the same way a saturated axis does.
-    local d1 = vm.show_dragonriding or vm.hide_not_dragonriding
-    local d2 = vm.show_not_dragonriding or vm.hide_dragonriding
+    -- emits instead of needing a gate of its own. A lane whose OWN row also has its Show
+    -- box set is skipped, the same rule VisModeHideVeto applies, so the two never fold
+    -- into a term the Lua verdict does not agree with.
+    local hc1 = vm.hide_in_combat and not vm.in_combat
+    local hc2 = vm.hide_out_of_combat and not vm.out_of_combat
+    local hd1 = vm.hide_dragonriding and not vm.show_dragonriding
+    local hd2 = vm.hide_not_dragonriding and not vm.show_not_dragonriding
+    -- Both Hide lanes of one axis: every state is vetoed. Folding them would cancel out
+    -- and read as a saturated (unconstrained) axis, while the Lua veto hides everywhere.
+    -- An unconditional leading clause is the honest compilation; both compilers prepend
+    -- negGate, so it wins as the first matching clause.
+    if (hc1 and hc2) or (hd1 and hd2) then return "", "hide; " end
+    local d1 = vm.show_dragonriding or hd2
+    local d2 = vm.show_not_dragonriding or hd1
     if d1 and not d2 then
         conj = conj .. "advflyable,flying,"
     elseif d2 and not d1 then
         negGate = "[advflyable,flying] hide; "
     end
-    local c1 = vm.in_combat or vm.hide_out_of_combat
-    local c2 = vm.out_of_combat or vm.hide_in_combat
+    local c1 = vm.in_combat or hc2
+    local c2 = vm.out_of_combat or hc1
     if c1 and not c2 then
         conj = conj .. "combat,"
     elseif c2 and not c1 then
@@ -987,7 +997,6 @@ end
 -- Lua-resolved axes, which a driver could never keep honest.
 function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     wrap = wrap or ""
-    local wrappedShow = (wrap ~= "") and ("[" .. wrap .. "] show; hide") or "show"
     -- Never is an exclusive scalar, not an axis, so nothing can out-vote it.
     if (store[legacyKey] or "always") == "never" then return "hide", 1, 0 end
 
@@ -1038,7 +1047,11 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     if EUI.TallyVisibilityOptionAxes then
         luaC, luaP = EUI.TallyVisibilityOptionAxes(store, "luaOnly", edges)
     end
-    if luaP > 0 then return Finish(wrappedShow, luaC, 0) end
+    -- A passing Lua-only SHOW lane settles the disjunction, but it must not settle the
+    -- vetoes: returning a bare "show" here would skip the compiler below, and the compiler
+    -- is the only place the leading hide gates are emitted. forceShow already means exactly
+    -- this -- show outright, gates intact -- so the fall-through reuses it.
+    local settled = luaP > 0
 
     local modes = vm
     if not modes then
@@ -1076,7 +1089,7 @@ function EUI.BuildAnyMatchTail(store, legacyKey, vm, wrap, edges)
     end
     local hasMouseover = (vm and vm.mouseover) or (store[legacyKey] == "mouseover") or false
     local tail, axes, gates = EUI.BuildVisibilityDriverStringAny("", modes, opts,
-        luaC + dropped, wrap, hasMouseover, forceShow)
+        luaC + dropped, wrap, hasMouseover, forceShow or settled)
     -- liveAxes counts the gates too: a string that carries nothing but "[mounted] hide"
     -- is still a live driver worth registering.
     return Finish(tail, axes + luaC + dropped, axes + gates)
