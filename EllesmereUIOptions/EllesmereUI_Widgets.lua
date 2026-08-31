@@ -8783,6 +8783,13 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local function WriteSel(sel, store)
         -- Never-empty invariant: clearing the last condition means Always.
         if not next(sel) then sel.always = true end
+        -- A shared edit outside a session also clears a STRANDED override marker. Two
+        -- ways one can be left behind: the management list's Remove drops the entry but
+        -- deliberately leaves live values alone, and a profile exported while an override
+        -- applied carries the key into every import of it. Either way nothing owns the
+        -- key any more and the element would be stuck on it; a real applied override
+        -- simply writes it back on its next apply.
+        if not OvSessionActive() then store.visibilityOverride = nil end
         EllesmereUI.SetVisibilitySelection(store, legacyKey, sel, opts.applyScalarFn)
     end
 
@@ -9072,7 +9079,13 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         type = "dropdown", text = opts.label or "Visibility",
         getValue = function()
             local s = opts.getStore()
-            return s and (s[legacyKey] or "always") or "always"
+            if not s then return "always" end
+            -- Both are read on purpose, and unconditionally: the gold walk traces what a
+            -- getter READS, so a row whose override lives in either key has to touch both
+            -- or it never marks itself as overridden. The override wins as the value,
+            -- being the effective one this is meant to report.
+            local ov, base = s.visibilityOverride, s[legacyKey]
+            return ov or base or "always"
         end,
         setValue = function(v)
             local s = opts.getStore()
