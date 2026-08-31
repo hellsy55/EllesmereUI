@@ -7682,6 +7682,9 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
 
         local yOff = -4
         local _allRows = {}  -- { frame, isHeader, label(string), height }
+        -- Published for the refreshers below: the rows are parented to the SCROLL CHILD,
+        -- so a menu:GetChildren() walk never reaches them.
+        menu._rows = _allRows
         for _, item in ipairs(items) do
             -- Top-action items render above the search box, never here.
             if item.isTopAction then -- luacheck: ignore (intentional empty)
@@ -7703,9 +7706,10 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 hdrLine:SetHeight(1)
                 hdrLine:SetPoint("LEFT", hdrLbl, "RIGHT", 6, 0)
                 hdrLine:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+                local hdrR
                 -- Opt-in right caption (item.rightLabel): labels the hide-lane column on dual menus.
                 if item.rightLabel then
-                    local hdrR = hdr:CreateFontString(nil, "OVERLAY")
+                    hdrR = hdr:CreateFontString(nil, "OVERLAY")
                     hdrR:SetFont(fontPath, 10, "")
                     hdrR:SetTextColor(0.5, 0.5, 0.5, 1)
                     hdrR:SetPoint("RIGHT", hdr, "RIGHT", -10, 0)
@@ -7714,6 +7718,25 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     hdrLine:SetPoint("RIGHT", hdrR, "LEFT", -6, 0)
                 else
                     hdrLine:SetPoint("RIGHT", hdr, "RIGHT", -10, 0)
+                end
+                -- opts.ovLockedFn: the whole section below this header is locked (an
+                -- override session). The header carries that instead of every row
+                -- shouting it -- caption, divider and right caption take the override
+                -- system's red, the same one a conflicting slot has in the panel.
+                if opts.ovLockedFn then
+                    local function UpdateHdrLocked()
+                        if opts.ovLockedFn() then
+                            hdrLbl:SetTextColor(0.9, 0.2, 0.2, 1)
+                            hdrLine:SetColorTexture(0.9, 0.2, 0.2, 0.6)
+                            if hdrR then hdrR:SetTextColor(0.9, 0.2, 0.2, 1) end
+                        else
+                            hdrLbl:SetTextColor(0.5, 0.5, 0.5, 1)
+                            hdrLine:SetColorTexture(0.3, 0.3, 0.3, 0.5)
+                            if hdrR then hdrR:SetTextColor(0.5, 0.5, 0.5, 1) end
+                        end
+                    end
+                    hdr._updateLocked = UpdateHdrLocked
+                    UpdateHdrLocked()
                 end
                 if item.tooltip then
                     hdr:EnableMouse(true)
@@ -7862,6 +7885,21 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             local function ShowLaneLocked()
                 return item.showLockedFn and item.showLockedFn() or false
             end
+            -- item.ovLockedFn is the override-session lock: it blocks the click like any
+            -- other lock, but is painted and explained differently, because the row is not
+            -- merely unavailable here -- it cannot be captured into an override at all.
+            local function OvLocked()
+                return (item.ovLockedFn and item.ovLockedFn()) and true or false
+            end
+            local function RowLocked()
+                if OvLocked() or item.locked then return true end
+                return (item.lockedFn and item.lockedFn()) and true or false
+            end
+            local function LockedTip()
+                local lt = (OvLocked() and item.ovLockedTooltip) or item.lockedTooltip
+                if type(lt) == "function" then lt = lt() end
+                return lt
+            end
             local function UpdateCheck()
                 if chk then
                     if getFn(item.key) then
@@ -7902,8 +7940,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             row:SetScript("OnEnter", function()
                 if row._isLocked then
                     -- Locked rows keep the gray look (no highlight); if the item explains its lock, show that instead of the normal tooltip.
-                    local lt = item.lockedTooltip
-                    if type(lt) == "function" then lt = lt() end
+                    local lt = LockedTip()
                     if lt then
                         EllesmereUI.ShowWidgetTooltip(row, lt)
                     end
@@ -7919,7 +7956,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             end)
             row:SetScript("OnLeave", function()
                 if row._isLocked then
-                    if item.lockedTooltip then
+                    if item.lockedTooltip or item.ovLockedTooltip then
                         EllesmereUI.HideWidgetTooltip()
                     end
                     return
@@ -7931,7 +7968,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 end
             end)
             local function UpdateLocked()
-                local isLocked = item.locked or (item.lockedFn and item.lockedFn())
+                local isLocked = RowLocked()
                 -- Mouse stays enabled so locked rows can explain themselves on hover; clicks are guarded independently in OnClick.
                 row._isLocked = isLocked and true or false
                 if isLocked then
@@ -7943,6 +7980,16 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             row._updateLocked = UpdateLocked
             UpdateLocked()
             local function AfterToggle()
+                -- opts.notifyWrites: join the primary capture path every other widget's
+                -- setter uses. Without it a checklist has only the polling fallback,
+                -- whose mouse attribution is CLEARED while the menu (a UIParent child
+                -- with no popup marker) holds focus, so an override session never sees
+                -- the write when it happens. ddBtn's parent carries the row's
+                -- _captureCfg, so the slot is attributed exactly. Opt-in: every other
+                -- checklist keeps the behaviour it has always had.
+                if opts.notifyWrites and EllesmereUI._NotifySettingWrite then
+                    EllesmereUI._NotifySettingWrite(ddBtn)
+                end
                 UpdateLabel()
                 -- Refresh checkbox visuals + dynamic action labels, so items whose checked state depends on others (e.g. "Always" in crosshair) update live. Locked visuals refresh too, so rows whose lockedFn depends on the current selection never show a stale gray/active state.
                 for _, r in ipairs(_allRows) do
@@ -7963,7 +8010,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 end
             end
             row:SetScript("OnClick", function()
-                if item.locked or (item.lockedFn and item.lockedFn()) then return end
+                if RowLocked() then return end
                 if negBox and ShowLaneLocked() then
                     setFn(item.key, not getFn(item.key, true), true)
                 else
@@ -7973,12 +8020,16 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             end)
             if negBox then
                 negBox:SetScript("OnClick", function()
-                    if item.locked or (item.lockedFn and item.lockedFn()) then return end
+                    if RowLocked() then return end
                     setFn(item.key, not getFn(item.key, true), true)
                     AfterToggle()
                 end)
                 negBox:SetScript("OnEnter", function()
-                    if row._isLocked then return end
+                    if row._isLocked then
+                        local lt = LockedTip()
+                        if lt then EllesmereUI.ShowWidgetTooltip(negBox, lt) end
+                        return
+                    end
                     lbl:SetTextColor(1, 1, 1, 1)
                     hl:SetColorTexture(1, 1, 1, 0.04)
                     local hlt = opts.hideLaneTooltip
@@ -8153,6 +8204,13 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             menu:Hide()
             return
         end
+        -- A static menu is built once and reused, so anything that changed while it was
+        -- closed would show stale: refresh checked state AND locks on every open. The
+        -- case that matters is an override session starting between two opens.
+        for _, r in ipairs(menu._rows or {}) do
+            if r.frame._updateCheck then r.frame._updateCheck() end
+            if r.frame._updateLocked then r.frame._updateLocked() end
+        end
         -- Match the panel's effective scale since menu lives on UIParent
         local btnScale = ddBtn:GetEffectiveScale()
         local uiScale = UIParent:GetEffectiveScale()
@@ -8210,8 +8268,9 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
     local function RefreshAll()
         UpdateLabel()
         if menu then
-            for _, child in pairs({menu:GetChildren()}) do
-                if child._updateCheck then child._updateCheck() end
+            for _, r in ipairs(menu._rows or {}) do
+                if r.frame._updateCheck then r.frame._updateCheck() end
+                if r.frame._updateLocked then r.frame._updateLocked() end
             end
         end
     end
@@ -8532,6 +8591,16 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     local GROUP_KEYS = (EllesmereUI.VIS_AXES and EllesmereUI.VIS_AXES.group)
         or { "in_raid", "in_party", "solo" }
 
+    -- Only the two exclusive states survive an override: the checklist writes them to
+    -- the legacy scalar, which the value system can hold. Everything else lives in the
+    -- mode SET, the match mode or an option lane, all excluded from it, so a session
+    -- locks those rows instead of letting a click land that would be dropped.
+    local function OvSessionActive()
+        return (EllesmereUI.SpecOverrides_EditSessionActive
+            and EllesmereUI.SpecOverrides_EditSessionActive()) and true or false
+    end
+    local OV_LOCK_TIP = "Only Never and Always can be overridden. This condition stays on the shared value while you edit an override."
+
     -- Per-module row list. `listed` collects the legacy SCALAR values this row can
     -- actually reach, so the orphan rule below only fires for genuinely foreign ones.
     local items, defs, listed = {}, {}, {}
@@ -8559,6 +8628,13 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
             local item = { key = def.key, label = def.label, tooltip = def.tooltip,
                            dual = def.axis and true or nil,
                            isModifier = def.modifier }
+            -- Never / Always / Mouseover are the exclusive states: each one writes the
+            -- legacy scalar on its own, which an override CAN hold. Everything else is
+            -- the compound half.
+            if def.key ~= "never" and def.key ~= "always" and def.key ~= "mouseover" then
+                item.ovLockedFn = OvSessionActive
+                item.ovLockedTooltip = OV_LOCK_TIP
+            end
             if caps.noGroupModes and def.axis == "group" then
                 item.locked = true
                 item.lockedTooltip = (caps.lockedTooltips and caps.lockedTooltips[def.key])
@@ -8865,6 +8941,12 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         leftRgn, opts.width or 210, leftRgn:GetFrameLevel() + 2,
         items, GetChecked, SetChecked, nil, 12, nil, nil, OnMenuClosed,
         { emptyLabel = "Always",
+          -- Override sessions have to see each click as it happens: parts of this
+          -- control are excluded from them and the session says so per write.
+          notifyWrites = true,
+          -- Paints the section headers red while a session is live, so the locked half
+          -- is announced once at the top instead of by every row.
+          ovLockedFn = OvSessionActive,
           -- The separator reads the match live: under Any the conditions are OR'd.
           separatorFn = function() return GetMatchAny() and " or " or ", " end,
           -- Every row follows the same rule now: a checked Hide lane hides while its

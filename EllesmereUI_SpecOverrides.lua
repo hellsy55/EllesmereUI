@@ -343,9 +343,48 @@ local SETTING_BLACKLIST = {
     },
 }
 
+-- Only the COMPOUND half of the unified Visibility row is excluded: the mode SET
+-- (a table this system cannot bank), the match mode and the option lanes, which
+-- only mean anything while they agree with the scalar and which a per-leaf capture
+-- can therefore only ever hold part of. The legacy scalar stays capturable on
+-- purpose, so Never / Always / a single legacy mode keep overriding exactly as they
+-- did before the unified row existed. Only override-ELIGIBLE folders hosting the
+-- row are listed; the rest already sit in FOLDER_BLACKLIST above.
+local VIS_OV_FOLDERS = {
+    "EllesmereUIActionBars", "EllesmereUIChat", "EllesmereUICooldownManager",
+    "EllesmereUIDataBars", "EllesmereUIMinimap", "EllesmereUIResourceBars",
+    "EllesmereUIUnitFrames",
+}
+
+-- visibilityModes covers the mode set and its hide lanes at once: the gate below
+-- tests every path segment, so the leaves under it never need naming.
+for i = 1, #VIS_OV_FOLDERS do
+    local folder = VIS_OV_FOLDERS[i]
+    local set = SETTING_BLACKLIST[folder]
+    if not set then set = {}; SETTING_BLACKLIST[folder] = set end
+    set.visibilityModes = true
+    set.visibilityMatch = true
+end
+
+-- The lanes come from the shared VIS_OPT_KEYS, never a copy, so one added later
+-- cannot silently become capturable again. Lazy because this file can load first;
+-- the loop above already guaranteed every folder has a set. Idempotent.
+local _visLanesDone = false
+local function EnsureVisLaneBlacklist()
+    if _visLanesDone then return end
+    local keys = EllesmereUI.VIS_OPT_KEYS
+    if not keys then return end
+    for i = 1, #VIS_OV_FOLDERS do
+        local set = SETTING_BLACKLIST[VIS_OV_FOLDERS[i]]
+        for k = 1, #keys do set[keys[k]] = true end
+    end
+    _visLanesDone = true
+end
+
 -- The one predicate every capture/apply/prune gate uses: folder-blacklisted
 -- OR setting-blacklisted. Enforced in BOTH directions plus prune.
 local function BlacklistedFKey(fkey)
+    EnsureVisLaneBlacklist()
     local folder, path = SplitFKey(fkey)
     if not folder then return false end
     if FOLDER_BLACKLIST[folder] then return true end
