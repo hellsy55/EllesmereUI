@@ -587,6 +587,67 @@ local function ReportChannel()
     return nil   -- solo: nobody to report to
 end
 
+-- The client refuses (and taints) any single SendChatMessage over this many
+-- characters -- a raid-wide Repair/Flask/etc. report blows past it easily
+-- once the roster is more than a handful of names, so a long report has to
+-- go out as more than one message rather than not go out at all.
+local CHAT_MSG_LIMIT   = 255
+-- Marks every message after the first as a continuation of the one before
+-- it, since it carries no title of its own once the split happens mid-list.
+local CHAT_CONT_PREFIX = "(cont.) "
+-- Staggered rather than fired back to back: the server's own chat throttle
+-- can silently eat messages sent in the same instant, which would look like
+-- the addon dropped part of the report.
+local CHAT_CHUNK_DELAY = 0.3
+
+-- The rightmost ", " that still ends at or before `limit`, so a cut always
+-- falls between two list entries and never through the middle of a name.
+-- Nil means there is no such boundary at all (one entry alone is longer
+-- than the whole limit) -- the caller hard-cuts rather than lose the rest
+-- of the report.
+local function LastBoundary(text, limit)
+    local cut
+    local from = 1
+    while true do
+        local s = text:find(", ", from, true)
+        if not s or s + 1 > limit then break end
+        cut = s + 1
+        from = s + 1
+    end
+    return cut
+end
+
+-- Splits a report line into chat-safe pieces. The first piece is budgeted
+-- the full limit, since it goes out as-is; every piece after that is
+-- budgeted CHAT_CONT_PREFIX shorter, since SendChatChunks prepends that
+-- prefix before sending it -- computed here, not tacked on after, so the
+-- prefixed message itself never exceeds CHAT_MSG_LIMIT.
+local function ChatChunks(text)
+    local chunks = {}
+    local limit = CHAT_MSG_LIMIT
+    while #text > limit do
+        local cut = LastBoundary(text, limit) or limit
+        chunks[#chunks + 1] = text:sub(1, cut)
+        text = text:sub(cut + 1)
+        limit = CHAT_MSG_LIMIT - #CHAT_CONT_PREFIX
+    end
+    chunks[#chunks + 1] = text
+    return chunks
+end
+
+-- Sends one report as one or more chat messages, continuation pieces
+-- trailing the first by CHAT_CHUNK_DELAY apiece. A short report (the common
+-- case) is a single immediate SendChatMessage, same as before this existed.
+local function SendChatChunks(text, channel)
+    local chunks = ChatChunks(text)
+    SendChatMessage(chunks[1], channel)
+    for i = 2, #chunks do
+        local msg = CHAT_CONT_PREFIX .. chunks[i]
+        local delay = (i - 1) * CHAT_CHUNK_DELAY
+        C_Timer.After(delay, function() SendChatMessage(msg, channel) end)
+    end
+end
+
 -- toChat = true posts to /guild (in a raid) or /party (see ReportChannel); false (or
 -- solo, where there is no channel to post to) prints to the player's own
 -- chat frame only.
@@ -595,7 +656,7 @@ local function SendOrPrint(text, toChat)
     if toChat then
         local channel = ReportChannel()
         if channel then
-            SendChatMessage(text, channel)
+            SendChatChunks(text, channel)
             return
         end
     end
