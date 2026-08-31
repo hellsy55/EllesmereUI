@@ -7706,10 +7706,9 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 hdrLine:SetHeight(1)
                 hdrLine:SetPoint("LEFT", hdrLbl, "RIGHT", 6, 0)
                 hdrLine:SetColorTexture(0.3, 0.3, 0.3, 0.5)
-                local hdrR
                 -- Opt-in right caption (item.rightLabel): labels the hide-lane column on dual menus.
                 if item.rightLabel then
-                    hdrR = hdr:CreateFontString(nil, "OVERLAY")
+                    local hdrR = hdr:CreateFontString(nil, "OVERLAY")
                     hdrR:SetFont(fontPath, 10, "")
                     hdrR:SetTextColor(0.5, 0.5, 0.5, 1)
                     hdrR:SetPoint("RIGHT", hdr, "RIGHT", -10, 0)
@@ -7718,25 +7717,6 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     hdrLine:SetPoint("RIGHT", hdrR, "LEFT", -6, 0)
                 else
                     hdrLine:SetPoint("RIGHT", hdr, "RIGHT", -10, 0)
-                end
-                -- opts.ovLockedFn: the whole section below this header is locked (an
-                -- override session). The header carries that instead of every row
-                -- shouting it -- caption, divider and right caption take the override
-                -- system's red, the same one a conflicting slot has in the panel.
-                if opts.ovLockedFn then
-                    local function UpdateHdrLocked()
-                        if opts.ovLockedFn() then
-                            hdrLbl:SetTextColor(0.9, 0.2, 0.2, 1)
-                            hdrLine:SetColorTexture(0.9, 0.2, 0.2, 0.6)
-                            if hdrR then hdrR:SetTextColor(0.9, 0.2, 0.2, 1) end
-                        else
-                            hdrLbl:SetTextColor(0.5, 0.5, 0.5, 1)
-                            hdrLine:SetColorTexture(0.3, 0.3, 0.3, 0.5)
-                            if hdrR then hdrR:SetTextColor(0.5, 0.5, 0.5, 1) end
-                        end
-                    end
-                    hdr._updateLocked = UpdateHdrLocked
-                    UpdateHdrLocked()
                 end
                 if item.tooltip then
                     hdr:EnableMouse(true)
@@ -8062,10 +8042,72 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     end)
                 end
             end
+            -- Marks the contiguous run the override overlay below seals off.
+            row._ovBlock = item.ovLockedFn and true or nil
             _allRows[#_allRows + 1] = { frame = row, isHeader = false, label = item.label, height = ITEM_H }
             yOff = yOff - ITEM_H
 
             end -- isHeader else
+        end
+
+        -- Override session: the excluded rows are sealed off as ONE block rather than
+        -- marked one by one -- 1px red border, a 5% red wash, a lock glyph with a caption
+        -- and a click blocker holding the explanation, the same treatment SetSlotMark
+        -- gives an override-red slot in the panel.
+        -- Parented to the scroll child so it travels with the rows.
+        if opts.ovLockedFn then
+            local first, last
+            for i = 1, #_allRows do
+                if _allRows[i].frame._ovBlock then
+                    -- A header sitting directly on top of the run introduces it.
+                    if not first then
+                        first = (i > 1 and _allRows[i - 1].isHeader) and (i - 1) or i
+                    end
+                    last = i
+                end
+            end
+            if first and last then
+                local seal = CreateFrame("Button", nil, itemParent)
+                seal:SetPoint("TOPLEFT", _allRows[first].frame, "TOPLEFT", 1, 0)
+                -- The 4px scrollbar track sits 4px off the right edge, ON the scroll
+                -- frame rather than in here, so the seal stops short of it instead of
+                -- running underneath and having the bar cut through its border.
+                seal:SetPoint("BOTTOMRIGHT", _allRows[last].frame, "BOTTOMRIGHT", -9, 0)
+                seal:SetFrameLevel(menu:GetFrameLevel() + 8)
+                local wash = seal:CreateTexture(nil, "BACKGROUND")
+                wash:SetAllPoints()
+                wash:SetColorTexture(0.9, 0.2, 0.2, 0.05)
+                if PP and PP.CreateBorder then
+                    PP.CreateBorder(seal, 0.9, 0.2, 0.2, 0.9, 1, "OVERLAY", 7)
+                end
+                -- Caption on the block's top edge rather than across its middle: the wash
+                -- is deliberately faint, so a centred label would land on readable rows.
+                local sealLbl = seal:CreateFontString(nil, "OVERLAY", nil, 7)
+                sealLbl:SetFont(fontPath, 11, "")
+                sealLbl:SetTextColor(1, 0.35, 0.35, 1)
+                sealLbl:SetPoint("TOPRIGHT", seal, "TOPRIGHT", -6, -5)
+                sealLbl:SetText(EllesmereUI.L("Not overridable"))
+                -- The section header's divider line runs straight THROUGH the caption at
+                -- this height. A plate in the menu's own background colour cuts the line
+                -- for the width of the text: the seal sits at a higher frame level than
+                -- the header, so anything it draws covers that line.
+                local plate = seal:CreateTexture(nil, "ARTWORK", nil, 6)
+                plate:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G,
+                    EllesmereUI.DD_BG_B, 1)
+                plate:SetPoint("TOPLEFT", sealLbl, "TOPLEFT", -5, 2)
+                plate:SetPoint("BOTTOMRIGHT", sealLbl, "BOTTOMRIGHT", 5, -2)
+                seal:EnableMouse(true)
+                seal:SetScript("OnEnter", function(self)
+                    if opts.ovLockedTooltip then
+                        EllesmereUI.ShowWidgetTooltip(self, opts.ovLockedTooltip)
+                    end
+                end)
+                seal:SetScript("OnLeave", function()
+                    EllesmereUI.HideWidgetTooltip()
+                end)
+                menu._ovSeal = seal
+                seal:SetShown(opts.ovLockedFn())
+            end
         end
 
         -- Close button at bottom of dropdown (optional)
@@ -8211,6 +8253,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             if r.frame._updateCheck then r.frame._updateCheck() end
             if r.frame._updateLocked then r.frame._updateLocked() end
         end
+        if menu._ovSeal then menu._ovSeal:SetShown(opts.ovLockedFn()) end
         -- Match the panel's effective scale since menu lives on UIParent
         local btnScale = ddBtn:GetEffectiveScale()
         local uiScale = UIParent:GetEffectiveScale()
@@ -8272,6 +8315,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 if r.frame._updateCheck then r.frame._updateCheck() end
                 if r.frame._updateLocked then r.frame._updateLocked() end
             end
+            if menu._ovSeal then menu._ovSeal:SetShown(opts.ovLockedFn()) end
         end
     end
     return ddBtn, RefreshAll
@@ -8599,7 +8643,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
         return (EllesmereUI.SpecOverrides_EditSessionActive
             and EllesmereUI.SpecOverrides_EditSessionActive()) and true or false
     end
-    local OV_LOCK_TIP = "Only Never and Always can be overridden. This condition stays on the shared value while you edit an override."
+    local OV_LOCK_TIP = "Not overridable. An override can only set Visibility to Never, Always or Mouseover. Everything else here is shared: it applies the same in every override, and can only be changed while no override is being edited."
 
     -- Per-module row list. `listed` collects the legacy SCALAR values this row can
     -- actually reach, so the orphan rule below only fires for genuinely foreign ones.
@@ -8944,9 +8988,10 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
           -- Override sessions have to see each click as it happens: parts of this
           -- control are excluded from them and the session says so per write.
           notifyWrites = true,
-          -- Paints the section headers red while a session is live, so the locked half
-          -- is announced once at the top instead of by every row.
+          -- Seals the excluded rows off as one block while a session is live, announced
+          -- once instead of by every row.
           ovLockedFn = OvSessionActive,
+          ovLockedTooltip = OV_LOCK_TIP,
           -- The separator reads the match live: under Any the conditions are OR'd.
           separatorFn = function() return GetMatchAny() and " or " or ", " end,
           -- Every row follows the same rule now: a checked Hide lane hides while its
