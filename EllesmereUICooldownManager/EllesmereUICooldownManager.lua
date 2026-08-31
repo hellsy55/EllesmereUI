@@ -2412,9 +2412,12 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
 
     _G_Glows.StopAllGlows(overlay)
 
-    local parent = overlay:GetParent()
+    -- Threshold glows pass the owning icon and its size explicitly so every
+    -- style sizes exactly like the normal buff-glow path.
+    local parent = (opts and opts.owner) or overlay:GetParent()
     if not parent then return end
-    local pW, pH = parent:GetWidth(), parent:GetHeight()
+    local pW = (opts and opts.width) or parent:GetWidth()
+    local pH = (opts and opts.height) or parent:GetHeight()
     if pW < 5 then pW = 36 end
     if pH < 5 then pH = 36 end
     local noColor = (cr == nil)
@@ -2469,6 +2472,12 @@ StartNativeGlow = function(overlay, style, cr, cg, cb, opts)
     else
         if noColor then cr, cg, cb = nil, nil, nil end
         _G_Glows.StartFlipBookGlow(overlay, pW, entry, cr, cg, cb, pH)
+    end
+
+    -- Threshold gating: bound every texture the style just created with the
+    -- caller's mask (see ApplyMaskWith in EllesmereUI_Glows.lua).
+    if opts and opts.maskWith and _G_Glows.ApplyMaskWith then
+        _G_Glows.ApplyMaskWith(overlay, opts.maskWith)
     end
 
     overlay._glowActive = true
@@ -5496,10 +5505,26 @@ local function RefreshCDMIconAppearance(barKey)
             if nColor == "custom" and ssb then
                 nR, nG, nB = ssb.buffGlowColorR, ssb.buffGlowColorG, ssb.buffGlowColorB
             end
+            -- Glow at Stacks: only with the per-spell toggle ON and a sane
+            -- threshold. Own custom frames expose no native applications
+            -- count, so they keep the normal presence glow.
+            local nThreshold
+            if ssb and ssb.buffGlowStackEnabled then
+                -- Default 2 when the toggle is on before the input was ever
+                -- touched (matches the input's displayed default). Minimum 2:
+                -- at 1 this would just be the normal presence glow.
+                nThreshold = tonumber(ssb.buffGlowStackThreshold) or 2
+                if nThreshold < 2 then nThreshold = nil end
+            end
+            if icon._isCustomBuffFrame or not ns.StackGlow_Configure then
+                nThreshold = nil
+            end
             if fd then
                 if fd._bgT ~= nT or fd._bgColor ~= nColor
-                   or fd._bgR ~= nR or fd._bgG ~= nG or fd._bgB ~= nB then
+                   or fd._bgR ~= nR or fd._bgG ~= nG or fd._bgB ~= nB
+                   or fd._bgThreshold ~= nThreshold then
                     fd._bgT = nT; fd._bgColor = nColor; fd._bgR = nR; fd._bgG = nG; fd._bgB = nB
+                    fd._bgThreshold = nThreshold
                     if fd.buffGlowActive and fd.buffGlowOverlay then
                         StopNativeGlow(fd.buffGlowOverlay)
                         fd.buffGlowActive = false
@@ -5507,7 +5532,35 @@ local function RefreshCDMIconAppearance(barKey)
                 end
                 -- Per-icon Desaturate Inactive override, read by the BuffTicker.
                 fd._desatOverride = (ssb and ssb.desatInactive) or nil
+
+                if nThreshold then
+                    -- Style: the spell's effective Buff Glow (per-spell
+                    -- override falling back to the bar's), with None and
+                    -- Blizzard Default falling back to Modern WoW Glow so the
+                    -- threshold always has a maskable glow to drive.
+                    local sgStyle = nT
+                    if sgStyle == nil then sgStyle = barData.buffGlowType end
+                    sgStyle = tonumber(sgStyle) or 0
+                    if sgStyle <= 0 then sgStyle = 6 end -- Modern WoW Glow
+                    local sgMode = nColor or barData.buffGlowMode
+                    local sgR, sgG, sgB
+                    if nColor == "custom" then
+                        sgR, sgG, sgB = nR, nG, nB
+                    elseif sgMode == "class" then
+                        local cc = EllesmereUI.GetClassColor(EllesmereUI._playerClass)
+                        if cc then sgR, sgG, sgB = cc.r, cc.g, cc.b end
+                    elseif sgMode == "custom" then
+                        sgR, sgG, sgB = barData.buffGlowR, barData.buffGlowG, barData.buffGlowB
+                    end
+                    ns.StackGlow_Configure(icon, nThreshold, sgStyle, sgR, sgG, sgB, barData)
+                elseif fd.stackGlow then
+                    ns.StackGlow_Configure(icon)
+                end
             end
+        elseif fd and fd.stackGlow and ns.StackGlow_Configure then
+            -- Blizzard viewer frames are pooled across cooldown and buff
+            -- families: retire a controller when its frame goes non-buff.
+            ns.StackGlow_Configure(icon)
         end
         -- Update texture -- fill the entire frame. The border renders on top via PP.CreateBorder so no inset is needed.
         if tex then
@@ -9927,6 +9980,17 @@ function ns.RefreshItemCountOOCBars()
     end
 end
 
+-- TAINT LAW (field-proven 2026-08-31, 24x error burst in the field): NEVER
+-- write ANY field on a Blizzard CooldownViewer item frame, not even a key
+-- Blizzard itself owns (spellOutOfRange), and never call its paint methods
+-- from our execution. The written value is tainted; Blizzard's refresh
+-- chains read it MID-EXECUTION and the taint poisons everything downstream:
+-- forbidden secure caches (CheckAllowOnCooldownGeneric dataCache), secret
+-- boolean fields (allowOnCooldownAlert), and map registrations made inside
+-- the chain, which then convert every later event dispatch on the viewer
+-- into tainted execution. A stale-range repaint is never worth that. The
+-- range-on-override-swap staleness this replaced is cosmetic and stays.
+
 -------------------------------------------------------------------------------
 --  Event-Driven Runtime Maintenance
 --
@@ -9975,6 +10039,12 @@ eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 -- Visibility option events: mounted, target, instance zone changes
 eventFrame:RegisterEvent("PLAYER_MOUNT_DISPLAY_CHANGED")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+-- Resting: IsResting() has no dedicated poll, so without this the Resting
+-- axis only re-evaluated when some unrelated event above happened to fire.
+eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")
+-- Vehicle edges for the In Vehicle axis (player-filtered; same reasoning).
+eventFrame:RegisterUnitEvent("UNIT_ENTERED_VEHICLE", "player")
+eventFrame:RegisterUnitEvent("UNIT_EXITED_VEHICLE", "player")
 -- Dragonriding visibility modes: capability edge (mount/dismount/zone) plus
 -- the airborne edge (takeoff/landing while staying mounted; probed at load
 -- in EllesmereUI_Visibility.lua -- absent = the checklist items lock).
@@ -10178,7 +10248,8 @@ eventFrame:SetScript("OnEvent", function(_, event, unit, updateInfo, arg3)
         if ns.QueueReanchor then ns.QueueReanchor() end
         return
     end
-    if event == "PLAYER_TARGET_CHANGED" then
+    if event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_UPDATE_RESTING"
+       or event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE" then
         _CDMApplyVisibility()
         return
     end
