@@ -3150,13 +3150,25 @@ local function AssistProbe(unit)
         end
         return true
     end
+    -- LIVENESS, not identity: UNIT_AURA stops for a unit that disconnects, dies,
+    -- leaves render range or phases, and nothing clears the containers for the
+    -- duration, so they hide rather than sit frozen on what they last parsed.
     if not (UnitIsConnected(unit)
         and not UnitIsDeadOrGhost(unit)
-        and UnitCanAssist("player", unit)
         and UnitIsVisible(unit)
         and not UnitPhaseReason(unit)) then
         return false
     end
+    -- Assist is the only IDENTITY term left, and it is dead for group tokens
+    -- since 12.1.0 build 69497: CanApplyIdentityCandidateFilters short-circuits
+    -- on `isHelpful and UnitIsPlayerControlledOrGroupMember`, a token-SHAPE test,
+    -- and every container gated here is helpful spell-ID filtered. Friendly Boss
+    -- slots host bossN, outside the exemption, and keep the test.
+    if UnitIsPlayerControlledOrGroupMember and UnitIsPlayerControlledOrGroupMember(unit) then
+        return true
+    end
+    -- Evaluated in here so a secret answer errors inside the caller's pcall.
+    if not UnitCanAssist("player", unit) then return false end
     return true
 end
 
