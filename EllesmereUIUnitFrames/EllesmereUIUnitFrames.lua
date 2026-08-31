@@ -3051,12 +3051,16 @@ local function LayoutCastbarIcon(castbar, inWidth, iconH, onRight, offX, offY, i
 end
 
 -- Donor settings table for mini frames (focus > target > player); source of
--- inherited border, texture and font settings.
+-- inherited border, texture and font settings. A frame that is disabled, or that
+-- Visibility keeps off screen entirely, is not a donor -- before Visibility and
+-- enabledFrames were split, "never" cleared that flag and fell out here for free.
 local function GetMiniDonorSettings()
     local ef = db.profile.enabledFrames
-    if ef.focus ~= false and db.profile.focus then return db.profile.focus end
-    if ef.target ~= false and db.profile.target then return db.profile.target end
-    return db.profile.player
+    local function usable(unitKey)
+        local s = db.profile[unitKey]
+        return ef[unitKey] ~= false and s ~= nil and s.barVisibility ~= "never" and s
+    end
+    return usable("focus") or usable("target") or db.profile.player
 end
 
 -- Boss "Simple Debuff Display" mode: "none"|"left"|"right". Tolerates legacy booleans
@@ -10965,6 +10969,10 @@ function ns.ResolveVisResting(s, frame, ext, hiddenByOpts, inCombat)
         return ext and shownAlpha or 0, false
     end
     local vis = s.barVisibility or "always"
+    -- Never rides the alpha too, not just the Show/Hide bucket: that bucket is
+    -- lockdown-gated, so a Never picked (or applied by an override) in combat would
+    -- otherwise leave the frame at full alpha until PLAYER_REGEN_ENABLED.
+    if vis == "never" then return 0, false end
     if vis == "in_combat" then return inCombat and shownAlpha or 0, false end
     if vis == "out_of_combat" then return (not inCombat) and shownAlpha or 0, false end
     if vis == "mouseover" then
@@ -12480,6 +12488,14 @@ function InitializeFrames()
                     bd3d:SetAlpha(bodyAlpha)
                 end
 
+                -- A class resource bar unlocked from the frame is parented to UIParent
+                -- and so survives its owner being hidden. Only Never takes it along:
+                -- that used to leave the player frame unspawned and the bar with it,
+                -- and the other hiding modes have always kept their own bar visible.
+                if unitKey == "player" and frames._classPowerBar then
+                    frames._classPowerBar:SetAlpha(vis == "never" and 0 or 1)
+                end
+
                 -- Show/Hide and SetAttribute are restricted during lockdown.
                 -- When a condition driver is registered it owns Show/Hide
                 -- entirely -- a manual toggle would de-sync it until its
@@ -12573,7 +12589,12 @@ function InitializeFrames()
                 -- condition-hidden mini absorbs no clicks either.
                 if mini then
                     local miniWant
-                    if (not miniAlways) and visTail then
+                    if (not miniAlways) and vis == "never" then
+                        -- The parent is hidden outright, so alpha 0 alone would leave
+                        -- the mini an invisible click blocker; pin it like the
+                        -- disabled-parent branch below does.
+                        miniWant = "hide"
+                    elseif (not miniAlways) and visTail then
                         miniWant = "[@" .. ns.UF_MINI_OF[unitKey] .. ",noexists] hide; " .. visTail
                     end
                     if mini._euiVisDriver ~= miniWant and not isLocked then
