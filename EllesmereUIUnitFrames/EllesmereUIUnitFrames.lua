@@ -3056,11 +3056,11 @@ end
 -- enabledFrames were split, "never" cleared that flag and fell out here for free.
 function ns.GetMiniDonorSettings()
     local ef = db.profile.enabledFrames
-    local function usable(unitKey)
-        local s = db.profile[unitKey]
-        return ef[unitKey] ~= false and s ~= nil and s.barVisibility ~= "never" and s
-    end
-    return usable("focus") or usable("target") or db.profile.player
+    local focus = db.profile.focus
+    if ef.focus ~= false and focus and focus.barVisibility ~= "never" then return focus end
+    local target = db.profile.target
+    if ef.target ~= false and target and target.barVisibility ~= "never" then return target end
+    return db.profile.player
 end
 local GetMiniDonorSettings = ns.GetMiniDonorSettings
 
@@ -12499,8 +12499,13 @@ function InitializeFrames()
                 -- and so survives its owner being hidden. Only Never takes it along:
                 -- that used to leave the player frame unspawned and the bar with it,
                 -- and the other hiding modes have always kept their own bar visible.
+                -- Written only when it moves: this pass runs on every target change,
+                -- and for the "blizzard" style the bar is Blizzard's own frame.
                 if unitKey == "player" and frames._classPowerBar then
-                    frames._classPowerBar:SetAlpha(vis == "never" and 0 or 1)
+                    local cpWant = (vis == "never") and 0 or 1
+                    if frames._classPowerBar:GetAlpha() ~= cpWant then
+                        frames._classPowerBar:SetAlpha(cpWant)
+                    end
                 end
 
                 -- Show/Hide and SetAttribute are restricted during lockdown.
