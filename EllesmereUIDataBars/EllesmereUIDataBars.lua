@@ -37,6 +37,8 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --   ns.SolveLayout(barCfg, L, measureFn) -> segments (pure)
 --   ns.GetLiveAutoLength(barId, blockId) -> px | nil
 --   ns.BuildCurrencyList() -> values, order
+--   ns.BuildLDBList() -> values, order      LibDataBroker sources, by name
+--   ns.GetLDB() -> LibDataBroker-1.1 | nil
 --   ns.LocationWidthMode(blockSettings) -> "auto" | "manual"
 --   ns.LOC_MAX_WIDTH_DEFAULT               Manual-mode width before one is set
 --   ns.BlockTextDynamic(blockType) -> r, g, b   state-driven Text Color swatch
@@ -134,6 +136,7 @@ local L = {
     DELVE_JOURNEY        = "Delver's Journey",
     COMPANION_LEVEL      = "Companion Level",
     SELECT_CURRENCY      = "Select a currency",
+    SELECT_PLUGIN        = "Select a plugin",
     OPEN_SETTINGS        = "Open Settings",
     CRESTS               = "Crests",
     SEASON_MAXIMUM       = "Current Season Maximum",
@@ -168,6 +171,7 @@ local wipe              = wipe
 local format            = string.format
 local tinsert, tremove  = table.insert, table.remove
 local tconcat           = table.concat
+local tsort             = table.sort
 local floor             = math.floor
 local max, min, abs     = math.max, math.min, math.abs
 
@@ -209,6 +213,7 @@ ns.BLOCK_TYPES = {
     { key = "ilvl",       label = "Item Level" },
     { key = "greatvault", label = "Great Vault" },
     { key = "audio",      label = "Audio" },
+    { key = "ldb",        label = "Broker Plugin" },
     { key = "spacer",     label = "Spacer" },
 }
 
@@ -241,6 +246,12 @@ ns.BLOCK_DEFAULTS = {
     ilvl       = { prefix = "short", value = "equipped", precision = 0 },
     greatvault = {},
     audio      = { channel = "master" },
+    -- Broker plugin: one block type for every LibDataBroker data source, picked
+    -- by name (source). stripColors defaults ON -- broker text arrives full of
+    -- the plugin's own |cff.. codes, which would silently beat this block's Text
+    -- Color and its accent hover. maxWidth nil = size from the live string.
+    ldb        = { source = nil, showIcon = true, showLabel = false, showText = true,
+                   stripColors = true, maxWidth = nil },
     spacer     = {},
 }
 
@@ -3076,6 +3087,50 @@ function ns.BuildCurrencyList()
     for i = #collapsed, 1, -1 do
         C_CurrencyInfo.ExpandCurrencyList(collapsed[i], false)
     end
+    return values, order
+end
+
+-------------------------------------------------------------------------------
+--  LibDataBroker access (the "ldb" block type)
+-------------------------------------------------------------------------------
+-- The suite ships the library itself (EllesmereUI parent, beside the
+-- CallbackHandler it needs) rather than borrowing it from whichever broker addon
+-- happens to load: every broker we read sorts after EllesmereUIDataBars, so
+-- borrowing would hand back nil at our load time. Resolved lazily all the same --
+-- a half-updated install must go quiet here, not error.
+local _ldb
+function ns.GetLDB()
+    if _ldb then return _ldb end
+    if not LibStub then return nil end
+    _ldb = LibStub:GetLibrary("LibDataBroker-1.1", true)
+    return _ldb
+end
+
+-- Display label for one data object. The registered NAME is what the block
+-- stores, so it always leads; a self-declared label that differs rides along in
+-- grey, so a plugin that calls itself something other than its name is still
+-- findable in the picker.
+function ns.LDBLabel(name, obj)
+    if not obj then return name end
+    local lbl = obj.label
+    if type(lbl) == "string" and lbl ~= "" and lbl ~= name then
+        return name .. " |cff808080(" .. lbl .. ")|r"
+    end
+    return name
+end
+
+-- Every data source registered right now, sorted case-insensitively. Rebuilt at
+-- each dropdown open (never cached): plugins register on their own schedule, and
+-- some appear only after their addon finishes loading.
+function ns.BuildLDBList()
+    local values, order = {}, {}
+    local LDB = ns.GetLDB()
+    if not LDB then return values, order end
+    for name, obj in LDB:DataObjectIterator() do
+        values[name] = ns.LDBLabel(name, obj)
+        order[#order + 1] = name
+    end
+    tsort(order, function(a, b) return a:lower() < b:lower() end)
     return values, order
 end
 
