@@ -165,6 +165,7 @@ Choose which addons to include in your exported profile. Check everything for a 
 Choose which addons you want enabled. You can change any of these later in the EllesmereUI settings panel.
 Choose which specs sync with %1$s, including your alts' specs (the source is always included)
 Choose which transforms are removed
+Clear
 Click a bar to edit it
 Click any new feature to go directly to the setting
 Click elements to scroll to and highlight their options
