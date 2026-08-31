@@ -101,9 +101,10 @@ local AURA_SCAN_LIMIT = 40
 local SWEEP_PERIOD    = 2
 
 -- Blizzard's own ready-check art: exactly these semantics, guaranteed present,
--- and no texture of ours to ship.
-local TEX_OK   = "Interface\\RaidFrame\\ReadyCheck-Ready"
-local TEX_MISS = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+-- and no texture of ours to ship. Atlases (matching EllesmereUIRaidFrames'
+-- UpdateReadyCheck) rather than the legacy Interface\RaidFrame textures.
+local ATLAS_OK   = "UI-LFG-ReadyMark-Raid"
+local ATLAS_MISS = "UI-LFG-DeclineMark-Raid"
 
 -- QoL's key in EllesmereUI._addonKeyToFolder. On-screen text has to resolve
 -- through GetFontPath: EllesmereUI.MakeFont hardcodes the options-panel font,
@@ -845,7 +846,7 @@ local function MakeRow(parent, index)
     -- readyCheckActive), otherwise a yellow "?" while pending -- there is no
     -- ready/not-ready art for "pending" to reuse -- and, once the game has a
     -- verdict, the SAME ready-check art every other column in this grid uses
-    -- (TEX_OK / TEX_MISS), so ready and not-ready read identically wherever
+    -- (ATLAS_OK / ATLAS_MISS), so ready and not-ready read identically wherever
     -- they appear in the window.
     r._ready = MakeText(r, NAME_SIZE)
     r._ready:SetPoint("LEFT", r, "LEFT", 2, 0)
@@ -872,7 +873,7 @@ local function MakeRow(parent, index)
             -- uniform across numeric columns.
             local tex = r:CreateTexture(nil, "ARTWORK")
             tex:SetSize(ICON_SZ, ICON_SZ)
-            tex:SetTexture(TEX_OK)
+            tex:SetAtlas(ATLAS_OK)
             tex:SetAlpha(0.9)
             tex:Hide()
             r._cellTex[c] = tex
@@ -965,7 +966,11 @@ local function Build()
                 local info = C_Spell.GetSpellInfo(def.seed)
                 icon = info and info.iconID
             end
-            tex:SetTexture(icon or TEX_MISS)
+            if icon then
+                tex:SetTexture(icon)
+            else
+                tex:SetAtlas(ATLAS_MISS)
+            end
 
             -- Raid buff columns only: when hiding inapplicable columns and
             -- the providing class is not in the group, the column stays
@@ -974,7 +979,7 @@ local function Build()
             if def.class then
                 local xMark = h:CreateTexture(nil, "OVERLAY")
                 xMark:SetAllPoints()
-                xMark:SetTexture(TEX_MISS)
+                xMark:SetAtlas(ATLAS_MISS)
                 xMark:SetVertexColor(1, 0.15, 0.15, 1)
                 xMark:Hide()
                 h.xMark = xMark
@@ -1215,11 +1220,11 @@ local function Refresh()
                 local status = GetReadyCheckStatus(e.unit)
                 if status == "ready" then
                     r._ready:SetText("")
-                    r._readyTex:SetTexture(TEX_OK)
+                    r._readyTex:SetAtlas(ATLAS_OK)
                     r._readyTex:Show()
                 elseif status == "notready" then
                     r._ready:SetText("")
-                    r._readyTex:SetTexture(TEX_MISS)
+                    r._readyTex:SetAtlas(ATLAS_MISS)
                     r._readyTex:Show()
                 elseif status == "waiting" then
                     r._readyTex:Hide()
@@ -1266,13 +1271,13 @@ local function Refresh()
                     end
                     local hit = r._cellHit and r._cellHit[ci]
                     if v == true then
-                        cell:SetTexture(TEX_OK)
+                        cell:SetAtlas(ATLAS_OK)
                         cell:Show()
                         -- Only the tick is hoverable: a MISS or a blank cell
                         -- has no buff name behind it to report.
                         if hit then hit:Show() end
                     elseif v == false then
-                        cell:SetTexture(TEX_MISS)
+                        cell:SetAtlas(ATLAS_MISS)
                         cell:Show()
                         if hit then hit:Hide() end
                     else

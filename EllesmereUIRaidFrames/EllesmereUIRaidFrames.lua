@@ -4883,8 +4883,7 @@ local function UpdateReadyCheck(button, unit)
     -- Incoming resurrection (cast in flight, or the latched unaccepted-offer window
     -- -- see ns._RFRezShown).
     if s.showIncomingRez and unit and ns._RFRezShown(unit) then
-        tex:SetTexCoord(0, 1, 0, 1)
-        tex:SetTexture("Interface\\RaidFrame\\Raid-Icon-Rez")
+        tex:SetAtlas("RaidFrame-Icon-Rez")
         tex:Show()
         return
     end
@@ -12847,10 +12846,10 @@ end
 -- Status icon states: texture/atlas, keyed by rcStatus. Other Phase / Other Party use
 -- the real Blizzard atlases, same as the live UpdateReadyCheck painter.
 local STATUS_ICON_LOOKUP = {
-    ready        = { tex = "Interface\\RaidFrame\\ReadyCheck-Ready" },
-    notready     = { tex = "Interface\\RaidFrame\\ReadyCheck-NotReady" },
-    pending      = { tex = "Interface\\RaidFrame\\ReadyCheck-Waiting" },
-    rez          = { tex = "Interface\\RaidFrame\\Raid-Icon-Rez" },
+    ready        = { atlas = "UI-LFG-ReadyMark-Raid" },
+    notready     = { atlas = "UI-LFG-DeclineMark-Raid" },
+    pending      = { atlas = "UI-LFG-PendingMark-Raid" },
+    rez          = { atlas = "RaidFrame-Icon-Rez" },
     other_phase  = { atlas = "RaidFrame-Icon-Phasing" },
     other_party  = { atlas = "RaidFrame-Icon-LFR" },
 }
