@@ -7438,13 +7438,24 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local names = {}
         local total = 0
         local hiddenCount = 0
+        -- An override session splits the menu in two: the rows it sealed belong to the
+        -- shared value, the rest to the override. Mixing them reads as one selection that
+        -- exists nowhere ("Always or Solo"), so while a session is live the summary is the
+        -- override's own row when it holds one -- and otherwise the shared summary below,
+        -- because that is what still applies. Falling back to the empty label instead
+        -- would claim an override of "Always" that was never set.
+        if opts.ovLockedFn and opts.ovLockedFn() then
+            for _, item in ipairs(items) do
+                if not item.isHeader and not item.isTopAction and not item.isModifier
+                   and not (item.ovLockedFn and item.ovLockedFn()) and getFn(item.key) then
+                    return EllesmereUI.L(item.label)
+                end
+            end
+        end
         for _, item in ipairs(items) do
             -- isModifier rows (the Visibility match toggle) are not conditions: excluded
-            -- from the summary and from the "All" shortcut. A row an override session
-            -- has sealed off is excluded too: it belongs to the shared value, not to what
-            -- the override holds, and mixing the two reads as one nonsense selection.
-            if not item.isHeader and not item.isTopAction and not item.isModifier
-               and not (item.ovLockedFn and item.ovLockedFn()) then
+            -- from the summary and from the "All" shortcut.
+            if not item.isHeader and not item.isTopAction and not item.isModifier then
                 total = total + 1
                 if getFn(item.key) then names[#names + 1] = EllesmereUI.L(item.label) end
                 -- Dual-lane rows: the hide lane reads through getFn(key, true).
