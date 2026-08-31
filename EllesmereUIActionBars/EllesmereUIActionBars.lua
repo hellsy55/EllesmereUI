@@ -1010,6 +1010,7 @@ do
     -- a single button does real work per event. Idle cost is zero.
     local _vehNeed, _extraNeed, _phNeed = false, false, false
     local _broadcasterMode = "off"
+    local _broadcasterSlot = true
     -- Class gate, and it exists purely for ORDERING. The survey that sets
     -- _phNeed reads the action slots, and on a cold login those are still empty
     -- when it first runs -- so it reports "no press-and-hold", we stay off, and
@@ -1028,11 +1029,20 @@ do
         end
         return _classPH
     end
+    -- ACTIONBAR_SLOT_CHANGED is the only event in either set that reaches
+    -- Blizzard's Update() -> UpdatePressAndHoldAction -> SetAttribute. The
+    -- registration is ours, so the dispatch runs under our taint and that write
+    -- is BLOCKED in combat, on Blizzard's own ActionButtonN and reported as
+    -- EllesmereUI. An assisted-combat action dirties its slot ~11x/sec, so a
+    -- raid pull spams it (Jera, 9.0.1). Registered out of combat only, both
+    -- edges driven by the REGEN events; PLAYER_ENTERING_WORLD, the other
+    -- Update() path, cannot fire under lockdown.
     local function ApplyBroadcaster()
         local want = (_vehNeed or _extraNeed) and "full"
             or ((_phNeed or ClassMayPressHold()) and "ph" or "off")
-        if want == _broadcasterMode then return end
-        _broadcasterMode = want
+        local slotOK = not InCombatLockdown()
+        if want == _broadcasterMode and slotOK == _broadcasterSlot then return end
+        _broadcasterMode, _broadcasterSlot = want, slotOK
         -- Always drop to a known state first: "full" and "ph" are different
         -- registration sets, so switching between them directly would leave the
         -- wider set's events behind.
@@ -1041,7 +1051,9 @@ do
         if want == "full" then
             if ActionBarButtonEventsFrame then
                 for _, ev in ipairs(_abefEvents) do
-                    ActionBarButtonEventsFrame:RegisterEvent(ev)
+                    if slotOK or ev ~= "ACTIONBAR_SLOT_CHANGED" then
+                        ActionBarButtonEventsFrame:RegisterEvent(ev)
+                    end
                 end
             end
             if ActionBarActionEventsFrame then
@@ -1051,7 +1063,9 @@ do
             end
         elseif want == "ph" then
             if ActionBarButtonEventsFrame then
-                ActionBarButtonEventsFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+                if slotOK then
+                    ActionBarButtonEventsFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+                end
                 -- PLAYER_ENTERING_WORLD as well, because SLOT_CHANGED alone
                 -- cannot seed a login. Blizzard gates that one on
                 -- "arg1 == 0 or arg1 == tonumber(self.action)", so a button only
@@ -1087,7 +1101,7 @@ do
     -- silently inert -- registered once at login, wiped moments later, and the
     -- state machine none the wiser. Any direct wipe must come back through here.
     ns.ResyncBroadcaster = function()
-        _broadcasterMode = "off"   -- the caller has just put the frames in that state
+        _broadcasterMode = nil   -- the caller has just wiped the frames; never early-out
         ApplyBroadcaster()
     end
     -- Recompute from ground truth (the buttons' actual visibility) on a broad event set
@@ -1108,7 +1122,15 @@ do
     barFrame:RegisterEvent("UPDATE_OVERRIDE_ACTIONBAR")
     barFrame:RegisterEvent("UPDATE_EXTRA_ACTIONBAR")
     barFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    barFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    barFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     barFrame:SetScript("OnEvent", function(_, event, unit)
+        if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+            -- Undeferred: the first slot change of the pull can arrive in the
+            -- same frame as the lockdown, and the needs are unchanged anyway.
+            ApplyBroadcaster()
+            return
+        end
         C_Timer.After(0, RefreshBroadcasterNeeds) -- deferred so IsShown reflects post-event state
         -- On vehicle/override entry, force-paint OverrideActionBar cooldowns:
         -- the broadcaster only catches the NEXT change, so an already-running
