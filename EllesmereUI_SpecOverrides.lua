@@ -5095,6 +5095,16 @@ function EllesmereUI.SpecOverrides_ClearStoreKey(store, key)
     local sStore = condSession and Cond.GetStore() or GetStore()
     if not sStore then return false end
 
+    -- The value maps this session owns. A conditional session keeps one map per GROUP;
+    -- the spec side keeps one per SPEC and a group covers every member spec, which is
+    -- also how HarvestGroup banks into all of them.
+    local owned = {}
+    if condSession then
+        owned[1] = condSession.id
+    else
+        for _, specID in ipairs(_editGroup.specs or {}) do owned[#owned + 1] = specID end
+    end
+
     local cleared = false
     for i = #sStore, 1, -1 do
         local e = sStore[i]
@@ -5107,16 +5117,34 @@ function EllesmereUI.SpecOverrides_ClearStoreKey(store, key)
             end
         end
         if hit then
+            -- Only the maps the EDITED session owns are cleared. One entry is shared by
+            -- every group that customized the same slot (AutoCapture looks it up by slot,
+            -- not by group, and adds a per-group value map), so wiping all of them would
+            -- delete other groups' overrides along with this one.
+            for _, mapKey in ipairs(owned) do
+                local m = e.values[mapKey]
+                if type(m) == "table" then m[hit] = nil end
+            end
+            -- The recorded default only goes once nobody holds a value for the key any
+            -- more; until then the entry stays alive for the groups that still do.
+            local stillHeld = false
+            for mapKey, m in pairs(e.values) do
+                if mapKey ~= "default" and type(m) == "table" and m[hit] ~= nil then
+                    stillHeld = true
+                    break
+                end
+            end
             local dv = def[hit]
             if dv == NIL_SENT then dv = nil end
             -- Same guard the apply sites use: a stored removal is never honored for a
-            -- key the module registers a default for.
+            -- key the module registers a default for. Written either way: the session
+            -- has to show the value it just gave up.
             if dv ~= nil or not HasRegisteredDefault(hit) then WriteLive(hit, dv) end
-            for _, m in pairs(e.values) do
-                if type(m) == "table" then m[hit] = nil end
+            if not stillHeld then
+                def[hit] = nil
+                if not next(def) then table.remove(sStore, i) end
             end
             cleared = true
-            if not next(def) then table.remove(sStore, i) end
         end
     end
 
