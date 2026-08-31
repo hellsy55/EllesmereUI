@@ -963,7 +963,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "9.1.0",
+        version = "9.1.1",
         heroes = {
             {
                 module = "Cooldown Manager",
@@ -1049,6 +1049,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Profiles", text = "Editing Buff or Debuff Manager settings inside an override group now confirms the change saved to that override instead of showing a refusal message." },
             { module = "QoL", text = "Cursor Trail now follows every visibility rule on the cursor circle, including Combat Only and the shared Visibility options." },
             { module = "QoL", text = "A GCD or Cast circle switched back to Attach to Cursor no longer keeps a stale mover, and attached circles no longer chase the mouse while Unlock Mode is open." },
+            { module = "Quest Tracker", text = "The background no longer throws repeated errors after leaving an arena, no longer blanks out when minimizing a section, and follows collapse and add/remove animations smoothly." },
             { module = "Raid Frames", text = "Buff and debuff displays no longer freeze on a group member after roster changes, and hidden buff monitors no longer show stale icons when reused." },
             { module = "Raid Frames", text = "The Dispel and External click-cast presets now cast the right spell on every spec (Holy Priest, Elemental Shaman and Shadow Priest included), and Dynamic Rez works out of combat for Death Knights and Warlocks and can pre-cast Soulstone on a living ally." },
             { module = "Raid Frames", text = "Guardian of Ancient Kings with Glyph of the Queen applied now counts for the Defensives filter, with a distinguishable name in the spell pickers; picker rows show a hover tooltip for long or duplicate names." },
@@ -1056,6 +1057,8 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Raid Frames", text = "Dead players now fade by the distance to their corpse (your resurrection spell's range) instead of where their ghost is standing, for classes that can resurrect." },
             { module = "Resource Bars", text = "The Protection Warrior Ignore Pain bar no longer fills from other absorbs like trinket shields: with Ignore Pain tracked in the Blizzard CDM it shows exactly your Ignore Pain amount, and otherwise only fills while Ignore Pain is up." },
             { module = "Resource Bars", text = "The Arcane Soul Helper no longer shows for Spellslinger Arcane Mages after a hero talent swap; it is Sunfury only." },
+            { module = "Resource Bars", text = "The Whirlwind and Sweeping Strikes charge bar honors the Empty Bar Overlay again, so spent charges stay visible in Dark Mode." },
+            { module = "Unit Frames", text = "Changing the weapon enchant bar's grow direction in Unlock Mode no longer triggers a blocked-action error." },
             { module = "Localization", text = "Korean gained the Arcane Soul Helper, house-visit menu and Visibility Match Mode strings; Brazilian Portuguese gained the Visibility Match Mode strings and Buff Manager preset names; Traditional Chinese gained the unified Visibility checklist, Arcane Soul Helper, Crests and Item Level blocks, Compact Band, Debuff Filter modes, Ping Marker and Strict Comparison Mode strings." },
         },
     },

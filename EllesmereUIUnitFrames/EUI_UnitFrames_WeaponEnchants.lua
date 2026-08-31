@@ -424,7 +424,11 @@ local function LayoutHost(key, rec)
     -- living in the plain bar frame's tree.
     local function DoAnchor()
         local r = host.rec
-        if not r then return end -- cleared before this ran
+        -- Cleared-rec guard, plus the outer skip mirrored: AuraKit jobs are
+        -- combat-runnable, so a job enqueued OOC can drain in lockdown and
+        -- these writes on the SECURE host would be blocked actions there.
+        -- The rec stays, and the regen relayout heals it like the old skip.
+        if not r or (host.secure and InCombatLockdown()) then return end
         host.frame:SetParent(r.parent or r.frame)
         host.frame:ClearAllPoints()
         host.frame:SetAllPoints(r.anchorTo or r.parent or r.frame)

@@ -9555,7 +9555,24 @@ local MYSLOT_VIS_FIELDS = {
     -- fresh table on every write, so the captured table never mutates) and
     -- restored/cleared like any other field.
     "visibilityModes",
+    -- The Match Mode scalar is its own store key outside visibilityModes; a
+    -- surviving "any" makes the compiler build from the emptied set.
+    "visibilityMatch",
 }
+-- The option LANES (target/enemy/mounted macro lanes AND the Lua-only
+-- instance/housing/skyriding/resting/VEHICLE lanes) are enumerated by the
+-- live EllesmereUI.VIS_OPT_KEYS list and swapped dynamically below: ANY lane
+-- left standing hides the bar past the forced "always" -- the Lua-only ones
+-- through CheckVisibilityOptionsNonMacro's bare "hide" driver, which runs
+-- before the mode string is even consulted. Iterating the live list means a
+-- future lane can never reopen this hole.
+local function MyslotEachVisField(fn)
+    for _, f in ipairs(MYSLOT_VIS_FIELDS) do fn(f) end
+    local optKeys = EllesmereUI and EllesmereUI.VIS_OPT_KEYS
+    if optKeys then
+        for _, f in ipairs(optKeys) do fn(f) end
+    end
+end
 
 -- Restore real visibility settings from the persisted backup, then clear it.
 -- Safe to call anytime (no-op if no backup). NOT gated on that addon being
@@ -9566,7 +9583,7 @@ function EAB:RestoreMyslotBackup()
     for key, saved in pairs(backup) do
         local s = self.db.profile.bars[key]
         if s then
-            for _, f in ipairs(MYSLOT_VIS_FIELDS) do s[f] = saved[f] end
+            MyslotEachVisField(function(f) s[f] = saved[f] end)
         end
     end
     self.db.profile._myslotVisBackup = nil
@@ -9588,7 +9605,7 @@ function EAB:SetMyslotForceShow(on)
             local s = self.db.profile.bars[info.key]
             if s then
                 local saved = {}
-                for _, f in ipairs(MYSLOT_VIS_FIELDS) do saved[f] = s[f] end
+                MyslotEachVisField(function(f) saved[f] = s[f] end)
                 backup[info.key] = saved
             end
         end
@@ -9599,17 +9616,30 @@ function EAB:SetMyslotForceShow(on)
         for _, info in ipairs(BAR_CONFIG) do
             local s = self.db.profile.bars[info.key]
             if s then
-                local wasMouseover = s.mouseoverEnabled
                 s.barVisibility = "always"
                 -- A lingering multi-select set would stay authoritative over
                 -- the forced "always"; the backup above already captured it.
                 s.visibilityModes = nil
+                s.visibilityMatch = nil
+                -- EVERY option lane off, macro and Lua-only alike (the live
+                -- VIS_OPT_KEYS list): visOnlyVehicle and friends otherwise
+                -- keep feeding CheckVisibilityOptionsNonMacro a hide verdict
+                -- that overrides the forced "always" at the driver site.
+                local optKeys = EllesmereUI and EllesmereUI.VIS_OPT_KEYS
+                if optKeys then
+                    for _, f in ipairs(optKeys) do s[f] = nil end
+                end
                 s.alwaysHidden = false
                 s.mouseoverEnabled = false
-                if wasMouseover and s._savedBarAlpha then
-                    s.mouseoverAlpha = s._savedBarAlpha
-                    s._savedBarAlpha = nil
-                end
+                -- Force FULL opacity, never the bar's real resting value: a
+                -- hidden-until-hover bar rests at mouseoverAlpha 0 (and the
+                -- Any-engine parks it at 0 with the real value stashed), and
+                -- RefreshMouseover's disable path paints mouseoverAlpha
+                -- verbatim -- restoring the stash here re-hid the very bar
+                -- this swap exists to show. The backup holds both real
+                -- values; restore puts them back untouched.
+                s.mouseoverAlpha = 1
+                s._savedBarAlpha = nil
                 s.combatShowEnabled = false
                 s.combatHideEnabled = false
                 s.alwaysShowButtons = true

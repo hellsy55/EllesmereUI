@@ -5596,6 +5596,16 @@ local function UpdateSecondaryResource()
             -- the handoff before the render paths does the rest. Until the
             -- deferred build lands the row simply shows empty (the cast-count
             -- simulator is retired).
+            -- BuildBars still lays the legacy gap-fill strips from the OLD pip
+            -- grid (cumulative cell+gap pixels); the engine bar's separator
+            -- ticks follow the fill's uniform fractions, so live strips
+            -- double-line against them, drifting apart along the bar (worst
+            -- with a wide Bar Spacing). These two powers never render pips,
+            -- so the strips are never wanted; hide once when present.
+            local gf = secondaryFrame._gapFills
+            if gf and gf[1] and gf[1]:IsShown() then
+                for gi = 1, #gf do gf[gi]:Hide() end
+            end
             if ns.WC_EngineOn and ns.WC_EngineOn(powerType) then
                 _wcEngine = true
             else
