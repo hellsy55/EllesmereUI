@@ -1319,7 +1319,8 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local function _pvPct(p01)
                 if not _G._EUI_TextDecimals then return tostring(math.floor(p01 * 100)) end
-                if _G._EUI_PctTrim then return tostring(math.floor(p01 * 1000 + 0.5) / 10) end
+                local trim = _G._EUI_PctTrim
+                if trim then return AbbreviateNumbers(trim.curve:Evaluate(p01), trim.cfg) end
                 return string.format("%.1f", p01 * 100)
             end
             local function _pvName()

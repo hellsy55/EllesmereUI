@@ -2172,7 +2172,7 @@ EllesmereUI.IsSmartPowerPercent = EUI_IsSmartPowerPercent
 -- (like the no-config call on secret health/power). Tags read these _G flags:
 --   _G._EUI_AbbrevDecimalCfg = this table when on, nil when off
 --   _G._EUI_TextDecimals     = true/false, selects "%.1f" vs "%d" for percents
---   _G._EUI_PctTrim          = the trailing-zero percent pair below, nil when off
+--   _G._EUI_PctTrim          = { curve, cfg } trimming the percent, nil when off
 ns._decimalAbbrevConfig = { breakpointData = {
     { breakpoint = 1e9, abbreviation = "b", significandDivisor = 1e8, fractionDivisor = 10, abbreviationIsGlobal = false },
     { breakpoint = 1e6, abbreviation = "m", significandDivisor = 1e5, fractionDivisor = 10, abbreviationIsGlobal = false },
@@ -2187,11 +2187,10 @@ ns._decimalAbbrevConfig2 = { breakpointData = {
 } }
 -- "Hide Trailing Zeros": AbbreviateNumbers drops a zero fraction ("100") but keeps a
 -- real one ("99.5"), which "%.1f" cannot do and a SECRET percent forbids doing with
--- Lua string ops. It TRUNCATES though, so a fractional significandDivisor misreads
--- (0.1 turns 33.3 into "33.2"); the curve does the scaling instead, handing over whole
--- tenths/hundredths, +0.5 so truncation lands on the same value "%.1f" would round to.
+-- Lua string ops. It TRUNCATES though, so a fractional significandDivisor reads a tenth
+-- low (0.1 renders 33.3 as "33.2"); the curve scales instead, handing over whole
+-- tenths/hundredths, +0.5 so truncation lands where "%.1f" would have rounded.
 local function MakePctTrim(scale, fractionDivisor)
-    if not (C_CurveUtil and C_CurveUtil.CreateCurve and Enum and Enum.LuaCurveType) then return nil end
     local curve = C_CurveUtil.CreateCurve()
     curve:SetType(Enum.LuaCurveType.Linear)
     curve:AddPoint(0.0, 0.5)
@@ -2260,13 +2259,12 @@ do
 end
 
 do
-  TagFns.perhpnosign = function(unit)
-    if not unit or not UnitExists(unit) then return "" end
-    if not UnitIsConnected(unit) then return "OFFLINE" end
-    if UnitIsDeadOrGhost(unit) then return "DEAD" end
+  -- Health percent under the decimal options. "Hide Trailing Zeros" reads the percent
+  -- through a scaling curve so AbbreviateNumbers can drop the zero "%.1f" would pad.
+  local function PercentHP(unit)
     local boss = _G._EUI_BossExtraDecimal and string.sub(unit, 1, 4) == "boss"
-    local trim
-    if boss then trim = _G._EUI_PctTrim2 else trim = _G._EUI_PctTrim end
+    local trim = _G._EUI_PctTrim
+    if boss then trim = _G._EUI_PctTrim2 end
     if trim then
       local scaled = UnitHealthPercent(unit, true, trim.curve)
       if not scaled then return "0" end
@@ -2274,10 +2272,16 @@ do
     end
     local pct = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
     if not pct then return "0" end
-    if boss then
-      return string_format("%.2f", pct)
-    end
+    if boss then return string_format("%.2f", pct) end
     return string_format(_G._EUI_TextDecimals and "%.1f" or "%d", pct)
+  end
+
+  TagFns.perhp = PercentHP
+  TagFns.perhpnosign = function(unit)
+    if not unit or not UnitExists(unit) then return "" end
+    if not UnitIsConnected(unit) then return "OFFLINE" end
+    if UnitIsDeadOrGhost(unit) then return "DEAD" end
+    return PercentHP(unit)
   end
 end
 
@@ -2654,6 +2658,7 @@ do
 
     -- Function-registered tag methods are shared directly: one body, no drift.
     P.curhpshort  = TagFns.curhpshort
+    P.perhp       = TagFns.perhp
     P.perhpnosign = TagFns.perhpnosign
     P.level       = TagFns.level
     P.name        = TagFns.name
@@ -2663,17 +2668,6 @@ do
     -- String-compiled tag methods get real equivalents (same logic, same
     -- _EUI_ globals; the compiled strings stay registered only while the tag
     -- engine still runs).
-    P.perhp = function(u)
-        local boss = _G._EUI_BossExtraDecimal and string.sub(u, 1, 4) == "boss"
-        local trim
-        if boss then trim = _G._EUI_PctTrim2 else trim = _G._EUI_PctTrim end
-        if trim then
-            return AbbreviateNumbers(UnitHealthPercent(u, true, trim.curve), trim.cfg)
-        end
-        local fmt = _G._EUI_TextDecimals and "%.1f" or "%d"
-        if boss then fmt = "%.2f" end
-        return sf(fmt, UnitHealthPercent(u, true, CurveConstants.ScaleTo100))
-    end
     P.perpp = function(u)
         local pType = _G._EUI_ResolvedPowerType[u] or UnitPowerType(u)
         return sf("%d", UnitPowerPercent(u, pType, true, CurveConstants.ScaleTo100))
