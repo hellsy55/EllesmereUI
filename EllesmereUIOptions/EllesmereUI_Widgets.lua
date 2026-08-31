@@ -8656,7 +8656,9 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
     end
     local OV_LOCK_TIP = "Not overridable. These conditions are shared and can only be changed while no override is being edited. An override replaces the Visibility setting outright -- Never, Always or Mouseover -- and ignores everything set here while it applies."
     local OV_PICK_TIP = "Makes this the override. It replaces the whole Visibility setting, so the conditions below no longer apply while it does. Click it again to remove the override."
-    local OV_NO_MOUSEOVER_TIP = "This element cannot be overridden to Mouseover: its hover mechanism follows the shared setting, so an override would just leave it shown. Never and Always work."
+    -- The block carries ONE tooltip, so the module that also has to seal Mouseover
+    -- says why right there instead of losing the reason to the shared text.
+    local OV_LOCK_TIP_MO = OV_LOCK_TIP .. " Mouseover is sealed here too for this element: its hover mechanism follows the shared setting, so an override could only leave it shown."
 
     -- Per-module row list. `listed` collects the legacy SCALAR values this row can
     -- actually reach, so the orphan rule below only fires for genuinely foreign ones.
@@ -8692,10 +8694,11 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
                 item.ovLockedFn = OvSessionActive
                 item.ovLockedTooltip = OV_LOCK_TIP
             elseif def.key == "mouseover" and caps.noOverrideMouseover then
-                -- Locked plainly rather than sealed: the seal marks one contiguous block
-                -- further down, and this row sits above it among the states that DO work.
-                item.lockedFn = OvSessionActive
-                item.lockedTooltip = OV_NO_MOUSEOVER_TIP
+                -- Joins the sealed run: this row sits directly above the section header
+                -- the block starts at, so it simply grows by one and stays contiguous,
+                -- with Never and Always left outside it.
+                item.ovLockedFn = OvSessionActive
+                item.ovLockedTooltip = OV_LOCK_TIP_MO
             end
             if caps.noGroupModes and def.axis == "group" then
                 item.locked = true
@@ -9060,7 +9063,7 @@ function EllesmereUI.AttachVisibilityChecklist(region, opts)
           -- Seals the excluded rows off as one block while a session is live, announced
           -- once instead of by every row.
           ovLockedFn = OvSessionActive,
-          ovLockedTooltip = OV_LOCK_TIP,
+          ovLockedTooltip = caps.noOverrideMouseover and OV_LOCK_TIP_MO or OV_LOCK_TIP,
           -- The value a live override holds, applied or edited: the summary shows it
           -- instead of the shared selection it replaces.
           ovHeldFn = function()
