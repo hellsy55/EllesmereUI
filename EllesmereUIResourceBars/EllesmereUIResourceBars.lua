@@ -447,10 +447,11 @@ local EBON_MIGHT_DURATION = 20
 
 local ICICLES_SPELL_ID = 205473
 
--- Prot Warrior Ignore Pain: stacking buff 190456 (0-100 stacks), but ALL player aura
--- fields are SECRET even out of combat (field-confirmed: spellId, name, applications),
--- so stacks are unreadable. Absorb amount IS readable and IP caps at 30% max health
--- (CAP), so absorbs vs that cap gives the same 0-100% fullness. DURATION drives the
+-- Prot Warrior Ignore Pain: stacking buff 190456 (0-100 stacks). ALL player aura fields
+-- are SECRET even out of combat (field-confirmed: spellId, name, applications) and the
+-- id is restriction-flagged, so the aura API gives nothing; Blizzard's tracked-buff icon
+-- is the only stack source. IP caps at 30% max health (CAP), so stacks and absorbs-vs-
+-- cap are the same 0-100% fullness -- see UpdateSecondaryResource. DURATION drives the
 -- moving hash line, reset on cast since aura expiry is secret (same approach as Ironfur
 -- ticks). One namespace table for the feature (200-local cap).
 local IP = {
@@ -4333,8 +4334,9 @@ IP.HandleCast = function(spellID)
     -- fallback (frames-as-truth, works under restriction when the user tracks
     -- the proc) backs it up. Called at SUCCEEDED: if the proc aura is already
     -- consumed by then BOTH probes can miss -- field question; the escalation
-    -- is a SENT-time latch, not a wider guess. A miss degrades to the
-    -- pre-fix behavior (stale tick), never a false refresh.
+    -- is a SENT-time latch, not a wider guess. A miss leaves a stale tick and,
+    -- since the bar fill rides this same window, an early-empty bar; IP.Active
+    -- covers both from the tracked-buff icon when the user tracks IP.
     if spellID == IP.SHIELD_SLAM then
         local aura = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
             and C_UnitAuras.GetPlayerAuraBySpellID(IP.VO_PROC)
@@ -4738,6 +4740,30 @@ IP.ScanViewer = function(force)
     end
 end
 
+-- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle); also rescan
+-- while the captured FS is invisible, since a viewer pool rebuild (tracked buffs
+-- proccing/expiring, e.g. Thunder Blast) can strand the capture on a released
+-- hidden frame that never fires SetText, while the icon lives on in another pool
+-- frame -- otherwise text stays blank until the orphan happens to be reused. Driven
+-- from MotionTick, not from UpdateText: the fill gate below reads the capture too,
+-- so it has to stay current with the count text switched off.
+IP.EnsureViewer = function()
+    local staleFS = IP.viewerFS and not IP.viewerFS:IsVisible()
+    if (not IP.viewerFrame or staleFS) and GetTime() >= IP.nextScan then
+        IP.nextScan = GetTime() + 2
+        IP.ScanViewer(staleFS)
+    end
+end
+
+-- Is Ignore Pain up? Blizzard's tracked-buff icon is the authoritative answer -- it
+-- survives a reload, a spec swap and a Violent Outburst refresh the cast handler
+-- missed -- but it only exists while the user tracks IP in the CDM, so the
+-- cast-driven window backs it up.
+IP.Active = function()
+    if IP.viewerFS and IP.viewerFS:IsVisible() then return true end
+    return IP.hashEndTime > GetTime()
+end
+
 -- Per-frame stack text for the IP bar. Preferred source: the exact stack number
 -- captured from Blizzard's tracked-buff icon above; fallback: rendered fill width
 -- (fill/bar = percent of cap = stacks) when values read clean but the viewer is
@@ -4751,16 +4777,6 @@ IP.UpdateText = function()
             IP.lastTextStacks = nil
         end
         return
-    end
-    -- Lazy (re)scan for the Blizzard tracked-buff IP icon (2s throttle); also rescan
-    -- while the captured FS is invisible, since a viewer pool rebuild (tracked buffs
-    -- proccing/expiring, e.g. Thunder Blast) can strand the capture on a released
-    -- hidden frame that never fires SetText, while the icon lives on in another pool
-    -- frame -- otherwise text stays blank until the orphan happens to be reused.
-    local staleFS = IP.viewerFS and not IP.viewerFS:IsVisible()
-    if (not IP.viewerFrame or staleFS) and GetTime() >= IP.nextScan then
-        IP.nextScan = GetTime() + 2
-        IP.ScanViewer(staleFS)
     end
     -- The captured viewer value is usually a SECRET number (type() says "number"
     -- and truthiness works, but comparisons/format error). SetText renders secret
@@ -5264,15 +5280,27 @@ local function UpdateSecondaryResource()
                 if maxTainted then maxC = maxPts end
                 if not maxTainted and maxC <= 0 then maxC = 1 end
             elseif powerType == "IGNOREPAIN_BAR" then
-                -- Prot Ignore Pain: total absorbs vs the IP cap (30% max health) --
-                -- the only readable source, since aura stack data is fully secret.
-                -- A secret absorb value flows into SetValue via the smooth target.
-                cur = UnitGetTotalAbsorbs("player") or 0
+                -- Prot Ignore Pain. Preferred: the tracked-buff icon's stack count --
+                -- IP caps at 30% max health, so 0-100 stacks are percent-of-cap, i.e.
+                -- IP's own share with no foreign shield mixed in. It exists only while
+                -- the user tracks IP in the CDM, so UnitGetTotalAbsorbs stays as the
+                -- fallback: EVERY shield on the player, and secret, so IP cannot be
+                -- subtracted out -- gated on IP being up, still over-reads in uptime.
+                -- 190456 is restriction-flagged and GetPlayerAuraBySpellID returns
+                -- NOTHING for it (field-probed): aura points are not an exact source.
                 maxC = UnitHealthMax("player")
                 if (issecretvalue and issecretvalue(maxC)) or not maxC or maxC <= 0 then
                     maxC = maxPts
                 else
                     maxC = maxC * IP.CAP
+                end
+                if IP.value and IP.viewerFS and IP.viewerFS:IsVisible() then
+                    -- Kept for the value-mode threshold rescale below.
+                    IP.stackAxis = maxC
+                    cur, maxC = IP.value, 100
+                else
+                    IP.stackAxis = nil
+                    cur = IP.Active() and (UnitGetTotalAbsorbs("player") or 0) or 0
                 end
             end
             -- Brewmaster stagger ceiling
@@ -5394,7 +5422,14 @@ local function UpdateSecondaryResource()
                         -- StatusBar-overlay technique (as Vengeance pips): the fill
                         -- texture is the "cell", each overlay repaints the visible fill.
                         local function _ipBound(to)
-                            return (_tsBandMode == "value") and (to or 0) or (maxC * (to or 0) / 100)
+                            if _tsBandMode ~= "value" then return maxC * (to or 0) / 100 end
+                            -- A value-mode bound is an absorb amount. On the stack axis
+                            -- maxC is 0-100, so rescale it against the absorb-scale cap
+                            -- (both clean: user config and max health).
+                            if IP.stackAxis and IP.stackAxis > 0 then
+                                return (to or 0) / IP.stackAxis * 100
+                            end
+                            return to or 0
                         end
                         IP.layerN = 0
                         if _tsBandOn and _tsBands and #_tsBands > 0 then
@@ -6196,6 +6231,7 @@ ns.MotionTick = EllesmereUI.Tick.NewAnimTicker(CreateFrame("Frame"), function() 
         UpdateIronfurBar()
         return true
     elseif cs.power == "IGNOREPAIN_BAR" then
+        IP.EnsureViewer()
         IP.UpdateHash()
         IP.UpdateText()
         return true

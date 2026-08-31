@@ -4566,7 +4566,12 @@ initFrame:SetScript("OnEvent", function(self)
                 return sid == 73
             end
             if _IsProtWarrior() then
-                local ipBarTip = "Creates a class resource bar for Ignore Pain tracking. To see stack text, you must have Ignore Pain tracked in your Blizzard CDM \"Tracked Buffs\" or \"Tracked Bars\" section."
+                -- Translated in halves so the CDM sentence keeps its existing locale
+                -- entries; ShowWidgetTooltip L()s the joined string, a harmless miss.
+                -- The first half stays a variable: its escaped quotes would come back
+                -- truncated from the static key extractor.
+                local ipBarTipCDM = "Creates a class resource bar for Ignore Pain tracking. To see stack text, you must have Ignore Pain tracked in your Blizzard CDM \"Tracked Buffs\" or \"Tracked Bars\" section."
+                local ipBarTip = EllesmereUI.L(ipBarTipCDM) .. " " .. EllesmereUI.L("Tracking it also makes the fill show Ignore Pain alone; without it the fill shows your total absorb, so other shields can add to it.")
                 local ipHashTip = "Draws a hash line that resets to the right edge when you cast Ignore Pain and slides left as the buff runs out."
                 local ipRow
                 ipRow, h = W:DualRow(parent, y,
