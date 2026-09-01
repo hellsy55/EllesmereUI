@@ -1611,6 +1611,17 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
+        -- Row 5: Hide Learned Spell Messages
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Hide Learned Spell Messages",
+              tooltip="Suppresses \"You have learned a new spell/ability/passive effect\" and \"You have unlearned ...\" system messages, like the ones spammed every time you switch spec or talent loadout.",
+              getValue=function() return Cfg("hideLearnedSpellMessages") == true end,
+              setValue=function(v)
+                  Set("hideLearnedSpellMessages", v)
+                  if ECHAT.ApplyHideLearnedSpells then ECHAT.ApplyHideLearnedSpells(v) end
+              end })
+        y = y - h
+
         end -- isChat
 
         return math.abs(y)
@@ -1623,7 +1634,7 @@ initFrame:SetScript("OnEvent", function(self)
         description = "Chat frame reskin, clickable URLs, copy chat, sidebar icons.",
         pages       = { "Chat", "Tabs", "Sidebar" },
         buildPage   = function(pageName, p, yOffset) return BuildPage(pageName, p, yOffset) end,
-        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size",
+        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size hide learned unlearned spell ability passive effect spec talent loadout system messages",
         onReset = function()
             local d = _G._ECHAT_DB
             if d and d.ResetProfile then d:ResetProfile() end

@@ -730,6 +730,54 @@ function ECHAT.EngineSetSystemClassColor(on)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Hide "learned/unlearned a spell/ability/passive effect" system messages
+--  (opt-in). These are ordinary CHAT_MSG_SYSTEM lines Blizzard prints every
+--  time a spec/talent swap re-teaches (and un-teaches) that build's spells
+--  and passives, which floods the log on every loadout change. Filtered via
+--  ChatFrame_AddMessageEventFilter -- BEFORE Blizzard's own frame (and so
+--  before our AddMessage bridge) ever sees the line -- so a match suppresses
+--  it everywhere, same lane as the URL filter in EllesmereUIChat.lua (module
+--  header: "third-party message filters exactly as stock"). Patterns are
+--  built from the client's own global strings (escaped, "%s" -> wildcard),
+--  same idiom as EUI_UpgradeCalc.lua's CREATED_BY_PATTERN, so this works on
+--  every locale without a hand-translated string list; each falls back to
+--  its enUS literal if the global string is ever missing.
+-------------------------------------------------------------------------------
+local function PatternFromFormat(fmt)
+    if type(fmt) ~= "string" or fmt == "" then return nil end
+    local pat = fmt:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+    pat = pat:gsub("%%%%s", ".+")
+    return pat
+end
+
+local _learnedPatterns = {
+    PatternFromFormat(_G.ERR_LEARN_ABILITY_S or "You have learned a new ability: %s."),
+    PatternFromFormat(_G.ERR_LEARN_PASSIVE_S or "You have learned a new passive effect: %s."),
+    PatternFromFormat(_G.ERR_LEARN_SPELL_S or "You have learned a new spell: %s."),
+    PatternFromFormat(_G.ERR_SPELL_UNLEARNED_S or "You have unlearned %s."),
+}
+
+local _hideLearnedOn = false
+
+local function LearnedSpellFilter(self, event, msg, ...)
+    if not _hideLearnedOn then return false end
+    if type(msg) ~= "string" then return false end
+    if issecretvalue and issecretvalue(msg) then return false end
+    for i = 1, #_learnedPatterns do
+        local pat = _learnedPatterns[i]
+        if pat and msg:find(pat) then
+            return true
+        end
+    end
+    return false
+end
+ChatFrame_AddMessageEventFilter("CHAT_MSG_SYSTEM", LearnedSpellFilter)
+
+function ECHAT.EngineSetHideLearnedSpells(on)
+    _hideLearnedOn = on == true
+end
+
 -- Escape spans the name scanner must never touch. Hyperlinks are protected
 -- through their LABEL too: corrupting a |H target breaks the link, and
 -- sender-name labels are already colored by Blizzard's own composer.

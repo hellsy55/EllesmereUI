@@ -141,6 +141,7 @@ local CHAT_DEFAULTS = {
             abbreviateChannels = true,  -- same key as live: saved settings carry over
             classColorNames = true,
             classColorSystem = true,
+            hideLearnedSpellMessages = false,
             hideSidebarBg = false,
             sidebarIconScale = 1.0,
             sidebarIconSpacing = 10,
@@ -694,6 +695,17 @@ end
 function ECHAT.ApplyClassColorSystem(on)
     if ECHAT.EngineSetSystemClassColor then
         ECHAT.EngineSetSystemClassColor(on == true)
+    end
+end
+
+-- Suppresses Blizzard's "You have learned a new spell/ability/passive
+-- effect" and "You have unlearned ..." CHAT_MSG_SYSTEM lines (the spam a
+-- spec/talent swap triggers as it re-teaches and un-teaches that build's
+-- passives). Filtered before Blizzard's chat frame ever sees the line, so
+-- nothing reaches ours either.
+function ECHAT.ApplyHideLearnedSpells(on)
+    if ECHAT.EngineSetHideLearnedSpells then
+        ECHAT.EngineSetHideLearnedSpells(on == true)
     end
 end
 
@@ -5143,6 +5155,9 @@ initFrame:SetScript("OnEvent", function(self)
     end
     if p.classColorSystem == true then
         ECHAT.ApplyClassColorSystem(true)
+    end
+    if p.hideLearnedSpellMessages == true then
+        ECHAT.ApplyHideLearnedSpells(true)
     end
     if ECHAT.EngineIntegrateAll then ECHAT.EngineIntegrateAll() end
     -- Owned tab strip: hides Blizzard's strip, builds ours from the same
