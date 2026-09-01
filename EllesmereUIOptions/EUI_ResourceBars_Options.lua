@@ -7278,6 +7278,18 @@ initFrame:SetScript("OnEvent", function(self)
         local visRow
         visRow, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
             { getStore = function() local p = DB(); return p and p.secondary end,
+              -- The override marker fans out like the scalar and the option lanes do;
+              -- secondary leads, matching getStore above.
+              getStores = function()
+                  local p = DB(); if not p then return nil end
+                  -- Built by presence, never as a literal triple: a nil in the middle
+                  -- would leave a hole the # operator reads past.
+                  local out = {}
+                  if p.secondary then out[#out + 1] = p.secondary end
+                  if p.health    then out[#out + 1] = p.health    end
+                  if p.primary   then out[#out + 1] = p.primary   end
+                  return out
+              end,
               legacyKey = "visibility",
               caps = { partyIncludesRaid = false, luaDragonriding = true },
               applyScalarFn = ApplyVisScalarAll,
