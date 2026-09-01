@@ -5206,8 +5206,18 @@ L["Hearty Wise Tails"] = "Cauda de Sábio Substanciais"
 L["Missing Pet"] = "Ajudante Ausente"
 L["Passive Pet"] = "Ajudante em Passivo"
 L["Show a reminder when you don't have an active pet summoned. Only applies to pet classes (Hunter, Warlock, Death Knight, Mage)."] = "Exibe um lembrete quando você não tem um ajudante ativo invocado. Aplica-se apenas às classes com ajudante (Caçador, Bruxo, Cavaleiro da Morte, Mago)."
-L["Show a reminder when your Demonology Warlock has the wrong pet summoned (not Felguard)."] = "Exibe um lembrete quando seu Bruxo Demonologia tem o ajudante errado invocado (não é o Guarda Vil)."
-L["Wrong Pet (Demo Lock)"] = "Ajudante Errado (Bruxo Demo)"
+L["Wrong Demon"] = "Demônio Errado"
+L["Show a reminder when your Warlock's active pet isn't one of the demons picked in Allowed Demons. A demon only counts while its summon spell is known, so leaving only Felguard picked stays silent for specs/builds that haven't talented Summon Felguard."] = "Exibe um lembrete quando o ajudante ativo do seu Bruxo não é um dos demônios escolhidos em Demônios Permitidos. Um demônio só conta enquanto seu feitiço de invocação for conhecido, então deixar apenas o Guarda Vil escolhido mantém o lembrete em silêncio para especializações ou configurações que não talentaram Evocar Guarda Vil."
+
+-- Warlock demons (Allowed Demons)
+L["WARLOCK DEMONS"] = "DEMÔNIOS DO BRUXO"
+L["Allowed Demons"] = "Demônios Permitidos"
+L["Pick which demons count as correct for Wrong Demon. A demon only counts while its summon spell is known; with none picked (or everything picked), the reminder never fires."] = "Escolha quais demônios contam como corretos para o Demônio Errado. Um demônio só conta enquanto seu feitiço de invocação for conhecido; com nenhum escolhido (ou todos escolhidos), o lembrete nunca é ativado."
+L["You have not learned %1$s."] = "Você não aprendeu %1$s."
+L["Imp"] = "Diabrete"
+L["Voidwalker"] = "Emissário do Caos"
+L["Felhunter"] = "Caçador Vil"
+L["Sayaad"] = true
 
 -- Healthstone reminder
 L["Remind you to grab a Healthstone when a Warlock is in your group."] = "Lembra você de pegar uma Pedra de Vida quando há um Bruxo no seu grupo."
