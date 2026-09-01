@@ -1981,6 +1981,21 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         if not visOnly then
+            -- Strata Level: shares a row with Click Through. Controls which frame
+            -- strata this bar renders on (useful when another window is covering it,
+            -- or when it should render behind other UI).
+            local STRATA_VALUES = {
+                BACKGROUND        = "Background",
+                LOW               = "Low",
+                MEDIUM            = "Medium",
+                HIGH              = "High",
+                DIALOG            = "Dialog",
+                FULLSCREEN        = "Fullscreen",
+                FULLSCREEN_DIALOG = "Fullscreen Dialog",
+                TOOLTIP           = "Tooltip",
+            }
+            local STRATA_ORDER = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
+
             local ctRow
             ctRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Click Through",
@@ -1990,7 +2005,13 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       SSet("clickThrough", v, function(k) EAB:ApplyClickThroughForBar(k) end)
                   end },
-                { type="label", text="" });  y = y - h
+                { type="dropdown", text="Strata Level",
+                  tooltip="Controls the frame layering (strata) this bar renders on. Raise it if the bar is being covered by another window; lower it if it should render behind other UI.",
+                  values=STRATA_VALUES, order=STRATA_ORDER,
+                  getValue=function() return SGet("frameStrata") or "MEDIUM" end,
+                  setValue=function(v)
+                      SSet("frameStrata", v, function(k) EAB:ApplyStrataForBar(k) end)
+                  end });  y = y - h
             -- "Toggle Action Bar" keybind: bound key flips the bar shown/hidden at runtime
             -- without writing saved visibility. Enabled only for Always/Never; out of combat
             -- only. Its label sits in the Visibility row, so the button goes there too.
@@ -2153,33 +2174,8 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
-            -- Strata Level: last row of the Visibility section. Controls which frame
-            -- strata this bar renders on (useful when another window is covering it,
-            -- or when it should render behind other UI).
-            local STRATA_VALUES = {
-                BACKGROUND        = "Background",
-                LOW               = "Low",
-                MEDIUM            = "Medium",
-                HIGH              = "High",
-                DIALOG            = "Dialog",
-                FULLSCREEN        = "Fullscreen",
-                FULLSCREEN_DIALOG = "Fullscreen Dialog",
-                TOOLTIP           = "Tooltip",
-            }
-            local STRATA_ORDER = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
-
-            local strataRow
-            strataRow, h = W:DualRow(parent, y,
-                { type="dropdown", text="Strata Level",
-                  tooltip="Controls the frame layering (strata) this bar renders on. Raise it if the bar is being covered by another window; lower it if it should render behind other UI.",
-                  values=STRATA_VALUES, order=STRATA_ORDER,
-                  getValue=function() return SGet("frameStrata") or "MEDIUM" end,
-                  setValue=function(v)
-                      SSet("frameStrata", v, function(k) EAB:ApplyStrataForBar(k) end)
-                  end },
-                { type="spacer" });  y = y - h
             do
-                local rgn = strataRow._leftRegion
+                local rgn = ctRow._rightRegion
                 EllesmereUI.BuildSyncIcon({
                     region  = rgn,
                     tooltip = "Apply Strata Level to all Bars",
