@@ -4384,11 +4384,14 @@ local function BuildCogPopup(opts)
                     cpLblBlock:SetScript("OnLeave", function() if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end end)
                 end
 
-                rowWidgets[#rowWidgets + 1] = { type = 'colorpicker', updateSwatch = cpUpdate, swatch = cpSwatch, swBlock = cpSwBlock, lblBlock = cpLblBlock, disCheck = row.disabled }
+                rowWidgets[#rowWidgets + 1] = { type = 'colorpicker', updateSwatch = cpUpdate, swatch = cpSwatch, lbl = lbl, swBlock = cpSwBlock, lblBlock = cpLblBlock, disCheck = row.disabled }
 
                 if row.disabled then
                     local initDis = type(row.disabled) == "function" and row.disabled() or row.disabled
                     cpSwatch:SetAlpha(initDis and 0.3 or 1)
+                    -- Label dims by alpha rather than the dark row overlay the other
+                    -- types use: that overlay would tint the swatch's own color.
+                    lbl:SetAlpha(initDis and 0.2 or 0.6)
                     if cpSwBlock then if initDis then cpSwBlock:Show() else cpSwBlock:Hide() end end
                     if cpLblBlock then if initDis then cpLblBlock:Show() else cpLblBlock:Hide() end end
                 end
@@ -4903,6 +4906,7 @@ local function BuildCogPopup(opts)
                         local dis
                         if type(rw.disCheck) == "function" then dis = rw.disCheck() else dis = rw.disCheck end
                         if rw.swatch then rw.swatch:SetAlpha(dis and 0.3 or 1) end
+                        if rw.lbl then rw.lbl:SetAlpha(dis and 0.2 or 0.6) end
                         if rw.swBlock then if dis then rw.swBlock:Show() else rw.swBlock:Hide() end end
                         if rw.lblBlock then if dis then rw.lblBlock:Show() else rw.lblBlock:Hide() end end
                     end
