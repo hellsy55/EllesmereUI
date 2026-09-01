@@ -5651,7 +5651,7 @@ local function UpdateSecondaryResource()
             if ns.WC_Thresholds then
                 ns.WC_Thresholds(powerType,
                     (_tsEntry and _tsEntry.thresholdMode) or sp.thresholdMode,
-                    _tsThreshCount, _tsR, _tsG, _tsB, _tsA,
+                    _tsEntry and _tsThreshCount or nil, _tsR, _tsG, _tsB, _tsA,
                     _tsBandOn, _tsBands, _tsBandReverse, _tsReverse)
             end
         end
