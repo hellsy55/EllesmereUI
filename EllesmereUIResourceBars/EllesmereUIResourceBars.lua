@@ -3591,9 +3591,9 @@ local function BuildBars()
                 if not runeFrames[i] then
                     runeFrames[i] = CreatePip(secondaryFrame, 20, pipH, i,
                         0, 0, 0, 0, 0)
-                    -- Countdown number on its own overlay ABOVE the bar border. Rune
-                    -- pips use per-pip border size 0, so the VISIBLE border is the
-                    -- outer secondaryFrame._barBorder at level +5 -- the number must
+                    -- Countdown number on its own overlay ABOVE the bar border (whichever
+                    -- one is visible: per-pip when Border on Individual Pips is on, else
+                    -- the outer secondaryFrame._barBorder at level +5) -- the number must
                     -- clear that (not just the pip) while staying below the
                     -- count/value text overlay (level 25). Recharge fill stays
                     -- framed by the border, matching the ready-rune fill.
@@ -3639,7 +3639,13 @@ local function BuildBars()
                 rf["_barAnim_x1"] = x1 - x0
                 rf["_barAnim_ph"] = pipH
                 ApplyRunePos()
-                runeFrames[i]:ApplyBorder(0, 0, 0, 0, 0)
+                if sp.borderOnPips then
+                    runeFrames[i]:ApplyBorder(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
+                        sp.borderTexture, sp.borderTextureOffset, sp.borderTextureOffsetY,
+                        sp.borderTextureShiftX, sp.borderTextureShiftY, "resourcebars", sp.borderSize)
+                else
+                    runeFrames[i]:ApplyBorder(0, 0, 0, 0, 0)
+                end
                 runeFrames[i]:ApplyTexture(g.barTexture or "none")
                 runeFrames[i]._bg:SetColorTexture(ERB.PipBgColor(sp))
                 -- Fill Opacity: same stamp as regular pips (consumed by
@@ -3748,7 +3754,7 @@ local function BuildBars()
             local pl = secondaryFrame:GetFrameLevel()
             secondaryFrame._barBorder._frame:SetFrameLevel(sp.borderBehind and math.max(0, pl - 1) or (pl + 5))
         end
-        if sp.borderOnPips and cachedSecondary.type ~= "runes" and not isBarType then
+        if sp.borderOnPips and not isBarType then
             secondaryFrame._barBorder:ApplyStyle(0,0,0,0,0)
         else
             secondaryFrame._barBorder:ApplyStyle(sp.borderSize, sp.borderR, sp.borderG, sp.borderB, sp.borderA,
