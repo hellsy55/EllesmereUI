@@ -477,6 +477,7 @@ Not Included
 Not Loaded
 Not currently talented
 Not enough gold to repair.
+Not overridable
 Nothing Extra
 Nothing to add
 OFFLINE

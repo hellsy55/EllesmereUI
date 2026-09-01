@@ -5062,6 +5062,10 @@ local _mmDriverStr
 
 -- Compile the profile's selection into macro-conditional grammar for the secure driver, or nil when it cannot be expressed as one.
 local function MinimapDriverString(p, vm)
+    -- An applied Visibility override replaces the whole setting: a constant, and the
+    -- shared selection underneath never reaches the driver.
+    local visOv = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(p)
+    if visOv then return (visOv == "never") and "hide" or "show" end
     -- Any match: Lua-only lanes (instances, housing, skyriding mount) are resolved at
     -- build time (caller runs out of combat only); a later zone/mount edge re-runs the
     -- dispatcher and re-registers the string.

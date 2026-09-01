@@ -2839,9 +2839,24 @@ end
 -- spawn, actively disable Blizzard's too). "hidden" has highest precedence so a
 -- legacy disabled frame (enabledFrames[unit]==false: Visibility "never" or an
 -- "Enable X Frame" toggle off) keeps meaning "no frame at all".
+--- True when the unit has no EllesmereUI frame at all. That is the enabledFrames flag,
+--- with the one exception an applied Visibility override carves out: the same flag is how
+--- a shared Visibility of "never" is stored (applyScalarFn writes it), and an override
+--- REPLACES the whole Visibility setting, "never" included. A frame source of "hidden" is
+--- the cog's own choice rather than a Visibility setting, so it still wins. On ns for the
+--- 200-locals cap.
+function ns.VisUnitDisabled(profile, unitKey)
+    local ef = profile and profile.enabledFrames
+    if not ef or ef[unitKey] ~= false then return false end
+    if (profile.frameSource and profile.frameSource[unitKey]) == "hidden" then return true end
+    local s = profile[unitKey]
+    local ov = s and EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
+    return not (ov and ov ~= "never")
+end
+
 function ns.GetUnitFrameSource(unit)
     if not db or not db.profile then return "eui" end
-    if db.profile.enabledFrames[unit] == false then return "hidden" end
+    if ns.VisUnitDisabled(db.profile, unit) then return "hidden" end
     local fs = db.profile.frameSource and db.profile.frameSource[unit]
     if fs == "blizzard" then
         -- ToT/focus-target have no standalone Blizzard frame (native one is a child
@@ -10956,12 +10971,23 @@ function ns.ResolveVisRestingLive(s, frame)
     return ns.ResolveVisResting(s, frame, ext, hiddenByOpts, InCombatLockdown())
 end
 
+--- Is the hover mechanism wired for this frame at all? The cheap static prefilter both
+--- handlers use, kept static on purpose (a live verdict here would write alpha on every
+--- mouse leave of every frame). An applied Visibility override answers it too: it holds
+--- the hover state itself, and without this the frame would rest at alpha 0 with no
+--- handler willing to reveal it again.
+function ns.VisMouseoverWired(s)
+    if not s then return false end
+    if (s.barVisibility or "always") == "mouseover" then return true end
+    return (EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)) == "mouseover"
+end
+
 local function UnitFrame_OnEnter(self)
     local unit = self._euiUnit
     if not unit then return end
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
-    if s and (s.barVisibility or "always") == "mouseover" then
+    if ns.VisMouseoverWired(s) then
         -- Reveal only what is actually hover-gated right now. Under Any the frame may
         -- already be shown on another passing disjunct, in which case there is nothing to
         -- reveal and OnLeave must not undo anything either -- both handlers read the same
@@ -11009,7 +11035,7 @@ local function UnitFrame_OnLeave(self)
     if not unit then return end
     local unitKey = unit:match("^boss%d$") and "boss" or unit
     local s = db and db.profile and db.profile[unitKey]
-    if s and (s.barVisibility or "always") == "mouseover" then
+    if ns.VisMouseoverWired(s) then
         -- Return to the resting alpha the visibility pass would paint, never a hardcoded
         -- 0: under Any a passing disjunct keeps the frame visible with no hover involved,
         -- and hiding it here would leave it wrong until the next visibility event fires.
@@ -12342,7 +12368,6 @@ function InitializeFrames()
         -- (SetAlpha) are not restricted and must run on combat transitions.
         -- Show/Hide and SetAttribute ARE restricted; those are guarded below.
         local isLocked = InCombatLockdown()
-        local enabled2 = db.profile.enabledFrames
         local inRaid = IsInRaid()
         local inParty = not inRaid and IsInGroup()
         local solo = not inRaid and not inParty
@@ -12351,7 +12376,9 @@ function InitializeFrames()
         for _, unitKey in ipairs({"player", "target", "focus"}) do
             local s = db.profile[unitKey]
             local frame = frames[unitKey]
-            if frame and enabled2[unitKey] ~= false and s then
+            -- The enabledFrames gate through VisUnitDisabled: a unit disabled purely by a
+            -- shared Visibility of "never" comes back while an override replaces it.
+            if frame and not ns.VisUnitDisabled(db.profile, unitKey) and s then
                 local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(s)
                 local vis = s.barVisibility or "always"
 
@@ -12381,7 +12408,12 @@ function InitializeFrames()
                 -- Tail built once and reused by the mini frame below (both compilers only
                 -- PREPEND their prefix).
                 local visTail
-                if s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
+                -- An applied Visibility override replaces the whole setting, so the tail
+                -- is a constant and the shared selection never reaches the driver.
+                local visOv = EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)
+                if visOv then
+                    visTail = (visOv == "never") and "hide" or "show"
+                elseif s.visibilityMatch == "any" and EllesmereUI.BuildAnyMatchTail then
                     local tail, _, liveAxes = EllesmereUI.BuildAnyMatchTail(s, "barVisibility", drvSet)
                     -- Gated on liveAxes: with no soft-target edge here, target/enemy axes
                     -- resolve in Lua, and a driver compiled from those alone would be a
