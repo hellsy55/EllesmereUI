@@ -59,6 +59,14 @@ do
         return width, height
     end
 
+    -- The gate oversizes the icon by pad on every side and the mask matches the
+    -- gate exactly, so a FULL fill puts the open mask over the whole glow --
+    -- flipbook/pixel textures overhang the icon edges.
+    local function SizeStackGlowMask(st, width, height)
+        if not (st.mask and st.pad) then return end
+        st.mask:SetSize(width + st.pad * 2, height + st.pad * 2)
+    end
+
     -- LIVE-FIRST: the item's auraDataCached is (re)written on aura
     -- ASSIGNMENT, so an update-only stack change can leave it holding the
     -- gain-time count -- a threshold crossing would then wait for the next
@@ -107,6 +115,9 @@ do
             ns.StopNativeGlow(st.glow)
             st.started = nil
         end
+        -- Unconditional: the wrapper is created at alpha 1, so anything an
+        -- engine left on it would show through a gate that never opened.
+        if st.glow then st.glow:SetAlpha(0) end
         if st.gate then st.gate:SetValue(0) end
     end
 
@@ -160,12 +171,19 @@ do
             if gft then gft:SetAlpha(0) end
             st.gate:EnableMouse(false)
 
-            -- The mask shadows the (alpha-0) fill rect: value below the
-            -- window = zero-width rect = everything masked away.
+            -- The mask rides the (alpha-0) fill's RIGHT edge at a FIXED
+            -- gate-sized rect instead of shadowing the fill rect: at value =
+            -- min the fill is zero-wide, and a zero-area mask samples
+            -- undefined -- a partly passing mask reads as a faint glow below
+            -- the threshold. Parked a gate-width left it covers nothing; at
+            -- value = max it lands on the gate. NEAREST for the Raid Frames
+            -- absorb bound's reason: bilinear ramps WHITE8X8's edge texel into
+            -- the black border, and that leak shows along every edge.
             st.mask = st.gate:CreateMaskTexture()
             st.mask:SetTexture("Interface\\Buttons\\WHITE8x8",
-                "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-            st.mask:SetAllPoints(gft or st.gate)
+                "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE", "NEAREST")
+            st.mask:SetPoint("RIGHT", gft or st.gate, "RIGHT", 0, 0)
+            SizeStackGlowMask(st, StackGlowSize(icon))
 
             st.glow = CreateFrame("Frame", nil, icon)
             st.glow:SetAllPoints(icon)
@@ -229,6 +247,7 @@ do
                 st.gate:SetPoint("TOPLEFT", icon, "TOPLEFT", -pad, pad)
                 st.gate:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", pad, -pad)
             end
+            SizeStackGlowMask(st, width, height)
             StartStackGlow(st, width, height)
         end
         st.gate:SetValue(applications)

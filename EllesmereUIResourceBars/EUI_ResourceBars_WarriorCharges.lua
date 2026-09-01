@@ -58,6 +58,17 @@ function ns.WC_Recolor(powerKey, r, g, b, a)
     if ewc then ewc.Recolor("erb", powerKey, r, g, b, a) end
 end
 
+-- Threshold/band inputs, handed raw each paint pass; the core change-gates
+-- with alloc-free compares and renders them as engine-masked range strips.
+function ns.WC_Thresholds(powerKey, mode, count, r, g, b, a,
+                          bandOn, bands, bandReverse, reverse)
+    local ewc = _G._EWC
+    if ewc and ewc.Thresholds then
+        ewc.Thresholds("erb", powerKey, mode, count, r, g, b, a,
+            bandOn, bands, bandReverse, reverse)
+    end
+end
+
 -- Called from BuildBars with the resolved secondary build in hand (race-free:
 -- the frame is created, sized and styled by the time this runs). Any power
 -- type other than the two warrior charge buffs parks the overlay.
@@ -70,6 +81,16 @@ function ns.WC_Sync(frame, sp, powerKey, gen)
         return
     end
     local fr, fg, fb, fa = FillColor(sp, powerKey)
+    -- Empty Bar Overlay: the legacy pips painted every empty slot's backdrop
+    -- through ERB.PipBgColor (bgR/G/B/A, dark theme -> opaque dark-mode bg,
+    -- fill-opacity compositing). The engine fill renders over a transparent
+    -- proxy, so without this strip the empty portion fell through to the
+    -- near-black _barBg and dark mode lost all deduction contrast.
+    local ebR, ebG, ebB, ebA = 0.1, 0.1, 0.1, 0.5
+    local ERB2 = ns.ERB
+    if ERB2 and ERB2.PipBgColor then
+        ebR, ebG, ebB, ebA = ERB2.PipBgColor(sp)
+    end
     local wantText = sp.showText and true or false
     if wantText and _G._ERB_TextHiddenByForm and ns.ERB and ns.ERB.db
        and _G._ERB_TextHiddenByForm(ns.ERB.db.profile.secondary, true) then
@@ -85,6 +106,7 @@ function ns.WC_Sync(frame, sp, powerKey, gen)
         gapColorEnabled = sp.gapColorEnabled,
         gapR = sp.gapR, gapG = sp.gapG, gapB = sp.gapB, gapA = sp.gapA,
         darkTheme = sp.darkTheme,
+        sep = { empty = { r = ebR, g = ebG, b = ebB, a = ebA } },
         barBgR = sp.barBgR, barBgG = sp.barBgG, barBgB = sp.barBgB, barBgA = sp.barBgA,
         text = {
             fontFrom = frame._countText,

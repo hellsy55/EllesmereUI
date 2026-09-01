@@ -5602,6 +5602,16 @@ local function UpdateSecondaryResource()
             -- the handoff before the render paths does the rest. Until the
             -- deferred build lands the row simply shows empty (the cast-count
             -- simulator is retired).
+            -- BuildBars still lays the legacy gap-fill strips from the OLD pip
+            -- grid (cumulative cell+gap pixels); the engine bar's separator
+            -- ticks follow the fill's uniform fractions, so live strips
+            -- double-line against them, drifting apart along the bar (worst
+            -- with a wide Bar Spacing). These two powers never render pips,
+            -- so the strips are never wanted; hide once when present.
+            local gf = secondaryFrame._gapFills
+            if gf and gf[1] and gf[1]:IsShown() then
+                for gi = 1, #gf do gf[gi]:Hide() end
+            end
             if ns.WC_EngineOn and ns.WC_EngineOn(powerType) then
                 _wcEngine = true
             else
@@ -5639,6 +5649,17 @@ local function UpdateSecondaryResource()
         -- value read.
         if ns.WC_Recolor and (powerType == "WHIRLWIND_STACKS" or powerType == "SWEEPING_STRIKES") then
             ns.WC_Recolor(powerType, r, g, b, a)
+            -- Threshold/band settings ride along raw (already resolved above
+            -- at this pass's existing cost); the engine module change-gates
+            -- and renders them as fill-masked range strips -- no Lua count
+            -- exists for these two powers, so this is the only threshold
+            -- renderer they have.
+            if ns.WC_Thresholds then
+                ns.WC_Thresholds(powerType,
+                    (_tsEntry and _tsEntry.thresholdMode) or sp.thresholdMode,
+                    _tsThreshCount, _tsR, _tsG, _tsB, _tsA,
+                    _tsBandOn, _tsBands, _tsBandReverse, _tsReverse)
+            end
         end
         if _wcEngine then
             for i = 1, #pips do if pips[i] then pips[i]:Hide() end end
