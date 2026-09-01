@@ -8933,6 +8933,15 @@ initFrame:SetScript("OnEvent", function(self)
                     AB.RunBarApply = function(applyKeys, applyWrite, val, allSpecs)
                         if not applyWrite then return end
                         local keys = applyKeys or {}
+                        -- Resolve the value ONCE, before anything below clears a thing. A payload
+                        -- writer (custom colour, Threshold Seconds) reads the source spell's own keys
+                        -- back out of its entry, and the sweeps clear exactly those keys -- re-running
+                        -- it per tier and per stamp would make the result depend on sweep order.
+                        local temp = {}
+                        applyWrite(temp, val)
+                        local function stamp(t)
+                            for _, k in ipairs(keys) do t[k] = temp[k] end
+                        end
                         local touchesCas = false
                         for _, k in ipairs(keys) do
                             if AB.CAS_KEYS[k] then touchesCas = true; break end
@@ -8955,10 +8964,10 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                             end)
                             if touchesCas then
-                                AB.StampMemberCas(bsX, applyWrite, val, keys)
+                                AB.StampMemberCas(bsX, stamp, val, keys)
                             end
                             if touchesHosted then
-                                AB.StampHostedBuffs(prof, bsX, applyWrite, val, keys)
+                                AB.StampHostedBuffs(prof, bsX, stamp, val, keys)
                             end
                         end
                         if allSpecs then
@@ -8969,7 +8978,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- New tier table: chained results are stale.
                                 ns._cdmResGen = (ns._cdmResGen or 0) + 1
                             end
-                            applyWrite(abs, val)
+                            stamp(abs)
                             AB.FlipSessionGates(abs)
                             local spAll = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
                             if spAll then
@@ -8989,7 +8998,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 ns._cdmResGen = (ns._cdmResGen or 0) + 1
                             end
                             ns.ChainSettings(bs, bdSel and bdSel.barSpellSettings)
-                            applyWrite(bs, val)
+                            stamp(bs)
                             AB.FlipSessionGates(bs)
                             local spAll = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
                             local specKeyA = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
