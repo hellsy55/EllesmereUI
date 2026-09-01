@@ -63,31 +63,58 @@ local ACTION_ICONS = {
     external = 135966,  -- Blessing of Sacrifice icon
 }
 
--- Dispel spells by class (friendly dispels only)
+-- Dispel spells by class (friendly dispels only). One entry per spec that has a
+-- distinct spell; ClassPresetSpells drops the ones this character has not got
+-- before they reach the macro.
 local DISPEL_SPELLS = {
-    { id = 240166, name = "Purify",        class = "PRIEST" },
-    { id = 218164, name = "Detox",         class = "MONK" },
+    { id = 527,    name = "Purify",        class = "PRIEST" },  -- Disc & Holy
+    { id = 213634, name = "Purify Disease", class = "PRIEST" }, -- Shadow
+    { id = 115450, name = "Detox",         class = "MONK" },  -- Mistweaver
+    { id = 218164, name = "Detox",         class = "MONK" },  -- Brewmaster & Windwalker
     { id = 4987,   name = "Cleanse",       class = "PALADIN" },  -- Holy
     { id = 213644, name = "Cleanse Toxins", class = "PALADIN" }, -- Prot & Ret (Cleanse is Holy-only)
     { id = 88423,  name = "Nature's Cure", class = "DRUID" },  -- Resto
     { id = 2782,   name = "Remove Corruption", class = "DRUID" }, -- Guardian, Feral & Balance
-    { id = 254420, name = "Purify Spirit", class = "SHAMAN" },  -- Resto
+    { id = 77130,  name = "Purify Spirit", class = "SHAMAN" },  -- Resto
     { id = 51886,  name = "Cleanse Spirit", class = "SHAMAN" }, -- Ele & Enh
     { id = 360823, name = "Naturalize",    class = "EVOKER" },  -- Pres
     { id = 365585, name = "Expunge",       class = "EVOKER" },  -- Aug & Dev
-    { id = 89808,  name = "Singe Magic",   class = "WARLOCK" }, -- Warlock
+    { id = 89808,  name = "Singe Magic",   class = "WARLOCK", pet = true }, -- Imp
     { id = 475,    name = "Remove Curse",  class = "MAGE" },  -- All specs (Curse only)
 }
 
 -- External defensive spells by class
 local EXTERNAL_SPELLS = {
-    { id = 33206,  name = "Pain Suppression",      class = "PRIEST" },
-    { id = 255312, name = "Guardian Spirit",        class = "PRIEST" },
-    { id = 102342, name = "Ironbark",              class = "DRUID" },
+    { id = 33206,  name = "Pain Suppression",      class = "PRIEST" },  -- Disc
+    { id = 47788,  name = "Guardian Spirit",        class = "PRIEST" },  -- Holy
+    { id = 102342, name = "Ironbark",              class = "DRUID" },  -- Resto
     { id = 6940,   name = "Blessing of Sacrifice",  class = "PALADIN" },
-    { id = 357170, name = "Time Dilation",          class = "EVOKER" },
-    { id = 343744, name = "Life Cocoon",            class = "MONK" },
+    { id = 357170, name = "Time Dilation",          class = "EVOKER" },  -- Pres
+    { id = 116849, name = "Life Cocoon",            class = "MONK" },  -- Mistweaver
 }
+
+-- This class's preset entries, narrowed to what the character can cast. A /cast
+-- line naming a spell they have not got matches its condition and then casts
+-- nothing, eating the fallback the next line was there to be, so an unavailable
+-- entry has to be dropped rather than ordered last. Empty falls back to the
+-- unfiltered list: bindings rebuild on spec change but not on a talent or
+-- loadout swap, so "nothing available" is as likely stale as true, and an
+-- all-unknown list shadows nothing anyway. Singe Magic is exempt -- the pet book
+-- holds only the summoned demon's spells.
+local function ClassPresetSpells(spellList, class)
+    local bank = Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player
+    local canCheck = C_SpellBook.IsSpellInSpellBook and bank
+    local usable, all = {}, {}
+    for _, sp in ipairs(spellList) do
+        if sp.class == class then
+            all[#all + 1] = sp
+            if sp.pet or not canCheck or C_SpellBook.IsSpellInSpellBook(sp.id, bank, true) then
+                usable[#usable + 1] = sp
+            end
+        end
+    end
+    return #usable > 0 and usable or all
+end
 
 -- Resurrection spells by class: single (ooc), group (ooc), battle (combat)
 local REZ_BY_CLASS = {
@@ -624,7 +651,9 @@ end
 -- Builds dynamic-rez /cast lines (used by the dynamicrez binding type + Smart
 -- Rez). Returns a list of macro lines (possibly empty) or nil if the class has
 -- no rez kit. Never includes /stopmacro -- caller adds that for oocOnly.
-local function BuildRezLines(binding, guard)
+-- standalone marks the dedicated rez binding, where these lines are the whole
+-- macro rather than a [dead] prefix in front of somebody else's action.
+local function BuildRezLines(binding, guard, standalone)
     local _, pClass = UnitClass("player")
     local kit = REZ_BY_CLASS[pClass]
     if not kit then return nil end
@@ -640,13 +669,33 @@ local function BuildRezLines(binding, guard)
     local groupName  = Known(kit.group)
     local singleName = Known(kit.single)
     local lines = {}
-    if battleName and not binding.oocOnly then
-        lines[#lines + 1] = "/cast [@mouseover,help,dead,combat" .. guard .. "] " .. battleName
+    -- [combat] only when there is an out-of-combat rez after it to be the answer
+    -- instead. A death knight or a warlock, whose only rez IS the battle one,
+    -- would otherwise cast nothing out of combat -- where that spell works
+    -- perfectly well, so theirs takes oocOnly's [nocombat] rather than dropping.
+    -- That conditional has to live on the line: Smart Rez prepends these ahead of
+    -- the base macro, and so ahead of its /stopmacro [combat].
+    local hasOOCRez = groupName or singleName
+    if battleName and not (hasOOCRez and binding.oocOnly) then
+        local combatCond = ""
+        if hasOOCRez then
+            combatCond = ",combat"
+        elseif binding.oocOnly then
+            combatCond = ",nocombat"
+        end
+        lines[#lines + 1] = "/cast [@mouseover,help,dead" .. combatCond .. guard .. "] " .. battleName
     end
     if groupName then
         lines[#lines + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. groupName
     elseif singleName then
         lines[#lines + 1] = "/cast [@mouseover,help,dead,nocombat" .. guard .. "] " .. singleName
+    end
+    -- Soulstone also pre-buffs a LIVING ally, which the [dead] lines above can
+    -- never reach. Standalone only: Smart Rez prepends these lines to another
+    -- action and depends on all of them failing on a living unit.
+    if standalone and pClass == "WARLOCK" and battleName then
+        local oocCond = binding.oocOnly and ",nocombat" or ""
+        lines[#lines + 1] = "/cast [@mouseover,help,exists,nodead" .. oocCond .. guard .. "] " .. battleName
     end
     return lines
 end
@@ -752,7 +801,7 @@ local function BuildBaseMacroText(binding)
         end
         return cmd
     elseif binding.type == "dynamicrez" then
-        local lines = BuildRezLines(binding, guard)
+        local lines = BuildRezLines(binding, guard, true)
         if not lines or #lines == 0 then return nil end
         if binding.oocOnly then
             table.insert(lines, 1, "/stopmacro [combat]")
@@ -765,14 +814,12 @@ local function BuildBaseMacroText(binding)
         if binding.oocOnly then
             lines[#lines + 1] = "/stopmacro [combat]"
         end
-        for _, sp in ipairs(spellList) do
-            if sp.class == pClass then
-                -- /cast resolves by localized name; hardcoded English sp.name
-                -- would silently fail on non-English clients. Fall back to
-                -- sp.name only if the API is unavailable/empty.
-                local castName = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
-                lines[#lines + 1] = "/cast [@mouseover,exists,nodead" .. guard .. "] " .. castName
-            end
+        for _, sp in ipairs(ClassPresetSpells(spellList, pClass)) do
+            -- /cast resolves by localized name; hardcoded English sp.name would
+            -- silently fail on non-English clients. Fall back to sp.name only if
+            -- the API is unavailable/empty.
+            local castName = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+            lines[#lines + 1] = "/cast [@mouseover,exists,nodead" .. guard .. "] " .. castName
         end
         if #lines == 0 then return nil end
         return table.concat(lines, "\n")
@@ -811,20 +858,16 @@ end
 function ns.CC_GetBindingIcon(b)
     if b.type == "dispel" then
         local _, pc = UnitClass("player")
-        for _, sp in ipairs(DISPEL_SPELLS) do
-            if sp.class == pc then
-                local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
-                if tex then return tex end
-            end
+        for _, sp in ipairs(ClassPresetSpells(DISPEL_SPELLS, pc)) do
+            local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
+            if tex then return tex end
         end
         return ACTION_ICONS.dispel
     elseif b.type == "external" then
         local _, pc = UnitClass("player")
-        for _, sp in ipairs(EXTERNAL_SPELLS) do
-            if sp.class == pc then
-                local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
-                if tex then return tex end
-            end
+        for _, sp in ipairs(ClassPresetSpells(EXTERNAL_SPELLS, pc)) do
+            local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(sp.id)
+            if tex then return tex end
         end
         return ACTION_ICONS.external
     elseif b.type == "trinket1" then
@@ -1057,10 +1100,9 @@ local function SetClickAttr(frame, parsed, actionType, spellOrMacro, macrotext, 
     -- protected items); route through the secure proxy instead. TRANSPORT: the
     -- "click" action itself crashes on a Blizzard typo (SecureTemplates.lua:564,
     -- aspect check on the mouse-button string) -- use a "/click <proxy>" macro.
-    if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
-        local proxy = EllesmereUI.GetSecureMenuProxy(frame)
+    if actionType == "togglemenu" and EllesmereUI.GetSecureMenuMacro then
         SetGatedType(frame, typeAttr, "macro", oocOnly)
-        frame:SetAttribute(prefix .. "macrotext" .. suffix, "/click " .. proxy:GetName())
+        frame:SetAttribute(prefix .. "macrotext" .. suffix, EllesmereUI.GetSecureMenuMacro(frame))
         return
     end
     -- 12.0.7+ also gates raw "target" on unit buttons, EXCEPT plain unmodified
@@ -1100,10 +1142,9 @@ local function SetKeyAttr(frame, idx, actionType, spellOrMacro, macrotext, oocOn
     local typeAttr = "type-" .. suffix
     -- Route a "menu" keybind through the secure proxy (see SetClickAttr for
     -- why this uses the /click macro transport instead of the click action).
-    if actionType == "togglemenu" and EllesmereUI.GetSecureMenuProxy then
-        local proxy = EllesmereUI.GetSecureMenuProxy(frame)
+    if actionType == "togglemenu" and EllesmereUI.GetSecureMenuMacro then
         SetGatedType(frame, typeAttr, "macro", oocOnly)
-        frame:SetAttribute("macrotext-" .. suffix, "/click " .. proxy:GetName())
+        frame:SetAttribute("macrotext-" .. suffix, EllesmereUI.GetSecureMenuMacro(frame))
         return
     end
     -- A "target" keybind is never plain left-click, so it always hits the 12.0.7
@@ -1266,6 +1307,22 @@ local function NeutralizeDefaultClicks(frame, bindings)
     if not b2 then frame:SetAttribute("type2", "none") end
 end
 
+-- Active-binding list shared across one synchronous registration burst (the
+-- CompactUnitFrame hook firing per frame inside one Blizzard rebuild, the
+-- init/regen queue drains, the all-frames sweep). GetActiveBindings walks and
+-- merges the whole binding set, so recomputing it per frame dominated those
+-- bursts. A burst never spans a render frame (GetTime stamp), and
+-- CC_ApplyBindings -- where every settings write ends -- refreshes it in place.
+local burst = {}
+burst.Get = function()
+    local now = GetTime()
+    if burst.at ~= now then
+        burst.at = now
+        burst.list = GetActiveBindings()
+    end
+    return burst.list
+end
+
 local function DoRegisterFrame(frame)
     if not frame or not frame.RegisterForClicks then return end
     if not header then return end
@@ -1313,7 +1370,7 @@ local function DoRegisterFrame(frame)
         ]])
     end
 
-    local bindings = GetActiveBindings()
+    local bindings = burst.Get()
     for i, b in ipairs(bindings) do
         if IsFrameBinding(b) and b.key then
             local parsed = ParseKeyString(b.key)
@@ -1338,7 +1395,7 @@ local function DoUnregisterFrame(frame)
     if not registeredFrames[frame] then return end
     registeredFrames[frame] = nil
 
-    local bindings = GetActiveBindings()
+    local bindings = burst.Get()
     for i, b in ipairs(bindings) do
         if IsFrameBinding(b) and b.key then
             local parsed = ParseKeyString(b.key)
@@ -1599,6 +1656,9 @@ function ns.CC_ApplyBindings()
     NormalizeSavedBindingKeys()
 
     local bindings = GetActiveBindings()
+    -- Fresh list becomes the burst list: any registration later this frame
+    -- reads the post-write set.
+    burst.at, burst.list = GetTime(), bindings
 
     local frameBindings = {}
     local hoverBindings = {}
@@ -1913,6 +1973,21 @@ function RegisterBlizzardFrames()
         hooksecurefunc("CompactUnitFrame_SetUpFrame", function(frame)
             if not frame then return end
             if frame.IsForbidden and frame:IsForbidden() then return end
+            -- Frames the raid module parked under its hidden parent (the whole
+            -- CompactRaidFrameContainer, the raid-style party members) can never
+            -- be clicked, yet Blizzard re-runs SetUpFrame on every one of them
+            -- for every roster change -- a full binding pass per hidden frame
+            -- per roster event, all wasted. Skip them; a frame that later leaves
+            -- the hidden parent registers on its next SetUpFrame.
+            local hiddenParent = ns._blizzHiddenParent
+            if hiddenParent then
+                local p, depth = frame:GetParent(), 0
+                while p and depth < 6 do
+                    if p == hiddenParent then return end
+                    p = p:GetParent()
+                    depth = depth + 1
+                end
+            end
             local ok, name = pcall(frame.GetName, frame)
             if ok and name and not name:match("^NamePlate") then
                 externalFrames[frame] = true
@@ -2195,21 +2270,17 @@ function ns.CC_BuildPage(pageName, parent, yOffset)
         end
     end
     if hasDispel then
-        for _, sp in ipairs(DISPEL_SPELLS) do
-            if sp.class == pClass then
-                -- Matches the localized name stored by the spell picker, so
-                -- "already bound" dimming works on non-English clients.
-                local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
-                boundSpells[n] = true
-            end
+        for _, sp in ipairs(ClassPresetSpells(DISPEL_SPELLS, pClass)) do
+            -- Matches the localized name stored by the spell picker, so
+            -- "already bound" dimming works on non-English clients.
+            local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+            boundSpells[n] = true
         end
     end
     if hasExternal then
-        for _, sp in ipairs(EXTERNAL_SPELLS) do
-            if sp.class == pClass then
-                local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
-                boundSpells[n] = true
-            end
+        for _, sp in ipairs(ClassPresetSpells(EXTERNAL_SPELLS, pClass)) do
+            local n = (C_Spell.GetSpellName and C_Spell.GetSpellName(sp.id)) or sp.name
+            boundSpells[n] = true
         end
     end
     if hasDynamicRez then

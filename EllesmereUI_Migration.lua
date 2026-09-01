@@ -2458,6 +2458,75 @@ EllesmereUI.RegisterMigration({
     end,
 })
 
+-- The borderless hover/target highlight draws its own outline at Border Size 0,
+-- where the Hover/Target Border ticks were previously inert. Existing
+-- borderless profiles overwhelmingly kept those ticks ON (they did nothing),
+-- so without a pin the upgrade makes highlights appear unrequested. Pin BOTH
+-- enables OFF for every existing profile whose border size is 0 --
+-- UNCONDITIONALLY, not nil-guarded like the sibling migrations: an explicit
+-- true stored while the setting was inert cannot represent informed intent
+-- for the new behavior, and borderless veterans must see no change. The ticks
+-- are the opt-in. Border'd profiles untouched (the highlight path is
+-- unreachable there, so their recolor behavior is identical either way). A
+-- profile with NO RaidFrames bucket never stored borderSize, defaults to 1,
+-- and is skipped -- no bucket creation needed. Party frames share these keys
+-- (no party_ border section exists); per-spec overrides are out of scope,
+-- matching the sibling existing-off migrations.
+EllesmereUI.RegisterMigration({
+    id          = "rf_borderless_highlight_existing_off_v1",
+    scope       = "global",
+    description = "Pin Raid Frames Hover/Target Border OFF for existing profiles running Border Size 0, so the new borderless highlight stays opt-in for veterans; fresh installs and border'd profiles inherit the live defaults.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only profiles with real child-addon data: an empty/stub profile
+            -- isn't an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local rf = profData.addons.EllesmereUIRaidFrames
+                if type(rf) == "table" and (rf.borderSize or 1) <= 0 then
+                    rf.hoverBorderEnabled = false
+                    rf.targetBorderEnabled = false
+                end
+            end
+        end
+    end,
+})
+
+-- The Nameplates dispel glow's Action Button Glow substitute gained real-ABG
+-- anatomy (white ants, the color riding the soft halo, stock gold when no
+-- color is set). A color stored under the OLD rendering was chosen to tint
+-- bare ants; carrying it forward would tint the new halo instead -- a look
+-- the user never picked. Clear it once for profiles running the ABG style so
+-- they land on the stock gold; stored colors on every other style (and the
+-- per-type color toggle) are untouched, and any color picked after this
+-- migration is honored as usual.
+EllesmereUI.RegisterMigration({
+    id          = "np_dispel_abg_color_gold_v1",
+    scope       = "global",
+    description = "Reset stored Dispel Glow colors to the stock gold for profiles using the Action Button Glow style, since the color now tints the new halo rather than the old bare ants.",
+    body = function(ctx)
+        local db = ctx.db
+        if not db or not db.profiles then return end
+        for _, profData in pairs(db.profiles) do
+            -- Only profiles with real child-addon data: an empty/stub profile
+            -- isn't an existing user's.
+            if type(profData) == "table" and type(profData.addons) == "table"
+               and next(profData.addons) then
+                local np = profData.addons.EllesmereUINameplates
+                -- Style 2 = Action Button Glow; a missing key means the same
+                -- via defaults. Cleared color = the engines' gold default.
+                if type(np) == "table"
+                   and (np.dispelGlowStyle == nil or np.dispelGlowStyle == 2)
+                   and np.dispelGlowColor ~= nil then
+                    np.dispelGlowColor = nil
+                end
+            end
+        end
+    end,
+})
+
 -- Profile sync is now two-way mirror groups: a module's sync set is a membership group
 -- (configuring profile is written into it) and only members push at logout/switch. Old
 -- sets stored receivers only with no record of the sender, so they can't translate
@@ -4048,6 +4117,59 @@ EllesmereUI.RegisterMigration({
                 local oug = ov.unitGrowth or ug
                 if isVert(ogg) == isVert(oug) then
                     ov.unitGrowth = isVert(ogg) and "RIGHT" or "DOWN"
+                end
+            end
+        end
+    end,
+})
+
+-- The Important Cast Glow menu used to offer exactly two engines under an ad-hoc
+-- numbering: 1 = Pixel Glow, 4 = Auto-Cast Shine. It now offers the whole
+-- PANDEMIC_GLOW_STYLES list, where 3 is Auto-Cast Shine and 4 is GCD -- so a saved
+-- 4 would silently become a different glow. Re-point it.
+--
+-- 4 is the only value that can be stale: 1 means Pixel Glow in both numberings and
+-- nothing else was reachable from the old menu. Runs per profile and the flag rides
+-- on the profile data, so a profile IMPORTED from an older build is fixed up on the
+-- pass after it lands rather than staying wrong forever.
+EllesmereUI.RegisterMigration({
+    id          = "np_important_cast_glow_style_reindex_v1",
+    scope       = "profile",
+    description = "Re-point the saved Important Cast Glow style from the old two-entry numbering (4 = Auto-Cast Shine) onto the PANDEMIC_GLOW_STYLES index (3).",
+    body = function(ctx)
+        local np = ctx.profile.addons and ctx.profile.addons.EllesmereUINameplates
+        if type(np) ~= "table" then return end
+        if np.importantCastGlowStyle == 4 then
+            np.importantCastGlowStyle = 3
+        end
+    end,
+})
+
+-- The target/focus/boss Debuff Filter became a single-select mode. Before it, a
+-- frame with NOTHING checked (Own Only off, Important off) that carried Tracked
+-- Auras rendered ONLY those spells -- the include link was the whole chain. The
+-- mode model treats Tracked Auras as additional in every mode and derives such
+-- a frame as Show All, so pin those frames to Only Tracked Auras once. Every
+-- other combination derives its old display from the untouched legacy keys
+-- (ns.UF_DebuffFilterMode in EUI_UnitFrames_AuraContainers.lua). An explicit
+-- mode is never touched, so a re-run is a no-op.
+EllesmereUI.RegisterMigration({
+    id          = "uf_debuff_filter_tracked_only_v1",
+    scope       = "profile",
+    description = "Pin target/focus/boss Debuff Filters that had nothing checked but carried Tracked Auras (they rendered only those spells) to the Only Tracked Auras mode.",
+    body = function(ctx)
+        local uf = ctx.profile.addons and ctx.profile.addons.EllesmereUIUnitFrames
+        if type(uf) ~= "table" then return end
+        for _, unitKey in ipairs({ "target", "focus", "boss" }) do
+            local s = uf[unitKey]
+            if type(s) == "table" and s.debuffFilterMode == nil
+                and s.onlyPlayerDebuffs ~= true and s.debuffPriorityAura ~= true
+                and type(s.debuffInclude) == "table" then
+                for _, on in pairs(s.debuffInclude) do
+                    if on then
+                        s.debuffFilterMode = "tracked"
+                        break
+                    end
                 end
             end
         end
