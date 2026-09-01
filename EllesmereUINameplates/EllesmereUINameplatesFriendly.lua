@@ -425,10 +425,17 @@ local function GetNPCNameColor(unit)
 end
 
 -- Title line under the name-only NPC name. Independent of the name color; the
--- default alpha is what separates it from the name above it.
-local function GetNPCTitleColor()
+-- default alpha is what separates it from the name above it. Neutral units
+-- mirror GetNPCNameColor: reaction yellow wins over the stored color (the
+-- swatch governs friendly units only, same as Name Color), alpha stays the
+-- stored one.
+local function GetNPCTitleColor(unit)
     local fp = FP()
     local c = (fp and fp.friendlyNPCTitleColor) or ns.defaults.friendlyNPCTitleColor
+    local reaction = unit and UnitReaction(unit, "player")
+    if reaction and reaction == 4 then
+        return 0.9, 0.7, 0.0, c.a or 1
+    end
     return c.r, c.g, c.b, c.a or 1
 end
 
@@ -496,7 +503,7 @@ local function ApplyOverlayStyle(overlay, unit)
     end
     if Prime then Prime(overlay.title, shadow) end
     overlay.title:SetFont(font, GetNPCTitleSize(), outline)
-    overlay.title:SetTextColor(GetNPCTitleColor())
+    overlay.title:SetTextColor(GetNPCTitleColor(unit))
 end
 
 local function ShowNPCOverlay(nameplate, unit)

@@ -9577,6 +9577,10 @@ do
 local MYSLOT_VIS_FIELDS = {
     "barVisibility", "alwaysHidden", "mouseoverEnabled", "mouseoverAlpha",
     "_savedBarAlpha", "combatShowEnabled", "combatHideEnabled", "alwaysShowButtons",
+    -- An applied Visibility override REPLACES the whole setting (a "never"
+    -- would keep the bar hidden through the import); captured, force-cleared
+    -- and restored like every other field here.
+    "visibilityOverride",
     -- Multi-select set: backed up by reference (the shared setter assigns a
     -- fresh table on every write, so the captured table never mutates) and
     -- restored/cleared like any other field.

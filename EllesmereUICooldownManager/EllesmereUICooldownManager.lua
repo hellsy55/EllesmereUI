@@ -9963,6 +9963,14 @@ function ns.ApplyOverrideRangeTint(icon, overrideSpellID)
     local tex = fd and fd.tex
     local C = CooldownViewerConstants
     if not (tex and C) then return end
+    -- Live-override count, kept on the nil<->value transitions of the ONLY
+    -- writer of _oorSpellID: RepaintOverrideRange gates its whole icon walk on
+    -- it, so the event dispatches Blizzard's own base-spell registrations
+    -- produce (nearly all of them, for nearly every player) cost one integer
+    -- read instead of a full bar scan.
+    if (fd._oorSpellID ~= nil) ~= (overrideSpellID ~= nil) then
+        ns._oorLiveCount = (ns._oorLiveCount or 0) + (overrideSpellID and 1 or -1)
+    end
     fd._oorSpellID = overrideSpellID
     if not fd._oorHooked then
         fd._oorHooked = true
@@ -10045,6 +10053,17 @@ function ns.DisarmOverrideRanges()
         end
         armed[base] = nil
     end
+    -- The tracked ids go with the registrations ("the new spec's overrides
+    -- re-arm on their own events"): a value left behind would keep that icon's
+    -- hook polling a dead spell and hold the repaint gate open. Also what
+    -- keeps the live count exact across spec changes.
+    for _, icons in pairs(cdmBarIcons) do
+        for _, icon in ipairs(icons) do
+            local fd = _getFD(icon)
+            if fd and fd._oorSpellID ~= nil then fd._oorSpellID = nil end
+        end
+    end
+    ns._oorLiveCount = 0
 end
 
 -- SPELL_RANGE_CHECK_UPDATE. Keyed off the icon's own stored override id rather than
@@ -10053,6 +10072,9 @@ end
 -- which already guards a secret answer. Falls through immediately for the base-spell
 -- registrations Blizzard makes, which is nearly every dispatch.
 function ns.RepaintOverrideRange(spellID)
+    -- No icon holds a live override: nothing here could match. Reads only our
+    -- own counter, so it runs before any payload value is touched.
+    if (ns._oorLiveCount or 0) <= 0 then return end
     if type(spellID) ~= "number" then return end
     if issecretvalue and issecretvalue(spellID) then return end
     for _, icons in pairs(cdmBarIcons) do

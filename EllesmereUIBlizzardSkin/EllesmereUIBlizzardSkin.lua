@@ -1380,9 +1380,29 @@ end
 
         local timerBorder, timerBg
 
+        -- True once the user has touched ANY Queue Timer Style setting. Gates the
+        -- unified style below off the Blizzard-style branch: reskin-off users chose
+        -- the stock look, so an untouched profile keeps the legacy rendering
+        -- byte-identically; the first setting they touch activates the unified
+        -- style in both modes (and a section reset returns them to legacy).
+        local function QueueTimerCustomized()
+            local db = EllesmereUIDB
+            return (db and (db.queueTimerTextColor ~= nil or db.queueTimerTextSize ~= nil
+                or db.queueTimerBarHeight ~= nil or db.queueTimerTextOffsetY ~= nil))
+                and true or false
+        end
+
         -- Applied after either style branch, so the look holds with the reskin on or off.
         local function ApplyTimerStyle()
             if not timerBar then return end
+            if GetFFD(timerBar).style == false and not QueueTimerCustomized() then
+                -- Legacy stock rendering, exactly as before the style controls existed.
+                timerText:SetFontObject("GameFontHighlight")
+                timerText:ClearAllPoints()
+                timerText:SetPoint("CENTER", timerBar, "CENTER", 0, 0)
+                timerBar:SetHeight(9)
+                return
+            end
             local db = EllesmereUIDB or {}
             local QT = EllesmereUI.QUEUE_TIMER
             local c = db.queueTimerTextColor

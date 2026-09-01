@@ -6222,6 +6222,21 @@ initFrame:SetScript("OnEvent", function(self)
 				local function _thrOptUsable() return _thrEnabled() and not _thrMultiOn() end
 				local function _thrOffTip() if _thrMultiOn() then return BAND_REPLACES_TIP end return "Enable the Threshold toggle to use these options." end
 				local function _thrIsUpTo() local e=_thrEnt(); return (e and e.thresholdReverse) and true or false end
+				local function _thrIsWarrCharge()
+					-- Arms/Fury class-bar thresholds render on the engine-fed
+					-- Whirlwind/Sweeping Strikes charge bar, whose only
+					-- threshold display is range coloring at/above the count
+					-- (no Lua count exists to flip the whole fill).
+					if (select(2, UnitClass("player"))) ~= "WARRIOR" then return false end
+					local e = _thrEnt()
+					local ids = e and e.specIDs
+					if not ids then return false end
+					for i = 1, #ids do
+						local id = ids[i]
+						if id == 0 or id == 71 or id == 72 then return true end
+					end
+					return false
+				end
 				local threshCog, threshCogShow = EllesmereUI.BuildCogPopup({
 					title = "Threshold Options", bgAlpha = 1, frameStrata = "FULLSCREEN_DIALOG", frameLevel = 500, minWidth = 320,
 					rows = {
@@ -6237,18 +6252,22 @@ initFrame:SetScript("OnEvent", function(self)
 							set = function(v) local e=_thrEnt(); if not e then return end e.thresholdMode=v; RefreshClass(); if RefreshDetail then RefreshDetail() end end },
 						{ type = "segmented", label = "Direction",
 							keys = { "upto", "from" }, labels = { upto = "Up to", from = "From" }, rawTooltip = true,
-							disabled = function() return not _thrOptUsable() end,
-							disabledTooltip = function() return _thrOffTip() end,
-							get = function() local e=_thrEnt(); return (e and e.thresholdReverse) and "upto" or "from" end,
+							disabled = function() return (not _thrOptUsable()) or _thrIsWarrCharge() end,
+							disabledTooltip = function()
+								if _thrIsWarrCharge() and _thrOptUsable() then return "Whirlwind and Sweeping Strikes thresholds only support the 'From' direction." end
+								return _thrOffTip()
+							end,
+							get = function() if _thrIsWarrCharge() then return "from" end local e=_thrEnt(); return (e and e.thresholdReverse) and "upto" or "from" end,
 							set = function(v) local e=_thrEnt(); if not e then return end e.thresholdReverse=(v=="upto"); RefreshClass(); if RefreshDetail then RefreshDetail() end end },
 						{ type = "toggle", label = "Only color at/above threshold", rawTooltip = true,
-							disabled = function() return (not _thrOptUsable()) or _thrIsBar() or _thrIsUpTo() end,
+							disabled = function() return (not _thrOptUsable()) or _thrIsBar() or _thrIsUpTo() or _thrIsWarrCharge() end,
 							disabledTooltip = function()
+								if _thrIsWarrCharge() and _thrOptUsable() then return "Always on for Whirlwind and Sweeping Strikes charges: range coloring at/above the threshold is the only way these bars can display thresholds." end
 								if not _thrOptUsable() then return _thrOffTip() end
 								if _thrIsBar() then return "This option applies to pip-type resources only." end
 								return "Only available with the 'From' direction -- it highlights the pips at/above the threshold."
 							end,
-							get = function() local e=_thrEnt(); return (e and e.thresholdPartialOnly) and true or false end,
+							get = function() if _thrIsWarrCharge() then return true end local e=_thrEnt(); return (e and e.thresholdPartialOnly) and true or false end,
 							set = function(v) local e=_thrEnt(); if not e then return end e.thresholdPartialOnly=v; RefreshClass(); if RefreshDetail then RefreshDetail() end end },
 					},
 				})
