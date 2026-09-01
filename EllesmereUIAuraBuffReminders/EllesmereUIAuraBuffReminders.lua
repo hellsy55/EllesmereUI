@@ -1170,6 +1170,22 @@ local WARLOCK_PETS = {
     { key="felhunter",  name="Felhunter",  castSpell=691,    families={[15]=true,  [103]=true} },
 }
 
+-- Points an entry at whichever pet the shared cycle index currently selects
+-- from `pets` (Missing Pet and Wrong Demon share one index, so cycling on
+-- either reminder advances the same pointer). On EABR, not a top-level
+-- local -- this file is at Lua's 200-local ceiling.
+EABR.SetWarlockPetSpell = function(e, pets, fallbackTexture, labelOverride)
+    local n = #pets
+    local idx = EABR._petCycleIndex or 1
+    if idx > n then idx = 1 end
+    local pet = pets[idx]
+    e.mode = "spell"
+    e.spellID = pet.castSpell
+    e.texture = Tex(pet.castSpell) or fallbackTexture
+    e.label = labelOverride or EllesmereUI.L(pet.name)
+    e.petCycleTotal = n > 1 and n or nil
+end
+
 -- Weapon Enchant Items (temporary weapon enchants applied from items). weaponType: BLADED, BLUNT, RANGED, NEUTRAL (NEUTRAL fits any weapon).
 local WEAPON_ENCHANT_ITEMS = {
     -- Midnight
@@ -3759,14 +3775,7 @@ local function Refresh()
                 e.dismissKey = "consumable:pet"
                 local n = warlockEnforcedPets and #warlockEnforcedPets or 0
                 if n > 0 then
-                    local idx = EABR._petCycleIndex or 1
-                    if idx > n then idx = 1 end
-                    local pet = warlockEnforcedPets[idx]
-                    e.mode = "spell"
-                    e.spellID = pet.castSpell
-                    e.texture = Tex(pet.castSpell) or petIcon
-                    e.label = EllesmereUI.L(pet.name)
-                    e.petCycleTotal = n > 1 and n or nil
+                    EABR.SetWarlockPetSpell(e, warlockEnforcedPets, petIcon)
                 else
                     e.mode = "texture"
                     e.texture = petIcon
@@ -3779,16 +3788,13 @@ local function Refresh()
                and UnitExists("pet") and not UnitIsDead("pet") then
                 local _, familyID = UnitCreatureFamily("pet")
                 familyID = familyID and not (issecretvalue and issecretvalue(familyID)) and familyID or nil
-                local isAllowed, icon = false, nil
+                local isAllowed = false
                 for _, pet in ipairs(warlockEnforcedPets) do
-                    icon = icon or Tex(pet.castSpell)
-                    if familyID and pet.families[familyID] then isAllowed = true end
+                    if familyID and pet.families[familyID] then isAllowed = true; break end
                 end
                 if #warlockEnforcedPets > 0 and not isAllowed then
                     local e = AcquireEntry()
-                    e.mode = "texture"
-                    e.texture = icon or 136216
-                    e.label = EllesmereUI.L("Wrong Demon")
+                    EABR.SetWarlockPetSpell(e, warlockEnforcedPets, 136216, EllesmereUI.L("Wrong Demon"))
                     e.cat = "consumable"
                     e.dismissKey = "consumable:wrong_pet"
                     missing[#missing+1] = e
