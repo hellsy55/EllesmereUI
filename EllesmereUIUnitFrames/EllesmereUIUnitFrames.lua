@@ -2880,6 +2880,15 @@ end
 -- frame at runtime and the frame stays built, so a Spec Override can lift it again
 -- without a /reload.
 
+--- The Visibility mode actually in force for a settings table. An applied override
+--- REPLACES the whole shared setting, "never" included, so every reader that acts on
+--- "never" alone resolves it here instead of off the stored scalar. On ns for the
+--- 200-locals cap.
+function ns.VisEffective(s)
+    if not s then return nil end
+    return (EllesmereUI.VisOverrideValue and EllesmereUI.VisOverrideValue(s)) or s.barVisibility
+end
+
 --- True when the unit has no EllesmereUI frame at all -- the enabledFrames flag, which
 --- only the "Enable X Frame" toggles write now that Visibility no longer touches it.
 --- On ns for the 200-locals cap.
@@ -2895,8 +2904,7 @@ function ns.GetUnitFrameSource(unit)
     if fs == "blizzard" then
         -- Visibility "never" over Blizzard's frame: we spawn nothing of our own to
         -- hide, so suppressing Blizzard's is the only way to honor it.
-        local s = db.profile[unit]
-        if s and s.barVisibility == "never" then return "hidden" end
+        if ns.VisEffective(db.profile[unit]) == "never" then return "hidden" end
         -- ToT/focus-target have no standalone Blizzard frame (native one is a child
         -- of TargetFrame/FocusFrame, lives only while that parent does), so
         -- "blizzard" is honored for them ONLY when the parent is itself on
@@ -3057,9 +3065,9 @@ end
 function ns.GetMiniDonorSettings()
     local ef = db.profile.enabledFrames
     local focus = db.profile.focus
-    if ef.focus ~= false and focus and focus.barVisibility ~= "never" then return focus end
+    if ef.focus ~= false and focus and ns.VisEffective(focus) ~= "never" then return focus end
     local target = db.profile.target
-    if ef.target ~= false and target and target.barVisibility ~= "never" then return target end
+    if ef.target ~= false and target and ns.VisEffective(target) ~= "never" then return target end
     return db.profile.player
 end
 local GetMiniDonorSettings = ns.GetMiniDonorSettings
@@ -10935,7 +10943,7 @@ local function ApplyBlizzCastbarState()
         -- counts as no replacement too: our cast bar is built now but hides with the
         -- frame, and taking Blizzard's away would leave no player cast bar at all.
         local suppress = (db.profile.player.showPlayerCastbar
-            and db.profile.player.barVisibility ~= "never"
+            and ns.VisEffective(db.profile.player) ~= "never"
             and ns.GetUnitFrameSource("player") == "eui") or false
         EllesmereUI.SetPlayerCastBarSuppressed("UnitFrames", suppress)
     end
@@ -10971,8 +10979,8 @@ function ns.ResolveVisResting(s, frame, ext, hiddenByOpts, inCombat)
     end
     local vis = s.barVisibility or "always"
     -- Never rides the alpha too, not just the Show/Hide bucket: that bucket is
-    -- lockdown-gated, so a Never picked (or applied by an override) in combat would
-    -- otherwise leave the frame at full alpha until PLAYER_REGEN_ENABLED.
+    -- lockdown-gated, so a Never picked in combat would otherwise leave the frame at
+    -- full alpha until PLAYER_REGEN_ENABLED. An override reaches the ext block above.
     if vis == "never" then return 0, false end
     if vis == "in_combat" then return inCombat and shownAlpha or 0, false end
     if vis == "out_of_combat" then return (not inCombat) and shownAlpha or 0, false end
@@ -12404,8 +12412,8 @@ function InitializeFrames()
         for _, unitKey in ipairs({"player", "target", "focus"}) do
             local s = db.profile[unitKey]
             local frame = frames[unitKey]
-            -- The enabledFrames gate through VisUnitDisabled: a unit disabled purely by a
-            -- shared Visibility of "never" comes back while an override replaces it.
+            -- Visibility "never" no longer clears enabledFrames, so a frame hidden that
+            -- way stays on this path and is hidden below, reversibly.
             if frame and not ns.VisUnitDisabled(db.profile, unitKey) and s then
                 local hiddenByOpts = EllesmereUI and EllesmereUI.CheckVisibilityOptions and EllesmereUI.CheckVisibilityOptions(s)
                 local vis = s.barVisibility or "always"
@@ -12450,8 +12458,13 @@ function InitializeFrames()
                 elseif drvSet and EllesmereUI.BuildVisibilityDriverString then
                     visTail = EllesmereUI.BuildVisibilityDriverString("", drvSet)
                 end
+                -- Off the override, never the stored scalar: an override REPLACES the
+                -- shared setting, so a profile-level "never" under an override of Always
+                -- must not pin anything, and an override of "never" must pin even though
+                -- the stored scalar says otherwise.
+                local visNever = (visOv or vis) == "never"
                 local wantDriver
-                if vis == "never" then
+                if visNever then
                     -- Never is terminal, so it pins the secure driver instead of
                     -- riding the Show/Hide bucket below: that bucket is lockdown-
                     -- gated, and acquiring a target in combat would otherwise let
@@ -12502,7 +12515,7 @@ function InitializeFrames()
                 -- Written only when it moves: this pass runs on every target change,
                 -- and for the "blizzard" style the bar is Blizzard's own frame.
                 if unitKey == "player" and frames._classPowerBar then
-                    local cpWant = (vis == "never") and 0 or 1
+                    local cpWant = visNever and 0 or 1
                     if frames._classPowerBar:GetAlpha() ~= cpWant then
                         frames._classPowerBar:SetAlpha(cpWant)
                     end
@@ -12514,7 +12527,7 @@ function InitializeFrames()
                 -- next re-evaluation -- so this whole bucket steps aside.
                 if not isLocked and not frame._euiVisDriver then
                     local shouldShow
-                    if vis == "never" then
+                    if visNever then
                         -- Ahead of the engine verdict: Never is exclusive, but under
                         -- a leftover Any match the engine evaluates the scalar and
                         -- answers false rather than nil, which would keep the frame
@@ -12601,7 +12614,7 @@ function InitializeFrames()
                 -- condition-hidden mini absorbs no clicks either.
                 if mini then
                     local miniWant
-                    if (not miniAlways) and vis == "never" then
+                    if (not miniAlways) and visNever then
                         -- The parent is hidden outright, so alpha 0 alone would leave
                         -- the mini an invisible click blocker; pin it like the
                         -- disabled-parent branch below does.
@@ -13625,8 +13638,7 @@ local function RegisterUFUnlockElements()
                     if key == "pet" and db.profile.pet and db.profile.pet.alwaysShow then
                         return false
                     end
-                    local s = db.profile[MOVER_VIS_OF[key] or key]
-                    return s ~= nil and s.barVisibility == "never"
+                    return ns.VisEffective(db.profile[MOVER_VIS_OF[key] or key]) == "never"
                 end,
                 getFrame = function(k)
                     if k == "boss" then return frames["boss1"] end
@@ -13868,7 +13880,7 @@ local function RegisterUFUnlockElements()
                     -- effect without a /reload.
                     local s = GetCBSettings()
                     if not s then return true end
-                    if s.barVisibility == "never" then return true end
+                    if ns.VisEffective(s) == "never" then return true end
                     if unitKey == "player" then return not s.showPlayerCastbar end
                     return s.showCastbar == false
                 end,
