@@ -2602,7 +2602,11 @@ local function UpdateAbsorb(button, unit)
     local healOn = (s.healAbsorbStyle or "clean") ~= "none"
     -- Heal prediction is also independent, and shares this frame, so it must keep the frame alive too.
     local predOn = s.healPrediction and true or false
-    if not styleOn and not barOn and not healOn and not healBarOn and not predOn then
+    -- Reduced max health is independent too (a max-HP-loss debuff has nothing to do with
+    -- shield absorbs) -- without this the whole overlay frame bails out below whenever
+    -- Absorb Style is "none", even with Max Health Style on, so it never gets to paint.
+    local maxHealthOn = (s.maxHealthStyle or "maxHealthStripes") ~= "none"
+    if not styleOn and not barOn and not healOn and not healBarOn and not predOn and not maxHealthOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
@@ -2796,14 +2800,14 @@ local function UpdateAbsorb(button, unit)
     end
 
     -- Shield style off: hide the in-frame shield bars. Heal absorb paints earlier in this
-    -- function so it's untouched either way; heal prediction paints later, so only stop
-    -- here if that's off too, or its block below never runs.
+    -- function so it's untouched either way; heal prediction and reduced max health both
+    -- paint later, so only stop here if those are off too, or their blocks below never run.
     if not styleOn then
         ab:Hide()
         if fw then fw:Hide() end
         if fw and fw._edgeSpark then fw._edgeSpark:Hide() end
         if fw and fw._bfSpark then fw._bfSpark:Hide() end
-        if not predOn then return end
+        if not predOn and not maxHealthOn then return end
     end
 
     -- Bars track the health-bar size; size-gated (frame sizes are never secret, so it holds in combat).
@@ -2813,6 +2817,11 @@ local function UpdateAbsorb(button, unit)
         if fw then fw:SetWidth(hpW); fw:SetHeight(hpH) end
     end
 
+    -- Shield absorb bar painting (ab/fw + the Default Blizz spark decoration below) is scoped to
+    -- styleOn only -- with it off, execution still reaches this point (Heal Prediction/Max Health
+    -- Style may need to run past here), but must not re-Show() the shield bars styleOn already
+    -- asked to hide above.
+    if styleOn then
     -- Settings-derived style + mode flags, gen-gated (see the Absorb Bar note).
     if ab._sGen ~= ns._absorbGen then
         ab._sGen = ns._absorbGen
@@ -2913,6 +2922,7 @@ local function UpdateAbsorb(button, unit)
         fw._edgeSpark:Hide()
         if fw._bfSpark then fw._bfSpark:Hide() end
     end
+    end -- styleOn
 
     -- Heal prediction: extends from current HP into missing health
     local hpd = ab._healPred
