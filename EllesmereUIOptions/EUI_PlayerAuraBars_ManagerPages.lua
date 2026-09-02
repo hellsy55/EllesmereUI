@@ -1093,8 +1093,18 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     return sy
 end
 
--- "Display": Border Style (+offset cog) | spacer; Border Size [swatch] |
--- Spacing; Icons per Row (+Max Rows/Max Total/Row Spacing cog) | spacer.
+local function FontOutlineField(cfg, apply)
+    return {
+        type = "dropdown", text = "Font Outline",
+        values = FONT_OUTLINE_VALUES, order = FONT_OUTLINE_ORDER,
+        getValue = function() return cfg.fontOutline or "default" end,
+        setValue = function(v) cfg.fontOutline = v; apply() end,
+    }
+end
+
+-- "Display": Border Style (+offset cog) | Border Size [swatch]; Icons Per Row
+-- (+grid cog) | Spacing (+row-spacing cog); Icon Shape | Icon Zoom; remaining
+-- toggles are packed by polarity without placeholder slots.
 local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
     local W = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
@@ -1128,7 +1138,19 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
                 apply()
             end,
         },
-        { type = "label", text = "" }
+        {
+            type = "dropdown", text = "Border Size",
+            values = BORDER_SIZE_VALUES, order = BORDER_SIZE_LEVELS,
+            itemDisabled = function(v)
+                local shape = cfg.iconShape
+                return shape and shape ~= "none" and BORDER_SIZE_SHAPE_DISABLED[v] or false
+            end,
+            itemDisabledTooltip = function()
+                return "This option requires a non-custom shape to be selected"
+            end,
+            getValue = function() return BORDER_SIZE_KEY[cfg.borderSize or 1] or "thin" end,
+            setValue = function(v) cfg.borderSize = BORDER_SIZE_NUM[v] or 1; apply() end,
+        }
     ); sy = sy - hh
     do
         local rgn = styleRow._leftRegion
@@ -1240,20 +1262,12 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         })
     end
 
-    local borderRow
-    borderRow, hh = W:DualRow(frame, sy,
+    local rowRow
+    rowRow, hh = W:DualRow(frame, sy,
         {
-            type = "dropdown", text = "Border Size",
-            values = BORDER_SIZE_VALUES, order = BORDER_SIZE_LEVELS,
-            itemDisabled = function(v)
-                local shape = cfg.iconShape
-                return shape and shape ~= "none" and BORDER_SIZE_SHAPE_DISABLED[v] or false
-            end,
-            itemDisabledTooltip = function()
-                return "This option requires a non-custom shape to be selected"
-            end,
-            getValue = function() return BORDER_SIZE_KEY[cfg.borderSize or 1] or "thin" end,
-            setValue = function(v) cfg.borderSize = BORDER_SIZE_NUM[v] or 1; apply() end
+            type = "slider", text = "Icons Per Row", min = 1, max = 20, step = 1, trackWidth = 120,
+            getValue = function() return cfg.iconsPerRow or (isBuff and 11 or 8) end,
+            setValue = function(v) cfg.iconsPerRow = v; apply() end
         },
         {
             type = "slider", text = "Spacing", min = -5, max = 20, step = 1, trackWidth = 120,
@@ -1262,9 +1276,9 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         }
     ); sy = sy - hh
     do
-        local rgn = borderRow._leftRegion
+        local rgn = styleRow._rightRegion
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
-            rgn, borderRow:GetFrameLevel() + 3,
+            rgn, styleRow:GetFrameLevel() + 3,
             function()
                 return (cfg.borderR or 0), (cfg.borderG or 0), (cfg.borderB or 0), (cfg.borderA or 1)
             end,
@@ -1278,7 +1292,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
     end
     do
-        local rgn = borderRow._leftRegion
+        local rgn = styleRow._rightRegion
         local keys, labels = {}, {}
         for _, entry in ipairs(PabAllBarEntries()) do
             keys[#keys + 1] = entry.key
@@ -1341,7 +1355,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         -- Row Spacing lives here, not in Icons Per Row's cog -- it's spacing between
         -- rows, same family as Spacing (icon-to-icon gap), not a grid-size concern like
         -- Icons Per Row/ Max Rows/Max Total.
-        local rgn = borderRow._rightRegion
+        local rgn = rowRow._rightRegion
         local _, cogShow = EllesmereUI.BuildCogPopup({
             title = "Spacing",
             rows = {
@@ -1355,20 +1369,6 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         ns._PAMakeCogBtn(rgn, cogShow)
     end
 
-    local rowRow
-    rowRow, hh = W:DualRow(frame, sy,
-        {
-            type = "slider", text = "Icons Per Row", min = 1, max = 20, step = 1, trackWidth = 120,
-            getValue = function() return cfg.iconsPerRow or (isBuff and 11 or 8) end,
-            setValue = function(v) cfg.iconsPerRow = v; apply() end
-        },
-        {
-            type = "dropdown", text = "Font Outline",
-            values = FONT_OUTLINE_VALUES, order = FONT_OUTLINE_ORDER,
-            getValue = function() return cfg.fontOutline or "default" end,
-            setValue = function(v) cfg.fontOutline = v; apply() end
-        }
-    ); sy = sy - hh
     do
         -- Verified against EUI_RaidFrames_BuffManager.lua's "legacy layout"
         -- branch: perRowCfg paired with a blank spacer, cog on
@@ -1523,13 +1523,13 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
     -- dropdown -- see BuildAssignedBuffsFields.)
     if isBuff then
         _, hh = W:DualRow(frame, sy,
+            FontOutlineField(cfg, apply),
             {
                 type = "toggle", text = "Right-Click to Cancel",
                 tooltip = "Right-clicking a buff icon cancels the buff. Turning this off makes the bar's icons click-through; tooltips still follow the Show Tooltips setting.",
                 getValue = function() return cfg.rightClickCancel ~= false end,
                 setValue = function(v) cfg.rightClickCancel = v; apply() end
-            },
-            { type = "label", text = "" }
+            }
         ); sy = sy - hh
     end
 
@@ -1558,7 +1558,7 @@ local function BuildDispelColorFields(frame, fontPath, sy, cfg, apply)
 
     -- Dispel-type indicator icon on each debuff bar (engine-driven, mirrors
     -- Raid Frames' "Type Icon Position"). "none" (default) = feature off.
-    _, hh = W:SectionHeader(frame, "DEBUFF TYPE ICON", sy); sy = sy - hh
+    _, hh = W:SectionHeader(frame, "DEBUFF DISPLAY", sy); sy = sy - hh
     do
         local function IconOn() return (cfg.dispelIconPosition or "none") ~= "none" end
         local row
@@ -1572,7 +1572,7 @@ local function BuildDispelColorFields(frame, fontPath, sy, cfg, apply)
                   apply()
                   EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            FontOutlineField(cfg, apply)
         ); sy = sy - hh
         local rgn = row._leftRegion
         local _, cogShow = EllesmereUI.BuildCogPopup({
