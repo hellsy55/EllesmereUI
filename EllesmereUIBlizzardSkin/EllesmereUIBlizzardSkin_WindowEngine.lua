@@ -417,6 +417,14 @@ function WSkin.Button(btn, keepKeys)
     if d.skinned then return end
     d.skinned = true
 
+    -- Native pushed state shifts the label 1px right/down (SetPushedTextOffset
+    -- defaults to (1,-1) on most button templates). Harmless on its own, but on
+    -- a label that already fills its text region edge-to-edge, that 1px is
+    -- enough to tip the last character into a word-wrap on click. Zeroing the
+    -- offset here matches the fix already used for tab buttons elsewhere in
+    -- this file.
+    if btn.SetPushedTextOffset then btn:SetPushedTextOffset(0, 0) end
+
     local keep = {}
     if keepKeys then
         for _, k in ipairs(keepKeys) do
@@ -430,7 +438,19 @@ function WSkin.Button(btn, keepKeys)
         if t and not keep[t] then t:SetAlpha(0) end
     end
     for _, k in ipairs({ "Left", "Middle", "Right", "LeftSeparator", "RightSeparator" }) do
-        local r = btn[k]; if r and not keep[r] and r.SetAlpha then r:SetAlpha(0) end
+        local r = btn[k]
+        if r and not keep[r] and r.SetAlpha then
+            r:SetAlpha(0)
+            -- Same guard as the LFG queue Enter/Leave buttons: Blizzard's C++
+            -- press-state handling re-shows these named pieces on mouse down,
+            -- which our one-time fade above cannot stop by itself.
+            if not GetFFD(r).pushGuard then
+                GetFFD(r).pushGuard = true
+                hooksecurefunc(r, "SetAlpha", function(self, a)
+                    if a > 0 then self:SetAlpha(0) end
+                end)
+            end
+        end
     end
 
     local fill = SolidTex(btn, "BACKGROUND", Theme.bgR, Theme.bgG, Theme.bgB, Theme.bgA)

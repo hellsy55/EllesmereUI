@@ -11644,6 +11644,30 @@ function LP.FadeKeys(frame, keys)
     end
 end
 
+-- Single-line lock for a button's label. SetPushedTextOffset(0,0) (set by
+-- WSkin.Button) stops the *default* 1px pushed-state nudge, and disabling
+-- word wrap alone just traded a wrapped "t" for a clipped one -- so the real
+-- problem is the label's usable WIDTH shrinking slightly when pressed,
+-- presumably because it's anchored relative to the Left/Middle/Right art
+-- pieces rather than the button frame itself, and those pieces reposition on
+-- click. Re-anchoring straight to the button's own LEFT/RIGHT edges (whose
+-- size does not change when pressed) gives the label a fixed box no matter
+-- what the pushed-state art underneath is doing.
+function LP.LockButtonLabel(b)
+    if not b then return end
+    local fs = b.GetFontString and b:GetFontString()
+    if not fs then return end
+    if fs.SetWordWrap then fs:SetWordWrap(false) end
+    local d = GetFFD(b)
+    if d.labelLocked then return end
+    d.labelLocked = true
+    local justify = (fs.GetJustifyH and fs:GetJustifyH()) or "CENTER"
+    fs:ClearAllPoints()
+    fs:SetPoint("LEFT", b, "LEFT", 6, 0)
+    fs:SetPoint("RIGHT", b, "RIGHT", -6, 0)
+    if fs.SetJustifyH then fs:SetJustifyH(justify) end
+end
+
 -- Re-font a frame's own FontString regions, leaving their COLOR alone: item
 -- names and roll results are quality/state colored by Blizzard, never
 -- overwritten. `skip` is a stack COUNT -- an outlined number font drawn over an icon, unreadable in the panel face.
@@ -12070,6 +12094,7 @@ function LP.SkinInvite(fr, roleChecks)
         if b then
             WSkin.Button(b)
             WSkin.StateButtonLabel(b)
+            LP.LockButtonLabel(b)
         end
     end
     -- Templates naming their buttons globally rather than off the frame (LFGInvitePopupAcceptButton / ...DeclineButton).
@@ -12080,6 +12105,7 @@ function LP.SkinInvite(fr, roleChecks)
             if b then
                 WSkin.Button(b)
                 WSkin.StateButtonLabel(b)
+                LP.LockButtonLabel(b)
             end
         end
     end
