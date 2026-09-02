@@ -7455,8 +7455,10 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         end
         for _, item in ipairs(items) do
             -- isModifier rows (the Visibility match toggle) are not conditions: excluded
-            -- from the summary and from the "All" shortcut.
-            if not item.isHeader and not item.isTopAction and not item.isModifier then
+            -- from the summary and from the "All" shortcut. item.excludeFromSummaryFn
+            -- opts a row out the same way (e.g. locked behind an unlearned talent).
+            if not item.isHeader and not item.isTopAction and not item.isModifier
+               and not (item.excludeFromSummaryFn and item.excludeFromSummaryFn()) then
                 total = total + 1
                 if getFn(item.key) then names[#names + 1] = EllesmereUI.L(item.label) end
                 -- Dual-lane rows: the hide lane reads through getFn(key, true).
