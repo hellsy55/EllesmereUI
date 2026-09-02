@@ -9070,7 +9070,9 @@ local function CreateCustomClassPower(playerFrame, style)
     -- Uses Snap() to round all positions to physical pixel boundaries
     -- so gaps between pips are guaranteed identical.
     container._repositionForWidth = function(targetW)
-        local n = #pips
+        -- shownPipCount, not #pips: the table is a high-water mark, so a shrunk
+        -- max would divide the width by the old pip count and leave a gap.
+        local n = shownPipCount
         if n <= 0 then return end
         local efs = container:GetEffectiveScale()
         if efs <= 0 then efs = 1 end
