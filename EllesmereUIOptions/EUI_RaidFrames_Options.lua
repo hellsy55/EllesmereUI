@@ -2823,7 +2823,7 @@ initFrame:SetScript("OnEvent", function(self)
         local stRow
         stRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Status Text", values=statusTextPositionValues, order=statusTextPositionOrder,
-              tooltip="Controls whether status text is displayed and where. When enabled, Dead and Offline statuses are shown. AFK status can also be shown or hidden, but only when status text is enabled.",
+              tooltip="Controls whether the Offline/AFK status text is displayed and where. Dead status text has its own independent settings below.",
               getValue=function() return SVal("statusTextPosition", "center") end,
               setValue=function(v) SSet("statusTextPosition", v) end },
             { type="slider", text="Text Size", min=6, max=30, step=1,
@@ -2868,6 +2868,59 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 function(r, g, b)
                     SWrite("statusTextColor", { r=r, g=g, b=b })
+                    ReloadAndUpdate()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+        end
+
+        -- Dead status text: independent position/offset/size/color from the
+        -- Offline/AFK group above (same layout pattern, own row).
+        local stDeadRow
+        stDeadRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Dead Status Text", values=statusTextPositionValues, order=statusTextPositionOrder,
+              tooltip="Controls whether the Dead status text is displayed and where, independent of the Offline/AFK Status Text above.",
+              getValue=function() return SVal("statusTextDeadPosition", "center") end,
+              setValue=function(v) SSet("statusTextDeadPosition", v) end },
+            { type="slider", text="Text Size", min=6, max=30, step=1,
+              getValue=function() return SVal("statusTextDeadSize", 14) end,
+              setValue=function(v) SSet("statusTextDeadSize", v) end });  y = y - h
+        if not EllesmereUI._prebuilding then
+            local rgn = stDeadRow._leftRegion
+            local _, cogShow = EllesmereUI.BuildCogPopup({
+                title = "Dead Status Text",
+                rows = {
+                    { type="slider", label="Offset X", min=-50, max=50, step=1,
+                      get=function() return SVal("statusTextDeadOffsetX", 0) end,
+                      set=function(v) SSet("statusTextDeadOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                      get=function() return SVal("statusTextDeadOffsetY", 0) end,
+                      set=function(v) SSet("statusTextDeadOffsetY", v) end },
+                },
+            })
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
+        end
+        if not EllesmereUI._prebuilding then
+            local rgn = stDeadRow._rightRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, stDeadRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGet("statusTextDeadColor")
+                    if c then return c.r, c.g, c.b, 1 end
+                    return 1, 1, 1, 1
+                end,
+                function(r, g, b)
+                    SWrite("statusTextDeadColor", { r=r, g=g, b=b })
                     ReloadAndUpdate()
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)

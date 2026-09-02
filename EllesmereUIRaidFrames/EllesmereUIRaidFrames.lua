@@ -539,12 +539,19 @@ local defaults = {
         combatIndicatorPosition = "right",
         combatIndicatorOffsetX = 0,
         combatIndicatorOffsetY = 0,
+        -- Offline/AFK share this group's position/size/color.
         statusTextPosition = "center",
         statusTextOffsetX  = 0,
         statusTextOffsetY  = 0,
         statusTextSize     = 12,
         statusTextColor    = { r = 1, g = 1, b = 1 },
         statusShowAFK      = false,
+        -- Dead status text: independent position/offset/size/color from the Offline/AFK group above.
+        statusTextDeadPosition = "center",
+        statusTextDeadOffsetX  = 0,
+        statusTextDeadOffsetY  = 0,
+        statusTextDeadSize     = 12,
+        statusTextDeadColor    = { r = 1, g = 1, b = 1 },
         -- Group numbers (raid only). Size/color shared with the preview; the toggle gates only real frames (preview always shows them).
         showGroupNumbers   = false,
         groupNumberSize    = 10,
@@ -3559,7 +3566,10 @@ local function StyleButton(button)
     AnchorHealAbsorbText()
     d.AnchorHealAbsorbText = AnchorHealAbsorbText
 
-    -- Status text (DEAD / OFFLINE / AFK -- always shown, own position/size/color)
+    -- Status text (DEAD / OFFLINE / AFK -- always shown). Dead has its own
+    -- position/offset/size/color (statusTextDead*); Offline and AFK share the
+    -- base statusText* group. Only one state is ever active on a given unit at
+    -- a time, so the single fontstring is safe to re-anchor/re-size per state.
     local statusFS = health:CreateFontString(nil, "OVERLAY")
     local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
     ApplyFont(statusFS, s.statusTextSize or 14)
@@ -3568,13 +3578,20 @@ local function StyleButton(button)
     statusFS:Hide()
     d.statusText = statusFS
 
-    local function AnchorStatusText()
+    local function AnchorStatusTextState(state)
         local s = LiveS()   -- party/extra-aware (see LiveS note above)
         local health = ns.RF_AnchorHost(health, s)   -- Uniform Icon Anchoring host swap
         statusFS:ClearAllPoints()
-        local pos = s.statusTextPosition or "center"
-        local ox = s.statusTextOffsetX or 0
-        local oy = s.statusTextOffsetY or 0
+        local pos, ox, oy
+        if state == 2 then
+            pos = s.statusTextDeadPosition or "center"
+            ox  = s.statusTextDeadOffsetX or 0
+            oy  = s.statusTextDeadOffsetY or 0
+        else
+            pos = s.statusTextPosition or "center"
+            ox  = s.statusTextOffsetX or 0
+            oy  = s.statusTextOffsetY or 0
+        end
         if pos == "topleft" then
             statusFS:SetPoint("TOPLEFT", health, "TOPLEFT", 2 + ox, -2 + oy)
         elseif pos == "top" then
@@ -3595,8 +3612,14 @@ local function StyleButton(button)
             statusFS:SetPoint("CENTER", health, "CENTER", ox, oy)
         end
     end
+    local function AnchorStatusText()
+        -- Generic refresh (resize/apply-settings paths): re-anchor using
+        -- whichever state is currently on screen (dead vs offline/AFK).
+        AnchorStatusTextState(d._stSt == 2 and 2 or 1)
+    end
     AnchorStatusText()
     d.AnchorStatusText = AnchorStatusText
+    d.AnchorStatusTextState = AnchorStatusTextState
 
     -- Role icon. Carrier sits in the text band (ns.LVL_AURA - 1 = ns.LVL_TEXT): above every border incl. the raise, auras still over it.
     -- Level is owned by AnchorRoleIcon (live-resolves the "Show Behind Border" option); this is just the initial value.
@@ -5334,25 +5357,25 @@ end
 ns._PaintStatusText = function(d, s, unit, connected, deadOrGhost)
     local statusText = d.statusText
     if not statusText then return end
-    local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
     local st
-    if s.statusTextPosition == "none" then
-        st = 0
-    elseif deadOrGhost and s.showIncomingRez and ns._RFRezShown(unit) then
+    if deadOrGhost and s.showIncomingRez and ns._RFRezShown(unit) then
         -- Being resurrected: hide the status text so the incoming-rez icon isn't covered.
         st = 0
     elseif not connected then
-        st = 1
+        st = (s.statusTextPosition == "none") and 0 or 1
     elseif deadOrGhost then
-        st = 2
+        -- Dead uses its own position setting; "none" hides Dead only, independent of Offline/AFK.
+        st = ((s.statusTextDeadPosition or "center") == "none") and 0 or 2
     else
         local afk
-        if s.statusShowAFK and UnitIsAFK then
+        if s.statusTextPosition ~= "none" and s.statusShowAFK and UnitIsAFK then
             afk = UnitIsAFK(unit)
             if issecretvalue(afk) then afk = nil end
         end
         st = afk and 3 or 0
     end
+    local stc = (st == 2) and (s.statusTextDeadColor or { r = 1, g = 1, b = 1 })
+        or (s.statusTextColor or { r = 1, g = 1, b = 1 })
     if d._stSt ~= st or d._stR ~= stc.r or d._stG ~= stc.g or d._stB ~= stc.b then
         d._stSt, d._stR, d._stG, d._stB = st, stc.r, stc.g, stc.b
         if st == 0 then
@@ -5361,6 +5384,8 @@ ns._PaintStatusText = function(d, s, unit, connected, deadOrGhost)
             local L = ns.EllesmereUI.L
             statusText:SetText(st == 1 and L("OFFLINE") or st == 2 and L("DEAD") or L("AFK"))
             statusText:SetTextColor(stc.r, stc.g, stc.b)
+            ApplyFont(statusText, (st == 2 and (s.statusTextDeadSize or 12)) or (s.statusTextSize or 14))
+            if d.AnchorStatusTextState then d.AnchorStatusTextState(st == 2 and 2 or 1) end
             statusText:Show()
         end
     end
@@ -6607,7 +6632,8 @@ XF.Layout = function()
             if d.AnchorHealAbsorbText then d.AnchorHealAbsorbText() end
         end
         if d.statusText then
-            ApplyFont(d.statusText, xs.statusTextSize or 14)
+            local isDead = (d._stSt == 2)
+            ApplyFont(d.statusText, (isDead and xs.statusTextDeadSize) or xs.statusTextSize or 14)
             if d.AnchorStatusText then d.AnchorStatusText() end
         end
         if d.roleIcon then
@@ -7907,10 +7933,13 @@ local function ReloadFrames(skipButtons)
             if d.AnchorHealAbsorbText then d.AnchorHealAbsorbText() end
         end
 
-        -- Status text (DEAD/OFFLINE/AFK)
+        -- Status text (DEAD/OFFLINE/AFK). Re-apply using whichever group (Dead vs
+        -- Offline/AFK) is currently on screen for this unit, since the two can now
+        -- have independent size/color/position.
         if d.statusText then
-            local stc = s.statusTextColor or { r = 1, g = 1, b = 1 }
-            ApplyFont(d.statusText, s.statusTextSize or 14)
+            local isDead = (d._stSt == 2)
+            local stc = (isDead and s.statusTextDeadColor) or s.statusTextColor or { r = 1, g = 1, b = 1 }
+            ApplyFont(d.statusText, (isDead and s.statusTextDeadSize) or s.statusTextSize or 14)
             d.statusText:SetTextColor(stc.r, stc.g, stc.b)
             if d.AnchorStatusText then d.AnchorStatusText() end
         end
@@ -8128,7 +8157,10 @@ ns._ResizePartyButtons = function(w, h)
                 if d.nameText then ApplyFont(d.nameText, pp.nameSize or 10) end
                 if d.healthText then ApplyFont(d.healthText, pp.healthTextSize or 9) end
                 if d.healAbsorbText then ApplyFont(d.healAbsorbText, pp.healAbsorbTextSize or 9) end
-                if d.statusText then ApplyFont(d.statusText, pp.statusTextSize or 14) end
+                if d.statusText then
+                    local isDead = (d._stSt == 2)
+                    ApplyFont(d.statusText, (isDead and pp.statusTextDeadSize) or pp.statusTextSize or 14)
+                end
             end
         end
     end
