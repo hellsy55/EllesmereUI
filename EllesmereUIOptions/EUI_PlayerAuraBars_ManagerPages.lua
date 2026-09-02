@@ -1093,14 +1093,152 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     return sy
 end
 
--- "Display": Border Size [swatch] | Spacing; Icons per Row (+Max Rows/Max
--- Total/Row Spacing cog) | spacer.
+-- "Display": Border Style (+offset cog) | spacer; Border Size [swatch] |
+-- Spacing; Icons per Row (+Max Rows/Max Total/Row Spacing cog) | spacer.
 local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
     local W = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
     local _, hh = 0, 0
 
     _, hh = W:SectionHeader(frame, "DISPLAY", sy); sy = sy - hh
+
+    local textureValues, textureOrder = EllesmereUI.GetBorderTextureDropdown()
+    local styleRow
+    styleRow, hh = W:DualRow(frame, sy,
+        {
+            type = "dropdown", text = "Border Style",
+            disabled = function()
+                return cfg.iconShape and cfg.iconShape ~= "none"
+            end,
+            disabledTooltip = "This option requires a non-custom shape to be selected",
+            rawTooltip = true,
+            values = textureValues, order = textureOrder,
+            getValue = function() return cfg.borderTexture or "solid" end,
+            setValue = function(v)
+                cfg.borderTexture = v
+                cfg.borderTextureOffset = nil
+                cfg.borderTextureOffsetY = nil
+                cfg.borderTextureShiftX = nil
+                cfg.borderTextureShiftY = nil
+                local color, behind = EllesmereUI.GetBorderStyleSelectDefaults(v)
+                cfg.borderR, cfg.borderG, cfg.borderB, cfg.borderA = color.r, color.g, color.b, 1
+                cfg.borderBehind = behind
+                local defaultSize = EllesmereUI.GetBorderDefaultSize("unitframes", v)
+                if defaultSize then cfg.borderSize = defaultSize end
+                apply()
+            end,
+        },
+        { type = "label", text = "" }
+    ); sy = sy - hh
+    do
+        local rgn = styleRow._leftRegion
+        local _, cogShow = EllesmereUI.BuildCogPopup({
+            title = "Border Offset",
+            rows = {
+                { type = "slider", label = "Offset X", min = -10, max = 10, step = 1,
+                  get = function()
+                      if cfg.borderTextureOffset ~= nil then return cfg.borderTextureOffset end
+                      return EllesmereUI.GetBorderDefaults("unitframes", cfg.borderTexture or "solid", cfg.borderSize or 1)
+                  end,
+                  set = function(v) cfg.borderTextureOffset = v; apply() end },
+                { type = "slider", label = "Offset Y", min = -10, max = 10, step = 1,
+                  get = function()
+                      if cfg.borderTextureOffsetY ~= nil then return cfg.borderTextureOffsetY end
+                      local _, y = EllesmereUI.GetBorderDefaults("unitframes", cfg.borderTexture or "solid", cfg.borderSize or 1)
+                      return y
+                  end,
+                  set = function(v) cfg.borderTextureOffsetY = v; apply() end },
+                { type = "slider", label = "Shift X", min = -10, max = 10, step = 1,
+                  get = function()
+                      if cfg.borderTextureShiftX ~= nil then return cfg.borderTextureShiftX end
+                      local _, _, x = EllesmereUI.GetBorderDefaults("unitframes", cfg.borderTexture or "solid", cfg.borderSize or 1)
+                      return x
+                  end,
+                  set = function(v) cfg.borderTextureShiftX = v == 0 and nil or v; apply() end },
+                { type = "slider", label = "Shift Y", min = -10, max = 10, step = 1,
+                  get = function()
+                      if cfg.borderTextureShiftY ~= nil then return cfg.borderTextureShiftY end
+                      local _, _, _, y = EllesmereUI.GetBorderDefaults("unitframes", cfg.borderTexture or "solid", cfg.borderSize or 1)
+                      return y
+                  end,
+                  set = function(v) cfg.borderTextureShiftY = v == 0 and nil or v; apply() end },
+                { type = "toggle", label = "Show Behind",
+                  get = function() return cfg.borderBehind == true end,
+                  set = function(v) cfg.borderBehind = v; apply() end },
+            },
+        })
+        local cogBtn = ns._PAMakeCogBtn(rgn, cogShow)
+        local function UpdateBorderCogVisibility()
+            cogBtn:SetShown((cfg.borderTexture or "solid") ~= "solid"
+                and not (cfg.iconShape and cfg.iconShape ~= "none"))
+        end
+        EllesmereUI.RegisterWidgetRefresh(UpdateBorderCogVisibility)
+        UpdateBorderCogVisibility()
+
+        local keys, labels = {}, {}
+        for _, entry in ipairs(PabAllBarEntries()) do
+            keys[#keys + 1] = entry.key
+            labels[entry.key] = entry.label
+        end
+        local function CopyBorderStyleTo(entry)
+            local target = entry.cfg
+            target.borderTexture = cfg.borderTexture
+            target.borderTextureOffset = cfg.borderTextureOffset
+            target.borderTextureOffsetY = cfg.borderTextureOffsetY
+            target.borderTextureShiftX = cfg.borderTextureShiftX
+            target.borderTextureShiftY = cfg.borderTextureShiftY
+            target.borderBehind = cfg.borderBehind
+            target.borderR, target.borderG, target.borderB, target.borderA =
+                cfg.borderR, cfg.borderG, cfg.borderB, cfg.borderA
+            -- Border textures and custom shape masks are mutually exclusive in
+            -- the editor. A bulk style sync follows the same "last choice wins"
+            -- rule as a direct selection so it cannot create a locked combination.
+            if (cfg.borderTexture or "solid") ~= "solid" then
+                target.iconShape = "none"
+            end
+            PabApplyBarEntry(entry)
+        end
+        EllesmereUI.BuildSyncIcon({
+            region = rgn,
+            tooltip = "Apply Border Style to all Bars",
+            onClick = function()
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    if entry.cfg ~= cfg then CopyBorderStyleTo(entry) end
+                end
+                EllesmereUI:RefreshPage()
+            end,
+            isSynced = function()
+                local texture = cfg.borderTexture or "solid"
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    local c = entry.cfg
+                    if (c.borderTexture or "solid") ~= texture
+                        or c.borderTextureOffset ~= cfg.borderTextureOffset
+                        or c.borderTextureOffsetY ~= cfg.borderTextureOffsetY
+                        or c.borderTextureShiftX ~= cfg.borderTextureShiftX
+                        or c.borderTextureShiftY ~= cfg.borderTextureShiftY
+                        or (c.borderBehind == true) ~= (cfg.borderBehind == true) then
+                        return false
+                    end
+                end
+                return true
+            end,
+            flashTargets = function() return { rgn } end,
+            multiApply = {
+                elementKeys = keys,
+                elementLabels = labels,
+                getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
+                onApply = function(checkedKeys)
+                    local byKey = {}
+                    for _, entry in ipairs(PabAllBarEntries()) do byKey[entry.key] = entry end
+                    for _, key in ipairs(checkedKeys) do
+                        local entry = byKey[key]
+                        if entry then CopyBorderStyleTo(entry) end
+                    end
+                    EllesmereUI:RefreshPage()
+                end,
+            },
+        })
+    end
 
     local borderRow
     borderRow, hh = W:DualRow(frame, sy,
@@ -1257,6 +1395,14 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         {
             type = "dropdown", text = "Icon Shape",
             values = SHAPE_VALUES, order = SHAPE_ORDER,
+            itemDisabled = function(v)
+                return v ~= "none" and (cfg.borderTexture or "solid") ~= "solid"
+            end,
+            itemDisabledTooltip = function(v)
+                if v ~= "none" and (cfg.borderTexture or "solid") ~= "solid" then
+                    return "This option requires the Border Style to be set to Solid"
+                end
+            end,
             getValue = function() return cfg.iconShape or "none" end,
             setValue = function(v)
                 cfg.iconShape = v
@@ -1292,6 +1438,14 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         local function CopyShapeTo(entry)
             local shape = cfg.iconShape
             entry.cfg.iconShape = shape
+            if shape and shape ~= "none" then
+                entry.cfg.borderTexture = "solid"
+                entry.cfg.borderTextureOffset = nil
+                entry.cfg.borderTextureOffsetY = nil
+                entry.cfg.borderTextureShiftX = nil
+                entry.cfg.borderTextureShiftY = nil
+                entry.cfg.borderBehind = false
+            end
             local sz = entry.cfg.borderSize or 1
             if shape and shape ~= "none" and sz >= 1 and sz <= 3 then
                 entry.cfg.borderSize = BORDER_SIZE_NUM[BORDER_SIZE_DEFAULT_SHAPE]
