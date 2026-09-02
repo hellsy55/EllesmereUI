@@ -19083,17 +19083,13 @@ initFrame:SetScript("OnEvent", function(self)
                   BD().pressMirror = v
                   if ns.ClearCdmPressPush then ns.ClearCdmPressPush() end
               end }
-        _, h = W:DualRow(parent, y,
-            (not isAnyBuffBar) and hideMissingCfg or nil,
-            pressMirrorCfg);  y = y - h
 
         -- Bar Strata: per-bar screen render layer for the bar container and its
         -- icons (MEDIUM default = the engine's baseline, so unset bars are
         -- unchanged). Cursor-anchored bars keep their deliberate TOOLTIP raise
         -- while riding the cursor; this applies only when not cursor-anchored.
         -- Same values/labels as the Tracking Bars "Bar Strata" dropdown.
-        _, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Bar Strata",
+        local barStrataCfg = { type = "dropdown", text = "Bar Strata",
               tooltip = "Screen layer this bar and its icons render on.",
               values = EllesmereUI.FRAME_STRATA_LABELS,
               order = EllesmereUI.FRAME_STRATA_ORDER_FULL,
@@ -19101,13 +19097,14 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   BD().barStrata = v
                   ns.BuildAllCDMBars(); Refresh()
-              end },
-            -- Profile-wide (one switch covers the Light's Potential, Recklessness
-            -- and Liquid Luster presets on every CD/utility bar): a pot preset
-            -- whose own family is fully out of bags swaps its icon/count/cooldown
-            -- to the best pot of the partner families instead of sitting greyed
-            -- (Liquid Luster is the final fallback for the other two).
-            { type = "toggle", text = "Swap Combat Potions When Missing",
+              end }
+
+        -- Profile-wide (one switch covers the Light's Potential, Recklessness
+        -- and Liquid Luster presets on every CD/utility bar): a pot preset
+        -- whose own family is fully out of bags swaps its icon/count/cooldown
+        -- to the best pot of the partner families instead of sitting greyed
+        -- (Liquid Luster is the final fallback for the other two).
+        local swapPotionsCfg = { type = "toggle", text = "Swap Combat Potions When Missing",
               tooltip = "When your bags have none of one combat potion type, its icon swaps to track the next type you own.",
               getValue = function()
                   local p = DB(); return p and p.cdmBars and p.cdmBars.swapPotionsWhenMissing == true
@@ -19119,7 +19116,20 @@ initFrame:SetScript("OnEvent", function(self)
                       if ns._BumpPotResolveGen then ns._BumpPotResolveGen() end
                       if ns.FullCDMRebuild then ns.FullCDMRebuild("pot_swap_toggle") end
                   end
-              end });  y = y - h
+              end }
+
+        if isAnyBuffBar then
+            -- Buff bars have no "Hide Items if Missing" slot here (it's hosted
+            -- in the tooltip row above instead), so pair Mirror Key Presses with
+            -- Bar Strata directly beneath Hide Rotation Helper -- no blank slot
+            -- sitting between them -- then Swap Combat Potions When Missing on
+            -- its own row right after.
+            _, h = W:DualRow(parent, y, pressMirrorCfg, barStrataCfg);  y = y - h
+            _, h = W:DualRow(parent, y, swapPotionsCfg, nil);  y = y - h
+        else
+            _, h = W:DualRow(parent, y, hideMissingCfg, pressMirrorCfg);  y = y - h
+            _, h = W:DualRow(parent, y, barStrataCfg, swapPotionsCfg);  y = y - h
+        end
 
         -- Cooldown/utility bars only: buff bars have no cooldown edge.
         if barData.barType == "cooldowns" or barData.barType == "utility" then
