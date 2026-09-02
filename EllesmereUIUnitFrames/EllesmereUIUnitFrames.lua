@@ -8901,10 +8901,12 @@ local function CreateCustomClassPower(playerFrame, style)
                 pips[i]:Show()
             end
             shownPipCount = max
-            -- Re-stretch pips if in "above" position
-            if container._repositionForWidth then
-                local fw = db and db.profile and db.profile.player and db.profile.player.frameWidth or 181
-                container._repositionForWidth(fw)
+            -- Only "above" stretches the row across the health bar (see
+            -- PositionClassPowerBar); every other position keeps the natural pip
+            -- width laid out just above.
+            if isModern and (db.profile.player.classPowerPosition or "top") == "above"
+               and container._repositionForWidth then
+                container._repositionForWidth(db.profile.player.frameWidth or 181)
             end
         end
 
