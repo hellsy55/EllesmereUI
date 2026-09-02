@@ -412,6 +412,15 @@ local BUFF_BAR_PRESETS = {
         duration = 30,
     },
     {
+        key      = "liquid_luster",
+        name     = "Liquid Luster",
+        -- Picker art runtime-resolved (fileID not known statically at authoring
+        -- time), mirroring CDM_ITEM_PRESETS' liquid_luster entry below.
+        icon     = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(271887)) or 134400,
+        spellIDs = { 1295132 },
+        duration = 30,
+    },
+    {
         key      = "invis_potion",
         name     = "Invisibility Potion",
         icon     = 134764,
