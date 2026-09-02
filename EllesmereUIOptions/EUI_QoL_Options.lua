@@ -2434,6 +2434,12 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Y Offset", min=-200, max=200, step=1,
                       get=function() return cget("crosshairYOffset") or 0 end,
                       set=function(v) dbset("crosshairYOffset", v) end },
+                    { type="dropdown", label="Frame Strata",
+                      tooltip="Controls the order that overlapping elements display in. Set higher to show above other elements.",
+                      values = EllesmereUI.FRAME_STRATA_LABELS,
+                      order = EllesmereUI.FRAME_STRATA_ORDER_BASE,
+                      get=function() return cget("crosshairStrata") or "MEDIUM" end,
+                      set=function(v) dbset("crosshairStrata", v) end },
             }
             -- Holy Paladin uses a 40yd out-of-range cutoff by default; let
             -- paladins opt into a melee (5yd) cutoff. Shown only for Paladins.

@@ -11041,10 +11041,25 @@ initFrame:SetScript("OnEvent", function(self)
                         local classItems = ns.PAB_ClassItems and ns.PAB_ClassItems(false) or {}
                         for i = 1, #classItems do
                             local ci = classItems[i]
-                            items[#items + 1] = { key = ci.key, label = ci.label, tooltip = ci.tooltip,
-                                dual = true, showLockedFn = AllOn, showLockedTooltip = lockedTip }
+                            if ci.isHeader then
+                                items[#items + 1] = { isHeader = true, label = ci.label }
+                            else
+                                items[#items + 1] = { key = ci.key, label = ci.label, tooltip = ci.tooltip,
+                                    dual = true, showLockedFn = AllOn, showLockedTooltip = lockedTip }
+                            end
                         end
                         return items
+                    end
+                    -- Non-Player / From Any Player share one engine field: a check
+                    -- in either lane clears the sibling from both lanes.
+                    local function ClearExclusive(k)
+                        local other = ns.PAB_ExclusiveSkey and ns.PAB_ExclusiveSkey[k]
+                        if not other then return end
+                        ps["debuff" .. other] = nil
+                        if ps.debuffNegClasses then
+                            ps.debuffNegClasses[other] = nil
+                            if not next(ps.debuffNegClasses) then ps.debuffNegClasses = nil end
+                        end
                     end
                     if ns.UF_EnsurePlayerAuraLanes then ns.UF_EnsurePlayerAuraLanes(ps) end
                     local warnClosed
@@ -11075,6 +11090,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 return
                             end
                             -- Two-lane class write: checking one lane clears the other.
+                            if v then ClearExclusive(k) end
                             if neg then
                                 ps.debuffNegClasses = ps.debuffNegClasses or {}
                                 ps.debuffNegClasses[k] = v or nil

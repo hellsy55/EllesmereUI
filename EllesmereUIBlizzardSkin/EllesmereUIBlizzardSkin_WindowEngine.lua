@@ -281,12 +281,8 @@ function WSkin.Shell(winKey, frame, opts)
                 bg:SetTexCoord(BASE_L + trimU, BASE_R - trimU, BASE_T, BASE_B)
             end
         end
-        -- OnSizeChanged, NOT hooksecurefunc(frame, "SetSize"/"SetWidth"/"SetHeight"):
-        -- that form is a FIELD WRITE onto a Blizzard frame, and the field is read
-        -- back from Blizzard's own code. BNToastMixin:ShowToast calls SetHeight in
-        -- the chain that opens a Battle.net whisper (same reasoning as the SetPoint
-        -- note in EllesmereUIChat). A script hook writes nothing, and it also fires
-        -- for anchor-driven resizes the setter hooks never saw.
+        -- One script hook instead of three setter hooks: it also fires for
+        -- anchor-driven resizes the setters never saw.
         frame:HookScript("OnSizeChanged", UpdateBgTexCoords)
         UpdateBgTexCoords()
 

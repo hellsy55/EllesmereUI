@@ -357,9 +357,8 @@ local function PreSkinCharacterSheet()
             bg:SetTexCoord(BASE_L + trimU, BASE_R - trimU, BASE_T, BASE_B)
         end
     end
-    -- Script hook, never hooksecurefunc(frame, "SetSize"/...): that form
-    -- writes a field onto a Blizzard frame that Blizzard reads back. Same
-    -- conversion as WSkin.Shell in the window engine.
+    -- One script hook instead of three setter hooks; also fires for
+    -- anchor-driven resizes (same shape as WSkin.Shell).
     frame:HookScript("OnSizeChanged", UpdateBgTexCoords)
     UpdateBgTexCoords()
     -- Standard window-reskin border (AdventureMap_TopBorder atlas), as on every skinned window.

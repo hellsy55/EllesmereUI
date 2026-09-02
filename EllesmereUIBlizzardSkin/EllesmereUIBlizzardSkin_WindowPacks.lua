@@ -12384,7 +12384,7 @@ WSkin.RegisterWindow({
 --  SINGLETON rather than a pool instance, so it takes a plain window
 --  registration instead of their pool sweep. TAINT: clicking it opens a
 --  Battle.net whisper, whose target is a SECRET string, so nothing here writes a
---  field onto the frame (WSkin.Shell was converted for the same reason).
+--  Lua field onto the frame.
 -------------------------------------------------------------------------------
 function LP.SkinBNetToast(f)
     if not f or f:IsForbidden() then return end

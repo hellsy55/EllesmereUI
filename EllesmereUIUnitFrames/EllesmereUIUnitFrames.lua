@@ -2033,7 +2033,11 @@ do
     -- .smoothing, then the shared secret-safe color chain.
     local function PaintHealth(frame, unit, event)
         local element = frame.Health
-        if not element or not unit or not UnitExists(unit) then return end
+        if not element or not unit then return end
+        -- A UNIT_HEALTH delivery for this token proves the unit exists (the
+        -- tracker only routes real unit events under that name); the identity
+        -- and forced paths still pay the probe.
+        if event ~= "UNIT_HEALTH" and not UnitExists(unit) then return end
         if not ns.Engine.ElementOn(frame, "Health") then return end
         -- Bar bounds ride the max-health/identity events (Blizzard's own
         -- contract); a pure UNIT_HEALTH value tick pushes only the value.
@@ -5094,12 +5098,16 @@ local function CreateAbsorbBar(frame, unit, settings)
             local hpW, hpH = hp:GetWidth(), hp:GetHeight()
             -- Identical-state short-circuit (RF's memo, ported): chatter
             -- events with unchanged values skip the whole paint below.
-            -- Identity/settings/belt paints bypass the skip; any secret input
+            -- Identity/settings paints bypass the skip; any secret input
             -- fails open to painting and poisons the memo for the next plain
-            -- pass (exactly the RF contract).
+            -- pass (exactly the RF contract). The 0.5s belt honors the memo
+            -- like RF's does: it exists for the no-event timer expiry, and
+            -- that edge reads a CHANGED amount (memo miss) -- the arm/disarm
+            -- derivation and the paint stamp above already ran, so a belt
+            -- pass over unchanged plain values has nothing left to move.
             if isSecD and (isSecD(absorbAmt) or isSecD(maxHealth) or isSecD(haAmtD)) then
                 ab._mAbs = nil
-            elseif event ~= "ForceUpdate" and event ~= "Resettle" and event ~= "EUI_AbsorbBelt"
+            elseif event ~= "ForceUpdate" and event ~= "Resettle"
                and ab._mAbs == absorbAmt and ab._mHeal == haAmtD
                and ab._mMax == maxHealth and ab._mW == hpW and ab._mH == hpH then
                 return
