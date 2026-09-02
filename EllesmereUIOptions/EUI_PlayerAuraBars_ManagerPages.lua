@@ -52,9 +52,25 @@ local pabInhSel = nil
 -- session-sticky file local defaulting to the Buffs bar, so a nav targeting a
 -- debuff-side section must pre-select the right pane or the section scan
 -- silently misses.
-EllesmereUI._setPABSelection = function(kind, id)
+--
+-- `bucket` = the bar's owning editing-spec bucket, passed by unlock mode's
+-- "Element Options". The view is session-sticky too and BuildPage validates the
+-- selection against the current view's bucket only, so a bar from another bucket
+-- would be dropped back to the default tile. Same move as the inherited pane's
+-- "Edit in <group>" link.
+EllesmereUI._setPABSelection = function(kind, id, bucket)
     pabSel = { kind = kind, id = id or "default" }
     pabInhSel = nil
+    if bucket then
+        pabSpecSel = bucket
+    elseif pabSel.id == "default" and pabSpecSel ~= "allspecs"
+        and not (type(pabSpecSel) == "string" and pabSpecSel:match("^spec%d")) then
+        -- The two built-in bars are All Specs content: they are listed in the All
+        -- Specs view and in concrete spec views, but never in a group bucket, so a
+        -- stale group view would drop this selection. Concrete spec views list
+        -- them, so those stay untouched.
+        pabSpecSel = "allspecs"
+    end
 end
 
 -- Editing-spec group buckets (labels/icons mirror the RaidFrames roster in

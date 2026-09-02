@@ -2473,6 +2473,37 @@ local function CreateBars()
     SyncCancelCVar()
 end
 
+-- Unlock mode's cog menu only offers "Element Options" for keys in
+-- EllesmereUI._ELEMENT_SETTINGS_MAP; a module adds its own dynamic keys there the
+-- way EllesmereUIDataBars.lua does, so EUI_UnlockMode.lua's static map needs no
+-- PAB branch. barId nil = one of the two built-in bars.
+--
+-- No sectionName/highlightText: NavigateToElementSettings scans the page
+-- wrapper's DIRECT children for section headers, and PABMP_BuildPage builds past
+-- `parent` into its own root on the shared scroll frame, so nothing is scannable.
+local function MapElementSettings(key, kind, barId)
+    if not EllesmereUI then return end
+    EllesmereUI._ELEMENT_SETTINGS_MAP = EllesmereUI._ELEMENT_SETTINGS_MAP or {}
+    EllesmereUI._ELEMENT_SETTINGS_MAP[key] = {
+        module = "EllesmereUIUnitFrames",
+        page = "Player Aura Bars",
+        preSelectFn = function()
+            if not EllesmereUI._setPABSelection then return end
+            if not barId then
+                EllesmereUI._setPABSelection(kind, "default")
+                return
+            end
+            -- Owning bucket resolved at click time, not baked in at registration:
+            -- the tile's "Add To" menu can move a bar to another editing-spec
+            -- bucket long after its key was mapped.
+            local bar, bucket
+            if kind == "buff" then bar, bucket = ns.PAB_GetCustomBuffBar(barId)
+            else bar, bucket = ns.PAB_GetCustomDebuffBar(barId) end
+            if bar then EllesmereUI._setPABSelection(kind, barId, bucket) end
+        end,
+    }
+end
+
 -- Unlock-mode registration, patterned on EllesmereUIDamageMeters.lua's
 -- ns.RegisterDMUnlock/MakeSATimerUnlockElement (observed EUI.MakeUnlockElement field
 -- usage, not a verified schema). Both bars use noResize (AuraKit sizes the container
@@ -2545,6 +2576,8 @@ function RegisterPABUnlock()
         MakeBarElement("PAB_Buffs", buffLabel, 700, true, function() return buffsParent end),
         MakeBarElement("PAB_Debuffs", "Debuffs", 701, false, function() return debuffsParent end),
     }
+    MapElementSettings("PAB_Buffs", "buff")
+    MapElementSettings("PAB_Debuffs", "debuff")
     EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIUnitFrames")
     -- Registration alone only updates the element table; a mover already built
     -- this session keeps the label CreateMover baked into its FontString. No-op
@@ -3775,6 +3808,7 @@ local function RegisterPABCustomUnlock()
 
     local function MakeCustomBarElement(barId, bar, order, isBuff, parents)
         local key = (isBuff and "PAB_CustomBuff_" or "PAB_CustomDebuff_") .. barId
+        MapElementSettings(key, isBuff and "buff" or "debuff", barId)
         return key, MK({
             key = key,
             label = "PAB: " .. (bar.name or (isBuff and "Buff Bar" or "Debuff Bar")),
@@ -3871,15 +3905,24 @@ local function RegisterPABCustomUnlock()
     end
 
     -- Retire keys for bars deleted since the last call -- safe here (unlike TBB)
-    -- because PAB custom-bar ids are permanent, see doc comment above.
+    -- because PAB custom-bar ids are permanent, see doc comment above. The
+    -- element-options map entry is retired with the mover; a leftover entry would
+    -- be harmless (no mover, no cog) but the id is gone for good either way.
+    local elemMap = EllesmereUI._ELEMENT_SETTINGS_MAP
     if prevBuffKeys then
         for key in pairs(prevBuffKeys) do
-            if not pabRegisteredCustomBuffKeys[key] then EllesmereUI:UnregisterUnlockElement(key) end
+            if not pabRegisteredCustomBuffKeys[key] then
+                EllesmereUI:UnregisterUnlockElement(key)
+                if elemMap then elemMap[key] = nil end
+            end
         end
     end
     if prevDebuffKeys then
         for key in pairs(prevDebuffKeys) do
-            if not pabRegisteredCustomDebuffKeys[key] then EllesmereUI:UnregisterUnlockElement(key) end
+            if not pabRegisteredCustomDebuffKeys[key] then
+                EllesmereUI:UnregisterUnlockElement(key)
+                if elemMap then elemMap[key] = nil end
+            end
         end
     end
 end
