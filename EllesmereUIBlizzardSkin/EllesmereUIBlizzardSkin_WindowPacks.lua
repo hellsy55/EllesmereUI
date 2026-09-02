@@ -12380,11 +12380,11 @@ WSkin.RegisterWindow({
 
 -------------------------------------------------------------------------------
 --  BNet toast (BNToastFrame): a friend coming online or going offline, plus
---  broadcasts and club invites. A permanent named frame, not a pooled alert, so
---  it takes a plain window registration rather than the loot-toast sweep.
---  TAINT: clicking it opens a Battle.net whisper, whose target is a SECRET
---  string, so nothing here may write a field onto the frame -- script hooks and
---  the external FFD table only (WSkin.Shell was converted for the same reason).
+--  broadcasts and club invites. Alert-system driven like the loot toasts, but a
+--  SINGLETON rather than a pool instance, so it takes a plain window
+--  registration instead of their pool sweep. TAINT: clicking it opens a
+--  Battle.net whisper, whose target is a SECRET string, so nothing here writes a
+--  field onto the frame (WSkin.Shell was converted for the same reason).
 -------------------------------------------------------------------------------
 function LP.SkinBNetToast(f)
     if not f or f:IsForbidden() then return end

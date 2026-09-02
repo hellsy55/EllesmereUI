@@ -361,6 +361,9 @@ local function SkinInspectSheet()
         local BASE_V = BASE_B - BASE_T
         local function UpdateBgTexCoords()
             local fw, fh = frame:GetSize()
+            -- Secrecy test BEFORE the zero check: that check is itself a
+            -- comparison and throws on a secret size. Matches the engine.
+            if issecretvalue and (issecretvalue(fw) or issecretvalue(fh)) then return end
             if fw == 0 or fh == 0 then return end
             local frameAspect = fw / fh
             if frameAspect > BG_ASPECT then
@@ -373,9 +376,10 @@ local function SkinInspectSheet()
                 bg:SetTexCoord(BASE_L + trimU, BASE_R - trimU, BASE_T, BASE_B)
             end
         end
-        hooksecurefunc(frame, "SetSize", UpdateBgTexCoords)
-        hooksecurefunc(frame, "SetWidth", UpdateBgTexCoords)
-        hooksecurefunc(frame, "SetHeight", UpdateBgTexCoords)
+        -- Script hook, never hooksecurefunc(frame, "SetSize"/...): that form
+        -- writes a field onto a Blizzard frame that Blizzard reads back. Same
+        -- conversion as WSkin.Shell in the window engine.
+        frame:HookScript("OnSizeChanged", UpdateBgTexCoords)
         UpdateBgTexCoords()
         -- Follows the Character Sheet window's style pick (the two share one
         -- enable + style setting).
