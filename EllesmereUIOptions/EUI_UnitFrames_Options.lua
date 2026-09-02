@@ -2393,10 +2393,7 @@ initFrame:SetScript("OnEvent", function(self)
             local isMini = (unitKey == "pet" or unitKey == "boss" or unitKey == "targettarget" or unitKey == "focustarget")
             local ds = s
             if isMini then
-                local ef = db.profile.enabledFrames
-                if ef.focus ~= false and db.profile.focus then ds = db.profile.focus
-                elseif ef.target ~= false and db.profile.target then ds = db.profile.target
-                else ds = db.profile.player end
+                ds = ns.GetMiniDonorSettings and ns.GetMiniDonorSettings() or db.profile.player
             end
 
             -- The preview mocks the EUI frame, so it counts as "enabled" only when the
@@ -4581,12 +4578,13 @@ initFrame:SetScript("OnEvent", function(self)
               legacyKey = "barVisibility",
               caps = { partyIncludesRaid = false, luaDragonriding = true },
               refreshPageArg = true,
-              -- Visibility owns only the hidden/not-hidden axis: "never" disables
-              -- the frame, any visible mode re-enables it. frameSource (the inline
-              -- cog's EUI/Blizzard choice) is left intact so it resumes on re-enable.
+              -- Visibility is a RUNTIME axis and never touches enabledFrames: that
+              -- key decides whether the frame is built at all, once, at login, so a
+              -- Spec Override carrying "never" used to leave the frame uncreated for
+              -- the session with no way back but a /reload. "never" is hidden by the
+              -- visibility pass instead (ns.UpdateFrameVisibility), which reverses.
               applyScalarFn = function(s, mode)
                   s.barVisibility = mode
-                  db.profile.enabledFrames[selectedUnit] = (mode ~= "never")
               end,
               onChanged = function()
                   local s = UNIT_DB_MAP[selectedUnit]()
@@ -4678,8 +4676,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- ONE sync icon now that both halves share a control: set-aware for correct
-        -- multi-selection compare/copy, and VisFullCopy carries the option booleans too;
-        -- runs each target's scalar side effects (enabledFrames) + boolean-trio derivation.
+        -- multi-selection compare/copy, and VisFullCopy carries the option booleans too,
+        -- plus each target's boolean-trio derivation.
         if not EllesmereUI._prebuilding then
             local rgn = visRow._leftRegion
             local function CopyVisToUnit(key)
@@ -4688,7 +4686,6 @@ initFrame:SetScript("OnEvent", function(self)
                 if dst == src then return end
                 EllesmereUI.VisFullCopy(dst, src, "barVisibility", nil, function(t, mode)
                     t.barVisibility = mode
-                    db.profile.enabledFrames[key] = (mode ~= "never")
                 end)
                 SyncUnitVisBooleans(dst)
             end
@@ -12613,13 +12610,12 @@ initFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  Mini frame donor settings helper
-    --  Returns the settings table from focus (if enabled) target player
+    --  Returns the settings table from focus (if usable) target player. Routed
+    --  through the runtime resolver so the options preview and the live frames
+    --  can never disagree about which frame is on screen to inherit from.
     ---------------------------------------------------------------------------
     local function GetMiniDonorSettings()
-        local ef = db.profile.enabledFrames
-        if ef.focus ~= false and db.profile.focus then return db.profile.focus end
-        if ef.target ~= false and db.profile.target then return db.profile.target end
-        return db.profile.player
+        return ns.GetMiniDonorSettings and ns.GetMiniDonorSettings() or db.profile.player
     end
 
     ---------------------------------------------------------------------------
