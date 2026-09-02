@@ -3796,13 +3796,6 @@ local function BuildBars()
             secondaryFrame._barBg:SetColorTexture(sp.barBgR or 0, sp.barBgG or 0, sp.barBgB or 0, sp.barBgA or 0.5)
         end
 
-        -- Warrior charge buffs: hand the engine-slot module the resolved build
-        -- (it parks itself for every other power type and non-warriors; see
-        -- EUI_ResourceBars_WarriorCharges.lua).
-        if ns.WC_Sync then
-            ns.WC_Sync(secondaryFrame, sp, cachedSecondary and cachedSecondary.power, g)
-        end
-
         if sp.showText then
             if not secondaryFrame._countText then
                 -- Parent to a high-level overlay so text renders above pip fills and borders
@@ -3834,6 +3827,15 @@ local function BuildBars()
             end
         elseif secondaryFrame._countText then
             secondaryFrame._countText:Hide()
+        end
+
+        -- Warrior charge buffs: hand the engine-slot module the resolved build
+        -- (it parks itself for every other power type and non-warriors; see
+        -- EUI_ResourceBars_WarriorCharges.lua). Must run after _countText is
+        -- created and styled above -- the engine bakes its count-text font from
+        -- this fontstring at slot-creation time and never re-reads it.
+        if ns.WC_Sync then
+            ns.WC_Sync(secondaryFrame, sp, cachedSecondary and cachedSecondary.power, g)
         end
 
         secondaryFrame:Show()
@@ -5651,7 +5653,7 @@ local function UpdateSecondaryResource()
             if ns.WC_Thresholds then
                 ns.WC_Thresholds(powerType,
                     (_tsEntry and _tsEntry.thresholdMode) or sp.thresholdMode,
-                    _tsThreshCount, _tsR, _tsG, _tsB, _tsA,
+                    _tsEntry and _tsThreshCount or nil, _tsR, _tsG, _tsB, _tsA,
                     _tsBandOn, _tsBands, _tsBandReverse, _tsReverse)
             end
         end
