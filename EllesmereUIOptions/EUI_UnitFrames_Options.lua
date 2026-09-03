@@ -11747,11 +11747,12 @@ initFrame:SetScript("OnEvent", function(self)
                           SSetSupported("showOvershield", v ~= "never")
                           SSetSupported("overshieldMode", v)
                       end },
-                    -- Single global toggle (boss block key, nil = enabled):
-                    -- boss frames render absorbs with the TARGET frame's
-                    -- absorb styling -- no per-boss customization.
+                    -- Master on/off switch (boss block key, nil = enabled).
+                    -- When on, Boss Frames render absorbs using their OWN
+                    -- independent settings on the Boss tab (no longer tied
+                    -- to the Target frame's styling).
                     { type="toggle", label="Show on Boss Frames",
-                      tooltip="Render absorbs on Boss Frames using the Target frame's absorb styling.",
+                      tooltip="Show absorbs on Boss Frames, styled independently from the Boss tab's own Absorbs section.",
                       get=function() return not (db.profile.boss and db.profile.boss.showAbsorbs == false) end,
                       set=function(v)
                           local b = db.profile.boss
@@ -16068,16 +16069,357 @@ initFrame:SetScript("OnEvent", function(self)
 
             end   -- close boss Cast Bar hidden-while-disabled gate
 
-            -- The Show Cast Bar toggle's own color swatches stay gated grey +
+    -- The Show Cast Bar toggle's own color swatches stay gated grey +
             -- blocked while the cast bar is off (the Height slider uses a
             -- native disabled state; the hidden rows need nothing).
             for _, item in ipairs(castColorSwatches) do AddCastBlock(item.sw, item.enabledAlpha) end
             return yy
         end
 
+        -- ABSORBS section for Boss Frames -- independent config (own style,
+        -- opacity, color, placement, heal absorb, and absorb/heal-absorb
+        -- bars). Boss frames used to always render with the Target frame's
+        -- absorb styling; this mirrors the shared Player/Target/Focus
+        -- ABSORBS section (see BuildSharedSettings) but reads/writes
+        -- db.profile.boss directly since this page has no unit dropdown.
+        local function bossAbsorbs(Ww, pp, yy)
+            local B = db.profile.boss
+            local _, hh
+            local function BVal(k, d)
+                local v = B[k]
+                if v == nil then return d end
+                return v
+            end
+            local function BSet(k, v)
+                B[k] = v
+                ReloadAndUpdate(); UpdatePreview()
+            end
+            local function ACogBtn(rgn, showFn)
+                local cogBtn = CreateFrame("Button", nil, rgn)
+                cogBtn:SetSize(26, 26)
+                cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = cogBtn
+                cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+                cogBtn:SetAlpha(0.4)
+                local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+                cogTex:SetAllPoints()
+                cogTex:SetTexture(EllesmereUI.COGS_ICON)
+                cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+                cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+                cogBtn:SetScript("OnClick", function(self) showFn(self) end)
+                return cogBtn
+            end
+
+            _, hh = Ww:SectionHeader(pp, "ABSORBS", yy); yy = yy - hh
+
+            local absorbStyleValues = {
+                ["none"]            = "None",
+                ["striped"]         = "Striped",
+                ["stripedReversed"] = "Striped Reversed",
+                ["stripedThick"]    = "Striped Thick",
+                ["stripedThickR"]   = "Striped Thick Reversed",
+                ["clean"]           = "Clean (Flat)",
+                ["blizzard"]        = "Blizzard",
+                ["largeOutlinedStripes"]  = "Large Outlined Stripes",
+                ["largeOutlinedStripesR"] = "Large Outlined Stripes R",
+                ["largeStripes"]          = "Large Stripes",
+                ["largeStripesR"]         = "Large Stripes R",
+            }
+            local absorbStyleOrder = { "none", "striped", "stripedReversed", "stripedThick", "stripedThickR", "clean", "blizzard", "largeStripes", "largeStripesR" }
+            local healAbsorbStyleOrder = { "none", "striped", "stripedReversed", "stripedThick", "stripedThickR", "clean", "blizzard", "largeOutlinedStripes", "largeOutlinedStripesR", "largeStripes", "largeStripesR" }
+            do
+                if EllesmereUI.AppendSharedMediaTextures then
+                    EllesmereUI.AppendSharedMediaTextures(
+                        ns.healthBarTextureNames or {}, ns.healthBarTextureOrder or {}, nil, ns.healthBarTextures)
+                end
+                local smNames = ns.healthBarTextureNames or {}
+                local smKeys = {}
+                for _, k in ipairs(ns.healthBarTextureOrder or {}) do
+                    if type(k) == "string" and k:find("^sm:") then
+                        smKeys[#smKeys + 1] = k
+                        absorbStyleValues[k] = smNames[k] or k
+                    end
+                end
+                if #smKeys > 0 then
+                    absorbStyleOrder[#absorbStyleOrder + 1] = "---"
+                    healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = "---"
+                    for _, k in ipairs(smKeys) do
+                        absorbStyleOrder[#absorbStyleOrder + 1] = k
+                        healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = k
+                    end
+                end
+                absorbStyleValues._menuOpts = {
+                    itemHeight = 28,
+                    background = function(key)
+                        if not key or key == "---" or key == "none" then return nil end
+                        return ns.ResolveAbsorbStyleTex and ns.ResolveAbsorbStyleTex(key) or nil
+                    end,
+                }
+            end
+
+            -- Must match GetAbsorbOpacity in EllesmereUIUnitFrames.lua.
+            local function EffAbsorbOpacity()
+                local v = BVal("absorbOpacity", nil)
+                if v then return v end
+                if BVal("showPlayerAbsorb", "none") == "clean" then
+                    return BVal("absorbCleanAlpha", 30)
+                end
+                return 80
+            end
+
+            -- Row 1: Absorb Style (+ color swatch + placement cog) | Absorb Opacity
+            local absorbRow
+            absorbRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
+                  getValue=function() return BVal("showPlayerAbsorb", "none") end,
+                  setValue=function(v)
+                      B.absorbOpacity = (v == "clean") and 30 or 90
+                      BSet("showPlayerAbsorb", v)
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Absorb Opacity", min=5, max=100, step=1,
+                  disabled=function() return BVal("showPlayerAbsorb", "none") == "none" end,
+                  disabledTooltip="Absorb Style",
+                  getValue=EffAbsorbOpacity,
+                  setValue=function(v) BSet("absorbOpacity", v) end });  yy = yy - hh
+            if not EllesmereUI._prebuilding then
+                local rgn = absorbRow._leftRegion
+                local swatch = EllesmereUI.BuildColorSwatch(
+                    rgn, absorbRow:GetFrameLevel() + 3,
+                    function()
+                        local c = B.absorbColor
+                        if c then return c.r, c.g, c.b, 1 end
+                        return 1, 1, 1, 1
+                    end,
+                    function(r, g, b)
+                        B.absorbColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate(); UpdatePreview()
+                    end, false, 20)
+                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                local function UpdateAbsorbSwatchVis()
+                    swatch:SetAlpha(BVal("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
+                end
+                RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
+                UpdateAbsorbSwatchVis()
+            end
+            do
+                local rgn = absorbRow._leftRegion
+                local absorbEdgeLabels = { overlay = "Overlay", overlayReverse = "Overlay Reverse" }
+                local absorbEdgeLabelsVert
+                local function SyncAbsorbEdgeLabels()
+                    local vert = (BVal("healthVerticalFill", false)) and true or false
+                    if absorbEdgeLabelsVert == vert then return false end
+                    absorbEdgeLabelsVert = vert
+                    absorbEdgeLabels.right = vert and "From Top Edge"    or "From Right Edge"
+                    absorbEdgeLabels.left  = vert and "From Bottom Edge" or "From Left Edge"
+                    return true
+                end
+                SyncAbsorbEdgeLabels()
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Absorb Rendering",
+                    rows = {
+                        { type="dropdown", label="Placement",
+                          values = absorbEdgeLabels,
+                          order = { "overlay", "overlayReverse", "right", "left" },
+                          get=function() SyncAbsorbEdgeLabels(); return BVal("absorbEdgeMode", "overlay") end,
+                          set=function(v) BSet("absorbEdgeMode", v) end },
+                        { type="dropdown", label="Show Overshield",
+                          tooltip="Overshield is the part of an absorb exceeding your empty health. Always backfills it over current health from the shield's edge; From Left grows it from the opposite end of the bar; Never hides it.",
+                          values = { never = "Never", always = "Always", fromleft = "From Left" },
+                          order = { "never", "always", "fromleft" },
+                          itemDisabled=function(v)
+                              return v == "fromleft" and BVal("absorbEdgeMode", "overlay") ~= "overlay"
+                          end,
+                          get=function()
+                              local m = BVal("overshieldMode", nil)
+                              if m == nil then m = (BVal("showOvershield", true) == false) and "never" or "always" end
+                              return m
+                          end,
+                          set=function(v)
+                              BSet("showOvershield", v ~= "never")
+                              BSet("overshieldMode", v)
+                          end },
+                        { type="toggle", label="Enable Absorbs",
+                          tooltip="Master on/off switch for absorbs on Boss Frames.",
+                          get=function() return B.showAbsorbs ~= false end,
+                          set=function(v)
+                              B.showAbsorbs = v and nil or false
+                              ReloadAndUpdate()
+                          end },
+                    },
+                })
+                RegisterWidgetRefresh(function()
+                    if not SyncAbsorbEdgeLabels() then return end
+                    local pf = cogShow and cogShow._popupFrame
+                    if pf and pf.GetChildren then
+                        for _, child in ipairs({ pf:GetChildren() }) do
+                            if child._invalidateMenu then child._invalidateMenu() end
+                        end
+                    end
+                end)
+                ACogBtn(rgn, cogShow)
+            end
+
+            -- Row 2: Heal Absorb Style (+ color swatch + placement cog) | Heal Absorb Opacity
+            local healAbsorbRow
+            healAbsorbRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Heal Absorb Style", values=absorbStyleValues, order=healAbsorbStyleOrder,
+                  getValue=function() return BVal("healAbsorbStyle", "clean") end,
+                  setValue=function(v)
+                      B.healAbsorbOpacity = (v == "clean") and 50 or 75
+                      BSet("healAbsorbStyle", v)
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Heal Absorb Opacity", min=5, max=100, step=1,
+                  disabled=function() return BVal("healAbsorbStyle", "clean") == "none" end,
+                  disabledTooltip="Heal Absorb Style",
+                  getValue=function() return BVal("healAbsorbOpacity", 65) end,
+                  setValue=function(v) BSet("healAbsorbOpacity", v) end });  yy = yy - hh
+            if not EllesmereUI._prebuilding then
+                local rgn = healAbsorbRow._leftRegion
+                local swatch = EllesmereUI.BuildColorSwatch(
+                    rgn, healAbsorbRow:GetFrameLevel() + 3,
+                    function()
+                        local c = B.healAbsorbColor
+                        if c then return c.r or 0.8, c.g or 0.15, c.b or 0.15, 1 end
+                        return 0.8, 0.15, 0.15, 1
+                    end,
+                    function(r, g, b)
+                        B.healAbsorbColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate(); UpdatePreview()
+                    end, false, 20)
+                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                local swatchBlock = CreateFrame("Frame", nil, swatch)
+                swatchBlock:SetAllPoints()
+                swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                swatchBlock:EnableMouse(true)
+                swatchBlock:Hide()
+                local function UpdateHealAbsorbSwatchVis()
+                    local st = BVal("healAbsorbStyle", "clean")
+                    local off = (st == "none" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR")
+                    swatch:SetAlpha(off and 0.3 or 1)
+                    if off then swatchBlock:Show() else swatchBlock:Hide() end
+                end
+                RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
+                UpdateHealAbsorbSwatchVis()
+            end
+            do
+                local rgn = healAbsorbRow._leftRegion
+                local healAbsorbEdgeLabels = { overlay = "Overlay" }
+                local healAbsorbEdgeLabelsVert
+                local function SyncHealAbsorbEdgeLabels()
+                    local vert = (BVal("healthVerticalFill", false)) and true or false
+                    if healAbsorbEdgeLabelsVert == vert then return false end
+                    healAbsorbEdgeLabelsVert = vert
+                    healAbsorbEdgeLabels.right = vert and "From Top Edge"    or "From Right Edge"
+                    healAbsorbEdgeLabels.left  = vert and "From Bottom Edge" or "From Left Edge"
+                    return true
+                end
+                SyncHealAbsorbEdgeLabels()
+                local _, cogShow = EllesmereUI.BuildCogPopup({
+                    title = "Heal Absorb Rendering",
+                    rows = {
+                        { type="dropdown", label="Placement",
+                          values = healAbsorbEdgeLabels,
+                          order = { "overlay", "right", "left" },
+                          get=function() SyncHealAbsorbEdgeLabels(); return BVal("healAbsorbEdgeMode", "overlay") end,
+                          set=function(v) BSet("healAbsorbEdgeMode", v) end },
+                        { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+                          get=function() return BVal("healAbsorbBgOpacity", 15) end,
+                          set=function(v) BSet("healAbsorbBgOpacity", v) end },
+                    },
+                })
+                RegisterWidgetRefresh(function()
+                    if not SyncHealAbsorbEdgeLabels() then return end
+                    local pf = cogShow and cogShow._popupFrame
+                    if pf and pf.GetChildren then
+                        for _, child in ipairs({ pf:GetChildren() }) do
+                            if child._invalidateMenu then child._invalidateMenu() end
+                        end
+                    end
+                end)
+                ACogBtn(rgn, cogShow)
+            end
+
+            -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ color swatch)
+            local absorbBarRow
+            absorbBarRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Absorb Bar",
+                  values={ none="None", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+                  order={ "none", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
+                  getValue=function() return BVal("absorbBarPosition", "none") end,
+                  setValue=function(v) BSet("absorbBarPosition", v); EllesmereUI:RefreshPage() end },
+                { type="slider", text="Bar Height", min=1, max=20, step=1,
+                  disabled=function() return BVal("absorbBarPosition", "none") == "none" end,
+                  disabledTooltip="Absorb Bar",
+                  getValue=function() return BVal("absorbBarHeight", 4) end,
+                  setValue=function(v) BSet("absorbBarHeight", v) end });  yy = yy - hh
+            if not EllesmereUI._prebuilding then
+                local rgn = absorbBarRow._rightRegion
+                local swatch = EllesmereUI.BuildColorSwatch(
+                    rgn, absorbBarRow:GetFrameLevel() + 3,
+                    function()
+                        local c = B.absorbBarColor
+                        if c then return c.r, c.g, c.b, c.a or 1 end
+                        return 1, 1, 1, 1
+                    end,
+                    function(r, g, b, a)
+                        B.absorbBarColor = { r=r, g=g, b=b, a=a }
+                        ReloadAndUpdate(); UpdatePreview()
+                    end, true, 20)
+                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                local function UpdateAbsorbBarSwatchVis()
+                    swatch:SetAlpha(BVal("absorbBarPosition", "none") == "none" and 0.3 or 1)
+                end
+                RegisterWidgetRefresh(UpdateAbsorbBarSwatchVis)
+                UpdateAbsorbBarSwatchVis()
+            end
+
+            -- Row 4: Heal Absorb Bar (position dropdown) | Bar Height (+ color swatch)
+            local healAbsorbBarRow
+            healAbsorbBarRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Heal Absorb Bar",
+                  values={ none="None", aboveAbsorb="Above Absorb Bar", belowAbsorb="Below Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+                  order={ "none", "aboveAbsorb", "belowAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
+                  getValue=function() return BVal("healAbsorbBarPosition", "none") end,
+                  setValue=function(v) BSet("healAbsorbBarPosition", v); EllesmereUI:RefreshPage() end },
+                { type="slider", text="Bar Height", min=1, max=20, step=1,
+                  disabled=function() return BVal("healAbsorbBarPosition", "none") == "none" end,
+                  disabledTooltip="Heal Absorb Bar",
+                  getValue=function() return BVal("healAbsorbBarHeight", 4) end,
+                  setValue=function(v) BSet("healAbsorbBarHeight", v) end });  yy = yy - hh
+            if not EllesmereUI._prebuilding then
+                local rgn = healAbsorbBarRow._rightRegion
+                local swatch = EllesmereUI.BuildColorSwatch(
+                    rgn, healAbsorbBarRow:GetFrameLevel() + 3,
+                    function()
+                        local c = B.healAbsorbBarColor
+                        if c then return c.r, c.g, c.b, c.a or 1 end
+                        return 200/255, 29/255, 29/255, 1
+                    end,
+                    function(r, g, b, a)
+                        B.healAbsorbBarColor = { r=r, g=g, b=b, a=a }
+                        ReloadAndUpdate(); UpdatePreview()
+                    end, true, 20)
+                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
+                local function UpdateHealAbsorbBarSwatchVis()
+                    swatch:SetAlpha(BVal("healAbsorbBarPosition", "none") == "none" and 0.3 or 1)
+                end
+                RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
+                UpdateHealAbsorbBarSwatchVis()
+            end
+
+            return yy
+        end
+
         local displayHeader, sizeRow, textHeader, textRow
         y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.boss, "boss", enableRow, bossAfterSize, { hasPowerBar = true, afterPowerRow = function(Ww, pp, yy)
             yy = bossCastBar(Ww, pp, yy)
+            yy = bossAbsorbs(Ww, pp, yy)
             return bossIndicators(Ww, pp, yy)
         end })
 

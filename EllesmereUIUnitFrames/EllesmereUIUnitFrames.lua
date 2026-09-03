@@ -1075,6 +1075,18 @@ local defaults = {
             portraitMode = "2d",
             healthBarOpacity = 90,
             powerBarOpacity = 100,
+            -- Absorbs: independent config for Boss Frames (no longer borrows
+            -- the Target frame's styling -- see the "ABSORBS" section on the
+            -- Boss tab). Defaults mirror player/target/focus.
+            showPlayerAbsorb = "none",
+            absorbCleanAlpha = 30,
+            -- Absorb Bar / Heal Absorb Bar: separate strips (see Raid Frames)
+            absorbBarPosition     = "none",
+            absorbBarHeight       = 4,
+            absorbBarColor        = { r = 1, g = 1, b = 1 },
+            healAbsorbBarPosition = "none",
+            healAbsorbBarHeight   = 4,
+            healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
             onlyPlayerDebuffs = true,
             debuffAnchor = "bottomleft",
             debuffGrowth = "auto",
@@ -5186,14 +5198,19 @@ local function CreateAbsorbBar(frame, unit, settings)
             -- only the shield segments, and the whole update is skipped only when BOTH
             -- are off, so unit events can't re-Show() bars ReloadFrames hid. (Heal
             -- Absorb Style defaults to "clean", so it shows even with shield "none".)
-            local s = GetSettingsForUnit(updUnit)
-            -- Boss frames have no absorb settings of their own: render with the TARGET
-            -- frame's styling (donor convention), behind "Show on Boss Frames" in the
-            -- absorb cog (nil = enabled).
+            -- Style resolution must key off `unit` (captured once when this bar
+            -- was created -- always "boss1".."boss5" for boss frames), NOT
+            -- `updUnit` (the frame's LIVE real unit token). Boss Preview swaps
+            -- the frame's real unit to "player" so it has live data to show
+            -- (see SetBossPreview), which would otherwise make this resolve to
+            -- the Player frame's settings instead of the Boss tab's own.
+            local isBossBar = unit and unit:match("^boss")
+            local s = isBossBar and db.profile.boss or GetSettingsForUnit(updUnit)
+            -- Boss frames render with their own absorb settings (Boss tab),
+            -- gated by "Show on Boss Frames" in the absorb cog (nil = enabled).
             local bossAbsorbOff
-            if updUnit and updUnit:match("^boss") then
+            if isBossBar then
                 bossAbsorbOff = db.profile.boss and db.profile.boss.showAbsorbs == false
-                s = db.profile.target or s
             end
             local ha = ab._healAbsorb
             local topBar = ab._topBar
@@ -10487,16 +10504,13 @@ local function ReloadFrames()
                     -- Just Show/Hide the bar -- the element keeps running in the
                     -- background and the value stays live either way.
                     if frame.HealthPrediction and frame.HealthPrediction.damageAbsorb then
-                        -- Boss frames style from the TARGET donor block,
+                        -- Boss frames style from their own settings (Boss tab),
                         -- behind the "Show on Boss Frames" toggle (nil = on).
                         local absSettings = settings
                         local absStyle = settings.showPlayerAbsorb
                         if unit and unit:match("^boss") then
                             if db.profile.boss and db.profile.boss.showAbsorbs == false then
                                 absStyle = nil
-                            else
-                                absSettings = db.profile.target or settings
-                                absStyle = absSettings.showPlayerAbsorb
                             end
                         end
                         if absStyle and absStyle ~= "none" then
@@ -13129,11 +13143,11 @@ function InitializeFrames()
         end
     end
 
-    -- Boss frames: same absorb refresh, styled from the TARGET donor block
-    -- and gated by the "Show on Boss Frames" toggle (nil = enabled).
+    -- Boss frames: same absorb refresh, styled from their own settings
+    -- (Boss tab) and gated by the "Show on Boss Frames" toggle (nil = enabled).
     do
         local bossOff = db.profile.boss and db.profile.boss.showAbsorbs == false
-        local donor = db.profile.target
+        local donor = db.profile.boss
         for i = 1, 5 do
             local f = frames["boss" .. i]
             if f and f.HealthPrediction and f.HealthPrediction.damageAbsorb then
