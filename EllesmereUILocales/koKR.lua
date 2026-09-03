@@ -7103,6 +7103,20 @@ L["Shows the debuffs you apply plus important debuffs from anyone."] = "자신�
 --핵심 애드온 - 재사용 대기시간 관리자
 L["ARCANE SOUL (SUNFURY)"]         = "비전의 영혼 (태양격노)"
 L["Arcane Soul Helper"]            = "비전의 영혼 도우미"
+L["Minimum Width"] = "최소 너비"
+L["Icon Slots Wide (0 = Off)"] = "가로 아이콘 칸 수 (0 = 끔)"
+L["Stack Text and Glows"] = "중첩 문자 및 반짝임"
+L["Glow at Stacks"] = "지정 중첩에서 반짝임"
+L["Comparison"] = "비교"
+L["Show Stack Text"] = "중첩 문자 표시"
+L["Below (<)"] = "미만 (<)"
+L["At Most (<=)"] = "이하 (<=)"
+L["Exactly (=)"] = "일치 (=)"
+L["At Least (>=)"] = "이상 (>=)"
+L["Above (>)"] = "초과 (>)"
+L["Speed"] = "속도" 
+L["Spell ID"] = "주문 ID"
+L["Stack Thresholds"] = "중첩 기준값"
 
 --하우징 방문 메뉴 
 L["House"] = "집"
