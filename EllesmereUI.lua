@@ -3330,7 +3330,9 @@ do
 
     -- BackdropTemplate does arithmetic on its owner's width/height, so it is unusable for
     -- frames anchored to secret aura geometry. This variant draws the same eight edge-file
-    -- slices manually, keeping the PP path for Solid; `state` is any caller-owned table caching the eight textures (FFD, AuraKit button data).
+    -- slices manually, keeping the PP path for Solid; `state` is any caller-owned table
+    -- caching the eight textures (FFD, AuraKit button data). edgeScale is preview-only
+    -- geometry compensation; live callers leave it nil.
     local SECRET_BORDER_UV = {
         topLeft     = { 0.5078125, 0.0625, 0.5078125, 0.9375, 0.6171875, 0.0625, 0.6171875, 0.9375 },
         topRight    = { 0.6328125, 0.0625, 0.6328125, 0.9375, 0.7421875, 0.0625, 0.7421875, 0.9375 },
@@ -3343,7 +3345,7 @@ do
     }
 
     function EllesmereUI.ApplySecretSafeBorderStyle(borderFrame, state, size, r, g, b, a,
-        textureKey, offsetX, offsetY, shiftX, shiftY, addonKey, sizeKey)
+        textureKey, offsetX, offsetY, shiftX, shiftY, addonKey, sizeKey, edgeScale)
         if not borderFrame or not state then return end
         size, textureKey = size or 0, textureKey or "solid"
         local edges = state._secretBorderEdges
@@ -3370,10 +3372,15 @@ do
             end
             state._secretBorderEdges = edges
         end
-        local edgeSize = EDGE_MAP[size] or EDGE_MAP[1]
+        -- Preview surfaces can cancel their own panel scale without scaling the
+        -- saved 0-4 texture-size key (a fractional key would fall through EDGE_MAP).
+        -- Live aura buttons omit edgeScale and stay byte-for-byte equivalent.
+        edgeScale = edgeScale or 1
+        local edgeSize = (EDGE_MAP[size] or EDGE_MAP[1]) * edgeScale
         local ox, oy, sx, sy = EllesmereUI.GetBorderDefaults(addonKey, textureKey, sizeKey)
         ox = offsetX ~= nil and offsetX or ox; oy = offsetY ~= nil and offsetY or oy
         sx = shiftX ~= nil and shiftX or sx; sy = shiftY ~= nil and shiftY or sy
+        ox, oy, sx, sy = ox * edgeScale, oy * edgeScale, sx * edgeScale, sy * edgeScale
         if EllesmereUI.BorderTextureUsesScaleOffset(textureKey) then
             ox, oy = edgeSize / 2 + ox, edgeSize / 2 + oy
         end
@@ -3599,19 +3606,39 @@ function EllesmereUI.GetDarkModeDB()
     return EllesmereUIDB.darkMode
 end
 
+-- Materialized Dark Mode palette. The fill and background quadruples are read on
+-- every raid-frame and unit-frame health tick, so they are served from this cache
+-- instead of walking to the active profile per read. Rebuilt lazily after an
+-- invalidation; the generation is bumped by InvalidateColorCache, which every
+-- writer reaches: the swatches and darken sliders (RefreshDarkMode), the master
+-- toggle (RefreshDarkMode), every profile repoint (RefreshDarkMode in the profile
+-- apply pass) and ApplyColorsToOUF. Lives on the namespace: this file sits at the
+-- 200-local cap.
+EllesmereUI._dmGen = 0
+EllesmereUI._dmCache = { gen = -1 }
+
+function EllesmereUI._RebuildDarkModeCache()
+    local c = EllesmereUI._dmCache
+    local d = EllesmereUI.GetDarkModeDB()
+    local def = EllesmereUI.DEFAULT_DARK_MODE
+    c.fr, c.fg, c.fb, c.fa = d.fillR or def.fillR, d.fillG or def.fillG, d.fillB or def.fillB, d.fillA or def.fillA
+    c.br, c.bg, c.bb, c.ba = d.bgR or def.bgR, d.bgG or def.bgG, d.bgB or def.bgB, d.bgA or def.bgA
+    c.gen = EllesmereUI._dmGen
+end
+
 -- Dark Mode fill colour (r, g, b, a). Opacity is honoured by Unit Frames and
 -- Raid Frames; Resource Bars ignore the alpha and keep their own.
 function EllesmereUI.GetDarkModeFill()
-    local d = EllesmereUI.GetDarkModeDB()
-    local def = EllesmereUI.DEFAULT_DARK_MODE
-    return d.fillR or def.fillR, d.fillG or def.fillG, d.fillB or def.fillB, d.fillA or def.fillA
+    local c = EllesmereUI._dmCache
+    if c.gen ~= EllesmereUI._dmGen then EllesmereUI._RebuildDarkModeCache() end
+    return c.fr, c.fg, c.fb, c.fa
 end
 
 -- Dark Mode background colour (r, g, b, a). Same opacity rules as the fill.
 function EllesmereUI.GetDarkModeBg()
-    local d = EllesmereUI.GetDarkModeDB()
-    local def = EllesmereUI.DEFAULT_DARK_MODE
-    return d.bgR or def.bgR, d.bgG or def.bgG, d.bgB or def.bgB, d.bgA or def.bgA
+    local c = EllesmereUI._dmCache
+    if c.gen ~= EllesmereUI._dmGen then EllesmereUI._RebuildDarkModeCache() end
+    return c.br, c.bg, c.bb, c.ba
 end
 
 -- Effective-colour cache. Class/power/resource getters run in hot render paths, so the FINAL
@@ -3626,6 +3653,8 @@ EllesmereUI._powerBgDarkenFactor = 1
 
 function EllesmereUI.InvalidateColorCache()
     EllesmereUI._colorCacheDirty = true
+    -- The dark palette cache above shares every invalidation input.
+    EllesmereUI._dmGen = EllesmereUI._dmGen + 1
 end
 
 -- Fill `out` with {r,g,b} per key: defaults overlaid by custom, blackened by darkenPct (0-100); sub-tables are recreated each rebuild (rare) so hot-path reads never allocate.
@@ -10699,7 +10728,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "9.1.4"
+EllesmereUI.VERSION = "9.1.6"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
