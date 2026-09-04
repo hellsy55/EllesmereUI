@@ -5455,6 +5455,31 @@ initFrame:SetScript("OnEvent", function(self)
                           bd.chargeHashLineB, bd.chargeHashLineA = b, a
                           RefreshTBB()
                       end },
+                    { type = "toggle", label = "Partial Charge Shade",
+                      tooltip = "Darkens the section of the bar that is still recharging the next charge.",
+                      get = function()
+                          local bd = SelectedTBB()
+                          return bd and bd.chargeHashShade == true
+                      end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.chargeHashShade = v and true or nil
+                          RefreshTBB()
+                      end },
+                    { type = "slider", label = "Shade Darkness", min = 5, max = 95, step = 5,
+                      disabled = function()
+                          local bd = SelectedTBB()
+                          return not bd or bd.chargeHashShade ~= true
+                      end,
+                      get = function()
+                          local bd = SelectedTBB()
+                          return bd and math.floor(((bd.chargeHashShadeAlpha or 0.5) * 100) + 0.5) or 50
+                      end,
+                      set = function(v)
+                          local bd = SelectedTBB(); if not bd then return end
+                          bd.chargeHashShadeAlpha = (v or 50) / 100
+                          RefreshTBB()
+                      end },
                 },
             })
             local cogBtn = MakeCogBtn(rgn, cogShow, nil, EllesmereUI.COGS_ICON)
