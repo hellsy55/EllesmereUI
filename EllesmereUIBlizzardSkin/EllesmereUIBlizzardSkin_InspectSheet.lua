@@ -6,6 +6,9 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  are exported by CharacterSheet and loaded before this file.
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
+-- Compat: item-API globals (GetItemInfo, GetItemInfoInstant,
+-- GetItemQualityColor) are called via EllesmereUI._GetX (set once in
+-- EllesmereUI.lua) since some clients no longer expose the bare globals.
 local skinned = false
 
 -- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
@@ -128,7 +131,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
 
     -- Item level label (font size matches CharacterSheet)
     if itemLink and not GetFFD(slot).iLvlText and not skipLabels then
-        local ilvl = select(4, GetItemInfo(itemLink))
+        local ilvl = select(4, EllesmereUI._GetItemInfo(itemLink))
         if ilvl and ilvl > 0 then
             local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
             local ilvlText = GetFFD(slot).cachedILvlText or textOverlayFrame:CreateFontString(nil, "OVERLAY")
@@ -156,9 +159,9 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
             elseif not (EllesmereUIDB and EllesmereUIDB.charSheetItemLevelIgnoreTrack) and upgradeTrackText ~= "" and upgradeTrackColor then
                 displayColor = upgradeTrackColor
             elseif (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) then
-                local _, _, quality = GetItemInfo(itemLink)
+                local _, _, quality = EllesmereUI._GetItemInfo(itemLink)
                 if quality then
-                    local r, g, b = GetItemQualityColor(quality)
+                    local r, g, b = EllesmereUI._GetItemQualityColor(quality)
                     displayColor = { r = r, g = g, b = b }
                 end
             end
@@ -176,7 +179,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
         local enchantText = EllesmereUI.GetEnchantText(slotID, inspectUnit)
         local canHaveEnchant = INSPECT_ENCHANT_SLOTS[slotID]
         if slotID == INVSLOT_OFFHAND then
-            local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
+            local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
             canHaveEnchant = (classID == Enum.ItemClass.Weapon)
         end
         local inspLvl = UnitLevel(inspectUnit)
@@ -735,7 +738,7 @@ local function SkinInspectSheet()
             local itemLink = GetInventoryItemLink("inspect", slot:GetID())
             local borderR, borderG, borderB = 0.4, 0.4, 0.4  -- Default gray
             if itemLink then
-                local _, _, rarity = GetItemInfo(itemLink)
+                local _, _, rarity = EllesmereUI._GetItemInfo(itemLink)
                 if rarity then
                     borderR, borderG, borderB = C_Item.GetItemQualityColor(rarity)
                 end

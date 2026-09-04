@@ -383,6 +383,14 @@ local function BuildNPStyle(kind, variant)
         stackOffX = stk.x,
         stackOffY = stk.y,
     }
+    -- 12.1.5 PTR test toggles (Options: Auras -> Duration/Stacks row). Debuffs
+    -- only -- pandemic timing and caster attribution matter for the thing
+    -- you're actively fighting, not for your own buffs.
+    if kind == "debuffs" then
+        local p = ns.NP_GetProfile and ns.NP_GetProfile()
+        if p and p.debuffPandemicGlow then style.pandemicGlow = true end
+        if p and p.debuffShowCasterName then style.showCasterName = true end
+    end
     -- variant: nil/1 = the dispellable glow group ("np" -- the Magic half
     -- while split), 2 = the non-Magic half ("np2", enrages), "plain" = the
     -- npnb remainder: identical text styling, NEVER the glow. Per-aura
@@ -1481,7 +1489,15 @@ local function StyleFPFor(kind, idx)
     end
     local durFP = FP(dur.size, dur.x, dur.y, dur.pos, dur.color.r, dur.color.g, dur.color.b)
     local stkFP = FP(stk.size, stk.x, stk.y, stk.pos, stk.color.r, stk.color.g, stk.color.b)
-    return FP(kind, size, height, durFP, stkFP, purge,
+    -- 12.1.5 PTR test toggles feed BuildNPStyle (debuffs only) -- same trap
+    -- as every other input here: leave them out and the checkbox never
+    -- restyles the plates until an unrelated field happens to change too.
+    local ptrFP = "-"
+    if kind == "debuffs" then
+        local p = ns.NP_GetProfile and ns.NP_GetProfile()
+        ptrFP = FP(p and p.debuffPandemicGlow, p and p.debuffShowCasterName)
+    end
+    return FP(kind, size, height, durFP, stkFP, purge, ptrFP,
         EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates") or "",
         -- NOT `fn(kind) or true`: the getter legitimately returns false, and
         -- `false or true` would pin this fingerprint input to a constant so

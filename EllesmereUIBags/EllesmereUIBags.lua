@@ -5,6 +5,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 if not (EllesmereUI and EllesmereUI._ModuleNS) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring
 EllesmereUI._ModuleNS["EllesmereUIBags"] = select(2, ...)  -- LOD options files read this module ns via the registry
 
+-- Compat: GetItemInfo(Instant)/GetItemQualityColor/IsEquippableItem are called
+-- via EllesmereUI._GetX / EllesmereUI._IsX (set once in EllesmereUI.lua)
+-- since some clients no longer expose the bare globals.
+
 EUI_Bags = CreateFrame("Frame", "EUI_MainBagFrame", UIParent)
 EUI_Bags:Hide()
 -- Auto-size state: reset on close (next open sizes from its first/active tab);
@@ -39,7 +43,7 @@ local function BagsItemUnusable(bagID, slot, itemLink, itemID)
     -- below. Skip that: the scan can see red from the crafted item's own preview
     -- stats, not just from the recipe's learn requirements. Use the usable check
     -- instead, which reflects skill/known state directly.
-    local _, _, _, _, _, classID = GetItemInfoInstant(item)
+    local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(item)
     if classID == ITEM_CLASS_RECIPE then
         local usable = C_Item.IsUsableItem(item)
         unusable = not usable
@@ -47,7 +51,7 @@ local function BagsItemUnusable(bagID, slot, itemLink, itemID)
         return unusable
     end
 
-    if IsEquippableItem(item) or C_Item.GetItemSpell(item) then
+    if EllesmereUI._IsEquippableItem(item) or C_Item.GetItemSpell(item) then
         -- Only use a tooltip from the real bag slot or real item link; both carry
         -- bonus IDs, which set the item's true required level. A bare itemID lacks
         -- those and can read the wrong level requirement either way.
@@ -170,7 +174,7 @@ local ITEM_CLASS_WEAPON = Enum.ItemClass.Weapon  -- 2
 local ITEM_CLASS_ARMOR  = Enum.ItemClass.Armor   -- 4
 local function IsGearItem(itemLink)
     if not itemLink then return false end
-    local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
+    local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
     return classID == ITEM_CLASS_WEAPON or classID == ITEM_CLASS_ARMOR
 end
 -- Pin identity: bare itemID can't distinguish two different upgrade tracks
@@ -378,7 +382,7 @@ do
             if d.itemLink and not d._sortCached then
                 local c = cache[d.itemLink]
                 if not c then
-                    local name, _, quality, ilvl, _, itemType = GetItemInfo(d.itemLink)
+                    local name, _, quality, ilvl, _, itemType = EllesmereUI._GetItemInfo(d.itemLink)
                     local rank = 0
                     if GetUpgradeTrack and _trackRank then
                         local _, color = GetUpgradeTrack(d.itemLink)
@@ -447,7 +451,7 @@ local function GetItemExpansionIDFromLink(itemLink)
         local _, _, _, _, _, _, _, _, _, _, _, _, _, _, expID = C_Item.GetItemInfo(itemLink)
         return expID
     end
-    return select(15, GetItemInfo(itemLink))
+    return select(15, EllesmereUI._GetItemInfo(itemLink))
 end
 
 -- sortKey: higher = newer expansion, shown first. Unknown / uncached last.
@@ -478,7 +482,7 @@ local function BuildExpansionBuckets(itemList)
     for _, data in ipairs(itemList) do
         local sk, label
         if data.itemLink then
-            local _, _, _, ilvl = GetItemInfo(data.itemLink)
+            local _, _, _, ilvl = EllesmereUI._GetItemInfo(data.itemLink)
             if ilvl and ilvl >= 180 then
                 sk, label = 11, "Midnight"
             end
@@ -567,7 +571,7 @@ local function GetArmorySlotBucket(data)
     local subclassID = data._subclassID
     if data.itemLink and classID == nil then
         local _
-        _, _, _, equipSlot, _, classID, subclassID = GetItemInfoInstant(data.itemLink)
+        _, _, _, equipSlot, _, classID, subclassID = EllesmereUI._GetItemInfoInstant(data.itemLink)
         data._equipSlot, data._classID, data._subclassID = equipSlot, classID, subclassID
     end
 
@@ -2750,7 +2754,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
                     elseif not BP().itemlevelIgnoreTrackColor and rankText ~= "" and trackColor then
                         r, g, b = trackColor.r, trackColor.g, trackColor.b
                     else
-                        r, g, b = GetItemQualityColor(data._giQuality or 1)
+                        r, g, b = EllesmereUI._GetItemQualityColor(data._giQuality or 1)
                     end
                     btn.ItemLevelText:SetTextColor(r, g, b, 1)
                     local countFS = btn.Count
@@ -5228,7 +5232,7 @@ function EUI_Bags:RefreshInventory()
                 d.bag = bag; d.slot = slot; d.info = info; d.itemLink = itemLink
                 -- Pre-cache per-item data for RenderButton (zero API calls at render time)
                 if itemLink then
-                    local _, _, q, _, _, _, _, _, _, _, _, _, _, bindType = GetItemInfo(itemLink)
+                    local _, _, q, _, _, _, _, _, _, _, _, _, _, bindType = EllesmereUI._GetItemInfo(itemLink)
                     local loc = ItemLocation:CreateFromBagAndSlot(bag, slot)
                     -- Slot-grouping fields (_equipSlot/_classID/_subclassID) are NOT
                     -- pre-cached here: GetArmorySlotBucket fetches them lazily, only
@@ -6051,7 +6055,7 @@ function EUI_Bags:RefreshInventory()
                 if bag == 0 then return EllesmereUI.L("Backpack") end
                 local invID = C_Container.ContainerIDToInventoryID(bag)
                 local link = invID and GetInventoryItemLink("player", invID)
-                return (link and GetItemInfo(link)) or EllesmereUI.Lf("Bag %d", bag)
+                return (link and EllesmereUI._GetItemInfo(link)) or EllesmereUI.Lf("Bag %d", bag)
             end
             for bag = 0, 4 do
                 local bagList = {}
@@ -6849,7 +6853,7 @@ function EUI_BagsReagent:RefreshInventory()
                 local showItemlevel = BP().showItemlevelInBags ~= false
                 if showItemlevel then
                     if itemLink then
-                        local _, _, quality = GetItemInfo(itemLink)
+                        local _, _, quality = EllesmereUI._GetItemInfo(itemLink)
                         if IsGearItem(itemLink) then
                             local loc = ItemLocation:CreateFromBagAndSlot(data.bag, data.slot)
                             local level = GetItemLevelAtLocation(loc, itemLink)
@@ -6860,7 +6864,7 @@ function EUI_BagsReagent:RefreshInventory()
                             if BP().itemlevelUseCustomColor and BP().itemlevelCustomColor then
                                 r, g, b = BP().itemlevelCustomColor.r, BP().itemlevelCustomColor.g, BP().itemlevelCustomColor.b
                             else
-                                r, g, b = GetItemQualityColor(quality or 1)
+                                r, g, b = EllesmereUI._GetItemQualityColor(quality or 1)
                             end
                             btn.ItemLevelText:SetTextColor(r, g, b, 1)
                         else btn.ItemLevelText:SetText("") end
@@ -6927,7 +6931,7 @@ function EUI_BagsWindow:RefreshBags()
                 else
                     local bInvID = C_Container.ContainerIDToInventoryID(bagIdx)
                     local bLink = GetInventoryItemLink("player", bInvID)
-                    bName = bLink and GetItemInfo(bLink) or EUI.Lf("Bag %1$d", bagIdx)
+                    bName = bLink and EllesmereUI._GetItemInfo(bLink) or EUI.Lf("Bag %1$d", bagIdx)
                 end
                 local bTotal = C_Container.GetContainerNumSlots(bagIdx)
                 local bFree = C_Container.GetContainerNumFreeSlots(bagIdx)

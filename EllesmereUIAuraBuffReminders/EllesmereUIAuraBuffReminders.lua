@@ -2840,7 +2840,7 @@ local function SetIconItem(btn, itemID, texture, label)
         btn:SetAttribute("macrotext", nil)
         btn:SetAttribute("unit", nil)
     end
-    btn._icon:SetTexture(texture or GetItemIcon(itemID) or 134400)
+    btn._icon:SetTexture(texture or EllesmereUI._GetItemIcon(itemID) or 134400)
     btn._tooltipSpell = nil
     btn._tooltipItem = itemID
 end
@@ -3258,7 +3258,7 @@ function EABR.EmitWeaponEnchantReminders(missing, co)
             local e = AcquireEntry()
             e.mode = "macro"
             e.macro = "/use item:" .. bestItemID .. "\n/use " .. slot
-            e.texture = GetItemIcon(bestItemID) or 134400
+            e.texture = EllesmereUI._GetItemIcon(bestItemID) or 134400
             -- Localizes the full slot name THEN shortens: ShortLabel truncates on whitespace (English -> Main/Off, space-less locales like zhTW stay intact). L() on the pre-truncated word would collide with the generic Off (disabled) translation.
             e.label = ShortLabel(EllesmereUI.L(slot == 16 and "Main Hand" or "Off Hand"))
             e.tooltipItem = bestItemID
@@ -3433,7 +3433,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                 if runeItem and (co.showWithoutItem ~= false or rr.hasBags) then
                     local e = AcquireEntry()
                     e.mode = "item"; e.itemID = runeItem
-                    e.texture = GetItemIcon(runeItem); e.label = EllesmereUI.L(ShortLabel("Augment Rune"))
+                    e.texture = EllesmereUI._GetItemIcon(runeItem); e.label = EllesmereUI.L(ShortLabel("Augment Rune"))
                     e.qualityAtlas = EABR.GetItemQualityAtlas(runeItem)
                     e.bagCount = CachedGetItemCount(runeItem)
                     e.desaturated = not rr.hasBags
@@ -3467,7 +3467,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                 if flaskItemID and (co.showWithoutItem ~= false or rf.hasBags) then
                     local e = AcquireEntry()
                     e.mode = "item"; e.itemID = flaskItemID
-                    e.texture = GetItemIcon(flaskItemID) or 134830
+                    e.texture = EllesmereUI._GetItemIcon(flaskItemID) or 134830
                     e.label = EllesmereUI.L("Flask")
                     e.qualityAtlas = EABR.GetItemQualityAtlas(flaskItemID)
                     e.bagCount = CachedGetItemCount(flaskItemID)
@@ -3485,7 +3485,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                 if foodItemID and (co.showWithoutItem ~= false or EABR._resolved.food.hasBags) then
                     local e = AcquireEntry()
                     e.mode = "item"; e.itemID = foodItemID
-                    e.texture = GetItemIcon(foodItemID) or 134062
+                    e.texture = EllesmereUI._GetItemIcon(foodItemID) or 134062
                     e.label = EllesmereUI.L("Food")
                     e.qualityAtlas = EABR.GetItemQualityAtlas(foodItemID)
                     e.bagCount = CachedGetItemCount(foodItemID)
@@ -3519,7 +3519,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                     if not PlayerHasInkyBlackness() and hasPotion then
                         local e = AcquireEntry()
                         e.mode = "item"; e.itemID = INKY_BLACK_ITEM
-                        e.texture = GetItemIcon(INKY_BLACK_ITEM)
+                        e.texture = EllesmereUI._GetItemIcon(INKY_BLACK_ITEM)
                         e.label = EllesmereUI.L(ShortLabel("Inky Black Potion"))
                         e.qualityAtlas = EABR.GetItemQualityAtlas(INKY_BLACK_ITEM)
                         e.bagCount = CachedGetItemCount(INKY_BLACK_ITEM)

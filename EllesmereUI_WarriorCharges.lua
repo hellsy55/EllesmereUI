@@ -212,7 +212,28 @@ local function BuildHostPhase(H, powerKey, opts)
                 if Enum.StatusBarInterpolation then
                     barOpts.interpolation = Enum.StatusBarInterpolation.Immediate
                 end
-                button:SetApplicationBar(bar, barOpts)
+                -- 12.1.5 PTR: minApplications keeps the bar hidden until the
+                -- engine's true count clears the threshold, instead of a
+                -- momentary empty/full bar on a slot that just registered but
+                -- hasn't received its first apply yet. Tried first with the
+                -- key present, degrading to the known-good schema if this
+                -- build's SetApplicationBar rejects the unrecognized option
+                -- (pre-12.1.5) -- one rejected key must never cost the whole
+                -- charge bar.
+                -- Defaults to 1 rather than nil: a bar for either of these
+                -- buffs at 0 true applications is a stale slot (the aura just
+                -- fell off, or the engine hasn't posted the first apply yet),
+                -- never a state worth drawing. An adapter can pass
+                -- opts.minApplications = false to opt back into always-on.
+                local minApps = opts.minApplications
+                if minApps == nil then minApps = 1 end
+                if minApps then barOpts.minApplications = minApps end
+                local registered = pcall(button.SetApplicationBar, button, bar, barOpts)
+                if not registered and minApps then
+                    barOpts.minApplications = nil
+                    registered = pcall(button.SetApplicationBar, button, bar, barOpts)
+                end
+                if not registered then error("SetApplicationBar failed") end
             end)
             if not ok then st.err = err; return end
             st.bar = bar

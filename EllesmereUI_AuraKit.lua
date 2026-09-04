@@ -8,6 +8,14 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local AK = {}
 EllesmereUI.AuraKit = AK
 
+-- 12.1.5 PTR: Edit Mode preview default. Read once at file load (SavedVariables
+-- are populated before any addon file executes, per the client's declared-SV
+-- contract) so containers created during this same load pick up whatever the
+-- user last chose; the Options checkbox re-drives every live container
+-- afterward through AK.SetEditModePreviewEnabled. nil (never touched, or a
+-- fresh profile) reads as true -- unchanged stock behavior.
+AK.editModePreviewEnabled = (EllesmereUIDB and EllesmereUIDB.auraEditModePreview) ~= false
+
 local InCombatLockdown = InCombatLockdown
 local CreateFrame = CreateFrame
 local issecretvalue = issecretvalue or function() return false end
@@ -781,6 +789,146 @@ local function ApplyStyleToRegions(button, style)
         end
     end
 
+    ------------------------------------------------------------------------------
+    -- Pandemic pulse glow (12.1.5 PTR: CustomAuraButton Pandemic-triggered
+    -- animations). Fully native timing -- no OnUpdate polling and no duration
+    -- math of our own: the engine invokes Active for as long as the aura sits in
+    -- its pandemic refresh window and Enter/Leave once each at the edges of it.
+    -- style.pandemicGlow: `true` for the defaults, or a table with color={r,g,b,a},
+    -- blendMode, enterDuration, activeDuration, leaveDuration, smoothing.
+    --
+    -- API-gated end to end (button.AddPandemicActiveAnimation absent on live and
+    -- on any PTR build that predates this feature, so styles that request it are
+    -- silently inert there -- same fail-open posture as the dispel-icon channel
+    -- above). AddAnimations and QueryAnimationProgress are forbidden aspects on
+    -- animations registered this way: the group is fully built BEFORE the single
+    -- Add*Animation call and never touched again by any code, ours or otherwise.
+    ------------------------------------------------------------------------------
+    local pg = style.pandemicGlow
+    local wantPandemic = (pg and button.AddPandemicActiveAnimation) and true or false
+    if wantPandemic and not d.pandemicGlowTex and d.dispelHolder then
+        -- Sublevel 3 on the dispel holder: above the dispel ring/icon (which
+        -- write at sublevel 0/2) so a pandemic pulse is never masked by an
+        -- active dispel recolor, below the stack/duration text carrier.
+        local tex = d.dispelHolder:CreateTexture(nil, "OVERLAY", nil, 3)
+        tex:Hide()
+        d.pandemicGlowTex = tex
+    end
+    if d.pandemicGlowTex then
+        local opts = (pg == true) and {} or pg or {}
+        local c = opts.color or { 1, 0.15, 0.1, 0.9 }
+        d.pandemicGlowTex:SetColorTexture(c[1] or 1, c[2] or 0.15, c[3] or 0.1, c[4] or 0.9)
+        d.pandemicGlowTex:SetAllPoints(button)
+        if d.pandemicGlowTex.SetBlendMode then
+            d.pandemicGlowTex:SetBlendMode(opts.blendMode or "ADD")
+        end
+    end
+    if wantPandemic and not d.akPandemicOn then
+        local opts = (pg == true) and {} or pg or {}
+        local ok = pcall(function()
+            -- Active: looping alpha bounce for the duration of the pandemic
+            -- window. Alpha-only, so it composites cleanly over any dispel
+            -- ring or icon-shape mask already registered on this button.
+            local activeGroup = d.pandemicGlowTex:CreateAnimationGroup()
+            activeGroup:SetLooping("BOUNCE")
+            local activeAlpha = activeGroup:CreateAnimation("Alpha")
+            activeAlpha:SetFromAlpha(0.15)
+            activeAlpha:SetToAlpha(1)
+            activeAlpha:SetDuration(opts.activeDuration or 0.6)
+            if activeAlpha.SetSmoothing then
+                activeAlpha:SetSmoothing(opts.smoothing or "IN_OUT")
+            end
+            button:AddPandemicActiveAnimation(activeGroup)
+
+            -- Enter: one-shot flash the instant the window opens, so a
+            -- glance-away refresh still registers even mid-fade of Active's
+            -- own bounce.
+            if button.AddPandemicEnterAnimation then
+                local enterGroup = d.pandemicGlowTex:CreateAnimationGroup()
+                local enterAlpha = enterGroup:CreateAnimation("Alpha")
+                enterAlpha:SetFromAlpha(0)
+                enterAlpha:SetToAlpha(1)
+                enterAlpha:SetDuration(opts.enterDuration or 0.2)
+                button:AddPandemicEnterAnimation(enterGroup)
+            end
+
+            -- Leave: mirrors Enter back to fully transparent so the texture
+            -- never gets stranded mid-pulse when a fresh application (or the
+            -- aura falling off) clears the window.
+            if button.AddPandemicLeaveAnimation then
+                local leaveGroup = d.pandemicGlowTex:CreateAnimationGroup()
+                local leaveAlpha = leaveGroup:CreateAnimation("Alpha")
+                leaveAlpha:SetFromAlpha(1)
+                leaveAlpha:SetToAlpha(0)
+                leaveAlpha:SetDuration(opts.leaveDuration or 0.2)
+                button:AddPandemicLeaveAnimation(leaveGroup)
+            end
+        end)
+        if ok then
+            d.akPandemicOn = true
+            d.pandemicGlowTex:Show()
+        elseif d.styleKey and AK.AurasRestricted() then
+            deferredRestyles[d.styleKey] = true
+        end
+    elseif not wantPandemic and d.akPandemicOn then
+        -- Style flip pandemicGlow -> off. Forbidden AddAnimations means an
+        -- already-registered group can never be reparented or edited; the
+        -- clean retirement is clearing every trigger's list and hiding the
+        -- texture, letting a later re-enable build a fresh set from scratch.
+        if button.ClearPandemicActiveAnimations then pcall(button.ClearPandemicActiveAnimations, button) end
+        if button.ClearPandemicEnterAnimations then pcall(button.ClearPandemicEnterAnimations, button) end
+        if button.ClearPandemicLeaveAnimations then pcall(button.ClearPandemicLeaveAnimations, button) end
+        d.akPandemicOn = false
+        if d.pandemicGlowTex then d.pandemicGlowTex:Hide() end
+    end
+
+    ------------------------------------------------------------------------------
+    -- Aura caster name (12.1.5 PTR: CustomAuraButton:SetCasterName). Purely
+    -- cosmetic text drawn on the button itself; unlike the tooltip's own
+    -- tooltipShowAuraCasterNames CVar (Blizzard's global switch for the
+    -- mouseover tooltip line, unaffected by this), this is a per-style opt-in
+    -- so only buttons that ask for it grow the fontstring and pay the
+    -- registration. style.showCasterName: `true` for the defaults, or a table
+    -- with point, x, y, font, fontSize, fontFlags, color={r,g,b,a},
+    -- colorizeByReaction (default true).
+    ------------------------------------------------------------------------------
+    local cn = style.showCasterName
+    local wantCaster = (cn and button.SetCasterName) and true or false
+    if wantCaster and not d.casterName then
+        d.casterName = (d.stackCarrier or button):CreateFontString(nil, "OVERLAY")
+    end
+    if d.casterName then
+        local opts = (cn == true) and {} or cn or {}
+        if not style.noDefaultFonts then
+            local f = opts.font or STANDARD_TEXT_FONT
+            d.casterName:SetFont(f, opts.fontSize or 9, opts.fontFlags or "OUTLINE")
+            local p = opts.point or "BOTTOM"
+            local x, y = opts.x or 0, opts.y or -14
+            local key = p .. "|" .. x .. "|" .. y
+            if d.akCasterAnchor ~= key then
+                d.casterName:ClearAllPoints()
+                d.casterName:SetPoint(p, button, p, x, y)
+                d.akCasterAnchor = key
+            end
+            local c = opts.color
+            if c then d.casterName:SetTextColor(c.r or 1, c.g or 1, c.b or 1, c.a or 1) end
+        end
+        if wantCaster and not d.akCasterOn then
+            local regOpts = { colorizeByReaction = opts.colorizeByReaction ~= false }
+            if not pcall(button.SetCasterName, button, d.casterName, regOpts) then
+                pcall(button.SetCasterName, button, d.casterName, {})
+            end
+            d.akCasterOn = true
+            d.casterName:Show()
+        elseif not wantCaster and d.akCasterOn then
+            -- No native "unregister" documented for this setter; hiding our
+            -- own fontstring at least stops it rendering on a style flip,
+            -- even though the engine keeps writing text into it internally.
+            d.casterName:Hide()
+            d.akCasterOn = false
+        end
+    end
+
     -- Tooltip behavior (68914 button APIs): combat-only hiding and anchor
     -- overrides from the 4-state tooltip mode (style.tooltipCombatHide /
     -- style.tooltipAnchor = "cursor"). Button-surface calls: change-guarded,
@@ -1309,8 +1457,34 @@ function AK.CreateContainerShell(parent, spec)
 
     AK.ApplyContainerLayout(container, spec.layout)
 
+    -- 12.1.5 PTR: whether THIS container's preview (fake) auras render while
+    -- the player is in Edit Mode. A per-container API, but users think of it
+    -- as one on/off switch, not something that should vary frame to frame --
+    -- so a single global (AK.editModePreviewEnabled, default true = stock
+    -- behavior) drives every container at creation, and AK.SetEditModePreviewEnabled
+    -- below re-drives every LIVE container when the Options checkbox flips.
+    if container.SetEditModePreviewEnabled then
+        pcall(container.SetEditModePreviewEnabled, container, AK.editModePreviewEnabled ~= false)
+    end
+
     containerData[container] = { spec = spec, slotFrames = {} }
     return container
+end
+
+-- Options-facing global switch for the Edit Mode preview toggle above.
+-- Persists to SavedVariables and re-drives every container the engine has
+-- ever handed us (containerData is weak-keyed, so this only ever touches
+-- frames still alive) -- new containers created afterward pick up the
+-- stored value on their own via CreateContainerShell.
+function AK.SetEditModePreviewEnabled(enabled)
+    enabled = enabled and true or false
+    AK.editModePreviewEnabled = enabled
+    if EllesmereUIDB then EllesmereUIDB.auraEditModePreview = enabled end
+    for container in pairs(containerData) do
+        if container.SetEditModePreviewEnabled then
+            pcall(container.SetEditModePreviewEnabled, container, enabled)
+        end
+    end
 end
 
 function AK.AddGroupToContainer(container, g)
@@ -1343,6 +1517,40 @@ end
 function AK.FinishContainer(container, unitToken)
     container:SetUnit(unitToken)
     container:UpdateAllAuras()
+end
+
+------------------------------------------------------------------------------
+-- 12.1.5 PTR: per-item enable/disable on a live CustomAuraContainer, without
+-- the add/remove teardown a full group/slot swap costs -- the container's own
+-- engine-side state (filters, sort, candidates, layout) survives a
+-- disable/re-enable cycle untouched, unlike AddAuraGroup/AddAuraSlot which is
+-- ADD-ONLY (see the container spec comment above). Not wired into any
+-- consumer yet: every module in this suite currently manages "which auras
+-- show" through candidateFilters/maxFrameCount rebuilds rather than a
+-- disable flag, and retrofitting that onto the Buff/Debuff Manager files is
+-- its own project. These wrappers exist so a future pass (or a module that
+-- wants an instant, rebuild-free toggle) has a safe, API-gated entry point
+-- from day one. All three return false (never error) on any build without
+-- the underlying setter, so a caller can tell "not supported here" apart
+-- from "call failed."
+------------------------------------------------------------------------------
+
+function AK.SetGroupEnabled(container, key, enabled)
+    if not (container and container.SetAuraGroupEnabled) then return false end
+    return (pcall(container.SetAuraGroupEnabled, container, key, enabled and true or false))
+end
+
+function AK.SetSlotEnabled(container, key, enabled)
+    if not (container and container.SetAuraSlotEnabled) then return false end
+    return (pcall(container.SetAuraSlotEnabled, container, key, enabled and true or false))
+end
+
+-- The 68914-family naming convention reuses "item enchantment" across a few
+-- container flavors; container here is whatever the caller registered the
+-- enchantment entry on.
+function AK.SetItemEnchantmentEnabled(container, key, enabled)
+    if not (container and container.SetItemEnchantmentEnabled) then return false end
+    return (pcall(container.SetItemEnchantmentEnabled, container, key, enabled and true or false))
 end
 
 function AK.CreateContainer(parent, unitToken, spec)

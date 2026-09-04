@@ -8881,6 +8881,28 @@ initFrame:SetScript("OnEvent", function(self)
             AttachDurationTools(durationRow2._leftRegion, "cc")
             end
 
+            -- 12.1.5 PTR test row: Pandemic Pulse / Show Caster Name, debuffs
+            -- only (the case that actually matters on a nameplate -- knowing
+            -- when to refresh a DoT on your current target). No-ops on any
+            -- build without the underlying CustomAuraButton APIs (AuraKit's
+            -- own guards), so this is safe to leave visible on live 12.1.
+            local ptrAuraRow
+            ptrAuraRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Pandemic Pulse (PTR)",
+                  getValue=function() return DBVal("debuffPandemicGlow") == true end,
+                  setValue=function(v)
+                    DB().debuffPandemicGlow = v
+                    if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                    UpdatePreview()
+                  end },
+                { type="toggle", text="Show Caster Name (PTR)",
+                  getValue=function() return DBVal("debuffShowCasterName") == true end,
+                  setValue=function(v)
+                    DB().debuffShowCasterName = v
+                    if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                    UpdatePreview()
+                  end }); y = y - h
+
             if not EllesmereUI._prebuilding then
             -- RIGHT: Aura Stacks inline color swatch
             local rightRgn = durationRow2._rightRegion

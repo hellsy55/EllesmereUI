@@ -6,6 +6,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  them via sidebar context menus. Icons and type rules are not customizable.
 -------------------------------------------------------------------------------
 
+-- Compat: GetItemInfoInstant is called via EllesmereUI._GetItemInfoInstant
+-- (set once in EllesmereUI.lua) since some clients no longer expose the
+-- bare global.
+
 local CategoryManager = {}
 -- Profile access helper (DB created in EUI_Bags_Options.lua, loaded first per TOC)
 local EUI = EllesmereUI
@@ -430,7 +434,7 @@ function CategoryManager:ClassifyItem(itemLink, itemID, bag, slot)
     end
 
     -- Get classID + equip slot via GetItemInfoInstant (locale-safe numeric IDs)
-    local _, _, _, equipSlot, _, classID = GetItemInfoInstant(itemLink)
+    local _, _, _, equipSlot, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
     if not classID then
         -- Item data not available; classify as catch-all for now
         for i, cat in ipairs(cats) do

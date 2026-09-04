@@ -998,7 +998,14 @@ local function StyleTableFP(st, font)
         b and b.texture, b and b.size, b and b[1], b and b[2], b and b[3], b and b[4],
         b and b.offsetX, b and b.offsetY, b and b.shiftX, b and b.shiftY,
         b and b.behind, b and b.behindUnitFrame, b and b.unitFrameLevel,
-        st.noTooltips)
+        st.noTooltips,
+        -- FIX (found while wiring the 12.1.5 test toggles below): dispelBorder
+        -- was never part of this fingerprint, so flipping "Dispel Type
+        -- Borders" alone changed nothing until some OTHER fingerprinted field
+        -- happened to change too and dragged a restyle along with it. Folded
+        -- in here alongside the two new PTR fields, which have the identical
+        -- risk.
+        st.dispelBorder, st.pandemicGlow, st.showCasterName)
 end
 
 -- Declares one chain group and records it in the element's declared-set
@@ -1110,6 +1117,11 @@ local function BuildStyle(unit, base, s, unitFrame)
         -- dispel color itself -- the user palette cannot apply under secrecy
         -- (same documented delta as the RF debuff border).
         dispelBorder = (not isBuff and s.debuffDispelBorder) and true or nil,
+        -- 12.1.5 PTR (Options: Debuff Settings cog). Both no-op on any build
+        -- without the underlying button API -- see AuraKit's own guards -- so
+        -- toggling these on live 12.1 costs nothing and shows nothing.
+        pandemicGlow = s[p .. "PandemicGlow"] and true or nil,
+        showCasterName = s[p .. "ShowCasterName"] and true or nil,
         -- Resolved once per (fingerprint-gated) style rebuild instead of on
         -- every ApplyUFText call -- GetFontPath's result only changes when
         -- font settings change, which already forces a fresh style table.

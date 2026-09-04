@@ -1537,6 +1537,18 @@ local function BuildBaseDetailDM(frame, fontPath)
           getValue = function() return p.debuffShowSwipe ~= false end,
           setValue = function(v) p.debuffShowSwipe = v; DmApply() end }); sy = sy - hh
 
+    -- Row: 12.1.5 PTR test toggles. No-ops on any build without the
+    -- underlying CustomAuraButton APIs (AuraKit's own guards), so these are
+    -- safe to leave visible on live 12.1.
+    local ptrRow
+    ptrRow, hh = W:DualRow(frame, sy,
+        { type = "toggle", text = "Pandemic Pulse (PTR)",
+          getValue = function() return p.debuffPandemicGlow == true end,
+          setValue = function(v) p.debuffPandemicGlow = v; DmApply() end },
+        { type = "toggle", text = "Show Caster Name (PTR)",
+          getValue = function() return p.debuffShowCasterName == true end,
+          setValue = function(v) p.debuffShowCasterName = v; DmApply() end }); sy = sy - hh
+
     -- "Use Modifier" cog on Tooltips (left region): picks the key for the
     -- "Shown on Modifier" mode, so it is only available there. While that
     -- mode is selected with the key still at None, the cog hover warns that

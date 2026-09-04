@@ -10710,6 +10710,12 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="slider", label="Icon Zoom", min=0, max=0.20, step=0.01,
                       get=function() return SValSupported("buffIconZoom", 0.07) end,
                       set=function(v) SSetSupported("buffIconZoom", v) end },
+                    { type="toggle", label="Pandemic Pulse (PTR)",
+                      get=function() return SValSupported("buffPandemicGlow", false) end,
+                      set=function(v) SSetSupported("buffPandemicGlow", v) end },
+                    { type="toggle", label="Show Caster Name (PTR)",
+                      get=function() return SValSupported("buffShowCasterName", false) end,
+                      set=function(v) SSetSupported("buffShowCasterName", v) end },
                 },
             })
             MakeCogBtn(leftRgn, buffCogShow, nil, nil, BuffDisabled)
@@ -10849,6 +10855,12 @@ initFrame:SetScript("OnEvent", function(self)
                     { type="toggle", label="Dispel Type Borders",
                       get=function() return SValSupported("debuffDispelBorder", false) end,
                       set=function(v) SSetSupported("debuffDispelBorder", v) end },
+                    { type="toggle", label="Pandemic Pulse (PTR)",
+                      get=function() return SValSupported("debuffPandemicGlow", false) end,
+                      set=function(v) SSetSupported("debuffPandemicGlow", v) end },
+                    { type="toggle", label="Show Caster Name (PTR)",
+                      get=function() return SValSupported("debuffShowCasterName", false) end,
+                      set=function(v) SSetSupported("debuffShowCasterName", v) end },
                 },
             })
             MakeCogBtn(leftRgn, debuffCogShow, nil, nil, DebuffDisabled)

@@ -539,6 +539,32 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        -- Row: 12.1.5 PTR test toggles (global, not per-frame -- see
+        -- EllesmereUI_AuraKit.lua for the engine side of both). No-ops on
+        -- any build without the underlying API, so safe to leave visible on
+        -- live 12.1.
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Aura Caster In Tooltip (PTR)",
+              tooltip="Shows who cast a debuff in its mouseover tooltip, colorized by reaction/class. Native game CVar (tooltipShowAuraCasterNames) -- no effect on a build that doesn't have it yet.",
+              getValue=function()
+                  local ok, v = pcall(GetCVarBool, "tooltipShowAuraCasterNames")
+                  return ok and v or false
+              end,
+              setValue=function(v)
+                  pcall(SetCVar, "tooltipShowAuraCasterNames", v and "1" or "0")
+              end },
+            { type="toggle", text="Preview Auras In Edit Mode (PTR)",
+              tooltip="Whether EllesmereUI's aura containers show their placeholder preview icons while you're in Blizzard's Edit Mode. Defaults on (unchanged stock behavior).",
+              getValue=function()
+                  local AK = EllesmereUI.AuraKit
+                  return not (AK and AK.editModePreviewEnabled == false)
+              end,
+              setValue=function(v)
+                  local AK = EllesmereUI.AuraKit
+                  if AK and AK.SetEditModePreviewEnabled then AK.SetEditModePreviewEnabled(v) end
+              end }
+        );  y = y - h
+
         -- Cog on Show Coordinates on Map (left region)
         if not EllesmereUI._prebuilding then
             local leftRgn = coordRow._leftRegion

@@ -1432,6 +1432,17 @@ end
 --  Forward declarations
 -------------------------------------------------------------------------------
 local EllesmereUI = _G.EllesmereUI or {}
+-- Compat: some clients no longer expose these legacy item-API globals, only
+-- their C_Item namespaced versions. Stored as table fields (not new locals)
+-- so we don't push any file over Lua's 200-local-per-chunk ceiling. Every
+-- submodule addon depends on EllesmereUI (loads first per its .toc), so they
+-- can all safely reference EllesmereUI._GetX / EllesmereUI._IsX below.
+EllesmereUI._GetItemQualityColor = GetItemQualityColor or (C_Item and C_Item.GetItemQualityColor)
+EllesmereUI._GetItemIcon = GetItemIcon or (C_Item and C_Item.GetItemIconByID)
+EllesmereUI._GetItemInfoInstant = GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
+EllesmereUI._GetItemInfo = GetItemInfo or (C_Item and C_Item.GetItemInfo)
+EllesmereUI._IsEquippableItem = IsEquippableItem or (C_Item and C_Item.IsEquippableItem)
+EllesmereUI._GetItemCount = GetItemCount or (C_Item and C_Item.GetItemCount)
 _G.EllesmereUI = EllesmereUI
 EllesmereUI.GLOBAL_KEY = "_EUIGlobal"
 EllesmereUI.ADDON_ROSTER = ADDON_ROSTER
@@ -2055,7 +2066,7 @@ do
                 end
             end
             if (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and itemQuality then
-                local r, g, b = GetItemQualityColor(itemQuality)
+                local r, g, b = EllesmereUI._GetItemQualityColor(itemQuality)
                 return { r = r, g = g, b = b }
             end
             return { r = 1, g = 1, b = 1 }
@@ -11866,7 +11877,7 @@ initFrame:SetScript("OnEvent", function(self, event)
             end
             if showIcon then
                 local iconID = C_Item.GetItemIconByID and C_Item.GetItemIconByID(data.id)
-                    or (GetItemIcon and GetItemIcon(data.id))
+                    or (EllesmereUI._GetItemIcon and EllesmereUI._GetItemIcon(data.id))
                 if iconID then
                     tooltip:AddDoubleLine("IconID", tostring(iconID), 1, 1, 1, 1, 1, 1)
                 end

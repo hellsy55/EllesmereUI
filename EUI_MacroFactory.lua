@@ -17,7 +17,7 @@ local HEALTH_RECOVERY_POTS = {
 }
 
 local function HealthMacroItemCount(itemID)
-    return GetItemCount(itemID, false) or 0
+    return EllesmereUI._GetItemCount(itemID, false) or 0
 end
 
 local function CollectHealthRecoveryItems()
@@ -654,7 +654,7 @@ function EllesmereUI.BuildMacroFactory(parent, startY, PP)
             local cb = cbs[idx]
             if cb and db[cb.key] ~= false then
                 for _, itemID in ipairs(cb.items) do
-                    if (GetItemCount(itemID, false) or 0) > 0 then
+                    if (EllesmereUI._GetItemCount(itemID, false) or 0) > 0 then
                         return itemID
                     end
                 end
