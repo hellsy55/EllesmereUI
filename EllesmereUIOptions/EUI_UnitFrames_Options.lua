@@ -15497,6 +15497,12 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Max Per Row", min=1, max=20, step=1,
                           get=function() return db.profile.boss.buffMaxPerRow or db.profile.boss.maxBuffs or 4 end,
                           set=function(v) db.profile.boss.buffMaxPerRow = v; ReloadAndUpdate() end },
+                        { type="toggle", label="Pandemic Pulse (PTR)",
+                          get=function() return db.profile.boss.buffPandemicGlow == true end,
+                          set=function(v) db.profile.boss.buffPandemicGlow = v; ReloadAndUpdate() end },
+                        { type="toggle", label="Show Caster Name (PTR)",
+                          get=function() return db.profile.boss.buffShowCasterName == true end,
+                          set=function(v) db.profile.boss.buffShowCasterName = v; ReloadAndUpdate() end },
                     },
                 })
                 local cogBtn = BossCogBtn(leftRgn, bBuffCogShowRaw)
@@ -15543,6 +15549,12 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Max Per Row", min=1, max=20, step=1,
                           get=function() return db.profile.boss.debuffMaxPerRow or db.profile.boss.maxDebuffs or 10 end,
                           set=function(v) db.profile.boss.debuffMaxPerRow = v; ReloadAndUpdate() end },
+                        { type="toggle", label="Pandemic Pulse (PTR)",
+                          get=function() return db.profile.boss.debuffPandemicGlow == true end,
+                          set=function(v) db.profile.boss.debuffPandemicGlow = v; ReloadAndUpdate() end },
+                        { type="toggle", label="Show Caster Name (PTR)",
+                          get=function() return db.profile.boss.debuffShowCasterName == true end,
+                          set=function(v) db.profile.boss.debuffShowCasterName = v; ReloadAndUpdate() end },
                     },
                 })
                 local cogBtn = BossCogBtn(rightRgn, bDebuffCogShowRaw)
