@@ -662,6 +662,19 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = RCDisabled,
               getValue = ns.RaidCheckHideReady,
               setValue = ns.RaidCheckHideReady },
+            { type = "toggle", text = "Auto-Repair",
+              tooltip = "Raid only. When a player's Durability reading drops to 25% or below, their name blinks and their Durability cell becomes left-clickable to use the Auto-Hammer (item 132414).",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckAutoRepair,
+              setValue = ns.RaidCheckAutoRepair }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Raid Buff Whisper",
+              tooltip = "Works in and out of combat, unlike Auto-Repair. When a group-wide raid buff's column header shows it's missing on someone, the icon blinks and sends the buff's spell link. In a raid, left-click reaches a provider in groups 1-4 and right-click one in groups 5-8; outside a raid, left-click reaches the only provider found. Hovering the icon always shows who each click would whisper, or that everyone already has it.",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckBuffWhisper,
+              setValue = ns.RaidCheckBuffWhisper },
             { type = "label", text = "" }
         );  y = y - h
 

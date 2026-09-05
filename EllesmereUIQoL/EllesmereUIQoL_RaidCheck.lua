@@ -58,7 +58,11 @@ local IsInRaid, IsInGroup = IsInRaid, IsInGroup
 local UnitIsGroupLeader, UnitIsGroupAssistant = UnitIsGroupLeader, UnitIsGroupAssistant
 local UnitExists, UnitIsPlayer = UnitExists, UnitIsPlayer
 local UnitIsUnit          = UnitIsUnit
+local InCombatLockdown    = InCombatLockdown
+local SendChatMessage     = SendChatMessage
 local UnitName, UnitClass, UnitIsConnected = UnitName, UnitClass, UnitIsConnected
+local UnitPhaseReason     = UnitPhaseReason
+local UnitIsVisible       = UnitIsVisible
 local Ambiguate           = Ambiguate
 local issecretvalue       = issecretvalue
 local GetAuraDataByIndex  = C_UnitAuras.GetAuraDataByIndex
@@ -194,8 +198,20 @@ local SHOW_WENCHANT_COLUMN = false
 
 local DURABILITY_KEY = "durability"
 local WENCHANT_KEY   = "wenchant"
+local VANTUS_KEY     = "vantus"
 local MSG_REPORT     = "rc"    -- a client describing itself
 local MSG_QUERY      = "rcq"   -- someone asking the group to describe itself
+
+-- Auto-Repair: left-clicking a row's Durability cell uses the Auto-Hammer
+-- when that row's own durability reading is at or below the threshold.
+-- Raid only (see Refresh's autoRepairOn) -- a dungeon or M+ group repairs at
+-- the vendor between pulls easily enough that this is raid-specific chrome,
+-- not a general durability shortcut. 25 is its own threshold, deliberately
+-- not EllesmereUI.DURABILITY_LOW (20): that constant colors the grid's
+-- existing low-durability warning, a separate and already-shipped decision
+-- this feature does not get to quietly change.
+local AUTO_REPAIR_ITEM_ID  = 132414
+local AUTO_REPAIR_THRESHOLD = 25
 
 -- What each client volunteered about itself, from either wire. One store, so
 -- a future field lands here rather than growing a third parallel map -- and
@@ -236,6 +252,59 @@ end
 -- wire, and that must not be a difference the user can see.
 local function EnchantOK(id)
     return (id or 0) > 0
+end
+
+-- Left-click on a low-durability row's Durability cell (see Refresh/MakeRow).
+-- Re-checks both gates itself instead of trusting the hit frame's shown
+-- state: that state is a Refresh()-cadence snapshot, up to SWEEP_PERIOD
+-- stale, and leaving the raid or flipping the option off mid-window must not
+-- leave a click still armed. UseItemByName resolves by id fine and needs no
+-- bag slot from the caller; the pcall is what a plain button click needs
+-- here, not a SecureActionButton -- using an item from a real mouse click is
+-- unrestricted in combat the same as it is out of it, but the feature is
+-- deliberately out-of-combat-only anyway (see InCombatLockdown check): a
+-- pull is not when anyone should be looking at this column, let alone
+-- clicking it.
+local function UseAutoRepairItem()
+    if not ns.RaidCheckAutoRepair() then return end
+    if not IsInRaid() then return end
+    if InCombatLockdown() then return end
+    pcall(UseItemByName, AUTO_REPAIR_ITEM_ID)
+end
+
+-- "Name-Realm" when the unit is cross-realm, plain name otherwise -- what
+-- SendChatMessage's target argument needs either way. UnitName's second
+-- return is "" (not nil) same-realm, so that case falls through untouched.
+local function FullName(unit)
+    local name, realm = UnitName(unit)
+    if not name then return nil end
+    if realm and realm ~= "" then return name .. "-" .. realm end
+    return name
+end
+
+-- Raid buffs are checked for every online player -- being far away or in a
+-- different phase doesn't stop UnitAura from answering, so there's no
+-- reason to blank the column for someone just because they're across the
+-- room. What phasing DOES break is a negative read: a MISSING verdict on
+-- someone out of your broadcast range or in a different phase isn't
+-- trustworthy (their aura state may simply not be syncing to you), so
+-- Refresh applies this asymmetrically -- see the def.class block below --
+-- rather than gating the whole column. A player who reads as HAVING the
+-- buff is trusted regardless of phase; that positive information doesn't
+-- depend on live sync the same way an absence does.
+--
+-- Ported directly from BuffReminders' Plain/IsUnitPhased (Core/Core.lua,
+-- Core/State.lua) rather than re-derived: UnitIsVisible for out-of-
+-- broadcast-range, UnitPhaseReason (guarded through Plain, which reads a
+-- secret value as nil) for an actual phase/instance difference.
+local function Plain(v)
+    if issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
+local function Phased(unit)
+    return not UnitIsVisible(unit)
+        or Plain(UnitPhaseReason and UnitPhaseReason(unit)) ~= nil
 end
 
 -------------------------------------------------------------------------------
@@ -335,6 +404,31 @@ local function ColumnName(def)
         columnName[def.key] = n
     end
     return n
+end
+
+-- The clickable spell link, not just the name -- lets whoever gets whispered
+-- shift-click it into chat, hover it for the tooltip, whatever they'd do
+-- with any other spell link. Falls back to the plain name on the rare tick
+-- the link isn't cached yet (GetSpellLink can return nil before the client
+-- has seen the spell), same fallback shape as ColumnName above. Not cached
+-- itself, unlike columnName: the link can legitimately go from nil to
+-- non-nil across the session as data streams in, and re-asking costs one
+-- table lookup either way.
+local function BuffLink(def)
+    local link = def.seed and C_Spell and C_Spell.GetSpellLink
+        and C_Spell.GetSpellLink(def.seed)
+    return link or ColumnName(def)
+end
+
+-- Left-click on a missing raid-buff icon: whisper the one class that can
+-- cast it. providerName travels as a resolved string, not a unit token --
+-- see Refresh, where it is (re)computed every sweep. Unit tokens like
+-- "raidN" can point at a different person by the time a click lands; a name
+-- captured a sweep ago cannot silently retarget that way.
+local function WhisperBuffProvider(def, providerName)
+    if not ns.RaidCheckBuffWhisper() then return end
+    if not providerName then return end
+    SendChatMessage(BuffLink(def) .. ", please", "WHISPER", nil, providerName)
 end
 
 -------------------------------------------------------------------------------
@@ -822,6 +916,14 @@ local DB_DEFAULTS = {
         -- Show only the people something is wrong with. Off by default: the
         -- full roster is what most people expect to open.
         hideReady        = false,
+        -- Off by default: using an item off a raid-check click is exactly
+        -- the kind of thing that should be opted into, not discovered by
+        -- surprise the first time someone's durability drops.
+        autoRepair       = false,
+        -- Same reasoning as autoRepair, and the same shape: off by default,
+        -- since whispering someone on a raid leader's behalf is not
+        -- something to switch on by surprise.
+        buffWhisper      = false,
         scale            = 1,
         pos              = {},
     },
@@ -838,6 +940,44 @@ local colHeader = {}   -- column key -> one frame per member column
 local sweeper
 local closeTimer   -- always armed while the window is shown, however it opened
 local CLOSE_DELAY = 30   -- seconds the window stays open before auto-closing
+
+-- Raid-buff blink: one shared clock instead of one AnimationGroup per icon.
+-- An AnimationGroup's :Play() starts its own timeline from zero, so two
+-- icons that started blinking on different sweeps end up pulsing out of
+-- phase with each other -- correct individually, but reads as flicker when
+-- several are missing at once. Every icon here instead just sets/clears its
+-- own membership in buffBlinkTargets (see Refresh); a single OnUpdate
+-- computes one alpha per frame off GetTime() and stamps it onto whatever is
+-- currently in the set, so anything blinking is always in lockstep.
+-- Durability and Vantus-mismatch blinks are unrelated to this and keep
+-- their own AnimationGroups -- only raid-buff icons were asked to move.
+local buffBlinkTargets = {}
+local buffBlinkDriver
+
+local function SetBuffBlink(icon, on, restoreAlpha)
+    if on then
+        if not buffBlinkTargets[icon] then
+            buffBlinkTargets[icon] = true
+            if not buffBlinkDriver then
+                buffBlinkDriver = CreateFrame("Frame")
+                buffBlinkDriver:Hide()
+                buffBlinkDriver:SetScript("OnUpdate", function()
+                    local alpha = 0.625 + 0.375 * math.sin(GetTime() * 5)
+                    for tex in pairs(buffBlinkTargets) do
+                        tex:SetAlpha(alpha)
+                    end
+                end)
+            end
+            buffBlinkDriver:Show()
+        end
+    elseif buffBlinkTargets[icon] then
+        buffBlinkTargets[icon] = nil
+        icon:SetAlpha(restoreAlpha or 1)
+        if not next(buffBlinkTargets) and buffBlinkDriver then
+            buffBlinkDriver:Hide()   -- nothing left to animate; stop the OnUpdate entirely
+        end
+    end
+end
 
 local combatCloseTimer   -- armed only while combat is waiting out the grace period below
 local openedAt            -- GetTime() of the most recent Show
@@ -872,6 +1012,20 @@ local function MakeRow(parent, index)
     r._name:SetWidth(NAME_W - 6 - READY_ICON_W)
     r._name:SetJustifyH("LEFT")
 
+    -- Auto-Repair: pulses the name (not the durability number itself, which
+    -- already carries its own color) while this row's durability sits at or
+    -- below AUTO_REPAIR_THRESHOLD. Region alpha, not SetTextColor's alpha --
+    -- the offline/elsewhere dim below writes the color channel, so the two
+    -- multiply together instead of fighting over the same value.
+    local blink = r._name:CreateAnimationGroup()
+    local pulse = blink:CreateAnimation("Alpha")
+    pulse:SetFromAlpha(1)
+    pulse:SetToAlpha(0.25)
+    pulse:SetDuration(0.6)
+    pulse:SetSmoothing("IN_OUT")
+    blink:SetLooping("BOUNCE")
+    r._lowDurBlink = blink
+
     -- Ready check status: blank outside an active ready check (see
     -- readyCheckActive), otherwise a yellow "?" while pending -- there is no
     -- ready/not-ready art for "pending" to reuse -- and, once the game has a
@@ -898,6 +1052,20 @@ local function MakeRow(parent, index)
             fs:SetWidth(CELL_W)
             fs:SetJustifyH("CENTER")
             r._cells[c] = fs
+
+            -- Same low-durability pulse as the name, on the number itself --
+            -- the number is the thing to actually look at; the name blink is
+            -- the thing that catches your eye across the room.
+            if def.key == DURABILITY_KEY then
+                local numBlink = fs:CreateAnimationGroup()
+                local numPulse = numBlink:CreateAnimation("Alpha")
+                numPulse:SetFromAlpha(1)
+                numPulse:SetToAlpha(0.25)
+                numPulse:SetDuration(0.6)
+                numPulse:SetSmoothing("IN_OUT")
+                numBlink:SetLooping("BOUNCE")
+                r._durNumBlink = numBlink
+            end
             -- Unused for durability now that the column always shows the
             -- number (even at 100%), but kept so the cell/tex pairing stays
             -- uniform across numeric columns.
@@ -913,18 +1081,65 @@ local function MakeRow(parent, index)
             tex:SetAlpha(0.9)
             r._cells[c] = tex
 
+            -- A different Vantus than your own is worth a glance even though
+            -- the buff itself is present -- boss-specific runes are easy to
+            -- carry over from last week's kill. Its own blink, independent
+            -- of the hit-frame/whisper machinery below: Vantus has no
+            -- provider to whisper (nobody "casts" it onto someone else), so
+            -- this is purely informational and driven straight off the
+            -- check icon.
+            if def.key == VANTUS_KEY then
+                local mismatchBlink = tex:CreateAnimationGroup()
+                local mismatchPulse = mismatchBlink:CreateAnimation("Alpha")
+                mismatchPulse:SetFromAlpha(1)
+                mismatchPulse:SetToAlpha(0.25)
+                mismatchPulse:SetDuration(0.6)
+                mismatchPulse:SetSmoothing("IN_OUT")
+                mismatchBlink:SetLooping("BOUNCE")
+                r._vantusMismatchBlink = mismatchBlink
+            end
+
             -- Prefix columns (Vantus) and nameTooltip columns (Flask, Food)
             -- know not just THAT the buff is up but WHICH one -- the name
-            -- comes off the aura itself, see SweepBody / UnitHasAny. A
-            -- texture cannot take mouse input on its own, so a transparent
-            -- frame sits over the icon just to catch the hover; Relayout
-            -- keeps it pinned to the same spot as the icon.
-            if def.prefix or def.nameTooltip then
+            -- comes off the aura itself, see SweepBody / UnitHasAny. Raid-buff
+            -- (def.class) columns get the same overlay for a different job:
+            -- when the buff is MISSING and someone who can cast it is present
+            -- and reachable, left-click whispers them -- see Refresh, which
+            -- decides per sweep whether a provider exists and only then shows
+            -- this frame and plays the blink below. A texture cannot take
+            -- mouse input on its own, so a transparent frame sits over the
+            -- icon just to catch the hover/click; Relayout keeps it pinned to
+            -- the same spot as the icon.
+            if def.prefix or def.nameTooltip or def.class then
                 local hit = CreateFrame("Frame", nil, r)
                 hit:SetSize(ICON_SZ, ICON_SZ)
                 hit:EnableMouse(true)
                 hit:Hide()
                 hit:SetScript("OnEnter", function(self)
+                    if def.class then
+                        local providers = r._buffProvider and r._buffProvider[def.key]
+                        if not providers then return end
+                        local near, far, single = providers.near, providers.far, providers.single
+                        if not (near or far or single) then return end
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:AddLine(ColumnName(def), 1, 1, 1)
+                        if single then
+                            GameTooltip:AddLine(EllesmereUI.L("Left-click to whisper") .. " " .. single, 0.8, 0.8, 0.8, true)
+                        else
+                            -- Raid: up to two independent targets, one per
+                            -- half of the roster -- see providerFor in
+                            -- Refresh. Either line is omitted if that half
+                            -- has nobody who can answer it.
+                            if near then
+                                GameTooltip:AddLine(EllesmereUI.L("Left-click to whisper") .. " " .. near, 0.8, 0.8, 0.8, true)
+                            end
+                            if far then
+                                GameTooltip:AddLine(EllesmereUI.L("Right-click to whisper") .. " " .. far, 0.8, 0.8, 0.8, true)
+                            end
+                        end
+                        GameTooltip:Show()
+                        return
+                    end
                     local name = r._auraNames and r._auraNames[def.key]
                     if not name then return end
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -948,6 +1163,35 @@ local function MakeRow(parent, index)
                     GameTooltip:Show()
                 end)
                 hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+                if def.class then
+                    -- Left whispers the near (groups 1-4) or, outside a
+                    -- raid, the only target. Right whispers the far
+                    -- (groups 5-8) target when a raid has one; when it
+                    -- doesn't, right-click falls through to the row's usual
+                    -- job of closing the window, same as everywhere else in
+                    -- the grid -- this frame sits on top of the row and
+                    -- would otherwise eat that click for nothing.
+                    hit:SetScript("OnMouseUp", function(self, button)
+                        local providers = r._buffProvider and r._buffProvider[def.key]
+                        if button == "LeftButton" then
+                            local target = providers and (providers.near or providers.single)
+                            WhisperBuffProvider(def, target)
+                        elseif button == "RightButton" then
+                            local target = providers and providers.far
+                            if target then
+                                WhisperBuffProvider(def, target)
+                            elseif win then
+                                win:Hide()
+                            end
+                        end
+                    end)
+
+                    -- Referenced from Refresh via SetBuffBlink -- no
+                    -- per-icon AnimationGroup anymore, see buffBlinkTargets
+                    -- above for why.
+                    r._buffIcon = r._buffIcon or {}
+                    r._buffIcon[c] = tex
+                end
                 r._cellHit = r._cellHit or {}
                 r._cellHit[c] = hit
             end
@@ -1013,6 +1257,20 @@ local function Build()
                 xMark:SetVertexColor(1, 0.15, 0.15, 1)
                 xMark:Hide()
                 h.xMark = xMark
+
+                -- Raid Buff Whisper lives on this one icon rather than on
+                -- every row's cell: "is anyone missing this, and who do I
+                -- ask" is a question about the whole raid, not about any one
+                -- player, so it belongs on the icon that represents the
+                -- whole column. h._buffMissing/h._buffProviders are written
+                -- by Refresh() every sweep and read here at hover/click time,
+                -- same reasoning as everywhere else in this file that a
+                -- click target travels as a resolved value rather than
+                -- something recomputed live off a stale unit token.
+                -- h._icon feeds the shared blink driver (SetBuffBlink) so
+                -- this icon pulses in lockstep with every other blinking
+                -- raid-buff icon instead of running its own phase.
+                h._icon = tex
             end
 
             h:EnableMouse(true)
@@ -1022,9 +1280,67 @@ local function Build()
                 if def.note then
                     GameTooltip:AddLine(EllesmereUI.L(def.note), 1, 1, 1, true)
                 end
+                if def.class then
+                    if h._buffMissing == false then
+                        GameTooltip:AddLine(EllesmereUI.L("Everyone already has this buff."), 0.6, 1, 0.6, true)
+                    elseif h._buffMissing then
+                        local providers = h._buffProviders or {}
+                        local near, far, single = providers.near, providers.far, providers.single
+                        if single then
+                            GameTooltip:AddLine(EllesmereUI.L("Left-click to whisper") .. " " .. single, 0.8, 0.8, 0.8, true)
+                        elseif near or far then
+                            if near then
+                                GameTooltip:AddLine(EllesmereUI.L("Left-click to whisper") .. " " .. near, 0.8, 0.8, 0.8, true)
+                            end
+                            if far then
+                                GameTooltip:AddLine(EllesmereUI.L("Right-click to whisper") .. " " .. far, 0.8, 0.8, 0.8, true)
+                            end
+                        else
+                            GameTooltip:AddLine(EllesmereUI.L("Someone is missing it, but nobody reachable can provide it right now."), 1, 0.7, 0.7, true)
+                        end
+                    end
+                end
+                if def.key == DURABILITY_KEY then
+                    -- Auto-Repair status, same three-way shape as the raid-
+                    -- buff headers: nothing to say when the option/raid/
+                    -- combat gate is off (h._lowDurability stays nil, see
+                    -- the tail loop in Refresh), a green line when nobody is
+                    -- low, a click hint when someone is.
+                    if h._lowDurability == false then
+                        GameTooltip:AddLine(EllesmereUI.L("Nobody is below the Auto-Repair threshold."), 0.6, 1, 0.6, true)
+                    elseif h._lowDurability then
+                        GameTooltip:AddLine(EllesmereUI.L("Left-click to use the Auto-Hammer."), 0.8, 0.8, 0.8, true)
+                    end
+                end
                 GameTooltip:Show()
             end)
             h:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            if def.key == DURABILITY_KEY then
+                -- One action, not two, so there's no near/far split like the
+                -- raid-buff headers -- Auto-Repair always targets yourself,
+                -- so there is only one thing a click here could ever mean.
+                h:SetScript("OnMouseUp", function(self, button)
+                    if button == "LeftButton" then
+                        UseAutoRepairItem()
+                    end
+                end)
+            end
+            if def.class then
+                -- Left whispers the near (groups 1-4) or, outside a raid,
+                -- the only target; right whispers the far (groups 5-8)
+                -- target. Both are no-ops (WhisperBuffProvider itself checks)
+                -- when that slot has nobody in it -- there is nothing else
+                -- bound to a raid-buff header's right-click, so there is no
+                -- fallback action to preserve the way there is on a row.
+                h:SetScript("OnMouseUp", function(self, button)
+                    local providers = h._buffProviders
+                    if button == "LeftButton" then
+                        WhisperBuffProvider(def, providers and (providers.near or providers.single))
+                    elseif button == "RightButton" then
+                        WhisperBuffProvider(def, providers and providers.far)
+                    end
+                end)
+            end
 
             colHeader[def.key] = colHeader[def.key] or {}
             colHeader[def.key][mc] = h
@@ -1052,6 +1368,11 @@ local function Build()
         -- toggling it off): whatever countdown was armed no longer applies.
         if closeTimer then closeTimer:Cancel(); closeTimer = nil end
         if combatCloseTimer then combatCloseTimer:Cancel(); combatCloseTimer = nil end
+        -- The icons themselves are about to be hidden with the window, so
+        -- there's nothing to visually reset -- just stop the OnUpdate and
+        -- drop the references so a closed window isn't still driving one.
+        if buffBlinkDriver then buffBlinkDriver:Hide() end
+        wipe(buffBlinkTargets)
     end)
 
     -- Right-click anywhere on the window closes it, so no dedicated close
@@ -1161,8 +1482,84 @@ local function Refresh()
         answerable[def.key] = Answerable(def, restricted, classPresent, bossCombat)
     end
 
+    -- Auto-Repair is raid-only regardless of the option -- a party or M+
+    -- group is never far from a vendor between pulls, so the click target
+    -- and the blink both sit out anywhere else. Combat is a hard no for both
+    -- durability's click/blink AND the raid-buff whisper/blink below: a pull
+    -- is not when anyone should be staring at this window, let alone
+    -- clicking it.
+    local outOfCombat  = not InCombatLockdown()
+    local autoRepairOn = ns.RaidCheckAutoRepair() and IsInRaid() and outOfCombat
+
+    -- Unlike Auto-Repair, this one is NOT out-of-combat-only: whispering a
+    -- request for a buff doesn't touch anything protected, and a missing
+    -- raid buff is just as worth catching mid-pull as between them.
+    local buffWhisperOn = ns.RaidCheckBuffWhisper()
+
+    -- One reachable provider per raid-buff column, decided once here rather
+    -- than per row: every row missing the same buff would otherwise redo the
+    -- exact same roster walk. "Reachable" means online AND near you --
+    -- Phased() (see above), the same broadcast-range + phase check used for
+    -- the recipient side, applied here to the provider instead. A provider
+    -- who is technically online but out of your broadcast range or in a
+    -- different phase isn't someone who can realistically walk over and
+    -- help, so they don't count as a target and don't trigger the blink
+    -- below. Self is excluded on purpose: whispering yourself to ask for
+    -- your own missing buff is not a thing this feature needs to support.
+    --
+    -- In a raid, a column can carry up to two independent targets -- one
+    -- from the front half of the roster (groups 1-4), one from the back half
+    -- (groups 5-8) -- since a 20-40 man raid can easily have a provider
+    -- covering each half rather than one for the whole raid. Left-click
+    -- reaches the near one, right-click the far one (see the hit frame's
+    -- OnMouseUp in MakeRow). Outside a raid there is only one subgroup, so
+    -- there is only ever a `single` target, and only left-click is wired to
+    -- it -- right-click keeps closing the window there, same as everywhere
+    -- else in the grid.
+    local inRaid = IsInRaid()
+    local providerFor = {}
+    -- Whether at least one roster member is missing each raid-buff column --
+    -- raid/party-wide, filled in as rows are painted below. This is what the
+    -- column HEADER's own blink/tooltip/click go by (see the tail loop
+    -- further down): "everyone already has it" is a raid-wide claim, not a
+    -- per-row one, so it belongs on the one icon that represents the whole
+    -- column rather than on any single player's cell.
+    local anyMissing = {}
+    -- Whether anyone in the raid currently reads at or below
+    -- AUTO_REPAIR_THRESHOLD -- filled in as rows are painted below, read by
+    -- the Durability column HEADER's own click/tooltip (see the tail loop
+    -- further down), the same way anyMissing feeds the raid-buff headers.
+    local anyLowDurability = false
+    for _, def in ipairs(COLUMNS) do
+        if def.class then
+            local entry = {}
+            for _, e in ipairs(roster) do
+                if e.class == def.class and not e.isSelf and e.online
+                    and not Phased(e.unit) then
+                    if inRaid then
+                        local grp = e.group or 1
+                        if grp <= 4 then
+                            entry.near = entry.near or FullName(e.unit)
+                        else
+                            entry.far = entry.far or FullName(e.unit)
+                        end
+                    else
+                        entry.single = entry.single or FullName(e.unit)
+                    end
+                    if inRaid then
+                        if entry.near and entry.far then break end
+                    elseif entry.single then
+                        break
+                    end
+                end
+            end
+            providerFor[def.key] = entry
+        end
+    end
+
     for _, e in ipairs(roster) do
         e.checks = UnitChecks(e.unit, answerable, restricted)
+        e.phased = Phased(e.unit)
         local r = reported[e.name]
         if r then
             e.durability = r.dur
@@ -1173,6 +1570,20 @@ local function Refresh()
         -- sent at all when you are alone.
         if e.isSelf then
             for _, def in ipairs(SELF_COLS) do e.checks[def.key] = def.selfRead() end
+        end
+    end
+
+    -- Your own Vantus, if any -- read off your own row rather than a
+    -- second aura scan, since UnitChecks/SweepBody just filled it in above.
+    -- nil when you have none up, or the column can't answer at all (Vantus
+    -- is raid-only and unavailable under restriction); either way there is
+    -- nothing to compare anyone else's rune against, so the mismatch blink
+    -- below simply never fires.
+    local myVantusName
+    for _, e in ipairs(roster) do
+        if e.isSelf then
+            myVantusName = e.checks._names and e.checks._names[VANTUS_KEY]
+            break
         end
     end
 
@@ -1248,7 +1659,15 @@ local function Refresh()
         if e then
             local c = EllesmereUI.GetClassColor(e.class)
             r._name:SetText(e.name)
-            r._name:SetTextColor(c.r, c.g, c.b, e.online and 1 or 0.4)
+            -- Same dim for both: offline and "elsewhere" (a different
+            -- instance/phase -- UnitPhaseReason returns nil when the unit is
+            -- right there with you) read the same way at a glance, and
+            -- neither one is a fault the way a missing consumable is.
+            -- UnitPhaseReason is guarded for older clients that predate it,
+            -- same as EllesmereUIRaidFrames' own use of it.
+            local elsewhere = UnitPhaseReason and UnitPhaseReason(e.unit)
+            local dim = (not e.online) or elsewhere
+            r._name:SetTextColor(c.r, c.g, c.b, dim and 0.2 or 1)
 
             if readyCheckActive then
                 local status = GetReadyCheckStatus(e.unit)
@@ -1279,6 +1698,23 @@ local function Refresh()
                     cell:Hide()
                     if tex then tex:Hide() end
                     if r._cellHit and r._cellHit[ci] then r._cellHit[ci]:Hide() end
+                    if def.key == DURABILITY_KEY then
+                        if r._lowDurBlink:IsPlaying() then
+                            r._lowDurBlink:Stop()
+                            r._name:SetAlpha(1)
+                        end
+                        if r._durNumBlink:IsPlaying() then
+                            r._durNumBlink:Stop()
+                            cell:SetAlpha(1)
+                        end
+                    end
+                    if def.class then
+                        SetBuffBlink(cell, false, 0.9)
+                    end
+                    if def.key == VANTUS_KEY and r._vantusMismatchBlink:IsPlaying() then
+                        r._vantusMismatchBlink:Stop()
+                        cell:SetAlpha(0.9)
+                    end
                 elseif def.numeric then
                     -- The number is shown at every reading, including 100 --
                     -- a plain number reads faster at a glance than a tick
@@ -1291,12 +1727,45 @@ local function Refresh()
                         cell:SetText(shown)
                         cell:SetTextColor(EllesmereUI.GetDurabilityColor(pct))
                     end
+
+                    if def.key == DURABILITY_KEY then
+                        local lowDur = autoRepairOn and pct ~= nil and pct <= AUTO_REPAIR_THRESHOLD
+                        if lowDur then anyLowDurability = true end
+                        if lowDur then
+                            if not r._lowDurBlink:IsPlaying() then r._lowDurBlink:Play() end
+                            if not r._durNumBlink:IsPlaying() then r._durNumBlink:Play() end
+                        else
+                            if r._lowDurBlink:IsPlaying() then
+                                r._lowDurBlink:Stop()
+                                r._name:SetAlpha(1)
+                            end
+                            if r._durNumBlink:IsPlaying() then
+                                r._durNumBlink:Stop()
+                                cell:SetAlpha(1)
+                            end
+                        end
+                    end
                 else
                     -- Deliberately not `answerable and checks or nil`: `and`
                     -- binds tighter, so a false verdict would fall through to
                     -- nil and a missing consumable would draw nothing at all.
                     local v
                     if answerable[def.key] then v = e.checks[def.key] end
+                    -- Raid buffs specifically: checked for everyone, but a
+                    -- MISSING verdict is not trusted for someone offline or
+                    -- phased away from you -- their aura state may simply
+                    -- not be syncing, so a false negative here is the
+                    -- failure mode to avoid. A present (v==true) verdict is
+                    -- kept regardless: that information doesn't depend on
+                    -- live sync the same way an absence does. See Phased()
+                    -- above. Other columns (consumables, durability,
+                    -- enchant) are unaffected.
+                    if def.class and v == false and (not e.online or e.phased) then
+                        v = nil
+                    end
+                    if def.class and v == false then
+                        anyMissing[def.key] = true
+                    end
                     if def.prefix or def.nameTooltip then
                         r._auraNames = r._auraNames or {}
                         r._auraNames[def.key] = e.checks._names and e.checks._names[def.key]
@@ -1307,23 +1776,86 @@ local function Refresh()
                     if v == true then
                         cell:SetAtlas(ATLAS_OK)
                         cell:Show()
-                        -- Only the tick is hoverable: a MISS or a blank cell
-                        -- has no buff name behind it to report.
-                        if hit then hit:Show() end
+                        if def.class then
+                            -- Present: nothing to whisper for, nothing to blink.
+                            if hit then hit:Hide() end
+                            SetBuffBlink(cell, false, 0.9)
+                        else
+                            -- Only the tick is hoverable: a MISS or a blank
+                            -- cell has no buff name behind it to report.
+                            if hit then hit:Show() end
+
+                            if def.key == VANTUS_KEY then
+                                local theirName = e.checks._names and e.checks._names[def.key]
+                                local mismatch = outOfCombat and myVantusName
+                                    and theirName and theirName ~= myVantusName
+                                if mismatch then
+                                    if not r._vantusMismatchBlink:IsPlaying() then
+                                        r._vantusMismatchBlink:Play()
+                                    end
+                                elseif r._vantusMismatchBlink:IsPlaying() then
+                                    r._vantusMismatchBlink:Stop()
+                                    cell:SetAlpha(0.9)
+                                end
+                            end
+                        end
                     elseif v == false then
                         cell:SetAtlas(ATLAS_MISS)
                         cell:Show()
-                        if hit then hit:Hide() end
+                        if def.class then
+                            -- Blinks and is clickable only when a nearby
+                            -- provider exists (see providerFor above) -- a
+                            -- missing buff nobody around can fix isn't worth
+                            -- flashing about.
+                            local providers = providerFor[def.key]
+                            r._buffProvider = r._buffProvider or {}
+                            r._buffProvider[def.key] = providers
+                            local hasProvider = providers
+                                and (providers.near or providers.far or providers.single)
+                            local active = buffWhisperOn and hasProvider ~= nil
+                            if hit then hit:SetShown(active) end
+                            SetBuffBlink(cell, active, 0.9)
+                        else
+                            if hit then hit:Hide() end
+                        end
+                        if def.key == VANTUS_KEY and r._vantusMismatchBlink:IsPlaying() then
+                            r._vantusMismatchBlink:Stop()
+                            cell:SetAlpha(0.9)
+                        end
                     else
                         -- Unanswerable, or the client would not say.
                         cell:Hide()
                         if hit then hit:Hide() end
+                        if def.class then
+                            SetBuffBlink(cell, false, 0.9)
+                        end
+                        if def.key == VANTUS_KEY and r._vantusMismatchBlink:IsPlaying() then
+                            r._vantusMismatchBlink:Stop()
+                            cell:SetAlpha(0.9)
+                        end
                     end
                 end
             end
             r:Show()
         else
             r:Hide()
+            if r._lowDurBlink:IsPlaying() then
+                r._lowDurBlink:Stop()
+                r._name:SetAlpha(1)
+            end
+            if r._durNumBlink and r._durNumBlink:IsPlaying() then
+                r._durNumBlink:Stop()
+                r._durNumBlink:GetParent():SetAlpha(1)
+            end
+            if r._buffIcon then
+                for _, icon in pairs(r._buffIcon) do
+                    SetBuffBlink(icon, false, 0.9)
+                end
+            end
+            if r._vantusMismatchBlink and r._vantusMismatchBlink:IsPlaying() then
+                r._vantusMismatchBlink:Stop()
+                r._vantusMismatchBlink:GetParent():SetAlpha(0.9)
+            end
         end
     end
 
@@ -1338,8 +1870,35 @@ local function Refresh()
             local classMissing = def.class and not on
             for mc = 1, MEMBER_COLS do
                 local h = colHeader[def.key][mc]
-                h:SetAlpha(classMissing and 1 or (on and 0.8 or 0.2))
+                local baseAlpha = classMissing and 1 or (on and 0.8 or 0.2)
+                h:SetAlpha(baseAlpha)
                 if h.xMark then h.xMark:SetShown(classMissing) end
+                if def.class and h._icon then
+                    -- nil when the class isn't in the group at all (on is
+                    -- false): distinct from "on, but nobody's missing it",
+                    -- which is anyMissing[def.key] == false rather than nil.
+                    -- The header's OnEnter treats those differently -- see
+                    -- MakeRow -- so this is not the same as writing false.
+                    h._buffMissing   = on and (anyMissing[def.key] or false) or nil
+                    h._buffProviders = providerFor[def.key]
+                    local providers = providerFor[def.key]
+                    local hasProvider = providers
+                        and (providers.near or providers.far or providers.single)
+                    local blinking = buffWhisperOn and on and anyMissing[def.key]
+                        and hasProvider ~= nil
+                    SetBuffBlink(h._icon, blinking, baseAlpha)
+                end
+                if def.key == DURABILITY_KEY then
+                    -- Same nil/false/true shape as h._buffMissing: nil when
+                    -- Auto-Repair isn't active right now at all (option off,
+                    -- not a raid, or in combat), so the header's OnEnter says
+                    -- nothing rather than falsely claiming "nobody's low".
+                    if autoRepairOn then
+                        h._lowDurability = anyLowDurability
+                    else
+                        h._lowDurability = nil
+                    end
+                end
             end
         end
     end
@@ -1384,6 +1943,24 @@ function ns.RaidCheckHideInapplicable(v)
     if not p then return end
     p.hideInapplicable = v
     lastLayoutSig = nil   -- the column set changed
+    Refresh()
+end
+
+function ns.RaidCheckAutoRepair(v)
+    local p = P()
+    if v == nil then return (p and p.autoRepair) == true end
+    if not p then return end
+    p.autoRepair = v
+    -- Not raid-gated here: the toggle can be flipped from anywhere, and
+    -- Refresh() is what actually decides whether it applies right now.
+    Refresh()
+end
+
+function ns.RaidCheckBuffWhisper(v)
+    local p = P()
+    if v == nil then return (p and p.buffWhisper) == true end
+    if not p then return end
+    p.buffWhisper = v
     Refresh()
 end
 
