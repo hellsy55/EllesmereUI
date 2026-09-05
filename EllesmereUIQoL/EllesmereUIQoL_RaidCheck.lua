@@ -64,6 +64,8 @@ local issecretvalue       = issecretvalue
 local GetAuraDataByIndex  = C_UnitAuras.GetAuraDataByIndex
 local GetUnitAuraBySpellID = C_UnitAuras.GetUnitAuraBySpellID
 local GetReadyCheckStatus = GetReadyCheckStatus
+local IsEncounterInProgress = IsEncounterInProgress
+local GetInstanceInfo     = GetInstanceInfo
 local C_Timer             = C_Timer
 
 -- Two member columns of twenty: a 40-man roster in one screenful, without a
@@ -350,11 +352,38 @@ local function Restricted()
     return AK.AurasRestricted()
 end
 
+-- True only during a RAID boss encounter -- M+ (and any other instance type)
+-- always keeps checking consumables, boss pull or not, since running out of
+-- flask/food mid-key is exactly what a key group needs to catch live. Raid
+-- is the one place a mid-pull consumable check is worth sitting out (see
+-- Answerable below).
+local function BossPull()
+    if not IsEncounterInProgress() then return false end
+    local _, instanceType = GetInstanceInfo()
+    return instanceType == "raid"
+end
+
 -- Can this column be answered at all right now? One predicate, so nothing
 -- downstream branches on a column's name.
-local function Answerable(def, restricted, classPresent)
+--
+-- bossCombat: true only during an active RAID boss encounter (BossPull()
+-- above) -- never for trash combat, and never for M+, boss pull or not.
+-- Personal consumables (flask/food/rune/vantus -- the ids/icons/prefix
+-- columns below) go blank for that window rather than checked: a raid boss
+-- pull is exactly when aura restriction is most likely to be active AND when
+-- a stale/degraded read is most likely to be trusted at a glance, so the
+-- column sits out the fight rather than risk crossing someone who actually
+-- has their flask up. Trash combat and M+ are unaffected -- the whole point
+-- is that consumable checking keeps working there, same as out of combat, so
+-- a key group still catches a missing flask/food mid-key. Raid-buff columns
+-- (def.class) and the locally-read columns (durability, weapon enchant) do
+-- not depend on another unit's aura secrecy the same way, so they are
+-- untouched by this and keep reporting through a boss pull regardless of
+-- content type.
+local function Answerable(def, restricted, classPresent, bossCombat)
     if def.class    then return classPresent[def.class] or false end
     if def.raidOnly and not IsInRaid() then return false end
+    if bossCombat and (def.ids or def.icons or def.prefix) then return false end
     if def.ids      then return true end
     -- Icon and name prefix live on the full aura, which only the sweep hands
     -- back, so those columns cannot answer under restriction. A prefix that
@@ -681,7 +710,8 @@ local function BooleanReportLine(key)
         if e.class then classPresent[e.class] = true end
     end
     local restricted = Restricted()
-    if not Answerable(def, restricted, classPresent) then
+    local bossCombat = BossPull()
+    if not Answerable(def, restricted, classPresent, bossCombat) then
         return title .. ": " .. EllesmereUI.L("no data available right now.")
     end
 
@@ -1121,10 +1151,14 @@ local function Refresh()
     end
 
     -- Roster-invariant, so decided once rather than per member per column.
+    -- BossPull(), not IsEncounterInProgress() alone: trash combat AND M+ must
+    -- keep checking consumables exactly as they do out of combat, and only a
+    -- RAID boss pull pauses the personal-consumable columns (see Answerable).
     local restricted = Restricted()
+    local bossCombat = BossPull()
     local answerable = {}
     for _, def in ipairs(COLUMNS) do
-        answerable[def.key] = Answerable(def, restricted, classPresent)
+        answerable[def.key] = Answerable(def, restricted, classPresent, bossCombat)
     end
 
     for _, e in ipairs(roster) do
