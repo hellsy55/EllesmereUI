@@ -58,6 +58,7 @@ local IsInRaid, IsInGroup = IsInRaid, IsInGroup
 local UnitIsGroupLeader, UnitIsGroupAssistant = UnitIsGroupLeader, UnitIsGroupAssistant
 local UnitExists, UnitIsPlayer = UnitExists, UnitIsPlayer
 local UnitIsUnit          = UnitIsUnit
+local UnitIsDeadOrGhost   = UnitIsDeadOrGhost
 local InCombatLockdown    = InCombatLockdown
 local SendChatMessage     = SendChatMessage
 local UnitName, UnitClass, UnitIsConnected = UnitName, UnitClass, UnitIsConnected
@@ -65,10 +66,15 @@ local UnitPhaseReason     = UnitPhaseReason
 local UnitIsVisible       = UnitIsVisible
 local Ambiguate           = Ambiguate
 local issecretvalue       = issecretvalue
+-- UseItemByName was namespaced to C_Item.UseItemByName; the old global may
+-- no longer exist standalone on current clients (that's exactly why the
+-- Auto-Repair click was silently doing nothing -- pcall was swallowing a
+-- "call a nil value" error). Prefer the namespaced version, fall back to
+-- the bare global for older clients that still have it.
+local UseItemByName = (C_Item and C_Item.UseItemByName) or UseItemByName
 local GetAuraDataByIndex  = C_UnitAuras.GetAuraDataByIndex
 local GetUnitAuraBySpellID = C_UnitAuras.GetUnitAuraBySpellID
 local GetReadyCheckStatus = GetReadyCheckStatus
-local IsEncounterInProgress = IsEncounterInProgress
 local GetInstanceInfo     = GetInstanceInfo
 local C_Timer             = C_Timer
 
@@ -252,6 +258,21 @@ end
 -- wire, and that must not be a difference the user can see.
 local function EnchantOK(id)
     return (id or 0) > 0
+end
+
+-- Best-effort name for a temporary weapon enchant id (GetWeaponEnchantInfo /
+-- C_PaperDollInfo.GetTemporaryEnchantmentInfo's enchantID). UNVERIFIED: some
+-- temp enchants apply via a spell whose id matches this one, in which case
+-- GetSpellInfo resolves a real name; others don't, and this returns nil. A
+-- permanent enchant's name IS reliably readable off the item link's own
+-- enchant field (see EllesmereUIBlizzardSkin's EUI_GetEnchantText), but a
+-- temporary one lives entirely outside the item string -- there is no
+-- confirmed general API for it, so this is a plain attempt with a silent
+-- nil on failure rather than any scanning-tooltip fallback.
+local function EnchantName(id)
+    if not id or id == 0 then return nil end
+    local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
+    return info and info.name
 end
 
 -- Left-click on a low-durability row's Durability cell (see Refresh/MakeRow).
@@ -446,38 +467,39 @@ local function Restricted()
     return AK.AurasRestricted()
 end
 
--- True only during a RAID boss encounter -- M+ (and any other instance type)
--- always keeps checking consumables, boss pull or not, since running out of
--- flask/food mid-key is exactly what a key group needs to catch live. Raid
--- is the one place a mid-pull consumable check is worth sitting out (see
--- Answerable below).
-local function BossPull()
-    if not IsEncounterInProgress() then return false end
+-- True during ANY combat -- trash or boss alike -- while inside a raid or
+-- an active Mythic+ Keystone run. A normal/heroic dungeon or open-world
+-- fight does not block this. C_ChallengeMode.IsChallengeModeActive() is
+-- what distinguishes M+ from an ordinary dungeon, since GetInstanceInfo's
+-- instanceType is "party" for both alike.
+local function ConsumablesBlockedByCombat()
+    if not InCombatLockdown() then return false end
     local _, instanceType = GetInstanceInfo()
-    return instanceType == "raid"
+    if instanceType == "raid" then return true end
+    return C_ChallengeMode ~= nil and C_ChallengeMode.IsChallengeModeActive ~= nil
+        and C_ChallengeMode.IsChallengeModeActive() == true
 end
 
 -- Can this column be answered at all right now? One predicate, so nothing
 -- downstream branches on a column's name.
 --
--- bossCombat: true only during an active RAID boss encounter (BossPull()
--- above) -- never for trash combat, and never for M+, boss pull or not.
--- Personal consumables (flask/food/rune/vantus -- the ids/icons/prefix
--- columns below) go blank for that window rather than checked: a raid boss
--- pull is exactly when aura restriction is most likely to be active AND when
--- a stale/degraded read is most likely to be trusted at a glance, so the
--- column sits out the fight rather than risk crossing someone who actually
--- has their flask up. Trash combat and M+ are unaffected -- the whole point
--- is that consumable checking keeps working there, same as out of combat, so
--- a key group still catches a missing flask/food mid-key. Raid-buff columns
+-- consumablesBlocked: true during any combat (trash or boss) inside a raid
+-- or an active M+ (ConsumablesBlockedByCombat above). Personal consumables
+-- (flask/food/rune/vantus -- the ids/icons/prefix columns below) go blank
+-- for that window rather than checked: combat there is exactly when aura
+-- restriction is most likely to be active AND when a stale/degraded read is
+-- most likely to be trusted at a glance, so the column sits out the fight
+-- rather than risk crossing someone who actually has their flask up. A
+-- normal/heroic dungeon or open-world fight is unaffected -- consumable
+-- checking keeps working there, same as out of combat. Raid-buff columns
 -- (def.class) and the locally-read columns (durability, weapon enchant) do
 -- not depend on another unit's aura secrecy the same way, so they are
--- untouched by this and keep reporting through a boss pull regardless of
+-- untouched by this and keep reporting through combat regardless of
 -- content type.
-local function Answerable(def, restricted, classPresent, bossCombat)
+local function Answerable(def, restricted, classPresent, consumablesBlocked)
     if def.class    then return classPresent[def.class] or false end
     if def.raidOnly and not IsInRaid() then return false end
-    if bossCombat and (def.ids or def.icons or def.prefix) then return false end
+    if consumablesBlocked and (def.ids or def.icons or def.prefix) then return false end
     if def.ids      then return true end
     -- Icon and name prefix live on the full aura, which only the sweep hands
     -- back, so those columns cannot answer under restriction. A prefix that
@@ -804,8 +826,8 @@ local function BooleanReportLine(key)
         if e.class then classPresent[e.class] = true end
     end
     local restricted = Restricted()
-    local bossCombat = BossPull()
-    if not Answerable(def, restricted, classPresent, bossCombat) then
+    local consumablesBlocked = ConsumablesBlockedByCombat()
+    if not Answerable(def, restricted, classPresent, consumablesBlocked) then
         return title .. ": " .. EllesmereUI.L("no data available right now.")
     end
 
@@ -1101,16 +1123,21 @@ local function MakeRow(parent, index)
 
             -- Prefix columns (Vantus) and nameTooltip columns (Flask, Food)
             -- know not just THAT the buff is up but WHICH one -- the name
-            -- comes off the aura itself, see SweepBody / UnitHasAny. Raid-buff
-            -- (def.class) columns get the same overlay for a different job:
-            -- when the buff is MISSING and someone who can cast it is present
-            -- and reachable, left-click whispers them -- see Refresh, which
-            -- decides per sweep whether a provider exists and only then shows
-            -- this frame and plays the blink below. A texture cannot take
-            -- mouse input on its own, so a transparent frame sits over the
-            -- icon just to catch the hover/click; Relayout keeps it pinned to
-            -- the same spot as the icon.
-            if def.prefix or def.nameTooltip or def.class then
+            -- comes off the aura itself, see SweepBody / UnitHasAny. Weapon
+            -- Enchant gets the same hover-only treatment for the same
+            -- reason (which oil/stone, not just whether one is up) even
+            -- though its check itself arrives over comms rather than a live
+            -- aura read -- see EnchantName; the name is best-effort and may
+            -- legitimately be blank. Raid-buff (def.class) columns get the
+            -- overlay for a different job: when the buff is MISSING and
+            -- someone who can cast it is present and reachable, left-click
+            -- whispers them -- see Refresh, which decides per sweep whether
+            -- a provider exists and only then shows this frame and plays
+            -- the blink below. A texture cannot take mouse input on its
+            -- own, so a transparent frame sits over the icon just to catch
+            -- the hover/click; Relayout keeps it pinned to the same spot as
+            -- the icon.
+            if def.prefix or def.nameTooltip or def.class or def.key == WENCHANT_KEY then
                 local hit = CreateFrame("Frame", nil, r)
                 hit:SetSize(ICON_SZ, ICON_SZ)
                 hit:EnableMouse(true)
@@ -1472,14 +1499,14 @@ local function Refresh()
     end
 
     -- Roster-invariant, so decided once rather than per member per column.
-    -- BossPull(), not IsEncounterInProgress() alone: trash combat AND M+ must
-    -- keep checking consumables exactly as they do out of combat, and only a
-    -- RAID boss pull pauses the personal-consumable columns (see Answerable).
+    -- ConsumablesBlockedByCombat(): any combat (trash or boss) inside a raid
+    -- or an active M+ pauses the personal-consumable columns (see
+    -- Answerable); a normal/heroic dungeon or open-world fight does not.
     local restricted = Restricted()
-    local bossCombat = BossPull()
+    local consumablesBlocked = ConsumablesBlockedByCombat()
     local answerable = {}
     for _, def in ipairs(COLUMNS) do
-        answerable[def.key] = Answerable(def, restricted, classPresent, bossCombat)
+        answerable[def.key] = Answerable(def, restricted, classPresent, consumablesBlocked)
     end
 
     -- Auto-Repair is raid-only regardless of the option -- a party or M+
@@ -1498,14 +1525,15 @@ local function Refresh()
 
     -- One reachable provider per raid-buff column, decided once here rather
     -- than per row: every row missing the same buff would otherwise redo the
-    -- exact same roster walk. "Reachable" means online AND near you --
-    -- Phased() (see above), the same broadcast-range + phase check used for
-    -- the recipient side, applied here to the provider instead. A provider
-    -- who is technically online but out of your broadcast range or in a
-    -- different phase isn't someone who can realistically walk over and
-    -- help, so they don't count as a target and don't trigger the blink
-    -- below. Self is excluded on purpose: whispering yourself to ask for
-    -- your own missing buff is not a thing this feature needs to support.
+    -- exact same roster walk. "Reachable" means online, alive, and near you
+    -- -- Phased() (see above), the same broadcast-range + phase check used
+    -- for the recipient side, applied here to the provider instead. A
+    -- provider who is technically online but out of your broadcast range,
+    -- in a different phase, or dead/a ghost isn't someone who can
+    -- realistically cast anything right now, so they don't count as a
+    -- target and don't trigger the blink below. Self is excluded on
+    -- purpose: whispering yourself to ask for your own missing buff is not
+    -- a thing this feature needs to support.
     --
     -- In a raid, a column can carry up to two independent targets -- one
     -- from the front half of the roster (groups 1-4), one from the back half
@@ -1535,7 +1563,7 @@ local function Refresh()
             local entry = {}
             for _, e in ipairs(roster) do
                 if e.class == def.class and not e.isSelf and e.online
-                    and not Phased(e.unit) then
+                    and not Phased(e.unit) and not UnitIsDeadOrGhost(e.unit) then
                     if inRaid then
                         local grp = e.group or 1
                         if grp <= 4 then
@@ -1560,16 +1588,27 @@ local function Refresh()
     for _, e in ipairs(roster) do
         e.checks = UnitChecks(e.unit, answerable, restricted)
         e.phased = Phased(e.unit)
+        -- A corpse/ghost can't receive a raid buff at all -- not a data
+        -- reliability question like offline/phased, just a plain fact --
+        -- so a MISSING verdict on a dead player gets the same treatment
+        -- (see the def.class block below). UnitIsDeadOrGhost is ordinary,
+        -- non-secret unit state (BuffReminders' own IsValidBuffTarget uses
+        -- it unguarded the same way).
+        e.dead = UnitIsDeadOrGhost(e.unit)
         local r = reported[e.name]
         if r then
             e.durability = r.dur
-            if r.we then e.checks[WENCHANT_KEY] = EnchantOK(r.we) end
+            if r.we then
+                e.checks[WENCHANT_KEY] = EnchantOK(r.we)
+                e.enchantID = r.we
+            end
         end
         -- Last, so the local read beats anything that came off the wire: it is
         -- current, and your own row must not depend on a message that is not
         -- sent at all when you are alone.
         if e.isSelf then
             for _, def in ipairs(SELF_COLS) do e.checks[def.key] = def.selfRead() end
+            e.enchantID = MyEnchantID()
         end
     end
 
@@ -1751,17 +1790,33 @@ local function Refresh()
                     -- nil and a missing consumable would draw nothing at all.
                     local v
                     if answerable[def.key] then v = e.checks[def.key] end
-                    -- Raid buffs specifically: checked for everyone, but a
-                    -- MISSING verdict is not trusted for someone offline or
-                    -- phased away from you -- their aura state may simply
-                    -- not be syncing, so a false negative here is the
-                    -- failure mode to avoid. A present (v==true) verdict is
-                    -- kept regardless: that information doesn't depend on
-                    -- live sync the same way an absence does. See Phased()
-                    -- above. Other columns (consumables, durability,
-                    -- enchant) are unaffected.
-                    if def.class and v == false and (not e.online or e.phased) then
-                        v = nil
+                    -- A MISSING verdict is not trusted/flagged for someone
+                    -- offline or phased away from you -- their aura state
+                    -- (or, for weapon enchant, their last report) may simply
+                    -- not be current -- for raid buffs (def.class) AND for
+                    -- personal consumables (flask/food/rune/vantus, answered
+                    -- via ids/icons/prefix) AND weapon enchant, requested to
+                    -- follow the exact same rule as the consumables it's
+                    -- grouped with here even though it technically arrives
+                    -- over comms rather than a live aura read. Raid buffs get
+                    -- one more case: dead/ghost, who plainly cannot receive a
+                    -- buff at all right now -- that one does NOT extend to
+                    -- consumables or weapon enchant, since a flask/food/rune/
+                    -- oil generally survives death, so a dead player's
+                    -- reading there is still meaningful. A present (v==true)
+                    -- verdict is kept regardless of any of this: that
+                    -- information doesn't depend on live sync or current
+                    -- state the way an absence does. See Phased() above.
+                    -- Durability is the one column still fully unaffected.
+                    if v == false then
+                        local unreliable = not e.online or e.phased
+                        local personalAura = not def.class
+                            and (def.ids or def.icons or def.prefix or def.key == WENCHANT_KEY)
+                        if def.class and (unreliable or e.dead) then
+                            v = nil
+                        elseif personalAura and unreliable then
+                            v = nil
+                        end
                     end
                     if def.class and v == false then
                         anyMissing[def.key] = true
@@ -1771,6 +1826,11 @@ local function Refresh()
                         r._auraNames[def.key] = e.checks._names and e.checks._names[def.key]
                         r._auraExpires = r._auraExpires or {}
                         r._auraExpires[def.key] = e.checks._expires and e.checks._expires[def.key]
+                    elseif def.key == WENCHANT_KEY then
+                        -- Best-effort, see EnchantName -- nil just means no
+                        -- tooltip line, same as any other unresolved name.
+                        r._auraNames = r._auraNames or {}
+                        r._auraNames[def.key] = EnchantName(e.enchantID)
                     end
                     local hit = r._cellHit and r._cellHit[ci]
                     if v == true then
