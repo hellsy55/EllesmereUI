@@ -8376,6 +8376,14 @@ initFrame:SetScript("OnEvent", function(self)
                     tooltip = "Fades just the cast bar when the unit is out of range of your spells. Set to 100% to disable the fade.",
                     get = function() return math.floor(((SVal("castbarOorAlpha", 1)) * 100) + 0.5) end,
                     set = function(v) UNIT_DB_MAP[selectedUnit]().castbarOorAlpha = v / 100 end }
+                cogRows[#cogRows + 1] = { type = "toggle", label = "Darken Overlay Instead of Alpha",
+                    tooltip = "Off (default): the cast bar fades with real transparency, matching the whole-frame Out of Range Alpha (best if you're colour-matching the frame and cast bar). On: the old behavior -- a black overlay dims the bar instead of fading it, which can't discolor a shielded/uninterruptible cast's tint but won't visually match the frame's fade.",
+                    get = function()
+                        local v = SGetSupported("castbarOorOverlay")
+                        if v == nil then return false end
+                        return v
+                    end,
+                    set = function(v) SSetSupported("castbarOorOverlay", v) end }
             end
             -- Focus only: a second raid target marker icon anchored to the
             -- cast bar itself (left or right of it), independent of the
@@ -15816,6 +15824,10 @@ initFrame:SetScript("OnEvent", function(self)
                           tooltip="Fades just the cast bar when the boss is out of range of your spells. Set to 100% to disable the fade.",
                           get=function() return math.floor(((B.castbarOorAlpha or 1) * 100) + 0.5) end,
                           set=function(v) B.castbarOorAlpha = v / 100 end },
+                        { type="toggle", label="Darken Overlay Instead of Alpha",
+                          tooltip="Off (default): the cast bar fades with real transparency, matching the whole-frame Out of Range Alpha (best if you're colour-matching the frame and cast bar). On: the old behavior -- a black overlay dims the bar instead of fading it, which can't discolor a shielded/uninterruptible cast's tint but won't visually match the frame's fade.",
+                          get=function() return B.castbarOorOverlay == true end,
+                          set=function(v) B.castbarOorOverlay = v end },
                         { type="slider", label="Offset X", min=-500, max=500, step=1,
                           get=function() return B.castbarOffsetX or 0 end,
                           set=function(v) B.castbarOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },

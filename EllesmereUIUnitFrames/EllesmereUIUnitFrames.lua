@@ -701,6 +701,7 @@ local defaults = {
             powerTextStrata = "inherit",
             oorAlpha = 0.4,
             castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
+            castbarOorOverlay = false,   -- false = real alpha fade on the castbar (default); true = old black darken-overlay (avoids shield tint bleed)
             castbarIconDivider = false,
             castbarBorderTexture = "solid",
             castbarBorderSize = 1,
@@ -999,6 +1000,7 @@ local defaults = {
             powerTextStrata = "inherit",
             oorAlpha = 0.4,
             castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
+            castbarOorOverlay = false,   -- false = real alpha fade on the castbar (default); true = old black darken-overlay (avoids shield tint bleed)
             castbarIconDivider = false,
             castbarBorderTexture = "solid",
             castbarBorderSize = 1,
@@ -1179,6 +1181,7 @@ local defaults = {
             extraTextStrata = "inherit",
             powerTextStrata = "inherit",
             castbarOorAlpha = 1,   -- Cast Bar-only fade; 1 = off by default
+            castbarOorOverlay = false,   -- false = real alpha fade on the castbar (default); true = old black darken-overlay (avoids shield tint bleed)
             castbarBorderTexture = "solid",
             castbarBorderSize = 1,
             castbarBorderR = 0, castbarBorderG = 0, castbarBorderB = 0, castbarBorderA = 1,
@@ -15179,23 +15182,54 @@ do
         return nil
     end
 
-    -- Cast Bar-only Out of Range Alpha now drives the darken overlay created
-    -- in CreateCastBar (castbar._oorDarkHost) instead of the castbar's OWN
-    -- alpha -- see the overlay's creation comment for why fading castbar
-    -- directly discoloured uninterruptible (shielded) casts.
+    -- EUI EDIT (user request): Cast Bar-only Out of Range Alpha can now use
+    -- EITHER of two blend modes, chosen per-profile via castbarOorOverlay:
+    --   * castbarOorOverlay == false (default) -- true SetAlpha fade on the
+    --     castbar itself. Same blend math as the whole-frame Out of Range
+    --     Alpha (ns.ResolveFrameAlpha / TickBoss's f:SetAlpha), so a
+    --     foreground/background colour swap between the unit frame and the
+    --     castbar reproduces the same apparent transparency at the same
+    --     alpha value.
+    --   * castbarOorOverlay == true -- the original black darken overlay
+    --     (castbar._oorDarkHost, SetColorTexture(0,0,0,1)) drawn on top,
+    --     which dims by pure brightness scale (result = colour * (1 -
+    --     overlayAlpha)) instead of blending toward the background. Doesn't
+    --     visually match the unit frame's fade, but can't shift hue, so it
+    --     avoids bleeding the shielded/uninterruptible tint's colour through
+    --     (see the overlay's original creation comment, still above
+    --     oorDarkHost in CreateCastBar, for why that matters).
     local function ResetCastbarOor(cb)
         if not cb then return end
         cb:SetAlpha(1)
         if cb._oorDarkHost then cb._oorDarkHost:SetAlpha(0) end
     end
 
-    local function SetCastbarOorDarken(cb, castOor, inRange)
+    local function SetCastbarOorDarken(cb, castOor, inRange, useOverlay)
         if not cb then return end
-        cb:SetAlpha(1)
-        local dark = cb._oorDarkHost
-        if not dark then return end
+        if useOverlay then
+            -- Original behavior: castbar itself stays fully opaque; a black
+            -- overlay on top carries the fade instead.
+            cb:SetAlpha(1)
+            local dark = cb._oorDarkHost
+            if not dark then return end
+            if castOor >= 1 then
+                dark:SetAlpha(0)
+            elseif inRange ~= nil then
+                if issecretvalue(inRange) then
+                    dark:SetAlphaFromBoolean(inRange, 0, 1 - castOor)
+                else
+                    dark:SetAlpha(inRange and 0 or (1 - castOor))
+                end
+            else
+                dark:SetAlpha(0)
+            end
+            return
+        end
+
+        -- Real-alpha mode: overlay stays inert, alpha lives on cb itself.
+        if cb._oorDarkHost then cb._oorDarkHost:SetAlpha(0) end
         if castOor >= 1 then
-            dark:SetAlpha(0)
+            cb:SetAlpha(1)
         elseif inRange ~= nil then
             -- Outside instanced content inRange is a plain boolean, and
             -- SetAlphaFromBoolean does not reliably re-evaluate a changing
@@ -15207,12 +15241,12 @@ do
             -- fall back to the boolean-driven API when the value is
             -- genuinely secret (raid/instance content).
             if issecretvalue(inRange) then
-                dark:SetAlphaFromBoolean(inRange, 0, 1 - castOor)
+                cb:SetAlphaFromBoolean(inRange, 1, castOor)
             else
-                dark:SetAlpha(inRange and 0 or (1 - castOor))
+                cb:SetAlpha(inRange and 1 or castOor)
             end
         else
-            dark:SetAlpha(0)
+            cb:SetAlpha(1)
         end
     end
 
@@ -15256,7 +15290,7 @@ do
 
         -- Cast Bar-only Out of Range Alpha: independent of the whole-frame
         -- fade above (shares the same range check when both are active).
-        SetCastbarOorDarken(f.Castbar, castOor, inRange)
+        SetCastbarOorDarken(f.Castbar, castOor, inRange, s and s.castbarOorOverlay)
     end
 
     local function ResetCastbarAlpha(unitKey)
@@ -15283,7 +15317,7 @@ do
         -- fade above (shares the same range check when both are active), so
         -- it can dim just the Castbar element on its own.
         local cb = frames[unitKey] and frames[unitKey].Castbar
-        SetCastbarOorDarken(cb, castOor, inRange)
+        SetCastbarOorDarken(cb, castOor, inRange, s and s.castbarOorOverlay)
     end
 
     local function Tick()

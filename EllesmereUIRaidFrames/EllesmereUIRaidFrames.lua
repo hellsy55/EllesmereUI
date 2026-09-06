@@ -8614,7 +8614,7 @@ end
 -- Fallback when the user hasn't picked a custom Darken Color yet.
 local DEFAULT_DARKEN_COLOR = { r = 0.5, g = 0.5, b = 0.5 }
 
--- "Darken Frames Out of Range Instead" (oorDarken cog on the Out of Range
+-- "Darken Overlay Instead of Alpha" (oorDarken cog on the Out of Range
 -- Alpha option). Lazily creates a full-frame texture per button (tinted with
 -- the user's chosen Darken Color, gray by default) rather than fading the
 -- button's own alpha.
@@ -8693,7 +8693,7 @@ local function UpdateButtonRange(unit, btn)
     local oorAlpha = rs.oorAlpha or 0.4
 
     if rs.oorDarken then
-        -- Darken mode ("Darken Frames Out of Range Instead"): the button
+        -- Darken mode ("Darken Overlay Instead of Alpha"): the button
         -- itself stays at full (BM-respecting) alpha; a tinted overlay fades
         -- in over out-of-range frames instead. Strength derives from the
         -- same Out of Range Alpha value (lower % = darker), so one slider
