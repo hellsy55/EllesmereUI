@@ -1201,9 +1201,17 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
     -- and cached on the frame itself, so no extra count lookup is needed here.
     -- Ready-but-empty (e.g. last potion used, cooldown still running down on an
     -- alt charge/rank) reads as "nothing to glow for" rather than lighting up
-    -- an icon the player has none of.
+    -- an icon the player has none of. Rank-family presets (pots -- PotSwap
+    -- resolves them) cache their count in _displayCount, never _cachedTotal;
+    -- single-item presets (Healthstone, Demonic Healthstone) do the reverse.
+    -- Exactly one of the two is populated for any given frame, and 0 stays 0
+    -- through the `or` (0 is truthy in Lua) -- reading only _cachedTotal
+    -- read nil for every pot-family item and misread "unknown yet" as "zero",
+    -- suppressing the ready glow on pots unconditionally.
+    local curItemTotal = frame._displayCount
+    if curItemTotal == nil then curItemTotal = frame._cachedTotal end
     local hideForZeroCount = cas and cas.hideGlowOnItemCountZero
-        and (frame._cachedTotal or 0) == 0
+        and (curItemTotal or 0) == 0
     if not onCD and not hideForZeroCount and ns.CdStateGlowCombatOK(cas) then
         -- Re-assert against the overlay's REAL state (overlay._glowActive), not
         -- our flag alone. fd.glowOverlay is shared with the proc-glow and

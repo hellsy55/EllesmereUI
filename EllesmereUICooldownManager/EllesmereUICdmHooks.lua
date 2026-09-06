@@ -5511,14 +5511,15 @@ local function IsAtCurrentMaxLevel()
     return (lvl or 0) >= cap
 end
 
--- Low Item Count Glow's raid gate: the ZONE'S instance type, not the group
--- type. IsInRaid() only answers true for a formed raid GROUP (5+, converted
--- via "Convert to Raid"), so it reads false for a lone player soloing old raid
--- content outside a group -- exactly the case this feature should still cover.
--- IsInInstance()'s instanceType answers off the zone itself, group or no group.
+-- Low Item Count Glow's raid gate: requires BOTH a formed raid group (IsInRaid,
+-- "Convert to Raid" or matchmaking) AND actually standing inside a raid-type
+-- zone (IsInInstance's instanceType). Either alone lets through cases this
+-- feature isn't meant for -- IsInRaid alone would fire in a raid group standing
+-- in a city; IsInInstance alone would fire on a lone player soloing old raid
+-- content with no group at all. Both together is the actual "raiding" case.
 local function IsInRaidInstance()
     local inInstance, instanceType = IsInInstance()
-    return inInstance and instanceType == "raid"
+    return (inInstance and instanceType == "raid") and IsInRaid() and true or false
 end
 
 -- Low Item Count Glow's own bag total: the displayed count on the icon is
@@ -6112,13 +6113,18 @@ local function ProcessPresetCooldowns()
                     -- (_displayCount), so without this the read-skip gate saw pots as
                     -- count-armed FOREVER and never skipped them (probe capture #12).
                     f._countArm = false
-                elseif f._countArm ~= false then
-                    -- Count-on-edge: item counts only move with bag contents
-                    -- (BAG_UPDATE_DELAYED) or a use-cast, both of which arm.
-                    -- This content edge also re-points the single watched cd
-                    -- id (f._itemCdSource): first owned id wins; while
-                    -- nothing is owned the LAST owned id is kept (the shared
-                    -- cd lives on the id that was just used).
+                else
+                    -- Single-item presets only (Healthstone, Demonic Healthstone, any
+                    -- family-less custom item -- pot families take the dispID branch
+                    -- above instead). Always read fresh instead of gating on
+                    -- f._countArm: that gate could go stale here specifically -- a
+                    -- BAG_UPDATE_DELAYED re-arm swallowed by the loot-storm cap and
+                    -- never flushed (nothing else fired to trigger the trailing-flush
+                    -- check) left f._cachedTotal showing a wrong count until an
+                    -- unrelated edge or a reload happened to fix it. A single-item
+                    -- C_Item.GetItemCount call is cheap (no chain walk), and this
+                    -- branch only runs at all while the frame is already "unsettled"
+                    -- per the outer gate above, so this isn't a new per-tick cost.
                     f._countArm = false
                     total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
                     local owned = total > 0 and f._presetItemID or nil
@@ -6131,8 +6137,6 @@ local function ProcessPresetCooldowns()
                     end
                     if owned then f._itemCdSource = owned end
                     f._cachedTotal = total
-                else
-                    total = f._cachedTotal or 0
                 end
                 if f._itemCountText then
                     local fc = _ecmeFC[f]
@@ -6232,7 +6236,16 @@ local function ProcessPresetCooldowns()
                                 end
                             end
                         elseif fdLic._lowItemGlowOn then
-                            if fdLic.glowOverlay then ns.StopNativeGlow(fdLic.glowOverlay) end
+                            -- Ownership handoff: if Cooldown State Effect has since
+                            -- claimed the overlay (_presetCdGlowOn true), it is no
+                            -- longer ours to stop -- doing so would kill the glow
+                            -- ApplyCdState (EllesmereUICdmFakeActive.lua) just started
+                            -- on the exact same overlay. Only physically stop it when
+                            -- we still own it; either way, drop our own bookkeeping so
+                            -- we cleanly restart later if conditions make it ours again.
+                            if not fdLic._presetCdGlowOn and fdLic.glowOverlay then
+                                ns.StopNativeGlow(fdLic.glowOverlay)
+                            end
                             fdLic._lowItemGlowOn = false
                             fdLic._lowItemGlowSig = nil
                         end
