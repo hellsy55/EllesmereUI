@@ -663,7 +663,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = ns.RaidCheckHideReady,
               setValue = ns.RaidCheckHideReady },
             { type = "toggle", text = "Auto-Repair",
-              tooltip = "Raid only. When a player's Durability reading drops to 25% or below, their name blinks and their Durability cell becomes left-clickable to use the Auto-Hammer (item 132414).",
+              tooltip = "Raid only. Left-click the Durability column's header icon anytime to use the Auto-Hammer (item 132514) -- no one needs to be low first. When a player's Durability reading drops to 25% or below, their name blinks as a heads-up, but that's just a warning, not a requirement to click.",
               disabled = RCDisabled,
               getValue = ns.RaidCheckAutoRepair,
               setValue = ns.RaidCheckAutoRepair }

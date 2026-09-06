@@ -208,15 +208,19 @@ local VANTUS_KEY     = "vantus"
 local MSG_REPORT     = "rc"    -- a client describing itself
 local MSG_QUERY      = "rcq"   -- someone asking the group to describe itself
 
--- Auto-Repair: left-clicking a row's Durability cell uses the Auto-Hammer
--- when that row's own durability reading is at or below the threshold.
+-- Auto-Repair: left-clicking the Durability column's header icon always
+-- uses the Auto-Hammer, whether or not anyone in the raid is actually
+-- reading low right now -- the click is a deliberate, always-available
+-- action, not something that only arms once a threshold is crossed.
 -- Raid only (see Refresh's autoRepairOn) -- a dungeon or M+ group repairs at
 -- the vendor between pulls easily enough that this is raid-specific chrome,
 -- not a general durability shortcut. 25 is its own threshold, deliberately
 -- not EllesmereUI.DURABILITY_LOW (20): that constant colors the grid's
 -- existing low-durability warning, a separate and already-shipped decision
--- this feature does not get to quietly change.
-local AUTO_REPAIR_ITEM_ID  = 132414
+-- this feature does not get to quietly change. It still only drives the
+-- per-row blink and the header's tooltip hint below -- never whether the
+-- click itself works.
+local AUTO_REPAIR_ITEM_ID  = 132514
 local AUTO_REPAIR_THRESHOLD = 25
 
 -- What each client volunteered about itself, from either wire. One store, so
@@ -275,13 +279,14 @@ local function EnchantName(id)
     return info and info.name
 end
 
--- Left-click on a low-durability row's Durability cell (see Refresh/MakeRow).
--- Re-checks both gates itself instead of trusting the hit frame's shown
--- state: that state is a Refresh()-cadence snapshot, up to SWEEP_PERIOD
--- stale, and leaving the raid or flipping the option off mid-window must not
--- leave a click still armed. UseItemByName resolves by id fine and needs no
--- bag slot from the caller; the pcall is what a plain button click needs
--- here, not a SecureActionButton -- using an item from a real mouse click is
+-- Left-click on the Durability column header (see MakeRow) -- always live,
+-- regardless of whether any row is currently reading low. Re-checks its own
+-- gates rather than trusting any cached "someone is low" snapshot: that
+-- state is a Refresh()-cadence read, up to SWEEP_PERIOD stale, and leaving
+-- the raid or flipping the option off mid-window must not leave a click
+-- still armed. UseItemByName resolves by id fine and needs no bag slot from
+-- the caller; the pcall is what a plain button click needs here, not a
+-- SecureActionButton -- using an item from a real mouse click is
 -- unrestricted in combat the same as it is out of it, but the feature is
 -- deliberately out-of-combat-only anyway (see InCombatLockdown check): a
 -- pull is not when anyone should be looking at this column, let alone
