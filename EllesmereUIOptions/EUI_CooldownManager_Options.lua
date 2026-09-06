@@ -11235,6 +11235,28 @@ initFrame:SetScript("OnEvent", function(self)
                             { val = "modernGlowReady",   label = "Modern WoW Glow (CD Ready)" },
                             { val = "classicGlowReady",  label = "Classic WoW Glow (CD Ready)" },
                         }
+                        -- Item presets only (potions/healthstone/demonic healthstone --
+                        -- spellID here is the negated itemID, always <= -100; trinket
+                        -- slots and equipment slots use small negative slot ids, and
+                        -- racials/custom spell ids are positive, so none of those match).
+                        -- Independent "+ " toggle, same visual style as the charge
+                        -- toggles on the regular-spell Cooldown State Effect list above,
+                        -- but written through the toggleGet/toggleSet accessor pair
+                        -- (not item.charge) since presets store their per-icon settings
+                        -- in `cas`, not `ss`. Inserted right after "None", matching where
+                        -- the charge toggles sit on the regular-spell list.
+                        if type(spellID) == "number" and spellID <= -100 then
+                            table.insert(CD_STATE_ITEMS, 2, {
+                                toggleGet = function() return cas.hideGlowOnItemCountZero == true end,
+                                toggleSet = function(v)
+                                    SetCasOwn("hideGlowOnItemCountZero", v or nil)
+                                    if ns.FakeActive_Rearm then ns.FakeActive_Rearm() end
+                                end,
+                                label = "+ Hide Glow on Item Count 0",
+                                applyKeys  = { "hideGlowOnItemCountZero" },
+                                applyWrite = function(t, v) t.hideGlowOnItemCountZero = v and true or false end,
+                            })
+                        end
                         local KEEP_COLORED_ITEMS = {
                             { val = nil,  label = "None" },
                             { val = true, label = "Keep Colored (On CD)" },
@@ -11304,6 +11326,39 @@ initFrame:SetScript("OnEvent", function(self)
                                                 t.cdStateLowerAlpha = nil
                                             end
                                         end } })
+
+                        -- Low Item Count Glow (potions/healthstone/demonic healthstone only):
+                        -- glows the icon once the SUM across both ranks/variants of this item
+                        -- drops to 2 or fewer. Raid-only, current-expansion-max-level-only, and
+                        -- out-of-combat only (all enforced in ProcessPresetCooldowns,
+                        -- EllesmereUICdmHooks.lua) so it never fires while leveling and never
+                        -- fights the Cooldown State Effect's "CD Ready" glow above, which is the
+                        -- combat-relevant one.
+                        if type(spellID) == "number" and spellID <= -100 then
+                            MakeSubnavRow("Low Item Count Glow", ACTIVE_GLOW_ITEMS,
+                                function()
+                                    local v = cas.lowItemCountGlow
+                                    if v == false then v = nil end
+                                    return v
+                                end,
+                                function(v)
+                                    SetCasOwn("lowItemCountGlow", v)
+                                    if v then ns._cdmAnyLowItemCountGlow = true end
+                                    -- ProcessPresetCooldowns (EllesmereUICdmHooks.lua) is dirty-gated:
+                                    -- it never runs at all unless something marks it dirty, and the
+                                    -- 10Hz ticker driving it self-stops after ~1s of no dirty edges.
+                                    -- A plain settings change is neither, so without this the new (or
+                                    -- removed) glow only ever took effect on the next unrelated bag/
+                                    -- cast/combat edge -- or a reload. Force both explicitly so the
+                                    -- change is visible on this icon's very next pass.
+                                    if ns._MarkPresetCdDirty then ns._MarkPresetCdDirty() end
+                                    if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+                                end,
+                                function() return not cas.lowItemCountGlow end,
+                                nil,
+                                { apply = { keys = { "lowItemCountGlow" },
+                                            write = function(t, v) t.lowItemCountGlow = v end } })
+                        end
 
                         -- Cooldown Saturation (preset/custom): mirror of the regular-spell row.
                         -- These icons are greyed by the Fake-Active engine rather than by Blizzard, so the runtime reads this key in PresetKeepsColor instead of the SetDesaturated hook -- same setting, same key name.
@@ -18737,15 +18792,6 @@ initFrame:SetScript("OnEvent", function(self)
                           BD().showZeroItemCount = v and true or false
                           ns.RefreshCDMIconAppearance(BD().key); Refresh(); UpdateCDMPreview()
                       end },
-                    -- Crafted-rank pip on tracked items (ranks share icon art, so
-                    -- two ranks are otherwise indistinguishable). Off by default.
-                    { type="toggle", label="Show Item Quality",
-                      tooltip="Show the crafted quality rank on tracked items, matching the rank icon on the action bars. Items with no crafted quality are unaffected.",
-                      get=function() return BD().showItemQuality == true end,
-                      set=function(v)
-                          BD().showItemQuality = v
-                          if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_toggle") end
-                      end },
                     -- Buff-family only (stripped below for cd/utility): those
                     -- bars hide counters via the per-spell Hide Charge Text
                     -- lane, which owns their counter alpha channel.
@@ -18767,24 +18813,54 @@ initFrame:SetScript("OnEvent", function(self)
                           BD().stackCountPosition = v
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                       end },
-                    { type="slider", label="X Offset", min=-150, max=150, step=1,
+                    { type="slider", label="Item Count X Offset", min=-150, max=150, step=1,
                       get=function() return BD().stackCountX or 0 end,
                       set=function(v)
                           BD().stackCountX = v
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                       end },
-                    { type="slider", label="Y Offset", min=-150, max=150, step=1,
+                    { type="slider", label="Item Count Y Offset", min=-150, max=150, step=1,
                       get=function() return BD().stackCountY or 0 end,
                       set=function(v)
                           BD().stackCountY = v
                           ns.RefreshCDMIconAppearance(BD().key); ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview()
                       end },
+                    -- Crafted-rank pip on tracked items (ranks share icon art, so
+                    -- two ranks are otherwise indistinguishable). Off by default.
+                    -- Placed after the Charge/Stack offsets, with its own Size and
+                    -- X/Y offset immediately below it, so the pip can be resized
+                    -- and nudged independently of the charge/stack counter.
+                    { type="toggle", label="Show Item Quality",
+                      tooltip="Show the crafted quality rank on tracked items, matching the rank icon on the action bars. Items with no crafted quality are unaffected. Only shown while the item is owned.",
+                      get=function() return BD().showItemQuality == true end,
+                      set=function(v)
+                          BD().showItemQuality = v
+                          if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_toggle") end
+                      end },
+                    { type="slider", label="Item Quality Size", min=50, max=200, step=5,
+                      get=function() return BD().itemQualitySize or 100 end,
+                      set=function(v)
+                          BD().itemQualitySize = v
+                          if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_offset") end
+                      end },
+                    { type="slider", label="Item Quality X Offset", min=-150, max=150, step=1,
+                      get=function() return BD().itemQualityX or 0 end,
+                      set=function(v)
+                          BD().itemQualityX = v
+                          if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_offset") end
+                      end },
+                    { type="slider", label="Item Quality Y Offset", min=-150, max=150, step=1,
+                      get=function() return BD().itemQualityY or 0 end,
+                      set=function(v)
+                          BD().itemQualityY = v
+                          if ns.FullCDMRebuild then ns.FullCDMRebuild("item_quality_offset") end
+                      end },
                 },
             }
-            -- Show Charge/Stack Text (row 4, after the Show Item Count dropdown
-            -- and the new Show 0 When Empty toggle) is buff-family only -- see
-            -- its comment.
-            if not isBuffGlowBar then table.remove(scPopupSpec.rows, 4) end
+            -- Show Charge/Stack Text (row 3, right after the Show Item Count
+            -- dropdown and the Show 0 When Empty toggle above it) is buff-family
+            -- only -- see its comment.
+            if not isBuffGlowBar then table.remove(scPopupSpec.rows, 3) end
             local _, scCogShow = EllesmereUI.BuildCogPopup(scPopupSpec)
             MakeCogBtn(rightRgn, scCogShow, scSwatch, EllesmereUI.DIRECTIONS_ICON)
         end

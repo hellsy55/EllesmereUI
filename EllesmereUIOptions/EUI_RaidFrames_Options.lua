@@ -4216,7 +4216,7 @@ initFrame:SetScript("OnEvent", function(self)
             local _, cogShow = EllesmereUI.BuildCogPopup({
                 title = "Out of Range Alpha",
                 rows = {
-                    { type="toggle", label="Darken Frames Out of Range Instead",
+                    { type="toggle", label="Darken Overlay Instead of Alpha",
                       tooltip="Out-of-range frames darken instead of fading transparent, matching Blizzard's default party/raid frame look. Uses the same Out of Range Alpha % as brightness: 100% = no visible difference in/out of range, 10% = out-of-range frames drop to 10% brightness.",
                       get=function() return SVal("oorDarken", false) == true end,
                       set=function(v)

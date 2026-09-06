@@ -3523,6 +3523,39 @@ local function SkinCharacterSheet()
                 local sid = tile._setID
                 if not sid then return end
                 local items = {
+                    { text = "Change Name", onClick = function()
+                        if InCombatLockdown() then return end
+                        local pickSid   = tile._setID
+                        local pickSname = tile._setName
+                        if not (pickSid and pickSname) then return end
+                        StaticPopupDialogs["EUI_EQUIP_SET_NAME"] = {
+                            text = "New name for equipment set:",
+                            button1 = "Rename", button2 = "Cancel",
+                            hasEditBox = true, editBoxWidth = 200,
+                            timeout = 0, whileDead = false, hideOnEscape = true,
+                            OnShow = function(dialog)
+                                local eb = dialog.EditBox or dialog.editBox
+                                if eb then
+                                    eb:SetText(pickSname)
+                                    eb:HighlightText()
+                                end
+                            end,
+                            OnAccept = function(dialog)
+                                local eb = dialog.EditBox or dialog.editBox
+                                local newName = eb and eb:GetText()
+                                if newName then newName = newName:trim() end
+                                if newName and newName ~= "" and newName ~= pickSname then
+                                    local _, curIcon = C_EquipmentSet.GetEquipmentSetInfo(pickSid)
+                                    C_EquipmentSet.ModifyEquipmentSet(pickSid, newName, curIcon)
+                                    RefreshEquipmentSets()
+                                end
+                            end,
+                            EditBoxOnEnterPressed = function(self)
+                                StaticPopup_OnClick(self:GetParent(), 1)
+                            end,
+                        }
+                        StaticPopup_Show("EUI_EQUIP_SET_NAME")
+                    end },
                     { text = "Change Icon", onClick = function()
                         if InCombatLockdown() then return end
                         local pickSid   = tile._setID
