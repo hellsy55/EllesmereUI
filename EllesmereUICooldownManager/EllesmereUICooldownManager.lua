@@ -5824,6 +5824,13 @@ local function RefreshCDMIconAppearance(barKey)
             ShowProcGlow(icon)
         elseif hadActiveGlow then
             -- Don't touch: active glow is managed by the SetSwipeColor hook. Stopping it here causes a visible blink.
+        elseif ifd and ifd._lowItemGlowOn then
+            -- Low Item Count Glow (item presets: potions/healthstone -- see
+            -- ProcessPresetCooldowns, EllesmereUICdmHooks.lua) owns the overlay
+            -- while its own glow is lit. Don't touch, same reasoning as
+            -- hadActiveGlow above: stopping it here (this pass runs on every
+            -- restyle, e.g. any settings change) would kill the visual while the
+            -- flag stays true, and nothing here would ever restart it.
         elseif ifd and ifd._cdStateGlowOn then
             -- cdState glow active: stop it so the desat hook restarts with the updated style. Also re-evaluate immediately for off-CD spells (desat hook won't fire for those).
             if glowOv then StopNativeGlow(glowOv) end

@@ -1196,7 +1196,15 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
     if ns.SetCdStateShiftHidden then ns.SetCdStateShiftHidden(fc, false) end
     local glow = fd and fd.glowOverlay
     if not glow then return end
-    if not onCD and ns.CdStateGlowCombatOK(cas) then
+    -- Hide Glow on Item Count 0 (item presets only): the frame's bag total is
+    -- refreshed every pass in ProcessPresetCooldowns (EllesmereUICdmHooks.lua)
+    -- and cached on the frame itself, so no extra count lookup is needed here.
+    -- Ready-but-empty (e.g. last potion used, cooldown still running down on an
+    -- alt charge/rank) reads as "nothing to glow for" rather than lighting up
+    -- an icon the player has none of.
+    local hideForZeroCount = cas and cas.hideGlowOnItemCountZero
+        and (frame._cachedTotal or 0) == 0
+    if not onCD and not hideForZeroCount and ns.CdStateGlowCombatOK(cas) then
         -- Re-assert against the overlay's REAL state (overlay._glowActive), not
         -- our flag alone. fd.glowOverlay is shared with the proc-glow and
         -- appearance passes, and twelve of the thirteen sites that stop it never

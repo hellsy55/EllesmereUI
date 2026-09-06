@@ -5500,15 +5500,61 @@ local function CdmQualityAtlasFor(q)
     return nil
 end
 
-local function ApplyItemQualityPip(f, itemID, on)
+-- Low Item Count Glow gate: max level for the current expansion (Midnight =
+-- 90 today), read live via the Blizzard API when available so a future level
+-- bump doesn't need a code change; 90 is only the fallback for older clients
+-- that lack the API. Cheap (two API calls), safe to call every pass.
+local function IsAtCurrentMaxLevel()
+    local cap = (GetMaxLevelForPlayerExpansion and GetMaxLevelForPlayerExpansion()) or 90
+    local lvl = UnitLevel("player")
+    if issecretvalue and issecretvalue(lvl) then return false end
+    return (lvl or 0) >= cap
+end
+
+-- Low Item Count Glow's raid gate: the ZONE'S instance type, not the group
+-- type. IsInRaid() only answers true for a formed raid GROUP (5+, converted
+-- via "Convert to Raid"), so it reads false for a lone player soloing old raid
+-- content outside a group -- exactly the case this feature should still cover.
+-- IsInInstance()'s instanceType answers off the zone itself, group or no group.
+local function IsInRaidInstance()
+    local inInstance, instanceType = IsInInstance()
+    return inInstance and instanceType == "raid"
+end
+
+-- Low Item Count Glow's own bag total: the displayed count on the icon is
+-- deliberately the CURRENT variant only (see the comment at its computation
+-- below -- "2 Fleeting shows 2, even with 50 regular rank 1s"), so it cannot
+-- drive a "running low" warning by itself -- a full stack of the other rank
+-- would silently glow as if the player were empty. This sums the primary
+-- item id and every altItemIDs rank/variant instead.
+local function LowGlowItemTotal(f)
+    local total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
+    local alts = f._presetData and f._presetData.altItemIDs
+    if alts then
+        for i = 1, #alts do
+            total = total + (C_Item.GetItemCount(alts[i], false, true) or 0)
+        end
+    end
+    return total
+end
+
+local function ApplyItemQualityPip(f, itemID, on, offsetX, offsetY, sizePct)
     if not on then
         if f._qualityHolder then f._qualityHolder:Hide() end
         f._qualityItemID, f._qualityAtlas = nil, nil
         return
     end
     if not itemID then return end
-    -- Resolved already for this exact item (false = resolved as "no quality").
-    if f._qualityItemID == itemID and f._qualityAtlas ~= nil then return end
+    offsetX, offsetY = offsetX or 0, offsetY or 0
+    sizePct = sizePct or 100
+    -- Resolved already for this exact item AND at the same offset/size (false =
+    -- resolved as "no quality"). Offset/size are display settings, not part of
+    -- the item's own resolution, so a change to either must still re-anchor the
+    -- pip even though the item id (and therefore the atlas) hasn't changed.
+    if f._qualityItemID == itemID and f._qualityAtlas ~= nil
+       and f._qualityOffX == offsetX and f._qualityOffY == offsetY
+       and f._qualitySizePct == sizePct then return end
+    f._qualityOffX, f._qualityOffY, f._qualitySizePct = offsetX, offsetY, sizePct
 
     local atlas
     local ts = C_TradeSkillUI
@@ -5571,9 +5617,11 @@ local function ApplyItemQualityPip(f, itemID, on)
     end
     -- Same proportion the action bars use (Blizzard centers the overlay 14,-14
     -- from the TOPLEFT of a 45px button), scaled to whatever size the bar runs.
-    local sc = (f:GetWidth() or 36) / 36
+    local sc = (f:GetWidth() or 36) / 36 * (sizePct / 100)
     tex:ClearAllPoints()
-    tex:SetPoint("CENTER", holder, "TOPLEFT", 11 * sc, -11 * sc)
+    -- offsetY follows the same up-is-positive convention as every other
+    -- CDM text/icon offset slider (stackCountY, cooldownTextY, ...).
+    tex:SetPoint("CENTER", holder, "TOPLEFT", 11 * sc + offsetX, -11 * sc + offsetY)
     tex:SetScale(sc)
     tex:Show()
     holder:Show()
@@ -6120,11 +6168,75 @@ local function ProcessPresetCooldowns()
                     -- Quality pip follows the variant actually being SHOWN: a pot
                     -- preset resolves its icon across ranks, so keying this on the
                     -- primary would label the icon with a rank it is not drawing.
+                    -- Only shown while the player actually owns some of the item --
+                    -- a rank pip on an icon you have none of is misleading.
                     local fc2 = _ecmeFC[f]
                     local bk2 = fc2 and fc2.barKey
                     local bd2 = bk2 and barDataByKey[bk2]
                     ApplyItemQualityPip(f, f._displayItemID or f._presetItemID,
-                        bd2 and bd2.showItemQuality == true)
+                        bd2 and bd2.showItemQuality == true and total > 0,
+                        bd2 and bd2.itemQualityX, bd2 and bd2.itemQualityY,
+                        bd2 and bd2.itemQualitySize)
+                end
+
+                -- Low Item Count Glow (potions/healthstone/demonic healthstone):
+                -- glows the icon when the SUM across both ranks/variants of this
+                -- preset drops to 2 or fewer (LowGlowItemTotal -- the per-icon
+                -- `total` above is deliberately the current variant only and
+                -- would false-glow while the other rank still has a full stack).
+                -- Raid-only and max-level-only: a low-supply nudge is a raid
+                -- consumables thing, not something leveling alts need. Out-of-
+                -- combat only -- the same icon may also carry a Cooldown State
+                -- Effect "CD Ready" glow (ApplyCdState, EllesmereUICdmFakeActive.lua),
+                -- which IS combat-relevant, and both effects fighting over the same
+                -- glowOverlay would flicker between them. Item counts are plain Lua
+                -- numbers (never secret), so this can drive the overlay directly
+                -- instead of going through the secret-safe StackGlow_Configure gate
+                -- system built for aura stacks.
+                do
+                    local fdLic = hookFrameData[f]
+                    local casKeyLic = f._presetItemID and -(f._presetItemID)
+                    local casLic = casKeyLic and ns.GetEffectiveCustomActiveState
+                        and ns.GetEffectiveCustomActiveState(casKeyLic)
+                    local styleLic = casLic and casLic.lowItemCountGlow
+                    if styleLic == false then styleLic = nil end
+                    if fdLic then
+                        local wantGlow = false
+                        if styleLic and IsInRaidInstance() and IsAtCurrentMaxLevel()
+                           and not (ns.CDMInCombat and ns.CDMInCombat()) then
+                            wantGlow = LowGlowItemTotal(f) <= 2
+                        end
+                        -- Cooldown State Effect owns the overlay while its own ready
+                        -- glow is lit; never steal it out from under that effect.
+                        if wantGlow and not fdLic._presetCdGlowOn then
+                            local glow = fdLic.glowOverlay
+                            if glow then
+                                local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(casLic or {})
+                                gr, gg, gb = gr or 1, gg or 1, gb or 1
+                                -- Signature covers style + color: a live style/color change in the
+                                -- options menu must take effect on this icon's own next pass, not
+                                -- only on the next reload. StartNativeGlow stops the running glow
+                                -- itself before starting the new one, so this is safe to call
+                                -- whenever the signature changes, not just on a cold start. Also
+                                -- re-asserts against the overlay's REAL state (glow._glowActive),
+                                -- not the flag alone: an unrelated appearance refresh
+                                -- (RefreshCDMIconAppearance) stops any glow it doesn't itself own
+                                -- on every restyle pass, with no way to tell this engine -- the
+                                -- same reason ApplyCdState re-checks _glowActive above.
+                                local sig = styleLic .. "|" .. gr .. "|" .. gg .. "|" .. gb
+                                if not fdLic._lowItemGlowOn or not glow._glowActive
+                                   or fdLic._lowItemGlowSig ~= sig then
+                                    ns.StartNativeGlow(glow, styleLic, gr, gg, gb)
+                                    fdLic._lowItemGlowOn = true
+                                    fdLic._lowItemGlowSig = sig
+                                end
+                            end
+                        elseif fdLic._lowItemGlowOn then
+                            if fdLic.glowOverlay then ns.StopNativeGlow(fdLic.glowOverlay) end
+                            fdLic._lowItemGlowOn = false
+                            fdLic._lowItemGlowSig = nil
+                        end
+                    end
                 end
                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                 if shouldDesat ~= f._lastDesat then
