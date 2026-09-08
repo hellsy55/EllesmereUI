@@ -189,7 +189,21 @@ local function InstallMenuClassifierFix()
         local correct = isRaidToken and "RAID_PLAYER"
             or isPartyToken and "PARTY"
             or ResolvePlayerMenu(unit)
-        UnitPopup_OpenMenu(correct, { unit = unit })
+        -- Building RAID_PLAYER/PARTY also evaluates the Trade entry's
+        -- distance-gated visibility, which calls the protected
+        -- CheckInteractDistance(). That evaluation runs synchronously inside
+        -- THIS (insecure) re-open call, so the protected call itself throws
+        -- ADDON_ACTION_BLOCKED regardless of anything ModifyReopenedMenu does
+        -- afterward (SetEnabled only gates the click, not this build-time
+        -- shown check). Shadow the global for the duration of the call so the
+        -- generator gets a harmless "out of range" answer instead of reaching
+        -- the real protected function; restored immediately after, success or
+        -- error, so nothing else in this session is affected.
+        local realCheckInteractDistance = CheckInteractDistance
+        CheckInteractDistance = function() return false end
+        local ok, err = pcall(UnitPopup_OpenMenu, correct, { unit = unit })
+        CheckInteractDistance = realCheckInteractDistance
+        if not ok then geterrorhandler()(err) end
         EllesmereUI._menuReopenUnit = nil
         reopening = false
         if EllesmereUI._ShowReopenedMenuExtras then EllesmereUI._ShowReopenedMenuExtras(unit) end

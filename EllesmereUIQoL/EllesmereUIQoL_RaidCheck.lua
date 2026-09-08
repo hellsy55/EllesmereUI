@@ -208,15 +208,19 @@ local VANTUS_KEY     = "vantus"
 local MSG_REPORT     = "rc"    -- a client describing itself
 local MSG_QUERY      = "rcq"   -- someone asking the group to describe itself
 
--- Auto-Repair: left-clicking a row's Durability cell uses the Auto-Hammer
--- when that row's own durability reading is at or below the threshold.
+-- Auto-Repair: left-clicking the Durability column's header icon always
+-- uses the Auto-Hammer, whether or not anyone in the raid is actually
+-- reading low right now -- the click is a deliberate, always-available
+-- action, not something that only arms once a threshold is crossed.
 -- Raid only (see Refresh's autoRepairOn) -- a dungeon or M+ group repairs at
 -- the vendor between pulls easily enough that this is raid-specific chrome,
 -- not a general durability shortcut. 25 is its own threshold, deliberately
 -- not EllesmereUI.DURABILITY_LOW (20): that constant colors the grid's
 -- existing low-durability warning, a separate and already-shipped decision
--- this feature does not get to quietly change.
-local AUTO_REPAIR_ITEM_ID  = 132414
+-- this feature does not get to quietly change. It still only drives the
+-- per-row blink and the header's tooltip hint below -- never whether the
+-- click itself works.
+local AUTO_REPAIR_ITEM_ID  = 132514
 local AUTO_REPAIR_THRESHOLD = 25
 
 -- What each client volunteered about itself, from either wire. One store, so
@@ -275,22 +279,32 @@ local function EnchantName(id)
     return info and info.name
 end
 
--- Left-click on a low-durability row's Durability cell (see Refresh/MakeRow).
--- Re-checks both gates itself instead of trusting the hit frame's shown
--- state: that state is a Refresh()-cadence snapshot, up to SWEEP_PERIOD
--- stale, and leaving the raid or flipping the option off mid-window must not
--- leave a click still armed. UseItemByName resolves by id fine and needs no
--- bag slot from the caller; the pcall is what a plain button click needs
--- here, not a SecureActionButton -- using an item from a real mouse click is
--- unrestricted in combat the same as it is out of it, but the feature is
--- deliberately out-of-combat-only anyway (see InCombatLockdown check): a
--- pull is not when anyone should be looking at this column, let alone
--- clicking it.
-local function UseAutoRepairItem()
-    if not ns.RaidCheckAutoRepair() then return end
-    if not IsInRaid() then return end
-    if InCombatLockdown() then return end
-    pcall(UseItemByName, AUTO_REPAIR_ITEM_ID)
+-- Arms or disarms the Durability header's secure-button macro. Called from
+-- Refresh, out of combat only (autoRepairOn already folds in the option,
+-- IsInRaid, and !InCombatLockdown -- see Refresh) -- SetAttribute on a
+-- secure frame is only safe to call from insecure code outside combat, same
+-- restriction as everywhere else this feature touches the button.
+--
+-- The macro's own "[nocombat]" conditional is what actually blocks the use
+-- if combat somehow starts in the gap between one sweep and the next -- belt
+-- and braces alongside the outOfCombat check that gates whether this ever
+-- gets armed at all. Disarmed (nil attributes) is a plain no-op click, no
+-- different from any other icon nobody has wired up.
+--
+-- This has to be a secure button's own click, not a script handler calling
+-- UseItemByName/RunMacroText directly: using an item is a protected action,
+-- and the client throws ADDON_ACTION_FORBIDDEN on that call from a plain
+-- Frame's OnMouseUp even out of combat and even unwrapped from pcall.
+-- BuffReminders' repair button (Display/SecureButtons.lua) takes the same
+-- route for the same reason.
+local function ArmAutoRepairButton(h, armed)
+    if armed then
+        h:SetAttribute("type", "macro")
+        h:SetAttribute("macrotext", "/use [nocombat] item:" .. AUTO_REPAIR_ITEM_ID)
+    else
+        h:SetAttribute("type", nil)
+        h:SetAttribute("macrotext", nil)
+    end
 end
 
 -- "Name-Realm" when the unit is cross-realm, plain name otherwise -- what
@@ -1258,7 +1272,16 @@ local function Build()
     -- hovered -- twelve icons and not a word says nothing on its own.
     for mc = 1, MEMBER_COLS do
         for _, def in ipairs(COLUMNS) do
-            local h = CreateFrame("Frame", nil, win)
+            -- Auto-Repair needs a SecureActionButtonTemplate: using an item
+            -- is a protected action, and the client rejects it (even out of
+            -- combat, even unwrapped from pcall) unless the click runs
+            -- through a real secure button rather than a script handler on
+            -- a plain Frame calling the item API directly. Every other
+            -- header stays a plain Frame -- they only whisper or show a
+            -- tooltip, neither of which touches anything protected.
+            local h = def.key == DURABILITY_KEY
+                and CreateFrame("Button", nil, win, "SecureActionButtonTemplate")
+                or CreateFrame("Frame", nil, win)
             h:SetSize(ICON_SZ, ICON_SZ)
             local tex = h:CreateTexture(nil, "ARTWORK")
             tex:SetAllPoints()
@@ -1328,15 +1351,18 @@ local function Build()
                     end
                 end
                 if def.key == DURABILITY_KEY then
-                    -- Auto-Repair status, same three-way shape as the raid-
-                    -- buff headers: nothing to say when the option/raid/
-                    -- combat gate is off (h._lowDurability stays nil, see
-                    -- the tail loop in Refresh), a green line when nobody is
-                    -- low, a click hint when someone is.
-                    if h._lowDurability == false then
-                        GameTooltip:AddLine(EllesmereUI.L("Nobody is below the Auto-Repair threshold."), 0.6, 1, 0.6, true)
-                    elseif h._lowDurability then
+                    -- Same nil/on shape as the raid-buff headers: nothing to
+                    -- say when the option/raid/combat gate is off
+                    -- (h._lowDurability stays nil, see the tail loop in
+                    -- Refresh). Otherwise the click hint always shows --
+                    -- anyLowDurability only adds a heads-up line on top, it
+                    -- never withholds the hint the way the raid-buff headers
+                    -- withhold theirs when nobody's missing anything.
+                    if h._lowDurability ~= nil then
                         GameTooltip:AddLine(EllesmereUI.L("Left-click to use the Auto-Hammer."), 0.8, 0.8, 0.8, true)
+                        if h._lowDurability == false then
+                            GameTooltip:AddLine(EllesmereUI.L("Nobody is below the Auto-Repair threshold."), 0.6, 1, 0.6, true)
+                        end
                     end
                 end
                 GameTooltip:Show()
@@ -1346,12 +1372,16 @@ local function Build()
                 -- One action, not two, so there's no near/far split like the
                 -- raid-buff headers -- Auto-Repair always targets yourself,
                 -- so there is only one thing a click here could ever mean.
-                h:SetScript("OnMouseUp", function(self, button)
-                    if button == "LeftButton" then
-                        UseAutoRepairItem()
-                    end
-                end)
+                -- No OnMouseUp/UseItemByName here: using an item is a
+                -- protected action, so the click has to run through the
+                -- SecureActionButtonTemplate's own click handling (armed via
+                -- SetAttribute in Refresh, see ArmAutoRepairButton) rather
+                -- than a script calling the item API directly -- that's
+                -- exactly the call the client was rejecting with
+                -- ADDON_ACTION_FORBIDDEN.
+                h:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
             end
+
             if def.class then
                 -- Left whispers the near (groups 1-4) or, outside a raid,
                 -- the only target; right whispers the far (groups 5-8)
@@ -1958,6 +1988,11 @@ local function Refresh()
                     else
                         h._lowDurability = nil
                     end
+                    -- The click itself, unlike the line above, is not about
+                    -- anyLowDurability at all -- it's live whenever the
+                    -- option/raid/combat gate (autoRepairOn) is, whether or
+                    -- not this sweep found anyone actually low.
+                    ArmAutoRepairButton(h, autoRepairOn)
                 end
             end
         end

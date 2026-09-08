@@ -4458,33 +4458,9 @@ local function _updateTBBChargeHashFill(bar, cfg, maxCharges, currentCharges,
     local reverse = cfg.reverseFill and true or false
     local orientation = isVert and "VERTICAL" or "HORIZONTAL"
     local barW, barH = sb:GetWidth(), sb:GetHeight()
-    -- Divider boundary bars: one per charge boundary, frozen at value i (clean constants).
-    -- Their texture edges come from the SAME engine math as the live countTexture edge, so
-    -- the hash tick lines centered here share one coordinate system with the partial-charge
-    -- shade's leading edge -- the sliver that shimmered beside the divider at some bar
-    -- widths came from the old PP.Scale-snapped tick offset missing that native edge.
-    local divBars = bar._chargeHashDivBars
-    if not divBars then divBars = {}; bar._chargeHashDivBars = divBars end
-    for i = 1, maxCharges - 1 do
-        local db2 = divBars[i]
-        if not db2 then
-            db2 = CreateFrame("StatusBar", nil, sb)
-            db2:SetAllPoints(sb)
-            db2:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-            local dt = db2:GetStatusBarTexture()
-            dt:SetSnapToPixelGrid(false)
-            dt:SetTexelSnappingBias(0)
-            db2:SetAlpha(0)
-            db2:EnableMouse(false)
-            divBars[i] = db2
-        end
-        db2:SetOrientation(orientation)
-        db2:SetReverseFill(reverse)
-        db2:SetMinMaxValues(0, maxCharges)
-        db2:SetValue(i)
-        db2:Show()
-    end
-    for i = maxCharges, #divBars do divBars[i]:Hide() end
+    -- The divider boundary bars the hash ticks anchor to are built and cache-gated
+    -- by ApplyTBBChargeHashLines, which runs earlier on the same tick; nothing here
+    -- reads them, so this per-tick path never touches them.
 
     -- Direct scalar comparisons name every geometry invalidator while keeping the steady-state update allocation-free.
     if not bar._chargeHashFillGeometryValid
