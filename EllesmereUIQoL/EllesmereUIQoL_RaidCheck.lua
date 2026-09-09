@@ -184,7 +184,8 @@ local CHECKS = {
     { key = "flask",  label = "Flask",  seed = 1235110, nameTooltip = true,
       ids = { [1236763] = true, [1239355] = true, [1235057] = true, [1239755] = true,
               [1236767] = true, [1235111] = true, [1235110] = true, [1235108] = true } },
-    { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS, nameTooltip = true },
+    { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS, nameTooltip = true,
+      note = "Feast of Knowledge, falling back to Amani Cornucopia then Loa's Gathering." },
     { key = "rune",   label = "Rune",   seed = 1264426, nameTooltip = true,
       ids = { [1264426] = true } },
     -- Vantus runes apply to raid bosses, so in a Mythic+ key the column is not
@@ -203,6 +204,7 @@ local CHECKS = {
 local SHOW_WENCHANT_COLUMN = false
 
 local DURABILITY_KEY = "durability"
+local FOOD_KEY       = "food"
 local WENCHANT_KEY   = "wenchant"
 local VANTUS_KEY     = "vantus"
 local MSG_REPORT     = "rc"    -- a client describing itself
@@ -222,6 +224,38 @@ local MSG_QUERY      = "rcq"   -- someone asking the group to describe itself
 -- click itself works.
 local AUTO_REPAIR_ITEM_ID  = 132514
 local AUTO_REPAIR_THRESHOLD = 25
+
+-- Auto-Feast: left-clicking the Food column's header icon drops a raid
+-- feast at your own feet, the same "always-available header action" shape
+-- as Auto-Repair above, and for the same reason: using an item is a
+-- protected action, so it has to be a SecureActionButtonTemplate's own
+-- click rather than a script handler calling the item API directly.
+--
+-- Three feasts, tried in this order, is one macro rather than three: /use's
+-- comma-separated item list already means "the first of these you actually
+-- have", so there is no need to read bags here at all -- the client resolves
+-- the fallback itself, and a feast that later gets removed from a player's
+-- bag just falls through to the next one on the very next click.
+-- [@player] is explicit rather than relying on /use's default target: it is
+-- what makes this "drop it at MY feet" regardless of who or what the
+-- header's own frame happens to be anchored near.
+local AUTO_FEAST_ITEM_IDS = { 275266, 275264, 275265 } -- Feast of Knowledge, Amani Cornucopia, Loa's Gathering
+local AUTO_FEAST_ITEM_LIST = table.concat(AUTO_FEAST_ITEM_IDS, ",")
+
+-- Whether you personally already have a Well Fed buff running. Auto-Feast's
+-- click is disarmed while this is true (see autoFeastOn in Refresh) -- using
+-- another feast on top of one already running is pure waste, not something
+-- worth spending a click on. Self-read, like MyEnchantID above: your own
+-- auras are never restricted the way another player's are, so this is a
+-- plain index sweep with no Restricted() gate to check first.
+local function HasFoodBuff()
+    for i = 1, AURA_SCAN_LIMIT do
+        local aura = GetAuraDataByIndex("player", i, "HELPFUL")
+        if not aura then return false end
+        if aura.icon and FOOD_ICONS[aura.icon] then return true end
+    end
+    return false
+end
 
 -- What each client volunteered about itself, from either wire. One store, so
 -- a future field lands here rather than growing a third parallel map -- and
@@ -301,6 +335,20 @@ local function ArmAutoRepairButton(h, armed)
     if armed then
         h:SetAttribute("type", "macro")
         h:SetAttribute("macrotext", "/use [nocombat] item:" .. AUTO_REPAIR_ITEM_ID)
+    else
+        h:SetAttribute("type", nil)
+        h:SetAttribute("macrotext", nil)
+    end
+end
+
+-- Same shape as ArmAutoRepairButton, one column over: arms or disarms the
+-- Food header's secure-button macro. [nocombat] guards the click the same
+-- way it guards Auto-Repair's -- eating is blocked in combat regardless,
+-- this just keeps the button from throwing instead of quietly failing.
+local function ArmAutoFeastButton(h, armed)
+    if armed then
+        h:SetAttribute("type", "macro")
+        h:SetAttribute("macrotext", "/use [nocombat,@player] item:" .. AUTO_FEAST_ITEM_LIST)
     else
         h:SetAttribute("type", nil)
         h:SetAttribute("macrotext", nil)
@@ -956,6 +1004,8 @@ local DB_DEFAULTS = {
         -- the kind of thing that should be opted into, not discovered by
         -- surprise the first time someone's durability drops.
         autoRepair       = false,
+        -- Same reasoning and shape as autoRepair: off by default.
+        autoFeast        = false,
         -- Same reasoning as autoRepair, and the same shape: off by default,
         -- since whispering someone on a raid leader's behalf is not
         -- something to switch on by surprise.
@@ -1272,14 +1322,14 @@ local function Build()
     -- hovered -- twelve icons and not a word says nothing on its own.
     for mc = 1, MEMBER_COLS do
         for _, def in ipairs(COLUMNS) do
-            -- Auto-Repair needs a SecureActionButtonTemplate: using an item
-            -- is a protected action, and the client rejects it (even out of
-            -- combat, even unwrapped from pcall) unless the click runs
-            -- through a real secure button rather than a script handler on
-            -- a plain Frame calling the item API directly. Every other
-            -- header stays a plain Frame -- they only whisper or show a
-            -- tooltip, neither of which touches anything protected.
-            local h = def.key == DURABILITY_KEY
+            -- Auto-Repair and Auto-Feast both need a SecureActionButtonTemplate:
+            -- using an item is a protected action, and the client rejects it
+            -- (even out of combat, even unwrapped from pcall) unless the
+            -- click runs through a real secure button rather than a script
+            -- handler on a plain Frame calling the item API directly. Every
+            -- other header stays a plain Frame -- they only whisper or show
+            -- a tooltip, neither of which touches anything protected.
+            local h = (def.key == DURABILITY_KEY or def.key == FOOD_KEY)
                 and CreateFrame("Button", nil, win, "SecureActionButtonTemplate")
                 or CreateFrame("Frame", nil, win)
             h:SetSize(ICON_SZ, ICON_SZ)
@@ -1365,20 +1415,29 @@ local function Build()
                         end
                     end
                 end
+                if def.key == FOOD_KEY and h._autoFeastOn ~= nil then
+                    if h._autoFeastOn then
+                        GameTooltip:AddLine(EllesmereUI.L("Left-click to use a Feast."), 0.8, 0.8, 0.8, true)
+                    else
+                        -- Gate is on but the click is disarmed because you
+                        -- already have Well Fed -- see HasFoodBuff.
+                        GameTooltip:AddLine(EllesmereUI.L("You already have a Feast buff active."), 0.6, 1, 0.6, true)
+                    end
+                end
                 GameTooltip:Show()
             end)
             h:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            if def.key == DURABILITY_KEY then
+            if def.key == DURABILITY_KEY or def.key == FOOD_KEY then
                 -- One action, not two, so there's no near/far split like the
-                -- raid-buff headers -- Auto-Repair always targets yourself,
-                -- so there is only one thing a click here could ever mean.
-                -- No OnMouseUp/UseItemByName here: using an item is a
-                -- protected action, so the click has to run through the
-                -- SecureActionButtonTemplate's own click handling (armed via
-                -- SetAttribute in Refresh, see ArmAutoRepairButton) rather
-                -- than a script calling the item API directly -- that's
-                -- exactly the call the client was rejecting with
-                -- ADDON_ACTION_FORBIDDEN.
+                -- raid-buff headers -- Auto-Repair and Auto-Feast always
+                -- target yourself, so there is only one thing a click here
+                -- could ever mean. No OnMouseUp/UseItemByName here: using an
+                -- item is a protected action, so the click has to run
+                -- through the SecureActionButtonTemplate's own click
+                -- handling (armed via SetAttribute in Refresh, see
+                -- ArmAutoRepairButton/ArmAutoFeastButton) rather than a
+                -- script calling the item API directly -- that's exactly the
+                -- call the client was rejecting with ADDON_ACTION_FORBIDDEN.
                 h:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
             end
 
@@ -1547,6 +1606,16 @@ local function Refresh()
     -- clicking it.
     local outOfCombat  = not InCombatLockdown()
     local autoRepairOn = ns.RaidCheckAutoRepair() and IsInRaid() and outOfCombat
+    -- Auto-Feast: same raid-only, out-of-combat gate as Auto-Repair, and for
+    -- the same reason -- a feast is raid chrome, and eating is blocked in
+    -- combat regardless of what the button is armed with. autoFeastGateOn
+    -- is that gate alone (option/raid/combat); autoFeastOn additionally
+    -- requires you not already be fed, so the click stays live/dead exactly
+    -- with whether it would actually do anything -- see the tail loop below,
+    -- which needs the gate and the fed-check as two separate values to tell
+    -- "feature's off" apart from "feature's on, you're just already fed".
+    local autoFeastGateOn = ns.RaidCheckAutoFeast() and IsInRaid() and outOfCombat
+    local autoFeastOn     = autoFeastGateOn and not HasFoodBuff()
 
     -- Unlike Auto-Repair, this one is NOT out-of-combat-only: whispering a
     -- request for a buff doesn't touch anything protected, and a missing
@@ -1994,6 +2063,25 @@ local function Refresh()
                     -- not this sweep found anyone actually low.
                     ArmAutoRepairButton(h, autoRepairOn)
                 end
+                if def.key == FOOD_KEY then
+                    -- Same nil/false/true shape as h._lowDurability: nil
+                    -- when Auto-Feast isn't active right now at all (option
+                    -- off, not a raid, or in combat), so the header's
+                    -- OnEnter says nothing rather than falsely promising a
+                    -- click that would silently no-op. false (gate on, but
+                    -- you already have Well Fed) still shows a hint, just a
+                    -- different one -- see the OnEnter block above. Written
+                    -- as an if/else rather than the usual "a and b or c"
+                    -- shortcut on purpose: that shortcut collapses a real
+                    -- `false` (already fed) down to `nil` (feature off),
+                    -- which is exactly the distinction this needs to keep.
+                    if autoFeastGateOn then
+                        h._autoFeastOn = autoFeastOn
+                    else
+                        h._autoFeastOn = nil
+                    end
+                    ArmAutoFeastButton(h, autoFeastOn)
+                end
             end
         end
     end
@@ -2047,6 +2135,16 @@ function ns.RaidCheckAutoRepair(v)
     if not p then return end
     p.autoRepair = v
     -- Not raid-gated here: the toggle can be flipped from anywhere, and
+    -- Refresh() is what actually decides whether it applies right now.
+    Refresh()
+end
+
+function ns.RaidCheckAutoFeast(v)
+    local p = P()
+    if v == nil then return (p and p.autoFeast) == true end
+    if not p then return end
+    p.autoFeast = v
+    -- Not raid-gated here either, same reasoning as RaidCheckAutoRepair:
     -- Refresh() is what actually decides whether it applies right now.
     Refresh()
 end
