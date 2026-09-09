@@ -675,7 +675,11 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = RCDisabled,
               getValue = ns.RaidCheckBuffWhisper,
               setValue = ns.RaidCheckBuffWhisper },
-            { type = "label", text = "" }
+            { type = "toggle", text = "Auto-Feast",
+              tooltip = "Raid only. Left-click the Food column's header icon anytime to drop a feast at your own feet: Feast of Knowledge, falling back to Amani Cornucopia and then Loa's Gathering depending on what's in your bags. Disarmed while you already have a Well Fed buff active, so there's no wasted click.",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckAutoFeast,
+              setValue = ns.RaidCheckAutoFeast }
         );  y = y - h
 
         -- COMPACT BAND (standalone)
