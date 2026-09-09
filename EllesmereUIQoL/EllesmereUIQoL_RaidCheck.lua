@@ -248,10 +248,21 @@ local AUTO_FEAST_ITEM_LIST = table.concat(AUTO_FEAST_ITEM_IDS, ",")
 -- worth spending a click on. Self-read, like MyEnchantID above: your own
 -- auras are never restricted the way another player's are, so this is a
 -- plain index sweep with no Restricted() gate to check first.
+-- Secret-aura guard: on Midnight-era clients, GetAuraDataByIndex() throws
+-- instead of returning nil when the calling execution is tainted AND the
+-- client is currently reporting auras as secret (Delves, M+, certain
+-- encounters). ArmAutoRepairButton/ArmAutoFeastButton below taint this
+-- addon's execution whenever they arm the header buttons, so this plain
+-- self-read is no longer exempt the way the comment above once assumed --
+-- check C_Secrets first and keep the pcall as a backstop so a secret buff
+-- degrades to "not fed" instead of taking the whole Ticker down.
 local function HasFoodBuff()
+    if C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() then
+        return false
+    end
     for i = 1, AURA_SCAN_LIMIT do
-        local aura = GetAuraDataByIndex("player", i, "HELPFUL")
-        if not aura then return false end
+        local ok, aura = pcall(GetAuraDataByIndex, "player", i, "HELPFUL")
+        if not ok or not aura then return false end
         if aura.icon and FOOD_ICONS[aura.icon] then return true end
     end
     return false
@@ -331,7 +342,14 @@ end
 -- Frame's OnMouseUp even out of combat and even unwrapped from pcall.
 -- BuffReminders' repair button (Display/SecureButtons.lua) takes the same
 -- route for the same reason.
+-- Only touches SetAttribute when the armed state actually flips: every
+-- SetAttribute call on a secure frame from this insecure code taints the
+-- calling execution (see HasFoodBuff's guard above), so re-arming with the
+-- same value on every single Refresh() tick was tainting far more often
+-- than the button's state ever actually changed.
 local function ArmAutoRepairButton(h, armed)
+    if h._autoRepairArmed == armed then return end
+    h._autoRepairArmed = armed
     if armed then
         h:SetAttribute("type", "macro")
         h:SetAttribute("macrotext", "/use [nocombat] item:" .. AUTO_REPAIR_ITEM_ID)
@@ -345,7 +363,11 @@ end
 -- Food header's secure-button macro. [nocombat] guards the click the same
 -- way it guards Auto-Repair's -- eating is blocked in combat regardless,
 -- this just keeps the button from throwing instead of quietly failing.
+-- Same "only on change" guard as ArmAutoRepairButton, and for the same
+-- taint-frequency reason.
 local function ArmAutoFeastButton(h, armed)
+    if h._autoFeastArmed == armed then return end
+    h._autoFeastArmed = armed
     if armed then
         h:SetAttribute("type", "macro")
         h:SetAttribute("macrotext", "/use [nocombat,@player] item:" .. AUTO_FEAST_ITEM_LIST)
