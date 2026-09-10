@@ -62,6 +62,14 @@ local function TabFontPath()
     return (EUI.ResolveFontName and EUI.ResolveFontName(fontKey)) or STANDARD_TEXT_FONT
 end
 
+-- Outline flag for the tab labels: the chat module's own resolver first (the Chat
+-- page's Outline Mode picker overrides the module/global mode, same as the bubbles),
+-- then the module font entry, then none.
+local function TabFontFlag()
+    return (ECHAT.GetOutlineFlag and ECHAT.GetOutlineFlag())
+        or (EUI.GetFontOutlineFlag and EUI.GetFontOutlineFlag("chat")) or ""
+end
+
 -- Resolve a color table honoring the shared custom/accent/class mode keys.
 local function ResolveModeColor(mode, stored, fallback)
     if mode == "accent" and EUI.GetAccentColor then
@@ -194,7 +202,7 @@ local function BuildGhost()
     fs:SetWordWrap(false)
     fs:SetJustifyH("CENTER")
     -- A bare fontstring has NO font: SetText before a SetFont is a hard error.
-    fs:SetFont(TabFontPath(), DB().tabFontSize or 11, "")
+    fs:SetFont(TabFontPath(), DB().tabFontSize or 11, TabFontFlag())
     g._fs = fs
 
     local PP = EUI.PP
@@ -298,7 +306,7 @@ local function StyleGhost(g, isActive)
     local state = g.state
     local fs = g._fs
 
-    fs:SetFont(TabFontPath(), cfg.tabFontSize or 11, "")
+    fs:SetFont(TabFontPath(), cfg.tabFontSize or 11, TabFontFlag())
     local tr, tg, tb, ta
     if state.isTemp then
         -- Conversation tabs keep the whisper chat color as their marker,
@@ -447,7 +455,7 @@ local function RefreshFloatGhost(cf, height, fontPath, fontSize, padX, seen)
     g:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
     g:SetHeight(height)
     local fs = g._fs
-    fs:SetFont(fontPath, fontSize, "")
+    fs:SetFont(fontPath, fontSize, TabFontFlag())
     fs:ClearAllPoints()
     fs:SetPoint("LEFT", g, "LEFT", padX, 0)
     fs:SetPoint("RIGHT", g, "RIGHT", -padX, 0)
@@ -497,6 +505,7 @@ local function RefreshNow()
     local height = TabHeight()
     local fontPath = TabFontPath()
     local fontSize = cfg.tabFontSize or 11
+    local fontFlag = TabFontFlag()
     local padX = cfg.tabInnerPaddingX or 12
 
     -- The chat panel extends left of ChatFrame1 by its inset while Blizzard's
@@ -601,7 +610,7 @@ local function RefreshNow()
                 end
 
                 local fs = g._fs
-                fs:SetFont(fontPath, fontSize, "")
+                fs:SetFont(fontPath, fontSize, fontFlag)
                 fs:ClearAllPoints()
                 fs:SetPoint("LEFT", g, "LEFT", padX, 0)
                 fs:SetPoint("RIGHT", g, "RIGHT", -padX, 0)
