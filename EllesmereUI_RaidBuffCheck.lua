@@ -103,7 +103,7 @@ local CLASS_STAT = {
 EllesmereUI.RaidSpecByName = EllesmereUI.RaidSpecByName or {}
 
 if LS then
-    LS.RegisterGroup("EllesmereUI_RaidBuffCheck", function(specId, role, position, name)
+    LS.RegisterGroup(EllesmereUI, function(specId, role, position, name)
         EllesmereUI.RaidSpecByName[name] = specId
     end)
 end
