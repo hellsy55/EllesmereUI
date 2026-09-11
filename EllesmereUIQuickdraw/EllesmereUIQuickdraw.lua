@@ -1649,9 +1649,10 @@ local function ResolveAction(slot, p)
         -- which was written on the opposite assumption and did not work.
         local id = tonumber(slot.id)
         if not id or id < 0 or id > 8 then return nil end
-        -- /tm aceita "secure command options" como /cast: com [@target,exists]
-        -- ele marca o target quando existe um, e cai para [@player] quando não
-        -- há target selecionado, marcando o próprio jogador nesse caso.
+        -- /tm accepts "secure command options" just like /cast: with
+        -- [@target,exists] it marks the target when one exists, and falls
+        -- back to [@player] when no target is selected, marking the player
+        -- themself in that case.
         return "macro", "macrotext",
             "/tm [@target,exists] " .. id .. "; [@player] " .. id, "macro"
 
