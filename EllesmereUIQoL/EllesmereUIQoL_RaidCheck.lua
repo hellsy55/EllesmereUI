@@ -480,7 +480,8 @@ local function EnsureColumns()
             local ids = {}
             for _, id in ipairs(b.buffIDs) do ids[id] = true end
             COLUMNS[#COLUMNS + 1] = { key = b.key, class = b.class, ids = ids,
-                                      seed = b.castSpell, fallbackName = b.name }
+                                      seed = b.castSpell, fallbackName = b.name,
+                                      benefit = b.benefit }
         end
     end
 
@@ -1936,6 +1937,14 @@ local function Refresh()
                         if def.class and (unreliable or e.dead) then
                             v = nil
                         elseif personalAura and unreliable then
+                            v = nil
+                        elseif def.class and def.benefit
+                            and not EllesmereUI.RaidBuff_UnitBenefits(e.name, def.benefit, e.class) then
+                            -- Doesn't benefit from this buff's stat (a Mage
+                            -- and Battle Shout, a Warrior and Arcane
+                            -- Intellect) -- not missing, just not relevant to
+                            -- them. See EllesmereUI_RaidBuffCheck.lua for the
+                            -- class/spec resolution this calls into.
                             v = nil
                         end
                     end

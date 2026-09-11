@@ -62,6 +62,7 @@ EllesmereUI_Glows.lua
 EllesmereUI_Range.lua
 EllesmereUI_AuraKit.lua
 EllesmereUI_RaidBuffs.lua
+EllesmereUI_RaidBuffCheck.lua
 EllesmereUI_Comms.lua
 EllesmereUI_WarriorCharges.lua
 EllesmereUI_FirstInstall.lua
