@@ -158,6 +158,12 @@ local FOOD_ICONS = {
     [133950] = true,
 }
 
+-- Empty on purpose -- see the comment on the "food" CHECKS entry below for
+-- why this exists and how to fill it in (/euiraidcheck buffs). Spell ids of
+-- the CURRENT tier's Well Fed buffs (Feast of Knowledge / Amani Cornucopia /
+-- Loa's Gathering) go here, e.g. FOOD_IDS = { [1234567] = true, ... }.
+local FOOD_IDS = {}
+
 -- The Vantus prefix is not hardcoded: it is read off a known Vantus rune and
 -- cut at the first separator, so every client gets it correctly localized. The
 -- seed spell is only a name source -- which rune it is does not matter, and an
@@ -184,7 +190,32 @@ local CHECKS = {
     { key = "flask",  label = "Flask",  seed = 1235110, nameTooltip = true,
       ids = { [1236763] = true, [1239355] = true, [1235057] = true, [1239755] = true,
               [1236767] = true, [1235111] = true, [1235110] = true, [1235108] = true } },
-    { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS, nameTooltip = true,
+    -- ids alongside icons, unlike the old icon-only shape: under Midnight's
+    -- secret-aura rules (12.1), auras are secret for the WHOLE active M+ key,
+    -- not just while in combat, and an icon-based read of another player's
+    -- auras throws under that restriction (see UnitChecks/Answerable above),
+    -- so Food would sit blank for the entire key rather than just during
+    -- pulls. A by-spell-ID read is exempt from that restriction the same way
+    -- Flask and Rune already are, so it is the only way to keep Food answering
+    -- through a key. This does reintroduce the patch-day rot the icon-only
+    -- design was written to avoid -- FOOD_IDS starts empty on purpose. Run
+    -- /euiraidcheck buffs while each current Well Fed buff is active (Feast of
+    -- Knowledge, Amani Cornucopia, Loa's Gathering) to read off their spell
+    -- ids and add them here, the same maintenance step Flask already needs.
+    -- Until it is filled in, Food still works everywhere except mid-key,
+    -- exactly as before this change -- icons alone still answer it outside
+    -- restriction, and UnitHasAny simply has nothing to check under
+    -- restriction until ids are added.
+    -- next(FOOD_IDS) and FOOD_IDS or nil, not FOOD_IDS directly: Answerable()
+    -- treats a present `ids` table as sufficient on its own (see "if def.ids
+    -- then return true end"), without checking whether it is empty. Handing
+    -- it an empty table would make Answerable answer "yes" under restriction
+    -- and UnitHasAny then confidently report everyone as NOT fed (a false
+    -- negative) instead of leaving the column blank the way it did before
+    -- this change. Folding an empty FOOD_IDS down to nil here keeps that old,
+    -- safe blank-under-restriction behavior until ids actually get filled in.
+    { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS,
+      ids = next(FOOD_IDS) and FOOD_IDS or nil, nameTooltip = true,
       note = "Feast of Knowledge, falling back to Amani Cornucopia then Loa's Gathering." },
     { key = "rune",   label = "Rune",   seed = 1264426, nameTooltip = true,
       ids = { [1264426] = true } },
@@ -1091,6 +1122,11 @@ end
 local combatCloseTimer   -- armed only while combat is waiting out the grace period below
 local openedAt            -- GetTime() of the most recent Show
 local openedManually      -- true when Show came from the slash command, not a ready check
+local scaleReapplyPending -- true when a scale change was swallowed by combat and still owes a SetScale
+local geometryReapplyPending -- true when a Refresh() swallowed win:SetSize/Relayout because of combat
+local positionReapplyPending -- true when ShowRaidCheck swallowed win:ClearAllPoints/SetPoint because of combat
+local showReapplyPending      -- true when ShowRaidCheck was asked to open a hidden window during combat
+local showReapplyFromReadyCheck -- the fromReadyCheck arg to replay alongside showReapplyPending
 local MIN_MANUAL_OPEN = 10   -- seconds a manually opened window is guaranteed to stay up, even into combat
 
 local function MakeRow(parent, index)
@@ -1811,9 +1847,22 @@ local function Refresh()
     end
     local rowsShown  = math.min(math.max(n, 1), rowsPerCol)
     local bodyW      = NAME_W + #visible * CELL_W
-    win:SetSize(PAD * 2 + memberCols * bodyW + (memberCols - 1) * COL_GAP,
-                PAD * 2 + TITLE_H + HEADER_H + rowsShown * ROW_H)
-    Relayout(visible, slotOf, memberCols, bodyW, rowsPerCol)
+    -- win:SetSize/Relayout move and resize frames -- protected on this window
+    -- during combat, same as ApplyRaidCheckScale's SetScale above, and hit
+    -- for the same reason: Refresh() runs on every sweep tick while the
+    -- window is shown (see the ticker at the bottom of this function's
+    -- caller), combat or not. Skipping both here and flagging the pending
+    -- geometry update means the grid just keeps showing last-known
+    -- dimensions/positions through a pull instead of throwing; the
+    -- PLAYER_REGEN_ENABLED handler below re-runs Refresh() once combat drops,
+    -- which recomputes and applies real geometry at that point.
+    if InCombatLockdown() then
+        geometryReapplyPending = true
+    else
+        win:SetSize(PAD * 2 + memberCols * bodyW + (memberCols - 1) * COL_GAP,
+                    PAD * 2 + TITLE_H + HEADER_H + rowsShown * ROW_H)
+        Relayout(visible, slotOf, memberCols, bodyW, rowsPerCol)
+    end
 
     for i = 1, #rows do
         local r, e = rows[i], roster[i]
@@ -2129,6 +2178,18 @@ end
 
 function ns.ApplyRaidCheckScale()
     if not win then return end
+    -- SetScale is a protected call on this window (see ShowRaidCheck's own
+    -- comment on secure attributes) whenever the window itself is visible
+    -- during combat -- READY_CHECK can legitimately fire mid-pull, and
+    -- /euiraidcheck show can be typed in combat too, both of which land here
+    -- through ShowRaidCheck. Calling it anyway is exactly the
+    -- ADDON_ACTION_BLOCKED this guard exists to avoid; the scale is simply
+    -- whatever it already was for the rest of this combat, and the pending
+    -- flag below makes sure it catches up the moment combat ends.
+    if InCombatLockdown() then
+        scaleReapplyPending = true
+        return
+    end
     local base = (EllesmereUI.GetPopupScale and EllesmereUI.GetPopupScale()) or 1
     local p = P()
     win:SetScale(base * ((p and p.scale) or 1))
@@ -2212,15 +2273,24 @@ function ns.HideRaidCheck()
     if win then win:Hide() end   -- OnHide stops the sweep and cancels closeTimer
 end
 
--- `fromReadyCheck` suppresses the query: on that path every client has already
--- volunteered unprompted, and asking again would make each of them broadcast
--- once more for every leader whose window opened.
-function ns.ShowRaidCheck(fromReadyCheck)
-    if not MayShow() then return end
-    if not win then Build() end
-
-    ApplyFonts()
-    ns.ApplyRaidCheckScale()
+-- Anchors the window from the saved position (or CENTER, first run). Pulled
+-- out of ShowRaidCheck so the PLAYER_REGEN_ENABLED handler can call the exact
+-- same logic once combat drops, without duplicating it.
+--
+-- ClearAllPoints/SetPoint are protected on this window during combat, same
+-- family of restriction as ApplyRaidCheckScale's SetScale and Refresh's
+-- SetSize -- and ShowRaidCheck can run in combat too (a ready check firing
+-- mid-pull, or the Raid Tools button/slash command used in combat). Skipping
+-- the anchor there and flagging the pending re-anchor means a first-ever
+-- open mid-combat shows with whatever default position the frame happens to
+-- have (or none at all) until combat ends, rather than throwing; every
+-- later open just keeps its last real position.
+local function ApplyRaidCheckPosition()
+    if not win then return end
+    if InCombatLockdown() then
+        positionReapplyPending = true
+        return
+    end
     win:ClearAllPoints()
     local p = P()
     local pos = p and p.pos
@@ -2229,6 +2299,37 @@ function ns.ShowRaidCheck(fromReadyCheck)
     else
         win:SetPoint("CENTER")
     end
+end
+
+-- `fromReadyCheck` suppresses the query: on that path every client has already
+-- volunteered unprompted, and asking again would make each of them broadcast
+-- once more for every leader whose window opened.
+function ns.ShowRaidCheck(fromReadyCheck)
+    if not MayShow() then return end
+
+    -- Show() turns out to be protected on this window too, not just its
+    -- geometry (SetScale/SetSize/ClearAllPoints above) -- Blizzard locks
+    -- down every mutating call on a frame with a secure descendant (the
+    -- auto-repair/auto-feast buttons) while in combat, including Show()
+    -- itself, even though showing something is not a geometry change. If the
+    -- window doesn't exist yet or is currently hidden, there is nothing safe
+    -- to do here: Build() would create it fine, but the Show() at the end
+    -- would still throw. So bail out before doing anything and replay the
+    -- exact same request from PLAYER_REGEN_ENABLED once combat ends. A
+    -- window that's already shown skips this entirely and just keeps
+    -- refreshing in place through the pull (see Refresh/ApplyRaidCheckScale/
+    -- ApplyRaidCheckPosition above).
+    if (not win or not win:IsShown()) and InCombatLockdown() then
+        showReapplyPending = true
+        showReapplyFromReadyCheck = fromReadyCheck
+        return
+    end
+
+    if not win then Build() end
+
+    ApplyFonts()
+    ns.ApplyRaidCheckScale()
+    ApplyRaidCheckPosition()
 
     -- Ask before painting: answers land over the next few seconds and the
     -- sweep picks them up. Both transports throttle their own requests, so
@@ -2239,7 +2340,10 @@ function ns.ShowRaidCheck(fromReadyCheck)
         EllesmereUI.Comms.Send(MSG_QUERY, "")
     end
 
-    win:Show()
+    -- Only call Show() when it will actually do something: it is just as
+    -- protected as everything else on this window in combat (see above), and
+    -- an already-shown window calling it again would throw over a no-op.
+    if not win:IsShown() then win:Show() end
     Refresh()
     openedAt = GetTime()
     openedManually = not fromReadyCheck
@@ -2298,7 +2402,43 @@ ev:RegisterEvent("READY_CHECK_CONFIRM")
 ev:RegisterEvent("READY_CHECK_FINISHED")
 ev:RegisterEvent("GROUP_ROSTER_UPDATE")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
+ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:SetScript("OnEvent", function(_, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        -- Replays a whole ShowRaidCheck() that bailed out because the window
+        -- was hidden and Show() itself is protected in combat (see there).
+        -- This alone re-applies scale/position/refresh internally, so it
+        -- runs first; the other three flags below are for the separate case
+        -- of a window that was already shown and open through the pull.
+        if showReapplyPending then
+            showReapplyPending = nil
+            local fromReadyCheck = showReapplyFromReadyCheck
+            showReapplyFromReadyCheck = nil
+            ns.ShowRaidCheck(fromReadyCheck)
+        end
+        -- Catches up a scale change that ApplyRaidCheckScale swallowed while
+        -- combat made SetScale protected (see there). Harmless to call even
+        -- when nothing was pending -- ApplyRaidCheckScale no-ops without win.
+        if scaleReapplyPending then
+            scaleReapplyPending = nil
+            ns.ApplyRaidCheckScale()
+        end
+        -- Same idea for the window's own SetSize/Relayout, which Refresh()
+        -- swallows for the same reason (see there). A plain Refresh() call
+        -- recomputes the roster/columns from scratch and applies real
+        -- geometry now that SetSize/SetPoint are legal again.
+        if geometryReapplyPending then
+            geometryReapplyPending = nil
+            if win and win:IsShown() then Refresh() end
+        end
+        -- Same idea for the window's anchor, which ShowRaidCheck swallows
+        -- for the same reason (see ApplyRaidCheckPosition).
+        if positionReapplyPending then
+            positionReapplyPending = nil
+            ApplyRaidCheckPosition()
+        end
+        return
+    end
     if event == "PLAYER_REGEN_DISABLED" then
         -- Entering combat closes the window -- unless it was opened by hand
         -- less than MIN_MANUAL_OPEN seconds ago, in which case it is
