@@ -12501,6 +12501,125 @@ initFrame:SetScript("OnEvent", function(self)
             -- Size and show
             inner:SetHeight(mH + 4)
             menu:SetSize(menuW, math.min(mH + 4, MAX_H))
+
+            -- Scroll if needed: without this, rows past MAX_H (Replace with Buff,
+            -- Add Custom Icon, Copy to Other Specs, ...) render outside the menu's
+            -- own bounds, so the OnUpdate outside-click watcher below reads a click
+            -- on them as "outside the menu" and hides it before OnClick ever fires.
+            -- Wrapping the overflow in a real ScrollFrame keeps every row inside
+            -- menu's hit-rect and reachable via mouse wheel, matching the scroll
+            -- pattern already used by the other per-spell/buff pickers above.
+            if mH + 4 > MAX_H then
+                local sf = CreateFrame("ScrollFrame", nil, menu)
+                sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+                sf:SetFrameLevel(menu:GetFrameLevel() + 1)
+                sf:EnableMouseWheel(true)
+                sf:SetScrollChild(inner)
+                inner:SetWidth(menuW)
+                local scrollTarget = 0
+                local SCROLL_STEP = 40
+                local SMOOTH_SPEED = 12
+                local smoothFrame = CreateFrame("Frame")
+                smoothFrame:Hide()
+
+                -- Visual scrollbar on the LEFT edge, so it's obvious there are more
+                -- rows above/below without having to hover and wheel blindly.
+                local ddTrack = CreateFrame("Frame", nil, menu)
+                ddTrack:SetWidth(4)
+                ddTrack:SetPoint("TOPLEFT", menu, "TOPLEFT", 2, -2)
+                ddTrack:SetPoint("BOTTOMLEFT", menu, "BOTTOMLEFT", 2, 2)
+                ddTrack:SetFrameLevel(sf:GetFrameLevel() + 1)
+                do
+                    local tbg = ddTrack:CreateTexture(nil, "BACKGROUND")
+                    tbg:SetAllPoints(); tbg:SetColorTexture(1, 1, 1, 0.06)
+                end
+
+                local ddThumb = CreateFrame("Button", nil, ddTrack)
+                ddThumb:SetWidth(4)
+                ddThumb:SetFrameLevel(ddTrack:GetFrameLevel() + 1)
+                ddThumb:EnableMouse(true)
+                ddThumb:RegisterForDrag("LeftButton")
+                do
+                    local tt = ddThumb:CreateTexture(nil, "ARTWORK")
+                    tt:SetAllPoints(); tt:SetColorTexture(1, 1, 1, 0.35)
+                end
+
+                -- Reads the ScrollFrame's own GetVerticalScrollRange rather than a
+                -- hand-computed (mH+4)-MAX_H figure: Blizzard's real range accounts
+                -- for the scroll child's true layout, so the thumb size/position
+                -- always matches exactly how far the list can actually scroll.
+                local function UpdateDDThumb()
+                    local maxScroll = EllesmereUI.SafeScrollRange(sf)
+                    if maxScroll <= 0 then ddTrack:Hide(); return end
+                    ddTrack:Show()
+                    local trackH = ddTrack:GetHeight()
+                    local visH = sf:GetHeight()
+                    local ratio = visH / (visH + maxScroll)
+                    local thumbH = math.max(16, trackH * ratio)
+                    ddThumb:SetHeight(thumbH)
+                    local cur = sf:GetVerticalScroll()
+                    local scrollRatio = cur / maxScroll
+                    local maxTravel = trackH - thumbH
+                    ddThumb:ClearAllPoints()
+                    ddThumb:SetPoint("TOP", ddTrack, "TOP", 0, -(scrollRatio * maxTravel))
+                end
+
+                smoothFrame:SetScript("OnUpdate", function(_, elapsed)
+                    local cur = sf:GetVerticalScroll()
+                    local maxScroll = EllesmereUI.SafeScrollRange(sf)
+                    scrollTarget = math.max(0, math.min(maxScroll, scrollTarget))
+                    local diff = scrollTarget - cur
+                    if math.abs(diff) < 0.3 then
+                        sf:SetVerticalScroll(scrollTarget)
+                        UpdateDDThumb()
+                        smoothFrame:Hide()
+                        return
+                    end
+                    sf:SetVerticalScroll(cur + diff * math.min(1, SMOOTH_SPEED * elapsed))
+                    UpdateDDThumb()
+                end)
+                sf:SetScript("OnMouseWheel", function(_, delta)
+                    local maxScroll = EllesmereUI.SafeScrollRange(sf)
+                    if maxScroll <= 0 then return end
+                    local base = smoothFrame:IsShown() and scrollTarget or sf:GetVerticalScroll()
+                    scrollTarget = math.max(0, math.min(maxScroll, base - delta * SCROLL_STEP))
+                    smoothFrame:Show()
+                end)
+                sf:SetScript("OnScrollRangeChanged", UpdateDDThumb)
+
+                ddThumb:SetScript("OnMouseDown", function(self, button)
+                    if button ~= "LeftButton" then return end
+                    smoothFrame:Hide()
+                    local _, cursorY = GetCursorPosition()
+                    local dragStartY = cursorY / self:GetEffectiveScale()
+                    local dragStartScroll = sf:GetVerticalScroll()
+                    self:SetScript("OnUpdate", function(self2)
+                        if not IsMouseButtonDown("LeftButton") then
+                            self2:SetScript("OnUpdate", nil)
+                            return
+                        end
+                        local _, cy = GetCursorPosition()
+                        cy = cy / self2:GetEffectiveScale()
+                        local deltaY = dragStartY - cy
+                        local trackH = ddTrack:GetHeight()
+                        local maxTravel = trackH - self2:GetHeight()
+                        if maxTravel <= 0 then return end
+                        local maxScroll = EllesmereUI.SafeScrollRange(sf)
+                        local newScroll = math.max(0, math.min(maxScroll,
+                            dragStartScroll + (deltaY / maxTravel) * maxScroll))
+                        scrollTarget = newScroll
+                        sf:SetVerticalScroll(newScroll)
+                        UpdateDDThumb()
+                    end)
+                end)
+                ddThumb:SetScript("OnMouseUp", function(self, button)
+                    if button ~= "LeftButton" then return end
+                    self:SetScript("OnUpdate", nil)
+                end)
+
+                UpdateDDThumb()
+            end
+
             menu:ClearAllPoints()
             menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -4)
             menu._anchorFrame = anchorFrame
