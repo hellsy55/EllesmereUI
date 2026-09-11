@@ -2653,8 +2653,9 @@ do
         for _, f in pairs(frames) do
             -- The painter refuses an empty token, so a frame between units must
             -- not be blanked here either -- it would never get the value back.
+            -- UnitIsVisible mirrors the painter's own probe (see PaintText).
             if type(f) == "table" and f._euiTextZones
-               and f._euiUnit and UnitExists(f._euiUnit) then
+               and f._euiUnit and UnitIsVisible(f._euiUnit) then
                 local zones = f._euiTextZones
                 for i = 1, #zones do
                     local fs = zones[i].fs
@@ -2937,8 +2938,11 @@ do
         if not zones then return end
         -- An empty token renders every zone blank, and a boss frame outlives the
         -- gap: the unit watch is a 0.2s poll, so the frame is still shown while
-        -- its slot sits between units. Same probe the health painter pays.
-        if not (unit and UnitExists(unit)) then return end
+        -- its slot sits between units. UnitIsVisible (not UnitExists) is the
+        -- right probe here: UnitExists is false for a visible-but-untargetable
+        -- boss (e.g. an inactive boss mid-encounter), which would otherwise
+        -- never get its name painted at all.
+        if not (unit and UnitIsVisible(unit)) then return end
         local valueOnly = event ~= nil and VALUE_EVENTS[event]
         for i = 1, #zones do
             local z = zones[i]
