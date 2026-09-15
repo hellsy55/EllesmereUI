@@ -565,6 +565,12 @@ end
 local function WhisperBuffProvider(def, providerName)
     if not ns.RaidCheckBuffWhisper() then return end
     if not providerName then return end
+    -- SendChatMessage is protected inside combat lockdown; calling it from
+    -- this click handler while in combat throws ADDON_ACTION_BLOCKED
+    -- instead of sending anything, so just no-op here the same way every
+    -- other protected action in this file already gates on combat. Outside
+    -- combat this is unchanged.
+    if InCombatLockdown() then return end
     SendChatMessage(BuffLink(def) .. ", please", "WHISPER", nil, providerName)
 end
 
@@ -1081,40 +1087,42 @@ local sweeper
 local closeTimer   -- always armed while the window is shown, however it opened
 local CLOSE_DELAY = 30   -- seconds the window stays open before auto-closing
 
--- Raid-buff blink: one shared clock instead of one AnimationGroup per icon.
--- An AnimationGroup's :Play() starts its own timeline from zero, so two
--- icons that started blinking on different sweeps end up pulsing out of
--- phase with each other -- correct individually, but reads as flicker when
--- several are missing at once. Every icon here instead just sets/clears its
--- own membership in buffBlinkTargets (see Refresh); a single OnUpdate
--- computes one alpha per frame off GetTime() and stamps it onto whatever is
--- currently in the set, so anything blinking is always in lockstep.
--- Durability and Vantus-mismatch blinks are unrelated to this and keep
--- their own AnimationGroups -- only raid-buff icons were asked to move.
-local buffBlinkTargets = {}
-local buffBlinkDriver
+-- Every pulsing element in this window -- raid-buff icons, the low-
+-- durability name/number, the Vantus mismatch icon -- shares this one
+-- clock instead of each having its own AnimationGroup. An AnimationGroup's
+-- :Play() starts its own timeline from zero, so elements that started
+-- blinking on different sweeps end up pulsing out of phase with each
+-- other -- correct individually, but reads as flicker when several are
+-- blinking at once (e.g. a missing raid buff and low durability on the
+-- same row). Every element here instead just sets/clears its own
+-- membership in blinkTargets (see Refresh); a single OnUpdate computes one
+-- alpha per frame off GetTime() and stamps it onto whatever is currently
+-- in the set, so anything blinking anywhere in the window is always in
+-- lockstep.
+local blinkTargets = {}
+local blinkDriver
 
-local function SetBuffBlink(icon, on, restoreAlpha)
+local function SetSharedBlink(region, on, restoreAlpha)
     if on then
-        if not buffBlinkTargets[icon] then
-            buffBlinkTargets[icon] = true
-            if not buffBlinkDriver then
-                buffBlinkDriver = CreateFrame("Frame")
-                buffBlinkDriver:Hide()
-                buffBlinkDriver:SetScript("OnUpdate", function()
+        if not blinkTargets[region] then
+            blinkTargets[region] = true
+            if not blinkDriver then
+                blinkDriver = CreateFrame("Frame")
+                blinkDriver:Hide()
+                blinkDriver:SetScript("OnUpdate", function()
                     local alpha = 0.625 + 0.375 * math.sin(GetTime() * 5)
-                    for tex in pairs(buffBlinkTargets) do
-                        tex:SetAlpha(alpha)
+                    for region2 in pairs(blinkTargets) do
+                        region2:SetAlpha(alpha)
                     end
                 end)
             end
-            buffBlinkDriver:Show()
+            blinkDriver:Show()
         end
-    elseif buffBlinkTargets[icon] then
-        buffBlinkTargets[icon] = nil
-        icon:SetAlpha(restoreAlpha or 1)
-        if not next(buffBlinkTargets) and buffBlinkDriver then
-            buffBlinkDriver:Hide()   -- nothing left to animate; stop the OnUpdate entirely
+    elseif blinkTargets[region] then
+        blinkTargets[region] = nil
+        region:SetAlpha(restoreAlpha or 1)
+        if not next(blinkTargets) and blinkDriver then
+            blinkDriver:Hide()   -- nothing left to animate; stop the OnUpdate entirely
         end
     end
 end
@@ -1161,15 +1169,10 @@ local function MakeRow(parent, index)
     -- already carries its own color) while this row's durability sits at or
     -- below AUTO_REPAIR_THRESHOLD. Region alpha, not SetTextColor's alpha --
     -- the offline/elsewhere dim below writes the color channel, so the two
-    -- multiply together instead of fighting over the same value.
-    local blink = r._name:CreateAnimationGroup()
-    local pulse = blink:CreateAnimation("Alpha")
-    pulse:SetFromAlpha(1)
-    pulse:SetToAlpha(0.25)
-    pulse:SetDuration(0.6)
-    pulse:SetSmoothing("IN_OUT")
-    blink:SetLooping("BOUNCE")
-    r._lowDurBlink = blink
+    -- multiply together instead of fighting over the same value. Driven by
+    -- the shared blink clock (SetSharedBlink) rather than its own
+    -- AnimationGroup, so it pulses in lockstep with every other blinking
+    -- element in the window -- see blinkTargets above.
 
     -- Ready check status: blank outside an active ready check (see
     -- readyCheckActive), otherwise a yellow "?" while pending -- there is no
@@ -1200,16 +1203,12 @@ local function MakeRow(parent, index)
 
             -- Same low-durability pulse as the name, on the number itself --
             -- the number is the thing to actually look at; the name blink is
-            -- the thing that catches your eye across the room.
+            -- the thing that catches your eye across the room. Kept as a
+            -- direct reference (not an AnimationGroup) so it too can be
+            -- driven by the shared blink clock -- see r._durabilityCell
+            -- below and blinkTargets above.
             if def.key == DURABILITY_KEY then
-                local numBlink = fs:CreateAnimationGroup()
-                local numPulse = numBlink:CreateAnimation("Alpha")
-                numPulse:SetFromAlpha(1)
-                numPulse:SetToAlpha(0.25)
-                numPulse:SetDuration(0.6)
-                numPulse:SetSmoothing("IN_OUT")
-                numBlink:SetLooping("BOUNCE")
-                r._durNumBlink = numBlink
+                r._durabilityCell = fs
             end
             -- Unused for durability now that the column always shows the
             -- number (even at 100%), but kept so the cell/tex pairing stays
@@ -1232,16 +1231,10 @@ local function MakeRow(parent, index)
             -- of the hit-frame/whisper machinery below: Vantus has no
             -- provider to whisper (nobody "casts" it onto someone else), so
             -- this is purely informational and driven straight off the
-            -- check icon.
+            -- check icon -- via the shared blink clock, same as everything
+            -- else in the window, see blinkTargets above.
             if def.key == VANTUS_KEY then
-                local mismatchBlink = tex:CreateAnimationGroup()
-                local mismatchPulse = mismatchBlink:CreateAnimation("Alpha")
-                mismatchPulse:SetFromAlpha(1)
-                mismatchPulse:SetToAlpha(0.25)
-                mismatchPulse:SetDuration(0.6)
-                mismatchPulse:SetSmoothing("IN_OUT")
-                mismatchBlink:SetLooping("BOUNCE")
-                r._vantusMismatchBlink = mismatchBlink
+                r._vantusCell = tex
             end
 
             -- Prefix columns (Vantus) and nameTooltip columns (Flask, Food)
@@ -1336,8 +1329,8 @@ local function MakeRow(parent, index)
                         end
                     end)
 
-                    -- Referenced from Refresh via SetBuffBlink -- no
-                    -- per-icon AnimationGroup anymore, see buffBlinkTargets
+                    -- Referenced from Refresh via SetSharedBlink -- no
+                    -- per-icon AnimationGroup anymore, see blinkTargets
                     -- above for why.
                     r._buffIcon = r._buffIcon or {}
                     r._buffIcon[c] = tex
@@ -1426,7 +1419,7 @@ local function Build()
                 -- same reasoning as everywhere else in this file that a
                 -- click target travels as a resolved value rather than
                 -- something recomputed live off a stale unit token.
-                -- h._icon feeds the shared blink driver (SetBuffBlink) so
+                -- h._icon feeds the shared blink driver (SetSharedBlink) so
                 -- this icon pulses in lockstep with every other blinking
                 -- raid-buff icon instead of running its own phase.
                 h._icon = tex
@@ -1546,8 +1539,8 @@ local function Build()
         -- The icons themselves are about to be hidden with the window, so
         -- there's nothing to visually reset -- just stop the OnUpdate and
         -- drop the references so a closed window isn't still driving one.
-        if buffBlinkDriver then buffBlinkDriver:Hide() end
-        wipe(buffBlinkTargets)
+        if blinkDriver then blinkDriver:Hide() end
+        wipe(blinkTargets)
     end)
 
     -- Right-click anywhere on the window closes it, so no dedicated close
@@ -1909,21 +1902,14 @@ local function Refresh()
                     if tex then tex:Hide() end
                     if r._cellHit and r._cellHit[ci] then r._cellHit[ci]:Hide() end
                     if def.key == DURABILITY_KEY then
-                        if r._lowDurBlink:IsPlaying() then
-                            r._lowDurBlink:Stop()
-                            r._name:SetAlpha(1)
-                        end
-                        if r._durNumBlink:IsPlaying() then
-                            r._durNumBlink:Stop()
-                            cell:SetAlpha(1)
-                        end
+                        SetSharedBlink(r._name, false, 1)
+                        SetSharedBlink(cell, false, 1)
                     end
                     if def.class then
-                        SetBuffBlink(cell, false, 0.9)
+                        SetSharedBlink(cell, false, 0.9)
                     end
-                    if def.key == VANTUS_KEY and r._vantusMismatchBlink:IsPlaying() then
-                        r._vantusMismatchBlink:Stop()
-                        cell:SetAlpha(0.9)
+                    if def.key == VANTUS_KEY then
+                        SetSharedBlink(cell, false, 0.9)
                     end
                 elseif def.numeric then
                     -- The number is shown at every reading, including 100 --
@@ -1942,17 +1928,11 @@ local function Refresh()
                         local lowDur = autoRepairOn and pct ~= nil and pct <= AUTO_REPAIR_THRESHOLD
                         if lowDur then anyLowDurability = true end
                         if lowDur then
-                            if not r._lowDurBlink:IsPlaying() then r._lowDurBlink:Play() end
-                            if not r._durNumBlink:IsPlaying() then r._durNumBlink:Play() end
+                            SetSharedBlink(r._name, true)
+                            SetSharedBlink(cell, true)
                         else
-                            if r._lowDurBlink:IsPlaying() then
-                                r._lowDurBlink:Stop()
-                                r._name:SetAlpha(1)
-                            end
-                            if r._durNumBlink:IsPlaying() then
-                                r._durNumBlink:Stop()
-                                cell:SetAlpha(1)
-                            end
+                            SetSharedBlink(r._name, false, 1)
+                            SetSharedBlink(cell, false, 1)
                         end
                     end
                 else
@@ -2018,7 +1998,7 @@ local function Refresh()
                         if def.class then
                             -- Present: nothing to whisper for, nothing to blink.
                             if hit then hit:Hide() end
-                            SetBuffBlink(cell, false, 0.9)
+                            SetSharedBlink(cell, false, 0.9)
                         else
                             -- Only the tick is hoverable: a MISS or a blank
                             -- cell has no buff name behind it to report.
@@ -2028,14 +2008,7 @@ local function Refresh()
                                 local theirName = e.checks._names and e.checks._names[def.key]
                                 local mismatch = outOfCombat and myVantusName
                                     and theirName and theirName ~= myVantusName
-                                if mismatch then
-                                    if not r._vantusMismatchBlink:IsPlaying() then
-                                        r._vantusMismatchBlink:Play()
-                                    end
-                                elseif r._vantusMismatchBlink:IsPlaying() then
-                                    r._vantusMismatchBlink:Stop()
-                                    cell:SetAlpha(0.9)
-                                end
+                                SetSharedBlink(cell, mismatch, 0.9)
                             end
                         end
                     elseif v == false then
@@ -2053,24 +2026,22 @@ local function Refresh()
                                 and (providers.near or providers.far or providers.single)
                             local active = buffWhisperOn and hasProvider ~= nil
                             if hit then hit:SetShown(active) end
-                            SetBuffBlink(cell, active, 0.9)
+                            SetSharedBlink(cell, active, 0.9)
                         else
                             if hit then hit:Hide() end
                         end
-                        if def.key == VANTUS_KEY and r._vantusMismatchBlink:IsPlaying() then
-                            r._vantusMismatchBlink:Stop()
-                            cell:SetAlpha(0.9)
+                        if def.key == VANTUS_KEY then
+                            SetSharedBlink(cell, false, 0.9)
                         end
                     else
                         -- Unanswerable, or the client would not say.
                         cell:Hide()
                         if hit then hit:Hide() end
                         if def.class then
-                            SetBuffBlink(cell, false, 0.9)
+                            SetSharedBlink(cell, false, 0.9)
                         end
-                        if def.key == VANTUS_KEY and r._vantusMismatchBlink:IsPlaying() then
-                            r._vantusMismatchBlink:Stop()
-                            cell:SetAlpha(0.9)
+                        if def.key == VANTUS_KEY then
+                            SetSharedBlink(cell, false, 0.9)
                         end
                     end
                 end
@@ -2078,22 +2049,17 @@ local function Refresh()
             r:Show()
         else
             r:Hide()
-            if r._lowDurBlink:IsPlaying() then
-                r._lowDurBlink:Stop()
-                r._name:SetAlpha(1)
-            end
-            if r._durNumBlink and r._durNumBlink:IsPlaying() then
-                r._durNumBlink:Stop()
-                r._durNumBlink:GetParent():SetAlpha(1)
+            SetSharedBlink(r._name, false, 1)
+            if r._durabilityCell then
+                SetSharedBlink(r._durabilityCell, false, 1)
             end
             if r._buffIcon then
                 for _, icon in pairs(r._buffIcon) do
-                    SetBuffBlink(icon, false, 0.9)
+                    SetSharedBlink(icon, false, 0.9)
                 end
             end
-            if r._vantusMismatchBlink and r._vantusMismatchBlink:IsPlaying() then
-                r._vantusMismatchBlink:Stop()
-                r._vantusMismatchBlink:GetParent():SetAlpha(0.9)
+            if r._vantusCell then
+                SetSharedBlink(r._vantusCell, false, 0.9)
             end
         end
     end
@@ -2125,7 +2091,7 @@ local function Refresh()
                         and (providers.near or providers.far or providers.single)
                     local blinking = buffWhisperOn and on and anyMissing[def.key]
                         and hasProvider ~= nil
-                    SetBuffBlink(h._icon, blinking, baseAlpha)
+                    SetSharedBlink(h._icon, blinking, baseAlpha)
                 end
                 if def.key == DURABILITY_KEY then
                     -- Same nil/false/true shape as h._buffMissing: nil when
