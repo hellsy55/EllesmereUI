@@ -2840,6 +2840,13 @@ do
         end
         return ""
     end
+    -- "F" when this unit IS the player's current focus (e.g. Boss 2 is also
+    -- focused): a quick at-a-glance marker so a boss frame can flag itself
+    -- without the player having to check the Focus frame separately.
+    P.focusindicator = function(u)
+        if u and UnitExists(u) and UnitIsUnit(u, "focus") then return "F" end
+        return ""
+    end
 
     -- Separator piece for "Name > Target": resolved from settings at apply
     -- time (re-applied whenever settings change, like everything else on the
@@ -2899,6 +2906,7 @@ do
         healabsorb   = { "%s", "healabsorb" },
         healabsorbshort = { "%s", "healabsorbshort" },
         group        = { "%s", "group" },
+        focusindicator = { "%s", "focusindicator" },
     }
     -- Identity-only zones: their pieces read name/level, which change only on
     -- identity edges (UNIT_NAME_UPDATE, UNIT_LEVEL, repoints, provider
@@ -3336,6 +3344,7 @@ local ufTextWidths = {
     perhp_perpp = 75,  -- "86% | 86%"
     absorb      = 38,  -- "12.3 K"
     level       = 24,  -- "80" / "??"
+    focusindicator = 14, -- "F"
 }
 local function EstimateUFTextWidth(content)
     return (ufTextWidths[content] or 0) + UF_TEXT_PADDING
