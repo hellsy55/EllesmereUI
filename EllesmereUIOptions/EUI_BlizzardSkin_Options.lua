@@ -244,6 +244,28 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Disable Auto-Add Spells",
+              tooltip="Stops Blizzard from automatically placing newly learned or talented spells on your action bar, and suppresses the fly-on icon animation that goes with it. Dragonriding and Dracthyr Soar abilities are always exempt. Requires a UI reload.",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.disableAutoAddSpells or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.disableAutoAddSpells = v
+                  if EllesmereUI.ShowConfirmPopup then
+                      EllesmereUI:ShowConfirmPopup({
+                          title       = "Reload Required",
+                          message     = "Changing this setting requires a UI reload.",
+                          confirmText = "Reload Now",
+                          cancelText  = "Later",
+                          onConfirm   = function() ReloadUI() end,
+                      })
+                  end
+              end },
+            { type="spacer" }
+        );  y = y - h
+
         -- Countdown text color + style cog on the Show Queue Timer toggle.
         if not EllesmereUI._prebuilding then
             local PP = EllesmereUI.PanelPP
@@ -3225,6 +3247,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- just went nil = off; hooks stay installed but inert).
                 if EllesmereUI._EnsureResurrectGlow then EllesmereUI._EnsureResurrectGlow() end
                 EllesmereUIDB.reskinGameMenu = nil
+                EllesmereUIDB.disableAutoAddSpells = nil
                 EllesmereUIDB.popupMenuButtonBackgroundColor=nil
                 EllesmereUIDB.popupMenuButtonTextColorMode=nil
                 EllesmereUIDB.popupMenuButtonTextColor=nil

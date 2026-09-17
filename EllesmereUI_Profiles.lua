@@ -1829,7 +1829,7 @@ do
         "tooltipBgColor", "tooltipBgOpacity", "tooltipBorderSize",
         "showSpellID", "spellIDModifier", "showIconID", "showItemID",
         "showItemMaxStacks", "itemStackModifier",
-        "reskinPopupsMenus", "reskinGameMenu", "reskinQueuePopup",
+        "reskinPopupsMenus", "reskinGameMenu", "disableAutoAddSpells", "reskinQueuePopup",
         "showQueueTimer", "queueTimerTextColor", "queueTimerTextSize",
         "queueTimerBarHeight", "queueTimerTextOffsetY",
         "resurrectAcceptGlow",
