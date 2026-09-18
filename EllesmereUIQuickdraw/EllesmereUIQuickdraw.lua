@@ -749,11 +749,66 @@ ns.PaletteCount = PaletteCount
 -------------------------------------------------------------------------------
 
 -- The palette a slot opens, or nil for a slot that fires an action.
+-- A palette slot nests unconditionally, by its stored .palette index. A
+-- spec/dynamicspec slot nests too, but only ever into ns.ActiveSpecNestPalette
+-- (an extension point, unset by default -- see
+-- EllesmereUIQuickdraw_TalentLoadouts.lua) and only while it names the spec
+-- this character is CURRENTLY on: switching to a spec you are not already on
+-- is still a normal, single fire, and a spec slot for a spec you are not on
+-- never nests, whatever ActiveSpecNestPalette is set to.
+--
+-- Resolved fresh on every call rather than cached: the two call sites that
+-- matter both already run at points meant to reflect current state --
+-- PushCell at its usual out-of-combat push, same as dynamicspec and the
+-- usability filter beside it, and the paint/layout call sites at menu open,
+-- same as SlotDisplay and MarkerPip. Nothing here is evaluated inside the
+-- secure snippet itself; by the time the player releases, this has already
+-- been baked into the eqdPal attribute PushCell wrote.
+--
+-- The spec-index lookup below is SpecIndexFor's own logic, inlined rather
+-- than called: SpecIndexFor is declared further down the file (it needs
+-- nothing declared up here), and this file's main chunk sits at Lua's
+-- 200-local ceiling already (see the comment on ns.SpecPositionName), so
+-- there is no local left to forward-declare it through. Keep the two in sync
+-- if SpecIndexFor's own resolution logic ever changes.
 local function ChildIndex(slot)
-    if not slot or slot.kind ~= "palette" then return nil end
-    local idx = tonumber(slot.palette)
-    if not idx or idx < 1 or idx > MAX_PALETTES then return nil end
-    return idx
+    if not slot then return nil end
+
+    if slot.kind == "palette" then
+        local idx = tonumber(slot.palette)
+        if idx and idx >= 1 and idx <= MAX_PALETTES then return idx end
+        return nil
+    end
+
+    if (slot.kind == "spec" or slot.kind == "dynamicspec") and ns.ActiveSpecNestPalette
+       and C_SpecializationInfo then
+        local classID = select(3, UnitClass("player"))
+        local count = classID and C_SpecializationInfo.GetNumSpecializationsForClassID(classID) or 0
+        local index
+        if slot.kind == "dynamicspec" then
+            local i = tonumber(slot.index)
+            if i and i >= 1 and i <= count then index = i end
+        else
+            local want = tonumber(slot.specID)
+            if want then
+                for i = 1, count do
+                    if C_SpecializationInfo.GetSpecializationInfo(i) == want then
+                        index = i
+                        break
+                    end
+                end
+            end
+        end
+
+        if index and index == C_SpecializationInfo.GetSpecialization() then
+            local nestIdx = tonumber(ns.ActiveSpecNestPalette)
+            if nestIdx and nestIdx >= 1 and nestIdx <= MAX_PALETTES then
+                return nestIdx
+            end
+        end
+    end
+
+    return nil
 end
 ns.ChildIndex = ChildIndex
 
@@ -5148,7 +5203,12 @@ function ns.CreatePaletteView(parent, opts)
     AdoptFontString(hub.text)
     hub.text:SetPoint("CENTER", hub, "CENTER", 0, 0)
     hub.text:SetWidth(150)
-    hub.text:SetWordWrap(false)
+    -- Wrap at word boundaries instead of single-line ellipsis-truncating: a
+    -- long TalentLoadoutsEx name (or any other slot name) grows the caption
+    -- downward across extra lines rather than cutting mid-word. hub.hint
+    -- below it is anchored relative to hub.text's own edge, so it follows
+    -- the taller caption on its own -- nothing else to adjust for that.
+    hub.text:SetWordWrap(true)
 
     hub.hint = hub:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     AdoptFontString(hub.hint)
@@ -5693,43 +5753,74 @@ end
 -- A method rather than a local function, like MarkerPip's caller and
 -- RefreshMarkerPips below: the main chunk is at Lua's ceiling of 200 locals
 -- and has no room for another name.
+-- Whether THIS slot is the thing it draws, right now -- world marker on the
+-- ground, this character's current spec, or (through the ns hook below) an
+-- outside module's own idea of "active" for a slot it built. Split out of
+-- MarkerPip so the per-kind tests can return a plain bool and let one shared
+-- tail handle sizing, colour and Show/Hide -- the marker branch alone used to
+-- BE the whole function; it is now just the first of several.
+function PaletteView:SlotIsPipped(slot)
+    if not slot then return false end
+
+    if slot.kind == "worldmarker" or slot.kind == "cycleworldmarker" then
+        -- Per-palette opt-out (Show Placed-Marker Pips, in the Toggle World
+        -- Markers cog) -- markers only; the spec and macrotext branches below
+        -- answer to no such setting, there being nothing else to opt out of.
+        local pp = self:P()
+        if pp and pp.worldMarkerPip == false then return false end
+
+        local id
+        if slot.kind == "worldmarker" then
+            id = tonumber(slot.id)
+        else
+            -- The one the NEXT press places, which is the marker this entry
+            -- is already drawing (SlotDisplay). Through CycleNext rather than
+            -- off the stored position, so the pip and the icon cannot
+            -- disagree about which marker the entry is currently offering.
+            --
+            -- The target-marker cycle is NOT this: raid targets sit on
+            -- units, and IsRaidMarkerActive answers for world markers alone
+            -- -- which Blizzard says in as many words at
+            -- Mainline/Blizzard_CompactRaidFrameManager.lua:1088.
+            id = CycleNext(slot)
+        end
+        return id ~= nil and id >= 1 and id <= 8
+            and IsRaidMarkerActive(WORLD_MARKER_ENGINE[id])
+
+    elseif slot.kind == "spec" or slot.kind == "dynamicspec" then
+        -- The spec this entry would switch to, lit up when it is already the
+        -- one this character is on -- SpecIndexFor is the same resolver
+        -- SlotDisplay and the usability filter use, so the pip and the icon
+        -- can never name different specs.
+        local index = SpecIndexFor(slot)
+        return index ~= nil and index == C_SpecializationInfo.GetSpecialization()
+
+    elseif slot.kind == "macrotext" then
+        -- Extension point for a module that builds its own macrotext slots
+        -- and wants THIS one lit up when whatever it fires is already the
+        -- active thing -- see EllesmereUIQuickdraw_TalentLoadouts.lua, which
+        -- is the reason this hook exists. Absent for a plain custom macro,
+        -- which is exactly the QUESTION_MARK-icon case: nothing to compare
+        -- against, so no pip rather than a guess.
+        return ns.IsMacrotextSlotActive ~= nil and ns.IsMacrotextSlotActive(slot) == true
+    end
+
+    return false
+end
+
 function PaletteView:MarkerPip(w, slot, iconSize)
     local pip = w.markerPip
     if not pip then return end
-    -- Live menus only: the pip reads REAL marker state, which is noise on the
-    -- options preview and the editor -- those show arrangement, not the
-    -- battlefield. Hidden rather than skipped, so a reused widget never
-    -- carries a stale pip across views.
+    -- Live menus only: the pip reads REAL state -- on the battlefield, on
+    -- this character, or in another addon's own data -- which is noise on
+    -- the options preview and the editor; those show arrangement, not the
+    -- moment. Hidden rather than skipped, so a reused widget never carries a
+    -- stale pip across views.
     if not (self.opts and self.opts.live) then
         pip:Hide()
         return
     end
-    -- Per-palette opt-out (Show Placed-Marker Pips, in the Toggle World
-    -- Markers cog).
-    local pp = self:P()
-    if pp and pp.worldMarkerPip == false then
-        pip:Hide()
-        return
-    end
-    local id
-    if slot then
-        if slot.kind == "worldmarker" then
-            id = tonumber(slot.id)
-        elseif slot.kind == "cycleworldmarker" then
-            -- The one the NEXT press places, which is the marker this entry is
-            -- already drawing (SlotDisplay). Through CycleNext rather than off
-            -- the stored position, so the pip and the icon cannot disagree
-            -- about which marker the entry is currently offering.
-            --
-            -- The target-marker cycle is NOT this: raid targets sit on units,
-            -- and IsRaidMarkerActive answers for world markers alone -- which
-            -- Blizzard says in as many words at
-            -- Mainline/Blizzard_CompactRaidFrameManager.lua:1088.
-            id = CycleNext(slot)
-        end
-    end
-    if not id or id < 1 or id > 8
-       or not IsRaidMarkerActive(WORLD_MARKER_ENGINE[id]) then
+    if not self:SlotIsPipped(slot) then
         pip:Hide()
         return
     end
@@ -9191,6 +9282,7 @@ local function RequestPush()
         PushAllPalettes()
     end)
 end
+ns.RequestPush = RequestPush
 
 -- Land a pending push NOW rather than at the end of its window. Called by the
 -- press, so a key can never fire geometry the palette has stopped drawing --

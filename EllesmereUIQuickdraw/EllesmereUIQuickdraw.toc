@@ -21,4 +21,9 @@
 # Main Lua
 EllesmereUIQuickdraw.lua
 
+# TalentLoadoutsEx integration: mirrors its saved loadouts into a nested
+# Action Menu and adds the active-spec/active-loadout corner pip. See the
+# file's own header for what it depends on.
+EllesmereUIQuickdraw_TalentLoadouts.lua
+
 # Options page lives in the LoadOnDemand EllesmereUIOptions addon.
