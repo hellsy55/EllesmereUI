@@ -237,40 +237,31 @@ function ns.IsMacrotextSlotActive(slot)
     return false
 end
 
--- EllesmereUIActionBars' own "Show When Spellbook Is Open" also watches this
--- SAME frame (HookScript on OnShow/OnHide), and reacts by registering a
--- SECURE state-visibility driver (RegisterAttributeDriver) on any bar opted
--- into it -- a heavier, partly C-side mechanism, not a plain SetShown. Firing
--- that twice in the same tick (our Show, immediately followed by our Hide)
--- is what left it stuck rather than the flash itself. Two mitigations,
--- belt-and-braces:
---   1. TALENT_PANEL_WARMUP_DELAY pushes the FIRST flash (at login) well past
---      PLAYER_ENTERING_WORLD, past the point where every module's own
---      initial visibility pass (ActionBars' included) has already run at
---      least once, so it is never racing a module that is still setting
---      itself up. A spec-change flash later in the session needs no such
---      delay -- everything is long since settled by then.
---   2. Right after every flash's own Hide(), EllesmereUIActionBars is asked
---      -- through the suite's normal cross-addon accessor, not by reaching
---      into its internals uninvited -- to resync that exact feature. It
---      already ships a resync path for "the setting changed while the panel
---      was open", which is functionally the same shape of event our flash
---      produces, so this is using it for what it is for rather than working
---      around it.
+-- TalentLoadoutsEx's own "currently applied" tracking hangs off
+-- hooksecurefunc(PlayerSpellsFrame.TalentsFrame, "SetShown", ...) -- the
+-- TALENTS TAB, a child frame, not the PlayerSpellsFrame window itself (see
+-- its modules/frame.lua). EllesmereUIActionBars' "Show When Spellbook Is
+-- Open" watches the PARENT window instead (HookScript on PlayerSpellsFrame's
+-- own OnShow/OnHide). Those are two different frames: toggling the TALENTS
+-- TAB directly satisfies TalentLoadoutsEx's hook without ever calling
+-- Show()/Hide() on the parent PlayerSpellsFrame, so ActionBars' hook never
+-- fires and there is nothing of its state to disturb -- no resync required
+-- because nothing is ever touched. (An earlier version of this file toggled
+-- the parent and then resynced ActionBars afterward; toggling the right
+-- frame in the first place is simpler and does not depend on ActionBars'
+-- resync path staying compatible with a same-tick Show/Hide.)
+--
+-- A child's own :IsShown() is independent of whether its ancestors are
+-- shown -- only :IsVisible() cares about the whole chain -- so this never
+-- renders anything on screen: the parent PlayerSpellsFrame is never shown,
+-- so the tab has nothing to be visible IN, even while it reports itself as
+-- shown to TalentLoadoutsEx's hook.
 local TALENT_PANEL_WARMUP_DELAY = 5 -- seconds after PLAYER_ENTERING_WORLD
-
-local function ResyncActionBarSpellbookVisibility()
-    local eab = EllesmereUI and EllesmereUI.Lite and EllesmereUI.Lite.GetAddon
-        and EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
-    if eab and eab._UpdateSpellbookNeverBars then
-        eab._UpdateSpellbookNeverBars(true) -- true = drop and re-evaluate
-    end
-end
 
 -- Runs more than once per session on purpose: TalentLoadoutsEx's own
 -- "currently applied" tracking (see ns.IsMacrotextSlotActive above) only
--- seems to re-settle for the NEW spec once the Talents panel has actually
--- been shown again after the swap -- a plain PLAYER_SPECIALIZATION_CHANGED
+-- seems to re-settle for the NEW spec once the Talents tab has actually
+-- toggled again after the swap -- a plain PLAYER_SPECIALIZATION_CHANGED
 -- reaching TalentLoadoutsEx's own event handlers is not, in practice,
 -- enough on its own. So this flashes again on every spec change, not just
 -- once at login; pendingFlash (rather than a permanent "already done" flag)
@@ -290,12 +281,12 @@ local function FlashTalentPanel()
     end
 
     local frame = _G.PlayerSpellsFrame
-    -- Already open (the player has it up themselves, or another addon does)
-    -- -- never steal that away with a Hide() of our own.
-    if frame and not frame:IsShown() then
-        frame:Show()
-        frame:Hide()
-        ResyncActionBarSpellbookVisibility()
+    local talentsFrame = frame and frame.TalentsFrame
+    -- Already shown (the player has the Talents tab open themselves) --
+    -- never steal that away with a hide of our own.
+    if talentsFrame and not talentsFrame:IsShown() then
+        talentsFrame:SetShown(true)
+        talentsFrame:SetShown(false)
     end
 end
 
