@@ -8,7 +8,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --    centre, action bars 2+ hidden, the bag bar bottom-right with the damage
 --    meter above it and the tooltip above that, the minimap top-right, the
 --    player frame left and the target frame right a hundred pixels above
---    action bar 1.
+--    action bar 1, the stance bar just above the player frame.
 --
 --  Two halves:
 --    1. SeedForeverBaseLayout, called by the first-install loader at the
@@ -22,13 +22,16 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --       action bars are placed by Blizzard's Edit Mode (on retail too; the
 --       Action Bars module only follows the first two), so those come from
 --       an account layout named "EllesmereUI Forever", written once the
---       layouts have loaded and only while no layout of that name exists:
---       the player owns it from then on. The first-install popup always
---       ends in a reload, which lands both halves and clears the Edit Mode
---       taint, the way the profile importer's layout write relies on it.
+--       layouts have loaded and only while no layout of that name exists.
+--       Edit Mode keeps the layout account-wide but the active choice per
+--       character, so each character is switched to it once, on its first
+--       login (while still on a Blizzard preset), and owns its choice from
+--       then on. The first-install popup always ends in a reload, which
+--       lands both halves and clears the Edit Mode taint, the way the
+--       profile importer's layout write relies on it.
 --
---  Cost: nothing on any other client (the file returns), and on Forever
---  nothing after an install's first session.
+--  Cost: nothing on any other client (the file returns), and on Forever one
+--  saved-data lookup per login after a character's first session.
 --------------------------------------------------------------------------------
 local EllesmereUI = _G.EllesmereUI
 if not (EllesmereUI and EllesmereUI.IS_FOREVER) then return end
@@ -59,6 +62,11 @@ local TARGET_H     = 56
 local TOT_W        = 101
 local TOT_GAP      = 6
 local TOT_DX       = (TARGET_W - TOT_W) / 2   -- centre offset that aligns the right edges
+-- Stance bar: just above the player frame (same size as the target frame),
+-- right edges flush. Placed by its bottom-right corner, so a class with more
+-- or fewer forms grows to the left and the right edge stays put.
+local STANCE_RIGHT  = -UF_SPREAD + TARGET_W / 2   -- the player frame's right edge
+local STANCE_BOTTOM = UF_BOTTOM + TARGET_H + GAP
 local MINIMAP_SIZE = 200
 EllesmereUI.FOREVER_MINIMAP_SIZE = MINIMAP_SIZE   -- the minimap's own first-activation default there
 
@@ -151,11 +159,14 @@ function EllesmereUI.SeedForeverBaseLayout()
         win.curDMType = Enum.DamageMeterType.DamageDone
     end
 
-    -- Action bars: bar 1 bottom centre, every other bar hidden, Blizzard's
-    -- own XP and reputation bars in place of the module's.
+    -- Action bars: bar 1 bottom centre, the stance bar just above the player
+    -- frame, every other bar hidden, Blizzard's own XP and reputation bars in
+    -- place of the module's.
     local ab = Sub(addons, "EllesmereUIActionBars")
     ab.useBlizzardDataBars = true
-    Sub(ab, "barPositions").MainBar = Pos("BOTTOM", 0, BAR_BOTTOM)
+    local barPos = Sub(ab, "barPositions")
+    barPos.MainBar = Pos("BOTTOM", 0, BAR_BOTTOM)
+    barPos.StanceBar = { point = "BOTTOMRIGHT", relPoint = "BOTTOM", x = STANCE_RIGHT, y = STANCE_BOTTOM }
     local bars = Sub(ab, "bars")
     for _, key in ipairs({ "Bar2", "Bar3", "Bar4", "Bar5", "Bar6", "Bar7", "Bar8", "Bar9", "Bar10" }) do
         local b = Sub(bars, key)
@@ -210,7 +221,8 @@ local function SetSetting(entry, setting, value)
     rows[#rows + 1] = { setting = setting, value = value }
 end
 
--- Returns true once the layout exists (written now or found), false to retry.
+-- Returns true once the layout exists and this character is on it for its
+-- first time (written now, or found and switched to), false to retry.
 local function WriteEditModeLayout()
     if InCombatLockdown() then return false end
     local mgr = _G.EditModeManagerFrame
@@ -224,14 +236,28 @@ local function WriteEditModeLayout()
 
     local info = C_EditMode.GetLayouts()
     if not (info and type(info.layouts) == "table") then return false end
+    -- The presets come first in the game's own list: the active-layout index
+    -- counts them, and a copy of the Modern one is the base of ours.
+    local presets = PLM:GetCopyOfPresetLayouts()
+    if type(presets) ~= "table" or #presets == 0 then return false end
+    local presetCount = #presets
     local fullName = LayoutFullName()
-    for _, l in ipairs(info.layouts) do
-        if l.layoutName == fullName then return true end
+    for i, l in ipairs(info.layouts) do
+        if l.layoutName == fullName then
+            -- Already written, by an earlier session or another character:
+            -- the layout is account-wide, the active choice per character.
+            -- A character still on a Blizzard preset has never had its
+            -- first look at ours, so it is switched once; one on any saved
+            -- layout, ours or its own, keeps that choice.
+            local ours = presetCount + i
+            if info.activeLayout ~= ours and (info.activeLayout or 0) <= presetCount then
+                C_EditMode.SetActiveLayout(ours)
+            end
+            return true
+        end
     end
 
     -- A copy of the Modern preset, with the pieces moved.
-    local presets = PLM:GetCopyOfPresetLayouts()
-    if type(presets) ~= "table" or #presets == 0 then return false end
     local base = presets[1]
     local modernIndex = Enum.EditModePresetLayouts and Enum.EditModePresetLayouts.Modern
     for _, p in ipairs(presets) do
@@ -291,7 +317,6 @@ local function WriteEditModeLayout()
     -- with activeLayout indexing that merged list. Ours goes in ahead of the
     -- first character layout, with the account layouts.
     local merged = presets
-    local presetCount = #merged
     -- Older versions of ours drop out here; every other saved layout rides along.
     for _, l in ipairs(info.layouts) do
         if not IsOurLayout(l.layoutName) then merged[#merged + 1] = l end
@@ -324,25 +349,36 @@ local function PlaceTooltipAnchor()
     if EllesmereUI._applyTooltipFixedAnchor then EllesmereUI._applyTooltipFixedAnchor() end
 end
 
--- First session of an install only (the seed sets the flag), and never when
--- an external installer owns the first run. Retried on the layouts event and
--- a few times after entering the world; drops out for good once written.
+-- Every login of a character that has not had its first look at the layout
+-- (stamped by character below, in the account's saved data; a fresh install
+-- is such a login too), and never when an external installer owns the first
+-- run. Retried on the layouts event and a few times after entering the
+-- world; drops out for good once done, and at once for a stamped character.
+local function SeenByCharacter()
+    if not EllesmereUIDB then return nil end
+    return Sub(EllesmereUIDB, "foreverEditModeSeen")
+end
+
 local writer = CreateFrame("Frame")
 writer:RegisterEvent("PLAYER_ENTERING_WORLD")
 writer:SetScript("OnEvent", function(self, event)
-    if not EllesmereUI._foreverLayoutFresh or EllesmereUI._externalInstaller then
+    local guid = UnitGUID("player")
+    local seen = SeenByCharacter()
+    if EllesmereUI._externalInstaller or not guid or not seen or seen[guid] then
         self:UnregisterAllEvents()
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
         self:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
-        PlaceTooltipAnchor()
+        -- The tooltip box is profile data: first session of an install only.
+        if EllesmereUI._foreverLayoutFresh then PlaceTooltipAnchor() end
     end
     local tries = 0
     local function Attempt()
-        if not EllesmereUI._foreverLayoutFresh then return end
+        if seen[guid] then return end
         if WriteEditModeLayout() then
+            seen[guid] = true
             EllesmereUI._foreverLayoutFresh = nil
             self:UnregisterAllEvents()
             return

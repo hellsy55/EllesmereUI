@@ -993,7 +993,7 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
-        version = "9.2",
+        version = "9.2.1",
         heroes = {
             {
                 -- Full-width banner card (banner = true, see MakeBannerCard) above
@@ -1049,6 +1049,12 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 nav    = { module = "EllesmereUIBags", page = "Bags",
                            section = "DISPLAY", highlight = "Enabled Currencies" },
             },
+            {
+                -- Static card: the page only exists on WoW Forever.
+                module = "Quality of Life",
+                title  = "Swing Timer (WoW Forever)",
+                desc   = "Main-hand, off-hand and ranged swing bars driven by the Forever client's own swing event, with queued-attack highlighting and Unlock Mode placement; off by default",
+            },
         },
         fixes = {
             { module = "Aura Buff Reminders", text = "The main-hand weapon enchant reminder no longer disappears when only the off-hand is enchanted." },
@@ -1062,10 +1068,14 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Cooldown Manager", text = "A removed custom spell's Custom Active State no longer hides or overlays the same spell when it is tracked normally." },
             { module = "Cooldown Manager", text = "Custom Icon now applies to custom aura buffs on Buffs bars." },
             { module = "Cooldown Manager", text = "When a spell is bound on more than one action bar, the keybind label shows the lowest-numbered bar's key." },
+            { module = "Cooldown Manager", text = "The button settings tip no longer lingers on other pages after you leave the CDM Bars page." },
             { module = "Damage Meters", text = "Bar Height and Spell History icon and bar sizes now scale with the UI like the rest of the window, so a shared profile shows the same proportions for everyone." },
+            { module = "Damage Meters", text = "The mode picker no longer opens with collapsed cards on a window placed by a screen or element anchor, and it re-flows when the window is resized." },
             { module = "General", text = "The Instances visibility option now applies in battlegrounds and arenas." },
             { module = "General", text = "Escape closes the Great Vault window reliably from both the minimap and data bar shortcuts." },
             { module = "General", text = "In Unlock Mode, an element moved by its anchor cascade no longer jumps to the screen centre after its anchor link is removed." },
+            { module = "General", text = "Reset All no longer leaves the character sheet on Blizzard's default look." },
+            { module = "Minimap", text = "A lone addon button now shows on the map by itself; the group button only appears once a second button joins it." },
             { module = "Nameplates", text = "Friendly name-only player names now show an outline on the Classic nameplate style, matching the other styles." },
             { module = "Player Aura Bars", text = "Weapon enchant icons now sit flush with the buff run in every grow direction, count against Max Icons, and stay in place in combat." },
             { module = "Player Aura Bars", text = "Weapon enchants now show whenever the Buffs bar is on All Buffs or Has Duration; the separate Weapon Enchants filter row is gone." },
