@@ -66,7 +66,7 @@ local CHANNEL_EVENTS = {
     -- exactly that moment. (The "Short" variants ride the Override's
     -- _absGate lockstep instead, which the absorb channel already covers.)
     text     = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER",
-                 "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_CONNECTION",
+                 "UNIT_NAME_UPDATE", "UNIT_LEVEL", "UNIT_CONNECTION", "UNIT_FACTION",
                  "UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_ABSORB_AMOUNT_CHANGED",
                  "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" },
     -- (UNIT_HEAL_PREDICTION deliberately absent: the absorb painter never
@@ -791,6 +791,14 @@ globalFrame:SetScript("OnEvent", function(self, event)
         if f then Engine.RepaintAll(f, event) end
         local fot = unitFrames.focustarget
         if fot then fot._euiLastGuid = nil; pollAccum = POLL_INTERVAL end
+        -- Focus Indicator ([eui-focusindicator], Boss Left/Center/Right/Extra
+        -- Text): a boss frame's "F" marker depends on the player's focus, not
+        -- on anything about the boss unit itself, so a focus swap needs its
+        -- own repaint fan-out here instead of riding the boss unit's events.
+        for i = 1, 5 do
+            local bf = unitFrames["boss" .. i]
+            if bf and bf:IsShown() then Engine.RepaintAll(bf, event) end
+        end
     elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
         for i = 1, 5 do
             local f = unitFrames["boss" .. i]

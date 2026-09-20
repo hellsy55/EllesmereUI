@@ -126,23 +126,28 @@ local SHOW_WHEN_VALUES_EFFECT = { present = "When Any Present" }
 local SHOW_WHEN_ORDER_EFFECT = { "present" }
 local SHOW_WHEN_EFFECT_TIP = "Effect indicators show while a tracked buff is present. Absence-based modes are not available in 12.1."
 
--- Indicator frame level, relative to the unit button. Icon/Square: own border at base+1, count/duration text carrier pinned at +18 regardless of mode; bars use the base only (no sub-frames).
+-- Indicator frame level, relative to the unit button. Icon/Square: own border at base+1, count/duration text carrier pinned at +18 regardless of mode (raised automatically for aboveMarkers, see BM_ApplyIconLevel); bars use the base only (no sub-frames).
 local FRAMELVL_VALUES = {
     behindBorders = "Behind Borders",
     behindText    = "Behind Text",
     medium        = "Medium",
     high          = "High",
     highest       = "Highest",
+    aboveMarkers  = "Above Ready Check/Markers",
 }
-local FRAMELVL_ORDER = { "behindBorders", "behindText", "medium", "high", "highest" }
+local FRAMELVL_ORDER = { "behindBorders", "behindText", "medium", "high", "highest", "aboveMarkers" }
 local FRAMELVL_BASE = {
     behindBorders = 7,   -- below the main border (+8)
     behindText    = 11,  -- below the name/health text carrier (+12), above borders
     medium        = 13,  -- ns.LVL_AURA: the original/default band
     high          = 14,
     highest       = 15,
+    -- Above the marker band (ns.LVL_MARKER = 26: ready check, raid marker, summon,
+    -- combat icon) AND above the ping overlay (LVL_MARKER + 1 = 27), so the indicator
+    -- clears every one of them with headroom to spare instead of tying a level.
+    aboveMarkers  = 30,
 }
-local FRAMELVL_TEXT = 18  -- fixed count/duration text-carrier offset (icon/square)
+local FRAMELVL_TEXT = 18  -- default count/duration text-carrier offset (icon/square); BM_ApplyIconLevel raises this per-indicator so text always stays above a raised icon
 
 -------------------------------------------------------------------------------
 --  Healer spell database. hide=true: alt spell ID for the same aura, UI-skipped.
@@ -811,7 +816,11 @@ local function BM_ApplyIconLevel(fr, ind, baseLvl)
     -- Swipe + border one above the icon, text carrier on top; set each explicitly, not by child-level propagation.
     if fr._cooldown then fr._cooldown:SetFrameLevel(baseLvl + off + 1) end
     if fr._bdr then fr._bdr:SetFrameLevel(baseLvl + off + 1) end
-    if fr._textCarrier then fr._textCarrier:SetFrameLevel(baseLvl + FRAMELVL_TEXT) end
+    -- Text carrier stays pinned at the default +18 for every existing tier (their
+    -- offsets are all <= 15, so off+3 never exceeds 18 -- unchanged behavior), but
+    -- follows a raised icon (e.g. aboveMarkers = 30) so the count/duration text
+    -- never ends up rendering underneath its own icon.
+    if fr._textCarrier then fr._textCarrier:SetFrameLevel(baseLvl + math.max(FRAMELVL_TEXT, off + 3)) end
 end
 
 -- Bars have no border/text sub-frames: base only, defaulting to Behind Borders.

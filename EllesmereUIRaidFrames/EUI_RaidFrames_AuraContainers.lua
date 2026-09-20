@@ -912,7 +912,8 @@ end
 -- indicators render presence-driven only; simple mode stays on the legacy renderer.
 ------------------------------------------------------------------------------
 
-local BM_FRAMELVL = { behindBorders = 7, behindText = 11, medium = 13, high = 14, highest = 15 }
+-- Mirrors FRAMELVL_BASE in EUI_RaidFrames_BuffManager.lua -- keep both in sync.
+local BM_FRAMELVL = { behindBorders = 7, behindText = 11, medium = 13, high = 14, highest = 15, aboveMarkers = 30 }
 local BM_FRAMELVL_TEXT = 18
 
 local function BmScaleFor(d)
@@ -1281,7 +1282,9 @@ local function ApplyBmIconExtra(button, dd, style)
     end
     if dd.cooldown then dd.cooldown:SetFrameLevel(lvl + 1) end
     if dd.borderHost then dd.borderHost:SetFrameLevel(lvl + 1) end
-    if dd.stackCarrier then dd.stackCarrier:SetFrameLevel(base + BM_FRAMELVL_TEXT) end
+    -- Keep the count/duration text above a raised icon (e.g. aboveMarkers); unchanged
+    -- for every pre-existing tier since their offsets top out at 15 (+3 = 18 = same as before).
+    if dd.stackCarrier then dd.stackCarrier:SetFrameLevel(base + math.max(BM_FRAMELVL_TEXT, (style.levelOffset or 13) + 3)) end
     BmRebindDurationCurve(button, dd, style)
     ApplyBmIconGlow(button, dd, style)
 end
@@ -1395,7 +1398,8 @@ local function BmApplySquare(button, dd, style)
         button:SetFrameLevel(lvl)
         dd.bmLvl = lvl
     end
-    if dd.stackCarrier then dd.stackCarrier:SetFrameLevel(base + BM_FRAMELVL_TEXT) end
+    -- Same text-above-icon guarantee as ApplyBmIconExtra; no-op for pre-existing tiers.
+    if dd.stackCarrier then dd.stackCarrier:SetFrameLevel(base + math.max(BM_FRAMELVL_TEXT, (BM_FRAMELVL[ind.frameLevel or "medium"] or 13) + 3)) end
     BmRebindDurationCurve(button, dd, style)
 end
 

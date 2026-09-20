@@ -163,6 +163,20 @@ local function InstallMenuClassifierFix()
     if menuFixHooked or type(UnitPopup_OpenMenu) ~= "function" then return end
     menuFixHooked = true
     local reopening = false
+    -- Plain hooksecurefunc: Blizzard calls the real UnitPopup_OpenMenu first,
+    -- then this. Nothing here ever reassigns the CheckInteractDistance
+    -- global -- doing that from tainted code (which this hook body is,
+    -- since it runs as a continuation of the secure click) marks the global
+    -- itself as tainted from then on, and restoring it right after does NOT
+    -- undo that, because the restoring write is made from tainted code too.
+    -- Every later read of CheckInteractDistance anywhere, even from
+    -- genuinely clean code, then inherits that taint (this is exactly what
+    -- happened when this was tried: a background OnUpdate poller with no
+    -- click anywhere in its call stack started getting blocked too). The
+    -- 1-4x ADDON_ACTION_BLOCKED for CheckInteractDistance during a tainted
+    -- menu build (Trade/Duel/Follow's distance-gated visibility) is left in
+    -- place on purpose: it is a cosmetic log line, the call is simply a
+    -- no-op when blocked, and the menu opens and works correctly regardless.
     hooksecurefunc("UnitPopup_OpenMenu", function(which, contextData)
         if reopening then return end
         if which ~= "PET" and which ~= "OTHERPET" and which ~= "OTHERBATTLEPET" then return end
@@ -189,20 +203,7 @@ local function InstallMenuClassifierFix()
         local correct = isRaidToken and "RAID_PLAYER"
             or isPartyToken and "PARTY"
             or ResolvePlayerMenu(unit)
-        -- Building RAID_PLAYER/PARTY also evaluates the Trade entry's
-        -- distance-gated visibility, which calls the protected
-        -- CheckInteractDistance(). That evaluation runs synchronously inside
-        -- THIS (insecure) re-open call, so the protected call itself throws
-        -- ADDON_ACTION_BLOCKED regardless of anything ModifyReopenedMenu does
-        -- afterward (SetEnabled only gates the click, not this build-time
-        -- shown check). Shadow the global for the duration of the call so the
-        -- generator gets a harmless "out of range" answer instead of reaching
-        -- the real protected function; restored immediately after, success or
-        -- error, so nothing else in this session is affected.
-        local realCheckInteractDistance = CheckInteractDistance
-        CheckInteractDistance = function() return false end
         local ok, err = pcall(UnitPopup_OpenMenu, correct, { unit = unit })
-        CheckInteractDistance = realCheckInteractDistance
         if not ok then geterrorhandler()(err) end
         EllesmereUI._menuReopenUnit = nil
         reopening = false
