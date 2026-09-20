@@ -25,6 +25,7 @@ EllesmereUIQoL_RaidToolsCompactBand.lua
 EllesmereUIQoL_RaidCheck.lua
 EllesmereUIQoL_FailedCastAlert.lua
 EllesmereUIQoL_Swing.lua
+EllesmereUIQoL_PreyBar.lua
 EUI_UpgradeCalc.lua
 
 # Options
