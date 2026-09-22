@@ -282,15 +282,14 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 3: how the shown windows (and the collapsed icon) sit on
-        -- screen when nothing else is changing their visibility -- Always
-        -- keeps them solid, Mouseover fades them out until the cursor is
-        -- over them -- and which stacking layer they draw on. Both are
-        -- display-only; neither touches whether the mode/showAs verdict
-        -- shows anything.
+        -- Row 3: how the shown windows and the collapsed icon sit on screen
+        -- when nothing else is changing their visibility -- Always keeps them
+        -- solid, Mouseover fades them out until the cursor is over them. The
+        -- panels and the button each have their own choice. Display-only;
+        -- neither touches whether the mode/showAs verdict shows anything.
         _, h = W:DualRow(parent, y,
-            { type = "dropdown", text = "Visibility",
-              tooltip = "Always keeps the shown windows and the button that opens them fully visible. Mouseover fades them out until you move your cursor over them.",
+            { type = "dropdown", text = "Raid Tools Panel Visibility",
+              tooltip = "Always keeps the shown windows fully visible. Mouseover fades them out until you move your cursor over them.",
               disabled = Disabled,
               values = { always = "Always", mouseover = "Mouseover" },
               order = { "always", "mouseover" },
@@ -299,6 +298,26 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("visibility", v)
                   Refresh()
               end },
+            { type = "dropdown", text = "Raid Tools Button Visibility",
+              tooltip = "Always keeps the button that opens the windows fully visible. Mouseover fades it out until you move your cursor over it.",
+              disabled = Disabled,
+              values = { always = "Always", mouseover = "Mouseover" },
+              order = { "always", "mouseover" },
+              getValue = function()
+                  if ns.ButtonVisibility then return ns.ButtonVisibility() end
+                  return Cfg("buttonVisibility") or Cfg("visibility") or "always"
+              end,
+              setValue = function(v)
+                  Set("buttonVisibility", v)
+                  Refresh()
+              end }
+        );  y = y - h
+
+        -- Row 4: stacking layer | which corner the collapsed icon and its
+        -- expanded windows share -- that shared corner stays put across
+        -- collapse/expand, so it also reads as the direction the panel opens
+        -- from the button, and where the close button lands.
+        _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Strata",
               tooltip = "Which layer the windows and the collapsed icon draw on, relative to other frames on screen.",
               disabled = Disabled,
@@ -309,15 +328,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   Set("strata", v)
                   Refresh()
-              end }
-        );  y = y - h
-
-        -- Row 4: which corner the collapsed icon and its expanded windows
-        -- share -- that shared corner stays put across collapse/expand, so
-        -- it also reads as the direction the panel opens from the button,
-        -- and where the close button lands -- paired with Window Scale,
-        -- the other setting that touches every shown form of the feature.
-        _, h = W:DualRow(parent, y,
+              end },
             { type = "dropdown", text = "Menu Grow Direction",
               tooltip = "Which way the windows extend from the collapsed icon when they open. The close button always lands at that same corner.",
               disabled = Disabled,
@@ -328,24 +339,34 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   Set("growDir", v)
                   Refresh()
-              end },
-            -- One scale for the whole feature -- both shells and the
-            -- collapsed icon wear it, whichever windows the Show as choice
-            -- puts on screen. Fine step so the value can be nudged in small
-            -- increments (1.185, 1.195, ...) rather than jumping by whole
-            -- ticks.
+              end }
+        );  y = y - h
+
+        -- Row 5: the two scales. Window Scale is one scale for the whole
+        -- feature -- both shells and the collapsed icon wear it, whichever
+        -- windows the Show as choice puts on screen. Fine step so the value
+        -- can be nudged in small increments (1.185, 1.195, ...) rather than
+        -- jumping by whole ticks. The Raid Groups window keeps its own slice
+        -- and its own scale -- it is a popup opened on purpose, not one of
+        -- the panels, so it is sized for reading rather than for sitting on
+        -- screen.
+        _, h = W:DualRow(parent, y,
             { type = "slider", text = "Window Scale", min = 0.5, max = 2.0, step = 0.001,
               disabled = Disabled,
               getValue = function() return Cfg("scale") or 1 end,
               setValue = function(v)
                   Set("scale", v)
                   Refresh()
-              end }
+              end },
+            { type = "slider", text = "Raid Groups Window Scale", min = 0.5, max = 2.0, step = 0.05,
+              disabled = Disabled,
+              getValue = ns.RaidGroupsScale,
+              setValue = ns.RaidGroupsScale }
         );  y = y - h
 
-        -- Row 5: Auto-Minimize -- collapses the windows back to the icon on
+        -- Row 6: Auto-Minimize -- collapses the windows back to the icon on
         -- their own once they've sat open (and unhovered) for the delay
-        -- below, no click needed. The delay only matters while the toggle
+        -- beside it, no click needed. The delay only matters while the toggle
         -- is on, so it greys out alongside it exactly like the rest of this
         -- page greys out alongside Show Raid Tools.
         local function AutoMinDisabled()
@@ -369,17 +390,6 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("autoMinimizeDelay", v)
                   Refresh()
               end }
-        );  y = y - h
-
-        -- Row 6: the Raid Groups window keeps its own slice and its own
-        -- scale -- it is a popup opened on purpose, not one of the panels,
-        -- so it is sized for reading rather than for sitting on screen.
-        _, h = W:DualRow(parent, y,
-            { type = "slider", text = "Raid Groups Window Scale", min = 0.5, max = 2.0, step = 0.05,
-              disabled = Disabled,
-              getValue = ns.RaidGroupsScale,
-              setValue = ns.RaidGroupsScale },
-            { type = "label", text = "" }
         );  y = y - h
 
         -- QUICK FIRE
