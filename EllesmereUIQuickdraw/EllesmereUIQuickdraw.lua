@@ -5788,8 +5788,13 @@ function PaletteView:SlotIsPipped(slot)
             -- Mainline/Blizzard_CompactRaidFrameManager.lua:1088.
             id = CycleNext(slot)
         end
-        return id ~= nil and id >= 1 and id <= 8
-            and IsRaidMarkerActive(WORLD_MARKER_ENGINE[id])
+        if id == nil or id < 1 or id > 8 then return false end
+        -- Normally a plain bool, but tainted execution can hand back a
+        -- secret one, and the caller's boolean test would throw: an
+        -- unreadable answer hides the pip.
+        local active = IsRaidMarkerActive(WORLD_MARKER_ENGINE[id])
+        if issecretvalue and issecretvalue(active) then return false end
+        return active and true or false
 
     elseif slot.kind == "spec" or slot.kind == "dynamicspec" then
         -- The spec this entry would switch to, lit up when it is already the

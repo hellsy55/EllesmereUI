@@ -487,6 +487,8 @@ end
 local function RefreshMarkerState()
     for _, b in ipairs(markerButtonList) do
         local active = b._worldID and IsRaidMarkerActive and IsRaidMarkerActive(b._worldID)
+        -- Secret under tainted execution: show as not placed rather than throw.
+        if issecretvalue and issecretvalue(active) then active = false end
         if b.icon.SetDesaturated then b.icon:SetDesaturated(active and true or false) end
         if b._activeLine then b._activeLine:SetShown(active and true or false) end
     end

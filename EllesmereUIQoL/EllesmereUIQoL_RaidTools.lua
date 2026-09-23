@@ -503,6 +503,9 @@ local DB_DEFAULTS = {
         -- display fade layered on top of the mode/showAs verdict -- it never
         -- touches Show/Hide, so it is unaffected by combat lockdown.
         visibility    = "always",
+        -- buttonVisibility ("always" | "mouseover"): same choice for the
+        -- collapsed icon alone. Deliberately left unseeded: unset follows
+        -- visibility (see ButtonVisibility), so older profiles are unchanged.
         -- FrameStrata for every shell and the collapsed icon: one of
         -- BACKGROUND/LOW/MEDIUM/HIGH/DIALOG. Same "one value, everything the
         -- feature draws" convention as scale and visibility.
@@ -590,6 +593,17 @@ local function Visibility()
     return v
 end
 ns.Visibility = Visibility
+
+-- The Raid Tools Button Visibility choice: the collapsed icon's own fade,
+-- independent of the panels. Unset falls back to the panel choice so
+-- profiles saved before the split keep the look they had.
+local function ButtonVisibility()
+    local p = P()
+    local v = p and p.buttonVisibility
+    if v ~= "always" and v ~= "mouseover" then return Visibility() end
+    return v
+end
+ns.ButtonVisibility = ButtonVisibility
 
 local VALID_STRATA = { BACKGROUND = true, LOW = true, MEDIUM = true, HIGH = true, DIALOG = true }
 -- The Strata choice, normalized: any unset/unknown value reads as "MEDIUM"
@@ -2042,7 +2056,8 @@ function ApplyMouseoverFade()
         end
     end
     if iconBtn then
-        iconBtn:SetAlpha((not faded or iconBtn:IsMouseOver()) and 1 or 0)
+        local iconFaded = (ButtonVisibility() == "mouseover") and not previewOn
+        iconBtn:SetAlpha((not iconFaded or iconBtn:IsMouseOver()) and 1 or 0)
     end
 end
 
@@ -2056,7 +2071,8 @@ local mouseoverTicker = CreateFrame("Frame")
 do
     local sinceLast = 0
     mouseoverTicker:SetScript("OnUpdate", function(self, elapsed)
-        if not sections.Group or Visibility() ~= "mouseover" or previewOn then return end
+        if not sections.Group or previewOn
+           or (Visibility() ~= "mouseover" and ButtonVisibility() ~= "mouseover") then return end
         sinceLast = sinceLast + elapsed
         if sinceLast < 0.1 then return end
         sinceLast = 0
@@ -2149,7 +2165,12 @@ local function PrimeQuickFire(place)
     local count = 0
     for i = 1, 8 do
         local marker = SYMBOL_TO_WORLD[i]
-        if not IsRaidMarkerActive or not IsRaidMarkerActive(marker) then
+        -- IsRaidMarkerActive can hand back a secret boolean under tainted
+        -- execution; testing it throws. An unreadable answer counts the
+        -- marker as free, the same as the API being absent.
+        local active = IsRaidMarkerActive and IsRaidMarkerActive(marker)
+        if issecretvalue and issecretvalue(active) then active = false end
+        if not active then
             count = count + 1
             place:SetAttribute("qfAvail" .. count, i)
         end

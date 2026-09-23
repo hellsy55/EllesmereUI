@@ -10,7 +10,6 @@ readme={
     '../README.md',
     '../changelog.md',
     'benchmark.md',
-    '../LICENSE.txt',
 }
 sort = true
 title='LibDeflate documentation'

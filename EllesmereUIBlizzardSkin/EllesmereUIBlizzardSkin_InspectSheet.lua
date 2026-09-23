@@ -10,6 +10,9 @@ local ADDON_NAME, ns = ...
 -- GetItemQualityColor) are called via EllesmereUI._GetX (set once in
 -- EllesmereUI.lua) since some clients no longer expose the bare globals.
 local skinned = false
+local GetItemInfo = C_Item.GetItemInfo
+local GetItemInfoInstant = C_Item.GetItemInfoInstant
+local GetItemQualityColor = C_Item.GetItemQualityColor
 
 -- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
 local FFD = setmetatable({}, { __mode = "k" })
