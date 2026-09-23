@@ -1598,6 +1598,14 @@ function ns._ApplyHealthBg(d, health, s, unit, connected, deadOrGhost)
         end
         return
     end
+    -- Alive: clear the dead/offline stamp so a LATER dead/offline call (even
+    -- with the same st as before this alive pass) is seen as a real state
+    -- change and repaints -- without this, a transient alive read (e.g. a
+    -- stale UnitIsDeadOrGhost/UnitIsConnected result racing a range or
+    -- health event) repaints the bg to the alive color here, then the next
+    -- dead/offline call compares against the untouched old stamp, thinks
+    -- nothing changed, and never restores the status tint.
+    d._bgSt, d._bgR, d._bgG, d._bgB = nil, nil, nil, nil
     if not bg then return end
     bg:ClearAllPoints()
     -- The bg covers only MISSING health, so it hangs off the far side of the fill: the fill's
