@@ -7,6 +7,9 @@
 CLAUDE.md
 CLAUDE_PATTERNS.md
 
+# Codex workspace files
+AGENTS.md
+
 # 12.1 migration working documents (dev-only, never ship)
 MIDNIGHT_AURA_MIGRATION.md
 MIDNIGHT_MERGE_PLAN.md
