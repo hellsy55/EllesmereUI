@@ -429,7 +429,7 @@ local function TrackFont(owner, fs, size)
     return fs
 end
 local function ApplyFonts()
-    local path = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath(FONT_KEY)
+    local path = EllesmereUI.GetFontPath(FONT_KEY)
     if not path then return end
     for _, owner in ipairs(fontOwners) do
         local t = owner._fonts
@@ -1610,7 +1610,13 @@ end
 -- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
 -- missing it (or, for Repair, everyone's durability percentage) to this
 -- client's own chat frame only; right-click posts the same thing to /guild
--- (in a raid) or /party (in a party) depending on the current group. Small title-bar riders, same family
+-- (in a raid) or /party (in a party) depending on the current group.
+-- Middle-click always posts to that same guild/party chat: on every button
+-- except Food, it fires all five reports at once (ns.ReportAllConsumables);
+-- on Food specifically, it reports who is missing a food buff whose name
+-- starts with "Hearty" instead of the ordinary Well Fed check
+-- (ns.ReportHeartyFood) -- both defined in EllesmereUIQoL_RaidCheck.lua.
+-- Small title-bar riders, same family
 -- as the Raid Groups cog and Raid Check button, but with the full name on
 -- each instead of a single glyph -- so every button is sized to its own
 -- measured label (see ApplyLayout) rather than a shared fixed width. Not
@@ -1624,7 +1630,7 @@ local function BuildReportButtons()
         local b = CreateFrame("Button", nil, sections.Group)
         b:SetHeight(COG_SZ)
         b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
-        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
         SkinButtonChrome(b)
         local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 8, nil, 1, 1, 1), 8)
         lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
@@ -1637,12 +1643,17 @@ local function BuildReportButtons()
             lbl:SetAlpha(1)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(EllesmereUI.L(def.title))
-            GameTooltip:AddLine(EllesmereUI.L("Left Click: print to your own chat only."), 1, 1, 1)
-            GameTooltip:AddLine(EllesmereUI.L("Right Click: report to raid/party chat."), 1, 1, 1)
             if def.key == "durability" then
                 GameTooltip:AddLine(EllesmereUI.L("Lists anyone at 90% or below, worst first."), 0.7, 0.7, 0.7, true)
             else
                 GameTooltip:AddLine(EllesmereUI.L("Lists who is missing it."), 0.7, 0.7, 0.7, true)
+            end
+            GameTooltip:AddLine(EllesmereUI.L("Left Click: print to your own chat only."), 1, 1, 1)
+            GameTooltip:AddLine(EllesmereUI.L("Right Click: report to party/guild chat."), 1, 1, 1)
+            if def.key == "food" then
+                GameTooltip:AddLine(EllesmereUI.L("Middle Click: report who is missing a \"Hearty\" food, to party/guild chat."), 1, 1, 1)
+            else
+                GameTooltip:AddLine(EllesmereUI.L("Middle Click: report every consumable check at once, to party/guild chat."), 1, 1, 1)
             end
             GameTooltip:Show()
         end)
@@ -1651,6 +1662,14 @@ local function BuildReportButtons()
             GameTooltip:Hide()
         end)
         b:SetScript("OnClick", function(_, button)
+            if button == "MiddleButton" then
+                if def.key == "food" then
+                    if ns.ReportHeartyFood then ns.ReportHeartyFood(true) end
+                elseif ns.ReportAllConsumables then
+                    ns.ReportAllConsumables(true)
+                end
+                return
+            end
             if ns.ReportConsumable then
                 ns.ReportConsumable(def.key, button == "RightButton")
             end
@@ -2160,17 +2179,45 @@ end
 -- Build the first-free run from live marker state. Protected attributes cannot
 -- be changed during combat, so the secure Place button consumes the last run
 -- prepared out of combat and PLAYER_REGEN_ENABLED refreshes it afterward.
+--
+-- IsRaidMarkerActive answers a SECRET boolean during chat messaging lockdown:
+-- on every dungeon and raid map, in or out of combat, and through boss
+-- encounters, keystones and PvP matches. A secret cannot choose which
+-- attributes to write; no snippet can read marker state, and the one secure
+-- action that tests it (the worldmarker toggle) flips a single fixed marker,
+-- so it cannot pick the first free one. While the answer is secret the run
+-- already prepared is kept, and Place, Undo and Clear carry on by position
+-- exactly as they do in combat. A full Star to Skull run starts instead when
+-- the instance changed (runtime.qfZonedPending, latched at PLAYER_ENTERING_WORLD
+-- so a zone-in during combat still lands here), when no run exists yet, or
+-- when the run is used up -- clears are invisible while secret (ours, /cwm,
+-- another player's), so an exhausted run starts over rather than going dead.
+-- Markers already on the ground are not skipped then. The answers are all
+-- read before anything is written, so a secret never leaves a half-built run.
+-- An instance change also empties the Undo stack: its markers are gone.
 local function PrimeQuickFire(place)
     if not place or InCombatLockdown() then return end
+    local zoned = runtime.qfZonedPending
+    local free = runtime.qfFree
+    if not free then free = {}; runtime.qfFree = free end
+    for i = 1, 8 do
+        local active = IsRaidMarkerActive and IsRaidMarkerActive(SYMBOL_TO_WORLD[i])
+        if issecretvalue(active) then
+            local n = tonumber(place:GetAttribute("qfAvailCount"))
+            if zoned or not n or (tonumber(place:GetAttribute("qfAvailPos")) or 0) >= n then
+                for j = 1, 8 do place:SetAttribute("qfAvail" .. j, j) end
+                place:SetAttribute("qfAvailCount", 8)
+                place:SetAttribute("qfAvailPos", 0)
+                if zoned or not n then place:SetAttribute("qfDepth", 0) end
+                runtime.qfZonedPending = nil
+            end
+            return
+        end
+        free[i] = not active
+    end
     local count = 0
     for i = 1, 8 do
-        local marker = SYMBOL_TO_WORLD[i]
-        -- IsRaidMarkerActive can hand back a secret boolean under tainted
-        -- execution; testing it throws. An unreadable answer counts the
-        -- marker as free, the same as the API being absent.
-        local active = IsRaidMarkerActive and IsRaidMarkerActive(marker)
-        if issecretvalue and issecretvalue(active) then active = false end
-        if not active then
+        if free[i] then
             count = count + 1
             place:SetAttribute("qfAvail" .. count, i)
         end
@@ -2178,6 +2225,8 @@ local function PrimeQuickFire(place)
     for i = count + 1, 8 do place:SetAttribute("qfAvail" .. i, nil) end
     place:SetAttribute("qfAvailCount", count)
     place:SetAttribute("qfAvailPos", 0)
+    if zoned then place:SetAttribute("qfDepth", 0) end
+    runtime.qfZonedPending = nil
 end
 
 -- The three invisible buttons are created only after Quick Fire is enabled.
@@ -2381,12 +2430,19 @@ local function EnsureEvents()
                 wasInGroup = inGroup
             end
             if Mode() == "never" then return end
-            if event == "RAID_TARGET_UPDATE" and ShowAs() == "compact" then
-                RefreshCompactMarkerState()
+            -- Quick Fire shares these events, but each only does work while
+            -- enabled. An old Quick Fire frame can survive being disabled. An
+            -- instance change is latched for the next prime out of combat (see
+            -- PrimeQuickFire); a loading screen inside the same instance is not one.
+            if event == "PLAYER_ENTERING_WORLD" then
+                local zone = select(8, GetInstanceInfo())
+                if zone ~= runtime.qfZone then
+                    runtime.qfZone = zone
+                    runtime.qfZonedPending = true
+                end
             end
-            -- Both features share this event, but each only does work while
-            -- enabled. An old Quick Fire frame can survive being disabled.
-            if event == "RAID_TARGET_UPDATE" or event == "PLAYER_REGEN_ENABLED" then
+            if event == "RAID_TARGET_UPDATE" or event == "PLAYER_REGEN_ENABLED"
+               or event == "PLAYER_ENTERING_WORLD" then
                 local p = P()
                 if p and p.quickFire == true and runtime.qfPlace then
                     PrimeQuickFire(runtime.qfPlace)
@@ -2405,7 +2461,7 @@ local function EnsureEvents()
     ev:RegisterEvent("ENCOUNTER_START")
     ev:RegisterEvent("ENCOUNTER_END")
     local p = P()
-    if Mode() ~= "never" and (ShowAs() == "compact" or (p and p.quickFire == true)) then
+    if Mode() ~= "never" and (p and p.quickFire == true) then
         ev:RegisterEvent("RAID_TARGET_UPDATE")
     else
         ev:UnregisterEvent("RAID_TARGET_UPDATE")
@@ -2497,10 +2553,6 @@ end
 -- whole request is parked behind applyPending, with the REGEN listener
 -- guaranteed alive to finish it.
 function Apply()
-    -- Secure handlers end to end (state-driven shells, click handlers):
-    -- stands down on a client that cannot compile snippets (WoW Forever
-    -- beta). Nothing is built, so there is nothing to tear down either.
-    if not EllesmereUI.SecureSnippetsOK() then return end
     if InCombatLockdown() then
         applyPending = true
         EnsureEvents()

@@ -238,6 +238,11 @@ local DURABILITY_KEY = "durability"
 local FOOD_KEY       = "food"
 local WENCHANT_KEY   = "wenchant"
 local VANTUS_KEY     = "vantus"
+
+-- Flask/Food only: once the aura has this many minutes or less left, the
+-- grid cell shows the countdown instead of a plain checkmark (Refresh
+-- below), and the chat report calls it out too (BooleanReportLine below).
+local LOW_DURATION_THRESHOLD_MIN = 5
 local MSG_REPORT     = "rc"    -- a client describing itself
 local MSG_QUERY      = "rcq"   -- someone asking the group to describe itself
 
@@ -955,10 +960,23 @@ local function BooleanReportLine(key)
 
     local answerable = { [key] = true }
     local missing = {}
+    local now = GetTime()
+    local trackDuration = key == "flask" or key == FOOD_KEY
     for _, e in ipairs(roster) do
         local checks = UnitChecks(e.unit, answerable, restricted)
         if checks[key] == false then
             missing[#missing + 1] = e.name
+        elseif trackDuration and checks[key] == true and checks._expires and checks._expires[key] then
+            -- Has it, but it is about to run out -- called out the same as
+            -- someone missing it entirely, since that is what it will be a
+            -- few minutes from now. Minutes are floored, never rounded up:
+            -- reporting "5m" left when it is really 4:59 would read as more
+            -- time than there actually is.
+            local remain = checks._expires[key] - now
+            if remain > 0 and remain <= LOW_DURATION_THRESHOLD_MIN * 60 then
+                local mins = math.max(0, math.floor(remain / 60))
+                missing[#missing + 1] = e.name .. " (" .. mins .. "m)"
+            end
         end
     end
 
@@ -1006,6 +1024,72 @@ local function DurabilityReportLine()
         parts[#parts + 1] = r.name .. " " .. math.floor(r.pct + 0.5) .. "%"
     end
     return title .. ": " .. table.concat(parts, ", ")
+end
+
+-- Middle-click on the Food button: the same "who is missing it?" question
+-- the ordinary Food column answers, but pinned to one exact aura-name
+-- prefix ("Hearty") instead of the whole Well Fed family FOOD_ICONS/
+-- FOOD_IDS covers -- for a guild/raid that always eats one specific feast
+-- and wants to call out anyone who grabbed a different one (or nothing at
+-- all). Same restriction and in-combat gating as every other consumable
+-- column, since this reads the exact same "another player's aura" surface
+-- they do, and for the same reason: an icon/name read is unreliable under
+-- aura secrecy or mid-pull, so it sits out rather than risk a false report.
+local HEARTY_FOOD_PREFIX = "Hearty"
+
+local function HeartyFoodReportLine()
+    local title = "Hearty Food"
+    if Restricted() or ConsumablesBlockedByCombat() then
+        return title .. ": " .. EllesmereUI.L("no data available right now.")
+    end
+
+    local roster = ReadMembers()
+    local missing = {}
+    for _, e in ipairs(roster) do
+        local has = false
+        for i = 1, AURA_SCAN_LIMIT do
+            local aura = GetAuraDataByIndex(e.unit, i, "HELPFUL")
+            if not aura then break end
+            if aura.name and aura.name:find(HEARTY_FOOD_PREFIX, 1, true) == 1 then
+                has = true
+                break
+            end
+        end
+        if not has then
+            missing[#missing + 1] = e.name
+        end
+    end
+
+    if #missing == 0 then
+        return title .. ": " .. EllesmereUI.L("everyone has it.")
+    end
+    table.sort(missing)
+    return EllesmereUI.Lf("Missing %s: %s", title, table.concat(missing, ", "))
+end
+
+-- toChat: same meaning as ns.ReportConsumable's.
+function ns.ReportHeartyFood(toChat)
+    SendOrPrint(HeartyFoodReportLine(), toChat)
+end
+
+-- Middle-click on any report button EXCEPT Food: every one of the five
+-- reports at once (the ordinary Food check, not the Hearty-specific one --
+-- that stays behind Food's own middle-click), each exactly as its own
+-- single-key report would send it. Staggered rather than fired back to
+-- back: five SendChatMessage calls in the same instant risk the server's
+-- own chat throttle silently eating one, same reasoning as
+-- CHAT_CHUNK_DELAY above. Durability goes last since it already carries its
+-- own extra round-trip delay (see ns.ReportConsumable) on top of its slot
+-- in this stagger.
+local ALL_CONSUMABLE_KEYS = { "flask", "food", "rune", "vantus", DURABILITY_KEY }
+local ALL_REPORT_STAGGER = 0.4 -- seconds between each of the five reports
+
+function ns.ReportAllConsumables(toChat)
+    for i, key in ipairs(ALL_CONSUMABLE_KEYS) do
+        C_Timer.After((i - 1) * ALL_REPORT_STAGGER, function()
+            ns.ReportConsumable(key, toChat)
+        end)
+    end
 end
 
 -- key: "flask" | "food" | "rune" | "vantus" | "durability".
@@ -1224,6 +1308,21 @@ local function MakeRow(parent, index)
             tex:SetSize(ICON_SZ, ICON_SZ)
             tex:SetAlpha(0.9)
             r._cells[c] = tex
+
+            -- Flask/Food only: once the buff is about to run out (see
+            -- LOW_DURATION_THRESHOLD_MIN in Refresh), this replaces the
+            -- checkmark in place with the remaining minutes, so the warning
+            -- reads at a glance instead of needing a hover for the tooltip's
+            -- countdown.
+            if def.key == "flask" or def.key == FOOD_KEY then
+                local durFS = MakeText(r, SMALL_SIZE)
+                durFS:SetPoint("CENTER", tex, "CENTER", 0, 0)
+                durFS:SetWidth(CELL_W)
+                durFS:SetJustifyH("CENTER")
+                durFS:Hide()
+                r._cellDur = r._cellDur or {}
+                r._cellDur[c] = durFS
+            end
 
             -- A different Vantus than your own is worth a glance even though
             -- the buff itself is present -- boss-specific runes are easy to
@@ -1992,6 +2091,7 @@ local function Refresh()
                         r._auraNames[def.key] = EnchantName(e.enchantID)
                     end
                     local hit = r._cellHit and r._cellHit[ci]
+                    local durFS = r._cellDur and r._cellDur[ci]
                     if v == true then
                         cell:SetAtlas(ATLAS_OK)
                         cell:Show()
@@ -2010,10 +2110,30 @@ local function Refresh()
                                     and theirName and theirName ~= myVantusName
                                 SetSharedBlink(cell, mismatch, 0.9)
                             end
+
+                            -- Flask/Food only: swap the checkmark for the
+                            -- remaining minutes once it drops to
+                            -- LOW_DURATION_THRESHOLD_MIN or below. The
+                            -- hit-frame above still makes the full tooltip
+                            -- (buff name + exact countdown) available on
+                            -- hover regardless of which one is showing.
+                            if durFS then
+                                local expires = r._auraExpires and r._auraExpires[def.key]
+                                local remain = expires and (expires - GetTime())
+                                if remain and remain > 0 and remain <= LOW_DURATION_THRESHOLD_MIN * 60 then
+                                    cell:Hide()
+                                    durFS:SetText(math.max(1, math.ceil(remain / 60)) .. "m")
+                                    durFS:SetTextColor(1, 0.65, 0.2) -- amber warning, distinct from a plain checkmark
+                                    durFS:Show()
+                                else
+                                    durFS:Hide()
+                                end
+                            end
                         end
                     elseif v == false then
                         cell:SetAtlas(ATLAS_MISS)
                         cell:Show()
+                        if durFS then durFS:Hide() end
                         if def.class then
                             -- Blinks and is clickable only when a nearby
                             -- provider exists (see providerFor above) -- a
@@ -2037,6 +2157,7 @@ local function Refresh()
                         -- Unanswerable, or the client would not say.
                         cell:Hide()
                         if hit then hit:Hide() end
+                        if durFS then durFS:Hide() end
                         if def.class then
                             SetSharedBlink(cell, false, 0.9)
                         end

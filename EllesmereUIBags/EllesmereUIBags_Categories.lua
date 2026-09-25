@@ -418,11 +418,6 @@ function CategoryManager:GetCategories()
     return self._categories
 end
 
-function CategoryManager:GetCategoryCount()
-    local cats = self:GetCategories()
-    return #cats
-end
-
 -------------------------------------------------------------------------------
 --  Classification
 -------------------------------------------------------------------------------
@@ -833,12 +828,6 @@ function CategoryManager:GetGroupMembers(groupName)
         if cat.groupName == groupName then members[#members + 1] = i end
     end
     return members
-end
-
--- Check if a category is in a group.
-function CategoryManager:IsGrouped(catIndex)
-    local cats = self:GetCategories()
-    return cats[catIndex] and cats[catIndex].groupName or nil
 end
 
 -------------------------------------------------------------------------------

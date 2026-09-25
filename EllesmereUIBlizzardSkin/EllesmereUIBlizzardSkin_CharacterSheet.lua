@@ -11,7 +11,6 @@ local L = _G.EllesmereUI and _G.EllesmereUI.L or function(k) return k end
 -- per-chunk ceiling.
 local skinned = false
 local issecretvalue = issecretvalue or function() return false end
-local activeEquipmentSetID = nil
 
 -- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
 local FFD = setmetatable({}, { __mode = "k" })
@@ -36,7 +35,7 @@ function ns.CharSheetStyle()
         if EllesmereUI.IS_FOREVER then
             v = "eui"
         else
-            local p = EllesmereUI.GetActiveProfileData and EllesmereUI.GetActiveProfileData()
+            local p = EllesmereUI.GetActiveProfileData()
             if type(p) ~= "table" then return "eui" end
             v = (p.charSheetUseClassicStyle and "classic") or (p.charSheetUseBlizzardStyle and "blizzard") or "eui"
         end
@@ -216,6 +215,121 @@ end
 
 EllesmereUI.GetEnchantText  = EUI_GetEnchantText
 
+-- Shared with the inspect sheet (loads after this file) through ns.
+-- Slots that can have enchants in current expansion.
+local ENCHANT_SLOTS = {
+    [INVSLOT_HEAD] = true,
+    [INVSLOT_SHOULDER] = true,
+    [INVSLOT_BACK] = false,
+    [INVSLOT_CHEST] = true,
+    [INVSLOT_WRIST] = false,
+    [INVSLOT_LEGS] = true,
+    [INVSLOT_FEET] = true,
+    [INVSLOT_FINGER1] = true,
+    [INVSLOT_FINGER2] = true,
+    [INVSLOT_MAINHAND] = true,
+    -- INVSLOT_OFFHAND deliberately absent: whether it can be enchanted depends on
+    -- what's equipped there (weapon vs. shield/held item), checked dynamically below.
+}
+
+-- Enchant label parts for one slot: iconOnly keeps the |A:...|a atlas escapes
+-- (red icon when missing), tooltipText is the readable name. Only flags
+-- missing enchants at level 90+: leveling gear churn would fire it constantly.
+function ns.ParseEnchantLabel(enchantText, slotID, itemLink, unit)
+    local canHaveEnchant = ENCHANT_SLOTS[slotID]
+    if slotID == INVSLOT_OFFHAND and itemLink then
+        local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
+        canHaveEnchant = (classID == Enum.ItemClass.Weapon)
+    end
+    local lvl = UnitLevel(unit)
+    local atEnchantLevel = lvl and not (issecretvalue and issecretvalue(lvl)) and lvl >= 90 or false
+    local isMissing  = atEnchantLevel and canHaveEnchant and itemLink and (enchantText == "" or not enchantText)
+    local hasEnchant = enchantText and enchantText ~= ""
+
+    local iconOnly, tooltipText
+    if isMissing then
+        -- Same hex atlas enchanted items show, tinted red (#e54949 =
+        -- 229, 73, 73 in the atlas-escape color fields).
+        iconOnly    = "|A:Professions-ChatIcon-Quality-Tier5:14:14:0:0:229:73:73|a"
+        tooltipText = "Enchant missing"
+    elseif hasEnchant then
+        -- Concatenate every |A:...|a atlas escape, drop everything else.
+        local icons = {}
+        for atlas in enchantText:gmatch("|A:[^|]+|a") do
+            icons[#icons + 1] = atlas
+        end
+        iconOnly    = table.concat(icons, "")
+        tooltipText = enchantText:gsub("|A:[^|]+|a", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        -- Strip any "prefix - " (e.g. "Enchant Weapon - ") so the tooltip
+        -- shows just the enchant's readable name.
+        tooltipText = tooltipText:gsub("^.-%s*%-%s*", "")
+    end
+    return iconOnly, tooltipText, isMissing, hasEnchant
+end
+
+-- Mythic+ score color: highest threshold that the score meets wins.
+local MP_COLOR_BRACKETS = {
+    { 3850, "ff8000" }, { 3695, "f9753f" }, { 3575, "f16961" },
+    { 3455, "e75e7f" }, { 3335, "db529c" }, { 3215, "cc47b9" },
+    { 3095, "b83dd6" }, { 2965, "9c3eed" }, { 2845, "715be5" },
+    { 2725, "2c6dde" }, { 2565, "3b7fcd" }, { 2445, "5292b9" },
+    { 2325, "5ca6a4" }, { 2205, "5fba8d" }, { 2085, "5cce75" },
+    { 1965, "50e258" }, { 1845, "35f72d" }, { 1725, "3eff26" },
+    { 1600, "5eff43" }, { 1475, "74ff58" }, { 1350, "88ff6b" },
+    { 1225, "98ff7d" }, { 1100, "a8ff8d" }, { 975,  "b6ff9e" },
+    { 850,  "c3ffae" }, { 725,  "cfffbd" }, { 600,  "dbffcd" },
+    { 475,  "e7ffdd" }, { 350,  "f2ffec" }, { 225,  "fdfffc" },
+    { 200,  "ffffff" },
+}
+function ns.GetMPScoreHex(score)
+    for i = 1, #MP_COLOR_BRACKETS do
+        if score >= MP_COLOR_BRACKETS[i][1] then
+            return MP_COLOR_BRACKETS[i][2]
+        end
+    end
+    return "ffffff"
+end
+
+-- Sheet backdrop: modern_blizz atlas + 0.62 black overlay. The atlas covers the
+-- frame without distorting: native aspect 561x433, and on resize the tex coords
+-- are recomputed centered, cropping the overflow. Returns bg, overlay.
+function ns.SheetBackdrop(frame)
+    local BG_ASPECT = 561 / 433
+    local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
+    bg:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\modern_blizz.png")
+    bg:SetAllPoints(frame)
+    bg:SetAlpha(1)
+    local overlay = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+    overlay:SetColorTexture(0, 0, 0, 0.62)
+    overlay:SetAllPoints(frame)
+
+    local BASE_L, BASE_R, BASE_T, BASE_B = 0.25, 1, 0, 0.75
+    local BASE_U = BASE_R - BASE_L  -- 0.75
+    local BASE_V = BASE_B - BASE_T  -- 0.75
+    local function UpdateBgTexCoords()
+        local fw, fh = frame:GetSize()
+        -- Secrecy test BEFORE the zero check: that check is itself a
+        -- comparison and throws on a secret size. Matches the engine.
+        if issecretvalue and (issecretvalue(fw) or issecretvalue(fh)) then return end
+        if fw == 0 or fh == 0 then return end
+        local frameAspect = fw / fh
+        if frameAspect > BG_ASPECT then
+            local visV = BASE_V * (BG_ASPECT / frameAspect)
+            local trimV = (BASE_V - visV) / 2
+            bg:SetTexCoord(BASE_L, BASE_R, BASE_T + trimV, BASE_B - trimV)
+        else
+            local visU = BASE_U * (frameAspect / BG_ASPECT)
+            local trimU = (BASE_U - visU) / 2
+            bg:SetTexCoord(BASE_L + trimU, BASE_R - trimU, BASE_T, BASE_B)
+        end
+    end
+    -- One script hook instead of three setter hooks; also fires for
+    -- anchor-driven resizes (same shape as WSkin.Shell).
+    frame:HookScript("OnSizeChanged", UpdateBgTexCoords)
+    UpdateBgTexCoords()
+    return bg, overlay
+end
+
 -- Empty-socket atlas map (key names come from GetItemStats return keys).
 local EUI_EMPTY_SOCKET_ATLAS = {
     EMPTY_SOCKET_META       = "socket-meta",
@@ -385,42 +499,9 @@ local function PreSkinCharacterSheet()
             region:SetAlpha(0)
         end
     end
-    -- Background covers the frame without distorting: native aspect 561x433, and
-    -- on resize the tex coords are recomputed centered, cropping the overflow.
-    local BG_ASPECT = 561 / 433
-    local bg = frame:CreateTexture(nil, "BACKGROUND", nil, -8)
-    bg:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\modern_blizz.png")
-    bg:SetAllPoints(frame)
+    local bg, bgOverlay = ns.SheetBackdrop(frame)
     GetFFD(frame).bg = bg
-    bg:SetAlpha(1)
-    GetFFD(frame).bgOverlay = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
-    GetFFD(frame).bgOverlay:SetColorTexture(0, 0, 0, 0.62)
-    GetFFD(frame).bgOverlay:SetAllPoints(frame)
-
-    local BASE_L, BASE_R, BASE_T, BASE_B = 0.25, 1, 0, 0.75
-    local BASE_U = BASE_R - BASE_L  -- 0.75
-    local BASE_V = BASE_B - BASE_T  -- 0.75
-    local function UpdateBgTexCoords()
-        local fw, fh = frame:GetSize()
-        -- Secrecy test BEFORE the zero check: that check is itself a
-        -- comparison and throws on a secret size. Matches the engine.
-        if issecretvalue and (issecretvalue(fw) or issecretvalue(fh)) then return end
-        if fw == 0 or fh == 0 then return end
-        local frameAspect = fw / fh
-        if frameAspect > BG_ASPECT then
-            local visV = BASE_V * (BG_ASPECT / frameAspect)
-            local trimV = (BASE_V - visV) / 2
-            bg:SetTexCoord(BASE_L, BASE_R, BASE_T + trimV, BASE_B - trimV)
-        else
-            local visU = BASE_U * (frameAspect / BG_ASPECT)
-            local trimU = (BASE_U - visU) / 2
-            bg:SetTexCoord(BASE_L + trimU, BASE_R - trimU, BASE_T, BASE_B)
-        end
-    end
-    -- One script hook instead of three setter hooks; also fires for
-    -- anchor-driven resizes (same shape as WSkin.Shell).
-    frame:HookScript("OnSizeChanged", UpdateBgTexCoords)
-    UpdateBgTexCoords()
+    GetFFD(frame).bgOverlay = bgOverlay
     -- Standard window-reskin border (AdventureMap_TopBorder atlas), as on every skinned window.
     if ns.WSkin and ns.WSkin.AtlasBorder then ns.WSkin.AtlasBorder(frame) end
     -- Lets the Modern flat backdrop live-swap in for the atlas when the user picks Modern here.
@@ -782,35 +863,11 @@ local function SkinCharacterSheet()
     local FRAME_BG_R, FRAME_BG_G, FRAME_BG_B = 0.03, 0.045, 0.05
 
     local closeBtn = frame.CloseButton or _G.CharacterFrameCloseButton
-    if closeBtn and not ns.CharSheetStock() then
-        if closeBtn.SetNormalTexture then closeBtn:SetNormalTexture("") end
-        if closeBtn.SetPushedTexture then closeBtn:SetPushedTexture("") end
-        if closeBtn.SetHighlightTexture then closeBtn:SetHighlightTexture("") end
-        if closeBtn.SetDisabledTexture then closeBtn:SetDisabledTexture("") end
-
-        for i = 1, select("#", closeBtn:GetRegions()) do
-            local region = select(i, closeBtn:GetRegions())
-            if region and region:IsObjectType("Texture") and region ~= GetFFD(closeBtn).x then
-                region:SetAlpha(0)
-            end
-        end
-
-        local closeX = closeBtn:CreateTexture(nil, "OVERLAY")
-        closeX:SetAtlas("uitools-icon-close")
-        closeX:SetSize(14, 14)
-        closeX:SetPoint("CENTER", -2, 0)
-        closeX:SetVertexColor(1, 1, 1, 0.75)
-        GetFFD(closeBtn).x = closeX
-
-        closeBtn:HookScript("OnEnter", function()
-            if GetFFD(closeBtn).x then GetFFD(closeBtn).x:SetVertexColor(1, 1, 1, 1) end
-        end)
-        closeBtn:HookScript("OnLeave", function()
-            if GetFFD(closeBtn).x then GetFFD(closeBtn).x:SetVertexColor(1, 1, 1, 0.75) end
-        end)
+    if closeBtn and not ns.CharSheetStock() and ns.WSkin and ns.WSkin.CloseButton then
+        ns.WSkin.CloseButton(closeBtn)
     end
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
 
     do
@@ -902,9 +959,7 @@ local function SkinCharacterSheet()
                 underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
                 underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
                 underline:SetColorTexture(EG.r or 0.51, EG.g or 0.784, EG.b or 1, 1)
-                if EllesmereUI and EllesmereUI.RegAccent then
-                    EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
-                end
+                EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
                 underline:Hide()
                 GetFFD(tab).underline = underline
             end
@@ -957,10 +1012,6 @@ local function SkinCharacterSheet()
     local function ApplyTabVisibility(isCharacterTab)
         if ns.CharSheetStock() then return end
         UpdateTabVisuals()
-        -- Swapping back to the Character bottom-tab must also re-highlight our top-row Character button (hook installed below as _reactivateCharTab).
-        if isCharacterTab and GetFFD(frame).reactivateCharTab then
-            GetFFD(frame).reactivateCharTab()
-        end
 
         if GetFFD(frame).themedSlots then
             for _, slotName in ipairs(GetFFD(frame).themedSlots) do
@@ -981,7 +1032,20 @@ local function SkinCharacterSheet()
         end
 
         if GetFFD(frame).modelBgFrame     then GetFFD(frame).modelBgFrame:SetShown(isCharacterTab)     end
-        if GetFFD(frame).statsPanel       then GetFFD(frame).statsPanel:SetShown(isCharacterTab)       end
+        -- The Stats and Titles panels follow Blizzard's sidebar pane they stand
+        -- in for (see SyncTopButtons); off every other tab.
+        local statsPane = _G.CharacterStatsPane
+        local titlesPane = _G.PaperDollFrame and _G.PaperDollFrame.TitleManagerPane
+        if GetFFD(frame).statsPanel then
+            GetFFD(frame).statsPanel:SetShown(isCharacterTab and (statsPane == nil or statsPane:IsShown()))
+        end
+        if GetFFD(frame).titlesPanel then
+            GetFFD(frame).titlesPanel:SetShown(isCharacterTab and titlesPane ~= nil and titlesPane:IsShown())
+        end
+        local equipmentPane = _G.PaperDollFrame and _G.PaperDollFrame.EquipmentManagerPane
+        if GetFFD(frame).equipPanel then
+            GetFFD(frame).equipPanel:SetShown(isCharacterTab and equipmentPane ~= nil and equipmentPane:IsShown())
+        end
         if GetFFD(frame).iLvlText         then GetFFD(frame).iLvlText:SetShown(isCharacterTab)         end
         if GetFFD(frame).sidebarBgFrame   then GetFFD(frame).sidebarBgFrame:SetShown(isCharacterTab)   end
         if GetFFD(frame).scrollFrame      then GetFFD(frame).scrollFrame:SetShown(isCharacterTab)      end
@@ -994,12 +1058,6 @@ local function SkinCharacterSheet()
                     sectionData.container:SetShown(isCharacterTab)
                 end
             end
-        end
-
-        -- Titles / Equipment sub-panels only exist on the Character tab.
-        if not isCharacterTab then
-            if GetFFD(frame).titlesPanel then GetFFD(frame).titlesPanel:SetShown(false) end
-            if GetFFD(frame).equipPanel  then GetFFD(frame).equipPanel:SetShown(false)  end
         end
 
         if GetFFD(frame).modelScene   then GetFFD(frame).modelScene:SetShown(isCharacterTab)   end
@@ -1370,29 +1428,6 @@ local function SkinCharacterSheet()
     -- Alias for call sites that test the value FontString; the label hosts both parts.
     GetFFD(frame).mythicRatingValue = mythicRatingLabel
 
-    -- Color brackets: highest threshold that the score meets wins.
-    local MP_COLOR_BRACKETS = {
-        { 3850, "ff8000" }, { 3695, "f9753f" }, { 3575, "f16961" },
-        { 3455, "e75e7f" }, { 3335, "db529c" }, { 3215, "cc47b9" },
-        { 3095, "b83dd6" }, { 2965, "9c3eed" }, { 2845, "715be5" },
-        { 2725, "2c6dde" }, { 2565, "3b7fcd" }, { 2445, "5292b9" },
-        { 2325, "5ca6a4" }, { 2205, "5fba8d" }, { 2085, "5cce75" },
-        { 1965, "50e258" }, { 1845, "35f72d" }, { 1725, "3eff26" },
-        { 1600, "5eff43" }, { 1475, "74ff58" }, { 1350, "88ff6b" },
-        { 1225, "98ff7d" }, { 1100, "a8ff8d" }, { 975,  "b6ff9e" },
-        { 850,  "c3ffae" }, { 725,  "cfffbd" }, { 600,  "dbffcd" },
-        { 475,  "e7ffdd" }, { 350,  "f2ffec" }, { 225,  "fdfffc" },
-        { 200,  "ffffff" },
-    }
-    local function GetMPScoreHex(score)
-        for i = 1, #MP_COLOR_BRACKETS do
-            if score >= MP_COLOR_BRACKETS[i][1] then
-                return MP_COLOR_BRACKETS[i][2]
-            end
-        end
-        return "ffffff"
-    end
-
     -- Itemlevel display: sits just below the 3 tab buttons, inside the panel.
     local iLvlText = statsPanel:CreateFontString(nil, "OVERLAY")
     iLvlText:SetFont(fontPath, 18, "")
@@ -1630,7 +1665,7 @@ local function SkinCharacterSheet()
             local mythicRating = C_ChallengeMode.GetOverallDungeonScore()
             if mythicRating and mythicRating > 0 then
                 local score = math.floor(mythicRating)
-                local hex = GetMPScoreHex(score)
+                local hex = ns.GetMPScoreHex(score)
                 GetFFD(frame).mythicRatingLabel:SetText(L("M+ Score:") .. string.format(" |cff%s%d|r", hex, score))
                 GetFFD(frame).mythicRatingLabel:SetShown(isCharTab)
             else
@@ -1836,10 +1871,10 @@ local function SkinCharacterSheet()
                 self:SetScript("OnUpdate", nil)
             end
         end)
-        thumb:HookScript("OnHide", function(self)
-            drag.active = false
-            self:SetScript("OnUpdate", nil)
-        end)
+        -- No OnHide handler: the stock styles host the stats list under
+        -- Blizzard's stats pane, whose Hide runs inside the sidebar switch
+        -- (a handler there taints the Equipment Manager rows built next).
+        -- The drag OnUpdate already ends itself once the button is up.
 
         return track
     end
@@ -3077,13 +3112,11 @@ local function SkinCharacterSheet()
 
     GetFFD(frame).themedSlots = itemSlots
 
-    -- The top-row buttons, the Titles and Equipment panels and the Upgrades
-    -- tab are the EllesmereUI sheet's own sidebar; the stock styles keep
-    -- Blizzard's sidebar tabs and panes instead. The two locals are read
-    -- again by the gem OnShow reset further down, hence declared out here.
-    local SetActiveTopButton, characterBtn
+    -- The top-row labels, the Titles panel, the relocated Equipment Manager
+    -- pane and the Upgrades tab are the EllesmereUI sheet's own sidebar; the
+    -- stock styles keep Blizzard's sidebar tabs and panes where they are.
     if not ns.CharSheetStock() then
-    -- Create custom buttons for right side (Character, Titles, Equipment Manager)
+    -- Top-row labels for the right column (Character, Titles, Equipment Manager)
     local buttonWidth = 64
     local buttonHeight = 25
     local buttonSpacing = -6
@@ -3100,29 +3133,40 @@ local function SkinCharacterSheet()
         if btn._active then
             local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
             text:SetTextColor(EG.r, EG.g, EG.b, 1)
+        elseif btn._disabled then
+            text:SetTextColor(1, 1, 1, 0.25)
         elseif btn._hover then
             text:SetTextColor(1, 1, 1, 1)
         else
             text:SetTextColor(1, 1, 1, 0.6)
         end
     end
-    SetActiveTopButton = function(activeBtn)
+    -- Mirrors Blizzard's sidebar state onto the labels and our panels: the
+    -- shown pane's label is active and its stand-in panel (b._panel) shows, a
+    -- disabled tab's label dims. Blizzard refreshes its tab state on every
+    -- sheet open and pane switch, and this rides that refresh as a secure
+    -- post-hook. The panels stay in OUR tree, never under Blizzard's panes:
+    -- a pane's Show/Hide would run their scripts inside Blizzard's sidebar
+    -- switch and taint the Equipment Manager rows it builds next.
+    local function SyncTopButtons()
         for _, b in ipairs(topButtonRegistry) do
-            b._active = (b == activeBtn)
+            local pane = GetPaperDollSideBarFrame and GetPaperDollSideBarFrame(b._paneIndex)
+            b._active = (pane and pane:IsShown()) == true
+            b._disabled = (b._tab and not b._tab:IsEnabled()) == true
             _paintTopButton(b)
+            if b._panel then b._panel:SetShown(b._active) end
         end
     end
-    if EllesmereUI and EllesmereUI.RegAccent then
-        EllesmereUI.RegAccent({ type = "callback", fn = function()
-            for _, b in ipairs(topButtonRegistry) do _paintTopButton(b) end
-        end })
-    end
+    EllesmereUI.RegAccent({ type = "callback", fn = function()
+        for _, b in ipairs(topButtonRegistry) do _paintTopButton(b) end
+    end })
 
-    local function CreateEUIButton(name, label, onClick)
-        -- Plain Button, NOT SecureActionButtonTemplate: these tabs only need insecure
-        -- OnClick, and the secure template flags Show/Hide/SetShown on them as a
-        -- protected call when dispatched from Blizzard's secure ShowSubFrame stack.
-        local btn = CreateFrame("Button", "EUI_CharSheet_" .. name, frame)
+    -- Labels only: each click lands on Blizzard's own sidebar tab seated over
+    -- the label (below), so a pane switch is a real click on Blizzard's button
+    -- and its panes build untainted (the gear flyout's Ignore This Slot and
+    -- the set rows depend on it). Never click the tabs from our code.
+    local function CreateEUIButton(name, label, paneIndex)
+        local btn = CreateFrame("Frame", "EUI_CharSheet_" .. name, frame)
         btn:SetSize(buttonWidth, buttonHeight)
         btn:SetPoint("TOPLEFT", frame, "TOPLEFT", startX, startY)
 
@@ -3135,31 +3179,18 @@ local function SkinCharacterSheet()
         btn._text = text
         btn._active = false
         btn._hover = false
+        btn._paneIndex = paneIndex
+        btn._tab = _G["PaperDollSidebarTab" .. paneIndex]
         _paintTopButton(btn)
-
-        btn:SetScript("OnEnter", function() btn._hover = true; _paintTopButton(btn) end)
-        btn:SetScript("OnLeave", function() btn._hover = false; _paintTopButton(btn) end)
-
-        btn:SetScript("OnClick", function(self, ...)
-            SetActiveTopButton(btn)
-            if onClick then onClick(self, ...) end
-        end)
 
         table.insert(topButtonRegistry, btn)
         return btn
     end
 
-    characterBtn = CreateEUIButton("Stats", L("Character"), function() end)
+    CreateEUIButton("Stats", L("Character"), 1)._panel = statsPanel
 
-    -- Re-highlights the Character top-button; called by ApplyTabVisibility when
-    -- the bottom tab swaps Rep/Currency -> Character.
-    GetFFD(frame).reactivateCharTab = function()
-        if SetActiveTopButton and characterBtn then
-            SetActiveTopButton(characterBtn)
-        end
-    end
-
-    -- Create Titles Panel (same position and size as stats panel)
+    -- Titles panel (same position and size as stats panel); SyncTopButtons
+    -- shows it while Blizzard's Titles pane is the shown sidebar.
     local titlesPanel = CreateFrame("Frame", "EUI_CharSheet_TitlesPanel", frame)
     titlesPanel:SetWidth(190)
     titlesPanel:SetPoint("TOPLEFT", statsPanel, "TOPLEFT", 0, 0)
@@ -3412,29 +3443,8 @@ local function SkinCharacterSheet()
         RefreshTitlesList()
     end)
 
-    -- Character button switches back to the stats panel.
-    characterBtn:SetScript("OnClick", function()
-        SetActiveTopButton(characterBtn)
-        if not statsPanel:IsShown() then
-            statsPanel:SetShown(true)
-            if GetFFD(CharacterFrame).titlesPanel then GetFFD(CharacterFrame).titlesPanel:SetShown(false) end
-            if GetFFD(CharacterFrame).equipPanel  then GetFFD(CharacterFrame).equipPanel:SetShown(false)  end
-            -- Deactivate equipment sidebar (hides flyout arrows).
-            local sidebarTab = _G.PaperDollSidebarTab1
-            if sidebarTab and sidebarTab.Click then pcall(sidebarTab.Click, sidebarTab) end
-        end
-    end)
-
-    CreateEUIButton("Titles", L("Titles"), function()
-        if not GetFFD(CharacterFrame).titlesPanel:IsShown() then
-            GetFFD(CharacterFrame).titlesPanel:SetShown(true)
-            statsPanel:SetShown(false)
-            if GetFFD(CharacterFrame).equipPanel then GetFFD(CharacterFrame).equipPanel:SetShown(false) end
-            -- Deactivate equipment sidebar (hides flyout arrows).
-            local sidebarTab = _G.PaperDollSidebarTab1
-            if sidebarTab and sidebarTab.Click then pcall(sidebarTab.Click, sidebarTab) end
-        end
-    end)
+    CreateEUIButton("Titles", L("Titles"), 2)._panel = titlesPanel
+    local equipmentButton = CreateEUIButton("Equipment", L("Equipment"), 3)
 
     -- Create Equipment Panel (same position and size as stats panel)
     local equipPanel = CreateFrame("Frame", "EUI_CharSheet_EquipPanel", frame)
@@ -3465,6 +3475,7 @@ local function SkinCharacterSheet()
         equipScrollFrame:SetVerticalScroll(newScroll)
     end)
 
+    local activeEquipmentSetID = EllesmereUIDB and EllesmereUIDB.lastEquippedSet
     local selectedSetID = nil
     -- Persistent tile pool. Rebuilt once; reused across every refresh.
     local setTilePool = {}
@@ -4053,40 +4064,45 @@ local function SkinCharacterSheet()
         RefreshEquipmentSets()
     end)
 
-    -- Equipment Manager button. Activates Blizzard's equipment sidebar
-    -- (PaperDollSidebarTab3) so the per-slot flyout arrows appear; our equipPanel
-    -- overlays Blizzard's EquipmentManagerPane with our own gear-sets UI.
-    CreateEUIButton("Equipment", L("Equipment"), function()
-        if not GetFFD(CharacterFrame).equipPanel:IsShown() then
-            GetFFD(CharacterFrame).equipPanel:SetShown(true)
-            statsPanel:SetShown(false)
-            if GetFFD(CharacterFrame).titlesPanel then GetFFD(CharacterFrame).titlesPanel:SetShown(false) end
-            local sidebarTab = _G.PaperDollSidebarTab3
-            if sidebarTab and sidebarTab.Click then
-                pcall(sidebarTab.Click, sidebarTab)
-            end
-        end
-    end)
+    equipmentButton._panel = equipPanel
 
-    local buttons = {
-        "EUI_CharSheet_Stats",
-        "EUI_CharSheet_Titles",
-        "EUI_CharSheet_Equipment"
-    }
-    -- Buttons chain from the stats panel's TOPLEFT and span its full width.
+    -- Labels chain from the stats panel's TOPLEFT and span its full width.
     -- Frame level is raised above the stats panel so statsBg doesn't cover them.
-    for i, btnName in ipairs(buttons) do
-        local btn = _G[btnName]
-        if btn then
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", statsPanel, "TOPLEFT",
-                (i - 1) * (buttonWidth + buttonSpacing), 0)
-            btn:SetFrameLevel(statsPanel:GetFrameLevel() + 2)
+    -- Each label's Blizzard sidebar tab is seated over it one level up, with
+    -- the tab's own art faded out (Blizzard re-shows those regions on every
+    -- tab refresh, so alpha is the channel); hovering the tab paints the label.
+    -- The tab keeps its native tooltip, which also says why a dimmed label's
+    -- pane is unavailable.
+    local SIDEBAR_TAB_ART = { "TabBg", "Icon", "Hider", "Highlight" }
+    for i, btn in ipairs(topButtonRegistry) do
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", statsPanel, "TOPLEFT",
+            (i - 1) * (buttonWidth + buttonSpacing), 0)
+        btn:SetFrameLevel(statsPanel:GetFrameLevel() + 2)
+        local tab = btn._tab
+        if tab then
+            tab:ClearAllPoints()
+            tab:SetAllPoints(btn)
+            tab:SetFrameLevel(btn:GetFrameLevel() + 1)
+            for _, key in ipairs(SIDEBAR_TAB_ART) do
+                local region = tab[key]
+                if region then region:SetAlpha(0) end
+            end
+            tab:HookScript("OnEnter", function() btn._hover = true; _paintTopButton(btn) end)
+            tab:HookScript("OnLeave", function() btn._hover = false; _paintTopButton(btn) end)
         end
     end
+    hooksecurefunc("PaperDollFrame_UpdateSidebarTabs", SyncTopButtons)
+    SyncTopButtons()
 
-    -- Character tab is the default active view
-    SetActiveTopButton(characterBtn)
+    -- Keep Blizzard's sidebar state and secure flyout handling, while the
+    -- fork's equipment panel provides the visible set controls. Moving the
+    -- stock list off screen leaves its native sizing and row creation intact.
+    local emPane = _G.PaperDollFrame and _G.PaperDollFrame.EquipmentManagerPane
+    if emPane then
+        emPane:ClearAllPoints()
+        emPane:SetPoint("TOPRIGHT", UIParent, "TOPLEFT", -100, 0)
+    end
 
     -- Calc tab is created lazily by ApplyCharSheetCalcTab when showCalcButton is on.
     if EllesmereUI.ApplyCharSheetCalcTab then
@@ -4108,7 +4124,7 @@ local function SkinCharacterSheet()
         "CharacterTrinket0Slot", "CharacterTrinket1Slot"
     }
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
     -- Create overlay frame for text labels (above model, transparent, no mouse input).
     -- Stock styles: a PaperDollFrame child (hides with the Character tab) above
@@ -4150,13 +4166,11 @@ local function SkinCharacterSheet()
         end)
         eyeBtn:SetScript("OnEnter", function(self)
             self:SetAlpha(0.8)
-            if EllesmereUI.ShowWidgetTooltip then
-                EllesmereUI.ShowWidgetTooltip(self, hidden and "Show Item Text" or "Hide Item Text", { width = 135 })
-            end
+            EllesmereUI.ShowWidgetTooltip(self, hidden and "Show Item Text" or "Hide Item Text", { width = 135 })
         end)
         eyeBtn:SetScript("OnLeave", function(self)
             self:SetAlpha(0.4)
-            if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+            EllesmereUI.HideWidgetTooltip()
         end)
         GetFFD(frame).textEyeBtn = eyeBtn
     end
@@ -4642,17 +4656,6 @@ local function SkinCharacterSheet()
         else
             globalSocketContainer:Hide()
         end
-        -- Reset to Stats sub-panel on open, ONLY for the Character tab: forcing
-        -- selectedTab = 1 when opened via keybind to Rep/Currency desyncs Blizzard's
-        -- tab state and leaves the Character tab un-clickable until the user clicks Currency to resync.
-        if isCharacterTab then
-            if statsPanel        then statsPanel:SetShown(true)          end
-            if GetFFD(frame).titlesPanel then GetFFD(frame).titlesPanel:SetShown(false) end
-            if GetFFD(frame).equipPanel  then GetFFD(frame).equipPanel:SetShown(false)  end
-            if SetActiveTopButton and characterBtn then
-                SetActiveTopButton(characterBtn)
-            end
-        end
     end)
 
     frame:HookScript("OnHide", function()
@@ -4679,22 +4682,6 @@ local function SkinCharacterSheet()
 
     -- Cache item info (ID, level, upgrade track) to update when items change
     local itemCache = {}
-
-    -- Slots that can have enchants in current expansion
-    local ENCHANT_SLOTS = {
-        [INVSLOT_HEAD] = true,
-        [INVSLOT_SHOULDER] = true,
-        [INVSLOT_BACK] = false,
-        [INVSLOT_CHEST] = true,
-        [INVSLOT_WRIST] = false,
-        [INVSLOT_LEGS] = true,
-        [INVSLOT_FEET] = true,
-        [INVSLOT_FINGER1] = true,
-        [INVSLOT_FINGER2] = true,
-        [INVSLOT_MAINHAND] = true,
-        -- INVSLOT_OFFHAND deliberately absent: whether it can be enchanted depends on
-        -- what's equipped there (weapon vs. shield/held item), checked dynamically below.
-    }
 
     -- Update one slot's item level, enchant and upgrade-track labels.
     local function UpdateSlotInfo(slotName)
@@ -4762,31 +4749,8 @@ local function SkinCharacterSheet()
         -- the readable text, and park the full original text behind a hover tooltip.
         if GetFFD(slot).enchantLabel then
             local showEnchants = (not EllesmereUIDB) or (EllesmereUIDB.showEnchants ~= false)
-            -- Only flag missing enchants at level 90+: leveling gear churn would
-            -- fire the red icon and pulse on every replacement.
-            local playerLvl = UnitLevel("player")
-            local atEnchantLevel = playerLvl and not (issecretvalue and issecretvalue(playerLvl)) and playerLvl >= 90 or false
-            local isMissing    = atEnchantLevel and canHaveEnchant and itemLink and (enchantText == "" or not enchantText)
-            local hasEnchant   = enchantText and enchantText ~= ""
-
-            local iconOnly, tooltipText
-            if isMissing then
-                -- Same hex atlas enchanted items show, tinted red (#e54949 =
-                -- 229, 73, 73 in the atlas-escape color fields).
-                iconOnly    = "|A:Professions-ChatIcon-Quality-Tier5:14:14:0:0:229:73:73|a"
-                tooltipText = "Enchant missing"
-            elseif hasEnchant then
-                -- Concatenate every |A:...|a atlas escape, drop everything else.
-                local icons = {}
-                for atlas in enchantText:gmatch("|A:[^|]+|a") do
-                    icons[#icons + 1] = atlas
-                end
-                iconOnly    = table.concat(icons, "")
-                tooltipText = enchantText:gsub("|A:[^|]+|a", ""):gsub("^%s+", ""):gsub("%s+$", "")
-                -- Strip any "prefix - " (e.g. "Enchant Weapon - ") so the tooltip
-                -- shows just the enchant's readable name.
-                tooltipText = tooltipText:gsub("^.-%s*%-%s*", "")
-            end
+            local iconOnly, tooltipText, isMissing, hasEnchant =
+                ns.ParseEnchantLabel(enchantText, slotID, itemLink, "player")
 
             -- "Show Enchant Names": render the readable name (item-level colored) instead of the
             -- icon. Missing-enchant warning always keeps its red icon; no-enchant falls back to icon.
@@ -4995,14 +4959,13 @@ local function SkinCharacterSlot(slotName, slotID)
         EllesmereUI.PanelPP.CreateBorder(slot, 1, 1, 1, 0.4, 2, "OVERLAY", 7)
     end
 end
-
 -- Fake bottom tab on the character sheet, visually identical to the Blizzard
 -- Character/Rep/Currency tabs. Built on first enable only (zero cost while off).
 local function EnsureCalcTab(frame)
     local existing = GetFFD(frame).calcToggleBtn
     if existing then return existing end
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
     local PP = EllesmereUI and EllesmereUI.PP
 
     local refTab = _G["CharacterFrameTab1"]
@@ -5043,9 +5006,7 @@ local function EnsureCalcTab(frame)
     underline:SetPoint("BOTTOMRIGHT", calcTab, "BOTTOMRIGHT", 0, 0)
     underline:SetColorTexture(EG.r, EG.g, EG.b, 1)
     underline:Hide()
-    if EllesmereUI.RegAccent then
-        EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
-    end
+    EllesmereUI.RegAccent({ type = "solid", obj = underline, a = 1 })
 
     local function RefreshCalcTab()
         local fr = _G["EUIUpgCalcFrame"]
@@ -5238,76 +5199,25 @@ if EllesmereUI then
             -- Heavy skin (model, slots, stats, tabs) defers to first OnShow.
             CharacterFrame:HookScript("OnShow", ApplyThemedCharacterSheet)
 
-            -- Detect and record which equipment set is fully equipped.
-            local function UpdateActiveEquipmentSet()
-                local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
-                if setIDs then
-                    for _, setID in ipairs(setIDs) do
-                        local setItems = GetEquipmentSetItemIDs(setID)
-                        if setItems then
-                            local allMatch = true
-                            for slotIndex, itemID in pairs(setItems) do
-                                if itemID ~= 0 then
-                                    local currentItemID = GetInventoryItemID("player", slotIndex)
-                                    if currentItemID ~= itemID then
-                                        allMatch = false
-                                        break
-                                    end
-                                end
-                            end
-                            if allMatch then
-                                activeEquipmentSetID = setID
-                                return
-                            end
-                        end
-                    end
-                end
-                activeEquipmentSetID = nil
-            end
-
             -- Auto-equip equipment set when spec changes
             local specChangeFrame = CreateFrame("Frame")
             local lastSpecIndex = GetSpecialization()
             specChangeFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-            specChangeFrame:RegisterEvent("EQUIPMENT_SETS_CHANGED")
-            specChangeFrame:SetScript("OnEvent", function(self, event)
-                if event == "EQUIPMENT_SETS_CHANGED" then
-                    -- UpdateActiveEquipmentSet() is unavailable in the current WoW API and
-                    -- RefreshEquipmentSets() is out of scope here; the equipment panel refresh is owned by equipSetChangeFrame.
-                    if CharacterFrame and CharacterFrame:IsShown() and GetFFD(CharacterFrame).equipPanel and GetFFD(CharacterFrame).equipPanel:IsShown() then
-                    end
-                else
-                    -- Auto-equip when spec actually changes (not just event noise)
-                    local currentSpecIndex = GetSpecialization()
-                    if currentSpecIndex ~= lastSpecIndex then
-                        lastSpecIndex = currentSpecIndex
-                        local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
-                        if setIDs then
-                            for _, setID in ipairs(setIDs) do
-                                local assignedSpec = C_EquipmentSet.GetEquipmentSetAssignedSpec(setID)
-                                if assignedSpec then
-                                    if assignedSpec == currentSpecIndex then
-                                        EUI_EquipSet(setID)
-                                        activeEquipmentSetID = setID
-                                        if EllesmereUIDB then
-                                            EllesmereUIDB.lastEquippedSet = setID
-                                        end
-                                        break
-                                    end
-                                end
+            specChangeFrame:SetScript("OnEvent", function()
+                -- Auto-equip when spec actually changes (not just event noise)
+                local currentSpecIndex = GetSpecialization()
+                if currentSpecIndex ~= lastSpecIndex then
+                    lastSpecIndex = currentSpecIndex
+                    local setIDs = C_EquipmentSet.GetEquipmentSetIDs()
+                    if setIDs then
+                        for _, setID in ipairs(setIDs) do
+                            local assignedSpec = C_EquipmentSet.GetEquipmentSetAssignedSpec(setID)
+                            if assignedSpec and assignedSpec == currentSpecIndex then
+                                EUI_EquipSet(setID)
+                                break
                             end
                         end
                     end
-                end
-            end)
-
-            -- Initialize active set on login
-            local loginFrame = CreateFrame("Frame")
-            loginFrame:RegisterEvent("PLAYER_LOGIN")
-            loginFrame:SetScript("OnEvent", function()
-                loginFrame:UnregisterEvent("PLAYER_LOGIN")
-                if EllesmereUIDB and EllesmereUIDB.lastEquippedSet then
-                    activeEquipmentSetID = EllesmereUIDB.lastEquippedSet
                 end
             end)
         end
@@ -5329,7 +5239,7 @@ function EllesmereUI._applyCharSheetTextSizes()
     local enchantShadow = EllesmereUIDB and EllesmereUIDB.charSheetEnchantShadow or false
     local enchantOutline = EllesmereUIDB and EllesmereUIDB.charSheetEnchantOutline or false
 
-    local fontPath = EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
+    local fontPath = EllesmereUI.GetFontPath("blizzardSkin") or STANDARD_TEXT_FONT
 
     local itemSlots = EUI_GEAR_SLOTS
 
@@ -5341,7 +5251,7 @@ function EllesmereUI._applyCharSheetTextSizes()
                 if itemLevelOutline then
                     flags = "OUTLINE, SLUG"
                 end
-                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).itemLevelLabel, itemLevelShadow) end
+                EllesmereUI.PrimeFontShadow(GetFFD(slot).itemLevelLabel, itemLevelShadow)
                 GetFFD(slot).itemLevelLabel:SetFont(fontPath, itemLevelSize, flags)
             end
             if GetFFD(slot).upgradeTrackLabel then
@@ -5349,7 +5259,7 @@ function EllesmereUI._applyCharSheetTextSizes()
                 if upgradeTrackOutline then
                     flags = "OUTLINE, SLUG"
                 end
-                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).upgradeTrackLabel, upgradeTrackShadow) end
+                EllesmereUI.PrimeFontShadow(GetFFD(slot).upgradeTrackLabel, upgradeTrackShadow)
                 GetFFD(slot).upgradeTrackLabel:SetFont(fontPath, upgradeTrackSize, flags)
             end
             if GetFFD(slot).enchantLabel then
@@ -5357,7 +5267,7 @@ function EllesmereUI._applyCharSheetTextSizes()
                 if enchantOutline then
                     flags = "OUTLINE, SLUG"
                 end
-                if EllesmereUI and EllesmereUI.PrimeFontShadow then EllesmereUI.PrimeFontShadow(GetFFD(slot).enchantLabel, enchantShadow) end
+                EllesmereUI.PrimeFontShadow(GetFFD(slot).enchantLabel, enchantShadow)
                 GetFFD(slot).enchantLabel:SetFont(fontPath, enchantSize, flags)
             end
         end
@@ -5388,7 +5298,6 @@ function EllesmereUI._applyCharSheetItemColors()
         end
     end
 end
-
 function EllesmereUI._refreshCharacterSheetColors()
     local charFrame = CharacterFrame
     if not charFrame or not GetFFD(charFrame).statsSections then return end
@@ -5512,24 +5421,6 @@ function EllesmereUI._refreshEnchantsVisibility()
     end
 end
 
-function EllesmereUI._refreshEnchantsColors()
-    local itemSlots = EUI_GEAR_SLOTS
-
-    for _, slotName in ipairs(itemSlots) do
-        local slot = _G[slotName]
-        if slot and GetFFD(slot).enchantLabel then
-            local displayColor
-            if EllesmereUIDB and EllesmereUIDB.charSheetEnchantUseColor and EllesmereUIDB.charSheetEnchantColor then
-                displayColor = EllesmereUIDB.charSheetEnchantColor
-            else
-                displayColor = { r = 1, g = 1, b = 1 }
-            end
-
-            GetFFD(slot).enchantLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 1)
-        end
-    end
-end
-
 function EllesmereUI._refreshItemLevelVisibility()
     local itemSlots = EUI_GEAR_SLOTS
 
@@ -5546,7 +5437,6 @@ function EllesmereUI._refreshItemLevelVisibility()
         end
     end
 end
-
 function EllesmereUI._refreshItemLevelColors()
     local itemSlots = EUI_GEAR_SLOTS
 
