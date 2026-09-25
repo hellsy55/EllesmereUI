@@ -1610,7 +1610,13 @@ end
 -- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
 -- missing it (or, for Repair, everyone's durability percentage) to this
 -- client's own chat frame only; right-click posts the same thing to /guild
--- (in a raid) or /party (in a party) depending on the current group. Small title-bar riders, same family
+-- (in a raid) or /party (in a party) depending on the current group.
+-- Middle-click always posts to that same guild/party chat: on every button
+-- except Food, it fires all five reports at once (ns.ReportAllConsumables);
+-- on Food specifically, it reports who is missing a food buff whose name
+-- starts with "Hearty" instead of the ordinary Well Fed check
+-- (ns.ReportHeartyFood) -- both defined in EllesmereUIQoL_RaidCheck.lua.
+-- Small title-bar riders, same family
 -- as the Raid Groups cog and Raid Check button, but with the full name on
 -- each instead of a single glyph -- so every button is sized to its own
 -- measured label (see ApplyLayout) rather than a shared fixed width. Not
@@ -1624,7 +1630,7 @@ local function BuildReportButtons()
         local b = CreateFrame("Button", nil, sections.Group)
         b:SetHeight(COG_SZ)
         b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
-        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
         SkinButtonChrome(b)
         local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 8, nil, 1, 1, 1), 8)
         lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
@@ -1637,12 +1643,17 @@ local function BuildReportButtons()
             lbl:SetAlpha(1)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
             GameTooltip:AddLine(EllesmereUI.L(def.title))
-            GameTooltip:AddLine(EllesmereUI.L("Left Click: print to your own chat only."), 1, 1, 1)
-            GameTooltip:AddLine(EllesmereUI.L("Right Click: report to raid/party chat."), 1, 1, 1)
             if def.key == "durability" then
                 GameTooltip:AddLine(EllesmereUI.L("Lists anyone at 90% or below, worst first."), 0.7, 0.7, 0.7, true)
             else
                 GameTooltip:AddLine(EllesmereUI.L("Lists who is missing it."), 0.7, 0.7, 0.7, true)
+            end
+            GameTooltip:AddLine(EllesmereUI.L("Left Click: print to your own chat only."), 1, 1, 1)
+            GameTooltip:AddLine(EllesmereUI.L("Right Click: report to party/guild chat."), 1, 1, 1)
+            if def.key == "food" then
+                GameTooltip:AddLine(EllesmereUI.L("Middle Click: report who is missing a \"Hearty\" food, to party/guild chat."), 1, 1, 1)
+            else
+                GameTooltip:AddLine(EllesmereUI.L("Middle Click: report every consumable check at once, to party/guild chat."), 1, 1, 1)
             end
             GameTooltip:Show()
         end)
@@ -1651,6 +1662,14 @@ local function BuildReportButtons()
             GameTooltip:Hide()
         end)
         b:SetScript("OnClick", function(_, button)
+            if button == "MiddleButton" then
+                if def.key == "food" then
+                    if ns.ReportHeartyFood then ns.ReportHeartyFood(true) end
+                elseif ns.ReportAllConsumables then
+                    ns.ReportAllConsumables(true)
+                end
+                return
+            end
             if ns.ReportConsumable then
                 ns.ReportConsumable(def.key, button == "RightButton")
             end

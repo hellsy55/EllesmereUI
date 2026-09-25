@@ -130,6 +130,26 @@ initFrame:SetScript("OnEvent", function(self)
         pal.appearance[key] = val
     end
 
+    -- Does the palette currently being edited carry any Specialization
+    -- entries? The on-screen loadout announcement is conceptually tied to
+    -- that menu (it is the one whose own icon opens the mirrored Talent
+    -- Loadouts palette, see EllesmereUIQuickdraw_TalentLoadouts.lua's
+    -- header) -- its controls below are only INTERACTIVE while editPalette
+    -- is pointed at a menu like this one, and read-only (greyed) everywhere
+    -- else. The underlying setting is still a single profile-wide switch,
+    -- same as Cfg/Set elsewhere on this page -- this only gates the WIDGET.
+    local function PaletteHasSpecSlot(pal)
+        local slots = pal and pal.slots
+        if type(slots) ~= "table" then return false end
+        for i = 1, #slots do
+            local s = slots[i]
+            if type(s) == "table" and (s.kind == "spec" or s.kind == "dynamicspec") then
+                return true
+            end
+        end
+        return false
+    end
+
     -- From the module, so the name an emptied box reverts to is the same string
     -- the module hands a fresh palette.
     local function AutoName(index)
@@ -3074,6 +3094,14 @@ initFrame:SetScript("OnEvent", function(self)
         -- as off. The appearance sub-settings below stay nil-means-on.
         local function Disabled() return Cfg("enabled") ~= true end
 
+        -- The on-screen loadout text controls (further below) additionally
+        -- require the palette on screen right now to carry Specialization
+        -- entries -- everywhere else they are correct but meaningless, so
+        -- they read as disabled rather than quietly doing nothing.
+        local function LoadoutTextDisabled()
+            return Disabled() or not PaletteHasSpecSlot(Palette())
+        end
+
         -- What this build assumed about nest presence; Refresh compares
         -- against it and escalates to a rebuild when it flips.
         builtWithNest = HasAnyNest()
@@ -3740,6 +3768,59 @@ initFrame:SetScript("OnEvent", function(self)
         -- user's own animation pass.
         y = y - h
 
+        -- Pip Style + Pip Color: the border ring around an entry's icon
+        -- that says "this is on the ground / this is my active spec / this
+        -- is my active loadout" (PaletteView:MarkerPip in the main file).
+        -- Both PROFILE-WIDE (Cfg/Set, not ACfg/ASet) -- the same shared pip
+        -- mechanism draws on every palette (world markers, specs, macros),
+        -- so neither makes sense to vary per menu. Style defaults to the
+        -- border ring; color defaults to the suite's brand teal (0CD29F).
+        local pipStyleValues = { border = "Border", square = "Corner Square", dot = "Dot" }
+        local pipStyleOrder  = { "border", "square", "dot" }
+        row, h = W:DualRow(parent, y,
+            { type="dropdown", text="Pip Style", noCapture=true,
+              disabled=Disabled, disabledTooltip="the module",
+              tooltip="How the \"this is active\" indicator is drawn on an "
+                      .."icon: a border around it, the original corner "
+                      .."square, or a small dot.",
+              values=pipStyleValues, order=pipStyleOrder,
+              getValue=function() return Cfg("pipStyle") or "border" end,
+              setValue=function(v) Set("pipStyle", v); Refresh() end },
+            { type="label", text="Pip Color" })
+        do
+            local rgn = row._rightRegion
+            local PPQ = EllesmereUI.PanelPP
+            rgn._noCapture = true
+
+            local pipSwatch, updatePipSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, row:GetFrameLevel() + 3,
+                function()
+                    local c = Cfg("pipColor")
+                    return (c and c[1]) or 0.047, (c and c[2]) or 0.824, (c and c[3]) or 0.624
+                end,
+                function(r2, g2, b2)
+                    Set("pipColor", { r2, g2, b2 })
+                    Refresh()
+                end,
+                false, 20)
+            PPQ.Point(pipSwatch, "RIGHT", rgn, "RIGHT", -20, 0)
+            pipSwatch:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(pipSwatch,
+                    "The color of the \"this is active\" indicator (a "
+                    .."placed world marker, your current spec, your active "
+                    .."talent loadout).")
+            end)
+            pipSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+
+            local function refreshPipSwatch()
+                updatePipSwatch()
+                pipSwatch:SetAlpha(Disabled() and 0.3 or 1)
+            end
+            EllesmereUI.RegisterWidgetRefresh(refreshPipSwatch)
+            refreshPipSwatch()
+        end
+        y = y - h
+
         local wmRow
         wmRow, h = W:DualRow(parent, y,
             { type="toggle", text="Hide Unusable Entries", noCapture=true,
@@ -3791,6 +3872,87 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:Spacer(parent, y, 10); y = y - h
+
+        -----------------------------------------------------------------------
+        --  ON-SCREEN LOADOUT TEXT
+        --
+        --  A large on-screen reminder of the active TalentLoadoutsEx loadout,
+        --  shown at every ready check and again on a timer -- see
+        --  ns.ShowLoadoutAnnouncement in EllesmereUIQuickdraw_TalentLoadouts.
+        --  lua. It is a single PROFILE-WIDE switch (Cfg/Set, not ACfg/ASet --
+        --  there is only ever one such reminder, however many action menus
+        --  exist), but it only means anything tied to the menu that names
+        --  your specs, so these four controls are read-only (LoadoutText-
+        --  Disabled, defined above) everywhere else. Its screen POSITION is
+        --  deliberately not a slider here: drag it into place with Unlock
+        --  Mode instead ("Quickdraw: Loadout Text").
+        -----------------------------------------------------------------------
+        local LOADOUT_TEXT_TIP = "This option only applies to an Action Menu with Specialization entries."
+        _, h = W:SectionHeader(parent, "ON-SCREEN LOADOUT TEXT", y); y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Show On-Screen Loadout Text", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              tooltip="At every ready check, show a large on-screen reminder "
+                      .."of the currently active TalentLoadoutsEx loadout -- "
+                      .."no more often than \"Repeat Every\" below, so "
+                      .."spamming ready checks does not spam the text too. "
+                      .."Drag it into place with Unlock Mode "
+                      .."(\"Quickdraw: Loadout Text\").",
+              getValue=function() return Cfg("loadoutTextEnabled") == true end,
+              setValue=function(v)
+                  Set("loadoutTextEnabled", v)
+                  if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
+                  Refresh()
+              end },
+            { type="slider", text="Font Size", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              min=12, max=60, step=1,
+              getValue=function() return Cfg("loadoutTextFontSize") or 30 end,
+              setValue=function(v)
+                  Set("loadoutTextFontSize", v)
+                  if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
+              end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="slider", text="Text Duration (sec)", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              tooltip="How long the reminder stays on screen once shown.",
+              min=1, max=60, step=1,
+              getValue=function() return Cfg("loadoutTextDuration") or 10 end,
+              setValue=function(v)
+                  Set("loadoutTextDuration", v)
+                  if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
+              end },
+            { type="slider", text="Repeat Every (min)", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              tooltip="Minimum time between two pops of the reminder. A "
+                      .."ready check within this many minutes of the last "
+                      .."one shown is ignored, so spamming ready checks in "
+                      .."a short window only pops the text once. Set to 0 "
+                      .."to show it on every single ready check.",
+              min=0, max=60, step=1,
+              getValue=function() return Cfg("loadoutTextIntervalMin") or 10 end,
+              setValue=function(v)
+                  Set("loadoutTextIntervalMin", v)
+                  if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
+              end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
+            { type="slider", text="Line Spacing", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              tooltip="Pixels between two stacked loadout names, when the "
+                      .."active talents match more than one saved loadout.",
+              min=0, max=20, step=1,
+              getValue=function() return Cfg("loadoutTextRowGap") or 6 end,
+              setValue=function(v)
+                  Set("loadoutTextRowGap", v)
+                  if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
+              end },
+            { type="label", text="" })
+        y = y - h
 
         return math.abs(y)
     end

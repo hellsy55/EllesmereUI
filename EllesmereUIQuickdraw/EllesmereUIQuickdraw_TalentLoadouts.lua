@@ -215,13 +215,18 @@ ns.RefreshTalentLoadoutPalette = RefreshTalentLoadoutPalette
 --  TalentLoadoutsEx exists, it just asks ns for an opinion on a macrotext
 --  slot when one is offered.
 -------------------------------------------------------------------------------
-function ns.IsMacrotextSlotActive(slot)
-    local name = slot and slot.talentLoadoutName
-    if not name then return false end
+-- Every saved Config whose talent string matches what's currently applied,
+-- in the spec's own list order, each as { name = ..., icon = ... }. Normally
+-- one entry, but more than one when the same build was saved twice under a
+-- different name/icon (a "PvP" copy of a "Raid" loadout, say). Returns nil
+-- when nothing is resolvable (TLX not loaded, nothing saved, or no match).
+local function ResolveActiveLoadoutEntries()
+    local specTable = GetTalentLoadoutSpecTable()
+    if not specTable then return nil end
 
     local TLX = _G.TLX
     if type(TLX) ~= "table" or type(TLX.GetLoadedData) ~= "function" then
-        return false
+        return nil
     end
 
     -- GetLoadedData hands back TalentLoadoutsEx's own loadedDataList
@@ -229,12 +234,43 @@ function ns.IsMacrotextSlotActive(slot)
     -- one Config table, each already vetted by ITS comparison logic, not a
     -- plain string == on the export text.
     local loaded = { TLX.GetLoadedData() }
+    if #loaded == 0 then return nil end
+
+    local matched = {}
     for _, data in ipairs(loaded) do
-        if data and data.name == name then
-            return true
+        if data and data.name then matched[data.name] = true end
+    end
+    if not next(matched) then return nil end
+
+    -- Walk the spec's list in its own displayed order; Groups (no .text)
+    -- are skipped exactly like BuildTalentLoadoutSlots skips them.
+    local entries = {}
+    for _, data in ipairs(specTable) do
+        if data.text and data.name and matched[data.name] then
+            entries[#entries + 1] = { name = data.name, icon = data.icon }
         end
     end
-    return false
+    if #entries == 0 then return nil end
+    return entries
+end
+
+-- The single canonical "active loadout name" for the pip (IsMacrotextSlotActive
+-- below): the LAST matching entry in the spec's own list order (rather than
+-- the first match, or treating every match as simultaneously "active") gives
+-- a single, deterministic answer that matches how TalentLoadoutsEx's own
+-- list reads top to bottom -- whatever is listed lowest is treated as the
+-- "current" name for a build shared across more than one saved entry.
+local function ResolveActiveLoadoutName()
+    local entries = ResolveActiveLoadoutEntries()
+    if not entries then return nil end
+    return entries[#entries].name
+end
+ns.GetActiveTalentLoadoutName = ResolveActiveLoadoutName
+
+function ns.IsMacrotextSlotActive(slot)
+    local name = slot and slot.talentLoadoutName
+    if not name then return false end
+    return ResolveActiveLoadoutName() == name
 end
 
 -- TalentLoadoutsEx's own "currently applied" tracking hangs off
@@ -257,6 +293,12 @@ end
 -- so the tab has nothing to be visible IN, even while it reports itself as
 -- shown to TalentLoadoutsEx's hook.
 local TALENT_PANEL_WARMUP_DELAY = 5 -- seconds after PLAYER_ENTERING_WORLD
+
+-- Gap between the synthetic Show and the synthetic Hide inside FlashTalentPanel
+-- below -- long enough for Blizzard's own tree population and TalentLoadoutsEx's
+-- SetShown-hooked resync to land before the tab closes again. See the comment
+-- inside FlashTalentPanel for why a same-tick Show+Hide was not enough.
+local FLASH_HIDE_DELAY = 1
 
 -- Runs more than once per session on purpose: TalentLoadoutsEx's own
 -- "currently applied" tracking (see ns.IsMacrotextSlotActive above) only
@@ -284,11 +326,309 @@ local function FlashTalentPanel()
     local talentsFrame = frame and frame.TalentsFrame
     -- Already shown (the player has the Talents tab open themselves) --
     -- never steal that away with a hide of our own.
-    if talentsFrame and not talentsFrame:IsShown() then
-        talentsFrame:SetShown(true)
+    if not talentsFrame or talentsFrame:IsShown() then return end
+
+    -- Force Blizzard's own widget to refresh its tree/config info for
+    -- whichever spec is CURRENTLY active, before ever touching Show/Hide.
+    -- TalentLoadoutsEx's own /tlx slash-command code (modules/command.lua,
+    -- UpdateLoadedConfigNames) calls this exact same method when its own
+    -- loadedDataList is stale -- a real, public, safe-to-call method on the
+    -- global TalentsFrame, not private internals. Without it,
+    -- GetConfigID()/GetTreeInfo() (used inside TalentLoadoutsEx's own
+    -- GetExportText) can keep answering for the OLD spec even after our
+    -- SetShown flash below runs, which is what left the pip and the
+    -- on-screen text stuck until the player opened the real panel by hand.
+    if talentsFrame.UpdateTreeInfo then
+        talentsFrame:UpdateTreeInfo()
+    end
+
+    talentsFrame:SetShown(true)
+    -- Not a same-tick Show+Hide: TalentLoadoutsEx's own SetShown hook only
+    -- runs its resync (Addon:UpdateScrollBox, which is what rebuilds
+    -- GetLoadedData's answer) when it reads BOTH the Talents tab AND its own
+    -- ApplyButton as shown -- and the latter does not necessarily settle
+    -- before our hooksecurefunc callback fires in the very same instant we
+    -- called SetShown(true). Immediately calling SetShown(false) right after
+    -- risks closing the tab before that settles, leaving TalentLoadoutsEx's
+    -- tracking stuck on stale data until the player opens the real panel by
+    -- hand. FLASH_HIDE_DELAY gives Blizzard's own tree population and that
+    -- resync a real window to land before we close it again.
+    C_Timer.After(FLASH_HIDE_DELAY, function()
+        -- The parent panel is genuinely visible by now: the player opened
+        -- (or was already looking at) the real UI while our flash was
+        -- pending -- leave it alone rather than yank the tab shut on them.
+        if frame:IsShown() then return end
         talentsFrame:SetShown(false)
+    end)
+end
+
+-------------------------------------------------------------------------------
+--  On-screen loadout announcement -- a plain, oversized text reminder of
+--  which saved TalentLoadoutsEx loadout is active. Shown when a ready check
+--  fires (so the reminder lands right when it matters, before a pull), the
+--  same way the mirrored palette's pip already answers "which loadout am I
+--  on" on demand -- this just pushes that same, now-correctly-resolved
+--  answer (see ResolveActiveLoadoutName above) to the player without them
+--  having to open Quickdraw to look.
+--
+--  "Repeat Every" is a COOLDOWN on that trigger, not a standalone timer: a
+--  ready check fires the announcement, but if another one lands before the
+--  configured number of minutes has passed since the last time the text was
+--  actually shown, it is silently skipped. Someone spamming ready checks in
+--  a short window (a re-check right after a wipe, a leader double-clicking
+--  it) then pops the text once, not once per ready check.
+--
+--  Font size, on-screen duration, the cooldown length and the master on/off
+--  all live in the profile (read through ns.Profile(), the same accessor
+--  the options page uses) so they are editable from the Specialization
+--  action menu's Appearance section -- see EUI_Quickdraw_Options.lua, which
+--  is also what greys this whole feature out on every OTHER action menu,
+--  since it has nothing to do with one that carries no spec/loadout
+--  entries. Position is NOT a profile-appearance setting: it is a normal
+--  Unlock Mode element (see RegisterLoadoutTextUnlock below), draggable and
+--  resettable the same way every other movable piece of the suite is.
+-------------------------------------------------------------------------------
+local ANNOUNCE_DURATION_DEFAULT  = 10   -- seconds the text stays on screen
+local ANNOUNCE_COOLDOWN_DEFAULT  = 10   -- minutes between two ready-check pops
+local ANNOUNCE_FONT_SIZE_DEFAULT = 30
+local ANNOUNCE_ROW_GAP_DEFAULT   = 6    -- pixels between two stacked loadout lines
+local ANNOUNCE_DEFAULT_POS = { point = "CENTER", relPoint = "CENTER", x = 0, y = 300 }
+
+local function AnnounceEnabled()
+    local p = ns.Profile and ns.Profile()
+    return p and p.loadoutTextEnabled == true
+end
+
+local function AnnounceFontSize()
+    local p = ns.Profile and ns.Profile()
+    return (p and p.loadoutTextFontSize) or ANNOUNCE_FONT_SIZE_DEFAULT
+end
+
+local function AnnounceDuration()
+    local p = ns.Profile and ns.Profile()
+    return (p and p.loadoutTextDuration) or ANNOUNCE_DURATION_DEFAULT
+end
+
+-- Pixels between two stacked loadout lines when more than one entry matches
+-- -- "Line Spacing" on the Appearance page.
+local function AnnounceRowGap()
+    local p = ns.Profile and ns.Profile()
+    local gap = p and p.loadoutTextRowGap
+    if gap == nil then return ANNOUNCE_ROW_GAP_DEFAULT end
+    return gap
+end
+
+-- Stored in MINUTES (what the slider shows); the cooldown check below wants
+-- seconds, read fresh on every ready check so a slider change applies to the
+-- very next one with nothing else to refresh.
+local function AnnounceCooldownSeconds()
+    local p = ns.Profile and ns.Profile()
+    local minutes = (p and p.loadoutTextIntervalMin) or ANNOUNCE_COOLDOWN_DEFAULT
+    return minutes * 60
+end
+
+local function AnnouncePos()
+    local p = ns.Profile and ns.Profile()
+    local pos = p and p.loadoutTextPos
+    if pos and pos.point then return pos end
+    return ANNOUNCE_DEFAULT_POS
+end
+
+local function ApplyAnnouncePosition(f)
+    local pos = AnnouncePos()
+    f:ClearAllPoints()
+    f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
+end
+
+-- TalentLoadoutsEx stores a hero-talent icon as an ATLAS NAME (a string) and
+-- every other icon as a numeric fileID -- same distinction BuildTalentLoadout
+-- Slots above already has to make for Quickdraw's own icon widgets.
+local function ApplyAnnounceIcon(tex, icon)
+    if type(icon) == "string" then
+        tex:SetAtlas(icon)
+    elseif type(icon) == "number" then
+        tex:SetTexture(icon)
+    else
+        tex:SetTexture(134400) -- INV_Misc_QuestionMark: no icon on record
     end
 end
+
+local announceFrame
+local function EnsureAnnounceFrame()
+    if announceFrame then return announceFrame end
+
+    local f = CreateFrame("Frame", "EllesmereUIQuickdrawLoadoutAnnounce", UIParent)
+    f:SetSize(640, 60)
+    f:SetFrameStrata("HIGH")
+    f:Hide()
+    ApplyAnnouncePosition(f)
+    f.rows = {} -- pooled { icon = Texture, text = FontString } rows, one per entry
+
+    announceFrame = f
+    return f
+end
+
+local function EnsureAnnounceRow(f, i)
+    local row = f.rows[i]
+    if row then return row end
+
+    row = CreateFrame("Frame", nil, f)
+    row.icon = row:CreateTexture(nil, "ARTWORK")
+    row.icon:SetPoint("LEFT", row, "LEFT", 0, 0)
+    row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) -- crop the default Blizzard icon border
+
+    row.text = row:CreateFontString(nil, "OVERLAY")
+    row.text:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+    row.text:SetTextColor(1, 1, 1, 1) -- always white, independent of the pip's color
+
+    f.rows[i] = row
+    return row
+end
+
+-- Lays out one icon+name row per resolved entry, stacked top to bottom
+-- ("separated into paragraphs" per request), each centered as its own
+-- icon+text block under the frame's anchor point, and sizes the frame to
+-- fit however many entries there are this time. Re-run on every show (not
+-- just once at creation) so a live font-size change takes effect immediately
+-- and the row count can grow or shrink between one ready check and the next.
+local function ApplyAnnounceStyle(f, entries)
+    local fontPath = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("quickdraw")) or STANDARD_TEXT_FONT
+    local size = AnnounceFontSize()
+    local rowH = math.ceil(size * 1.3)
+    local rowGap = AnnounceRowGap()
+
+    local maxWidth = 0
+    for i, entry in ipairs(entries) do
+        local row = EnsureAnnounceRow(f, i)
+        row:SetSize(1, rowH) -- width corrected below once the text is measured
+        row.icon:SetSize(size, size)
+        ApplyAnnounceIcon(row.icon, entry.icon)
+        row.text:SetFont(fontPath, size, "OUTLINE")
+        row.text:SetText(entry.name)
+
+        row:ClearAllPoints()
+        if i == 1 then
+            row:SetPoint("TOP", f, "TOP", 0, 0)
+        else
+            row:SetPoint("TOP", f.rows[i - 1], "BOTTOM", 0, -rowGap)
+        end
+
+        local w = size + 8 + row.text:GetStringWidth()
+        row:SetWidth(w)
+        if w > maxWidth then maxWidth = w end
+        row:Show()
+    end
+
+    -- A previous, longer list can leave stale rows behind in the pool.
+    for i = #entries + 1, #f.rows do
+        f.rows[i]:Hide()
+    end
+
+    local totalH = #entries * rowH + math.max(0, #entries - 1) * rowGap
+    f:SetSize(math.max(maxWidth, 10), math.max(totalH, 10))
+end
+
+-- GetTime() of the last pop that actually made it to the screen -- nil means
+-- "never yet this session", which always passes the cooldown check below.
+local lastShownAt
+local lastEntries
+local announceHideTimer
+local function ShowLoadoutAnnouncement()
+    if not AnnounceEnabled() then return end -- master switch, off by default
+
+    local now = GetTime()
+    local cooldown = AnnounceCooldownSeconds()
+    if cooldown > 0 and lastShownAt and (now - lastShownAt) < cooldown then
+        -- Too soon since the last pop: this ready check (or whatever else
+        -- calls this) is within the configured window of an earlier one, so
+        -- it is silently skipped rather than re-popping the same text. A
+        -- cooldown of 0 (the slider's minimum) disables this check entirely
+        -- -- every ready check pops the text, no matter how close together.
+        return
+    end
+
+    -- Every saved entry the CURRENT talents match, not just one: a build
+    -- shared across two differently-named/iconed loadouts announces all of
+    -- them, one paragraph each, rather than picking a single "winner" the
+    -- way the pip has to.
+    local entries = ResolveActiveLoadoutEntries()
+    if not entries then return end -- nothing saved/resolvable to announce
+
+    lastShownAt = now
+    lastEntries = entries
+
+    local f = EnsureAnnounceFrame()
+    ApplyAnnounceStyle(f, entries)
+    f:Show()
+
+    if announceHideTimer then announceHideTimer:Cancel() end
+    announceHideTimer = C_Timer.NewTimer(AnnounceDuration(), function()
+        announceHideTimer = nil
+        f:Hide()
+    end)
+end
+ns.ShowLoadoutAnnouncement = ShowLoadoutAnnouncement
+
+-- Called by the options page whenever the font size changes, so a slider
+-- takes effect immediately instead of waiting for the next ready check --
+-- re-lays-out the CURRENTLY visible text (if any) with the new size right
+-- away. Duration and the cooldown are both read fresh at the moment they
+-- matter (AnnounceDuration inside the hide timer, AnnounceCooldownSeconds
+-- inside the ready-check check above), so neither needs anything here.
+function ns.RefreshLoadoutTextSettings()
+    if announceFrame and announceFrame:IsShown() and lastEntries then
+        ApplyAnnounceStyle(announceFrame, lastEntries)
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Unlock Mode: lets the announcement text be dragged anywhere on screen,
+--  the same way every other movable piece of the suite is repositioned.
+--  Follows the same shape as EllesmereUIQoL_FlightTimer.lua's mover (a
+--  fixed-size, non-resizable, sometimes-hidden HUD element).
+-------------------------------------------------------------------------------
+local function RegisterLoadoutTextUnlock()
+    local MK = EllesmereUI.MakeUnlockElement
+    if not MK then return end
+    EllesmereUI:RegisterUnlockElements({
+        MK({
+            key      = "EUI_QuickdrawLoadoutText",
+            label    = "Quickdraw: Loadout Text",
+            group    = "Quickdraw",
+            order    = 100,
+            -- Off the mover list entirely while the feature itself is off
+            -- (mirrors the Flight Timer bar / FPS Counter pattern) -- there
+            -- is nothing meaningful to drag if it never shows.
+            isHidden = function() return not AnnounceEnabled() end,
+            getFrame = function() return EnsureAnnounceFrame() end,
+            getSize  = function()
+                if announceFrame then return announceFrame:GetWidth(), announceFrame:GetHeight() end
+                return 640, 60
+            end,
+            noResize = true,
+            savePos = function(_, point, relPoint, x, y)
+                if not point then return end
+                local p = ns.Profile and ns.Profile()
+                if not p then return end
+                p.loadoutTextPos = { point = point, relPoint = relPoint, x = x, y = y }
+                if announceFrame and not EllesmereUI._unlockActive then
+                    ApplyAnnouncePosition(announceFrame)
+                end
+            end,
+            loadPos = function() return AnnouncePos() end,
+            clearPos = function()
+                local p = ns.Profile and ns.Profile()
+                if p then p.loadoutTextPos = nil end
+                if announceFrame then ApplyAnnouncePosition(announceFrame) end
+            end,
+            applyPos = function()
+                local f = EnsureAnnounceFrame()
+                ApplyAnnouncePosition(f)
+            end,
+        }),
+    })
+end
+ns.RegisterLoadoutTextUnlock = RegisterLoadoutTextUnlock
 
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("ADDON_LOADED")
@@ -296,19 +636,40 @@ watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
 watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+watcher:RegisterEvent("READY_CHECK")
 watcher:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 ~= "TalentLoadoutsEx" then return end
+
+    if event == "READY_CHECK" then
+        -- Fires the instant a ready check is initiated -- by the leader or
+        -- by this character -- so the reminder lands right before a pull,
+        -- not after. Nothing else in this handler applies to this event.
+        ShowLoadoutAnnouncement()
+        return
+    end
 
     if event == "PLAYER_ENTERING_WORLD" then
         -- First flash of the session: give the rest of the suite (ActionBars
         -- included) time to finish its own startup first.
         C_Timer.After(TALENT_PANEL_WARMUP_DELAY, FlashTalentPanel)
+        RegisterLoadoutTextUnlock()
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         -- A spec swap, not a talent edit within the current spec -- flash
         -- again right away so TalentLoadoutsEx's own tracking settles onto
         -- the NEW spec's loadouts before the player next checks the pip.
         -- Everything is long past "still loading" by this point in a
         -- session, so no delay here.
+        FlashTalentPanel()
+    elseif event == "TRAIT_CONFIG_UPDATED" then
+        -- A loadout switch (via /tlx, or TalentLoadoutsEx's own UI) or a
+        -- plain talent edit, WITHOUT necessarily ever opening the Talents
+        -- tab -- this is what previously left the pip and the on-screen
+        -- text stuck on the old name until the player opened the panel by
+        -- hand: TalentLoadoutsEx's own "currently loaded" comparison only
+        -- (re-)runs from ITS OnShow hook, which a plain TRAIT_CONFIG_UPDATED
+        -- reaching TLX's own event handlers does not, in practice, trigger
+        -- on its own. Flashing here closes that gap the same way a spec
+        -- change already did.
         FlashTalentPanel()
     elseif event == "PLAYER_REGEN_ENABLED" and pendingFlash then
         -- Picks up whichever flash (login or a spec change) landed mid-combat.

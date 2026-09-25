@@ -2718,15 +2718,38 @@ local function CreateSlotWidget(view, index)
     w.count:Hide()
     AdoptFontString(w.count, true)
 
-    -- "This world marker is on the ground right now", in the corner the count
-    -- does not use. Drawn above the border host so a selected entry does not
-    -- bury it. Shown only by PaletteView:MarkerPip, which is also what sizes
-    -- and colors it; created here unconditionally because a widget is reused
-    -- for whatever entry the next open puts in it.
-    w.markerPip = w:CreateTexture(nil, "OVERLAY", nil, 7)
-    w.markerPip:SetTexture("Interface\\Buttons\\WHITE8X8")
-    w.markerPip:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
-    w.markerPip:Hide()
+    -- "This world marker is on the ground right now" / "this is my active
+    -- spec or talent loadout" -- three interchangeable looks ("Pip Style" in
+    -- options): a border RING around the icon (default), the original
+    -- corner square, or a small round dot. All three are created here
+    -- unconditionally (a widget is reused for whatever entry the next open
+    -- puts in it) and PaletteView:MarkerPip below shows exactly one of them,
+    -- reading both the style and the color ("Pip Color") from the profile.
+    w.pipHost = CreateFrame("Frame", nil, w)
+    w.pipHost:SetAllPoints(w)
+    w.pipHost:SetFrameLevel(w.bhost:GetFrameLevel() + 1)
+    EllesmereUI.PP.CreateBorder(w.pipHost, 0.047, 0.824, 0.624, 1, 2, "OVERLAY", 7)
+    w.pipHost:Hide()
+
+    w.pipSquare = w:CreateTexture(nil, "OVERLAY", nil, 7)
+    w.pipSquare:SetTexture("Interface\\Buttons\\WHITE8X8")
+    w.pipSquare:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
+    w.pipSquare:Hide()
+
+    -- A plain square run through the suite's circular portrait mask -- same
+    -- trick as the patch-notes "new" dot (EllesmereUI.lua) -- rather than a
+    -- dedicated round texture asset.
+    w.pipDot = w:CreateTexture(nil, "OVERLAY", nil, 7)
+    w.pipDot:SetTexture("Interface\\Buttons\\WHITE8X8")
+    w.pipDot:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
+    do
+        local mask = w:CreateMaskTexture()
+        mask:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",
+            "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mask:SetAllPoints(w.pipDot)
+        w.pipDot:AddMaskTexture(mask)
+    end
+    w.pipDot:Hide()
 
     -- "This entry opens a menu", in the corner nothing else uses. Without it a
     -- nested entry is drawn exactly like a plain one until it arms, which is
@@ -5818,32 +5841,55 @@ function PaletteView:SlotIsPipped(slot)
 end
 
 function PaletteView:MarkerPip(w, slot, iconSize)
-    local pip = w.markerPip
-    if not pip then return end
+    local hostBorder, sq, dot = w.pipHost, w.pipSquare, w.pipDot
+    if not hostBorder then return end
+
     -- Live menus only: the pip reads REAL state -- on the battlefield, on
     -- this character, or in another addon's own data -- which is noise on
     -- the options preview and the editor; those show arrangement, not the
     -- moment. Hidden rather than skipped, so a reused widget never carries a
     -- stale pip across views.
-    if not (self.opts and self.opts.live) then
-        pip:Hide()
+    if not (self.opts and self.opts.live) or not self:SlotIsPipped(slot) then
+        hostBorder:Hide()
+        if sq then sq:Hide() end
+        if dot then dot:Hide() end
         return
     end
-    if not self:SlotIsPipped(slot) then
-        pip:Hide()
-        return
-    end
-    -- The widget's own width when no size is passed: a nest scales its
-    -- children as it opens, and the refresh below runs long after the paint
-    -- that knew the unscaled figure.
-    local s = max(3, floor((iconSize or w:GetWidth() or 40) * 0.18))
-    pip:SetSize(s, s)
+
+    -- Color and style both come from the profile ("Pip Color" / "Pip
+    -- Style" on the Appearance page), never from
+    -- EllesmereUI.ResolveActiveAccent() -- this indicator is independent of
+    -- the suite's accent unless explicitly set otherwise here.
     local ar, ag, ab = 0.047, 0.824, 0.624
-    if EllesmereUI.ResolveActiveAccent then
-        ar, ag, ab = EllesmereUI.ResolveActiveAccent()
+    local p = ns.Profile and ns.Profile()
+    local pc = p and p.pipColor
+    if pc then ar, ag, ab = pc[1] or ar, pc[2] or ag, pc[3] or ab end
+    local style = (p and p.pipStyle) or "border"
+
+    if style == "square" and sq then
+        hostBorder:Hide()
+        if dot then dot:Hide() end
+        -- Same corner sizing the original single-square pip used: a share
+        -- of the widget's own width when no explicit size is passed (a nest
+        -- scales its children as it opens, and this refresh runs long after
+        -- the paint that knew the unscaled figure).
+        local s = max(3, floor((iconSize or w:GetWidth() or 40) * 0.18))
+        sq:SetSize(s, s)
+        sq:SetVertexColor(ar, ag, ab, 1)
+        sq:Show()
+    elseif style == "dot" and dot then
+        hostBorder:Hide()
+        if sq then sq:Hide() end
+        local s = max(3, floor((iconSize or w:GetWidth() or 40) * 0.22))
+        dot:SetSize(s, s)
+        dot:SetVertexColor(ar, ag, ab, 1)
+        dot:Show()
+    else -- "border" (default)
+        if sq then sq:Hide() end
+        if dot then dot:Hide() end
+        EllesmereUI.PP.UpdateBorder(hostBorder, 2, ar, ag, ab, 1)
+        hostBorder:Show()
     end
-    pip:SetVertexColor(ar, ag, ab, 1)
-    pip:Show()
 end
 
 -- Every drawn cell's pip, for a menu that is already up when the markers move.
