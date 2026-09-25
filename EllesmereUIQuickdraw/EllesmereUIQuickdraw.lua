@@ -5880,7 +5880,7 @@ function PaletteView:MarkerPip(w, slot, iconSize)
     end
 end
 
--- Every drawn cell's pip, for a menu that is already up when the markers move.
+-- Every drawn cell's pip, for a menu already open when markers or spec change.
 -- Walks the cells rather than a collected list the way AdvanceLiveIcons does:
 -- that list earns itself by being read every frame, and this runs a handful of
 -- times a pull.
@@ -9646,6 +9646,14 @@ function SetEventsEnabled(on)
                 liveView:RefreshMarkerPips()
             end
         end)
+        -- A latched ring can stay open through a spec swap. Repaint its
+        -- existing cells, including nested ones, without resetting selection.
+        EQD:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", function(_, _, unit)
+            if unit ~= "player" then return end
+            if liveView and liveView:GetFrame():IsShown() then
+                liveView:RefreshMarkerPips()
+            end
+        end)
         -- What the "Last Used Mount" entry summons. Blizzard records no such
         -- thing -- the whole C_MountJournal surface answers only what is
         -- summoned RIGHT NOW -- so it is observed. Every successful player cast
@@ -9693,6 +9701,7 @@ function SetEventsEnabled(on)
         EQD:UnregisterEvent("UPDATE_MACROS")
         EQD:UnregisterEvent("TRANSMOG_OUTFITS_CHANGED")
         EQD:UnregisterEvent("RAID_TARGET_UPDATE")
+        EQD:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         EQD:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     end
 end
