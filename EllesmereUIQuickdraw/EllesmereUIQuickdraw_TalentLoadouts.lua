@@ -50,15 +50,9 @@ if EUI_CLIENT_BLOCKED then return end -- same pre-client-gate failsafe as the ma
 --  the matching MarkerPip patch is applied to the main file:
 --    - a "spec"/"dynamicspec" slot, when it names the spec this character is
 --      currently on;
---    - one of THIS file's loadout slots, when TalentLoadoutsEx's own public
---      API (TLX.GetLoadedData) says that exact loadout is the one currently
---      applied.
---  The second one leans on TalentLoadoutsEx's own tracking, which only runs
---  once Blizzard_PlayerSpells (the Talents & Specializations panel) has
---  loaded -- normally the first time the player opens it. This file force-
---  loads it once at login instead, so the pip works without that step. If it
---  still reads as "nothing active" right after login, it catches up on the
---  next spec change, talent change, or /tlx use.
+--    - one of this file's loadout slots, when the active talent configuration
+--      matches the saved TLEx build. Reads do not depend on the Talents UI
+--      or TLEx's UI-driven GetLoadedData cache.
 -------------------------------------------------------------------------------
 
 local ADDON_NAME, ns = ...
@@ -215,43 +209,87 @@ ns.RefreshTalentLoadoutPalette = RefreshTalentLoadoutPalette
 --  TalentLoadoutsEx exists, it just asks ns for an opinion on a macrotext
 --  slot when one is offered.
 -------------------------------------------------------------------------------
--- Every saved Config whose talent string matches what's currently applied,
--- in the spec's own list order, each as { name = ..., icon = ... }. Normally
--- one entry, but more than one when the same build was saved twice under a
--- different name/icon (a "PvP" copy of a "Raid" loadout, say). Returns nil
--- when nothing is resolvable (TLX not loaded, nothing saved, or no match).
+-- Decode with Blizzard's stateless import/export mixin, passing the active
+-- config/tree explicitly. Never use the panel's potentially stale config,
+-- and never invoke TLEx's import helpers (which can change starter builds).
+local function ReadLoadoutEntries(text, configID, specID, treeID)
+    local parser = ClassTalentImportExportMixin
+    if not parser or not ExportUtil or type(text) ~= "string" or text == "" then return nil end
+    local ok, entries = pcall(function()
+        local stream = ExportUtil.MakeImportDataStream(text)
+        local valid, version, savedSpec, hash = parser:ReadLoadoutHeader(stream)
+        if not valid or savedSpec ~= specID
+           or version ~= C_Traits.GetLoadoutSerializationVersion() then return nil end
+        if not parser:IsHashEmpty(hash)
+           and not parser:HashEquals(hash, C_Traits.GetTreeHash(treeID)) then return nil end
+        local content = parser:ReadLoadoutContent(stream, treeID)
+        return parser:ConvertToImportLoadoutEntryInfo(configID, treeID, content)
+    end)
+    return ok and entries or nil
+end
+
+local activeSnapshot
+local function InvalidateActiveLoadout()
+    activeSnapshot = nil
+end
+
+-- Shared by the pip and ready-check text. A short snapshot avoids decoding
+-- every saved build for every slot on every render tick. Failed reads are
+-- retried on the next query; spec/config changes bypass the snapshot.
 local function ResolveActiveLoadoutEntries()
     local specTable = GetTalentLoadoutSpecTable()
-    if not specTable then return nil end
+    if not specTable or not C_ClassTalents or not C_Traits then return nil end
+    local specIndex = C_SpecializationInfo.GetSpecialization()
+    local specID = specIndex and C_SpecializationInfo.GetSpecializationInfo(specIndex)
+    local configID = C_ClassTalents.GetActiveConfigID()
+    local treeID = specID and C_ClassTalents.GetTraitTreeForSpec(specID)
+    if not configID or not treeID or not C_Traits.GenerateImportString then return nil end
 
-    local TLX = _G.TLX
-    if type(TLX) ~= "table" or type(TLX.GetLoadedData) ~= "function" then
-        return nil
+    local now = GetTime()
+    if activeSnapshot and activeSnapshot.specID == specID
+       and activeSnapshot.configID == configID and activeSnapshot.specTable == specTable
+       and now - activeSnapshot.time < 0.2 then
+        return activeSnapshot.entries
     end
 
-    -- GetLoadedData hands back TalentLoadoutsEx's own loadedDataList
-    -- unpacked -- zero, one, or (identical loadouts saved twice) more than
-    -- one Config table, each already vetted by ITS comparison logic, not a
-    -- plain string == on the export text.
-    local loaded = { TLX.GetLoadedData() }
-    if #loaded == 0 then return nil end
+    local ok, currentText = pcall(C_Traits.GenerateImportString, configID)
+    if not ok or type(currentText) ~= "string" or currentText == "" then return nil end
+    local current = ReadLoadoutEntries(currentText, configID, specID, treeID)
+    if not current or #current == 0 then return nil end
+    local byEntry = {}
+    for _, entry in ipairs(current) do byEntry[entry.selectionEntryID] = entry end
 
-    local matched = {}
-    for _, data in ipairs(loaded) do
-        if data and data.name then matched[data.name] = true end
-    end
-    if not next(matched) then return nil end
-
-    -- Walk the spec's list in its own displayed order; Groups (no .text)
-    -- are skipped exactly like BuildTalentLoadoutSlots skips them.
+    local options = TalentLoadoutEx.Option
+    local pvp = options and options.IsEnabledPvp
+        and C_SpecializationInfo.GetAllSelectedPvpTalentIDs() or {}
     local entries = {}
     for _, data in ipairs(specTable) do
-        if data.text and data.name and matched[data.name] then
-            entries[#entries + 1] = { name = data.name, icon = data.icon }
+        if data.text and data.name and not data.isLegacy then
+            local matches = data.text == currentText
+            if not matches then
+                local saved = ReadLoadoutEntries(data.text, configID, specID, treeID)
+                matches = saved ~= nil and #saved > 0
+                -- Match TLEx's entry/rank comparison, including partial builds
+                -- and equivalent exports with different header hashes.
+                for _, entry in ipairs(saved or {}) do
+                    local applied = byEntry[entry.selectionEntryID]
+                    if not applied or applied.ranksGranted ~= entry.ranksGranted
+                       or applied.ranksPurchased ~= entry.ranksPurchased then
+                        matches = false
+                        break
+                    end
+                end
+            end
+            for index, talentID in ipairs(pvp) do
+                local savedID = tonumber(data["pvp" .. index])
+                if savedID and savedID ~= talentID then matches = false end
+            end
+            if matches then entries[#entries + 1] = { name = data.name, icon = data.icon } end
         end
     end
-    if #entries == 0 then return nil end
-    return entries
+    activeSnapshot = { specID = specID, configID = configID, specTable = specTable,
+        time = now, entries = #entries > 0 and entries or nil }
+    return activeSnapshot.entries
 end
 
 -- The single canonical "active loadout name" for the pip (IsMacrotextSlotActive
@@ -273,93 +311,20 @@ function ns.IsMacrotextSlotActive(slot)
     return ResolveActiveLoadoutName() == name
 end
 
--- TalentLoadoutsEx's own "currently applied" tracking hangs off
--- hooksecurefunc(PlayerSpellsFrame.TalentsFrame, "SetShown", ...) -- the
--- TALENTS TAB, a child frame, not the PlayerSpellsFrame window itself (see
--- its modules/frame.lua). EllesmereUIActionBars' "Show When Spellbook Is
--- Open" watches the PARENT window instead (HookScript on PlayerSpellsFrame's
--- own OnShow/OnHide). Those are two different frames: toggling the TALENTS
--- TAB directly satisfies TalentLoadoutsEx's hook without ever calling
--- Show()/Hide() on the parent PlayerSpellsFrame, so ActionBars' hook never
--- fires and there is nothing of its state to disturb -- no resync required
--- because nothing is ever touched. (An earlier version of this file toggled
--- the parent and then resynced ActionBars afterward; toggling the right
--- frame in the first place is simpler and does not depend on ActionBars'
--- resync path staying compatible with a same-tick Show/Hide.)
---
--- A child's own :IsShown() is independent of whether its ancestors are
--- shown -- only :IsVisible() cares about the whole chain -- so this never
--- renders anything on screen: the parent PlayerSpellsFrame is never shown,
--- so the tab has nothing to be visible IN, even while it reports itself as
--- shown to TalentLoadoutsEx's hook.
-local TALENT_PANEL_WARMUP_DELAY = 5 -- seconds after PLAYER_ENTERING_WORLD
-
--- Gap between the synthetic Show and the synthetic Hide inside FlashTalentPanel
--- below -- long enough for Blizzard's own tree population and TalentLoadoutsEx's
--- SetShown-hooked resync to land before the tab closes again. See the comment
--- inside FlashTalentPanel for why a same-tick Show+Hide was not enough.
-local FLASH_HIDE_DELAY = 1
-
--- Runs more than once per session on purpose: TalentLoadoutsEx's own
--- "currently applied" tracking (see ns.IsMacrotextSlotActive above) only
--- seems to re-settle for the NEW spec once the Talents tab has actually
--- toggled again after the swap -- a plain PLAYER_SPECIALIZATION_CHANGED
--- reaching TalentLoadoutsEx's own event handlers is not, in practice,
--- enough on its own. So this flashes again on every spec change, not just
--- once at login; pendingFlash (rather than a permanent "already done" flag)
--- is what lets a spec change that lands mid-combat retry once combat ends,
--- same as the very first login attempt would.
-local pendingFlash = false
-local function FlashTalentPanel()
+-- Load the parser and TLEx's slash-command dependencies without showing any
+-- frames. Loading is deferred in combat; direct reads keep working once loaded.
+local pendingTalentSupport = false
+local function EnsureTalentSupport()
     if InCombatLockdown() then
-        pendingFlash = true
+        pendingTalentSupport = true
         return
     end
-    pendingFlash = false
-
-    if C_AddOns and C_AddOns.LoadAddOn and C_AddOns.IsAddOnLoaded
+    pendingTalentSupport = false
+    if type(_G.TalentLoadoutEx) == "table" and C_AddOns
        and not C_AddOns.IsAddOnLoaded("Blizzard_PlayerSpells") then
         C_AddOns.LoadAddOn("Blizzard_PlayerSpells")
     end
-
-    local frame = _G.PlayerSpellsFrame
-    local talentsFrame = frame and frame.TalentsFrame
-    -- Already shown (the player has the Talents tab open themselves) --
-    -- never steal that away with a hide of our own.
-    if not talentsFrame or talentsFrame:IsShown() then return end
-
-    -- Force Blizzard's own widget to refresh its tree/config info for
-    -- whichever spec is CURRENTLY active, before ever touching Show/Hide.
-    -- TalentLoadoutsEx's own /tlx slash-command code (modules/command.lua,
-    -- UpdateLoadedConfigNames) calls this exact same method when its own
-    -- loadedDataList is stale -- a real, public, safe-to-call method on the
-    -- global TalentsFrame, not private internals. Without it,
-    -- GetConfigID()/GetTreeInfo() (used inside TalentLoadoutsEx's own
-    -- GetExportText) can keep answering for the OLD spec even after our
-    -- SetShown flash below runs, which is what left the pip and the
-    -- on-screen text stuck until the player opened the real panel by hand.
-    if talentsFrame.UpdateTreeInfo then
-        talentsFrame:UpdateTreeInfo()
-    end
-
-    talentsFrame:SetShown(true)
-    -- Not a same-tick Show+Hide: TalentLoadoutsEx's own SetShown hook only
-    -- runs its resync (Addon:UpdateScrollBox, which is what rebuilds
-    -- GetLoadedData's answer) when it reads BOTH the Talents tab AND its own
-    -- ApplyButton as shown -- and the latter does not necessarily settle
-    -- before our hooksecurefunc callback fires in the very same instant we
-    -- called SetShown(true). Immediately calling SetShown(false) right after
-    -- risks closing the tab before that settles, leaving TalentLoadoutsEx's
-    -- tracking stuck on stale data until the player opens the real panel by
-    -- hand. FLASH_HIDE_DELAY gives Blizzard's own tree population and that
-    -- resync a real window to land before we close it again.
-    C_Timer.After(FLASH_HIDE_DELAY, function()
-        -- The parent panel is genuinely visible by now: the player opened
-        -- (or was already looking at) the real UI while our flash was
-        -- pending -- leave it alone rather than yank the tab shut on them.
-        if frame:IsShown() then return end
-        talentsFrame:SetShown(false)
-    end)
+    InvalidateActiveLoadout()
 end
 
 -------------------------------------------------------------------------------
@@ -635,58 +600,44 @@ watcher:RegisterEvent("ADDON_LOADED")
 watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
 watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
+watcher:RegisterEvent("PLAYER_TALENT_UPDATE")
+watcher:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:RegisterEvent("READY_CHECK")
+local refreshGeneration = 0
 watcher:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 ~= "TalentLoadoutsEx" then return end
+    if event == "PLAYER_SPECIALIZATION_CHANGED" and arg1 ~= "player" then return end
+    InvalidateActiveLoadout()
 
     if event == "READY_CHECK" then
-        -- Fires the instant a ready check is initiated -- by the leader or
-        -- by this character -- so the reminder lands right before a pull,
-        -- not after. Nothing else in this handler applies to this event.
+        EnsureTalentSupport()
         ShowLoadoutAnnouncement()
         return
     end
-
     if event == "PLAYER_ENTERING_WORLD" then
-        -- First flash of the session: give the rest of the suite (ActionBars
-        -- included) time to finish its own startup first.
-        C_Timer.After(TALENT_PANEL_WARMUP_DELAY, FlashTalentPanel)
         RegisterLoadoutTextUnlock()
-    elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
-        -- A spec swap, not a talent edit within the current spec -- flash
-        -- again right away so TalentLoadoutsEx's own tracking settles onto
-        -- the NEW spec's loadouts before the player next checks the pip.
-        -- Everything is long past "still loading" by this point in a
-        -- session, so no delay here.
-        FlashTalentPanel()
-    elseif event == "TRAIT_CONFIG_UPDATED" then
-        -- A loadout switch (via /tlx, or TalentLoadoutsEx's own UI) or a
-        -- plain talent edit, WITHOUT necessarily ever opening the Talents
-        -- tab -- this is what previously left the pip and the on-screen
-        -- text stuck on the old name until the player opened the panel by
-        -- hand: TalentLoadoutsEx's own "currently loaded" comparison only
-        -- (re-)runs from ITS OnShow hook, which a plain TRAIT_CONFIG_UPDATED
-        -- reaching TLX's own event handlers does not, in practice, trigger
-        -- on its own. Flashing here closes that gap the same way a spec
-        -- change already did.
-        FlashTalentPanel()
-    elseif event == "PLAYER_REGEN_ENABLED" and pendingFlash then
-        -- Picks up whichever flash (login or a spec change) landed mid-combat.
-        FlashTalentPanel()
+    end
+    if event ~= "PLAYER_REGEN_ENABLED" or pendingTalentSupport then
+        EnsureTalentSupport()
     end
 
-    -- A tick late on purpose: TalentLoadoutsEx's own list can still be
-    -- settling (it debounces its rebuild by 0.1s -- see its RequestUpdate),
-    -- and this addon's own profile may not exist yet on the very first
-    -- ADDON_LOADED pass either -- FindOrCreateTalentLoadoutPalette just
-    -- no-ops in that case and PLAYER_ENTERING_WORLD covers it a moment later.
-    C_Timer.After(0.2, function() RefreshTalentLoadoutPalette(false) end)
+    -- Let spec/config events settle, canceling callbacks from earlier swaps.
+    -- Further reads always query the active config, even if it arrives later.
+    refreshGeneration = refreshGeneration + 1
+    local generation = refreshGeneration
+    C_Timer.After(0.2, function()
+        if generation ~= refreshGeneration then return end
+        InvalidateActiveLoadout()
+        RefreshTalentLoadoutPalette(false)
+        if ns.RequestPush then ns.RequestPush() end
+    end)
 end)
 
 -- Manual refresh / sanity check without a UI reload, e.g. right after saving
 -- a new loadout in TalentLoadoutsEx.
 SLASH_EUIQUICKDRAWTALENTLOADOUTS1 = "/eui-tlx"
 SlashCmdList["EUIQUICKDRAWTALENTLOADOUTS"] = function()
+    EnsureTalentSupport()
     RefreshTalentLoadoutPalette(true)
 end
