@@ -5349,6 +5349,48 @@ initFrame:SetScript("OnEvent", function(self)
             if v ~= nil then return v end
             return default
         end
+
+        -- Inline cog helper used by shared Unit Frame settings.
+        -- anchorTo optionally places the cog immediately to the left of an existing
+        -- inline widget (for example a color swatch). disabledFn can temporarily
+        -- dim/disable the cog while its parent option is turned off.
+        local function MakeCogBtn(rgn, showFn, anchorTo, iconPath, disabledFn)
+            local cogBtn = CreateFrame("Button", nil, rgn)
+            cogBtn:SetSize(26, 26)
+            cogBtn:SetPoint("RIGHT", anchorTo or rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = cogBtn
+            cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            cogBtn:SetAlpha(0.4)
+
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
+            cogTex:SetAllPoints()
+            cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
+
+            local function IsDisabled()
+                return disabledFn and disabledFn() or false
+            end
+            cogBtn:SetScript("OnEnter", function(self)
+                if not IsDisabled() then self:SetAlpha(0.7) end
+            end)
+            cogBtn:SetScript("OnLeave", function(self)
+                if not IsDisabled() then self:SetAlpha(0.4) end
+            end)
+            cogBtn:SetScript("OnClick", function(self)
+                if not IsDisabled() then showFn(self) end
+            end)
+
+            if disabledFn then
+                local function UpdateCogState()
+                    local disabled = IsDisabled()
+                    cogBtn:SetAlpha(disabled and 0.15 or 0.4)
+                    cogBtn:EnableMouse(not disabled)
+                end
+                UpdateCogState()
+                RegisterWidgetRefresh(UpdateCogState)
+            end
+
+            return cogBtn
+        end
         -- True while one of the unit's text slots shows its level (Level,
         -- Level | Name, Name | Level). The Level Text: Difficulty Color row is
         -- built only then, so the text setters rebuild the page when it flips.
@@ -14234,7 +14276,7 @@ initFrame:SetScript("OnEvent", function(self)
                           end },
                     },
                 })
-                MCogBtn(rightRgn, fillCogShow)
+                EllesmereUI.BuildInlineCog(rightRgn, { show = fillCogShow })
             end
 
             -- Inline color swatch for Target Fill Color, anchored to the toggle.

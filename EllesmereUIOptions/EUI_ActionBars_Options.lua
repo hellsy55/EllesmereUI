@@ -4513,7 +4513,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end,
                     },
                 })
-                local _, kbVehicleCogShow = EllesmereUI.BuildCogPopup({
+                EllesmereUI.BuildInlineCog(rgn, {
                     title = "Hide Keybind Text",
                     rows = {
                         { type="toggle", label="Show While in Vehicle",
@@ -4525,7 +4525,6 @@ initFrame:SetScript("OnEvent", function(self)
                           end },
                     },
                 })
-                MakeCogBtn(rgn, kbVehicleCogShow)
             end
             do
                 local rgn = keybindRow._rightRegion
