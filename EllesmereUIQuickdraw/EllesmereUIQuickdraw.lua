@@ -45,10 +45,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 local EQD = EllesmereUI.Lite.NewAddon(ADDON_NAME)
--- The palettes are secure handlers end to end: the enable drain stands the
--- module down where snippets cannot compile (WoW Forever beta); ns.Refresh
--- carries the same guard for the toggles (EllesmereUI.SecureSnippetsOK).
-EQD.requiresSecureSnippets = true
 if not (EllesmereUI and EllesmereUI._ModuleNS) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring
 EllesmereUI._ModuleNS[ADDON_NAME] = select(2, ...)  -- LOD options files read this module ns via the registry
 
@@ -637,14 +633,6 @@ local APPEARANCE_KEYS = {
     worldMarkerPip = true,
 }
 ns.APPEARANCE_KEYS = APPEARANCE_KEYS
-
--- The overrides table for a palette, created on demand. Only the options page
--- writes here; everything else reads through the view below.
-function ns.PaletteAppearance(palette, create)
-    if not palette then return nil end
-    if not palette.appearance and create then palette.appearance = {} end
-    return palette.appearance
-end
 
 -- One READ-ONLY view per palette, with that palette's overrides in front of
 -- the profile. Handing this back as `p` is what let the whole renderer stay
@@ -2597,13 +2585,12 @@ local function ApplyModuleFont(fs)
     if fs.eqdIconText and EllesmereUI.GetIconTextOutlineFlag then
         flags = EllesmereUI.GetIconTextOutlineFlag(FONT_KEY)
     else
-        flags = EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag(FONT_KEY) or ""
+        flags = EllesmereUI.GetFontOutlineFlag(FONT_KEY) or ""
     end
     -- Runtime SetShadowOffset no longer renders on 12.x; the shadow has to be
     -- carried by a FontObject, primed BEFORE the typeface call.
     if EllesmereUI.PrimeFontShadow then
-        local useShadow = flags == "" and EllesmereUI.GetFontUseShadow
-            and EllesmereUI.GetFontUseShadow()
+        local useShadow = flags == "" and EllesmereUI.GetFontUseShadow()
         EllesmereUI.PrimeFontShadow(fs, useShadow and true or false)
     end
     fs:SetFont(EllesmereUI.GetFontPath(FONT_KEY), size, flags)
@@ -2725,13 +2712,16 @@ local function CreateSlotWidget(view, index)
     -- unconditionally (a widget is reused for whatever entry the next open
     -- puts in it) and PaletteView:MarkerPip below shows exactly one of them,
     -- reading both the style and the color ("Pip Color") from the profile.
-    w.pipHost = CreateFrame("Frame", nil, w)
+    -- One alpha host supports all indicator styles, including secret marker state.
+    w.pipAlphaHost = CreateFrame("Frame", nil, w)
+    w.pipAlphaHost:SetAllPoints(w)
+    w.pipHost = CreateFrame("Frame", nil, w.pipAlphaHost)
     w.pipHost:SetAllPoints(w)
     w.pipHost:SetFrameLevel(w.bhost:GetFrameLevel() + 1)
     EllesmereUI.PP.CreateBorder(w.pipHost, 0.047, 0.824, 0.624, 1, 2, "OVERLAY", 7)
     w.pipHost:Hide()
 
-    w.pipSquare = w:CreateTexture(nil, "OVERLAY", nil, 7)
+    w.pipSquare = w.pipAlphaHost:CreateTexture(nil, "OVERLAY", nil, 7)
     w.pipSquare:SetTexture("Interface\\Buttons\\WHITE8X8")
     w.pipSquare:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
     w.pipSquare:Hide()
@@ -2739,11 +2729,11 @@ local function CreateSlotWidget(view, index)
     -- A plain square run through the suite's circular portrait mask -- same
     -- trick as the patch-notes "new" dot (EllesmereUI.lua) -- rather than a
     -- dedicated round texture asset.
-    w.pipDot = w:CreateTexture(nil, "OVERLAY", nil, 7)
+    w.pipDot = w.pipAlphaHost:CreateTexture(nil, "OVERLAY", nil, 7)
     w.pipDot:SetTexture("Interface\\Buttons\\WHITE8X8")
     w.pipDot:SetPoint("TOPLEFT", w, "TOPLEFT", 2, -2)
     do
-        local mask = w:CreateMaskTexture()
+        local mask = w.pipAlphaHost:CreateMaskTexture()
         mask:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",
             "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         mask:SetAllPoints(w.pipDot)
@@ -3689,16 +3679,10 @@ end
 -- entry drawn farthest from the centre is half the palette out and not the
 -- whole of it. Measured over the whole count the strip was fitted to about
 -- twice its own drawn length -- the preview shrank its icons to half what the
--- panel had room for. The hover reach next door counts the same way.
+-- panel had room for.
 function ns.FanReach(count, iconSize, gap, decay)
     return FanOffset(count * 0.5, iconSize, gap, decay, FAN_EDIT_MIN_SCALE)
            + iconSize + iconSize * (SelectedZoom() - 1) * 0.5
-end
-
--- The same measurement for a hover fan, which is evenly spaced at full pitch
--- because its zoomed entry is drawn at 1.0 and must not overlap its neighbours.
-function ns.FanHoverReach(count, iconSize, gap)
-    return count * 0.5 * (iconSize + gap) + iconSize * 0.5 * SelectedZoom()
 end
 
 -- Position every widget from self.fanVisual, the CONTINUOUS centre. Called
@@ -5769,9 +5753,15 @@ end
 -- entry closes the menu (see the release handler), so a press never updates a
 -- pip the presser can still see.
 --
--- IsRaidMarkerActive is unrestricted and answers a plain bool -- it is neither
--- protected nor a secret value, unlike GetRaidTargetIndex beside it in the
--- documentation -- so this reads the same in combat as out of it.
+-- IsRaidMarkerActive answers a SECRET boolean during chat messaging lockdown
+-- (SecretInChatMessagingLockdown in RaidMarkersDocumentation.lua): on every
+-- dungeon and raid map, in or out of combat, and through boss encounters,
+-- keystones and PvP matches -- which is where a marker menu does most of its
+-- work. So the answer is never tested, compared or kept here. It goes
+-- straight into SetAlphaFromBoolean on the pip's host frame, which takes a
+-- secret from our code and lets the client resolve it; a plain answer takes
+-- the same call, so the pip is right in both states on one path. Nothing
+-- else about the pip (size, color, shown) depends on the answer.
 --
 -- Every other kind hides the pip rather than leaving it alone: one widget is
 -- reused for whatever the next open puts in it, and a stale pip would claim a
@@ -5783,8 +5773,8 @@ end
 -- Whether THIS slot is the thing it draws, right now -- world marker on the
 -- ground, this character's current spec, or (through the ns hook below) an
 -- outside module's own idea of "active" for a slot it built. Split out of
--- MarkerPip so the per-kind tests can return a plain bool and let one shared
--- tail handle sizing, colour and Show/Hide -- the marker branch alone used to
+-- MarkerPip so the per-kind tests feed the alpha host and let one shared
+-- tail handle sizing, colour and style -- the marker branch alone used to
 -- BE the whole function; it is now just the first of several.
 function PaletteView:SlotIsPipped(slot)
     if not slot then return false end
@@ -5812,12 +5802,8 @@ function PaletteView:SlotIsPipped(slot)
             id = CycleNext(slot)
         end
         if id == nil or id < 1 or id > 8 then return false end
-        -- Normally a plain bool, but tainted execution can hand back a
-        -- secret one, and the caller's boolean test would throw: an
-        -- unreadable answer hides the pip.
-        local active = IsRaidMarkerActive(WORLD_MARKER_ENGINE[id])
-        if issecretvalue and issecretvalue(active) then return false end
-        return active and true or false
+        -- Return the raw boolean; only the client's alpha API may inspect it.
+        return IsRaidMarkerActive(WORLD_MARKER_ENGINE[id])
 
     elseif slot.kind == "spec" or slot.kind == "dynamicspec" then
         -- The spec this entry would switch to, lit up when it is already the
@@ -5849,12 +5835,14 @@ function PaletteView:MarkerPip(w, slot, iconSize)
     -- the options preview and the editor; those show arrangement, not the
     -- moment. Hidden rather than skipped, so a reused widget never carries a
     -- stale pip across views.
-    if not (self.opts and self.opts.live) or not self:SlotIsPipped(slot) then
+    if not (self.opts and self.opts.live) then
         hostBorder:Hide()
         if sq then sq:Hide() end
         if dot then dot:Hide() end
         return
     end
+
+    w.pipAlphaHost:SetAlphaFromBoolean(self:SlotIsPipped(slot), 1, 0)
 
     -- Color and style both come from the profile ("Pip Color" / "Pip
     -- Style" on the Appearance page), never from
@@ -9712,10 +9700,6 @@ end
 -- Re-read everything from the DB. Safe to call at any time; only redraws views
 -- that are actually on screen.
 function ns.Refresh()
-    -- Secure handlers end to end: stands down on a client that cannot compile
-    -- snippets (WoW Forever beta); the enable drain skipped OnEnable for the
-    -- same reason, and every toggle arrives here.
-    if not EllesmereUI.SecureSnippetsOK() then return end
     -- Ahead of everything that reads the profile: a profile imported from a
     -- pre-rename build carries its palettes under the dead key until this
     -- runs, and applying such a profile is exactly what reaches here.

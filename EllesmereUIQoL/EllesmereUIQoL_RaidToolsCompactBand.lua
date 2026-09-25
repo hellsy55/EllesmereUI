@@ -388,14 +388,17 @@ local function MakeMarkerButton(parent, index, kind)
     icon:SetAlpha(0.8)
     b._baseAlpha = 0.8
     if kind == "marker" then
-        local active = b:CreateTexture(nil, "OVERLAY")
+        local host = CreateFrame("Frame", nil, b)
+        host:SetAllPoints(b)
+        host:SetAlpha(0)
+        b._activeHost = host
+        local active = host:CreateTexture(nil, "OVERLAY")
         active:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 2, -2)
         active:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -2, -2)
         active:SetHeight(2)
         local ar, ag, ab = 0.05, 0.82, 0.62
         if EllesmereUI.GetAccentColor then ar, ag, ab = EllesmereUI.GetAccentColor() end
         active:SetColorTexture(ar, ag, ab, 0.95)
-        active:Hide()
         b._activeLine = active
     end
     b:SetScript("OnEnter", function(self)
@@ -486,11 +489,11 @@ end
 
 local function RefreshMarkerState()
     for _, b in ipairs(markerButtonList) do
-        local active = b._worldID and IsRaidMarkerActive and IsRaidMarkerActive(b._worldID)
-        -- Secret under tainted execution: show as not placed rather than throw.
-        if issecretvalue and issecretvalue(active) then active = false end
-        if b.icon.SetDesaturated then b.icon:SetDesaturated(active and true or false) end
-        if b._activeLine then b._activeLine:SetShown(active and true or false) end
+        if b._worldID and IsRaidMarkerActive then
+            local active = IsRaidMarkerActive(b._worldID)
+            b.icon:SetDesaturation(C_CurveUtil.EvaluateColorValueFromBoolean(active, 1, 0))
+            b._activeHost:SetAlphaFromBoolean(active, 1, 0)
+        end
     end
 end
 
