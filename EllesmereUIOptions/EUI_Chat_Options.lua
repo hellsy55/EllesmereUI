@@ -762,10 +762,6 @@ initFrame:SetScript("OnEvent", function(self)
                       Set("tabVisibility", v)
                       if ECHAT.ApplyTabVisibility then ECHAT.ApplyTabVisibility() end
                   end },
-                { type="label", text="" })
-            y = y - h
-
-            _, h = W:DualRow(parent, y,
                 { type="slider", text="Tab Spacing", min=0, max=10, step=1,
                   disabled=function() return Cfg("extendBgBehindTabs") == true end,
                   disabledTooltip="Tabs Inside Chat Panel", requireState="disabled",
@@ -773,7 +769,10 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       Set("tabSpacing", v)
                       if ECHAT.ApplyTabSpacing then ECHAT.ApplyTabSpacing() end
-                  end },
+                  end })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
                 { type="slider", text="Bottom Spacing to Panel", min=0, max=20, step=1,
                   disabled=function() return Cfg("extendBgBehindTabs") == true end,
                   disabledTooltip="Tabs Inside Chat Panel", requireState="disabled",
@@ -781,26 +780,27 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       Set("tabPadding", v)
                       if ECHAT.ApplyTabPadding then ECHAT.ApplyTabPadding() end
-                  end })
-            y = y - h
-
-            local tabSizeRow
-            tabSizeRow, h = W:DualRow(parent, y,
+                  end },
                 { type="slider", text="Tab Height", min=18, max=40, step=1,
                   getValue=function() return Cfg("tabHeight") or 24 end,
                   setValue=function(v)
                       Set("tabHeight", v)
                       if ECHAT.ApplyTabLayout then ECHAT.ApplyTabLayout() end
-                  end },
+                  end })
+            y = y - h
+
+            local tabSizeRow
+            tabSizeRow, h = W:DualRow(parent, y,
                 { type="slider", text="Inner Padding X", min=0, max=30, step=1,
                   getValue=function() return Cfg("tabInnerPaddingX") or 12 end,
                   setValue=function(v)
                       Set("tabInnerPaddingX", v)
                       if ECHAT.ApplyTabLayout then ECHAT.ApplyTabLayout() end
-                  end })
+                  end },
+                EllesmereUI.BlankRowCfg())
             -- Cog on Inner Padding X: Tab Offset X (applies in both tab modes)
             if not EllesmereUI._prebuilding then
-                local rrgn = tabSizeRow._rightRegion
+                local rrgn = tabSizeRow._leftRegion
                 EllesmereUI.BuildInlineCog(rrgn, {
                     title = "Tab Layout",
                     rows = {
@@ -1623,7 +1623,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                   Set("hideLearnedSpellMessages", v)
                   if ECHAT.ApplyHideLearnedSpells then ECHAT.ApplyHideLearnedSpells(v) end
-              end })
+              end },
+            EllesmereUI.BlankRowCfg())
         y = y - h
 
         end -- isChat

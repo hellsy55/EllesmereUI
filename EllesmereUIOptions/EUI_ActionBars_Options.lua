@@ -2293,32 +2293,43 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       SSet("clickThrough", v, function(k) EAB:ApplyClickThroughForBar(k) end)
                   end },
-                -- Stock looks: Action Bar 1's end caps take the free slot (WoW
-                -- Forever's shown unless hidden, the others opt-in).
-                (SelectedKey() == "MainBar" and EllesmereUI.BlizzStyle.Get("actionbars")) and
-                { type="toggle", text="Show End Caps",
-                  tooltip=(EllesmereUI.BlizzStyle.Active("actionbars") == "classic")
-                      and "Show the gryphons at the ends of the bar."
-                      or "Show the gryphons or wyverns at the ends of the bar.",
-                  disabled=function() return not EAB:GetOrientationForBar("MainBar") end,
-                  disabledTooltip="Vertical Orientation", requireState="disabled",
-                  getValue=function()
-                      local p = EAB.db.profile
-                      if EllesmereUI.BlizzStyle.Forever("actionbars") then return not p.foreverHideEndCaps end
-                      return p.showEndCaps == true
-                  end,
+                { type="dropdown", text="Strata Level",
+                  tooltip="Controls the frame layering (strata) this bar renders on. Raise it if the bar is being covered by another window; lower it if it should render behind other UI.",
+                  values=STRATA_VALUES, order=STRATA_ORDER,
+                  getValue=function() return SGet("frameStrata") or "MEDIUM" end,
                   setValue=function(v)
-                      local p = EAB.db.profile
-                      if EllesmereUI.BlizzStyle.Forever("actionbars") then
-                          p.foreverHideEndCaps = (not v) or nil
-                      else
-                          p.showEndCaps = v or nil
-                      end
-                      EAB:ApplyPaddingForBar("MainBar")
-                      SUpdatePreviewAndResize()
-                      EllesmereUI:RefreshPage()
-                  end }
-                or EllesmereUI.BlankRowCfg());  y = y - h
+                      SSet("frameStrata", v, function(k) EAB:ApplyStrataForBar(k) end)
+                  end });  y = y - h
+
+            -- Stock looks: Action Bar 1's end caps move to their own row now that
+            -- Strata Level sits directly beside Click Through.
+            local endCapsRow
+            if SelectedKey() == "MainBar" and EllesmereUI.BlizzStyle.Get("actionbars") then
+                endCapsRow, h = W:DualRow(parent, y,
+                    { type="toggle", text="Show End Caps",
+                      tooltip=(EllesmereUI.BlizzStyle.Active("actionbars") == "classic")
+                          and "Show the gryphons at the ends of the bar."
+                          or "Show the gryphons or wyverns at the ends of the bar.",
+                      disabled=function() return not EAB:GetOrientationForBar("MainBar") end,
+                      disabledTooltip="Vertical Orientation", requireState="disabled",
+                      getValue=function()
+                          local p = EAB.db.profile
+                          if EllesmereUI.BlizzStyle.Forever("actionbars") then return not p.foreverHideEndCaps end
+                          return p.showEndCaps == true
+                      end,
+                      setValue=function(v)
+                          local p = EAB.db.profile
+                          if EllesmereUI.BlizzStyle.Forever("actionbars") then
+                              p.foreverHideEndCaps = (not v) or nil
+                          else
+                              p.showEndCaps = v or nil
+                          end
+                          EAB:ApplyPaddingForBar("MainBar")
+                          SUpdatePreviewAndResize()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    EllesmereUI.BlankRowCfg());  y = y - h
+            end
             -- End caps' size and offsets (every stock look; X mirrored).
             if not EllesmereUI._prebuilding and SelectedKey() == "MainBar" and EllesmereUI.BlizzStyle.Get("actionbars") then
                 local function CapsHorizontal() return EAB:GetOrientationForBar("MainBar") end
@@ -2327,7 +2338,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EAB:ApplyPaddingForBar("MainBar")
                     SUpdatePreviewAndResize()
                 end
-                EllesmereUI.BuildInlineCog(ctRow._rightRegion, {
+                EllesmereUI.BuildInlineCog(endCapsRow._leftRegion, {
                     title = "End Cap Settings",
                     icon = EllesmereUI.RESIZE_ICON,
                     disabled = function()
@@ -2356,14 +2367,6 @@ initFrame:SetScript("OnEvent", function(self)
                     },
                 })
             end
-            _, h = W:DualRow(parent, y,
-                { type="dropdown", text="Strata Level",
-                  tooltip="Controls the frame layering (strata) this bar renders on. Raise it if the bar is being covered by another window; lower it if it should render behind other UI.",
-                  values=STRATA_VALUES, order=STRATA_ORDER,
-                  getValue=function() return SGet("frameStrata") or "MEDIUM" end,
-                  setValue=function(v)
-                      SSet("frameStrata", v, function(k) EAB:ApplyStrataForBar(k) end)
-                  end }, EllesmereUI.BlankRowCfg());  y = y - h
             -- "Toggle Action Bar" keybind: bound key flips the bar shown/hidden at runtime
             -- without writing saved visibility. Enabled only for Always/Never; out of combat
             -- only. Its label sits in the Visibility row, so the button goes there too.

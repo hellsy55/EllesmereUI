@@ -11088,6 +11088,39 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Reverse Fill",
               getValue=function() return SValSupported("castReverseFill", false) end,
               setValue=function(v) SSetSupported("castReverseFill", v); ReloadAndUpdate(); UpdatePreview() end });  y = y - h
+        -- Important Cast Glow is a Target/Focus-only option. Keep it in the
+        -- right slot of the Bar Texture row so both controls use one column.
+        local impGlowCfg, impGlowOff, impGlowRow, impGlowSide
+        if selectedUnit == "target" or selectedUnit == "focus" then
+            impGlowOff = function() return not SValSupported("castbarImportantGlow", false) end
+            local impGlowValues, impGlowOrder = { [0] = "None" }, { 0 }
+            do
+                local styles = EllesmereUI.Glows and EllesmereUI.Glows.STYLES
+                for _, idx in ipairs(ns.UF_IMPORTANT_GLOW_STYLES) do
+                    local entry = styles and styles[idx]
+                    impGlowValues[idx] = entry and entry.name or ("Style " .. idx)
+                    impGlowOrder[#impGlowOrder + 1] = idx
+                end
+            end
+            impGlowCfg = { type="dropdown", text="Important Cast Glow",
+                values=impGlowValues, order=impGlowOrder,
+                getValue=function()
+                  if impGlowOff() then return 0 end
+                  local v = SValSupported("castbarImportantGlowStyle", 1)
+                  return impGlowValues[v] and v or 1
+                end,
+                setValue=function(v)
+                  local s = UNIT_DB_MAP[selectedUnit]()
+                  if v == 0 then
+                      s.castbarImportantGlow = false
+                  else
+                      s.castbarImportantGlow = true
+                      s.castbarImportantGlowStyle = v
+                  end
+                  ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
+                end,
+                tooltip="Show a glow on the cast bar when the unit is casting a spell Blizzard marks as important." }
+        end
         -- Cast textures deliberately use their own key, so changing a cast bar
         -- texture never changes the health/power bar textures.
         local castTexValues, castTexOrder = BuildCastBarTexDropdown()
@@ -11100,7 +11133,10 @@ initFrame:SetScript("OnEvent", function(self)
                       return s.castbarTexture or s.healthBarTexture or db.profile.healthBarTexture or "none"
                   end,
                   setValue=function(v) UNIT_DB_MAP[selectedUnit]().castbarTexture=v; ReloadAndUpdate(); UpdatePreview() end },
-                nil); y = y - h
+                impGlowCfg); y = y - h
+            if impGlowCfg then
+                impGlowRow, impGlowSide = castTextureRow, "_rightRegion"
+            end
         end
         -- Inline color swatch on Spell Target Size
         if not EllesmereUI._prebuilding then
@@ -11192,40 +11228,8 @@ initFrame:SetScript("OnEvent", function(self)
                   current = function() return selectedUnit end,
                   db = function(u) local f = UNIT_DB_MAP[u]; return f and f() end })
         end
-        -- Important Cast Glow (target/focus); in Classic WoW UI it fills the Border Size row's free slot.
-        local impGlowCfg, impGlowOff
-        if selectedUnit == "target" or selectedUnit == "focus" then
-            impGlowOff = function() return not SValSupported("castbarImportantGlow", false) end
-            local impGlowValues, impGlowOrder = { [0] = "None" }, { 0 }
-            do
-                local styles = EllesmereUI.Glows and EllesmereUI.Glows.STYLES
-                for _, idx in ipairs(ns.UF_IMPORTANT_GLOW_STYLES) do
-                    local entry = styles and styles[idx]
-                    impGlowValues[idx] = entry and entry.name or ("Style " .. idx)
-                    impGlowOrder[#impGlowOrder + 1] = idx
-                end
-            end
-            impGlowCfg = { type="dropdown", text="Important Cast Glow",
-                values=impGlowValues, order=impGlowOrder,
-                getValue=function()
-                  if impGlowOff() then return 0 end
-                  local v = SValSupported("castbarImportantGlowStyle", 1)
-                  return impGlowValues[v] and v or 1
-                end,
-                setValue=function(v)
-                  local s = UNIT_DB_MAP[selectedUnit]()
-                  if v == 0 then
-                      s.castbarImportantGlow = false
-                  else
-                      s.castbarImportantGlow = true
-                      s.castbarImportantGlowStyle = v
-                  end
-                  ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
-                end,
-                tooltip="Show a glow on the cast bar when the unit is casting a spell Blizzard marks as important." }
-        end
         -- Classic WoW UI: Border Size closes the section (odd last slot).
-        local classicH, classicRow = ns.UF_ClassicCastBorderRow(W, parent, y,
+        local classicH = ns.UF_ClassicCastBorderRow(W, parent, y,
             function() return UNIT_DB_MAP[selectedUnit]() end,
             ns.UF_CastClassicKey(selectedUnit),
             function() ReloadAndUpdate(); UpdatePreview() end,
@@ -11233,14 +11237,9 @@ initFrame:SetScript("OnEvent", function(self)
               current = function() return selectedUnit end,
               db = function(u) local f = UNIT_DB_MAP[u]; return f and f() end,
               reload = ReloadAndUpdate },
-            selectedUnit .. "Castbar", impGlowCfg)
+            selectedUnit .. "Castbar")
         y = y - classicH
         if impGlowCfg then
-            local impGlowRow, impGlowSide = classicRow, "_rightRegion"
-            if not impGlowRow then
-                impGlowRow, h = W:DualRow(parent, y, impGlowCfg, EllesmereUI.BlankRowCfg());  y = y - h
-                impGlowSide = "_leftRegion"
-            end
             if not EllesmereUI._prebuilding then
                 local rgn = impGlowRow[impGlowSide]
                 -- Inline color swatch
