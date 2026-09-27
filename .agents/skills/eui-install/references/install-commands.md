@@ -2,6 +2,8 @@
 
 The operational scripts live in `C:\Users\jonat\Desktop\EUI`. Run commands directly in the current Codex session, which normally has administrator rights. Do not use `start`, `Start-Process`, or any separate window; the direct process naturally waits for completion, so no extra detection, file checking, or window-closing handling is needed.
 
+Repository/Codex metadata such as `AGENTS.md`, `.agents/`, and `.codex/` must not be copied into the installed addon. The operational installer excludes `AGENTS.md` through robocopy's `/XF` filter and `.agents` and `.codex` through `/XD` when copying both the core and `EllesmereUI*` modules into staging, preserving the existing exclusions.
+
 | Mode | Install | Line-ending fix after successful install |
 | --- | --- | --- |
 | Retail | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\atualizar-eui.ps1" -Only Retail` | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\corrigir-fim-de-linha.ps1" -Only Retail` |
