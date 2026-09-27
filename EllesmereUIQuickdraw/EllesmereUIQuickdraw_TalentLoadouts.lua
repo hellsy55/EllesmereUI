@@ -292,12 +292,10 @@ local function ResolveActiveLoadoutEntries()
     return activeSnapshot.entries
 end
 
--- The single canonical "active loadout name" for the pip (IsMacrotextSlotActive
--- below): the LAST matching entry in the spec's own list order (rather than
--- the first match, or treating every match as simultaneously "active") gives
--- a single, deterministic answer that matches how TalentLoadoutsEx's own
--- list reads top to bottom -- whatever is listed lowest is treated as the
--- "current" name for a build shared across more than one saved entry.
+-- Keep the historical single-name resolver for callers that explicitly want
+-- one canonical name.  The pip must NOT use it, though: TalentLoadoutsEx can
+-- have several differently named saved loadouts whose talent data is identical,
+-- and every one of those slots represents the currently applied build.
 local function ResolveActiveLoadoutName()
     local entries = ResolveActiveLoadoutEntries()
     if not entries then return nil end
@@ -308,7 +306,13 @@ ns.GetActiveTalentLoadoutName = ResolveActiveLoadoutName
 function ns.IsMacrotextSlotActive(slot)
     local name = slot and slot.talentLoadoutName
     if not name then return false end
-    return ResolveActiveLoadoutName() == name
+
+    local entries = ResolveActiveLoadoutEntries()
+    if not entries then return false end
+    for _, entry in ipairs(entries) do
+        if entry.name == name then return true end
+    end
+    return false
 end
 
 -- Load the parser and TLEx's slash-command dependencies without showing any
@@ -331,10 +335,9 @@ end
 --  On-screen loadout announcement -- a plain, oversized text reminder of
 --  which saved TalentLoadoutsEx loadout is active. Shown when a ready check
 --  fires (so the reminder lands right when it matters, before a pull), the
---  same way the mirrored palette's pip already answers "which loadout am I
---  on" on demand -- this just pushes that same, now-correctly-resolved
---  answer (see ResolveActiveLoadoutName above) to the player without them
---  having to open Quickdraw to look.
+--  same way the mirrored palette's pips already answer "which loadouts match
+--  what I have applied" on demand -- this pushes the full resolved set to the
+--  player without them having to open Quickdraw to look.
 --
 --  "Repeat Every" is a COOLDOWN on that trigger, not a standalone timer: a
 --  ready check fires the announcement, but if another one lands before the
@@ -512,10 +515,9 @@ local function ShowLoadoutAnnouncement()
         return
     end
 
-    -- Every saved entry the CURRENT talents match, not just one: a build
-    -- shared across two differently-named/iconed loadouts announces all of
-    -- them, one paragraph each, rather than picking a single "winner" the
-    -- way the pip has to.
+    -- Every saved entry the CURRENT talents match: a build shared across two
+    -- differently-named/iconed loadouts announces all of them, one paragraph
+    -- each.  The Quickdraw ring uses the same full set for its pips.
     local entries = ResolveActiveLoadoutEntries()
     if not entries then return end -- nothing saved/resolvable to announce
 
