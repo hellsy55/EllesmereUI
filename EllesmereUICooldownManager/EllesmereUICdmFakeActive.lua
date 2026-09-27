@@ -1300,6 +1300,14 @@ QueueCdStateEval = function()
     end)
 end
 
+-- Preset/item CD Ready glows use the Fake-Active cd-state engine instead of the
+-- generic CDGlowWatch path. Re-evaluate them after CDM's debounced combat state
+-- has actually changed; the raw PLAYER_REGEN_ENABLED edge fires before the
+-- 0.1s combat-exit debounce and otherwise leaves combat-only preset glows lit.
+if ns.CDMGlowCombatSync then
+    hooksecurefunc(ns, "CDMGlowCombatSync", QueueCdStateEval)
+end
+
 -- NOTE: pushes NEVER arm anything directly. The drain is push-through by
 -- design (fresh duration objects land on frames constantly, including
 -- zero-duration pushes onto READY frames when cooldown chatter waves arm it),
