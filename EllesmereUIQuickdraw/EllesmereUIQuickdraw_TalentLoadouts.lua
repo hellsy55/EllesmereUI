@@ -334,17 +334,19 @@ end
 -------------------------------------------------------------------------------
 --  On-screen loadout announcement -- a plain, oversized text reminder of
 --  which saved TalentLoadoutsEx loadout is active. Shown when a ready check
---  fires (so the reminder lands right when it matters, before a pull), the
---  same way the mirrored palette's pips already answer "which loadouts match
---  what I have applied" on demand -- this pushes the full resolved set to the
---  player without them having to open Quickdraw to look.
+--  fires (so the reminder lands right when it matters, before a pull) and
+--  whenever the player's applied talent/loadout state actually changes, no
+--  matter whether that change came from TalentLoadoutsEx or Blizzard's talent
+--  UI. The mirrored palette's pips already answer "which loadouts match what I
+--  have applied" on demand; this pushes the full resolved set to the player
+--  without them having to open Quickdraw to look.
 --
---  "Repeat Every" is a COOLDOWN on that trigger, not a standalone timer: a
---  ready check fires the announcement, but if another one lands before the
---  configured number of minutes has passed since the last time the text was
---  actually shown, it is silently skipped. Someone spamming ready checks in
---  a short window (a re-check right after a wipe, a leader double-clicking
---  it) then pops the text once, not once per ready check.
+--  "Repeat Every" is a COOLDOWN on READY-CHECK triggers only, not a standalone
+--  timer and not a throttle on talent swaps: a ready check fires the
+--  announcement, but if another one lands before the configured number of
+--  minutes has passed since the last ready-check pop, it is silently skipped.
+--  An actual talent/loadout change always gets its own pop and uses the same
+--  Text Duration setting as ready checks.
 --
 --  Font size, on-screen duration, the cooldown length and the master on/off
 --  all live in the profile (read through ns.Profile(), the same accessor
@@ -496,23 +498,26 @@ local function ApplyAnnounceStyle(f, entries)
     f:SetSize(math.max(maxWidth, 10), math.max(totalH, 10))
 end
 
--- GetTime() of the last pop that actually made it to the screen -- nil means
--- "never yet this session", which always passes the cooldown check below.
-local lastShownAt
+-- GetTime() of the last READY-CHECK pop that actually made it to the screen --
+-- nil means "never yet this session", which always passes the ready-check
+-- cooldown below. Talent/loadout-change pops intentionally do not touch it.
+local lastReadyCheckShownAt
 local lastEntries
 local announceHideTimer
-local function ShowLoadoutAnnouncement()
+local function ShowLoadoutAnnouncement(fromTalentChange)
     if not AnnounceEnabled() then return end -- master switch, off by default
 
-    local now = GetTime()
-    local cooldown = AnnounceCooldownSeconds()
-    if cooldown > 0 and lastShownAt and (now - lastShownAt) < cooldown then
-        -- Too soon since the last pop: this ready check (or whatever else
-        -- calls this) is within the configured window of an earlier one, so
-        -- it is silently skipped rather than re-popping the same text. A
-        -- cooldown of 0 (the slider's minimum) disables this check entirely
-        -- -- every ready check pops the text, no matter how close together.
-        return
+    local now
+    if not fromTalentChange then
+        now = GetTime()
+        local cooldown = AnnounceCooldownSeconds()
+        if cooldown > 0 and lastReadyCheckShownAt
+           and (now - lastReadyCheckShownAt) < cooldown then
+            -- Too soon since the last READY-CHECK pop: silently skip this one.
+            -- Talent/loadout changes bypass this throttle so the new active
+            -- build is always shown immediately when it settles.
+            return
+        end
     end
 
     -- Every saved entry the CURRENT talents match: a build shared across two
@@ -521,15 +526,20 @@ local function ShowLoadoutAnnouncement()
     local entries = ResolveActiveLoadoutEntries()
     if not entries then return end -- nothing saved/resolvable to announce
 
-    lastShownAt = now
+    if not fromTalentChange then lastReadyCheckShownAt = now end
     lastEntries = entries
 
     local f = EnsureAnnounceFrame()
     ApplyAnnounceStyle(f, entries)
     f:Show()
 
+    -- One duration source for every on-screen loadout pop. AnnounceDuration()
+    -- reads profile.loadoutTextDuration, i.e. the exact "Text Duration (sec)"
+    -- slider under On-Screen Loadout Text, regardless of whether this show was
+    -- triggered by READY_CHECK or by a talent/loadout change.
+    local duration = AnnounceDuration()
     if announceHideTimer then announceHideTimer:Cancel() end
-    announceHideTimer = C_Timer.NewTimer(AnnounceDuration(), function()
+    announceHideTimer = C_Timer.NewTimer(duration, function()
         announceHideTimer = nil
         f:Hide()
     end)
@@ -597,6 +607,30 @@ local function RegisterLoadoutTextUnlock()
 end
 ns.RegisterLoadoutTextUnlock = RegisterLoadoutTextUnlock
 
+-- Compact fingerprint of the applied talent state. Comparing this after the
+-- existing event debounce keeps one loadout swap (which can fire a burst of
+-- TRAIT_CONFIG_UPDATED / PLAYER_TALENT_UPDATE events) to one announcement,
+-- while ignoring noisy talent events that did not actually change the build.
+-- The active config id distinguishes two native loadouts with identical talent
+-- contents; PvP talents are appended because they live outside the PvE export.
+local function CurrentTalentStateKey()
+    if not C_ClassTalents or not C_Traits or not C_Traits.GenerateImportString then return nil end
+    local configID = C_ClassTalents.GetActiveConfigID()
+    if not configID then return nil end
+
+    local ok, text = pcall(C_Traits.GenerateImportString, configID)
+    if not ok or type(text) ~= "string" or text == "" then return nil end
+
+    local pvpKey = ""
+    if C_SpecializationInfo and C_SpecializationInfo.GetAllSelectedPvpTalentIDs then
+        local pvp = C_SpecializationInfo.GetAllSelectedPvpTalentIDs() or {}
+        local ids = {}
+        for i = 1, #pvp do ids[i] = tostring(pvp[i] or 0) end
+        pvpKey = table.concat(ids, ",")
+    end
+    return tostring(configID) .. "\031" .. text .. "\031" .. pvpKey
+end
+
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("ADDON_LOADED")
 watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -607,14 +641,22 @@ watcher:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
 watcher:RegisterEvent("READY_CHECK")
 local refreshGeneration = 0
+local lastTalentStateKey
+local talentAnnouncementPending = false
 watcher:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" and arg1 ~= "TalentLoadoutsEx" then return end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and arg1 ~= "player" then return end
+
+    if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE"
+       or event == "PLAYER_PVP_TALENT_UPDATE" then
+        talentAnnouncementPending = true
+    end
+
     InvalidateActiveLoadout()
 
     if event == "READY_CHECK" then
         EnsureTalentSupport()
-        ShowLoadoutAnnouncement()
+        ShowLoadoutAnnouncement(false)
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
@@ -633,6 +675,19 @@ watcher:SetScript("OnEvent", function(_, event, arg1)
         InvalidateActiveLoadout()
         RefreshTalentLoadoutPalette(false)
         if ns.RequestPush then ns.RequestPush() end
+
+        local stateKey = CurrentTalentStateKey()
+        if stateKey then
+            local changed = lastTalentStateKey ~= nil and stateKey ~= lastTalentStateKey
+            lastTalentStateKey = stateKey
+            if changed and talentAnnouncementPending then
+                -- Uses the exact same frame/style/Text Duration as ready checks,
+                -- but intentionally bypasses their Repeat Every cooldown.
+                InvalidateActiveLoadout()
+                ShowLoadoutAnnouncement(true)
+            end
+            talentAnnouncementPending = false
+        end
     end)
 end)
 
