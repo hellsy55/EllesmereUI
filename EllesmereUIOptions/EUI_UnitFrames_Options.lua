@@ -18678,11 +18678,16 @@ initFrame:SetScript("OnEvent", function(self)
             local bossImpGlowOff = function() return B.castbarImportantGlow ~= true end
             local bossImpGlowValues, bossImpGlowOrder = { [0] = "None" }, { 0 }
             do
-                local styles = EllesmereUI.Glows and EllesmereUI.Glows.STYLES
-                for _, idx in ipairs(ns.UF_IMPORTANT_GLOW_STYLES) do
-                    local entry = styles and styles[idx]
-                    bossImpGlowValues[idx] = entry and entry.name or ("Style " .. idx)
-                    bossImpGlowOrder[#bossImpGlowOrder + 1] = idx
+                local glows = EllesmereUI.Glows
+                local styles = glows and glows.STYLES
+                local barCaps = glows and glows.HOSTS and glows.HOSTS.bar
+                if styles then
+                    for idx, entry in ipairs(styles) do
+                        if not barCaps or barCaps[idx] then
+                            bossImpGlowValues[idx] = entry.name or ("Style " .. idx)
+                            bossImpGlowOrder[#bossImpGlowOrder + 1] = idx
+                        end
+                    end
                 end
             end
             local bossImpGlowRow
