@@ -3676,9 +3676,10 @@ initFrame:SetScript("OnEvent", function(self)
         --  ON-SCREEN LOADOUT TEXT
         --
         --  A large on-screen reminder of the active TalentLoadoutsEx loadout,
-        --  shown at every ready check and again on a timer -- see
-        --  ns.ShowLoadoutAnnouncement in EllesmereUIQuickdraw_TalentLoadouts.
-        --  lua. It is a single PROFILE-WIDE switch (Cfg/Set, not ACfg/ASet --
+        --  shown at ready checks and whenever the applied talent/loadout state
+        --  changes -- see ns.ShowLoadoutAnnouncement in
+        --  EllesmereUIQuickdraw_TalentLoadouts.lua. It is a single PROFILE-WIDE
+        --  switch (Cfg/Set, not ACfg/ASet --
         --  there is only ever one such reminder, however many action menus
         --  exist), but it only means anything tied to the menu that names
         --  your specs, so these four controls are read-only (LoadoutText-
@@ -3692,12 +3693,12 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Show On-Screen Loadout Text", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
-              tooltip="At every ready check, show a large on-screen reminder "
-                      .."of the currently active TalentLoadoutsEx loadout -- "
-                      .."no more often than \"Repeat Every\" below, so "
-                      .."spamming ready checks does not spam the text too. "
-                      .."Drag it into place with Unlock Mode "
-                      .."(\"Quickdraw: Loadout Text\").",
+              tooltip="Show a large on-screen reminder of the currently active "
+                      .."TalentLoadoutsEx loadout at every ready check and "
+                      .."after an applied talent/loadout change. \"Repeat Every\" "
+                      .."only limits ready-check pops; talent changes always "
+                      .."use the exact \"Text Duration (sec)\" value below. Drag it into "
+                      .."place with Unlock Mode (\"Quickdraw: Loadout Text\").",
               getValue=function() return Cfg("loadoutTextEnabled") == true end,
               setValue=function(v)
                   Set("loadoutTextEnabled", v)
@@ -3726,11 +3727,12 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type="slider", text="Repeat Every (min)", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
-              tooltip="Minimum time between two pops of the reminder. A "
-                      .."ready check within this many minutes of the last "
-                      .."one shown is ignored, so spamming ready checks in "
-                      .."a short window only pops the text once. Set to 0 "
-                      .."to show it on every single ready check.",
+              tooltip="Minimum time between ready-check pops of the reminder. "
+                      .."A ready check within this many minutes of the last "
+                      .."ready-check pop is ignored, so spamming ready checks "
+                      .."only pops the text once. Talent/loadout changes are "
+                      .."not throttled by this setting. Set to 0 to show it on "
+                      .."every single ready check.",
               min=0, max=60, step=1,
               getValue=function() return Cfg("loadoutTextIntervalMin") or 10 end,
               setValue=function(v)

@@ -1252,8 +1252,8 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
         -- starts a glow when nothing is running, so it cannot stomp another
         -- owner's.
         if not fd._presetCdGlowOn or not glow._glowActive then
-            local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(cas or {})
-            ns.StartNativeGlow(glow, ns.CD_GLOW_PLAIN_STYLE[eff] or 1, gr or 1, gg or 1, gb or 1)
+            local style = ns.CdReadyGlowStyle(eff, cas)
+            ns.StartNativeGlow(glow, style, ns.CdReadyGlowColor(style, cas))
             fd._presetCdGlowOn = true
         end
     elseif fd._presetCdGlowOn then
@@ -1298,6 +1298,14 @@ QueueCdStateEval = function()
         _cdEvalQueued = false
         EvalCdStateNow()
     end)
+end
+
+-- Preset/item CD Ready glows use the Fake-Active cd-state engine instead of the
+-- generic CDGlowWatch path. Re-evaluate them after CDM's debounced combat state
+-- has actually changed; the raw PLAYER_REGEN_ENABLED edge fires before the
+-- 0.1s combat-exit debounce and otherwise leaves combat-only preset glows lit.
+if ns.CDMGlowCombatSync then
+    hooksecurefunc(ns, "CDMGlowCombatSync", QueueCdStateEval)
 end
 
 -- NOTE: pushes NEVER arm anything directly. The drain is push-through by
