@@ -2841,6 +2841,7 @@ initFrame:SetScript("OnEvent", function(self)
                 absFillTex:SetDrawLayer("ARTWORK", 1)
                 local absTiled = (ns.ABSORB_TILED_STYLES[absStyle] == true)
                 absFillTex:SetHorizTile(absTiled); absFillTex:SetVertTile(absTiled)
+                if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(absFillTex, absStyle) end
             end
             absorbBar:SetStatusBarColor(ac.r, ac.g, ac.b, alpha)
             PositionPreviewAbsorb(absorbBar, settings.absorbEdgeMode or "overlay", settings.healthReverseFill, settings.healthVerticalFill)
@@ -2866,6 +2867,7 @@ initFrame:SetScript("OnEvent", function(self)
                 haFillTex:SetDrawLayer("ARTWORK", 2)
                 local haTiled = (ns.ABSORB_TILED_STYLES[haStyle] == true)
                 haFillTex:SetHorizTile(haTiled); haFillTex:SetVertTile(haTiled)
+                if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(haFillTex, haStyle) end
             end
             healAbsorbBar:SetStatusBarColor(hc.r or 0.8, hc.g or 0.15, hc.b or 0.15, haAlpha)
             PositionPreviewAbsorb(healAbsorbBar, settings.healAbsorbEdgeMode or "overlay", settings.healthReverseFill, settings.healthVerticalFill)
@@ -4544,6 +4546,7 @@ initFrame:SetScript("OnEvent", function(self)
                         _paFill:SetDrawLayer("ARTWORK", 1)
                         local _paTiled = (ns.ABSORB_TILED_STYLES[absS] == true)
                         _paFill:SetHorizTile(_paTiled); _paFill:SetVertTile(_paTiled)
+                        if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(_paFill, absS) end
                     end
                     absorbBar:SetStatusBarColor(_paC.r, _paC.g, _paC.b, _paA)
                     PositionPreviewAbsorb(absorbBar, s.absorbEdgeMode or "overlay", s.healthReverseFill, s.healthVerticalFill)
@@ -4589,6 +4592,7 @@ initFrame:SetScript("OnEvent", function(self)
                         _haFill:SetDrawLayer("ARTWORK", 2)
                         local _haTiled = (ns.ABSORB_TILED_STYLES[haS] == true)
                         _haFill:SetHorizTile(_haTiled); _haFill:SetVertTile(_haTiled)
+                        if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(_haFill, haS) end
                     end
                     healAbsorbBar:SetStatusBarColor(_haC.r or 0.8, _haC.g or 0.15, _haC.b or 0.15, _haA)
                     PositionPreviewAbsorb(healAbsorbBar, s.healAbsorbEdgeMode or "overlay", s.healthReverseFill, s.healthVerticalFill)
@@ -14025,20 +14029,6 @@ initFrame:SetScript("OnEvent", function(self)
                       disabledTooltip="Blizzard Glow Line",
                       get=function() return SValSupported("absorbGlowLineTexture", "blizzard") end,
                       set=function(v) SSetSupported("absorbGlowLineTexture", v) end },
-                    -- Master on/off switch (boss block key, nil = enabled).
-                    -- When on, Boss Frames render absorbs using their OWN
-                    -- independent settings on the Boss tab (no longer tied
-                    -- to the Target frame's styling).
-                    { type="toggle", label="Show on Boss Frames",
-                      tooltip="Show absorbs on Boss Frames, styled independently from the Boss tab's own Absorbs section.",
-                      get=function() return not (db.profile.boss and db.profile.boss.showAbsorbs == false) end,
-                      set=function(v)
-                          local b = db.profile.boss
-                          if b then
-                              if v then b.showAbsorbs = nil else b.showAbsorbs = false end
-                          end
-                          ReloadAndUpdate()
-                      end },
                 },
             })
             -- Re-label on every page refresh (the Vertical Fill toggle fires one) and
@@ -15923,13 +15913,21 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Vertical Fill swaps the fill AXIS (Reverse Fill above flips direction within
-        -- it, so vertical+reverse fills top-to-bottom); own row since Reverse Fill's row is already full on both layouts.
-        _, h = W:DualRow(parent, y,
+        -- it, so vertical+reverse fills top-to-bottom). Boss uses the otherwise-empty
+        -- right slot for Extra Text so the text controls stay compact.
+        local verticalFillRow
+        verticalFillRow, h = W:DualRow(parent, y,
             EllesmereUI.BlizzStyle.Gate("unitframes", { type="toggle", text="Vertical Fill",
               tooltip="Fill the health bar bottom-to-top instead of left-to-right. Reverse Fill flips it to top-to-bottom.",
               getValue=function() return settingsTable.healthVerticalFill end,
               setValue=function(v) settingsTable.healthVerticalFill = v; ReloadAndUpdate() end }),
-            { type="spacer" });  y = y - h
+            (unitKey == "boss") and { type="dropdown", text="Extra Text (full length)", values=healthTextValues, order=healthTextOrderBoss,
+              getValue=function() return MVal("extraTextContent", "none") end,
+              setValue=function(v)
+                settingsTable.extraTextContent = v
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+              end }
+            or { type="spacer" });  y = y - h
 
         -- Row 3: Left Text + Right Text (with inline swatches + cogs)
         local textRow
@@ -16194,8 +16192,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -- Row 4: Center Text (with inline swatch + cog). Slot 2 holds Smooth Health
-        -- Bars for the mini frames (ToT / Focus Target / Pet); boss gets the
-        -- Extra Text zone there instead (4th text zone, same as Main Frames).
+        -- Bars for the mini frames (ToT / Focus Target / Pet); Boss Extra Text
+        -- now lives beside Vertical Fill above.
         local centerRow
         centerRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Center Text", values=healthTextValues, order=(unitKey == "boss") and healthTextOrderBoss or healthTextOrder,
@@ -16204,13 +16202,7 @@ initFrame:SetScript("OnEvent", function(self)
                 settingsTable.centerTextContent = v
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
               end },
-            (unitKey ~= "boss") and smoothBarsWidget
-            or { type="dropdown", text="Extra Text (full length)", values=healthTextValues, order=healthTextOrderBoss,
-              getValue=function() return MVal("extraTextContent", "none") end,
-              setValue=function(v)
-                settingsTable.extraTextContent = v
-                ReloadAndUpdate(); EllesmereUI:RefreshPage()
-              end });  y = y - h
+            (unitKey ~= "boss") and smoothBarsWidget or { type="spacer" });  y = y - h
         -- Inline color swatches + cog on Center Text: Custom + Class (CDM Border Size pattern)
         if not EllesmereUI._prebuilding then
             local rgn = centerRow._leftRegion
@@ -16330,11 +16322,11 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Inline color swatches + cog on Extra Text (boss only, Center row right
-        -- region). Same pattern as Center Text above; the cog adds Alignment
+        -- Inline color swatches + cog on Extra Text (boss only, Vertical Fill row
+        -- right region). Same pattern as Center Text above; the cog adds Alignment
         -- (the Extra Text zone's distinguishing setting, as on Main Frames).
         if unitKey == "boss" and not EllesmereUI._prebuilding then
-            local rgn = centerRow._rightRegion
+            local rgn = verticalFillRow._rightRegion
             local classSw, classSwUp = EllesmereUI.BuildColorSwatch(
                 rgn, rgn:GetFrameLevel() + 5,
                 function()
@@ -18349,6 +18341,105 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = sw
             end
 
+            -- Important Cast Glow: same Blizzard-important-spell glow used by
+            -- Target/Focus, but stored independently on the shared Boss table.
+            local bossImpGlowOff = function() return B.castbarImportantGlow ~= true end
+            local bossImpGlowValues, bossImpGlowOrder = { [0] = "None" }, { 0 }
+            do
+                local styles = EllesmereUI.Glows and EllesmereUI.Glows.STYLES
+                for _, idx in ipairs(ns.UF_IMPORTANT_GLOW_STYLES) do
+                    local entry = styles and styles[idx]
+                    bossImpGlowValues[idx] = entry and entry.name or ("Style " .. idx)
+                    bossImpGlowOrder[#bossImpGlowOrder + 1] = idx
+                end
+            end
+            local bossImpGlowRow
+            bossImpGlowRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Important Cast Glow",
+                  values=bossImpGlowValues, order=bossImpGlowOrder,
+                  getValue=function()
+                      if bossImpGlowOff() then return 0 end
+                      local v = B.castbarImportantGlowStyle or 1
+                      return bossImpGlowValues[v] and v or 1
+                  end,
+                  setValue=function(v)
+                      if v == 0 then
+                          B.castbarImportantGlow = false
+                      else
+                          B.castbarImportantGlow = true
+                          B.castbarImportantGlowStyle = v
+                      end
+                      ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                  end,
+                  tooltip="Show a glow on the cast bar when the boss is casting a spell Blizzard marks as important." },
+                nil); yy = yy - hh
+            if not EllesmereUI._prebuilding then
+                local rgn = bossImpGlowRow._leftRegion
+                local sw, updateSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function()
+                        local c = B.castbarImportantGlowColor or { r = 1, g = 0.2, b = 0.2 }
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        B.castbarImportantGlowColor = { r = r, g = g, b = b }
+                        ReloadAndUpdate()
+                    end, false, 20)
+                PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
+                rgn._lastInline = sw
+                local swBlock = CreateFrame("Frame", nil, sw)
+                swBlock:SetAllPoints()
+                swBlock:SetFrameLevel(sw:GetFrameLevel() + 10)
+                swBlock:EnableMouse(true)
+                swBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Important Cast Glow"))
+                end)
+                swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function applySwState()
+                    local off = bossImpGlowOff()
+                    sw:SetAlpha(off and 0.3 or 1)
+                    if off then swBlock:Show() else swBlock:Hide() end
+                    if updateSw then updateSw() end
+                end
+                applySwState()
+                EllesmereUI.RegisterWidgetRefresh(applySwState)
+
+                EllesmereUI.BuildInlineCog(rgn, {
+                    gap = 6,
+                    tip = "Pixel Glow Settings",
+                    disabled = function()
+                        return bossImpGlowOff() or (B.castbarImportantGlowStyle or 1) ~= 1
+                    end,
+                    disabledTooltip = "This option requires Pixel Glow to be the selected glow type",
+                    title = "Pixel Glow Settings",
+                    rows = {
+                        { type = "slider", label = "Lines", min = 2, max = 16, step = 1,
+                          get = function() return B.castbarImportantGlowLines or 8 end,
+                          set = function(v) B.castbarImportantGlowLines = v; ReloadAndUpdate() end },
+                        { type = "slider", label = "Thickness", min = 1, max = 4, step = 1,
+                          get = function() return B.castbarImportantGlowThickness or 2 end,
+                          set = function(v) B.castbarImportantGlowThickness = v; ReloadAndUpdate() end },
+                        -- Stored as the animation period (lower = faster); shown inverted so right = faster.
+                        { type = "slider", label = "Speed", min = 1, max = 8, step = 1,
+                          get = function() return 9 - (B.castbarImportantGlowSpeed or 4) end,
+                          set = function(v) B.castbarImportantGlowSpeed = 9 - v; ReloadAndUpdate() end },
+                        { type = "toggle", label = "Background",
+                          get = function() return B.castbarImportantGlowBackground == true end,
+                          set = function(v) B.castbarImportantGlowBackground = v and true or nil; ReloadAndUpdate() end },
+                        { type = "colorpicker", label = "Background Color",
+                          get = function()
+                              local c = B.castbarImportantGlowBackgroundColor or { r = 0, g = 0, b = 0 }
+                              return c.r or 0, c.g or 0, c.b or 0
+                          end,
+                          set = function(r, g, b)
+                              B.castbarImportantGlowBackgroundColor = { r = r, g = g, b = b }
+                              ReloadAndUpdate()
+                          end,
+                          disabled = function() return B.castbarImportantGlowBackground ~= true end,
+                          disabledTooltip = "Pixel Glow Background" },
+                    },
+                })
+            end
+
             -- Boss cast bars use the same shared border for the bar and a
             -- detached icon as Target/Focus, including offsets and layering.
             do
@@ -18577,21 +18668,12 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, hh = Ww:SectionHeader(pp, "ABSORBS", yy); yy = yy - hh
 
-            local absorbStyleValues = {
-                ["none"]            = "None",
-                ["striped"]         = "Striped",
-                ["stripedReversed"] = "Striped Reversed",
-                ["stripedThick"]    = "Striped Thick",
-                ["stripedThickR"]   = "Striped Thick Reversed",
-                ["clean"]           = "Clean (Flat)",
-                ["blizzard"]        = "Blizzard",
-                ["largeOutlinedStripes"]  = "Large Outlined Stripes",
-                ["largeOutlinedStripesR"] = "Large Outlined Stripes R",
-                ["largeStripes"]          = "Large Stripes",
-                ["largeStripesR"]         = "Large Stripes R",
-            }
-            local absorbStyleOrder = { "none", "striped", "stripedReversed", "stripedThick", "stripedThickR", "clean", "blizzard", "largeStripes", "largeStripesR" }
-            local healAbsorbStyleOrder = { "none", "striped", "stripedReversed", "stripedThick", "stripedThickR", "clean", "blizzard", "largeOutlinedStripes", "largeOutlinedStripesR", "largeStripes", "largeStripesR" }
+            -- Keep Boss Frames on the same absorb texture registry as
+            -- Player/Target/Focus so every built-in style added there is
+            -- automatically available here as well.
+            local absorbStyleValues = CopyTable(ns.ABSORB_STYLE_NAMES)
+            local absorbStyleOrder = CopyTable(ns.ABSORB_STYLE_ORDER)
+            local healAbsorbStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
             do
                 if EllesmereUI.AppendSharedMediaTextures then
                     EllesmereUI.AppendSharedMediaTextures(
@@ -18705,13 +18787,34 @@ initFrame:SetScript("OnEvent", function(self)
                               BSet("showOvershield", v ~= "never")
                               BSet("overshieldMode", v)
                           end },
-                        { type="toggle", label="Enable Absorbs",
-                          tooltip="Master on/off switch for absorbs on Boss Frames.",
-                          get=function() return B.showAbsorbs ~= false end,
-                          set=function(v)
-                              B.showAbsorbs = v and nil or false
-                              ReloadAndUpdate()
-                          end },
+                        { type="toggle", label="Blizzard Glow Line",
+                          tooltip="Adds the Blizzard shield glow line where the shield meets current health.",
+                          disabled=function()
+                              if BVal("showPlayerAbsorb", "none") == "none" then return true end
+                              if BVal("healthVerticalFill", false) == true then return true end
+                              local originEdge = (BVal("healthReverseFill", false) == true) and "right" or "left"
+                              return BVal("absorbEdgeMode", "overlay") == originEdge
+                          end,
+                          disabledTooltip=function()
+                              if BVal("showPlayerAbsorb", "none") == "none" then
+                                  return "The glow line is not shown with Absorb Style None"
+                              end
+                              if BVal("healthVerticalFill", false) ~= true and BVal("healthReverseFill", false) == true then
+                                  return "The glow line is not shown on a vertical fill or with the From Right Edge placement"
+                              end
+                              return "The glow line is not shown on a vertical fill or with the From Left Edge placement"
+                          end,
+                          rawTooltip=true,
+                          get=function() return BVal("absorbGlowLine", false) == true end,
+                          set=function(v) BSet("absorbGlowLine", v and true or false) end },
+                        { type="dropdown", label="Glow Line Texture",
+                          tooltip="Art used for the glow line and the overshield edge.",
+                          values = { blizzard = "Blizzard", pixelsGlow = "Pixels Glow Line", pixelsOvershield = "Pixels Overshield Line" },
+                          order = { "blizzard", "pixelsGlow", "pixelsOvershield" },
+                          disabled=function() return BVal("absorbGlowLine", false) ~= true end,
+                          disabledTooltip="Blizzard Glow Line",
+                          get=function() return BVal("absorbGlowLineTexture", "blizzard") end,
+                          set=function(v) BSet("absorbGlowLineTexture", v) end },
                     },
                 })
                 RegisterWidgetRefresh(function()

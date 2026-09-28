@@ -1182,6 +1182,12 @@ local defaults = {
             castbarInterruptMidCastEnabled = false,
             castbarInterruptMidCastColor = { r = 0.318, g = 0.820, b = 0.357 },
             castbarUninterruptibleColor = { r = 0.5, g = 0.5, b = 0.5 },
+            castbarImportantGlow = false,
+            castbarImportantGlowStyle = 1,
+            castbarImportantGlowColor = { r = 1, g = 0.2, b = 0.2 },
+            castbarImportantGlowLines = 8,
+            castbarImportantGlowThickness = 2,
+            castbarImportantGlowSpeed = 4,
             castbarClassColored = false,
             -- Cast Bar cog "Custom Border Style" (opt-in; boss1-5 share it);
             -- see the player block.
@@ -1202,6 +1208,9 @@ local defaults = {
             -- Boss tab). Defaults mirror player/target/focus.
             showPlayerAbsorb = "none",
             absorbCleanAlpha = 30,
+            -- Blizzard Glow Line (opt-in) and its art: "blizzard" | "pixelsGlow" | "pixelsOvershield".
+            absorbGlowLine = false,
+            absorbGlowLineTexture = "blizzard",
             -- Absorb Bar / Heal Absorb Bar: separate strips (see Raid Frames)
             absorbBarPosition     = "none",
             absorbBarHeight       = 4,
@@ -5272,6 +5281,20 @@ ns.ABSORB_TILED_STYLES = {
     largeOutlinedStripes = true, largeOutlinedStripesR = true,
     pixelsShieldFill = true,
 }
+-- Pixels Shield artwork ships with a baked blue tint. Desaturate those fills
+-- before StatusBarColor is applied so the absorb color picker can tint them
+-- across the full RGB range. Always clear the flag for other styles because
+-- StatusBars may reuse the same Texture object when their texture changes.
+local ABSORB_DESATURATE_FOR_TINT = {
+    pixelsShield = true,
+    pixelsShieldEdge = true,
+    pixelsShieldFill = true,
+}
+function ns.UF_ApplyAbsorbTextureTintMode(texture, style)
+    if texture and texture.SetDesaturated then
+        texture:SetDesaturated(ABSORB_DESATURATE_FOR_TINT[style] == true)
+    end
+end
 -- Absorb Style / Heal Absorb Style dropdown data, read by the Main Frames
 -- rows and the Textures page tile so the lists cannot drift. Readers copy
 -- them first: the SharedMedia tail is appended into the copies.
@@ -5332,6 +5355,7 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
         fill:SetDrawLayer("ARTWORK", 1)
         fill:SetHorizTile(tiled)
         fill:SetVertTile(tiled)
+        ns.UF_ApplyAbsorbTextureTintMode(fill, style)
         if mask then fill:AddMaskTexture(mask) end
     end
     -- New fill object + tiling state: re-derive rotation (stretch styles rotate
@@ -5346,6 +5370,7 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
             fwFill:SetDrawLayer("ARTWORK", 1)
             fwFill:SetHorizTile(tiled)
             fwFill:SetVertTile(tiled)
+            ns.UF_ApplyAbsorbTextureTintMode(fwFill, style)
             if mask then fwFill:AddMaskTexture(mask) end
         end
         ns.ApplyFillRotation(fw)
@@ -5373,6 +5398,7 @@ local function ApplyHealAbsorbStyle(haBar, style, settings)
         fill:SetDrawLayer("ARTWORK", 2)
         fill:SetHorizTile(tiled)
         fill:SetVertTile(tiled)
+        ns.UF_ApplyAbsorbTextureTintMode(fill, style)
         if mask then fill:AddMaskTexture(mask) end
     end
     ns.ApplyFillRotation(haBar)
@@ -6119,7 +6145,7 @@ function ns.UF_AbsorbGlowApply(frame, unit)
     if not (ab and ab._forward) then return end
     local s
     if unit and unit:match("^boss") then
-        if not (db.profile.boss and db.profile.boss.showAbsorbs == false) then s = db.profile.boss end
+        s = db.profile.boss
     else
         s = GetSettingsForUnit(unit)
     end
@@ -6525,12 +6551,9 @@ local function CreateAbsorbBar(frame, unit, settings)
             -- the Player frame's settings instead of the Boss tab's own.
             local isBossBar = unit and unit:match("^boss")
             local s = isBossBar and db.profile.boss or GetSettingsForUnit(updUnit)
-            -- Boss frames render with their own absorb settings (Boss tab),
-            -- gated by "Show on Boss Frames" in the absorb cog (nil = enabled).
-            local bossAbsorbOff
-            if isBossBar then
-                bossAbsorbOff = db.profile.boss and db.profile.boss.showAbsorbs == false
-            end
+            -- Boss frames render with their own absorb settings (Boss tab).
+            -- Absorb Style itself is the shield on/off switch: None disables it,
+            -- any texture enables it.
             local ha = ab._healAbsorb
             local topBar = ab._topBar
             local healTopBar = ab._healTopBar
@@ -6540,7 +6563,7 @@ local function CreateAbsorbBar(frame, unit, settings)
             local healBarOn = healTopBar and healBarPos ~= "none"
             local shieldOff = s and (not s.showPlayerAbsorb or s.showPlayerAbsorb == "none")
             local healOff = (((s and s.healAbsorbStyle) or "clean") == "none")
-            if bossAbsorbOff or (shieldOff and healOff and not barOn and not healBarOn) then
+            if shieldOff and healOff and not barOn and not healBarOn then
                 ab:Hide()
                 if fw then fw:Hide() end
                 if ha then ha:Hide() end
@@ -8532,7 +8555,7 @@ local function CreateCastBar(frame, unit, settings)
     return castbar
 end
 
--- Important Cast Glow (target/focus), mirrors Nameplates.
+-- Important Cast Glow (target/focus/boss), mirrors Nameplates.
 -- The secret IsSpellImportant flag only drives overlay alpha.
 ns.UF_IMPORTANT_GLOW_STYLES = { 1, 2, 3, 5, 6, 7 }
 do
@@ -10429,9 +10452,8 @@ local function StyleBossFrame(frame, unit)
     frame.Health = CreateHealthBar(frame, unit, settings.healthHeight, portraitHeight, settings, healthRightInset)
     frame.Power = CreatePowerBar(frame, unit, settings)
     -- Always create the absorb bar (visibility gated at render time). Boss frames
-    -- carry no absorb settings of their own: they render with the TARGET frame's
-    -- styling (donor convention, like textures) behind "Show on Boss Frames" in the
-    -- absorb cog. Geometry (reverse fill) still comes from the boss block via `settings`.
+    -- use their own absorb settings from the Boss tab; Absorb Style None disables
+    -- the shield while any selected texture enables it.
     CreateAbsorbBar(frame, unit, settings)
     -- Always create portrait; hide backdrop when disabled
     frame.Portrait = CreatePortrait(frame, pSide, bossBarHeight, unit)
@@ -13684,15 +13706,10 @@ ReloadFramesBody = function()
                     -- Just Show/Hide the bar -- the element keeps running in the
                     -- background and the value stays live either way.
                     if frame.HealthPrediction and frame.HealthPrediction.damageAbsorb then
-                        -- Boss frames style from their own settings (Boss tab),
-                        -- behind the "Show on Boss Frames" toggle (nil = on).
+                        -- Boss frames style from their own settings (Boss tab).
+                        -- The selected style is the on/off switch; None hides it.
                         local absSettings = settings
                         local absStyle = settings.showPlayerAbsorb
-                        if unit and unit:match("^boss") then
-                            if db.profile.boss and db.profile.boss.showAbsorbs == false then
-                                absStyle = nil
-                            end
-                        end
                         if absStyle and absStyle ~= "none" then
                             ApplyAbsorbStyle(frame.HealthPrediction.damageAbsorb, absStyle, absSettings)
                             frame.HealthPrediction.damageAbsorb:Show()
@@ -14571,6 +14588,8 @@ ReloadFramesBody = function()
                         end
                     end
                     frame.Castbar._eufSettings = settings
+                    -- A glow already showing takes new Important Cast Glow settings now.
+                    if frame.Castbar._impGlowActive then ns.UpdateUnitFrameImportantGlow(frame.Castbar) end
                     local bCbColor = castbarColor
                     if settings.castbarFillColor then
                         bCbColor = settings.castbarFillColor
@@ -17206,16 +17225,15 @@ function InitializeFrames()
         end
     end
 
-    -- Boss frames: same absorb refresh, styled from their own settings
-    -- (Boss tab) and gated by the "Show on Boss Frames" toggle (nil = enabled).
+    -- Boss frames: same absorb refresh, styled from their own settings.
+    -- Absorb Style None disables the shield; any texture enables it.
     do
-        local bossOff = db.profile.boss and db.profile.boss.showAbsorbs == false
         local donor = db.profile.boss
         for i = 1, 5 do
             local f = frames["boss" .. i]
             if f and f.HealthPrediction and f.HealthPrediction.damageAbsorb then
                 local absStyle
-                if not bossOff and donor then absStyle = donor.showPlayerAbsorb end
+                if donor then absStyle = donor.showPlayerAbsorb end
                 if absStyle and absStyle ~= "none" then
                     ApplyAbsorbStyle(f.HealthPrediction.damageAbsorb, absStyle, donor)
                     f.HealthPrediction.damageAbsorb:Show()
