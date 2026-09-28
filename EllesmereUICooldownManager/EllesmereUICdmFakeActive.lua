@@ -1252,8 +1252,8 @@ ApplyCdState = function(frame, fc, cas, eff, onCD, ready)
         -- starts a glow when nothing is running, so it cannot stomp another
         -- owner's.
         if not fd._presetCdGlowOn or not glow._glowActive then
-            local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(cas or {})
-            ns.StartNativeGlow(glow, ns.CD_GLOW_PLAIN_STYLE[eff] or 1, gr or 1, gg or 1, gb or 1)
+            local style = ns.CdReadyGlowStyle(eff, cas)
+            ns.StartNativeGlow(glow, style, ns.CdReadyGlowColor(style, cas))
             fd._presetCdGlowOn = true
         end
     elseif fd._presetCdGlowOn then
