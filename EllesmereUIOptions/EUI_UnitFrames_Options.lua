@@ -18341,105 +18341,6 @@ initFrame:SetScript("OnEvent", function(self)
                 rgn._lastInline = sw
             end
 
-            -- Important Cast Glow: same Blizzard-important-spell glow used by
-            -- Target/Focus, but stored independently on the shared Boss table.
-            local bossImpGlowOff = function() return B.castbarImportantGlow ~= true end
-            local bossImpGlowValues, bossImpGlowOrder = { [0] = "None" }, { 0 }
-            do
-                local styles = EllesmereUI.Glows and EllesmereUI.Glows.STYLES
-                for _, idx in ipairs(ns.UF_IMPORTANT_GLOW_STYLES) do
-                    local entry = styles and styles[idx]
-                    bossImpGlowValues[idx] = entry and entry.name or ("Style " .. idx)
-                    bossImpGlowOrder[#bossImpGlowOrder + 1] = idx
-                end
-            end
-            local bossImpGlowRow
-            bossImpGlowRow, hh = Ww:DualRow(pp, yy,
-                { type="dropdown", text="Important Cast Glow",
-                  values=bossImpGlowValues, order=bossImpGlowOrder,
-                  getValue=function()
-                      if bossImpGlowOff() then return 0 end
-                      local v = B.castbarImportantGlowStyle or 1
-                      return bossImpGlowValues[v] and v or 1
-                  end,
-                  setValue=function(v)
-                      if v == 0 then
-                          B.castbarImportantGlow = false
-                      else
-                          B.castbarImportantGlow = true
-                          B.castbarImportantGlowStyle = v
-                      end
-                      ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                  end,
-                  tooltip="Show a glow on the cast bar when the boss is casting a spell Blizzard marks as important." },
-                nil); yy = yy - hh
-            if not EllesmereUI._prebuilding then
-                local rgn = bossImpGlowRow._leftRegion
-                local sw, updateSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                    function()
-                        local c = B.castbarImportantGlowColor or { r = 1, g = 0.2, b = 0.2 }
-                        return c.r, c.g, c.b, 1
-                    end,
-                    function(r, g, b)
-                        B.castbarImportantGlowColor = { r = r, g = g, b = b }
-                        ReloadAndUpdate()
-                    end, false, 20)
-                PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
-                rgn._lastInline = sw
-                local swBlock = CreateFrame("Frame", nil, sw)
-                swBlock:SetAllPoints()
-                swBlock:SetFrameLevel(sw:GetFrameLevel() + 10)
-                swBlock:EnableMouse(true)
-                swBlock:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Important Cast Glow"))
-                end)
-                swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                local function applySwState()
-                    local off = bossImpGlowOff()
-                    sw:SetAlpha(off and 0.3 or 1)
-                    if off then swBlock:Show() else swBlock:Hide() end
-                    if updateSw then updateSw() end
-                end
-                applySwState()
-                EllesmereUI.RegisterWidgetRefresh(applySwState)
-
-                EllesmereUI.BuildInlineCog(rgn, {
-                    gap = 6,
-                    tip = "Pixel Glow Settings",
-                    disabled = function()
-                        return bossImpGlowOff() or (B.castbarImportantGlowStyle or 1) ~= 1
-                    end,
-                    disabledTooltip = "This option requires Pixel Glow to be the selected glow type",
-                    title = "Pixel Glow Settings",
-                    rows = {
-                        { type = "slider", label = "Lines", min = 2, max = 16, step = 1,
-                          get = function() return B.castbarImportantGlowLines or 8 end,
-                          set = function(v) B.castbarImportantGlowLines = v; ReloadAndUpdate() end },
-                        { type = "slider", label = "Thickness", min = 1, max = 4, step = 1,
-                          get = function() return B.castbarImportantGlowThickness or 2 end,
-                          set = function(v) B.castbarImportantGlowThickness = v; ReloadAndUpdate() end },
-                        -- Stored as the animation period (lower = faster); shown inverted so right = faster.
-                        { type = "slider", label = "Speed", min = 1, max = 8, step = 1,
-                          get = function() return 9 - (B.castbarImportantGlowSpeed or 4) end,
-                          set = function(v) B.castbarImportantGlowSpeed = 9 - v; ReloadAndUpdate() end },
-                        { type = "toggle", label = "Background",
-                          get = function() return B.castbarImportantGlowBackground == true end,
-                          set = function(v) B.castbarImportantGlowBackground = v and true or nil; ReloadAndUpdate() end },
-                        { type = "colorpicker", label = "Background Color",
-                          get = function()
-                              local c = B.castbarImportantGlowBackgroundColor or { r = 0, g = 0, b = 0 }
-                              return c.r or 0, c.g or 0, c.b or 0
-                          end,
-                          set = function(r, g, b)
-                              B.castbarImportantGlowBackgroundColor = { r = r, g = g, b = b }
-                              ReloadAndUpdate()
-                          end,
-                          disabled = function() return B.castbarImportantGlowBackground ~= true end,
-                          disabledTooltip = "Pixel Glow Background" },
-                    },
-                })
-            end
-
             -- Boss cast bars use the same shared border for the bar and a
             -- detached icon as Target/Focus, including offsets and layering.
             do
@@ -18612,6 +18513,106 @@ initFrame:SetScript("OnEvent", function(self)
                     },
                 })
             end
+            -- Important Cast Glow closes the standard Cast Bar controls, directly
+            -- after Spell Name | Duration. Keep the empty right half as a spacer so
+            -- this option uses one panel column instead of expanding full-width.
+            local bossImpGlowOff = function() return B.castbarImportantGlow ~= true end
+            local bossImpGlowValues, bossImpGlowOrder = { [0] = "None" }, { 0 }
+            do
+                local styles = EllesmereUI.Glows and EllesmereUI.Glows.STYLES
+                for _, idx in ipairs(ns.UF_IMPORTANT_GLOW_STYLES) do
+                    local entry = styles and styles[idx]
+                    bossImpGlowValues[idx] = entry and entry.name or ("Style " .. idx)
+                    bossImpGlowOrder[#bossImpGlowOrder + 1] = idx
+                end
+            end
+            local bossImpGlowRow
+            bossImpGlowRow, hh = Ww:DualRow(pp, yy,
+                { type="dropdown", text="Important Cast Glow",
+                  values=bossImpGlowValues, order=bossImpGlowOrder,
+                  getValue=function()
+                      if bossImpGlowOff() then return 0 end
+                      local v = B.castbarImportantGlowStyle or 1
+                      return bossImpGlowValues[v] and v or 1
+                  end,
+                  setValue=function(v)
+                      if v == 0 then
+                          B.castbarImportantGlow = false
+                      else
+                          B.castbarImportantGlow = true
+                          B.castbarImportantGlowStyle = v
+                      end
+                      ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                  end,
+                  tooltip="Show a glow on the cast bar when the boss is casting a spell Blizzard marks as important." },
+                { type="spacer" }); yy = yy - hh
+            if not EllesmereUI._prebuilding then
+                local rgn = bossImpGlowRow._leftRegion
+                local sw, updateSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                    function()
+                        local c = B.castbarImportantGlowColor or { r = 1, g = 0.2, b = 0.2 }
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        B.castbarImportantGlowColor = { r = r, g = g, b = b }
+                        ReloadAndUpdate()
+                    end, false, 20)
+                PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
+                rgn._lastInline = sw
+                local swBlock = CreateFrame("Frame", nil, sw)
+                swBlock:SetAllPoints()
+                swBlock:SetFrameLevel(sw:GetFrameLevel() + 10)
+                swBlock:EnableMouse(true)
+                swBlock:SetScript("OnEnter", function()
+                    EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Important Cast Glow"))
+                end)
+                swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function applySwState()
+                    local off = bossImpGlowOff()
+                    sw:SetAlpha(off and 0.3 or 1)
+                    if off then swBlock:Show() else swBlock:Hide() end
+                    if updateSw then updateSw() end
+                end
+                applySwState()
+                EllesmereUI.RegisterWidgetRefresh(applySwState)
+
+                EllesmereUI.BuildInlineCog(rgn, {
+                    gap = 6,
+                    tip = "Pixel Glow Settings",
+                    disabled = function()
+                        return bossImpGlowOff() or (B.castbarImportantGlowStyle or 1) ~= 1
+                    end,
+                    disabledTooltip = "This option requires Pixel Glow to be the selected glow type",
+                    title = "Pixel Glow Settings",
+                    rows = {
+                        { type = "slider", label = "Lines", min = 2, max = 16, step = 1,
+                          get = function() return B.castbarImportantGlowLines or 8 end,
+                          set = function(v) B.castbarImportantGlowLines = v; ReloadAndUpdate() end },
+                        { type = "slider", label = "Thickness", min = 1, max = 4, step = 1,
+                          get = function() return B.castbarImportantGlowThickness or 2 end,
+                          set = function(v) B.castbarImportantGlowThickness = v; ReloadAndUpdate() end },
+                        -- Stored as the animation period (lower = faster); shown inverted so right = faster.
+                        { type = "slider", label = "Speed", min = 1, max = 8, step = 1,
+                          get = function() return 9 - (B.castbarImportantGlowSpeed or 4) end,
+                          set = function(v) B.castbarImportantGlowSpeed = 9 - v; ReloadAndUpdate() end },
+                        { type = "toggle", label = "Background",
+                          get = function() return B.castbarImportantGlowBackground == true end,
+                          set = function(v) B.castbarImportantGlowBackground = v and true or nil; ReloadAndUpdate() end },
+                        { type = "colorpicker", label = "Background Color",
+                          get = function()
+                              local c = B.castbarImportantGlowBackgroundColor or { r = 0, g = 0, b = 0 }
+                              return c.r or 0, c.g or 0, c.b or 0
+                          end,
+                          set = function(r, g, b)
+                              B.castbarImportantGlowBackgroundColor = { r = r, g = g, b = b }
+                              ReloadAndUpdate()
+                          end,
+                          disabled = function() return B.castbarImportantGlowBackground ~= true end,
+                          disabledTooltip = "Pixel Glow Background" },
+                    },
+                })
+            end
+
             -- Custom Border Style rows (the Cast Bar cog's opt-in): one table
             -- styles all five boss cast bars; no unlock element, no sync links.
             if B.castBorderCustom == true then
