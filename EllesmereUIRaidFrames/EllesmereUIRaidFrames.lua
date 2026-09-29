@@ -460,6 +460,7 @@ local defaults = {
         topNameBarTextOffsetX   = 0,
         topNameBarTextOffsetY   = 0,
         topNameBarTextAlign     = "center", -- "center", "left", "right"
+        topNameBarBottom        = false,    -- Show on Bottom: the bar takes the frame's bottom edge
 
         -- Text
         nameSize         = 10,
@@ -569,6 +570,16 @@ local defaults = {
         pingMarkerPosition = "center",
         pingMarkerOffsetX  = 0,
         pingMarkerOffsetY  = 0,
+        -- WoW Forever: Missing Buffs (EUI_RaidFrames_ForeverMissingBuffs.lua).
+        -- Forever-only defaults, absent on every other client.
+        showMissingBuffs     = (EllesmereUI.IS_FOREVER == true) and true or nil,
+        missingBuffsSize     = (EllesmereUI.IS_FOREVER == true) and 22 or nil,
+        missingBuffsPosition = (EllesmereUI.IS_FOREVER == true) and "top" or nil,
+        missingBuffsOffsetX  = (EllesmereUI.IS_FOREVER == true) and 0 or nil,
+        missingBuffsOffsetY  = (EllesmereUI.IS_FOREVER == true) and 0 or nil,
+        -- Its icons' glow (shared prefix schema; 2 = Action Button Glow).
+        missingBuffsGlowType      = (EllesmereUI.IS_FOREVER == true) and 2 or nil,
+        missingBuffsGlowColorMode = (EllesmereUI.IS_FOREVER == true) and "default" or nil,
         showReadyCheck   = true,
         showIncomingRez  = true,
         showInOtherPhase = false,
@@ -2017,21 +2028,58 @@ end
 -- Reserve the Top Name Bar's height from the TOP of a frame and style it. Shared by real buttons
 -- and every preview so they never drift. Layout + appearance only; the caller sets name text +
 -- color. Returns the reserved height (0 when disabled; health re-anchors flush to the top).
-local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText)
+-- Show on Bottom (topNameBarBottom): the bar takes the frame's BOTTOM edge instead. Health starts
+-- flush at the top (same height), and the power bar and the uniform anchor region (health +
+-- power) end on the bar. Those two, and the bar's own edge, are re-anchored only while the option
+-- is or just was on, so the top layout never touches them.
+local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText, powerBar)
     local enabled = s.topNameBarEnabled
     local topBarH = enabled and PixelSnap(s.topNameBarHeight or 20) or 0
+    local bottomY = (enabled and s.topNameBarBottom == true) and topBarH or 0
+    local parent
     if healthBar then
         -- A party portrait's bars' area (EUI_RaidFrames_Portrait.lua), else the frame.
-        local parent = healthBar._euiBarArea or healthBar:GetParent()
+        parent = healthBar._euiBarArea or healthBar:GetParent()
+        local topY = (bottomY > 0) and 0 or -topBarH
         healthBar:ClearAllPoints()
-        healthBar:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -topBarH)
-        healthBar:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -topBarH)
+        healthBar:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, topY)
+        healthBar:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, topY)
         healthBar:SetHeight(PixelSnap(baseH - ns.RF_HealthPowerInset(s, powerH) - topBarH))
+        if bottomY > 0 or (healthBar._euiTnbBottomY or 0) > 0 then
+            local uref = healthBar._euiUniformRef
+            -- Aura containers protect these once anchored: a combat pass leaves
+            -- them for the next one (the stamp stays unchanged).
+            if not (InCombatLockdown() and ((powerBar and powerBar:IsProtected())
+                or (uref and uref:IsProtected()))) then
+                if uref then
+                    uref:ClearAllPoints()
+                    uref:SetPoint("TOPLEFT", healthBar, "TOPLEFT", 0, 0)
+                    uref:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, bottomY)
+                end
+                if powerBar then
+                    powerBar:ClearAllPoints()
+                    powerBar:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, bottomY)
+                    powerBar:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, bottomY)
+                end
+                healthBar._euiTnbBottomY = bottomY
+            end
+        end
     end
     if not tnb then return topBarH end
     if not enabled then
         tnb:Hide()
         return topBarH
+    end
+    if parent and (bottomY > 0 or tnb._euiTnbBottom) then
+        tnb:ClearAllPoints()
+        if bottomY > 0 then
+            tnb:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", 0, 0)
+            tnb:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
+        else
+            tnb:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+            tnb:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
+        end
+        tnb._euiTnbBottom = (bottomY > 0) or nil
     end
     tnb:SetHeight(topBarH)
     if tnbBg then
@@ -7596,6 +7644,7 @@ XF.Layout = function()
             if d.AnchorCombatIcon then d.AnchorCombatIcon() end
         end
         if d.pingFrame then ns._RFAnchorPing(d) end
+        if ns.RF_FvMissingAnchor then ns.RF_FvMissingAnchor(b, d) end
     end
 end
 
@@ -10812,7 +10861,7 @@ local function ReloadFrames(skipButtons)
 
         -- Health bar height/anchor + Top Name Bar. The helper reserves the top
         -- bar's height from the top of the health area and styles the bar.
-        LayoutTopNameBar(s, bh, powerH, d.health, d.topNameBar, d.topNameBarBg, d.topNameBarText)
+        LayoutTopNameBar(s, bh, powerH, d.health, d.topNameBar, d.topNameBarBg, d.topNameBarText, d.power)
         if d.health then
             d.health:SetStatusBarTexture(texPath)
             d.health:GetStatusBarTexture():SetHorizTile(false)
@@ -10934,6 +10983,7 @@ local function ReloadFrames(skipButtons)
 
         -- Ping marker size + position (overlay exists only after a first ping)
         if d.pingFrame then ns._RFAnchorPing(d) end
+        if ns.RF_FvMissingAnchor then ns.RF_FvMissingAnchor(btn, d) end
 
         -- Border
         if d.UpdateBorder then d.UpdateBorder() end
@@ -10966,6 +11016,8 @@ end
 ns.ReloadFrames = ReloadFrames
 ns.PixelSnap = PixelSnap
 ns._allButtons = allButtons
+-- The raid unit map (RebuildUnitMap wipes it in place, so this stays live).
+ns._raidUnitToButton = unitToButton
 
 -- Global Dark Mode master: RF stores Dark Mode as a fill-color MODE
 -- (healthColorMode == "dark"), not a boolean -- enabling remembers the prior
@@ -12882,6 +12934,10 @@ do
             "showRoleForTank", "showRoleForHealer", "showRoleForDPS",
             "showRaidMarker", "raidMarkerSize", "raidMarkerPosition", "raidMarkerOffsetX", "raidMarkerOffsetY",
             "showPingMarker", "pingMarkerSize", "pingMarkerPosition", "pingMarkerOffsetX", "pingMarkerOffsetY",
+            "showMissingBuffs", "missingBuffsSize", "missingBuffsPosition", "missingBuffsOffsetX", "missingBuffsOffsetY",
+            "missingBuffsGlowType", "missingBuffsGlowColorMode", "missingBuffsGlowR", "missingBuffsGlowG", "missingBuffsGlowB",
+            "missingBuffsGlowLines", "missingBuffsGlowThickness", "missingBuffsGlowSpeed", "missingBuffsGlowBackground",
+            "missingBuffsGlowBackgroundR", "missingBuffsGlowBackgroundG", "missingBuffsGlowBackgroundB",
             "showReadyCheck", "showIncomingRez", "showInOtherPhase", "showInOtherParty",
             "readyCheckSize", "readyCheckPosition", "readyCheckOffsetX", "readyCheckOffsetY",
             "showSummonPending",
@@ -12919,6 +12975,7 @@ do
             "topNameBarBgColor", "topNameBarBgOpacity",
             "topNameBarTextSize", "topNameBarTextColorMode", "topNameBarTextColor",
             "topNameBarTextOffsetX", "topNameBarTextOffsetY", "topNameBarTextAlign",
+            "topNameBarBottom",
         },
         rangeTooltip = {
             "oorAlpha", "oorDarken", "oorDarkenColor", "showTooltip", "tooltipMode", "frameStrata",
@@ -13051,6 +13108,7 @@ for _, k in ipairs({
     "debuffStacksTextSize", "debuffDurTextSize", "defDurTextSize",
     -- Icon sizes
     "roleIconSize", "leaderIconSize", "raidMarkerSize", "combatIndicatorSize", "pingMarkerSize",
+    "missingBuffsSize",
     "debuffSize", "defSize", "dispellableDebuffSize",
     -- Offsets
     "nameOffsetX", "nameOffsetY",
@@ -13061,6 +13119,7 @@ for _, k in ipairs({
     "roleIconOffsetX", "roleIconOffsetY",
     "leaderIconOffsetX", "leaderIconOffsetY",
     "raidMarkerOffsetX", "raidMarkerOffsetY",
+    "missingBuffsOffsetX", "missingBuffsOffsetY",
     "combatIndicatorOffsetX", "combatIndicatorOffsetY",
     "debuffOffsetX", "debuffOffsetY",
     "dispellableDebuffOffsetX", "dispellableDebuffOffsetY",
@@ -14936,7 +14995,7 @@ ns.ReloadPartyFrames = function(skipButtons)
         -- The Party Frames kit owns its bar rects (its pass runs below, after
         -- the texture swaps, so its masks seat on the new fills).
         if not d.kit then
-            LayoutTopNameBar(raw, bh, powerH, d.health, d.topNameBar, d.topNameBarBg, d.topNameBarText)
+            LayoutTopNameBar(raw, bh, powerH, d.health, d.topNameBar, d.topNameBarBg, d.topNameBarText, d.power)
         end
         if d.health then
             d.health:SetStatusBarTexture(texPath)
@@ -15071,6 +15130,7 @@ ns.ReloadPartyFrames = function(skipButtons)
 
         -- Ping marker
         if d.pingFrame then ns._RFAnchorPing(d) end
+        if ns.RF_FvMissingAnchor then ns.RF_FvMissingAnchor(btn, d) end
 
         -- Border
         if d.UpdateBorder then d.UpdateBorder() end
@@ -17521,7 +17581,7 @@ local function ApplyPreviewData(f, index)
 
     -- Health bar height/anchor + Top Name Bar (helper re-anchors health top to
     -- -topBarH; the per-unit power block below re-sets only the height)
-    LayoutTopNameBar(s, h, powerH, f._health, f._topNameBar, f._topNameBarBg, f._topNameBarText)
+    LayoutTopNameBar(s, h, powerH, f._health, f._topNameBar, f._topNameBarBg, f._topNameBarText, f._power)
 
     -- Health bar
     if f._health then
@@ -18495,6 +18555,9 @@ local function ApplyPreviewData(f, index)
             f._raidMarker:Hide()
         end
     end
+
+    -- WoW Forever: Missing Buffs (EUI_RaidFrames_ForeverMissingBuffs.lua).
+    if ns.RF_FvMissingPreview then ns.RF_FvMissingPreview(f, index, s, indVis) end
 
     -- Status icon (Ready Check / Rez / In Other Phase / In Other Party)
     if f._readyCheck then

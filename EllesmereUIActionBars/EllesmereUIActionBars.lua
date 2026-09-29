@@ -1274,7 +1274,17 @@ do
                 -- the pager's invisible arrows would still eat clicks.
                 KillPagerMouse(frame)
                 if frame.Selection then frame.Selection:Hide(); frame.Selection:SetAlpha(0) end -- Edit Mode selection/mover
-                if frame.EndCaps then frame.EndCaps:Hide() end -- artwork (gryphons/endcaps/border)
+                local caps = frame.EndCaps
+                if caps then
+                    caps:Hide() -- artwork (gryphons/endcaps/border)
+                    -- WoW Forever: each end cap is an Edit Mode system of its own that
+                    -- shows itself and its selection overlay whenever Edit Mode opens
+                    -- (the overlay ignores the bar's alpha). Silence both overlays like
+                    -- the bar's own; Edit Mode's Show never resets alpha or mouse.
+                    local l, r = caps.LeftEndCap, caps.RightEndCap
+                    if l and l.Selection then l.Selection:SetAlpha(0); l.Selection:EnableMouse(false) end
+                    if r and r.Selection then r.Selection:SetAlpha(0); r.Selection:EnableMouse(false) end
+                end
                 if frame.BorderArt then frame.BorderArt:Hide() end
                 frame:SetAlpha(0)
             else
