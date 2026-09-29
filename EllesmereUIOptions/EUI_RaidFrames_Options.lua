@@ -661,6 +661,57 @@ initFrame:SetScript("OnEvent", function(self)
         return SGet(key)
     end
 
+    -- WoW Forever: the Missing Buffs icons' glow (prefix keys missingBuffsGlow*)
+    -- as a shared glow descriptor over a read/write pair -- the page's context-
+    -- aware SVal/SWrite in the indicator's cog, the raid keys on Global
+    -- Settings > Glows (built outside any tab, so never through the tab context).
+    local MissingGlowDesc
+    if EllesmereUI.IS_FOREVER then
+        local GK = EllesmereUI.Glows.PrefixKeys("missingBuffsGlow")
+        function MissingGlowDesc(read, write)
+            return {
+                host = "icon", excludes = { [4] = true },
+                caps = { mode = true, params = true, bg = true },
+                defaultColor = EllesmereUI.Glows.DEFAULT_COLOR,
+                onChange = ReloadAndUpdate,
+                disabled = function() return read("showMissingBuffs", true) == false end,
+                disabledTooltip = "Missing Buffs",
+                get = function(f)
+                    if f == "style" then return read(GK.type, 2)
+                    elseif f == "mode" then return read(GK.mode, "default")
+                    elseif f == "color" then return read(GK.r), read(GK.g), read(GK.b)
+                    elseif f == "lines" then return read(GK.lines)
+                    elseif f == "thickness" then return read(GK.th)
+                    elseif f == "speed" then return read(GK.speed)
+                    elseif f == "bg" then return read(GK.bg) == true
+                    elseif f == "bgColor" then return read(GK.bgR), read(GK.bgG), read(GK.bgB)
+                    end
+                end,
+                set = function(f, a, b, c)
+                    if f == "style" then write(GK.type, a)
+                    elseif f == "mode" then write(GK.mode, a)
+                    elseif f == "color" then write(GK.r, a); write(GK.g, b); write(GK.b, c)
+                    elseif f == "lines" then write(GK.lines, a)
+                    elseif f == "thickness" then write(GK.th, a)
+                    elseif f == "speed" then write(GK.speed, a)
+                    elseif f == "bg" then write(GK.bg, a and true or nil)
+                    elseif f == "bgColor" then write(GK.bgR, a); write(GK.bgG, b); write(GK.bgB, c)
+                    end
+                end,
+            }
+        end
+        EllesmereUI.GlowOptions.RegisterSite({ id = "rf_missing_buffs", label = "Missing Buffs Glow",
+            group = "module", module = "EllesmereUIRaidFrames", page = PAGE_MAIN,
+            section = "INDICATORS", highlight = "Missing Buffs",
+            desc = MissingGlowDesc(
+                function(key, default)
+                    local v = db.profile[key]
+                    if v == nil then return default end
+                    return v
+                end,
+                function(key, v) db.profile[key] = v end) })
+    end
+
     ---------------------------------------------------------------------------
     --  Shared "Sort By" control: Group/Role radio + drag-to-reorder role rows,
     --  installed into a DualRow half-region (replaces its placeholder dropdown);
@@ -3147,6 +3198,70 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end  -- close do (indicators eyeball)
 
+        -- WoW Forever: Missing Buffs, first in the section (runtime in
+        -- EUI_RaidFrames_ForeverMissingBuffs.lua). The raid marker row's
+        -- shape: Position (None turns it off) | Size, offsets in the cog.
+        if EllesmereUI.IS_FOREVER then
+            local mbPositionValues = {
+                none        = "None",
+                topleft     = "Top Left",
+                top         = "Top",
+                topright    = "Top Right",
+                left        = "Left",
+                center      = "Center",
+                right       = "Right",
+                bottomleft  = "Bottom Left",
+                bottom      = "Bottom",
+                bottomright = "Bottom Right",
+            }
+            local mbPositionOrder = { "none", "topleft", "top", "topright", "left", "center", "right", "bottomleft", "bottom", "bottomright" }
+            local mbRow
+            mbRow, h = W:DualRow(parent, y,
+                { type="dropdown", text="Missing Buffs", values=mbPositionValues, order=mbPositionOrder,
+                  tooltip="Shows Fortitude, Mark of the Wild or Spirit on a member who is missing it, while someone in your group can cast it.",
+                  getValue=function()
+                      if not SVal("showMissingBuffs", true) then return "none" end
+                      return SVal("missingBuffsPosition", "top")
+                  end,
+                  setValue=function(v)
+                      if v == "none" then
+                          SSet("showMissingBuffs", false)
+                      else
+                          SWrite("showMissingBuffs", true)
+                          SSet("missingBuffsPosition", v)
+                      end
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="slider", text="Missing Buffs Size", min=8, max=40, step=1,
+                  disabled=function() return not SVal("showMissingBuffs", true) end,
+                  disabledTooltip="Missing Buffs",
+                  getValue=function() return SVal("missingBuffsSize", 22) end,
+                  setValue=function(v) SSet("missingBuffsSize", v) end });  y = y - h
+            do
+                local rgn = mbRow._leftRegion
+                local rows = {
+                    { type="slider", label="Offset X", min=-50, max=50, step=1,
+                      get=function() return SVal("missingBuffsOffsetX", 0) end,
+                      set=function(v) SSet("missingBuffsOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                      get=function() return SVal("missingBuffsOffsetY", 0) end,
+                      set=function(v) SSet("missingBuffsOffsetY", v) end },
+                }
+                -- The icons' glow: the shared glow controls (also listed on
+                -- Global Settings > Glows); the Pixel Glow rows show only
+                -- while Pixel Glow is picked.
+                for _, r in ipairs(EllesmereUI.GlowOptions.PopupRows(MissingGlowDesc(SVal, SWrite), "Glow", true)) do
+                    rows[#rows + 1] = r
+                end
+                EllesmereUI.BuildInlineCog(rgn, {
+                    title = "Missing Buffs",
+                    rows = rows,
+                    disabled = function() return not SVal("showMissingBuffs", true) end,
+                    disabledTooltip = "Missing Buffs",
+                })
+            end
+        end
+
         local RI_STYLES = ns.ROLE_ICON_STYLES
         -- Effective role: the player's spec wins over a stale assigned role
         local playerRole = EllesmereUI.UnitEffectiveRole("player")
@@ -4044,7 +4159,10 @@ initFrame:SetScript("OnEvent", function(self)
               order={ "center", "left", "right" },
               getValue=function() return SVal("topNameBarTextAlign", "center") end,
               setValue=function(v) SSet("topNameBarTextAlign", v) end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Show on Bottom",
+              tooltip="Places the bar at the bottom of the frame instead of the top.",
+              getValue=function() return SVal("topNameBarBottom", false) end,
+              setValue=function(v) SSet("topNameBarBottom", v) end });  y = y - h
         -- Custom rightmost (opens picker), class leftmost. Clicking switches topNameBarTextColorMode; the inactive one dims. Custom is added FIRST so it sits next to the dropdown.
         if not EllesmereUI._prebuilding then
             local rgn = tnbRow3._leftRegion
