@@ -8391,14 +8391,21 @@ initFrame:SetScript("OnEvent", function(self)
             -- color rule.
             if EllesmereUI.IS_FOREVER then
                 local SCP = EllesmereUI.SpellCostPrediction
-                local sparkCfg = { type="toggle", text="Mana Regen Spark",
-                      tooltip="Sweeps a spark across the bar for 5 seconds after you spend mana, until mana regen resumes.",
+                -- Off or one of two modes: a view over manaRegenSpark (on/off) and
+                -- manaRegenSparkMode (nil = 5-Second Rule), so saved choices read as before.
+                local sparkCfg = { type="dropdown", text="Mana Regen Spark",
+                      tooltip="5-Second Rule sweeps a spark across the bar for 5 seconds after you spend mana, until mana regen resumes. Regen Ticks then keeps sweeping every 2 seconds while mana regenerates.",
+                      values = { off = "Off", fsr = "5-Second Rule", ticks = "Regen Ticks" },
+                      order = { "off", "fsr", "ticks" },
                       getValue = function()
-                          local p = DB(); return p and p.primary.manaRegenSpark or false
+                          local p = DB()
+                          if not (p and p.primary.manaRegenSpark) then return "off" end
+                          return p.primary.manaRegenSparkMode == "ticks" and "ticks" or "fsr"
                       end,
                       setValue = function(v)
                           local p = DB(); if not p then return end
-                          p.primary.manaRegenSpark = v
+                          p.primary.manaRegenSpark = v ~= "off"
+                          if v ~= "off" then p.primary.manaRegenSparkMode = (v == "ticks") and "ticks" or nil end
                           RebuildPower()
                       end }
                 local costCfg = { type="toggle", text="Spell Cost Prediction",
