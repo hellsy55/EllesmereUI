@@ -341,10 +341,9 @@ local function BuildDebuffStyle(s, sizeOverride)
         dispelBorderPx = dpx,
         dispelColorMap = dcMap,
         dispelColorFP = dcFP,
-        -- 12.1.5 PTR test toggles (Options: Debuffs row). No-ops on any build
-        -- without the underlying CustomAuraButton APIs (AuraKit's own guards).
-        pandemicGlow = s.debuffPandemicGlow and true or nil,
-        showCasterName = s.debuffShowCasterName and true or nil,
+        -- Native PTR decorations are capability-gated; base aura styling is unchanged.
+        pandemicGlow = AK.SupportsPandemicPulse() and s.debuffPandemicGlow and true or nil,
+        showCasterName = AK.SupportsCasterName() and s.debuffShowCasterName and true or nil,
         cooldownReverse = true,
         hideSwipe = (s.debuffShowSwipe == false),
         noDefaultFonts = true,
@@ -812,8 +811,7 @@ local function DebuffStyleFP(s, font)
         -- Dispel icon ring: thickness + the user palette the engine tints with.
         s.dispelIconBorderSize, CK(s.dispelColorMagic), CK(s.dispelColorCurse),
         CK(s.dispelColorDisease), CK(s.dispelColorPoison), CK(s.dispelColorBleed),
-        -- 12.1.5 PTR test toggles -- must ride the fingerprint or the Options
-        -- checkboxes silently no-op until the next unrelated style change.
+        -- Native PTR decorations are capability-gated; base aura styling is unchanged.
         s.debuffPandemicGlow, s.debuffShowCasterName,
         -- Base DM Effects ride the debuff style (BuildDebuffStyle injects
         -- them), so their config is part of this fingerprint.

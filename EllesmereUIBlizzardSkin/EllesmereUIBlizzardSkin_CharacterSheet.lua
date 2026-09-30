@@ -4,11 +4,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 local L = _G.EllesmereUI and _G.EllesmereUI.L or function(k) return k end
--- Compat: some clients no longer expose GetItemInfo(Instant)/GetItemQualityColor/
--- GetItemIcon globals, only C_Item namespaced versions. Uses EllesmereUI._GetX
--- (set once in EllesmereUI.lua, which always loads first) instead of new
--- top-level locals here, since this file is already near Lua's 200-local-
--- per-chunk ceiling.
 local skinned = false
 local issecretvalue = issecretvalue or function() return false end
 
@@ -247,7 +242,7 @@ local ENCHANT_SLOTS = {
 function ns.ParseEnchantLabel(enchantText, slotID, itemLink, unit)
     local canHaveEnchant = ENCHANT_SLOTS[slotID]
     if slotID == INVSLOT_OFFHAND and itemLink then
-        local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
+        local _, _, _, _, _, classID = C_Item.GetItemInfoInstant(itemLink)
         canHaveEnchant = (classID == Enum.ItemClass.Weapon)
     end
     local lvl = UnitLevel(unit)
@@ -386,7 +381,7 @@ local function EUI_BuildSocketIconRow(itemLink, paintPasses)
             gemLinks[#gemLinks + 1] = gemLink
             local icon = C_Item.GetItemIconByID(gemLink)
             if not icon and GetItemInfoInstant then
-                icon = select(5, EllesmereUI._GetItemInfoInstant(gemLink))
+                icon = select(5, GetItemInfoInstant(gemLink))
             end
             row[#row + 1] = { icon = icon or 134400, isAtlas = false }
         end
@@ -1340,7 +1335,7 @@ local function SkinCharacterSheet()
         do
             local mhLink = GetInventoryItemLink("player", 16)
             if mhLink and GetInventoryItemLink("player", 17) == nil then
-                local _, _, _, mhEquipLoc = EllesmereUI._GetItemInfoInstant(mhLink)
+                local _, _, _, mhEquipLoc = GetItemInfoInstant(mhLink)
                 if mhEquipLoc == "INVTYPE_2HWEAPON"
                     or mhEquipLoc == "INVTYPE_RANGED"
                     or mhEquipLoc == "INVTYPE_RANGEDRIGHT" then
@@ -1356,7 +1351,7 @@ local function SkinCharacterSheet()
             for slotIndex = 1, bagSize do
                 local itemLink = C_Container.GetContainerItemLink(bagSlot, slotIndex)
                 if itemLink then
-                    local itemName, _, itemRarity, _, _, _, _, _, equipSlot, itemIcon = EllesmereUI._GetItemInfo(itemLink)
+                    local itemName, _, itemRarity, _, _, _, _, _, equipSlot, itemIcon = GetItemInfo(itemLink)
                     -- ItemLocation first (exact, uncached); GetItemInfo's cached itemLevel
                     -- can be stale for a specific instance.
                     local itemLevel
@@ -1372,7 +1367,7 @@ local function SkinCharacterSheet()
                     -- classID/subclassID (Weapon=2, Armor=4) -- GetItemInfo's itemType/itemSubType
                     -- are localized display strings and would filter out non-English clients.
                     -- GetItemInfoInstant returns: 1 itemID, 2 itemType, 3 itemSubType, 4 itemEquipLoc, 5 iconFileID, 6 classID, 7 subClassID.
-                    local _, _, _, _, _, classID, subclassID = EllesmereUI._GetItemInfoInstant(itemLink)
+                    local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(itemLink)
                     if itemLevel and itemName and (classID == Enum.ItemClass.Weapon or classID == Enum.ItemClass.Armor) and equipSlot then
                         -- Spec-aware usability filter (skip shields on Ret, etc.)
                         if not IsItemUsableBySpec(itemLink, equipSlot, classID, subclassID) then
@@ -3102,7 +3097,7 @@ local function SkinCharacterSheet()
         local itemLink = GetInventoryItemLink("player", slot:GetID())
         local borderR, borderG, borderB = 0.4, 0.4, 0.4  -- Default dark gray
         if itemLink then
-            local _, _, rarity = EllesmereUI._GetItemInfo(itemLink)
+            local _, _, rarity = GetItemInfo(itemLink)
             if rarity then
                 borderR, borderG, borderB = C_Item.GetItemQualityColor(rarity)
             end
@@ -3910,7 +3905,7 @@ local function SkinCharacterSheet()
                         GameTooltip:AddLine("Missing Items:", 1, 0.3, 0.3, 1)
                         for _, item in ipairs(missing) do
                             local icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(item.itemID))
-                                or (GetItemIcon and EllesmereUI._GetItemIcon(item.itemID))
+                                or (GetItemIcon and GetItemIcon(item.itemID))
                             local iconText = icon and string.format("|T%s:16|t", icon) or ""
                             GameTooltip:AddLine(
                                 string.format("%s %s: %s", iconText, L(item.slot), item.itemName),
@@ -4527,7 +4522,7 @@ local function SkinCharacterSheet()
                     local gemLink = GetFFD(slot).gemLinks and GetFFD(slot).gemLinks[i]
                     local rarity = 2
                     if gemLink then
-                        local _, _, r = EllesmereUI._GetItemInfo(gemLink)
+                        local _, _, r = GetItemInfo(gemLink)
                         if r then rarity = r end
                     end
                     local r, g, b, a = GemBorderColor(rarity)
@@ -4720,14 +4715,9 @@ local function SkinCharacterSheet()
         local upgradeTrackColor = { r = 1, g = 1, b = 1 }
         local itemQuality = nil
         local slotID = slot:GetID()
-        local canHaveEnchant = ENCHANT_SLOTS[slotID]
-        if slotID == INVSLOT_OFFHAND and itemLink then
-            local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
-            canHaveEnchant = (classID == Enum.ItemClass.Weapon)
-        end
 
         if itemLink then
-            local _, _, quality, ilvl = EllesmereUI._GetItemInfo(itemLink)
+            local _, _, quality, ilvl = GetItemInfo(itemLink)
             itemLevel = ilvl or ""
             itemQuality = quality
 
@@ -4908,64 +4898,6 @@ local function SkinCharacterSheet()
     ApplyTabVisibility(isCharTab)
 end
 
-local function GetRarityColorFromLink(itemLink)
-    if not itemLink then
-        return 0.9, 0.9, 0.9, 1  -- Default gray
-    end
-
-    local itemRarity = select(3, EllesmereUI._GetItemInfo(itemLink))
-    if not itemRarity then
-        return 0.9, 0.9, 0.9, 1
-    end
-
-    -- WoW standard rarity colors
-    local rarityColors = {
-        [0] = { 0.62, 0.62, 0.62 },  -- Poor
-        [1] = { 1, 1, 1 },            -- Common
-        [2] = { 0.12, 1, 0 },         -- Uncommon
-        [3] = { 0, 0.44, 0.87 },      -- Rare
-        [4] = { 0.64, 0.21, 0.93 },   -- Epic
-        [5] = { 1, 0.5, 0 },          -- Legendary
-        [6] = { 0.9, 0.8, 0.5 },      -- Artifact
-        [7] = { 0.9, 0.8, 0.5 },      -- Heirloom
-    }
-
-    local color = rarityColors[itemRarity] or rarityColors[1]
-    return color[1], color[2], color[3], 1
-end
-
-local function SkinCharacterSlot(slotName, slotID)
-    local slot = _G[slotName]
-    if not slot or GetFFD(slot).skinned then return end
-    GetFFD(slot).skinned = true
-
-    if slot.IconBorder then
-        slot.IconBorder:Hide()
-    end
-
-    local iconTexture = _G[slotName .. "IconTexture"]
-    if iconTexture then
-        iconTexture:SetTexCoord(0.07, 0.07, 0.07, 0.93, 0.93, 0.07, 0.93, 0.93)
-    end
-
-    if slotName == "CharacterHandsSlot" then
-        slot:Hide()
-    end
-
-    local normalTexture = _G[slotName .. "NormalTexture"]
-    if normalTexture then
-        normalTexture:Hide()
-    end
-
-    local slotBg = slot:CreateTexture(nil, "BACKGROUND", nil, -5)
-    slotBg:SetAllPoints(slot)
-    slotBg:SetColorTexture(0.5, 0.5, 0.5, 0.7)
-    GetFFD(slot).slotBg = slotBg
-
-    if EllesmereUI and EllesmereUI.PanelPP then
-        EllesmereUI.PanelPP.CreateBorder(slot, 1, 1, 1, 0.4, 2, "OVERLAY", 7)
-    end
-end
 -- Fake bottom tab on the character sheet, visually identical to the Blizzard
 -- Character/Rep/Currency tabs. Built on first enable only (zero cost while off).
 local function EnsureCalcTab(frame)
@@ -5316,30 +5248,6 @@ function EllesmereUI._applyCharSheetTextSizes()
     end
 end
 
-function EllesmereUI._applyCharSheetItemColors()
-    if not CharacterFrame then return end
-
-    local itemSlots = EUI_GEAR_SLOTS
-
-    for _, slotName in ipairs(itemSlots) do
-        local slot = _G[slotName]
-        if slot and GetFFD(slot).itemLevelLabel then
-            local itemLink = GetInventoryItemLink("player", slot:GetID())
-            if itemLink then
-                local _, _, quality = EllesmereUI._GetItemInfo(itemLink)
-                -- Use rarity color by default, unless explicitly disabled
-                if (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) and quality then
-                    local r, g, b = EllesmereUI._GetItemQualityColor(quality)
-                    GetFFD(slot).itemLevelLabel:SetTextColor(r, g, b, 0.9)
-                else
-                    GetFFD(slot).itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
-                end
-            else
-                GetFFD(slot).itemLevelLabel:SetTextColor(1, 1, 1, 0.9)
-            end
-        end
-    end
-end
 function EllesmereUI._refreshCharacterSheetColors()
     local charFrame = CharacterFrame
     if not charFrame or not GetFFD(charFrame).statsSections then return end
@@ -5475,59 +5383,6 @@ function EllesmereUI._refreshItemLevelVisibility()
                 GetFFD(slot).itemLevelLabel:Show()
             else
                 GetFFD(slot).itemLevelLabel:Hide()
-            end
-        end
-    end
-end
-function EllesmereUI._refreshItemLevelColors()
-    local itemSlots = EUI_GEAR_SLOTS
-
-    for _, slotName in ipairs(itemSlots) do
-        local slot = _G[slotName]
-        if slot and GetFFD(slot).itemLevelLabel then
-            local displayColor
-            if EllesmereUIDB and EllesmereUIDB.charSheetItemLevelUseColor and EllesmereUIDB.charSheetItemLevelColor then
-                displayColor = EllesmereUIDB.charSheetItemLevelColor
-            else
-                -- Rarity color by default, unless explicitly disabled.
-                local itemLink = GetInventoryItemLink("player", slot:GetID())
-                if itemLink and (not EllesmereUIDB or EllesmereUIDB.charSheetColorItemLevel ~= false) then
-                    local _, _, quality = EllesmereUI._GetItemInfo(itemLink)
-                    if quality then
-                        local r, g, b = EllesmereUI._GetItemQualityColor(quality)
-                        displayColor = { r = r, g = g, b = b }
-                    else
-                        displayColor = { r = 1, g = 1, b = 1 }
-                    end
-                else
-                    displayColor = { r = 1, g = 1, b = 1 }
-                end
-            end
-
-            GetFFD(slot).itemLevelLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.9)
-        end
-    end
-end
-
-function EllesmereUI._refreshUpgradeTrackColors()
-    local itemSlots = EUI_GEAR_SLOTS
-
-    for _, slotName in ipairs(itemSlots) do
-        local slot = _G[slotName]
-        if slot and GetFFD(slot).upgradeTrackLabel then
-            local itemLink = GetInventoryItemLink("player", slot:GetID())
-            if itemLink then
-                -- Upgrade track color via C_Item.GetItemUpgradeInfo (no tooltip).
-                local _, upgradeTrackColor = EUI_GetUpgradeTrack(itemLink)
-
-                local displayColor
-                if EllesmereUIDB and EllesmereUIDB.charSheetUpgradeTrackUseColor and EllesmereUIDB.charSheetUpgradeTrackColor then
-                    displayColor = EllesmereUIDB.charSheetUpgradeTrackColor
-                else
-                    displayColor = upgradeTrackColor
-                end
-
-                GetFFD(slot).upgradeTrackLabel:SetTextColor(displayColor.r, displayColor.g, displayColor.b, 0.8)
             end
         end
     end

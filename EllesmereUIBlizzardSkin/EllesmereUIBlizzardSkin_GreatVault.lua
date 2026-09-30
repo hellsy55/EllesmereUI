@@ -4,8 +4,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  Great Vault reskin.
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
--- Compat: GetItemInfo is called via EllesmereUI._GetItemInfo (set once in
--- EllesmereUI.lua) since some clients no longer expose the bare global.
 local LOCK_TEXTURE = "Interface\\LFGFrame\\UI-LFG-ICON-LOCK"
 
 -- External weak-keyed lookup table for frame state (prevents tainting Blizzard frames)
@@ -298,8 +296,8 @@ local function ResolveItemBorderColor(itemLink)
         return STYLE.colors.itemDefaultBorder
     end
 
-    -- GetItemInfo reads the link (bonus-modified quality); ByID reads the base item.
-    local _, _, quality = EllesmereUI._GetItemInfo(itemLink)
+    -- C_Item.GetItemInfo reads the link (bonus-modified quality); ByID reads the base item.
+    local _, _, quality = C_Item.GetItemInfo(itemLink)
     if not quality and C_Item and C_Item.GetItemQualityByID then
         quality = C_Item.GetItemQualityByID(itemLink)
     end

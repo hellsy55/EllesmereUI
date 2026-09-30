@@ -5,13 +5,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  Visually matches the Bags module with sidebar, search, and sorting
 -------------------------------------------------------------------------------
 local EUI = EllesmereUI
--- Compat: GetItemInfo(Instant)/GetItemQualityColor are called via
--- EllesmereUI._GetX (set once in EllesmereUI.lua) since some clients no
--- longer expose the bare globals.
 local ns = select(2, ...)  -- helpers shared with EllesmereUIBags.lua (loaded first)
-local GetItemInfo = EllesmereUI._GetItemInfo
-local GetItemInfoInstant = EllesmereUI._GetItemInfoInstant
-local GetItemQualityColor = EllesmereUI._GetItemQualityColor
+local GetItemInfo = C_Item.GetItemInfo
+local GetItemInfoInstant = C_Item.GetItemInfoInstant
+local GetItemQualityColor = C_Item.GetItemQualityColor
 -- Profile access helper (DB created in EUI_Bags_Options.lua, loaded first per TOC)
 local _emptyP = {}
 local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
@@ -66,7 +63,7 @@ local ITEM_CLASS_WEAPON = Enum.ItemClass.Weapon
 local ITEM_CLASS_ARMOR  = Enum.ItemClass.Armor
 local function IsGearItem(itemLink)
     if not itemLink then return false end
-    local _, _, _, _, _, classID = EllesmereUI._GetItemInfoInstant(itemLink)
+    local _, _, _, _, _, classID = GetItemInfoInstant(itemLink)
     return classID == ITEM_CLASS_WEAPON or classID == ITEM_CLASS_ARMOR
 end
 local function GetItemLevelAtLocation(loc, itemLink)
@@ -1477,7 +1474,7 @@ local function GetItemExpansionIDFromLink(itemLink)
         local _, _, _, _, _, _, _, _, _, _, _, _, _, _, expID = C_Item.GetItemInfo(itemLink)
         return expID
     end
-    return select(15, EllesmereUI._GetItemInfo(itemLink))
+    return select(15, GetItemInfo(itemLink))
 end
 
 -- sortKey: higher = newer expansion, shown first. Unknown / uncached last.
@@ -1512,7 +1509,7 @@ end
 -- Flask / Food. GetItemInfoInstant reads the local client DB, so unlike
 -- GetItemInfo it answers on the first bank open.
 local function GetSubTypeBucket(link)
-    local _, _, _, _, _, classID, subclassID = EllesmereUI._GetItemInfoInstant(link)
+    local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(link)
     if classID == nil then return "__other__", EllesmereUI.L("Other"), true end
     local name
     if C_Item and C_Item.GetItemSubClassInfo then
@@ -1522,7 +1519,7 @@ local function GetSubTypeBucket(link)
         name = _G.GetItemSubClassInfo(classID, subclassID or 0)
     end
     if not name or name == "" then
-        name = select(7, EllesmereUI._GetItemInfo(link))
+        name = select(7, GetItemInfo(link))
     end
     if not name or name == "" then
         return "__other__", EllesmereUI.L("Other"), true
@@ -1556,7 +1553,7 @@ local ARM_CROSSBOW = (Enum.ItemWeaponSubclass and Enum.ItemWeaponSubclass.Crossb
 local ARM_COSMETIC = Enum.ItemArmorSubclass and Enum.ItemArmorSubclass.Cosmetic
 
 local function GetSlotBucket(link)
-    local _, _, _, equipSlot, _, classID, subclassID = EllesmereUI._GetItemInfoInstant(link)
+    local _, _, _, equipSlot, _, classID, subclassID = GetItemInfoInstant(link)
     if classID == Enum.ItemClass.Armor and ARM_COSMETIC and subclassID == ARM_COSMETIC then
         return 130, EllesmereUI.L("Cosmetic"), false
     end
@@ -2311,7 +2308,7 @@ function EUI_Bank:RefreshBank()
             local giIlvl, giBindType
             local loc
             if showBindType or showIlvl then
-                local _, _, _, _, _, _, _, _, _, _, _, _, _, b14 = EllesmereUI._GetItemInfo(itemLink)
+                local _, _, _, _, _, _, _, _, _, _, _, _, _, b14 = GetItemInfo(itemLink)
                 loc = ItemLocation:CreateFromBagAndSlot(bagID, slot)
                 giIlvl = showIlvl and GetItemLevelAtLocation(loc, itemLink) or nil
                 giBindType = b14
@@ -2349,7 +2346,7 @@ function EUI_Bank:RefreshBank()
                         end
                     end
                     if not r then
-                        r, g, b = EllesmereUI._GetItemQualityColor(quality)
+                        r, g, b = GetItemQualityColor(quality)
                     end
                     btn.ItemLevelText:SetTextColor(r, g, b, 1)
                 else

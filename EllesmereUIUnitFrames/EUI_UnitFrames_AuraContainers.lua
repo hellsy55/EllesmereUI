@@ -1564,11 +1564,9 @@ local function BuildStyle(unit, base, s, unitFrame)
         -- goes off with the tooltips; clicks (player buff cancel) unaffected.
         noTooltips = (s.showAuraTooltips == false) or nil,
         dispelBorder = dispel,
-        -- 12.1.5 PTR (Options: Debuff Settings cog). Both no-op on any build
-        -- without the underlying button API -- see AuraKit's own guards -- so
-        -- toggling these on live 12.1 costs nothing and shows nothing.
-        pandemicGlow = s[p .. "PandemicGlow"] and true or nil,
-        showCasterName = s[p .. "ShowCasterName"] and true or nil,
+        -- Native PTR decorations are capability-gated; base aura styling is unchanged.
+        pandemicGlow = AK.SupportsPandemicPulse() and s[p .. "PandemicGlow"] and true or nil,
+        showCasterName = AK.SupportsCasterName() and s[p .. "ShowCasterName"] and true or nil,
         dispelHelpful = (isBuff and dispel) or nil,
         dispelBorderTexture = dispelTex,
         dispelColorMap = dcMap,

@@ -6285,8 +6285,11 @@ function ns.ComputeOffTankFold(unit, br, bg, bb, otr, otg, otb)
             for i = 1, count do
                 if n >= 3 then break end
                 local tok = prefix .. i
-                if not UnitIsUnit(tok, "player")
-                    and UnitGroupRolesAssigned(tok) == "TANK" then
+                local isPlayer = UnitIsUnit(tok, "player")
+                local role = UnitGroupRolesAssigned(tok)
+                local secretRoles = UnitFrameUtil and UnitFrameUtil.GetUnitRoleIconDisplayInfo
+                if (not secretRoles or (not issecretvalue(isPlayer) and not issecretvalue(role)))
+                    and not isPlayer and role == "TANK" then
                     n = n + 1; t[n] = tok
                 end
             end

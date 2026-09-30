@@ -11,14 +11,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  the Raid Target markers throw ADDON_ACTION_FORBIDDEN; "View Houses" runs
 --  HouseListFrame:InitWithContextData tainted, which poisons the house list's
 --  ScrollBox data for the rest of the session (every later Visit House click,
---  even from a secure menu, is blocked at C_Housing.VisitHouse); and Trade /
---  Duel / Inspect / Follow each carry a live CheckInteractDistance predicate
---  that Menu.lua evaluates while the (tainted) menu is opening -- not only on
---  click -- which trips ADDON_ACTION_BLOCKED on that protected call.
+--  even from a secure menu, is blocked at C_Housing.VisitHouse).
 --
 --  Everything applies to THAT menu only. Set Focus / Follow / Raid Target /
---  View Houses / Trade / Duel / Inspect entries are greyed out so they cannot
---  throw, poison, or trip a blocked call, and a
+--  View Houses entries are greyed out so they cannot throw or poison, and a
 --  "View Houses" button docked beside the menu opens our own house list. Each
 --  row's Visit is a SecureActionButton WE own running the stock "visithouse"
 --  secure action from string attributes set out of combat -- the same channel
@@ -388,36 +384,22 @@ local function ModifyReopenedMenu(owner, rootDescription, contextData)
     local setFocus = SET_FOCUS or "Set Focus"
     local follow = FOLLOW or "Follow"
     local raidTarget = RAID_TARGET_ICON or "Raid Target Icon"
-    -- Trade/Duel/Inspect are the other three CheckInteractDistance-gated
-    -- entries (distIndex 2/3/1; Follow above is 4). Blizzard's generator
-    -- attaches a live distance-checking enabled-predicate to each of these
-    -- when it builds rootDescription, and Menu.lua evaluates that predicate
-    -- (calling the protected CheckInteractDistance) while opening/refreshing
-    -- the menu -- not only on click. That evaluation runs regardless of
-    -- which items we touch below, so leaving any of the four unhandled still
-    -- fires the protected call from this tainted re-open and trips
-    -- ADDON_ACTION_BLOCKED even though the item was never clicked.
     local trade = TRADE or "Trade"
     local duel = DUEL or "Duel"
-    local inspect = INSPECT or "Inspect"
     local petDuel = PET_BATTLE_PVP_DUEL or "Pet Battle Duel"
     local achievements = COMPARE_ACHIEVEMENTS or "Compare Achievements"
     for _, d in rootDescription:EnumerateElementDescriptions() do
         local text = MenuUtil.GetElementText(d)
         if d.SetEnabled and (text == setFocus or text == follow or text == raidTarget
-                or text == trade or text == duel or text == inspect
-                or text == petDuel or text == achievements
+                or text == trade or text == duel or text == petDuel or text == achievements
                 or (HOUSING_OK and text == viewHouses)) then
             -- Range-gated entries call CheckInteractDistance from Blizzard's
             -- enabled predicate. Disable them before that predicate can run in
             -- this tainted reopen; normal secure menus keep their range checks.
             -- Protected from a tainted menu: throws (focus/follow, and every
-            -- marker under Raid Target Icon -- SetRaidTarget), trips
-            -- ADDON_ACTION_BLOCKED on the distance check itself (trade/duel/
-            -- inspect/follow), or poisons HouseListFrame for the session
-            -- (View Houses; the docked button replaces it). SetEnabled(false)
-            -- replaces the element's predicate outright, so the original
-            -- distance check is never invoked for it again.
+            -- marker under Raid Target Icon -- SetRaidTarget) or poisons
+            -- HouseListFrame for the session (View Houses; the docked button
+            -- replaces it).
             d:SetEnabled(false)
         end
     end

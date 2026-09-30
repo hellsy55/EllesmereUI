@@ -8,6 +8,22 @@ local ADDON_NAME = "EllesmereUIUnitFrames"
 local ns = EllesmereUI._ModuleNS[ADDON_NAME]  -- module namespace (published by the module at its load)
 if not ns then return end  -- module disabled: no options page
 
+-- Keep the original cog rows and layout on clients without native PTR APIs.
+function ns.PtrAuraCogRows(rows, prefix, get, set)
+    local AK = EllesmereUI.AuraKit
+    if AK.SupportsPandemicPulse() then
+        rows[#rows + 1] = { type="toggle", label="Pandemic Pulse (PTR)",
+            get=function() return get(prefix .. "PandemicGlow") end,
+            set=function(v) set(prefix .. "PandemicGlow", v) end }
+    end
+    if AK.SupportsCasterName() then
+        rows[#rows + 1] = { type="toggle", label="Show Caster's Name (PTR)",
+            get=function() return get(prefix .. "ShowCasterName") end,
+            set=function(v) set(prefix .. "ShowCasterName", v) end }
+    end
+    return rows
+end
+
 local PAGE_DISPLAY   = "Main Frames"
 local PAGE_BOSS      = "Boss Frames"
 local PAGE_MINI      = "Mini Frames"
@@ -13062,7 +13078,7 @@ initFrame:SetScript("OnEvent", function(self)
             local leftRgn = sharedAddRow2._leftRegion
             EllesmereUI.BuildInlineCog(leftRgn, { disabled = BuffDisabled, disabledTooltip = "Buff Display",
                 title = "Buff Settings",
-                rows = {
+                rows = ns.PtrAuraCogRows({
                     { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                       get=function() return SValSupported("buffGrowth", "auto") end,
                       set=function(v) SSetSupported("buffGrowth", v) end },
@@ -13083,12 +13099,6 @@ initFrame:SetScript("OnEvent", function(self)
                       requireState="disabled",
                       get=function() return SValSupported("buffIconZoom", 0.07) end,
                       set=function(v) SSetSupported("buffIconZoom", v) end },
-                    { type="toggle", label="Pandemic Pulse (PTR)",
-                      get=function() return SValSupported("buffPandemicGlow", false) end,
-                      set=function(v) SSetSupported("buffPandemicGlow", v) end },
-                    { type="toggle", label="Show Caster Name (PTR)",
-                      get=function() return SValSupported("buffShowCasterName", false) end,
-                      set=function(v) SSetSupported("buffShowCasterName", v) end },
                     { type="toggle", label="Dispel Type Borders",
                       disabled=function() return selectedUnit == "player" or EllesmereUI.BlizzStyle.Get("unitframes") end,
                       disabledTooltip=function()
@@ -13097,7 +13107,7 @@ initFrame:SetScript("OnEvent", function(self)
                       end,
                       get=function() return selectedUnit ~= "player" and SValSupported("buffDispelBorder", false) == true end,
                       set=function(v) SSetSupported("buffDispelBorder", v) end },
-                },
+                }, "buff", function(key) return SValSupported(key, false) end, function(key, v) SSetSupported(key, v) end),
             })
         end
         -- Directions cog on Buff Icon Size (X/Y offsets)
@@ -13239,12 +13249,6 @@ initFrame:SetScript("OnEvent", function(self)
                       requireState="disabled",
                       get=function() return SValSupported("debuffDispelBorder", false) end,
                       set=function(v) SSetSupported("debuffDispelBorder", v) end },
-                    { type="toggle", label="Pandemic Pulse (PTR)",
-                      get=function() return SValSupported("debuffPandemicGlow", false) end,
-                      set=function(v) SSetSupported("debuffPandemicGlow", v) end },
-                    { type="toggle", label="Show Caster Name (PTR)",
-                      get=function() return SValSupported("debuffShowCasterName", false) end,
-                      set=function(v) SSetSupported("debuffShowCasterName", v) end },
             }
             -- Player only: the Dispel Colors palette (the Dispel Overlay row's
             -- swatches) tints the player's dispel type borders.
@@ -13268,7 +13272,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.BuildInlineCog(leftRgn, { disabled = DebuffDisabled, disabledTooltip = "Debuff Display",
                 title = "Debuff Settings",
-                rows = debuffCogRows,
+                rows = ns.PtrAuraCogRows(debuffCogRows, "debuff", function(key) return SValSupported(key, false) end, function(key, v) SSetSupported(key, v) end),
             })
         end
         -- Directions cog on Debuff Icon Size (X/Y offsets)
@@ -18302,7 +18306,7 @@ initFrame:SetScript("OnEvent", function(self)
                     disabledTooltip = function() return ns.GetBossSimpleBuffMode(db.profile.boss) ~= "none" and EllesmereUI.DisabledTooltip("Simple Buff Display", "disabled") or EllesmereUI.DisabledTooltip("Buffs Location") end,
                     rawTooltip = true,
                     title = "Buff Settings",
-                    rows = {
+                    rows = ns.PtrAuraCogRows({
                         { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                           get=function() return db.profile.boss.buffGrowth or "auto" end,
                           set=function(v) db.profile.boss.buffGrowth = v; ReloadAndUpdate() end },
@@ -18312,18 +18316,12 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Max Per Row", min=1, max=20, step=1,
                           get=function() return db.profile.boss.buffMaxPerRow or db.profile.boss.maxBuffs or 4 end,
                           set=function(v) db.profile.boss.buffMaxPerRow = v; ReloadAndUpdate() end },
-                        { type="toggle", label="Pandemic Pulse (PTR)",
-                          get=function() return db.profile.boss.buffPandemicGlow == true end,
-                          set=function(v) db.profile.boss.buffPandemicGlow = v; ReloadAndUpdate() end },
-                        { type="toggle", label="Show Caster Name (PTR)",
-                          get=function() return db.profile.boss.buffShowCasterName == true end,
-                          set=function(v) db.profile.boss.buffShowCasterName = v; ReloadAndUpdate() end },
                         { type="toggle", label="Dispel Type Borders",
                           disabled=function() return EllesmereUI.BlizzStyle.Get("unitframes") end,
                           disabledTooltip="This option requires Blizzard Style to be disabled",
                           get=function() return db.profile.boss.buffDispelBorder == true end,
                           set=function(v) db.profile.boss.buffDispelBorder = v; ReloadAndUpdate() end },
-                    },
+                    }, "buff", function(key) return db.profile.boss[key] == true end, function(key, v) db.profile.boss[key] = v; ReloadAndUpdate() end),
                 })
             end
 
@@ -18335,7 +18333,7 @@ initFrame:SetScript("OnEvent", function(self)
                     disabledTooltip = function() return ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" and EllesmereUI.DisabledTooltip("Simple Debuff Display", "disabled") or EllesmereUI.DisabledTooltip("Debuffs Location") end,
                     rawTooltip = true,
                     title = "Debuff Settings",
-                    rows = {
+                    rows = ns.PtrAuraCogRows({
                         { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                           get=function() return db.profile.boss.debuffGrowth or "auto" end,
                           set=function(v) db.profile.boss.debuffGrowth = v; ReloadAndUpdate() end },
@@ -18345,13 +18343,7 @@ initFrame:SetScript("OnEvent", function(self)
                         { type="slider", label="Max Per Row", min=1, max=20, step=1,
                           get=function() return db.profile.boss.debuffMaxPerRow or db.profile.boss.maxDebuffs or 10 end,
                           set=function(v) db.profile.boss.debuffMaxPerRow = v; ReloadAndUpdate() end },
-                        { type="toggle", label="Pandemic Pulse (PTR)",
-                          get=function() return db.profile.boss.debuffPandemicGlow == true end,
-                          set=function(v) db.profile.boss.debuffPandemicGlow = v; ReloadAndUpdate() end },
-                        { type="toggle", label="Show Caster Name (PTR)",
-                          get=function() return db.profile.boss.debuffShowCasterName == true end,
-                          set=function(v) db.profile.boss.debuffShowCasterName = v; ReloadAndUpdate() end },
-                    },
+                    }, "debuff", function(key) return db.profile.boss[key] == true end, function(key, v) db.profile.boss[key] = v; ReloadAndUpdate() end),
                 })
 
             end

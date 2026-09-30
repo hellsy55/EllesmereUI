@@ -6,9 +6,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  are exported by CharacterSheet and loaded before this file.
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
--- Compat: item-API globals (GetItemInfo, GetItemInfoInstant,
--- GetItemQualityColor) are called via EllesmereUI._GetX (set once in
--- EllesmereUI.lua) since some clients no longer expose the bare globals.
 local skinned = false
 local GetItemInfo = C_Item.GetItemInfo
 local GetItemInfoInstant = C_Item.GetItemInfoInstant
@@ -103,7 +100,7 @@ local function EUI_UpdateSlotStyle(slotName, slotID, textOverlayFrame, isRightCo
 
     -- Item level label (font size matches CharacterSheet)
     if itemLink and not GetFFD(slot).iLvlText and not skipLabels then
-        local _, _, quality, ilvl = EllesmereUI._GetItemInfo(itemLink)
+        local _, _, quality, ilvl = GetItemInfo(itemLink)
         if ilvl and ilvl > 0 then
             local itemLevelSize = EllesmereUIDB and EllesmereUIDB.charSheetItemLevelSize or 11
             local ilvlText = GetFFD(slot).cachedILvlText or textOverlayFrame:CreateFontString(nil, "OVERLAY")
@@ -617,7 +614,7 @@ local function SkinInspectSheet()
             local itemLink = GetInventoryItemLink("inspect", slot:GetID())
             local borderR, borderG, borderB = 0.4, 0.4, 0.4  -- Default gray
             if itemLink then
-                local _, _, rarity = EllesmereUI._GetItemInfo(itemLink)
+                local _, _, rarity = GetItemInfo(itemLink)
                 if rarity then
                     borderR, borderG, borderB = C_Item.GetItemQualityColor(rarity)
                 end
