@@ -32,11 +32,13 @@ local tremove = table.remove
 -- a rank but no entry), false when not taken or not part of the active tree.
 local _nodeState = {}
 local _nodeStateConfig = nil
+local _nodeStateHeroSpec = nil
 
 -- Talent edit landed (TRAIT_CONFIG_UPDATED and friends): forget every node.
 function ns.TalentCondInvalidate()
     wipe(_nodeState)
     _nodeStateConfig = nil
+    _nodeStateHeroSpec = nil
 end
 
 local function NodeState(nodeID, configID)
@@ -44,6 +46,7 @@ local function NodeState(nodeID, configID)
         -- Spec swap: a different config, so every cached rank is stale.
         wipe(_nodeState)
         _nodeStateConfig = configID
+        _nodeStateHeroSpec = C_ClassTalents.GetActiveHeroTalentSpec and C_ClassTalents.GetActiveHeroTalentSpec() or false
     end
     local st = _nodeState[nodeID]
     if st == nil then
@@ -53,14 +56,19 @@ local function NodeState(nodeID, configID)
         local ok, info
         if configID then ok, info = pcall(C_Traits.GetNodeInfo, configID, nodeID) end
         if ok and info then
-            -- Committed state only: activeRank/activeEntry also count picks staged
-            -- in the talent UI and never applied. A granted rank (activeRank above
-            -- ranksPurchased) cannot be staged, so it counts as taken as well.
-            local committed = info.entryIDsWithCommittedRanks
-            if committed and #committed > 0 then
-                st = committed[1]
-            elseif (info.activeRank or 0) > (info.ranksPurchased or 0) then
-                st = (info.activeEntry and info.activeEntry.entryID) or true
+            -- Hero-tree ranks can remain queryable outside the active subtree. Only
+            -- the currently active Hero specialization can satisfy a Hero condition.
+            local activeTree = not info.subTreeID or info.subTreeID == _nodeStateHeroSpec
+            if activeTree then
+                -- Committed state only: activeRank/activeEntry also count picks staged
+                -- in the talent UI and never applied. A granted rank (activeRank above
+                -- ranksPurchased) cannot be staged, so it counts as taken as well.
+                local committed = info.entryIDsWithCommittedRanks
+                if committed and #committed > 0 then
+                    st = committed[1]
+                elseif (info.activeRank or 0) > (info.ranksPurchased or 0) then
+                    st = (info.activeEntry and info.activeEntry.entryID) or true
+                end
             end
         end
         _nodeState[nodeID] = st
