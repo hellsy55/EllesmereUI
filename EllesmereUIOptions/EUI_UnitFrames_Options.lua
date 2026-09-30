@@ -13491,6 +13491,9 @@ initFrame:SetScript("OnEvent", function(self)
                 -- every other class off for these units; stale keys from retired
                 -- checkboxes stay inert).
                 buffFilterItems = {
+                    -- AND-modifier (engine: ChainFor), not a class: never locks a lane.
+                    { key = "__hasDuration", label = "Has Duration",
+                      tooltip = "Only show buffs that have a duration, excluding permanent ones. Combines with the filters below." },
                     { isHeader = true, label = "Show", rightLabel = "Hide" },
                     { key = "stealable",         label = "Stealable",          dual = true, tooltip = "Buffs you can spellsteal or purge" },
                     { key = "bigDefensive",      label = "Big Defensive",      dual = true, tooltip = "Major defensive cooldowns" },
@@ -13707,6 +13710,7 @@ initFrame:SetScript("OnEvent", function(self)
                     cbDD, cbRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                         rgn, 210, rgn:GetFrameLevel() + 2, buffFilterItems,
                         function(k, neg)
+                            if k == "__hasDuration" then return SDB().buffDurOnly == true end
                             if neg then
                                 local m = SDB().buffNegClasses
                                 local sk = BUFF_NEG_SKEYS[k]
@@ -13716,6 +13720,13 @@ initFrame:SetScript("OnEvent", function(self)
                         end,
                         function(k, v, neg)
                             local db = SDB()
+                            if k == "__hasDuration" then
+                                -- Not buffHasDuration: that is the player's broad
+                                -- mode, which copies can have left on this unit.
+                                db.buffDurOnly = v or nil
+                                ReloadAndUpdate(); UpdatePreview()
+                                return
+                            end
                             local sk = BUFF_NEG_SKEYS[k]
                             if neg then
                                 if not sk then return end
@@ -13770,7 +13781,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local cbDD, cbRefresh
                 do
                     local ps = UNIT_DB_MAP[selectedUnit]()
-                    local ALL_KEY = "__allDebuffs"
+                    local ALL_KEY, DUR_KEY = "__allDebuffs", "__debuffHasDuration"
                     local function AllOn() return ps.debuffShowAll ~= false end
                     -- Hovering a dimmed Show box explains the dim (the lane is inert
                     -- while All Debuffs already shows everything), same wording as
@@ -13799,6 +13810,8 @@ initFrame:SetScript("OnEvent", function(self)
                         local items = {
                             { key = ALL_KEY, label = "All Debuffs",
                               tooltip = "Show every debuff. Use the Hide lane below to remove specific filters." },
+                            { key = DUR_KEY, label = "Has Duration",
+                              tooltip = "Only show debuffs that have a duration, excluding permanent ones. Combines with the filters below; checked alone it shows every timed debuff." },
                             { isHeader = true, label = "Match Mode" },
                             { key = "__matchAny", label = EllesmereUI.L("Match Any Filter"), isModifier = true,
                               lockedFn = AllOn, lockedTooltip = matchLockTip,
@@ -13838,6 +13851,7 @@ initFrame:SetScript("OnEvent", function(self)
                         FilterItems,
                         function(k, neg)
                             if k == ALL_KEY then return AllOn() end
+                            if k == DUR_KEY then return ps.debuffHasDuration == true end
                             if k == "__matchAny" or k == "__matchAll" then
                                 return (k == "__matchAll") == (ps.debuffFilterMatch == "all")
                             end
@@ -13869,6 +13883,15 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- subtracts in both modes; the show lane goes dormant
                                 -- while All Debuffs is on).
                                 ps.debuffShowAll = v
+                                ReloadAndUpdate()
+                                EllesmereUI:RefreshPage()
+                                return
+                            end
+                            if k == DUR_KEY then
+                                -- AND-modifier (never locks the Show lane): combines
+                                -- with All Debuffs or the Show picks; alone it is the
+                                -- timed catch-all.
+                                ps.debuffHasDuration = v or nil
                                 ReloadAndUpdate()
                                 EllesmereUI:RefreshPage()
                                 return
@@ -13907,6 +13930,7 @@ initFrame:SetScript("OnEvent", function(self)
                         EllesmereUI.L("You are displaying NO debuffs at all."),
                         function()
                             return DebuffDisabled() or AllOn()
+                                or (ps.debuffHasDuration == true and not AnyShowClass())
                                 or (AnyShowClass() and not (ns.UF_DebuffMatchEmpty and ns.UF_DebuffMatchEmpty(ps)))
                         end)
                 end
@@ -13919,6 +13943,25 @@ initFrame:SetScript("OnEvent", function(self)
             -- nothing, so the mode dropdown carries the standard empty warning.
             if selectedUnit ~= "player" and not EllesmereUI._prebuilding then
                 AttachDebuffModeWarn(filterRow._rightRegion, SDB, DebuffDisabled)
+                -- Has Duration: an AND-modifier on the picked mode (engine:
+                -- ChainFor), in the row's cog since the mode dropdown is
+                -- single-select.
+                EllesmereUI.BuildInlineCog(filterRow._rightRegion, {
+                    title = "Debuff Filter",
+                    tip = "Debuff Filter Options",
+                    disabled = DebuffDisabled,
+                    disabledTooltip = "Debuffs",
+                    requireState = "displayed",
+                    rows = {
+                        { type = "toggle", label = "Has Duration",
+                          tooltip = "Only show debuffs that have a duration, excluding permanent ones. Tracked Auras always show.",
+                          get = function() return SDB().debuffHasDuration == true end,
+                          set = function(v)
+                              SDB().debuffHasDuration = v or nil
+                              ReloadAndUpdate()
+                          end },
+                    },
+                })
             end
         end
         end   -- close filter row hidden-while-both-None gate

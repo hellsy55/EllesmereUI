@@ -655,7 +655,10 @@ for _, info in ipairs(BAR_CONFIG) do
         -- End caps (the End Caps checklist and its cog) and WoW Forever's bar
         -- background, per bar. nil reads the bar's default (ns.AB_CapsSides,
         -- ns.AB_CapsVal, ns.AB_ForeverBg): Action Bar 1 falls back to the
-        -- profile-wide keys, every other bar starts without them.
+        -- profile-wide keys, every other bar starts without them. The micro
+        -- menu and bag bar read the same endCap* keys; the profile keys
+        -- endCapSpanLeft / endCapSpanRight (written only by the first-install
+        -- capture, in no defaults table) move bar 1's defaults to another bar.
         endCapLeft = nil,
         endCapRight = nil,
         endCapArt = nil,
@@ -709,8 +712,9 @@ if defaults.profile.bars.FavorBar then
     defaults.profile.bars.FavorBar.alwaysHidden = true
 end
 
--- Blizzard data bar override (let Blizzard control XP + Rep via Edit Mode)
-defaults.profile.useBlizzardDataBars = false
+-- Blizzard data bar override (let Blizzard control XP + Rep via Edit Mode). WoW
+-- Forever keeps Blizzard's own bars by default (the per-client default rule).
+defaults.profile.useBlizzardDataBars = (EllesmereUI.IS_FOREVER == true)
 -- Stock vehicle / override bar suppression. Opt-in, and inert until switched
 -- on: no frame, no events and no hook exist while it is false.
 defaults.profile.hideBlizzardVehicleBar = false
@@ -753,6 +757,16 @@ end
 -- alpha), or a record beside its SetAlpha.
 local _fadeAlpha = {}
 
+-- The micro menu's and bag bar's end caps ride our own follower frame, not
+-- the Blizzard frame, so every alpha written to that Blizzard frame is copied
+-- onto their cap layer: ns._abFadeTwin[blizzFrame] = cap layer (weak keys),
+-- set only while that bar shows caps (ns.AB_ExtraCaps); nil otherwise.
+function ns.AB_FadeTwin(frame, a)
+    local tw = ns._abFadeTwin
+    local h = tw and tw[frame]
+    if h then h:SetAlpha(a) end
+end
+
 -- The one fader for every fade target: a shared OnUpdate queue.
 -- AnimationGroups spread taint on Blizzard frames and cost 0.7-4ms to start
 -- on secure bar frames.
@@ -761,21 +775,27 @@ local _extraFadeFrame = CreateFrame("Frame")
 
 local function _ExtraFadeOnUpdate(_, elapsed)
     local anyActive = false
+    local tw = ns._abFadeTwin
     for frame, info in pairs(_extraFadeQueue) do
         info.elapsed = info.elapsed + elapsed
         local t = info.elapsed / info.duration
+        local a
         if t >= 1 then
-            local a = info.toAlpha
+            a = info.toAlpha
             frame:SetAlpha(a)
             _fadeAlpha[frame] = a
             _extraFadeQueue[frame] = nil
         else
             -- Smooth in/out easing
             local e = t < 0.5 and (2 * t * t) or (1 - (-2 * t + 2)^2 / 2)
-            local a = info.fromAlpha + (info.toAlpha - info.fromAlpha) * e
+            a = info.fromAlpha + (info.toAlpha - info.fromAlpha) * e
             frame:SetAlpha(a)
             _fadeAlpha[frame] = a
             anyActive = true
+        end
+        if tw then
+            local h = tw[frame]
+            if h then h:SetAlpha(a) end
         end
     end
     if not anyActive then
@@ -831,6 +851,7 @@ local function FadeTo(frame, toAlpha, duration)
     if abs(cur - toAlpha) < 0.01 then
         frame:SetAlpha(toAlpha)
         _fadeAlpha[frame] = toAlpha
+        ns.AB_FadeTwin(frame, toAlpha)
         return
     end
     local existing = _extraFadeQueue[frame]
@@ -851,6 +872,7 @@ local function StopFade(frame, alpha)
     if alpha then
         frame:SetAlpha(alpha)
         _fadeAlpha[frame] = alpha
+        ns.AB_FadeTwin(frame, alpha)
     end
 end
 
@@ -5669,6 +5691,72 @@ local function CaptureBlizzardDefaults()
     return captured
 end
 
+-- First-install end cap span: the elements in one row directly beside
+-- Blizzard's Action Bar 1 at capture time (horizontal bars 2-8 shown at all
+-- times, the micro menu, the bag bar; stance and pet bars depend on the class,
+-- so never), walked outward from bar 1 on each side. The last one each way
+-- carries bar 1's cap for that side (ns.AB_CapsSides). Same row = vertical
+-- overlap of at least half the shorter one; directly beside = facing edges
+-- -8..12 apart (Blizzard's WoW Forever row leaves 4.5 and 7), the nearest
+-- first. Returns the left and right bar keys, nil for none.
+function ns.AB_CaptureCapSpan(captured)
+    local main = _G.MainActionBar
+    local mc = captured and captured.MainBar
+    if not main or not mc or mc.orientation == "vertical" then return nil, nil end
+    local uiS = UIParent:GetEffectiveScale()
+    local function Rect(f)
+        if not (f and f.GetLeft) then return nil end
+        local l, r, t, b = f:GetLeft(), f:GetRight(), f:GetTop(), f:GetBottom()
+        if not (l and r and t and b) or r - l < 1 or t - b < 1 then return nil end
+        local k = f:GetEffectiveScale() / uiS
+        return { l * k, r * k, t * k, b * k }
+    end
+    local home = Rect(main)
+    if not home or home[2] - home[1] < 20 then return nil, nil end
+    local cands = {}
+    for _, info in ipairs(BAR_CONFIG) do
+        local d = captured[info.key]
+        if info.key ~= "MainBar" and d and info.blizzFrame and not info.isStance and not info.isPetBar
+            and d.orientation == "horizontal" and (d.visibility == nil or d.visibility == 0) then
+            local r = Rect(_G[info.blizzFrame])
+            if r then cands[#cands + 1] = { key = info.key, r = r } end
+        end
+    end
+    local mcf, mm = _G.MicroMenuContainer, _G.MicroMenu
+    if mcf and mcf:IsShown() and mm and mm:GetParent() == mcf and mm:IsShown() and mm.isHorizontal ~= false then
+        local r = Rect(mcf)
+        if r then cands[#cands + 1] = { key = "MicroBar", r = r } end
+    end
+    local bags = _G.BagsBar
+    if bags and bags:IsShown() and bags.isHorizontal ~= false then
+        local r = Rect(bags)
+        if r then cands[#cands + 1] = { key = "BagBar", r = r } end
+    end
+    local function Walk(dir)
+        local cur, last, used = home, nil, {}
+        while true do
+            local best, bestGap
+            for i = 1, #cands do
+                local c = cands[i]
+                if not used[c] then
+                    local r = c.r
+                    local ov = min(cur[3], r[3]) - max(cur[4], r[4])
+                    if ov >= 0.5 * min(cur[3] - cur[4], r[3] - r[4]) then
+                        local gap = (dir > 0) and (r[1] - cur[2]) or (cur[1] - r[2])
+                        if gap >= -8 and gap <= 12 and (not bestGap or gap < bestGap) then
+                            best, bestGap = c, gap
+                        end
+                    end
+                end
+            end
+            if not best then return last end
+            used[best] = true
+            last, cur = best.key, best.r
+        end
+    end
+    return Walk(-1), Walk(1)
+end
+
 -------------------------------------------------------------------------------
 --  Layout Engine positions buttons in a grid
 -------------------------------------------------------------------------------
@@ -6086,42 +6174,58 @@ end
 -- One of a bar's end cap settings (endCapArt, endCapScale, endCapOffsetX,
 -- endCapOffsetY), nil = unset: the bar's own key, and on Action Bar 1 an
 -- unset key reads the profile-wide key (euiEndCaps for the art, the same
--- name for the rest), which nothing writes.
+-- name for the rest), which nothing writes. A bar that carries one of Action
+-- Bar 1's caps (the first-install span below) reads bar 1's where unset, so
+-- the pair matches.
 function ns.AB_CapsVal(key, k)
     local p = EAB.db and EAB.db.profile
     if not p then return nil end
     local s = p.bars and p.bars[key]
     local v = s and s[k]
-    if v == nil and key == "MainBar" then
-        v = p[(k == "endCapArt") and "euiEndCaps" or k]
+    if v == nil then
+        if key == "MainBar" then
+            v = p[(k == "endCapArt") and "euiEndCaps" or k]
+        elseif p.endCapSpanLeft == key or p.endCapSpanRight == key then
+            v = ns.AB_CapsVal("MainBar", k)
+        end
     end
     return v
 end
 
+-- Whether Action Bar 1's unset sides show caps under the current look: WoW
+-- Forever while foreverHideEndCaps is off; Blizzard Style and Classic WoW UI
+-- while showEndCaps; the EllesmereUI style while euiEndCaps names art this
+-- client draws.
+function ns.AB_CapsMainDefault(p)
+    if ns.AB_Forever() then return p.foreverHideEndCaps ~= true end
+    if ns.AB_Style() == "eui" then return ns.AB_CapsArtOK(p.euiEndCaps) end
+    return p.showEndCaps == true
+end
+
 -- Which ends of a bar show caps (the End Caps checklist): the bar's own
 -- endCapLeft / endCapRight. An unset side reads the bar's default: Action Bar
--- 1 follows the current look's profile-wide key, both sides alike (WoW
--- Forever: shown unless foreverHideEndCaps; Blizzard Style and Classic WoW
--- UI: while showEndCaps; the EllesmereUI style: while euiEndCaps names art
--- this client draws); every other bar shows none.
+-- 1 follows the look (ns.AB_CapsMainDefault), both sides alike; every other
+-- bar shows none. The first-install span (endCapSpanLeft / endCapSpanRight,
+-- written by the Action Bars capture: the outermost bar in a row directly
+-- beside bar 1 on that side) moves bar 1's default for that side onto the
+-- named bar's same side. Checklist choices always win.
 function ns.AB_CapsSides(key)
     local p = EAB.db and EAB.db.profile
     local s = p and p.bars and p.bars[key]
     if not s then return false, false end
     local l, r = s.endCapLeft, s.endCapRight
     if l == nil or r == nil then
-        local legacy = false
+        local sl, sr = p.endCapSpanLeft, p.endCapSpanRight
+        local dl, dr = false, false
         if key == "MainBar" then
-            if ns.AB_Forever() then
-                legacy = p.foreverHideEndCaps ~= true
-            elseif ns.AB_Style() == "eui" then
-                legacy = ns.AB_CapsArtOK(p.euiEndCaps)
-            else
-                legacy = p.showEndCaps == true
-            end
+            local d = ns.AB_CapsMainDefault(p)
+            dl, dr = d and sl == nil, d and sr == nil
+        elseif sl == key or sr == key then
+            local d = ns.AB_CapsMainDefault(p)
+            dl, dr = d and sl == key, d and sr == key
         end
-        if l == nil then l = legacy end
-        if r == nil then r = legacy end
+        if l == nil then l = dl end
+        if r == nil then r = dr end
     end
     return l and true or false, r and true or false
 end
@@ -6448,6 +6552,251 @@ function ns.AB_ApplyBarChrome(key, frame, w, h, btnW, vertical, multi, n, step, 
     if not st then st = {}; all[key] = st end
     ns.AB_PaintBarChrome(st, frame, 0, 0, w, h, btnW, fv, look, multi, vertical, n, step, extra, onePx, nil, key, sideL, sideR)
     ns.AB_CapsEvSync()
+end
+
+-------------------------------------------------------------------------------
+--  End caps on the micro menu and the bag bar. Both are Blizzard frames EAB
+--  only follows, so their caps are painted (the painter above, the same keys
+--  and checklist as an action bar) onto the bar's follower frame
+--  (extraBarHolders, our own), never into Blizzard's tree. They take Action Bar
+--  1's button size (neither bar has one), the strata and level of the frame
+--  that holds the buttons (so they draw over them as bar 1's do), and the
+--  Blizzard frame's alpha through the fader's twin. Shown state follows EAB's
+--  own hides (the follower hides with them; SetManagedBlizzOwnedSuppressed
+--  reports its own, Data Bars' micro menu hider too), the micro menu's docking
+--  (a secure post-hook) and WoW Forever's interface-style switch (its event,
+--  one frame later): never an OnShow hook, since Blizzard shows and hides
+--  these frames inside functions that go on to call protected ones. The micro
+--  menu's caps sit on the buttons' own rect (retail's container also keeps
+--  the queue eye's slot), the bag bar's on its shown buttons (retail's bar
+--  keeps its length while collapsed). Nothing runs until a side shows.
+-------------------------------------------------------------------------------
+ns.AB_CAP_EXTRAS = { MicroBar = true, BagBar = true }
+
+-- The frame whose level the buttons ride on.
+function ns.AB_ExtraCapsBase(key)
+    if key == "MicroBar" then return _G.MicroMenu end
+    return _G.BagsBar
+end
+
+-- Edit Mode laid the bar out vertically: no caps (as a vertical action bar).
+function ns.AB_ExtraCapsVertical(key)
+    local f = ns.AB_ExtraCapsBase(key)
+    return f ~= nil and f.isHorizontal == false
+end
+
+function ns.AB_ExtraCapsShown(key)
+    local st = ns._abChrome and ns._abChrome[key]
+    local host = st and st.capHost
+    if not host then return end
+    local bf = _G[BAR_LOOKUP[key].frameName]
+    local on = st.capsOn and bf ~= nil and bf:IsShown()
+    if on and key == "MicroBar" then
+        -- Docked into a vehicle or pet battle frame: the container is empty.
+        local m = _G.MicroMenu
+        on = m ~= nil and m:GetParent() == bf and m:IsShown()
+    end
+    host:SetShown(on and true or false)
+end
+
+-- After EAB itself hid or showed one of the two Blizzard frames.
+function ns.AB_ExtraCapsFor(frame)
+    if not ns._abCapHooked then return end
+    if frame == _G.MicroMenuContainer then
+        ns.AB_ExtraCapsShown("MicroBar")
+    elseif frame == _G.BagsBar then
+        ns.AB_ExtraCapsShown("BagBar")
+    end
+end
+
+-- Once per bar, the first time its caps show (a secure post-hook cannot be
+-- removed; with no caps it returns at the missing layer).
+function ns.AB_ExtraCapsHooks(key)
+    local done = ns._abCapHooked or {}
+    ns._abCapHooked = done
+    if done[key] then return end
+    done[key] = true
+    local m = _G.MicroMenu
+    if key == "MicroBar" and m and m.OverrideMicroMenuPosition then
+        hooksecurefunc(m, "OverrideMicroMenuPosition", function() ns.AB_ExtraCapsShown("MicroBar") end)
+    end
+end
+
+-- WoW Forever's interface-style switch (keyboard and mouse vs controller)
+-- hides and shows both Blizzard frames (INPUT_DEVICE_INTERFACE_TRANSITION):
+-- the shown state is re-read one frame later, listened to only while either
+-- bar shows caps. Retail's frames never follow that switch.
+function ns.AB_ExtraCapsPadFlush()
+    ns._abCapStyleArmed = nil
+    ns.AB_ExtraCapsShown("MicroBar")
+    ns.AB_ExtraCapsShown("BagBar")
+end
+function ns.AB_ExtraCapsPad()
+    if not EllesmereUI.IS_FOREVER then return end
+    local all = ns._abChrome
+    local on = all and ((all.MicroBar and all.MicroBar.capsOn) or (all.BagBar and all.BagBar.capsOn))
+    local ev = ns._abCapStyleEv
+    if not on then
+        if ev then ev:UnregisterAllEvents() end
+        return
+    end
+    if not ev then
+        if C_EventUtils and C_EventUtils.IsEventValid
+            and not C_EventUtils.IsEventValid("INPUT_DEVICE_INTERFACE_TRANSITION") then
+            return
+        end
+        ev = ns.TakeShell()
+        ev:SetScript("OnEvent", function()
+            if ns._abCapStyleArmed then return end
+            ns._abCapStyleArmed = true
+            C_Timer_After(0, ns.AB_ExtraCapsPadFlush)
+        end)
+        ns._abCapStyleEv = ev
+    end
+    ev:RegisterEvent("INPUT_DEVICE_INTERFACE_TRANSITION")
+end
+
+-- Retail's bag bar keeps its full length while collapsed (the expand arrow
+-- only hides the bag slots), so its caps sit on the shown buttons: their
+-- left edge and width in follower units, nil = the whole follower. WoW
+-- Forever hides that arrow, so its bar never collapses.
+function ns.AB_BagEdge(b, hs, hl, minL, maxR)
+    if b and b:IsShown() then
+        local l, r = b:GetLeft(), b:GetRight()
+        if l and r then
+            local k = b:GetEffectiveScale() / hs
+            l, r = l * k - hl, r * k - hl
+            if not minL or l < minL then minL = l end
+            if not maxR or r > maxR then maxR = r end
+        end
+    end
+    return minL, maxR
+end
+function ns.AB_BagCapsExtent(holder)
+    local bb, mgr = _G.BagsBar, _G.MainMenuBarBagManager
+    if not bb or bb.hideExpandToggle or not (mgr and mgr.EnumerateBagButtons) then return nil end
+    local hs, hl = holder:GetEffectiveScale(), holder:GetLeft()
+    if not hl then return nil end
+    local minL, maxR = ns.AB_BagEdge(_G.BagBarExpandToggle, hs, hl, nil, nil)
+    for _, b in mgr:EnumerateBagButtons() do
+        minL, maxR = ns.AB_BagEdge(b, hs, hl, minL, maxR)
+    end
+    if not minL or maxR - minL < 1 then return nil end
+    return minL, maxR - minL
+end
+-- Collapsing or expanding the bag bar repaints its caps (one frame later,
+-- after Blizzard's own relayout), listened to only while it shows caps.
+function ns.AB_BagCapsExpandFlush()
+    ns._abBagArmed = nil
+    ns.AB_ExtraCaps("BagBar")
+end
+function ns.AB_BagCapsExpandChanged()
+    if ns._abBagArmed then return end
+    ns._abBagArmed = true
+    C_Timer_After(0, ns.AB_BagCapsExpandFlush)
+end
+function ns.AB_BagCapsWatch(on)
+    local bb = _G.BagsBar
+    if not (bb and not bb.hideExpandToggle and EventRegistry) then return end
+    if on then
+        if not ns._abBagWatch then
+            ns._abBagWatch = true
+            EventRegistry:RegisterCallback("MainMenuBarManager.OnExpandChanged", ns.AB_BagCapsExpandChanged, ns.AB_CAP_EXTRAS)
+        end
+    elseif ns._abBagWatch then
+        ns._abBagWatch = nil
+        EventRegistry:UnregisterCallback("MainMenuBarManager.OnExpandChanged", ns.AB_CAP_EXTRAS)
+    end
+end
+
+-- Paints (or clears) a bar's caps. Stamp-gated on every input the paint
+-- reads; the shown state is re-read every call.
+function ns.AB_ExtraCaps(key)
+    local holder = extraBarHolders[key]
+    local bf = holder and _G[BAR_LOOKUP[key].frameName]
+    if not bf then return end
+    local all = ns._abChrome
+    local st = all and all[key]
+    local look, sL, sR
+    if not ns.AB_ExtraCapsVertical(key) then look, sL, sR = ns.AB_CapsLook(key) end
+    if not look then
+        if st and st.capsOn then
+            ns.AB_HideBarChrome(st)
+            if ns._abFadeTwin then ns._abFadeTwin[bf] = nil end
+            ns.AB_CapsEvSync()
+            ns.AB_ExtraCapsPad()
+            if key == "BagBar" then ns.AB_BagCapsWatch(false) end
+        end
+        return
+    end
+    if not all then all = {}; ns._abChrome = all end
+    if not st then st = {}; all[key] = st end
+    local base = ns.AB_ExtraCapsBase(key) or bf
+    local lvl, strata = base:GetFrameLevel(), base:GetFrameStrata()
+    local owner, ox = holder, 0
+    local w, h, u = holder:GetWidth(), holder:GetHeight(), ns._abMainBtnW or 45
+    local m = (key == "MicroBar") and _G.MicroMenu
+    if m then
+        -- The buttons' own rect, on a frame of ours anchored to it: it follows
+        -- a corner flip of the menu in its container by itself.
+        owner = st.xOwner
+        if not owner then
+            owner = CreateFrame("Frame", nil, holder)
+            owner:SetPoint("TOPLEFT", m, "TOPLEFT")
+            owner:SetPoint("BOTTOMRIGHT", m, "BOTTOMRIGHT")
+            st.xOwner = owner
+        end
+        local k = m:GetEffectiveScale() / holder:GetEffectiveScale()
+        w, h = m:GetWidth() * k, m:GetHeight() * k
+    elseif key == "BagBar" then
+        local l, bw = ns.AB_BagCapsExtent(holder)
+        if l then ox, w = l, bw end
+    end
+    local sc, dx, dy = ns.AB_CapsTweak(key)
+    if not st.capsOn or st.xLook ~= look or st.xL ~= sL or st.xR ~= sR or st.xW ~= w
+        or st.xH ~= h or st.xU ~= u or st.xS ~= sc or st.xDX ~= dx or st.xDY ~= dy
+        or st.xLvl ~= lvl or st.xStr ~= strata or st.xOX ~= ox then
+        if holder:GetFrameStrata() ~= strata then holder:SetFrameStrata(strata) end
+        holder:SetFrameLevel(lvl)
+        if owner ~= holder then
+            if owner:GetFrameStrata() ~= strata then owner:SetFrameStrata(strata) end
+            owner:SetFrameLevel(lvl)
+        end
+        ns.AB_PaintCaps(st, owner, ox, 0, w, h, u, look, false, nil, key, sL, sR)
+        ns.AB_CapsFaction(st)
+        st.xLook, st.xL, st.xR, st.xW, st.xH, st.xU = look, sL, sR, w, h, u
+        st.xS, st.xDX, st.xDY, st.xLvl, st.xStr, st.xOX = sc, dx, dy, lvl, strata, ox
+        local tw = ns._abFadeTwin
+        if not tw then
+            tw = setmetatable({}, { __mode = "k" })
+            ns._abFadeTwin = tw
+        end
+        tw[bf] = st.capsOn and st.capHost or nil
+        if st.capHost then st.capHost:SetAlpha(_fadeAlpha[bf] or 1) end
+        if st.capsOn then ns.AB_ExtraCapsHooks(key) end
+        ns.AB_CapsEvSync()
+        ns.AB_ExtraCapsPad()
+        if key == "BagBar" then ns.AB_BagCapsWatch(st.capsOn) end
+    end
+    ns.AB_ExtraCapsShown(key)
+end
+
+function ns.AB_ExtraCapsAll()
+    ns.AB_ExtraCaps("MicroBar")
+    ns.AB_ExtraCaps("BagBar")
+end
+
+-- Repaints the bars that carry Action Bar 1's caps (its cap settings reach them).
+function ns.AB_CapsSpanApply()
+    local p = EAB.db and EAB.db.profile
+    if not p then return end
+    local l, r = p.endCapSpanLeft, p.endCapSpanRight
+    for i = 1, 2 do
+        local k = (i == 1) and l or r
+        if k and not (i == 2 and k == l) then
+            if ns.AB_CAP_EXTRAS[k] then ns.AB_ExtraCaps(k) else EAB:ApplyPaddingForBar(k) end
+        end
+    end
 end
 
 -- The 20 segments of Blizzard's experience bar on our XP / reputation / favor
@@ -7143,6 +7492,12 @@ local function LayoutBar(key)
         ns.AB_ApplyBarChrome(key, frame, max(frameW, 1), max(frameH, 1), btnW, isVertical, totalRows > 1,
             oneLine and (isVertical and totalRows or totalCols) or 0,
             isVertical and stepH or stepW, isVertical and extraH or extraW, onePx)
+    end
+    -- The micro menu's and bag bar's caps size from Action Bar 1's buttons
+    -- and may carry its caps (the span): repaint them after bar 1's pass.
+    if key == "MainBar" then
+        ns._abMainBtnW = btnW
+        ns.AB_ExtraCapsAll()
     end
 
     -- Countdown size can be capped against button width (CooldownFonts .EffectiveSize,
@@ -10382,6 +10737,7 @@ function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, supp
         if frame:IsShown() then
             if not InCombatLockdown() then
                 frame:Hide()
+                ns.AB_ExtraCapsFor(frame)
             else
                 ns._eabApplyDeferred = true
             end
@@ -10407,6 +10763,7 @@ function EAB_VTABLE.ExtraBars.SetManagedBlizzOwnedSuppressed(frame, reason, supp
         ffd[shownKey] = nil
         if wasShown and not frame:IsShown() then
             frame:Show()
+            ns.AB_ExtraCapsFor(frame)
         end
     end
 end
@@ -10431,6 +10788,7 @@ function EAB_VTABLE.ExtraBars.ApplyManagedNonSecureAlpha(info, frame, s)
         _fadeAlpha[frame] = resting
         if hstate then hstate.fadeDir = nil end
     end
+    ns.AB_FadeTwin(frame, _fadeAlpha[frame])
 end
 
 function EAB_VTABLE.ExtraBars.ApplyManagedMouse(frame, blizzOwnedVisibility, s, shouldShow)
@@ -13695,6 +14053,7 @@ function EAB:ReclaimMicroMenu()
         MicroMenu:SetPoint(h[1], h[2] or MicroMenuContainer, h[3], h[4], h[5])
     end
     MicroMenu:SetAlpha(1)
+    ns.AB_ExtraCapsShown("MicroBar")
 end
 
 -- Blizzard docks MicroMenu into PetBattleFrame for the duration of a pet
@@ -14156,6 +14515,9 @@ local function ApplyAll()
         if not inCombat then EAB:ApplyClickThroughForBar(key) end
         if not inCombat then EAB:ApplyStrataForBar(key) end
     end
+    -- The micro menu's and bag bar's caps (a profile or spec switch changes
+    -- their keys without bar 1's layout stamp moving).
+    ns.AB_ExtraCapsAll()
 
     EAB:ApplyPushedTextures()
     EAB:HookPushedFlash()
@@ -14964,10 +15326,6 @@ end
 function EAB:OnFirstLogin()
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 
-    -- WoW Forever starts every install from the base layout, never from a
-    -- snapshot of Blizzard's bars (EllesmereUI_ForeverLayout.lua).
-    if EllesmereUI.IS_FOREVER then self.db.sv._capturedOnce_EAB = true end
-
     -- A profile import can stamp the capture flag mid-session (imported data
     -- is a chosen layout). Honor the stamp here so a still-pending capture
     -- never overwrites the imported profile; just run the normal setup.
@@ -15023,6 +15381,47 @@ function EAB:OnFirstLogin()
                     point = data.point, relPoint = data.relPoint,
                     x = data.x, y = data.y,
                 }
+            end
+        end
+    end
+
+    -- Action Bar 1's end caps go to the outer ends of a row of bars Blizzard
+    -- placed directly beside it (WoW Forever: the micro menu and bags).
+    do
+        local p = self.db.profile
+        p.endCapSpanLeft, p.endCapSpanRight = ns.AB_CaptureCapSpan(captured)
+    end
+
+    -- WoW Forever keeps Blizzard's XP / reputation bars (useBlizzardDataBars),
+    -- which Edit Mode stacks right above action bar 1 and restacks as they come
+    -- and go (a watched reputation, max level). The bars it stacks above them
+    -- (2, 3, stance, pet) were captured over the stack as it stood, so they are
+    -- lifted by the steps its hidden containers would add (Edit Mode's
+    -- UpdateBottomActionBarPositions: the secondary container height - 1, the
+    -- main one height + 4), and a status bar that shows later never covers
+    -- them. Only while the containers and the bar sit where Edit Mode puts them.
+    if EllesmereUI.IS_FOREVER and self.db.profile.useBlizzardDataBars then
+        local mainC, secC = _G.MainStatusTrackingBarContainer, _G.SecondaryStatusTrackingBarContainer
+        local function AtDefault(f)
+            if not f.IsInDefaultPosition then return true end
+            local ok, v = pcall(f.IsInDefaultPosition, f)
+            return not ok or v ~= false
+        end
+        if mainC and secC and AtDefault(mainC) and AtDefault(secC) then
+            local lift = 0
+            if not secC:IsShown() then lift = lift + (secC:GetHeight() or 0) - 1 end
+            if not mainC:IsShown() then lift = lift + (mainC:GetHeight() or 0) + 4 end
+            if lift > 0 then
+                local STACKED = { MultiBarBottomLeft = true, MultiBarBottomRight = true,
+                                  StanceBar = true, PetActionBar = true }
+                local uiS = UIParent:GetEffectiveScale()
+                for _, info in ipairs(BAR_CONFIG) do
+                    local pos = self.db.profile.barPositions[info.key]
+                    local bf = STACKED[info.blizzFrame] and _G[info.blizzFrame]
+                    if pos and pos.y and bf and bf:IsShown() and AtDefault(bf) then
+                        pos.y = pos.y + lift * bf:GetEffectiveScale() / uiS
+                    end
+                end
             end
         end
     end
@@ -18083,15 +18482,25 @@ local function SetupExtraBarHolder(barKey, frameName, barInfo)
         local function SyncFollow()
             local fw, fh = blizzFrame:GetWidth(), blizzFrame:GetHeight()
             if fw and fw > 1 and fh and fh > 1 then
-                holder:SetSize(fw, fh)
+                -- In our own units: Edit Mode's Size setting scales the frame.
+                local k = blizzFrame:GetEffectiveScale() / holder:GetEffectiveScale()
+                holder:SetSize(fw * k, fh * k)
             end
             holder:ClearAllPoints()
             holder:SetPoint("CENTER", blizzFrame, "CENTER", 0, 0)
+            -- The bar's end caps follow the frame's size and orientation.
+            ns.AB_ExtraCaps(barKey)
         end
         SyncFollow()
         blizzFrame:HookScript("OnSizeChanged", function() SyncFollow() end)
         if blizzFrame.ApplySystemAnchor then
             hooksecurefunc(blizzFrame, "ApplySystemAnchor", function()
+                C_Timer_After(0, SyncFollow)
+            end)
+        end
+        -- A Size change only rescales the frame (no size event).
+        if blizzFrame.UpdateSystemSettingSize then
+            hooksecurefunc(blizzFrame, "UpdateSystemSettingSize", function()
                 C_Timer_After(0, SyncFollow)
             end)
         end

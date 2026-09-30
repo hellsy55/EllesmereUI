@@ -16,10 +16,12 @@ local PAGE_SWING     = "Swing Timer"   -- WoW Forever only (C_SwingTimer)
 local PAGE_TOTEM     = "Totem Bar"
 local PAGE_UNLOCK    = "Unlock Mode"
 
--- WoW Forever shows the first tab as "Main Resources". Display only: the page
+-- WoW Forever shows the first tab as "Main Resources" and the totem tab as
+-- "Totem Bars" (it holds the Call Totem Bar too). Display only: the page
 -- identity above stays the same for nav targets, unlock and saved state.
 if EllesmereUI.IS_FOREVER then
     EllesmereUI.TAB_LABEL_OVERRIDES[PAGE_DISPLAY] = "Main Resources"
+    EllesmereUI.TAB_LABEL_OVERRIDES[PAGE_TOTEM] = "Totem Bars"
 end
 
 -- Classic WoW UI: each bar's Border Size slot sizes the vanilla frame round

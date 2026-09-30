@@ -3410,22 +3410,18 @@ end
 local optionsFrame
 local optionsCategoryID
 
-local unitSettingsMap
+-- Unit token -> its settings key in the profile. The settings table itself is
+-- read live on every call: a profile switch, import or reset (or a layer
+-- paint) can replace db.profile or its unit tables between frame reloads.
+local unitSettingsKey = {
+    player = "player", target = "target", targettarget = "targettarget",
+    pet = "pet", focus = "focus", focustarget = "focustarget",
+    boss1 = "boss", boss2 = "boss", boss3 = "boss", boss4 = "boss", boss5 = "boss",
+}
 local function GetSettingsForUnit(unit)
-    if not unitSettingsMap then
-        unitSettingsMap = {
-            player = db.profile.player,
-            target = db.profile.target,
-            targettarget = db.profile.targettarget,
-            pet = db.profile.pet,
-            focus = db.profile.focus,
-            focustarget = db.profile.focustarget,
-        }
-        for i = 1, 5 do
-            unitSettingsMap["boss" .. i] = db.profile.boss
-        end
-    end
-    return unitSettingsMap[unit] or db.profile.player
+    local p = db.profile
+    local k = unitSettingsKey[unit]
+    return (k and p[k]) or p.player
 end
 
 -- Per-unit frame source resolver. Returns "eui" (spawn skinned frame, default),
@@ -4168,8 +4164,8 @@ end
 function ns.UF_RecolorTexts(frame, unit, s)
     if not frame or not unit then return end
     if not s then
-        GetSettingsForUnit(unit)
-        s = unitSettingsMap and unitSettingsMap[unit]
+        local k = unitSettingsKey[unit]
+        s = k and db.profile[k]
     end
     if not s then return end
     if frame.LeftText and s.leftTextClassColor ~= nil then
@@ -13723,9 +13719,6 @@ ReloadFramesBody = function()
     end
 
     ApplyEnemyColors()
-
-    -- Reset cached settings map so it rebuilds with fresh DB references
-    unitSettingsMap = nil
 
     -- Normalize opacity values: old profiles stored 0-1 floats, new format is 0-100 integers
     do
