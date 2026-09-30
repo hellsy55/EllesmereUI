@@ -1533,6 +1533,21 @@ local DEFAULTS = {
             unlockPos     = nil,
             enabledClasses = nil,  -- nil = disabled; { SHAMAN = true, ... } = enabled for listed classes
         },
+        -- WoW Forever: Blizzard's call totem bar in the Totem Bar look
+        -- (EUI_ResourceBars_CallTotemBar.lua). Off by default; the table exists
+        -- only on that client, so retail profiles never gain the key.
+        callTotemBar = (EllesmereUI.IS_FOREVER == true) and {
+            enabled       = false,
+            iconSize      = 30,
+            spacing       = 2,
+            showTimer     = true,
+            timerSize     = 11,
+            orientation   = "HORIZONTAL",  -- "HORIZONTAL" or "VERTICAL"
+            borderSize    = 1,
+            borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
+            borderTexture = "solid",
+            unlockPos     = nil,
+        } or nil,
         general = {
             anchorX     = 0,
             anchorY     = -100,
@@ -2787,6 +2802,10 @@ local function RegisterUnlockElements()
     -- Swing Timer (WoW Forever): returns nil on clients without C_SwingTimer.
     if ns.ST_MakeUnlockElement then
         elements[#elements + 1] = ns.ST_MakeUnlockElement(MK, Rebuild)
+    end
+    -- Call Totem Bar (WoW Forever): nil elsewhere.
+    if ns.CT_MakeUnlockElement then
+        elements[#elements + 1] = ns.CT_MakeUnlockElement(MK)
     end
 
     EllesmereUI:RegisterUnlockElements(elements, "EllesmereUIResourceBars")
@@ -11516,6 +11535,7 @@ function ERB:ApplyAll()
     if ns.MigrateLegacyAnchorTo then ns.MigrateLegacyAnchorTo() end
     if ns.AS_Apply then ns.AS_Apply() end
     if ns.ST_Apply then ns.ST_Apply() end
+    if ns.CT_Apply then ns.CT_Apply() end
 
     -- Vehicle proxy: hide resource bars during full vehicle UI ([vehicleui]
     -- condition). Secure frame creation + RegisterStateDriver both need combat OOC.

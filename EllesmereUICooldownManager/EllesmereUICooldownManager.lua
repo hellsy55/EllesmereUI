@@ -10093,9 +10093,6 @@ end
 
 function ECME:OnCDMFirstLogin()
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-    -- WoW Forever starts every install from the base layout, never from a
-    -- snapshot of Blizzard's cooldown viewer (EllesmereUI_ForeverLayout.lua).
-    if EllesmereUI.IS_FOREVER then self.db.sv._capturedOnce_CDM = true end
     -- A profile import can stamp the capture flag mid-session (imported data is a chosen layout).
     -- Honor the stamp here so a still-pending capture never overwrites the imported profile; just finish the deferred setup.
     if not self.db.sv._capturedOnce_CDM then

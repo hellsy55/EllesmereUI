@@ -541,6 +541,26 @@ initFrame:SetScript("OnEvent", function(self)
         lvlText:SetPoint("CENTER", health, "CENTER", 0, 0)
         lvlText:SetText((ns.GetUnitLevelText and ns.GetUnitLevelText("player")) or "??")
         lvlText:Hide()
+        -- Target of Target sample: the preview mob targets the player (WoW Forever:
+        -- with the surname, in the slot's Name Format, as live).
+        pf._totFS = healthTextFrame:CreateFontString(nil, "OVERLAY")
+        SetPVFont(pf._totFS, FONT_PATH, 10, GetNPOptOutline())
+        pf._totFS:Hide()
+        pf._totSample = function(slotKey)
+            local name = EllesmereUI.WithSurname(UnitName("player")) or ""
+            if ns.NP_FormatName then name = ns.NP_FormatName(name, slotKey) end
+            return name
+        end
+        -- Its colour: in Class / Reaction mode the player's class colour (the
+        -- sample target), else the slot colour passed in.
+        pf._totSampleColor = function(slotKey, r, g, b)
+            if slotKey and DBVal(slotKey .. "ClassColor") == true then
+                local _, ct = UnitClass("player")
+                local cc = ct and EllesmereUI.GetClassColor(ct)
+                if cc then return cc.r, cc.g, cc.b end
+            end
+            return r, g, b
+        end
 
         -- Raid marker: custom marker.png image, position/size from settings
         local MARKER_PATH = "Interface\\AddOns\\EllesmereUI\\media\\marker.png"
@@ -1544,16 +1564,20 @@ initFrame:SetScript("OnEvent", function(self)
             local slotRight  = DBVal("textSlotRight") or defaults.textSlotRight
             local slotLeft   = DBVal("textSlotLeft") or defaults.textSlotLeft
             local slotCenter = DBVal("textSlotCenter") or defaults.textSlotCenter
+            local slotBL = DBVal("textSlotBottomLeft") or defaults.textSlotBottomLeft
+            local slotBR = DBVal("textSlotBottomRight") or defaults.textSlotBottomRight
 
             -- Hide all text elements first
             nameFS:Hide()
             hpText:Hide()
             hpNumber:Hide()
             lvlText:Hide()
+            pf._totFS:Hide()
             nameFS:ClearAllPoints()
             hpText:ClearAllPoints()
             hpNumber:ClearAllPoints()
             lvlText:ClearAllPoints()
+            pf._totFS:ClearAllPoints()
 
             -- Helper: position a health-related element in a bar slot
             local function PlaceHealthInBar(element, anchor, point, xOff, yOff, fontSize, cr, cg, cb, slotKey)
@@ -1580,23 +1604,30 @@ initFrame:SetScript("OnEvent", function(self)
                     hpText:SetPoint(point, health, anchor, xOff, yOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
-                elseif element == "level" then
-                    SetPVFont(lvlText, fontPath, fontSize, npOutline)
-                    lvlText:SetParent(healthTextFrame)
-                    lvlText:SetPoint(point, health, anchor, xOff, yOff)
-                    lvlText:SetTextColor(cr, cg, cb, 1)
-                    lvlText:Show()
+                elseif element == "level" or element == "targetOfTarget" then
+                    local fs = (element == "level") and lvlText or pf._totFS
+                    if fs ~= lvlText then cr, cg, cb = pf._totSampleColor(slotKey, cr, cg, cb) end
+                    SetPVFont(fs, fontPath, fontSize, npOutline)
+                    if fs ~= lvlText then fs:SetText(pf._totSample(slotKey)) end
+                    fs:SetParent(healthTextFrame)
+                    fs:SetPoint(point, health, anchor, xOff, yOff)
+                    fs:SetTextColor(cr, cg, cb, 1)
+                    fs:Show()
                 end
                 -- Per-slot Width % + Wrap mirrors runtime. At 100% (default) the FontString stays UNCONSTRAINED (SetWidth 0): a width box on a single-point-anchored FontString ignores SetJustifyH and drifts to centre, so only impose one below 100%.
                 local hfs = (element == "healthNumber") and hpNumber
-                    or (element == "level") and lvlText or hpText
-                hfs:SetJustifyH(point)
-                local hwpct = (slotKey and DBVal(slotKey .. "WidthPct")) or 100
+                    or (element == "level") and lvlText
+                    or (element == "targetOfTarget") and pf._totFS or hpText
+                -- Bottom slots anchor by a top corner; justify by its side.
+                hfs:SetJustifyH((point == "TOPLEFT" and "LEFT") or (point == "TOPRIGHT" and "RIGHT") or point)
+                -- The bottom slots never truncate (no Width % or Wrap), as live.
+                local noClip = slotKey == "textSlotBottomLeft" or slotKey == "textSlotBottomRight"
+                local hwpct = (not noClip and slotKey and DBVal(slotKey .. "WidthPct")) or 100
                 local hw = 0
                 if hwpct < 100 then hw = barW * hwpct / 100 end
                 hfs:SetWidth(hw)
                 local hwrap = false
-                if slotKey and DBVal(slotKey .. "Wrap") == true then hwrap = true end
+                if not noClip and slotKey and DBVal(slotKey .. "Wrap") == true then hwrap = true end
                 hfs:SetWordWrap(hwrap)
                 hfs:SetMaxLines(hwrap and 2 or 1)
             end
@@ -1627,16 +1658,20 @@ initFrame:SetScript("OnEvent", function(self)
                     hpText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
-                elseif element == "level" then
-                    SetPVFont(lvlText, fontPath, fontSize, npOutline)
-                    lvlText:SetParent(topTextFrame)
-                    lvlText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
-                    lvlText:SetTextColor(cr, cg, cb, 1)
-                    lvlText:Show()
+                elseif element == "level" or element == "targetOfTarget" then
+                    local fs = (element == "level") and lvlText or pf._totFS
+                    if fs ~= lvlText then cr, cg, cb = pf._totSampleColor(slotKey, cr, cg, cb) end
+                    SetPVFont(fs, fontPath, fontSize, npOutline)
+                    if fs ~= lvlText then fs:SetText(pf._totSample(slotKey)) end
+                    fs:SetParent(topTextFrame)
+                    fs:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
+                    fs:SetTextColor(cr, cg, cb, 1)
+                    fs:Show()
                 end
                 -- Per-slot Width % + Wrap mirrors runtime. Top slot is centered and stays unconstrained at 100% (see PlaceHealthInBar for why a width box mis-positions the text).
                 local hfs = (element == "healthNumber") and hpNumber
-                    or (element == "level") and lvlText or hpText
+                    or (element == "level") and lvlText
+                    or (element == "targetOfTarget") and pf._totFS or hpText
                 hfs:SetJustifyH("CENTER")
                 local hwpct = (slotKey and DBVal(slotKey .. "WidthPct")) or 100
                 local hw = 0
@@ -1686,22 +1721,29 @@ initFrame:SetScript("OnEvent", function(self)
                 nameFS:SetParent(healthTextFrame)
                 nameFS:SetPoint(point, health, anchor, xOff + txOff + markerShift, tyOff)
                 nameFS:SetJustifyH(justify)
-                -- Estimate health text width in opposing bar slots
-                local usedWidth = 0
-                local barSlotInfo = {
-                    { key = "textSlotRight",  slot = slotRight },
-                    { key = "textSlotLeft",   slot = slotLeft },
-                    { key = "textSlotCenter", slot = slotCenter },
-                }
-                for _, info in ipairs(barSlotInfo) do
-                    if info.key ~= nameSlotKey then
-                        local el = info.slot
-                        if el ~= "none" and not ns.IsNameElement(el) then
-                            usedWidth = usedWidth + ns.EstimateHealthTextWidth(el)
+                if nameSlotKey == "textSlotBottomLeft" or nameSlotKey == "textSlotBottomRight" then
+                    -- Under the bar the name never truncates (no width box, one line), as live.
+                    nameFS:SetWidth(0)
+                    nameFS:SetWordWrap(false)
+                    nameFS:SetMaxLines(1)
+                else
+                    -- Estimate health text width in opposing bar slots
+                    local usedWidth = 0
+                    local barSlotInfo = {
+                        { key = "textSlotRight",  slot = slotRight },
+                        { key = "textSlotLeft",   slot = slotLeft },
+                        { key = "textSlotCenter", slot = slotCenter },
+                    }
+                    for _, info in ipairs(barSlotInfo) do
+                        if info.key ~= nameSlotKey then
+                            local el = info.slot
+                            if el ~= "none" and not ns.IsNameElement(el) then
+                                usedWidth = usedWidth + ns.EstimateHealthTextWidth(el)
+                            end
                         end
                     end
+                    nameFS:SetWidth(math.max((barW - usedWidth - pvNameMarkerReserve) * pvNameWPct / 100, 20))
                 end
-                nameFS:SetWidth(math.max((barW - usedWidth - pvNameMarkerReserve) * pvNameWPct / 100, 20))
                 nameFS:SetTextColor(cr, cg, cb, 1)
                 nameFS:Show()
             end
@@ -1763,12 +1805,38 @@ initFrame:SetScript("OnEvent", function(self)
             else
                 PlaceHealthInBar(slotCenter, "CENTER", "CENTER", centerXOff, centerYOff, centerFontSz, centerC.r, centerC.g, centerC.b, "textSlotCenter")
             end
+
+            -- Process the bottom slots: under the health bar's corners, below the
+            -- cast bar (the preview always shows one), as live while casting.
+            do
+                -- Clamped at 0 like live: a raised cast bar never lifts them.
+                local by = math.min(0, pCastY - castH) - 2
+                local ext = 0
+                for i = 1, 2 do
+                    local key = (i == 1) and "textSlotBottomLeft" or "textSlotBottomRight"
+                    local el = (i == 1) and slotBL or slotBR
+                    local corner = (i == 1) and "LEFT" or "RIGHT"
+                    local c = previewGlow.slotColor(key)
+                    local sz = DBVal(key .. "Size") or defaults[key .. "Size"]
+                    local bx, byo = DBVal(key .. "XOffset") or 0, by + (DBVal(key .. "YOffset") or 0)
+                    if ns.IsNameElement(el) then
+                        PlaceNameInBar("BOTTOM" .. corner, "TOP" .. corner, 0, corner, bx, byo, sz, c.r, c.g, c.b, key)
+                    elseif el ~= "none" then
+                        PlaceHealthInBar(el, "BOTTOM" .. corner, "TOP" .. corner, bx, byo, sz, c.r, c.g, c.b, key)
+                    end
+                    if el ~= "none" then ext = math.max(ext, sz + 2 - (DBVal(key .. "YOffset") or 0)) end
+                end
+                -- Read by the preview height below (a table field: no new pf.Update local).
+                previewGlow.botTextH = ext
+            end
             -- Preview sample for whichever name-family variant is slotted (player level stands in for mob level), run after slot branches so text re-flows under the new justify (SetJustifyH alone won't re-flow it).
             ns.SetNameElementText(nameFS,
                 (ns.IsNameElement(slotTop) and slotTop)
                 or (ns.IsNameElement(slotRight) and slotRight)
                 or (ns.IsNameElement(slotLeft) and slotLeft)
                 or (ns.IsNameElement(slotCenter) and slotCenter)
+                or (ns.IsNameElement(slotBL) and slotBL)
+                or (ns.IsNameElement(slotBR) and slotBR)
                 or "enemyName",
                 -- WoW Forever: the slot's Name Format, as live (nil function off Forever).
                 ns.NP_FormatName and ns.NP_FormatName(EllesmereUI.L("Enemy Name Text"), pvNameSlotKey)
@@ -1897,6 +1965,10 @@ initFrame:SetScript("OnEvent", function(self)
                         anchor = nameFS
                     elseif slotTop == "healthNumber" then
                         anchor = hpNumber
+                    elseif slotTop == "level" then
+                        anchor = lvlText
+                    elseif slotTop == "targetOfTarget" then
+                        anchor = pf._totFS
                     elseif slotTop ~= "none" then
                         anchor = hpText
                     else
@@ -2471,6 +2543,8 @@ initFrame:SetScript("OnEvent", function(self)
             if isBottomSlot(ccSlotVal) then bottomExtent = math.max(bottomExtent, ccSz + 2 - ccYOff) end
             if isBottomSlot(rmPos) and showRM then bottomExtent = math.max(bottomExtent, rmSize + 2 - rmYOff) end
             if isBottomSlot(clPos) and showCL then bottomExtent = math.max(bottomExtent, reIconSz + 2 - clYOff) end
+            -- The Bottom Left / Bottom Right texts hang there too.
+            bottomExtent = math.max(bottomExtent, previewGlow.botTextH or 0)
             totalH = totalH + bottomExtent
             self:SetSize(localParentW, totalH)
 
@@ -2543,6 +2617,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Refresh text overlay sizes (font/text may have changed)
             if pf._textOverlays then
                 for _, ov in ipairs(pf._textOverlays) do
+                    if ov._syncFS then ov:SetShown(ov._syncFS:IsShown()) end
                     if ov._resizeToText then ov._resizeToText() end
                 end
             end
@@ -2551,6 +2626,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Expose preview elements for click-navigation hit overlays
         pf._nameFS       = nameFS
         pf._hpText       = hpText
+        pf._hpNumber     = hpNumber
+        pf._lvlText      = lvlText
         pf._debuffs      = debuffs
         pf._buffs        = buffs
         pf._ccs          = ccs
@@ -6200,6 +6277,7 @@ initFrame:SetScript("OnEvent", function(self)
             levelName            = "Level | Name",
             nameLevel            = "Name | Level",
             level                = "Level",
+            targetOfTarget       = "Target of Target",
             healthPercent        = "Health %",
             healthPercentNoSign  = "Health % (No Sign)",
             healthNumber         = "Health #",
@@ -6209,9 +6287,14 @@ initFrame:SetScript("OnEvent", function(self)
             healthNumPctDash     = "Health # - %",
             none                 = "None",
         }
-        local textElementOrder = { "none", "---", "enemyName", "levelName", "nameLevel", "level", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash" }
+        local textElementOrder = { "none", "---", "enemyName", "levelName", "nameLevel", "level", "targetOfTarget", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash" }
 
         local function TextSlotSetValue(slotKey, v)
+            -- Target of Target starts in Class / Reaction colour whenever a slot newly
+            -- takes it; the slot's custom swatch still switches it back.
+            if v == "targetOfTarget" and DBVal(slotKey) ~= "targetOfTarget" then
+                DB()[slotKey .. "ClassColor"] = true
+            end
             SetTextElementAtSlot(slotKey, v)
             ns.RefreshAllSettings()
             UpdatePreview(); EllesmereUI:RefreshPage()
@@ -6278,19 +6361,24 @@ initFrame:SetScript("OnEvent", function(self)
                     sizeLabel = "Size",
                     sizeFirst = true,
                 }
-                -- Both name and health text here get Width % + Wrap (dedicated Wrap row). Name-family variants use the GLOBAL enemyName keys (one slot holds the name FontString at a time); health text uses PER-SLOT keys (100% = no clip) and keeps "Show % Decimal".
+                -- Both name and health text here get Width % + Wrap (dedicated Wrap row). Name-family variants use the GLOBAL enemyName keys (one slot holds the name FontString at a time); health text uses PER-SLOT keys (100% = no clip) and keeps "Show % Decimal". The bottom slots never truncate, so they get neither.
+                local bottomSlot = slotKey == "textSlotBottomLeft" or slotKey == "textSlotBottomRight"
                 if ns.IsNameElement(DBVal(slotKey)) then
-                    cogOpts.widthGet = function() return DBVal("enemyNameWidthPct") or defaults.enemyNameWidthPct end
-                    cogOpts.widthSet = function(v) DB().enemyNameWidthPct = v; ns.RefreshAllSettings(); UpdatePreview() end
-                    cogOpts.wrapGet = function() return DBVal("enemyNameWrap") == true end
-                    cogOpts.wrapSet = function(v) DB().enemyNameWrap = v; ns.RefreshAllSettings(); UpdatePreview() end
+                    if not bottomSlot then
+                        cogOpts.widthGet = function() return DBVal("enemyNameWidthPct") or defaults.enemyNameWidthPct end
+                        cogOpts.widthSet = function(v) DB().enemyNameWidthPct = v; ns.RefreshAllSettings(); UpdatePreview() end
+                        cogOpts.wrapGet = function() return DBVal("enemyNameWrap") == true end
+                        cogOpts.wrapSet = function(v) DB().enemyNameWrap = v; ns.RefreshAllSettings(); UpdatePreview() end
+                    end
                 else
-                    local widthKey = slotKey .. "WidthPct"
-                    local wrapKey = slotKey .. "Wrap"
-                    cogOpts.widthGet = function() return DBVal(widthKey) or 100 end
-                    cogOpts.widthSet = function(v) DB()[widthKey] = v; ns.RefreshAllSettings(); UpdatePreview() end
-                    cogOpts.wrapGet = function() return DBVal(wrapKey) == true end
-                    cogOpts.wrapSet = function(v) DB()[wrapKey] = v; ns.RefreshAllSettings(); UpdatePreview() end
+                    if not bottomSlot then
+                        local widthKey = slotKey .. "WidthPct"
+                        local wrapKey = slotKey .. "Wrap"
+                        cogOpts.widthGet = function() return DBVal(widthKey) or 100 end
+                        cogOpts.widthSet = function(v) DB()[widthKey] = v; ns.RefreshAllSettings(); UpdatePreview() end
+                        cogOpts.wrapGet = function() return DBVal(wrapKey) == true end
+                        cogOpts.wrapSet = function(v) DB()[wrapKey] = v; ns.RefreshAllSettings(); UpdatePreview() end
+                    end
                     cogOpts.toggleLabel = "Show % Decimal"
                     cogOpts.toggleGet = function() return DBVal(slotKey .. "PctDecimal") == true end
                     cogOpts.toggleSet = function(v)
@@ -6302,7 +6390,9 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Level text (alone or with the name): Level Difficulty Color takes the
                 -- toggle row (the standalone level has no use for "Show % Decimal").
                 local slotEl = DBVal(slotKey)
-                if slotEl == "level" or slotEl == "levelName" or slotEl == "nameLevel" then
+                if slotEl == "targetOfTarget" then
+                    cogOpts.toggleLabel, cogOpts.toggleGet, cogOpts.toggleSet = nil, nil, nil
+                elseif slotEl == "level" or slotEl == "levelName" or slotEl == "nameLevel" then
                     cogOpts.toggleLabel = "Level Text: Difficulty Color"
                     cogOpts.toggleGet = function() return DBVal("levelDifficultyColor") == true end
                     cogOpts.toggleSet = function(v)
@@ -6318,9 +6408,10 @@ initFrame:SetScript("OnEvent", function(self)
                         UpdatePreview()
                     end
                 end
-                -- WoW Forever: the name's format, while this slot shows a name. First
-                -- and Last is stored as nil (the runtime's full-name path).
-                if EllesmereUI.IS_FOREVER and ns.IsNameElement(slotEl) then
+                -- WoW Forever: the name's format, while this slot shows a name or the
+                -- Target of Target name. First and Last is stored as nil (the
+                -- runtime's full-name path).
+                if EllesmereUI.IS_FOREVER and (ns.IsNameElement(slotEl) or slotEl == "targetOfTarget") then
                     local nfKey = slotKey .. "NameFormat"
                     cogOpts.dropdown2Label = "Name Format"
                     cogOpts.dropdown2Values = {
@@ -6433,7 +6524,7 @@ initFrame:SetScript("OnEvent", function(self)
             return swatch
         end
 
-        local textRow1, textRow2
+        local textRow1, textRow2, textRow3
 
         -- Row 1: Top Text | Right Text
         textRow1, h = W:DualRow(parent, y,
@@ -6481,6 +6572,30 @@ initFrame:SetScript("OnEvent", function(self)
         MakeTextCogIcon(textRow2, "_leftRegion",  "textSlotLeft",   "Left Text")
         MakeTextColorSwatch(textRow2, "_rightRegion", "textSlotCenter", "Center Text")
         MakeTextCogIcon(textRow2, "_rightRegion", "textSlotCenter", "Center Text")
+        end
+
+        -- Row 3: Bottom Left Text | Bottom Right Text (under the health bar's corners,
+        -- below the cast bar while one shows)
+        textRow3, h = W:DualRow(parent, y,
+            { type="dropdown", text="Bottom Left Text", values=textElementValues,
+              getValue=function() return DBVal("textSlotBottomLeft") end,
+              setValue=function(v) TextSlotSetValue("textSlotBottomLeft", v) end,
+              order=textElementOrder,
+              disabled=function() return DBVal("textSlotBottomLeft") == "none" end,
+              disabledTooltip="This option requires a text to be assigned", rawTooltip=true,
+              labelOnlyDisabled=true },
+            { type="dropdown", text="Bottom Right Text", values=textElementValues,
+              getValue=function() return DBVal("textSlotBottomRight") end,
+              setValue=function(v) TextSlotSetValue("textSlotBottomRight", v) end,
+              order=textElementOrder,
+              disabled=function() return DBVal("textSlotBottomRight") == "none" end,
+              disabledTooltip="This option requires a text to be assigned", rawTooltip=true,
+              labelOnlyDisabled=true });  y = y - h
+        if not EllesmereUI._prebuilding then
+        MakeTextColorSwatch(textRow3, "_leftRegion",  "textSlotBottomLeft",  "Bottom Left Text")
+        MakeTextCogIcon(textRow3, "_leftRegion",  "textSlotBottomLeft",  "Bottom Left Text")
+        MakeTextColorSwatch(textRow3, "_rightRegion", "textSlotBottomRight", "Bottom Right Text")
+        MakeTextCogIcon(textRow3, "_rightRegion", "textSlotBottomRight", "Bottom Right Text")
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -8578,6 +8693,8 @@ initFrame:SetScript("OnEvent", function(self)
             textSlotRight  = { row = textRow1, side = "_rightRegion" },
             textSlotLeft   = { row = textRow2, side = "_leftRegion" },
             textSlotCenter = { row = textRow2, side = "_rightRegion" },
+            textSlotBottomLeft  = { row = textRow3, side = "_leftRegion" },
+            textSlotBottomRight = { row = textRow3, side = "_rightRegion" },
         }
 
         -- Reverse lookup: find which Core Position slot holds a given element
@@ -8651,20 +8768,28 @@ initFrame:SetScript("OnEvent", function(self)
             end,
             enemyName    = function()
                 -- The name FontString renders whichever name-family variant is slotted; resolve the row for any of them.
-                local slot = FindTextSlotForElement("enemyName") or FindTextSlotForElement("levelName") or FindTextSlotForElement("nameLevel") or FindTextSlotForElement("level")
+                local slot = FindTextSlotForElement("enemyName") or FindTextSlotForElement("levelName") or FindTextSlotForElement("nameLevel")
                 if not slot then return { section = coreTextHeader, target = textRow1 } end
                 local info = textSlotToRow[slot]
                 if not info then return { section = coreTextHeader, target = textRow1 } end
                 return { section = coreTextHeader, target = info.row, slotSide = (info.side == "_leftRegion") and "left" or "right" }
             end,
             healthText   = function()
-                local slot = FindTextSlotForElement("healthPercent") or FindTextSlotForElement("healthPercentNoSign") or FindTextSlotForElement("healthNumber") or FindTextSlotForElement("healthPctNum") or FindTextSlotForElement("healthNumPct") or FindTextSlotForElement("healthPctNumDash") or FindTextSlotForElement("healthNumPctDash")
+                local slot = FindTextSlotForElement("healthPercent") or FindTextSlotForElement("healthPercentNoSign") or FindTextSlotForElement("healthPctNum") or FindTextSlotForElement("healthNumPct") or FindTextSlotForElement("healthPctNumDash") or FindTextSlotForElement("healthNumPctDash")
                 if not slot then return { section = coreTextHeader, target = textRow1 } end
                 local info = textSlotToRow[slot]
                 if not info then return { section = coreTextHeader, target = textRow1 } end
                 return { section = coreTextHeader, target = info.row, slotSide = (info.side == "_leftRegion") and "left" or "right" }
             end,
         }
+        -- The font strings a single element owns: the row of the slot showing it.
+        for mapKey, element in pairs({ healthNumber = "healthNumber", levelText = "level", targetOfTarget = "targetOfTarget" }) do
+            dynamicMappings[mapKey] = function()
+                local info = textSlotToRow[FindTextSlotForElement(element) or ""]
+                if not info then return { section = coreTextHeader, target = textRow1 } end
+                return { section = coreTextHeader, target = info.row, slotSide = (info.side == "_leftRegion") and "left" or "right" }
+            end
+        end
 
         local function NavigateToSetting(key)
             local m = clickMappings[key]
@@ -8820,6 +8945,18 @@ initFrame:SetScript("OnEvent", function(self)
             if pv._hpText then
                 local ov = CreateHitOverlay(pv._hpText, "healthText", true)
                 textOverlays[#textOverlays + 1] = ov
+            end
+            -- Health #, standalone level and Target of Target: each on its own font
+            -- string, shown only while a slot holds it, so the overlay follows the
+            -- text's shown state (_syncFS, re-read on every preview update).
+            for fsKey, mapKey in pairs({ _hpNumber = "healthNumber", _lvlText = "levelText", _totFS = "targetOfTarget" }) do
+                local fs = pv[fsKey]
+                if fs then
+                    local ov = CreateHitOverlay(fs, mapKey, true)
+                    ov._syncFS = fs
+                    ov:SetShown(fs:IsShown())
+                    textOverlays[#textOverlays + 1] = ov
+                end
             end
             -- Classic WoW UI: the level in the health border's plate
             if pv._classicLevel then

@@ -4961,3 +4961,106 @@ do
         end)
     end
 end
+
+--------------------------------------------------------------------------------
+--  WoW Forever snapshot switch: accounts from the base-layout era (one-time).
+--  A fresh WoW Forever install now snapshots Blizzard's layout through the same
+--  module captures as retail. An account that already ran EllesmereUI there
+--  started from the old fixed base layout, with those captures switched off, so
+--  it is frozen to exactly what those builds gave it: no capture runs for it
+--  (Action Bars, Cooldown Manager, the minimap and the chat genesis), on old or
+--  new characters, and its positions stay as they are. Its Edit Mode layouts
+--  are never read or written.
+--  Detection, once per account as the saved data loads (Lite's
+--  OnSavedVariablesLoaded: before any module opens its profile, merges its
+--  defaults or reads a capture flag, in the suite and in every standalone):
+--  any Edit Mode layout stamp of the old writer (foreverEditModeSeen) or any
+--  stored profile data. The flag is written first, so an account that starts
+--  empty is never mistaken for one later. Two client checks, as the buff clear
+--  above: the suite's flag and the raw interface number.
+--------------------------------------------------------------------------------
+do
+    local FLAG = "forever_snapshot_legacy_v1"
+    -- The full-account import keeps the recipient's mark (EllesmereUI_Profiles.lua).
+    EllesmereUI._FvSnapFlag = FLAG
+
+    local function ClientOK()
+        local toc = select(4, GetBuildInfo())
+        return EllesmereUI ~= nil and EllesmereUI.IS_FOREVER == true
+            and type(toc) == "number" and toc >= 16000 and toc < 20000
+    end
+
+    local function Sub(t, key)
+        if type(t[key]) ~= "table" then t[key] = {} end
+        return t[key]
+    end
+
+    -- True when the account holds data from an earlier WoW Forever session.
+    local function HadData(db)
+        if type(db.foreverEditModeSeen) == "table" and next(db.foreverEditModeSeen) then return true end
+        if type(db.profiles) == "table" then
+            for _, prof in pairs(db.profiles) do
+                if type(prof) == "table" and type(prof.addons) == "table" and next(prof.addons) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    -- One stored profile, frozen to what the base-layout builds gave it:
+    --   minimap: never captured -> the old WoW Forever size, no capture;
+    --   chat: the old genesis rule (a pre-ownership position is dropped) with
+    --     the old WoW Forever spot in place of a live read;
+    --   the two WoW Forever defaults that changed (tabs inside the chat panel,
+    --     Blizzard's XP / reputation bars) keep the old default where unset.
+    local function FreezeProfile(prof)
+        if type(prof) ~= "table" then return end
+        local addons = Sub(prof, "addons")
+        local mm = Sub(Sub(addons, "EllesmereUIMinimap"), "minimap")
+        if not mm._capturedOnce then
+            mm._capturedOnce = true
+            if mm.mapSize == nil then mm.mapSize = 200 end
+        end
+        local chat = Sub(Sub(addons, "EllesmereUIChat"), "chat")
+        if chat._chatPosOwnership ~= 1 then
+            chat._chatPosOwnership = 1
+            chat.chatPosition = nil
+        end
+        if chat.chatPosition == nil then
+            chat.chatPosition = { point = "BOTTOMLEFT", relPoint = "BOTTOMLEFT", x = 63.33, y = 108.17 }
+        end
+        if chat.extendBgBehindTabs == nil then chat.extendBgBehindTabs = false end
+        local ab = Sub(addons, "EllesmereUIActionBars")
+        if ab.useBlizzardDataBars == nil then ab.useBlizzardDataBars = false end
+    end
+
+    if ClientOK() then
+        EllesmereUI.Lite.OnSavedVariablesLoaded(function()
+            if not ClientOK() then return end
+            local db = EllesmereUIDB
+            if type(db) ~= "table" then
+                -- A brand-new account (no saved data yet): nothing to freeze. It is
+                -- marked once its saved data exists, so its own first session's data
+                -- never reads as the old layout's next time.
+                local f = CreateFrame("Frame")
+                f:RegisterEvent("PLAYER_LOGIN")
+                f:SetScript("OnEvent", function(self)
+                    self:UnregisterAllEvents()
+                    local d = EllesmereUIDB
+                    if type(d) == "table" then Sub(d, "_migrations")[FLAG] = true end
+                end)
+                return
+            end
+            local flags = Sub(db, "_migrations")
+            if flags[FLAG] then return end
+            flags[FLAG] = true
+            if not HadData(db) then return end
+            db._capturedOnce_EAB = true
+            db._capturedOnce_CDM = true
+            if type(db.profiles) == "table" then
+                for _, prof in pairs(db.profiles) do FreezeProfile(prof) end
+            end
+        end)
+    end
+end

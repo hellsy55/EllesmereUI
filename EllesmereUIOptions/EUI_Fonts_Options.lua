@@ -199,6 +199,9 @@ local function TileNameplates(parent, y, W, tile)
         size("Left Text Size", "textSlotLeftSize", 6, 30, 10),
         size("Right Text Size", "textSlotRightSize", 6, 30, 10));  y = y - h
     _, h = W:DualRow(parent, y,
+        size("Bottom Left Text Size", "textSlotBottomLeftSize", 6, 30, 10),
+        size("Bottom Right Text Size", "textSlotBottomRightSize", 6, 30, 10));  y = y - h
+    _, h = W:DualRow(parent, y,
         size("Cast Name Size", "castNameSize", 6, 20, 10),
         size("Cast Timer Size", "castTimerSize", 6, 20, 10));  y = y - h
     _, h = W:DualRow(parent, y,
@@ -294,6 +297,8 @@ local function TileRaidFrames(parent, y, W, tile)
               p.healerMana.textSize = v
               if ns.HM_Rebuild then ns.HM_Rebuild() else RFApply() end
           end });  y = y - h
+    _, h = W:DualRow(parent, y,
+        size("Level Size", "levelTextSize", 6, 26, 10), BLANK());  y = y - h
     y = LinkRow(parent, y, "Party-Specific Text Sizes",
         tile.folder, "Party", "TEXT DISPLAY")
     y = LinkRow(parent, y, "Buff Manager Text (per indicator)",

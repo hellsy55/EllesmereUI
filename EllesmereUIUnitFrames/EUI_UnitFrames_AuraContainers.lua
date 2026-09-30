@@ -1072,7 +1072,21 @@ end
 -- nothing when its picks can never match.
 local function PlayerDebuffChain(s)
     EnsurePlayerAuraLanes(s)
-    if s.debuffShowAll == false then
+    -- Has Duration checked with no Show pick is the timed catch-all (Player Aura
+    -- Bars parity): the All Debuffs path below, narrowed by ChainFor.
+    local durAlone = false
+    if s.debuffShowAll == false and s.debuffHasDuration == true then
+        durAlone = true
+        for i = 1, #TOKEN_CLASSES do
+            if ClassEnabled(TOKEN_CLASSES[i], false, s, "player") then durAlone = false break end
+        end
+        if durAlone then
+            for i = 1, #CANDIDATE_CLASSES do
+                if ClassEnabled(CANDIDATE_CLASSES[i], false, s, "player") then durAlone = false break end
+            end
+        end
+    end
+    if s.debuffShowAll == false and not durAlone then
         local matchOn, link = PlayerDebuffMatch(s)
         if matchOn then return { link } end
         return BuildChain("HARMFUL", false, s, "player")
@@ -1127,6 +1141,60 @@ local function PlayerDebuffChain(s)
     for n = 1, #negations do allTokens[#allTokens + 1] = negations[n] end
     chain[#chain + 1] = { key = "pdall|" .. table.concat(allTokens, "") .. "|" .. CandFP(cand),
         tokens = allTokens, cand = cand }
+    return chain
+end
+
+-- An element's chain. Has Duration (s.debuffHasDuration on every unit,
+-- s.buffDurOnly on target/focus/boss -- its own key: the player's broad-mode
+-- s.buffHasDuration, run inside PlayerBuffChain, can already sit copied on
+-- those units) is an AND-modifier on every link that shows content:
+-- Blizzard's candidate maxDuration check, which drops an aura when
+-- `duration > maxDuration or duration == 0`, so math.huge drops only the
+-- permanent ones. The container evaluates it and it is not identity-gated,
+-- so it holds on any unit, friendly or hostile, secret or not. Hide-lane links
+-- (they render nothing) and Tracked Auras include links (explicit always-show
+-- spells) keep their payload. A narrowed link's key gains "|dur", so the
+-- variant declares fresh and the plain one parks at 0.
+local function ChainFor(unit, base, s)
+    local isBuff = base == "HELPFUL"
+    local chain
+    if unit == "player" and isBuff then
+        return PlayerBuffChain(s)
+    elseif unit == "player" then
+        chain = PlayerDebuffChain(s)
+    else
+        chain = BuildChain(base, isBuff, s, unit)
+    end
+    local dur
+    if isBuff then dur = s.buffDurOnly == true else dur = s.debuffHasDuration == true end
+    if not dur then return chain end
+    -- Non-player buffs with nothing shown or hidden run the plain show-all
+    -- group (ApplyGroupConfig); narrowed, it becomes an explicit link.
+    if isBuff and #chain == 0 then
+        chain[1] = { key = "all", tokens = { base } }
+    end
+    -- Show All's catch-all is what shows the Tracked Auras there (no include
+    -- links); narrowed, they get one include link of their own, from any
+    -- caster as the catch-all showed them, at any duration.
+    if not isBuff and unit ~= "player" and DebuffFilterMode(s) == "all" and HasActiveIncludes(s) then
+        local m = {}
+        for id, v in pairs(s.debuffInclude) do
+            if v then m[id] = true end
+        end
+        chain[#chain + 1] = { key = "incall|" .. CandFP({ includeSpellIDs = m }),
+            tokens = { "HARMFUL" }, cand = { includeSpellIDs = m, excludeSpellIDs = {} }, inc = true }
+    end
+    for i = 1, #chain do
+        local c = chain[i]
+        if not (c.hidden or c.inc) then
+            local cand = { maxDuration = math.huge }
+            if c.cand then
+                for k, v in pairs(c.cand) do cand[k] = v end
+                if cand.maxDuration == nil then cand.maxDuration = math.huge end
+            end
+            chain[i] = { key = c.key .. "|dur", tokens = c.tokens, cand = cand, glow = c.glow, mine = c.mine }
+        end
+    end
     return chain
 end
 
@@ -2796,14 +2864,7 @@ function ns.UF_ReloadAuraContainers(frame, unit)
         -- probe T1/T1b), and the config pass zeroes whatever fell out of the active
         -- set. The old swap path permanently leaked a 10-button batch per group per
         -- toggle (engine frames are never freed).
-        local chain
-        if unit == "player" and base == "HELPFUL" then
-            chain = PlayerBuffChain(s)
-        elseif unit == "player" then
-            chain = PlayerDebuffChain(s)
-        else
-            chain = BuildChain(base, base == "HELPFUL", s, unit)
-        end
+        local chain = ChainFor(unit, base, s)
         local sig = ChainSignature(chain)
         local force = forceCfg
         local container = entry[field]
@@ -3059,14 +3120,7 @@ local function BuildUnitContainers(frame, unit)
     -- atom).
     for e = 1, 2 do
         local base, field = ELEMENT_ORDER[e][1], ELEMENT_ORDER[e][2]
-        local chain
-        if unit == "player" and base == "HELPFUL" then
-            chain = PlayerBuffChain(s)
-        elseif unit == "player" then
-            chain = PlayerDebuffChain(s)
-        else
-            chain = BuildChain(base, base == "HELPFUL", s, unit)
-        end
+        local chain = ChainFor(unit, base, s)
         local declared = entry.groups[field]
         local styleKey = StyleKey(unit, base)
         if not declared.all then
