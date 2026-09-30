@@ -11333,11 +11333,11 @@ initFrame:SetScript("OnEvent", function(self)
 
                         -- Low Item Count Glow (potions/healthstone/demonic healthstone only):
                         -- glows the icon once the SUM across both ranks/variants of this item
-                        -- drops to 2 or fewer. Raid-only, current-expansion-max-level-only, and
-                        -- out-of-combat only (all enforced in ProcessPresetCooldowns,
-                        -- EllesmereUICdmHooks.lua) so it never fires while leveling and never
-                        -- fights the Cooldown State Effect's "CD Ready" glow above, which is the
-                        -- combat-relevant one.
+                        -- drops to 2 or fewer out of combat, and when it reaches 0 in combat.
+                        -- Raid-only and current-expansion-max-level-only (all enforced in
+                        -- ProcessPresetCooldowns, EllesmereUICdmHooks.lua), so it never fires
+                        -- while leveling. Cooldown State Effect keeps ownership if its own
+                        -- "CD Ready" glow is already using the shared overlay.
                         if type(spellID) == "number" and spellID <= -100 then
                             MakeSubnavRow("Low Item Count Glow", ACTIVE_GLOW_ITEMS,
                                 function()

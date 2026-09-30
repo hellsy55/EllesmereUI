@@ -6642,18 +6642,19 @@ local function ProcessPresetCooldowns()
 
                 -- Low Item Count Glow (potions/healthstone/demonic healthstone):
                 -- glows the icon when the SUM across both ranks/variants of this
-                -- preset drops to 2 or fewer (LowGlowItemTotal -- the per-icon
-                -- `total` above is deliberately the current variant only and
-                -- would false-glow while the other rank still has a full stack).
-                -- Raid-only and max-level-only: a low-supply nudge is a raid
-                -- consumables thing, not something leveling alts need. Out-of-
-                -- combat only -- the same icon may also carry a Cooldown State
-                -- Effect "CD Ready" glow (ApplyCdState, EllesmereUICdmFakeActive.lua),
-                -- which IS combat-relevant, and both effects fighting over the same
-                -- glowOverlay would flicker between them. Item counts are plain Lua
-                -- numbers (never secret), so this can drive the overlay directly
-                -- instead of going through the secret-safe StackGlow_Configure gate
-                -- system built for aura stacks.
+                -- preset drops to 2 or fewer out of combat, and keeps the same
+                -- warning in combat only when the family is completely empty.
+                -- (LowGlowItemTotal -- the per-icon `total` above is deliberately
+                -- the current variant only and would false-glow while the other
+                -- rank still has a full stack.) Raid-only and max-level-only: a
+                -- low-supply nudge is a raid consumables thing, not something
+                -- leveling alts need. The combat-zero exception is deliberately
+                -- narrow because the same icon may also carry a Cooldown State
+                -- Effect "CD Ready" glow (ApplyCdState, EllesmereUICdmFakeActive.lua);
+                -- its ownership flag below still wins if that effect is lit. Item
+                -- counts are plain Lua numbers (never secret), so this can drive
+                -- the overlay directly instead of going through the secret-safe
+                -- StackGlow_Configure gate system built for aura stacks.
                 do
                     local fdLic = hookFrameData[f]
                     local casKeyLic = f._presetItemID and -(f._presetItemID)
@@ -6663,9 +6664,10 @@ local function ProcessPresetCooldowns()
                     if styleLic == false then styleLic = nil end
                     if fdLic then
                         local wantGlow = false
-                        if styleLic and IsInRaidInstance() and IsAtCurrentMaxLevel()
-                           and not (ns.CDMInCombat and ns.CDMInCombat()) then
-                            wantGlow = LowGlowItemTotal(f) <= 2
+                        if styleLic and IsInRaidInstance() and IsAtCurrentMaxLevel() then
+                            local itemTotal = LowGlowItemTotal(f)
+                            local inCombat = ns.CDMInCombat and ns.CDMInCombat()
+                            wantGlow = (inCombat and itemTotal == 0) or (not inCombat and itemTotal <= 2)
                         end
                         -- Cooldown State Effect owns the overlay while its own ready
                         -- glow is lit; never steal it out from under that effect.
@@ -6729,6 +6731,15 @@ ns._MarkPresetCdDirty = function()
     _presetCdDirty = true
     _pcAllSettled = false
     if ns.ArmBuffTicker then ns.ArmBuffTicker() end
+end
+
+-- Low Item Count Glow depends on the debounced CDM combat state, not the raw
+-- regen event. Re-arm the preset pass after that state flips so an empty item
+-- starts glowing immediately on combat entry and the <= 2 warning resumes as
+-- soon as combat exit is committed. CDMGlowCombatSync also runs on world/profile
+-- reconciles, which is a useful backstop for reloads that land mid-combat.
+if ns.CDMGlowCombatSync then
+    hooksecurefunc(ns, "CDMGlowCombatSync", ns._MarkPresetCdDirty)
 end
 
 
