@@ -221,9 +221,9 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "dropdown", text = "Menu Grow Direction",
               tooltip = "Which way the windows extend from the collapsed icon when they open. The close button always lands at that same corner.",
               disabled = Disabled,
-              values = { downright = "Down Right", upright = "Up Right",
-                         downleft = "Down Left", upleft = "Up Left" },
-              order = { "downright", "upright", "downleft", "upleft" },
+              values = { downright = "Down Right", downleft = "Down Left",
+                         upright = "Up Right", upleft = "Up Left" },
+              order = { "downright", "downleft", "upright", "upleft" },
               getValue = function() return Cfg("growDir") or "downright" end,
               setValue = function(v)
                   Set("growDir", v)
