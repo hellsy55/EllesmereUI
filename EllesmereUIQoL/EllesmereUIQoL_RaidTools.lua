@@ -121,6 +121,8 @@ local ICON_SZ      = 30
 local PULL_SLOTS   = 3
 local PULL_DEFAULTS = { 3, 5, 10 }   -- also seeded into DB_DEFAULTS below
 ns.PULL_DEFAULTS = PULL_DEFAULTS
+ns.BREAK_DEFAULT = 300                -- 5 minutes, stored in seconds
+ns.BREAK_MAX = 1800                   -- 30 minutes
 
 -- The collapse ("close") button sits at the same literal corner Open
 -- Direction anchors the collapsed icon to, so the panel closes at the exact
@@ -279,7 +281,12 @@ local wasInGroup = false       -- edge-detects joining a group, for ResetGroupFi
 local previewOn = false        -- Raid Tools settings page is in front (see ApplyVisibility)
 local lastSuppressed           -- assist gate verdict currently ON SCREEN (see AssistSuppressed)
 local toggleButton             -- keybind target; also the out-of-combat path
-local runtime = {}             -- Quick Fire's lazily-created secure state
+local runtime = {}             -- lazily-created runtime state
+runtime.roleColumns = {
+    { role = "TANK",    label = "Tank" },
+    { role = "HEALER",  label = "Heal" },
+    { role = "DAMAGER", label = "DPS"  },
+}
 local sections = {}            -- key -> shell frame
 local shellTitle = {}          -- key -> title fontstring
 local shellTitleFont = {}      -- key -> tracked font entry (combined title can be slightly larger)
@@ -451,6 +458,7 @@ local markerRowButtons = { target = {}, world = {} }
 local markerRowLabels = {}
 local pullButtons = {}         -- fixed set of 3; only the ones above 0s show
 local raidGroupButtons = {}    -- plain buttons, gated on the raid frames only
+runtime.roleCountButtons = {}  -- display-only raid role counters
 local raidGroupsRowLabel
 local COMBINED_MARKERS_TOP = 0 -- y-offset of the marker block inside combined Group holder
 -- Individually hideable content. Every one of these is created at build and
@@ -542,12 +550,19 @@ local DB_DEFAULTS = {
         -- share the width. All three at 0 takes the row away entirely, Stop
         -- included (see LayoutGroupContent).
         pullTimes     = { PULL_DEFAULTS[1], PULL_DEFAULTS[2], PULL_DEFAULTS[3] },
-        -- Per-button switches for the three optional actions. Ready Check has
-        -- none on purpose. Same flow rule as the pull slots: a hidden button
-        -- leaves no hole, the rest close up.
+        -- Break is stored in seconds as well. 0 removes its row; values are
+        -- clamped to 30 minutes when read so old/manual profiles cannot push
+        -- an invalid duration into a boss-mod timer.
+        breakTime     = ns.BREAK_DEFAULT,
+        -- Optional controls compact around anything the user hides. Pings and
+        -- Difficulty are leader-only at runtime; role counts only render
+        -- while the player is actually in a raid group.
+        showPings     = true,
+        showDifficulty = true,
         showRoleCheck = true,
         showConvert   = true,
         showDisband   = true,
+        showRoles     = true,
         -- Per-section: pos[key] = { point, relPoint, x, y }
         pos           = {},
     },
@@ -845,6 +860,19 @@ local function VisiblePullTimes()
     return out
 end
 
+function runtime.BreakTime()
+    local secs = P() and tonumber(P().breakTime)
+    if secs == nil then secs = ns.BREAK_DEFAULT end
+    secs = math.floor((secs + 30) / 60) * 60
+    if secs < 0 then secs = 0 end
+    if secs > ns.BREAK_MAX then secs = ns.BREAK_MAX end
+    return secs
+end
+
+function runtime.RolesShown()
+    return ButtonShown("showRoles") and IsInRaid()
+end
+
 -------------------------------------------------------------------------------
 --  Raid Groups filter -- which subgroups the EllesmereUI Raid Frames draw.
 --  This panel is a pure remote control for that addon's own setting; the
@@ -972,6 +1000,39 @@ local function RefreshRaidGroups(force)
 end
 
 -------------------------------------------------------------------------------
+--  Raid role counts -- raid-only display row kept at the marker edge nearest
+--  Break in the combined window. These are assigned group roles, not specialization guesses.
+-------------------------------------------------------------------------------
+
+function runtime.RefreshRoleCounts(force)
+    local visible = runtime.RolesShown()
+    local layoutChanged = runtime.lastRolesVisible ~= nil and visible ~= runtime.lastRolesVisible
+    runtime.lastRolesVisible = visible
+
+    if visible then
+        local counts = { TANK = 0, HEALER = 0, DAMAGER = 0 }
+        local maxRaid = _G.MAX_RAID_MEMBERS or 40
+        for i = 1, maxRaid do
+            local name, _, _, _, _, _, _, _, _, _, _, role = GetRaidRosterInfo(i)
+            if name and role then
+                local secret = _G.issecretvalue and _G.issecretvalue(role)
+                if not secret and counts[role] ~= nil then
+                    counts[role] = counts[role] + 1
+                end
+            end
+        end
+        for i, def in ipairs(runtime.roleColumns) do
+            local b = runtime.roleCountButtons[i]
+            if b and b._lbl then
+                b._lbl:SetText(EllesmereUI.L(def.label) .. " " .. tostring(counts[def.role] or 0))
+            end
+        end
+    end
+
+    return not force and layoutChanged
+end
+
+-------------------------------------------------------------------------------
 --  Make Everyone Assistant -- a raid-only checkbox, not a one-shot button:
 --  its own checked state is never stored, only read live off the roster
 --  (AllAssistants), so it can never drift from what the raid actually looks
@@ -1007,7 +1068,7 @@ local function SetEveryoneAssistant(on)
     if InCombatLockdown() then
         EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " ..
             EllesmereUI.L("Raid ranks cannot be changed in combat."))
-        return
+        return false
     end
     local n = GetNumGroupMembers()
     for i = 1, n do
@@ -1020,14 +1081,170 @@ local function SetEveryoneAssistant(on)
             DemoteAssistant("raid" .. i)
         end
     end
+    return true
 end
 
--- Reads the roster fresh rather than toggling a remembered boolean: called
--- from RefreshPermissions, which already runs on every roster/leadership
--- event, so the box is never more than one event stale.
+-- Reads the roster fresh rather than storing a separate checkbox value. It
+-- is refreshed directly from roster/role events as well as permission passes,
+-- so promotions or demotions made here or elsewhere cannot leave it stale.
 local function RefreshAssistCheckbox()
     if not assistCheckTex then return end
     assistCheckTex:SetShown(AllAssistants())
+end
+
+-------------------------------------------------------------------------------
+--  Leader controls: ping restrictions and dungeon/raid difficulty.
+--  Both use the same modern menu API as Blizzard's Compact Raid Manager.
+-------------------------------------------------------------------------------
+
+function runtime.ShowPingMenu(button)
+    -- This Raid Tools control is intentionally raid-leader-only. Keep the
+    -- click guard identical to the visual permission gate below so it stays
+    -- visibly unavailable in parties and for non-leaders.
+    if not IsInRaid() or not UnitIsGroupLeader("player") or InCombatLockdown() then return end
+    if not (MenuUtil and MenuUtil.CreateContextMenu and C_PartyInfo.GetRestrictPings
+            and C_PartyInfo.SetRestrictPings and Enum and Enum.RestrictPingsTo) then
+        return
+    end
+
+    MenuUtil.CreateContextMenu(button, function(_, root)
+        root:SetTag("EUI_RAID_TOOLS_RESTRICT_PINGS")
+        local function IsSelected(value)
+            return C_PartyInfo.GetRestrictPings() == value
+        end
+        local function SetSelected(value)
+            if InCombatLockdown() or not IsInRaid() or not UnitIsGroupLeader("player") then return end
+            local newValue = IsSelected(value) and Enum.RestrictPingsTo.None or value
+            C_PartyInfo.SetRestrictPings(newValue)
+
+            -- Match Blizzard's own Compact Raid Manager behavior: radio
+            -- selections close the menu, then the next open reads the
+            -- authoritative server-backed value from GetRestrictPings().
+            -- Forcing MenuResponse.Refresh here refreshes synchronously,
+            -- before the restriction has necessarily propagated, which can
+            -- redraw the old selection and make the control look stale.
+        end
+
+        root:CreateRadio(_G.NONE or "None", IsSelected, SetSelected, Enum.RestrictPingsTo.None)
+        root:CreateRadio(_G.RAID_MANAGER_RESTRICT_PINGS_TO_LEAD or "Leader Only",
+            IsSelected, SetSelected, Enum.RestrictPingsTo.Lead)
+        root:CreateRadio(_G.RAID_MANAGER_RESTRICT_PINGS_TO_ASSIST or "Leader & Assistants",
+            IsSelected, SetSelected, Enum.RestrictPingsTo.Assist)
+        root:CreateRadio(_G.RAID_MANAGER_RESTRICT_PINGS_TO_TANKS_HEALERS or "Tanks & Healers",
+            IsSelected, SetSelected, Enum.RestrictPingsTo.TankHealer)
+    end)
+end
+
+function runtime.DifficultyIDs()
+    local ids = _G.DifficultyUtil and _G.DifficultyUtil.ID
+    return ids or {
+        DungeonNormal = 1, DungeonHeroic = 2, DungeonMythic = 23,
+        PrimaryRaidNormal = 14, PrimaryRaidHeroic = 15, PrimaryRaidMythic = 16,
+    }
+end
+
+function runtime.UsesRaidDifficulty()
+    -- Raid difficulty belongs only to an actual raid group. Parties and solo
+    -- always read/write the dungeon difficulty, so converting between party
+    -- and raid also changes what the button reports without carrying the
+    -- previous group's difficulty type across the transition.
+    return IsInGroup() and IsInRaid()
+end
+
+function runtime.DifficultySuffix()
+    local ids = runtime.DifficultyIDs()
+    if runtime.UsesRaidDifficulty() then
+        local util = _G.DifficultyUtil
+        if util and util.DoesCurrentRaidDifficultyMatch then
+            if util.DoesCurrentRaidDifficultyMatch(ids.PrimaryRaidMythic) then return "M" end
+            if util.DoesCurrentRaidDifficultyMatch(ids.PrimaryRaidHeroic) then return "H" end
+            if util.DoesCurrentRaidDifficultyMatch(ids.PrimaryRaidNormal) then return "N" end
+        end
+        local id = GetRaidDifficultyID and GetRaidDifficultyID()
+        if id == ids.PrimaryRaidMythic then return "M" end
+        if id == ids.PrimaryRaidHeroic or id == 5 or id == 6 then return "H" end
+        if id == ids.PrimaryRaidNormal or id == 3 or id == 4 then return "N" end
+    else
+        local id = GetDungeonDifficultyID and GetDungeonDifficultyID()
+        if id == ids.DungeonMythic then return "M" end
+        if id == ids.DungeonHeroic then return "H" end
+        if id == ids.DungeonNormal then return "N" end
+    end
+end
+
+function runtime.RefreshDifficultyLabel()
+    if not runtime.difficultyButton or not runtime.difficultyButton._lbl then return end
+    local suffix = runtime.DifficultySuffix()
+    local text = EllesmereUI.L("Difficulty")
+    runtime.difficultyButton._lbl:SetText(suffix and (text .. " (" .. suffix .. ")") or text)
+end
+
+function runtime.ShowDifficultyMenu(button)
+    -- Difficulty can be changed while solo. Once grouped, only the group
+    -- leader may change it, matching Blizzard's own difficulty controls.
+    if not IsLeader() or InCombatLockdown() then return end
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+
+    MenuUtil.CreateContextMenu(button, function(_, root)
+        root:SetTag("EUI_RAID_TOOLS_DIFFICULTY")
+        local ids = runtime.DifficultyIDs()
+        local util = _G.DifficultyUtil
+
+        if runtime.UsesRaidDifficulty() then
+            local function IsSelected(id)
+                if util and util.DoesCurrentRaidDifficultyMatch then
+                    return util.DoesCurrentRaidDifficultyMatch(id)
+                end
+                return GetRaidDifficultyID and GetRaidDifficultyID() == id
+            end
+            local function SetSelected(id)
+                if InCombatLockdown() or not UnitIsGroupLeader("player") then return end
+                if _G.SetRaidDifficulties then
+                    _G.SetRaidDifficulties(true, id)
+                elseif SetRaidDifficultyID then
+                    SetRaidDifficultyID(id)
+                end
+                runtime.RefreshDifficultyLabel()
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, runtime.RefreshDifficultyLabel)
+                end
+            end
+            local data = {
+                { ids.PrimaryRaidNormal, _G.PLAYER_DIFFICULTY1 or "Normal" },
+                { ids.PrimaryRaidHeroic, _G.PLAYER_DIFFICULTY2 or "Heroic" },
+                { ids.PrimaryRaidMythic, _G.PLAYER_DIFFICULTY6 or "Mythic" },
+            }
+            for _, item in ipairs(data) do
+                local radio = root:CreateRadio(item[2], IsSelected, SetSelected, item[1])
+                if util and util.IsRaidDifficultyEnabled then
+                    radio:SetEnabled(util.IsRaidDifficultyEnabled(item[1]))
+                end
+            end
+        else
+            local function IsSelected(id)
+                return GetDungeonDifficultyID and GetDungeonDifficultyID() == id
+            end
+            local function SetSelected(id)
+                if InCombatLockdown() or not IsLeader() then return end
+                if SetDungeonDifficultyID then SetDungeonDifficultyID(id) end
+                runtime.RefreshDifficultyLabel()
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, runtime.RefreshDifficultyLabel)
+                end
+            end
+            local data = {
+                { ids.DungeonNormal, _G.PLAYER_DIFFICULTY1 or "Normal" },
+                { ids.DungeonHeroic, _G.PLAYER_DIFFICULTY2 or "Heroic" },
+                { ids.DungeonMythic, _G.PLAYER_DIFFICULTY6 or "Mythic" },
+            }
+            for _, item in ipairs(data) do
+                local radio = root:CreateRadio(item[2], IsSelected, SetSelected, item[1])
+                if util and util.IsDungeonDifficultyEnabled then
+                    radio:SetEnabled(util.IsDungeonDifficultyEnabled(item[1]))
+                end
+            end
+        end
+    end)
 end
 
 -- GROUP_ROSTER_UPDATE is one of the chattiest events in a raid -- it bursts on
@@ -1049,6 +1266,18 @@ local function RefreshPermissions(force)
     -- an actual group to be assist or leader of.
     for _, b in ipairs(groupButtons) do
         local on = grouped and (b.needsLeader and leader or assist)
+
+        -- Pings is raid-leader-only. Difficulty remains usable while solo,
+        -- and once grouped it requires the group leader. Both use the exact
+        -- same disabled treatment as Make Everyone Assistant (alpha + mouse
+        -- input), so their state is visually unambiguous instead of merely
+        -- refusing the click.
+        if b == runtime.pingButton then
+            on = raid and leader
+        elseif b == runtime.difficultyButton then
+            on = leader
+        end
+
         -- Convert to Party can't succeed with more than 5 members in the
         -- raid group -- the server just refuses it -- so grey the button out
         -- in that case regardless of leader/assist, the same way the other
@@ -1083,6 +1312,7 @@ local function RefreshPermissions(force)
         convertButton._lbl:SetText(raid and EllesmereUI.L("Convert to Party")
                                          or EllesmereUI.L("Convert to Raid"))
     end
+    runtime.RefreshDifficultyLabel()
 
     -- Leader-only: unlike Ready Check/Role Check, this one actually requires
     -- the raid leader specifically -- an assistant can promote a single
@@ -1135,6 +1365,33 @@ local function StopPull()
     local handler = BossModPullHandler()
     if handler then handler("0") end
     if not ChatLocked() then C_PartyInfo.DoCountdown(0) end
+end
+
+function runtime.BossModBreakHandler()
+    return SlashCmdList["break"] or SlashCmdList.BIGWIGSBREAK
+        or SlashCmdList.DEADLYBOSSMODSBREAK
+end
+
+function runtime.StartBreak(secs)
+    secs = tonumber(secs)
+    if not secs or secs <= 0 then return end
+    secs = math.floor((secs + 30) / 60) * 60
+    if secs > ns.BREAK_MAX then secs = ns.BREAK_MAX end
+    if IsEncounterInProgress and IsEncounterInProgress() then
+        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Break timer unavailable during an encounter."))
+        return
+    end
+
+    local handler = runtime.BossModBreakHandler()
+    if not handler then
+        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Break timer requires BigWigs or DBM."))
+        return
+    end
+    handler(tostring(secs / 60))
+end
+
+function runtime.BreakLabel(secs)
+    return EllesmereUI.L("Break") .. " (" .. tostring(secs / 60) .. "m)"
 end
 
 -------------------------------------------------------------------------------
@@ -1270,8 +1527,16 @@ local function MakeShell(key)
     colFs:SetPoint("CENTER", col, "CENTER", 0, 1)
     colFs:SetText("-")
     colFs:SetAlpha(0.7)
-    col:SetScript("OnEnter", function() colFs:SetAlpha(1) end)
-    col:SetScript("OnLeave", function() colFs:SetAlpha(0.7) end)
+    col:SetScript("OnEnter", function(self)
+        colFs:SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(EllesmereUI.L("Minimize"))
+        GameTooltip:Show()
+    end)
+    col:SetScript("OnLeave", function()
+        colFs:SetAlpha(0.7)
+        GameTooltip:Hide()
+    end)
     col:SetAttribute("_onclick", COLLAPSE_SNIPPET)
     f._collapseBtn = col
 
@@ -1292,19 +1557,39 @@ local function LayoutGroupContent()
     if not groupHolder then return end
     local f = groupHolder
 
-    -- Optional action buttons compact into pairs; Pull remains its own row so
-    -- the combined window can place the marker block between Reports and Pull.
-    local actionRows, pair = {}, {}
-    local function Add(b)
-        pair[#pair + 1] = b
-        if #pair == 2 then actionRows[#actionRows + 1] = pair; pair = {} end
+    local function PackRows(buttons, perRow)
+        local rows, row = {}, {}
+        perRow = perRow or 2
+        for _, b in ipairs(buttons) do
+            if b then
+                row[#row + 1] = b
+                if #row == perRow then rows[#rows + 1] = row; row = {} end
+            end
+        end
+        if #row > 0 then rows[#rows + 1] = row end
+        return rows
     end
-    Add(readyButton)
-    if ButtonShown("showRoleCheck") then Add(roleButton) end
-    if ButtonShown("showConvert")   then Add(convertButton) end
-    if ButtonShown("showDisband")   then Add(disbandButton) end
-    if #pair > 0 then actionRows[#actionRows + 1] = pair end
 
+    -- Pings and Difficulty sit directly between Make Everyone Assistant and
+    -- the ordinary action block. Every optional survivor compacts leftward.
+    local pre = {}
+    if ButtonShown("showPings") and C_PartyInfo.GetRestrictPings and C_PartyInfo.SetRestrictPings then
+        pre[#pre + 1] = runtime.pingButton
+    end
+    if ButtonShown("showDifficulty") then pre[#pre + 1] = runtime.difficultyButton end
+    local preRows = PackRows(pre, 2)
+
+    local actions = { readyButton }
+    if ButtonShown("showRoleCheck") then actions[#actions + 1] = roleButton end
+    if ButtonShown("showConvert")   then actions[#actions + 1] = convertButton end
+    if ButtonShown("showDisband")   then actions[#actions + 1] = disbandButton end
+    local actionRows = PackRows(actions, 2)
+
+    -- Keep the existing Pull/Stop row exactly as it was. Break is the next
+    -- control after Stop: when that row currently has fewer than three buttons
+    -- it fills the next slot; once the Stop row already has three (or more)
+    -- controls, Break gets the immediately adjacent row by itself.
+    local timerRows = {}
     local pullRow
     local times = VisiblePullTimes()
     if #times > 0 then
@@ -1313,9 +1598,21 @@ local function LayoutGroupContent()
             local b = pullButtons[i]
             b.secs = secs
             b._lbl:SetText(tostring(secs))
-            pullRow[i] = b
+            pullRow[#pullRow + 1] = b
         end
         pullRow[#pullRow + 1] = stopButton
+        timerRows[#timerRows + 1] = pullRow
+    end
+
+    local breakSecs = runtime.BreakTime()
+    if breakSecs > 0 then
+        runtime.breakButton.secs = breakSecs
+        runtime.breakButton._lbl:SetText(runtime.BreakLabel(breakSecs))
+        if pullRow and #pullRow < 3 then
+            pullRow[#pullRow + 1] = runtime.breakButton
+        else
+            timerRows[#timerRows + 1] = { runtime.breakButton }
+        end
     end
 
     for _, b in ipairs(groupButtons) do b:Hide() end
@@ -1334,76 +1631,60 @@ local function LayoutGroupContent()
     end
 
     local hasReports = #reportBtns > 0
-
-    if ShowAs() == "one" and MARKERS_CONTENT_H then
-        -- From the grow-origin outward the stack is always:
-        -- corner controls -> Reports -> Raid Groups -> World -> Target ->
-        -- Pull -> action rows -> Make Everyone Assistant. A BOTTOM anchor
-        -- renders that same sequence in reverse top-to-bottom order.
-        local isUp = AnchorCorner():find("BOTTOM") ~= nil
-        local blocks = {}
-        local function Push(kind, payload, h)
-            blocks[#blocks + 1] = { kind = kind, payload = payload, h = h }
-        end
-
-        if not isUp then
-            if hasReports then Push("row", reportBtns, ROW_H) end
-            Push("markers", nil, MARKERS_CONTENT_H)
-            if pullRow then Push("row", pullRow, ROW_H) end
-            for _, row in ipairs(actionRows) do Push("row", row, ROW_H) end
-            Push("assist", nil, ROW_H)
+    local isUp = AnchorCorner():find("BOTTOM") ~= nil
+    local blocks = {}
+    local function Push(kind, payload, h)
+        blocks[#blocks + 1] = { kind = kind, payload = payload, h = h }
+    end
+    local function PushRows(rows, reverse)
+        if reverse then
+            for i = #rows, 1, -1 do Push("row", rows[i], ROW_H) end
         else
-            Push("assist", nil, ROW_H)
-            for i = #actionRows, 1, -1 do Push("row", actionRows[i], ROW_H) end
-            if pullRow then Push("row", pullRow, ROW_H) end
-            Push("markers", nil, MARKERS_CONTENT_H)
-            if hasReports then Push("row", reportBtns, ROW_H) end
+            for _, row in ipairs(rows) do Push("row", row, ROW_H) end
+        end
+    end
+
+    -- Restore the pre-feature Raid Tools stack and insert the new controls at
+    -- the requested boundaries. With Grow Direction = UP, physical top->bottom
+    -- is: Assistant -> Pings/Difficulty -> actions -> Pull/Stop -> Break ->
+    -- Roles -> Target -> World -> Raid Groups -> reports. DOWN is its vertical
+    -- mirror. Roles lives in the markers holder, at the edge touching Break.
+    if isUp then
+        Push("assist", nil, ROW_H)
+        PushRows(preRows, true)
+        PushRows(actionRows, true)
+        PushRows(timerRows, false)
+        if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
+        if hasReports then Push("row", reportBtns, ROW_H) end
+    else
+        if hasReports then Push("row", reportBtns, ROW_H) end
+        if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
+        PushRows(timerRows, true)
+        PushRows(actionRows, false)
+        PushRows(preRows, false)
+        Push("assist", nil, ROW_H)
+    end
+
+    local y = 0
+    COMBINED_MARKERS_TOP = 0
+    for i, block in ipairs(blocks) do
+        if block.kind == "row" then
+            PlaceRow(block.payload, y)
+        elseif block.kind == "assist" then
+            assistCheckRow:ClearAllPoints()
+            assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+            assistCheckRow:Show()
+        elseif block.kind == "markers" then
+            COMBINED_MARKERS_TOP = -y
         end
 
-        local y = 0
-        COMBINED_MARKERS_TOP = 0
-        for i, block in ipairs(blocks) do
-            if block.kind == "row" then
-                PlaceRow(block.payload, y)
-            elseif block.kind == "assist" then
-                assistCheckRow:ClearAllPoints()
-                assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
-                assistCheckRow:Show()
-            elseif block.kind == "markers" then
-                COMBINED_MARKERS_TOP = -y
-            end
-
-            y = y - block.h
-            if i < #blocks then
-                local nextBlock = blocks[i + 1]
-                local aroundMarkers = block.kind == "markers" or nextBlock.kind == "markers"
-                y = y - (aroundMarkers and ROW_GAP * 2 or ROW_GAP)
-            end
+        y = y - block.h
+        if i < #blocks then
+            local nextBlock = blocks[i + 1]
+            local aroundMarkers = block.kind == "markers" or nextBlock.kind == "markers"
+            y = y - (aroundMarkers and ROW_GAP * 2 or ROW_GAP)
         end
-
-        GROUP_CONTENT_H = -y
-        f:SetHeight(GROUP_CONTENT_H)
-        return
     end
-
-    -- Split modes keep Group & Pull self-contained.
-    if hasReports then PlaceRow(reportBtns, 0) end
-    assistCheckRow:ClearAllPoints()
-    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD,
-        hasReports and -(ROW_H + ROW_GAP) or 0)
-    assistCheckRow:Show()
-
-    local fixedRows = hasReports and 2 or 1
-    local y = -fixedRows * (ROW_H + ROW_GAP)
-    for _, row in ipairs(actionRows) do
-        PlaceRow(row, y)
-        y = y - ROW_H - ROW_GAP
-    end
-    if pullRow then
-        PlaceRow(pullRow, y)
-        y = y - ROW_H - ROW_GAP
-    end
-    y = y + ROW_GAP
 
     GROUP_CONTENT_H = -y
     f:SetHeight(GROUP_CONTENT_H)
@@ -1420,8 +1701,8 @@ local function BuildGroupContent()
     local f = groupHolder
     local full = PANEL_W - PAD * 2
 
-    -- Make Everyone Assistant is a fixed full-width row beneath the report
-    -- buttons (LayoutGroupContent positions both rows). Whole-row button (not
+    -- Make Everyone Assistant is a fixed full-width row whose edge position
+    -- follows Grow Direction (LayoutGroupContent positions it). Whole-row button (not
     -- just the box) so the label is as clickable as the tick -- same
     -- reasoning as the pull/marker rows' generous hit targets.
     assistCheckRow = CreateFrame("Button", nil, f)
@@ -1450,13 +1731,24 @@ local function BuildGroupContent()
     chkLbl:SetJustifyH("LEFT")
     chkLbl:SetText(EllesmereUI.L("Make Everyone Assistant"))
     assistCheckRow:SetScript("OnClick", function()
-        SetEveryoneAssistant(not AllAssistants())
-        RefreshAssistCheckbox()
+        local desired = not AllAssistants()
+        if SetEveryoneAssistant(desired) then
+            -- Show the requested state immediately; roster events below
+            -- reconcile it with the authoritative server state as promotions
+            -- or demotions arrive. Re-reading the roster synchronously here
+            -- used to restore the old state before the server had answered.
+            assistCheckTex:SetShown(desired)
+        end
     end)
-    -- MakeGroupButton runs labels through L itself. All four action buttons
-    -- are born unplaced at full-row width; LayoutGroupContent re-flows the
-    -- survivors (per the showRoleCheck/showConvert/showDisband switches)
-    -- starting below this fixed checkbox row.
+    -- Leader controls are created first because their layout block sits before
+    -- Ready Check. They remain visible-but-grey to non-leaders rather than
+    -- disappearing, so the panel does not jump around as leadership changes.
+    runtime.pingButton = MakeGroupButton(f, "Pings", full, function(self) runtime.ShowPingMenu(self) end, true)
+    runtime.difficultyButton = MakeGroupButton(f, "Difficulty", full,
+        function(self) runtime.ShowDifficultyMenu(self) end, true)
+
+    -- MakeGroupButton runs labels through L itself. Action buttons are born
+    -- unplaced at full-row width; LayoutGroupContent re-flows the survivors.
     readyButton = MakeGroupButton(f, "Ready Check", full, function() DoReadyCheck() end)
     roleButton  = MakeGroupButton(f, "Role Check", full, function() InitiateRolePoll() end)
 
@@ -1477,14 +1769,20 @@ local function BuildGroupContent()
     end
     stopButton = MakeGroupButton(f, "Stop", full, StopPull)
 
+    local b
+    b = MakeGroupButton(f, "Break", full, function() runtime.StartBreak(b.secs) end)
+    runtime.breakButton = b
+    runtime.RefreshDifficultyLabel()
+
     -- A height right away: BuildAll has callers (the slash command, unlock
     -- mode) that reach the shells without going through Apply.
     LayoutGroupContent()
 end
 
--- Marker rows follow the same outward stack rule as the combined window:
--- Raid Groups -> World -> Target. Up growth reverses their visual top-to-bottom
--- order; Down growth uses that sequence literally.
+-- Marker rows mirror with the combined window. In UP, Roles is the first
+-- marker row so it sits directly below Break, followed by Target / World /
+-- Raid Groups. DOWN reverses that stack, leaving Roles at the bottom edge next
+-- to Break. Party/solo layouts omit Roles.
 local MARKER_ROWS = {
     { kind = "target", label = "Target" },
     { kind = "world",  label = "World"  },
@@ -1494,10 +1792,20 @@ local function LayoutMarkersContent()
     if not markersHolder or not raidGroupsRowLabel then return end
     local f = markersHolder
     local isUp = AnchorCorner():find("BOTTOM") ~= nil
-    local order = isUp and { "target", "world", "groups" }
-                       or { "groups", "world", "target" }
+    local roles = runtime.RolesShown()
+    local order
+    if isUp then
+        order = roles and { "roles", "target", "world", "groups" }
+                      or { "target", "world", "groups" }
+    else
+        order = roles and { "groups", "world", "target", "roles" }
+                      or { "groups", "world", "target" }
+    end
     local y = 0
     local step = (PANEL_W - PAD * 2 - MARKER_SZ) / 8
+
+    if runtime.roleCountRowLabel then runtime.roleCountRowLabel:SetShown(roles) end
+    for _, b in ipairs(runtime.roleCountButtons) do b:SetShown(roles) end
 
     local function PlaceMarkerRow(kind)
         local lbl = markerRowLabels[kind]
@@ -1509,6 +1817,20 @@ local function LayoutMarkersContent()
             b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + step * (i - 1), y)
         end
         y = y - MARKER_SZ
+    end
+
+    local function PlaceRolesRow()
+        runtime.roleCountRowLabel:ClearAllPoints()
+        runtime.roleCountRowLabel:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+        y = y - MARKER_LBL_H - 2
+        local n = #runtime.roleColumns
+        local w = (PANEL_W - PAD * 2 - (n - 1) * ROW_GAP) / n
+        for i, b in ipairs(runtime.roleCountButtons) do
+            b:SetWidth(w)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
+        end
+        y = y - ROW_H
     end
 
     local function PlaceGroupsRow()
@@ -1525,7 +1847,13 @@ local function LayoutMarkersContent()
     end
 
     for i, kind in ipairs(order) do
-        if kind == "groups" then PlaceGroupsRow() else PlaceMarkerRow(kind) end
+        if kind == "groups" then
+            PlaceGroupsRow()
+        elseif kind == "roles" then
+            PlaceRolesRow()
+        else
+            PlaceMarkerRow(kind)
+        end
         if i < #order then y = y - ROW_GAP * 2 end
     end
 
@@ -1548,6 +1876,16 @@ local function BuildMarkersContent()
         for i = 0, 8 do
             MakeMarkerButton(f, i == 8 and 0 or (i + 1), row.kind)
         end
+    end
+
+    runtime.roleCountRowLabel = TrackFont(f, EllesmereUI.MakeFont(f, 9, nil, 1, 1, 1), 9)
+    runtime.roleCountRowLabel:SetAlpha(0.55)
+    runtime.roleCountRowLabel:SetText(EllesmereUI.L("Roles"))
+    local roleW = (PANEL_W - PAD * 2 - (#runtime.roleColumns - 1) * ROW_GAP) / #runtime.roleColumns
+    for _, def in ipairs(runtime.roleColumns) do
+        local b = MakeGroupButton(f, "", roleW, nil, nil, runtime.roleCountButtons)
+        b:EnableMouse(false)
+        b._lbl:SetText(EllesmereUI.L(def.label) .. " 0")
     end
 
     raidGroupsRowLabel = TrackFont(f, EllesmereUI.MakeFont(f, 9, nil, 1, 1, 1), 9)
@@ -2559,7 +2897,19 @@ local function EnsureEvents()
                     PrimeQuickFire(runtime.qfPlace)
                 end
             end
+            local roleLayoutChanged = runtime.RefreshRoleCounts()
+            if roleLayoutChanged then
+                Apply()
+                return
+            end
             RefreshPermissions()
+            -- Permission inputs are memoized, but these stateful controls can
+            -- change while leader/assist/group type stays identical. Always
+            -- refresh them from their authoritative APIs on the registered
+            -- roster/roles/difficulty events instead of hiding that update
+            -- behind RefreshPermissions' early-return cache.
+            RefreshAssistCheckbox()
+            runtime.RefreshDifficultyLabel()
             RefreshRaidGroups()
             RefreshAssistGate()
             RefreshReportButtons()
@@ -2568,6 +2918,8 @@ local function EnsureEvents()
     ev:RegisterEvent("GROUP_ROSTER_UPDATE")
     ev:RegisterEvent("PARTY_LEADER_CHANGED")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    ev:RegisterEvent("PLAYER_DIFFICULTY_CHANGED")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
     ev:RegisterEvent("ENCOUNTER_START")
     ev:RegisterEvent("ENCOUNTER_END")
@@ -2719,6 +3071,7 @@ function Apply()
     ApplyQuickFireBindings()
     ApplyFonts()
     RefreshPermissions(true)
+    runtime.RefreshRoleCounts(true)
     RefreshRaidGroups(true)
     RefreshReportButtons()
 end

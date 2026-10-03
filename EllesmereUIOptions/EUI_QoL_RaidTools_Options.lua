@@ -71,6 +71,23 @@ initFrame:SetScript("OnEvent", function(self)
         Refresh()
     end
 
+    local function BreakGet()
+        local v = tonumber(Cfg("breakTime"))
+        if v == nil then v = ns.BREAK_DEFAULT or 300 end
+        v = math.floor((v + 30) / 60)
+        if v < 0 then v = 0 end
+        if v > 30 then v = 30 end
+        return v
+    end
+
+    local function BreakSet(v)
+        v = math.floor((tonumber(v) or 0) + 0.5)
+        if v < 0 then v = 0 end
+        if v > 30 then v = 30 end
+        Set("breakTime", v * 60)
+        Refresh()
+    end
+
     local function BuildPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
         local y = yOffset
@@ -357,6 +374,12 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:DualRow(parent, y,
+            ButtonToggle("showPings", "Show Pings",
+                "Shows the ping-restriction control near Ready Check. It is greyed out unless you are the raid leader, and also stays greyed out outside a raid group."),
+            ButtonToggle("showDifficulty", "Show Difficulty",
+                "Shows the dungeon/raid difficulty control near Ready Check. It is greyed out unless you are the group leader.")
+        );  y = y - h
+        _, h = W:DualRow(parent, y,
             ButtonToggle("showRoleCheck", "Show Role Check",
                 "Shows the Role Check button. Turn it off and the remaining buttons close the gap."),
             ButtonToggle("showConvert", "Show Convert to Raid",
@@ -365,7 +388,8 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             ButtonToggle("showDisband", "Show Disband",
                 "Shows the Disband button. It always asks before disbanding, but hiding it puts it out of misclick range for good."),
-            { type = "spacer" }
+            ButtonToggle("showRoles", "Show Raid Role Counts",
+                "Shows Tank, Heal and DPS counts next to the Target Markers boundary. The row only appears while you are actually in a raid group and mirrors with Grow Direction.")
         );  y = y - h
 
         -- PULL TIMER
@@ -382,7 +406,13 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:DualRow(parent, y, PullSlider(1), PullSlider(2));      y = y - h
-        _, h = W:DualRow(parent, y, PullSlider(3), { type="spacer" });  y = y - h
+        _, h = W:DualRow(parent, y, PullSlider(3),
+            { type="slider", text="Break Timer (Minutes)", min=0, max=30, step=1,
+              tooltip="Break timer length in whole minutes, up to 30 minutes. Set it to 0 to hide the Break button. The button uses BigWigs or DBM break-timer support.",
+              disabled=Disabled,
+              getValue=BreakGet,
+              setValue=BreakSet }
+        );  y = y - h
 
         -- RAID CHECK
         --
