@@ -48,6 +48,350 @@ initFrame:SetScript("OnEvent", function(self)
         local isTabs = pageName == "Tabs"
         local isSidebar = pageName == "Sidebar"
         local isBubbles = pageName == "Chat Bubbles"
+        local isLootFeed = pageName == "Loot Feed"
+
+        if isLootFeed then
+            parent._showRowDivider = true
+            local lf = ns.LootFeed
+            if not (lf and lf.Settings and lf.Settings.db and lf.Messages and lf.Messages.LootFeedMessageGroup) then
+                return math.abs(y)
+            end
+
+            local db = lf.Settings.db
+            local defaults = lf.Settings.DefaultOptions or {}
+            local L = lf.Locale or {}
+
+            local function NotifySettingChanged(key, value, oldValue)
+                local eventFrame = lf.EventFrame
+                if eventFrame and eventFrame.OnSettingsChanged then
+                    eventFrame:OnSettingsChanged(key, value, oldValue)
+                end
+            end
+
+            local function SetLF(key, value, notify)
+                local oldValue = db[key]
+                if oldValue == value then return end
+                db[key] = value
+                if notify ~= false then
+                    NotifySettingChanged(key, value, oldValue)
+                end
+            end
+
+            local function LFDisabled()
+                return db.Enabled == false
+            end
+
+            local function NumberSlider(key, text, tooltip, minValue, maxValue, step, dependant, pixel)
+                return {
+                    type = "slider", text = text, tooltip = tooltip,
+                    min = minValue, max = maxValue, step = step or 1, pixel = pixel,
+                    getValue = function()
+                        local value = db[key]
+                        if value == nil then value = defaults[key] end
+                        return tonumber(value) or minValue or 0
+                    end,
+                    setValue = function(value)
+                        local number = tonumber(value)
+                        if not number then return end
+                        if minValue and number < minValue then number = minValue end
+                        if maxValue and number > maxValue then number = maxValue end
+                        SetLF(key, number)
+                    end,
+                    disabled = function()
+                        if LFDisabled() then return true end
+                        return dependant and not dependant() or false
+                    end,
+                }
+            end
+
+            _, h = W:SectionHeader(parent, "LOOT FEED", y); y = y - h
+
+            local remixCfg
+            if lf.Utils and lf.Utils.GetTimerunningSeasonID and lf.Utils.GetTimerunningSeasonID() then
+                remixCfg = {
+                    type = "toggle", text = L.PANEL_OPTION_ENABLE_REMIX_MODE or "Use Remix Profile",
+                    tooltip = L.PANEL_OPTION_ENABLE_REMIX_MODE_TOOLTIP,
+                    getValue = function() return db.EnableRemixMode ~= false end,
+                    setValue = function(v) SetLF("EnableRemixMode", v) end,
+                    disabled = LFDisabled,
+                }
+            end
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ENABLED or "Enable Loot Feed",
+                  tooltip = "Enables Loot Feed loot-message processing inside EllesmereUI Chat. Changing this setting requires a UI reload.",
+                  getValue = function() return db.Enabled ~= false end,
+                  setValue = function(v)
+                      local current = db.Enabled ~= false
+                      if v == current then return end
+
+                      -- Keep the stored value (and therefore the visible toggle) unchanged
+                      -- until the user commits to the reload. Rebuild the page immediately
+                      -- because the shared toggle widget animates toward the clicked value
+                      -- after setValue returns even when the backing setting was not written.
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+
+                      local function RestoreToggle()
+                          if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                      end
+
+                      EllesmereUI:ShowConfirmPopup({
+                          title = "Reload Required",
+                          message = "Enabling or disabling Loot Feed requires a UI reload.",
+                          confirmText = "Reload Now",
+                          cancelText = "Cancel",
+                          reload = true,
+                          onConfirm = function()
+                              -- Deliberately do not notify the live runtime: the new state is
+                              -- persisted only as part of the confirmed reload path.
+                              SetLF("Enabled", v, false)
+                          end,
+                          onCancel = RestoreToggle,
+                          onDismiss = RestoreToggle,
+                      })
+                  end },
+                remixCfg or EllesmereUI.BlankRowCfg())
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "OUTPUT", y); y = y - h
+
+            local chatValues, chatOrder = {}, {}
+            for i = 1, 9 do
+                local key = "ChatFrame" .. i
+                local frame = _G[key]
+                local name = frame and frame.name
+                chatValues[key] = name and (key .. " (" .. name .. ")") or key
+                chatOrder[#chatOrder + 1] = key
+            end
+
+            _, h = W:DualRow(parent, y,
+                { type = "dropdown", text = L.PANEL_OPTION_CHATFRAME or "Active Chat Frame",
+                  tooltip = L.PANEL_OPTION_CHATFRAME_TOOLTIP,
+                  values = chatValues, order = chatOrder,
+                  getValue = function() return db.ChatFrame or defaults.ChatFrame or "ChatFrame1" end,
+                  setValue = function(v) SetLF("ChatFrame", v) end,
+                  disabled = LFDisabled },
+                NumberSlider("Debounce", L.PANEL_OPTION_DEBOUNCE or "Output Interval", L.PANEL_OPTION_DEBOUNCE_TOOLTIP, 0, 30, 1))
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_DEBOUNCE_INCOMBAT or "Output during Combat",
+                  tooltip = L.PANEL_OPTION_DEBOUNCE_INCOMBAT_TOOLTIP,
+                  getValue = function() return db.DebounceInCombat ~= false end,
+                  setValue = function(v) SetLF("DebounceInCombat", v) end,
+                  disabled = LFDisabled },
+                { type = "toggle", text = L.PANEL_OPTION_ENABLE_TOOLTIPS or "Enable Hover Tooltips",
+                  tooltip = L.PANEL_OPTION_ENABLE_TOOLTIPS_TOOLTIP,
+                  getValue = function() return db.EnableTooltips ~= false end,
+                  setValue = function(v) SetLF("EnableTooltips", v) end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "FORMAT", y); y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_SHORTEN_PLAYER_NAMES or "Short Player names",
+                  tooltip = L.PANEL_OPTION_SHORTEN_PLAYER_NAMES_TOOLTIP,
+                  getValue = function() return db.ShortenPlayerNames ~= false end,
+                  setValue = function(v) SetLF("ShortenPlayerNames", v) end,
+                  disabled = LFDisabled },
+                { type = "toggle", text = L.PANEL_OPTION_SHORTEN_FACTION_NAMES or "Short Faction names",
+                  tooltip = L.PANEL_OPTION_SHORTEN_FACTION_NAMES_TOOLTIP,
+                  getValue = function() return db.ShortenFactionNames ~= false end,
+                  setValue = function(v)
+                      SetLF("ShortenFactionNames", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                NumberSlider("ShortenFactionNamesLength", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH or "Short Faction name length", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH_TOOLTIP, 1, 50, 1,
+                    function() return db.ShortenFactionNames ~= false end),
+                NumberSlider("IconSize", L.PANEL_OPTION_ICON_SIZE or "Icon Size", L.PANEL_OPTION_ICON_SIZE_TOOLTIP, 1, 64, 1, nil, true))
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                NumberSlider("IconTrim", L.PANEL_OPTION_ICON_TRIM or "Icon Trim", L.PANEL_OPTION_ICON_TRIM_TOOLTIP, 0, 50, 1),
+                EllesmereUI.BlankRowCfg())
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "ITEM DISPLAY", y); y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT or "Show Item Count",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_TOOLTIP,
+                  getValue = function() return db.ItemCount == true end,
+                  setValue = function(v)
+                      SetLF("ItemCount", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_BANK or "Count Bank items",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_BANK_TOOLTIP,
+                  getValue = function() return db.ItemCountBank ~= false end,
+                  setValue = function(v) SetLF("ItemCountBank", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_USES or "Count Charges on items",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_USES_TOOLTIP,
+                  getValue = function() return db.ItemCountUses ~= false end,
+                  setValue = function(v) SetLF("ItemCountUses", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_REAGENT_BANK or "Count Reagent Bank items",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_REAGENT_BANK_TOOLTIP,
+                  getValue = function() return db.ItemCountReagentBank ~= false end,
+                  setValue = function(v) SetLF("ItemCountReagentBank", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_CURRENCY or "Count Currency totals",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_CURRENCY_TOOLTIP,
+                  getValue = function() return db.ItemCountCurrency ~= false end,
+                  setValue = function(v) SetLF("ItemCountCurrency", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_LEVEL or "Add Item Level",
+                  tooltip = L.PANEL_OPTION_ITEM_LEVEL_TOOLTIP,
+                  getValue = function() return db.ItemLevel ~= false end,
+                  setValue = function(v)
+                      SetLF("ItemLevel", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_LEVEL_EQUIP_ONLY or "Show for equipment only",
+                  tooltip = L.PANEL_OPTION_ITEM_LEVEL_EQUIP_ONLY_TOOLTIP,
+                  getValue = function() return db.ItemLevelEquipmentOnly ~= false end,
+                  setValue = function(v) SetLF("ItemLevelEquipmentOnly", v) end,
+                  disabled = function() return LFDisabled() or db.ItemLevel == false end },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_TIER or "Add Tier Indicator",
+                  tooltip = L.PANEL_OPTION_ITEM_TIER_TOOLTIP,
+                  getValue = function() return db.ItemTier ~= false end,
+                  setValue = function(v)
+                      SetLF("ItemTier", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_TIER_AS_TEXT or "Show as text",
+                  tooltip = L.PANEL_OPTION_ITEM_TIER_AS_TEXT_TOOLTIP,
+                  getValue = function() return db.ItemTierAsText ~= false end,
+                  setValue = function(v) SetLF("ItemTierAsText", v) end,
+                  disabled = function() return LFDisabled() or db.ItemTier == false end },
+                EllesmereUI.BlankRowCfg())
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "MESSAGE GROUPS", y); y = y - h
+
+            local function PrettyGroup(group)
+                local label = tostring(group or "")
+                label = label:gsub("(%u)(%u%l)", "%1 %2")
+                label = label:gsub("(%l)(%u)", "%1 %2")
+                return label
+            end
+
+            local groupNames = {}
+            for _, group in pairs(lf.Messages.LootFeedMessageGroup) do
+                groupNames[#groupNames + 1] = group
+            end
+            table.sort(groupNames)
+            local groupItems = {}
+            for _, group in ipairs(groupNames) do
+                groupItems[#groupItems + 1] = { key = group, label = PrettyGroup(group) }
+            end
+
+            local enabledGroupsTooltip = L.PANEL_OPTION_ENABLED_GROUPS_TOOLTIP
+                or "Select message groups Loot Feed should process and format. Selecting a group here removes it from Ignored groups. Groups selected in neither list use Blizzard's original chat output."
+            local ignoredGroupsTooltip = L.PANEL_OPTION_IGNORED_GROUPS_TOOLTIP
+                or "Select message groups Loot Feed should suppress from chat. Selecting a group here removes it from Enabled groups. Groups selected in neither list use Blizzard's original chat output."
+
+            local groupRow
+            groupRow, h = W:DualRow(parent, y,
+                { type = "dropdown", text = L.PANEL_OPTION_ENABLED_GROUPS or "Enabled groups",
+                  tooltip = enabledGroupsTooltip,
+                  values = { __placeholder = "..." }, order = { "__placeholder" },
+                  getValue = function() return "__placeholder" end, setValue = function() end },
+                { type = "dropdown", text = L.PANEL_OPTION_IGNORED_GROUPS or "Ignored groups",
+                  tooltip = ignoredGroupsTooltip,
+                  values = { __placeholder = "..." }, order = { "__placeholder" },
+                  getValue = function() return "__placeholder" end, setValue = function() end })
+            y = y - h
+
+            local groupDropdownRefresh = {}
+            local function RefreshGroupDropdowns()
+                for _, refresh in pairs(groupDropdownRefresh) do
+                    refresh()
+                end
+            end
+
+            local function InstallGroupDropdown(region, key, enabledSemantics, tooltip)
+                if region._control then region._control:Hide() end
+                local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                    region, 170, region:GetFrameLevel() + 2, groupItems,
+                    function(group)
+                        if enabledSemantics then
+                            return db.EnabledGroups[group] ~= false and db.IgnoredGroups[group] ~= true
+                        end
+                        return db.IgnoredGroups[group] == true
+                    end,
+                    function(group, value)
+                        if enabledSemantics then
+                            db.EnabledGroups[group] = value and true or false
+                            if value then
+                                db.IgnoredGroups[group] = nil
+                            end
+                        else
+                            db.IgnoredGroups[group] = value and true or nil
+                            if value then
+                                db.EnabledGroups[group] = false
+                            end
+                        end
+                        NotifySettingChanged(key, db[key], db[key])
+                        RefreshGroupDropdowns()
+                    end,
+                    nil, 12, true)
+                PP.Point(cbDD, "RIGHT", region, "RIGHT", -20, 0)
+                region._control = cbDD
+                groupDropdownRefresh[key] = cbDDRefresh
+                EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+
+                cbDD:HookScript("OnEnter", function()
+                    if tooltip and not (cbDD._ddMenu and cbDD._ddMenu:IsShown()) and EllesmereUI.ShowWidgetTooltip then
+                        EllesmereUI.ShowWidgetTooltip(cbDD, tooltip)
+                    end
+                end)
+                cbDD:HookScript("OnLeave", function()
+                    if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                end)
+                cbDD:HookScript("OnClick", function()
+                    if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                end)
+
+                local function UpdateDisabled()
+                    local off = LFDisabled()
+                    cbDD:SetAlpha(off and 0.3 or 1)
+                    cbDD:EnableMouse(not off)
+                    if region._label then region._label:SetAlpha(off and 0.3 or 1) end
+                end
+                UpdateDisabled()
+                EllesmereUI.RegisterWidgetRefresh(UpdateDisabled)
+            end
+
+            InstallGroupDropdown(groupRow._leftRegion, "EnabledGroups", true, enabledGroupsTooltip)
+            InstallGroupDropdown(groupRow._rightRegion, "IgnoredGroups", false, ignoredGroupsTooltip)
+
+            -- Debounce Groups, Enabled Tooltips and Filters are intentionally not
+            -- exposed here: the embedded version has no useful configurable rows
+            -- for those sections.
+            return math.abs(y)
+        end
 
         -- Stock styles (Blizzard Style / Classic WoW UI) reveal Blizzard's own
         -- chat frame art and input box: the panel background, panel border and
@@ -1902,13 +2246,16 @@ initFrame:SetScript("OnEvent", function(self)
     if ECHAT.BubblesDB and ECHAT.BubbleDefaults and ns.ChatBubbles then
         chatPages[#chatPages + 1] = "Chat Bubbles"
     end
+    if ns.LootFeed and ns.LootFeed.Settings and ns.LootFeed.Messages then
+        chatPages[#chatPages + 1] = "Loot Feed"
+    end
 
     EllesmereUI:RegisterModule("EllesmereUIChat", {
         title       = "Chat",
         description = "Chat frame reskin, clickable URLs, copy chat, sidebar icons.",
         pages       = chatPages,
         buildPage   = function(pageName, p, yOffset) return BuildPage(pageName, p, yOffset) end,
-        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size hide learned unlearned spell ability passive effect spec talent loadout system messages bubbles bubble speech balloon nameplate",
+        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size hide learned unlearned spell ability passive effect spec talent loadout system messages bubbles bubble speech balloon nameplate loot feed loot rolls need greed transmog currency item level tooltips filters",
         onReset = function()
             local d = _G._ECHAT_DB
             if d and d.ResetProfile then d:ResetProfile() end

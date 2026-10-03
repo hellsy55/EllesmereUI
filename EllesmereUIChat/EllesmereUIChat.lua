@@ -191,6 +191,10 @@ local CHAT_DEFAULTS = {
             -- colour the engine already gave it, which is per channel.
             followBlizzardColor = false,
         },
+        -- Loot Feed settings. The feature applies its own defaults lazily
+        -- so these tables stay profile-scoped without duplicating its schema here.
+        lootFeed = {},
+        lootFeedRemix = {},
     },
 }
 

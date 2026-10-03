@@ -32,6 +32,19 @@ EllesmereUIChat_Forever.lua
 # frame on the frame that carries their position.
 EllesmereUIChat_Bubbles.lua
 
+# Loot Feed: loot-message processing integrated as a native Chat feature.
+EllesmereUIChat_LootFeed_Locale.lua
+EllesmereUIChat_LootFeed_Links.lua
+EllesmereUIChat_LootFeed_Utils.lua
+EllesmereUIChat_LootFeed_Filters.lua
+EllesmereUIChat_LootFeed_Messages.lua
+EllesmereUIChat_LootFeed_Settings.lua
+EllesmereUIChat_LootFeed_Reporting.lua
+EllesmereUIChat_LootFeed_Formatter.lua
+EllesmereUIChat_LootFeed_Output.lua
+EllesmereUIChat_LootFeed_Tooltips.lua
+EllesmereUIChat_LootFeed.lua
+
 # Options
 
 # Session scrollback: bridge-tail capture (formatted lines), replay into our
