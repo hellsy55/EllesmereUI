@@ -1310,6 +1310,26 @@ end
 -- change-guarded via CK() fingerprints (d.ufDurColor/d.ufStackColor) --
 -- SetTextColor costs real time too, same reasoning as the font guard above.
 local function ApplyUFText(button, d, style)
+    if style.auraBorderAboveEffects or d.ufBorderAboveEffects then
+        -- Only owned art/text hosts move; the restricted button is untouched.
+        -- Stock styles hide the border instead of restoring its level.
+        local level = d.borderHost:GetFrameLevel()
+        if style.auraBorderAboveEffects then
+            d.ufBorderBaseLevel = level
+            level = math.max(level, (d.buttonFrameLevel or 1) + 20)
+            d.borderHost:SetFrameLevel(level)
+        else
+            if not style.border and d.ufBorderBaseLevel then
+                level = d.ufBorderBaseLevel
+                d.borderHost:SetFrameLevel(level)
+            end
+            d.ufBorderBaseLevel = nil
+        end
+        d.dispelHolder:SetFrameLevel(level + 4)
+        d.stackCarrier:SetFrameLevel(level + 5)
+        d.akDispelLvl = level
+        d.ufBorderAboveEffects = style.auraBorderAboveEffects or nil
+    end
     local path = style.fontPath or FALLBACK_FONT
     if d.duration then
         local fontKey = path .. "|" .. (style.cdTextSize or 10)
@@ -1410,6 +1430,7 @@ local function StyleTableFP(st, font)
         b and b.texture, b and b.size, b and b.edgePx, b and b[1], b and b[2], b and b[3], b and b[4],
         b and b.offsetX, b and b.offsetY, b and b.shiftX, b and b.shiftY,
         b and b.behind, b and b.behindUnitFrame, b and b.unitFrameLevel,
+        st.auraBorderAboveEffects,
         st.noTooltips, st.blizzBorder, st.dispelBorder,
         -- Textured Dispel Ring (the ring's art key) and Use Dispel Colors (the
         -- palette fingerprint the colour map was built from).
@@ -1457,16 +1478,23 @@ local function ElementSize(unit, base, s)
     local isBuff = (base == "HELPFUL")
     local size = Pick(isBuff, s.buffSize, s.debuffSize) or 22
     local simpleOn = BossSimple(unit, base, s)
+    local PP = EllesmereUI.PP
+    local m = PP.mult or 1
     if simpleOn then
-        local PP = EllesmereUI.PP
         local powerPos = s.powerPosition or "below"
         local powerH = 0
         if powerPos == "below" or powerPos == "above" then powerH = s.powerHeight or 0 end
         size = PP.Scale((s.healthHeight or 0) + powerH)
+    elseif m ~= 1 then
+        -- Whole physical pixels (nearest, as Player Aura Bars): AuraKit's border
+        -- strips skip pixel snapping while the icon texture snaps, so a
+        -- fractional far edge leaves the border off the icon at a
+        -- non-pixel-perfect scale.
+        size = PP.FromPixels(PP.ToPixels(size))
     end
     local cropped = Pick(isBuff, s.buffCropIcons, s.debuffCropIcons)
     local h = size
-    if cropped then h = math.floor(size * AURA_CROP_HEIGHT + 0.5) end
+    if cropped then h = math.floor(size / m * AURA_CROP_HEIGHT + 0.5) * m end
     return size, h, cropped
 end
 
@@ -1523,7 +1551,7 @@ local function BuildStyle(unit, base, s, unitFrame)
         if isBuff and unit ~= "player" and s.buffDispelBorder == true then
             dispel = true
         end
-        -- Textured Dispel Ring (per-unit, player/target): AuraKit draws the ring
+        -- Textured Dispel Ring (per-unit, player/target/focus): AuraKit draws the ring
         -- in the aura border's own art on the aura border's geometry (style.border)
         -- instead of flat strips, and keeps the strips by itself for a size-0 border.
         if dispel and s.auraBorderDispelTextured == true
@@ -1575,6 +1603,8 @@ local function BuildStyle(unit, base, s, unitFrame)
         -- every ApplyUFText call -- GetFontPath's result only changes when
         -- font settings change, which already forces a fresh style table.
         fontPath = (EllesmereUI.GetFontPath("unitFrames")) or FALLBACK_FONT,
+        auraBorderAboveEffects = s.auraBorderAboveEffects == true and unit:match("^boss")
+            and ns.UF_BossAuraBorderAboveEffects(s) or nil,
         applyExtra = ApplyUFText,
     }
 end
@@ -1597,7 +1627,9 @@ function PurgeGlow.Extra(button, d, style)
         -- window for parenting a new frame to it. Just below the text carrier.
         host = CreateFrame("Frame", nil, button)
         host:SetAllPoints(button)
-        if d.stackCarrier then
+        if style.auraBorderAboveEffects then
+            host:SetFrameLevel(d.cooldown:GetFrameLevel() + 5)
+        elseif d.stackCarrier then
             host:SetFrameLevel(d.stackCarrier:GetFrameLevel() - 1)
         else
             host:SetFrameLevel(button:GetFrameLevel() + 1)
@@ -1891,7 +1923,7 @@ local function AnchorContainer(container, frame, unit, base, s, buffContainer)
                 local es = container:GetEffectiveScale()
                 local _, fcY = frame:GetCenter()
                 if fcY then
-                    local iconH = Pick(isBuff, s.buffSize, s.debuffSize) or 22
+                    local _, iconH = ElementSize(unit, base, s)
                     local rawY = fcY + oy + cbOff + offY
                     offY = offY + (PP.SnapCenterForDim(rawY, iconH, es) - rawY)
                 end
@@ -2455,13 +2487,45 @@ end
 -- a type rather than giving the by-me twin a filter that would match it: two
 -- slots declaring one filter string share a single engine parse batch (see
 -- AK.Filter) and both are not guaranteed to receive the aura. The rule itself
--- lives with the legacy overlay in EllesmereUIUnitFrames.lua, which needs the
+-- lives with the legacy overlay in EUI_UnitFrames_Lifecycle.lua, which needs the
 -- same answer.
 local function TokenBlindDispelSlot(slotKey)
     return ns.UF_TokenBlindDispel ~= nil and ns.UF_TokenBlindDispel(slotKey)
 end
 local GRADIENT_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-tb.tga"
 local GRADIENT_SHARP_TEXTURE = "Interface\\AddOns\\EllesmereUI\\media\\textures\\gradient-sharp.tga"
+
+-- Copy the separator's actual texture rect, so width, pixel snapping and future
+-- layout changes stay owned by the separator. Copies belong to the aura slot
+-- (engine visibility); the options preview tints its separators in place.
+-- Keep state outside the slot button, as with the border and outer ring copies.
+local function ApplyDispelSeparatorCopy(parent, state, key, seam, color)
+    local copy = state[key]
+    local source = seam and seam._tex
+    if not (source and seam:IsShown() and source:IsShown()) then
+        if copy then copy.host:Hide() end
+        return
+    end
+    if not copy then
+        local host = CreateFrame("Frame", nil, parent)
+        local tex = host:CreateTexture(nil, "OVERLAY", nil, 7)
+        tex:SetAllPoints(host)
+        host:SetAllPoints(source)
+        copy = { host = host, tex = tex, source = source }
+        state[key] = copy
+    end
+    if copy.source ~= source then
+        copy.host:ClearAllPoints()
+        copy.host:SetAllPoints(source)
+        copy.source = source
+    end
+    copy.host:SetFrameStrata(seam:GetFrameStrata())
+    copy.host:SetFrameLevel(seam:GetFrameLevel() + 1)
+    copy.tex:SetTexture(source:GetTexture())
+    copy.tex:SetTexCoord(source:GetTexCoord())
+    copy.tex:SetVertexColor(color.r, color.g, color.b, 1)
+    copy.host:Show()
+end
 
 -- applyExtra for dispel slots: builds/updates the overlay texture from the
 -- style (mode, color, opacity, health refs). Runs at init and every Restyle.
@@ -2592,6 +2656,13 @@ local function ApplyDispelSlotStyle(button, d, style)
     elseif d.ufRingOn then
         d.ufRingHost:Hide()
         d.ufRingOn = nil
+    end
+
+    -- Only enabled, displayed separators get copies. The inactive by-me twin
+    -- and disabled custom-border mode clear any copies they previously drew.
+    if ub or d.ufPowerSeam or d.ufPortraitSeam then
+        ApplyDispelSeparatorCopy(button, d, "ufPowerSeam", ub and uf.Power and uf.Power._pbSeam, c)
+        ApplyDispelSeparatorCopy(button, d, "ufPortraitSeam", ub and uf._portraitSeparator, c)
     end
 end
 
@@ -2741,7 +2812,9 @@ local function DispelFP(p)
     -- the copy reads counts too: the border keys; the strata (a strata change
     -- re-stacks child levels); the portrait mode and side (an inside 3D portrait
     -- lifts the unified border to frame+20); and the portrait and Outer Ring keys
-    -- that decide whether the ring copy shows and which art it takes.
+    -- that decide whether the ring copy shows and which art it takes. Separator
+    -- visibility and orientation changes must restyle their copies too; their
+    -- dimensions follow the source texture anchors without a restyle.
     local s = p.player
     local cb = p.dispelCustomBorder == true and s ~= nil
     return FP(p.dispelOverlay, p.dispelOverlayOpacity, p.dispelOverlayByMe == true,
@@ -2753,7 +2826,8 @@ local function DispelFP(p)
             s.borderTextureShiftY, s.borderBehind, p.frameStrata, s.frameStrata,
             s.portraitMode, s.portraitSide, p.portraitStyle, s.portraitStyle, s.showPortrait,
             s.portraitSize, s.detachedPortraitShape, s.detachedPortraitOuterRing,
-            s.detachedPortraitOuterRingScale) or false)
+            s.detachedPortraitOuterRingScale, s.borderPowerSeam, s.powerPosition,
+            s.powerHeight, s.portraitSeparator) or false)
 end
 
 local function ReloadDispelSlots(frame, entry)

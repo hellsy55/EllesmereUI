@@ -2,10 +2,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 --  EUI_CooldownManager_TalentConditions.lua
 --  Talent Conditions popup for the CDM per-icon menu (cooldown/utility bars).
---  Draws the current spec's class tree and spec tree side by side, laid out
---  from the game's own node positions, and lets the user mark talents:
---  click cycles Taken > Not Taken > cleared. A choice node is split in two
---  halves so either side can be picked. Hero trees are out of scope.
+--  Draws the current spec's class tree, active Hero tree and spec tree side by
+--  side, laid out from the game's own node positions, and lets the user mark
+--  talents: click cycles Taken > Not Taken > cleared. A choice node is split
+--  in two halves so either side can be picked.
 --
 --  Storage, evaluation and the reanchor filter live in the CDM addon
 --  (EllesmereUICdmTalentConditions.lua). The tree read here is the ACTIVE
@@ -22,17 +22,19 @@ if not ns then return end
 
 local PP = EllesmereUI.PP
 
-local POPUP_W, POPUP_H = 940, 620
+local POPUP_H = 620
 -- Bump over the dimmer's panel scale: the popup draws at panelScale px per unit, the
 -- density of the sibling CDM popups that every size below assumes.
 local POPUP_BUMP = 1.2
 local HEADER_H, FOOTER_H = 70, 56
 local SIDE_PAD, PANEL_GAP = 16, 12
-local PANEL_W = (POPUP_W - SIDE_PAD * 2 - PANEL_GAP) / 2
+-- Preserve the roomy class/spec trees and insert a compact Hero Talent quadrant
+-- between them. ClampPopupToScreen scales the full shell down on smaller displays.
+local CLASS_PANEL_W, HERO_PANEL_W, SPEC_PANEL_W = 448, 270, 448
+local POPUP_W = SIDE_PAD * 2 + PANEL_GAP * 2 + CLASS_PANEL_W + HERO_PANEL_W + SPEC_PANEL_W
 local PANEL_H = POPUP_H - HEADER_H - FOOTER_H
 local PANEL_LABEL_H = 24
 local AREA_PAD = 12
-local AREA_W = PANEL_W - AREA_PAD * 2
 local AREA_H = PANEL_H - PANEL_LABEL_H - AREA_PAD
 local NODE = 26
 local BORDER_PX, MARK_PX = 1, 3
@@ -44,7 +46,8 @@ local OFF_PAD, OFF_LABEL_H = 10, 22
 local CHIP_COLS, CHIP_W, CHIP_H, CHIP_GAP_X, CHIP_GAP_Y = 4, 218, 26, 12, 6
 local CLOSE_ICON = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png"
 
-local CLASS_HALF, SPEC_HALF = 1, 2
+local CLASS_HALF, HERO_HALF, SPEC_HALF = 1, 2, 3
+local PANEL_WIDTHS = { CLASS_PANEL_W, HERO_PANEL_W, SPEC_PANEL_W }
 local EMPTY = {}
 
 local function SetTCFont(fs, size)
@@ -100,8 +103,9 @@ local function RangeDistance(half, x)
     return 0
 end
 
--- The active config's tree for the current spec, split into its class half and
--- spec half: { [CLASS_HALF] = nodes, [SPEC_HALF] = nodes }, plus the spec name.
+-- The active config's tree for the current spec, split into class, active Hero
+-- and spec sections, plus the spec/Hero names. Hero nodes are identified from
+-- their SubTreeID, so this works for every class/spec without hardcoded IDs.
 local function ReadTree()
     local configID = C_ClassTalents.GetActiveConfigID()
     local specIndex = C_SpecializationInfo.GetSpecialization()
@@ -111,45 +115,66 @@ local function ReadTree()
     local nodeIDs = treeID and C_Traits.GetTreeNodes(treeID)
     if not nodeIDs then return nil end
 
-    -- Which points a node costs tells the halves apart. The game lists the
-    -- class currency first and the spec currency second.
+    -- Which points a base-tree node costs tells the class/spec halves apart. The
+    -- game lists the class currency first and the spec currency second. Hero
+    -- nodes have a SubTreeID and are routed directly into the centre panel.
     local currencies = C_Traits.GetTreeCurrencyInfo(configID, treeID, false)
     local classCur = currencies and currencies[1] and currencies[1].traitCurrencyID
     local specCur = currencies and currencies[2] and currencies[2].traitCurrencyID
 
-    local halves = { {}, {} }
+    local heroSpecID = C_ClassTalents.GetActiveHeroTalentSpec and C_ClassTalents.GetActiveHeroTalentSpec()
+    if not heroSpecID and C_ClassTalents.GetHeroTalentSpecsForClassSpec and C_Traits.GetSubTreeInfo then
+        local subTreeIDs = C_ClassTalents.GetHeroTalentSpecsForClassSpec(configID, specID)
+        for _, subTreeID in ipairs(subTreeIDs or EMPTY) do
+            local subTreeInfo = C_Traits.GetSubTreeInfo(configID, subTreeID)
+            if subTreeInfo and subTreeInfo.isActive then
+                heroSpecID = subTreeID
+                break
+            end
+        end
+    end
+    local heroInfo = heroSpecID and C_Traits.GetSubTreeInfo and C_Traits.GetSubTreeInfo(configID, heroSpecID)
+    local heroName = heroInfo and heroInfo.name
+
+    local halves = { {}, {}, {} }
     local free = {}
     for _, nodeID in ipairs(nodeIDs) do
         local info = C_Traits.GetNodeInfo(configID, nodeID)
-        if info and info.isVisible and not info.subTreeID
-           and info.type ~= Enum.TraitNodeType.SubTreeSelection then
-            local node = ReadNode(configID, nodeID, info)
-            if node then
-                local half
-                for _, cost in ipairs(C_Traits.GetNodeCost(configID, nodeID) or EMPTY) do
-                    if cost.ID == specCur then half = SPEC_HALF; break end
-                    if cost.ID == classCur then half = CLASS_HALF end
+        if info and info.isVisible and info.type ~= Enum.TraitNodeType.SubTreeSelection then
+            if info.subTreeID then
+                if heroSpecID and info.subTreeID == heroSpecID then
+                    local node = ReadNode(configID, nodeID, info)
+                    if node then halves[HERO_HALF][#halves[HERO_HALF] + 1] = node end
                 end
-                if half then
-                    local h = halves[half]
-                    h[#h + 1] = node
-                    if not h.minX or node.x < h.minX then h.minX = node.x end
-                    if not h.maxX or node.x > h.maxX then h.maxX = node.x end
-                else
-                    free[#free + 1] = node
+            else
+                local node = ReadNode(configID, nodeID, info)
+                if node then
+                    local half
+                    for _, cost in ipairs(C_Traits.GetNodeCost(configID, nodeID) or EMPTY) do
+                        if cost.ID == specCur then half = SPEC_HALF; break end
+                        if cost.ID == classCur then half = CLASS_HALF end
+                    end
+                    if half then
+                        local h = halves[half]
+                        h[#h + 1] = node
+                        if not h.minX or node.x < h.minX then h.minX = node.x end
+                        if not h.maxX or node.x > h.maxX then h.maxX = node.x end
+                    else
+                        free[#free + 1] = node
+                    end
                 end
             end
         end
     end
-    -- The starting talents each tree grants cost nothing: place them by position,
-    -- into whichever half's columns they sit nearer to.
+    -- The starting talents each base tree grants cost nothing: place them by
+    -- position into whichever class/spec half's columns they sit nearer to.
     for _, node in ipairs(free) do
         local c = RangeDistance(halves[CLASS_HALF], node.x)
         local s = RangeDistance(halves[SPEC_HALF], node.x)
         local h = halves[(s < c) and SPEC_HALF or CLASS_HALF]
         h[#h + 1] = node
     end
-    return halves, specName
+    return halves, specName, heroName
 end
 
 -------------------------------------------------------------------------------
@@ -315,8 +340,9 @@ local function LayoutHalf(panel, nodes)
         end
         local spanX = math.max(maxX - minX, 1)
         local spanY = math.max(maxY - minY, 1)
-        local scale = math.min((AREA_W - NODE) / spanX, (AREA_H - NODE) / spanY)
-        local offX = (AREA_W - (spanX * scale + NODE)) / 2
+        local areaW = panel.areaW
+        local scale = math.min((areaW - NODE) / spanX, (AREA_H - NODE) / spanY)
+        local offX = (areaW - (spanX * scale + NODE)) / 2
         local offY = (AREA_H - (spanY * scale + NODE)) / 2
 
         for _, n in ipairs(nodes) do
@@ -404,7 +430,7 @@ local function MakeChip(i)
     chip:SetSize(CHIP_W, CHIP_H)
     local bg = chip:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.04, 0.06, 0.08, 1)
+    bg:SetColorTexture(0.060, 0.049, 0.037, 1)
     chip.border = EllesmereUI.MakeBorder(chip, 1, 1, 1, 0.10, PP)
     chip.icon = chip:CreateTexture(nil, "ARTWORK")
     chip.icon:SetSize(CHIP_H - 8, CHIP_H - 8)
@@ -476,12 +502,14 @@ end
 -------------------------------------------------------------------------------
 local function MakePanel(half)
     local frame = CreateFrame("Frame", nil, popup)
-    frame:SetSize(PANEL_W, PANEL_H)
-    frame:SetPoint("TOPLEFT", popup, "TOPLEFT",
-        SIDE_PAD + (half - 1) * (PANEL_W + PANEL_GAP), -HEADER_H)
+    local panelW = PANEL_WIDTHS[half]
+    local panelX = SIDE_PAD
+    for i = 1, half - 1 do panelX = panelX + PANEL_WIDTHS[i] + PANEL_GAP end
+    frame:SetSize(panelW, PANEL_H)
+    frame:SetPoint("TOPLEFT", popup, "TOPLEFT", panelX, -HEADER_H)
     local bg = frame:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.04, 0.06, 0.08, 1)
+    bg:SetColorTexture(0.060, 0.049, 0.037, 1)
     EllesmereUI.MakeBorder(frame, 1, 1, 1, 0.10, PP)
 
     local label = frame:CreateFontString(nil, "OVERLAY")
@@ -490,7 +518,8 @@ local function MakePanel(half)
     label:SetTextColor(0.85, 0.85, 0.85, 1)
 
     local area = CreateFrame("Frame", nil, frame)
-    area:SetSize(AREA_W, AREA_H)
+    local areaW = panelW - AREA_PAD * 2
+    area:SetSize(areaW, AREA_H)
     area:SetPoint("TOPLEFT", frame, "TOPLEFT", AREA_PAD, -PANEL_LABEL_H)
 
     local empty = frame:CreateFontString(nil, "OVERLAY")
@@ -500,7 +529,7 @@ local function MakePanel(half)
     empty:SetText(EllesmereUI.L("Talent data is not available right now."))
     empty:Hide()
 
-    panels[half] = { frame = frame, label = label, area = area, empty = empty,
+    panels[half] = { frame = frame, label = label, area = area, areaW = areaW, empty = empty,
                      lines = {}, buttons = {}, used = 0 }
 end
 
@@ -551,6 +580,7 @@ local function Build()
     hint:SetText(EllesmereUI.L("Click a talent to require it: Taken, then Not Taken, then cleared. Every condition must hold for the icon to show."))
 
     MakePanel(CLASS_HALF)
+    MakePanel(HERO_HALF)
     MakePanel(SPEC_HALF)
 
     offFrame = CreateFrame("Frame", nil, popup)
@@ -664,10 +694,12 @@ function ns.ShowCDMTalentConditionsPopup(spellID, conds, confirm)
     local spellName = C_Spell.GetSpellName(spellID) or tostring(spellID)
     titleFS:SetText(EllesmereUI.Lf("Talent Conditions: %1$s", spellName))
 
-    local halves, specName = ReadTree()
+    local halves, specName, heroName = ReadTree()
     panels[CLASS_HALF].label:SetText((UnitClass("player")) or "")
+    panels[HERO_HALF].label:SetText(heroName or EllesmereUI.L("Hero Talents"))
     panels[SPEC_HALF].label:SetText(specName or "")
     LayoutHalf(panels[CLASS_HALF], halves and halves[CLASS_HALF])
+    LayoutHalf(panels[HERO_HALF], halves and halves[HERO_HALF])
     LayoutHalf(panels[SPEC_HALF], halves and halves[SPEC_HALF])
 
     -- Seed the edit copy. A condition no drawn button can show (a talent a patch

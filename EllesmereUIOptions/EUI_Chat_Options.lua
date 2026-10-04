@@ -30,9 +30,6 @@ initFrame:SetScript("OnEvent", function(self)
         if ECHAT.ApplyBackground  then ECHAT.ApplyBackground()  end
         if ECHAT.ApplyFonts       then ECHAT.ApplyFonts()       end
         if ECHAT.RefreshVisibility then ECHAT.RefreshVisibility() end
-        -- Reset Profile wipes the bubble settings too; without this the feature keeps
-        -- running with Blizzard's CVars still suppressed against settings that are gone.
-        if ns.ChatBubbles then ns.ChatBubbles.Refresh() end
     end
 
     local function BuildPage(pageName, parent, yOffset)
@@ -48,6 +45,350 @@ initFrame:SetScript("OnEvent", function(self)
         local isTabs = pageName == "Tabs"
         local isSidebar = pageName == "Sidebar"
         local isBubbles = pageName == "Chat Bubbles"
+        local isLootFeed = pageName == "Loot Feed"
+
+        if isLootFeed then
+            parent._showRowDivider = true
+            local lf = ns.LootFeed
+            if not (lf and lf.Settings and lf.Settings.db and lf.Messages and lf.Messages.LootFeedMessageGroup) then
+                return math.abs(y)
+            end
+
+            local db = lf.Settings.db
+            local defaults = lf.Settings.DefaultOptions or {}
+            local L = lf.Locale or {}
+
+            local function NotifySettingChanged(key, value, oldValue)
+                local eventFrame = lf.EventFrame
+                if eventFrame and eventFrame.OnSettingsChanged then
+                    eventFrame:OnSettingsChanged(key, value, oldValue)
+                end
+            end
+
+            local function SetLF(key, value, notify)
+                local oldValue = db[key]
+                if oldValue == value then return end
+                db[key] = value
+                if notify ~= false then
+                    NotifySettingChanged(key, value, oldValue)
+                end
+            end
+
+            local function LFDisabled()
+                return db.Enabled == false
+            end
+
+            local function NumberSlider(key, text, tooltip, minValue, maxValue, step, dependant, pixel)
+                return {
+                    type = "slider", text = text, tooltip = tooltip,
+                    min = minValue, max = maxValue, step = step or 1, pixel = pixel,
+                    getValue = function()
+                        local value = db[key]
+                        if value == nil then value = defaults[key] end
+                        return tonumber(value) or minValue or 0
+                    end,
+                    setValue = function(value)
+                        local number = tonumber(value)
+                        if not number then return end
+                        if minValue and number < minValue then number = minValue end
+                        if maxValue and number > maxValue then number = maxValue end
+                        SetLF(key, number)
+                    end,
+                    disabled = function()
+                        if LFDisabled() then return true end
+                        return dependant and not dependant() or false
+                    end,
+                }
+            end
+
+            _, h = W:SectionHeader(parent, "LOOT FEED", y); y = y - h
+
+            local remixCfg
+            if lf.Utils and lf.Utils.GetTimerunningSeasonID and lf.Utils.GetTimerunningSeasonID() then
+                remixCfg = {
+                    type = "toggle", text = L.PANEL_OPTION_ENABLE_REMIX_MODE or "Use Remix Profile",
+                    tooltip = L.PANEL_OPTION_ENABLE_REMIX_MODE_TOOLTIP,
+                    getValue = function() return db.EnableRemixMode ~= false end,
+                    setValue = function(v) SetLF("EnableRemixMode", v) end,
+                    disabled = LFDisabled,
+                }
+            end
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ENABLED or "Enable Loot Feed",
+                  tooltip = "Enables Loot Feed loot-message processing inside EllesmereUI Chat. Changing this setting requires a UI reload.",
+                  getValue = function() return db.Enabled ~= false end,
+                  setValue = function(v)
+                      local current = db.Enabled ~= false
+                      if v == current then return end
+
+                      -- Keep the stored value (and therefore the visible toggle) unchanged
+                      -- until the user commits to the reload. Rebuild the page immediately
+                      -- because the shared toggle widget animates toward the clicked value
+                      -- after setValue returns even when the backing setting was not written.
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+
+                      local function RestoreToggle()
+                          if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                      end
+
+                      EllesmereUI:ShowConfirmPopup({
+                          title = "Reload Required",
+                          message = "Enabling or disabling Loot Feed requires a UI reload.",
+                          confirmText = "Reload Now",
+                          cancelText = "Cancel",
+                          reload = true,
+                          onConfirm = function()
+                              -- Deliberately do not notify the live runtime: the new state is
+                              -- persisted only as part of the confirmed reload path.
+                              SetLF("Enabled", v, false)
+                          end,
+                          onCancel = RestoreToggle,
+                          onDismiss = RestoreToggle,
+                      })
+                  end },
+                remixCfg or EllesmereUI.BlankRowCfg())
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "OUTPUT", y); y = y - h
+
+            local chatValues, chatOrder = {}, {}
+            for i = 1, 9 do
+                local key = "ChatFrame" .. i
+                local frame = _G[key]
+                local name = frame and frame.name
+                chatValues[key] = name and (key .. " (" .. name .. ")") or key
+                chatOrder[#chatOrder + 1] = key
+            end
+
+            _, h = W:DualRow(parent, y,
+                { type = "dropdown", text = L.PANEL_OPTION_CHATFRAME or "Active Chat Frame",
+                  tooltip = L.PANEL_OPTION_CHATFRAME_TOOLTIP,
+                  values = chatValues, order = chatOrder,
+                  getValue = function() return db.ChatFrame or defaults.ChatFrame or "ChatFrame1" end,
+                  setValue = function(v) SetLF("ChatFrame", v) end,
+                  disabled = LFDisabled },
+                NumberSlider("Debounce", L.PANEL_OPTION_DEBOUNCE or "Output Interval", L.PANEL_OPTION_DEBOUNCE_TOOLTIP, 0, 30, 1))
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_DEBOUNCE_INCOMBAT or "Output during Combat",
+                  tooltip = L.PANEL_OPTION_DEBOUNCE_INCOMBAT_TOOLTIP,
+                  getValue = function() return db.DebounceInCombat ~= false end,
+                  setValue = function(v) SetLF("DebounceInCombat", v) end,
+                  disabled = LFDisabled },
+                { type = "toggle", text = L.PANEL_OPTION_ENABLE_TOOLTIPS or "Enable Hover Tooltips",
+                  tooltip = L.PANEL_OPTION_ENABLE_TOOLTIPS_TOOLTIP,
+                  getValue = function() return db.EnableTooltips ~= false end,
+                  setValue = function(v) SetLF("EnableTooltips", v) end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "FORMAT", y); y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_SHORTEN_PLAYER_NAMES or "Short Player names",
+                  tooltip = L.PANEL_OPTION_SHORTEN_PLAYER_NAMES_TOOLTIP,
+                  getValue = function() return db.ShortenPlayerNames ~= false end,
+                  setValue = function(v) SetLF("ShortenPlayerNames", v) end,
+                  disabled = LFDisabled },
+                { type = "toggle", text = L.PANEL_OPTION_SHORTEN_FACTION_NAMES or "Short Faction names",
+                  tooltip = L.PANEL_OPTION_SHORTEN_FACTION_NAMES_TOOLTIP,
+                  getValue = function() return db.ShortenFactionNames ~= false end,
+                  setValue = function(v)
+                      SetLF("ShortenFactionNames", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                NumberSlider("ShortenFactionNamesLength", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH or "Short Faction name length", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH_TOOLTIP, 1, 50, 1,
+                    function() return db.ShortenFactionNames ~= false end),
+                NumberSlider("IconSize", L.PANEL_OPTION_ICON_SIZE or "Icon Size", L.PANEL_OPTION_ICON_SIZE_TOOLTIP, 1, 64, 1, nil, true))
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                NumberSlider("IconTrim", L.PANEL_OPTION_ICON_TRIM or "Icon Trim", L.PANEL_OPTION_ICON_TRIM_TOOLTIP, 0, 50, 1),
+                EllesmereUI.BlankRowCfg())
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "ITEM DISPLAY", y); y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT or "Show Item Count",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_TOOLTIP,
+                  getValue = function() return db.ItemCount == true end,
+                  setValue = function(v)
+                      SetLF("ItemCount", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_BANK or "Count Bank items",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_BANK_TOOLTIP,
+                  getValue = function() return db.ItemCountBank ~= false end,
+                  setValue = function(v) SetLF("ItemCountBank", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_USES or "Count Charges on items",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_USES_TOOLTIP,
+                  getValue = function() return db.ItemCountUses ~= false end,
+                  setValue = function(v) SetLF("ItemCountUses", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_REAGENT_BANK or "Count Reagent Bank items",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_REAGENT_BANK_TOOLTIP,
+                  getValue = function() return db.ItemCountReagentBank ~= false end,
+                  setValue = function(v) SetLF("ItemCountReagentBank", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_CURRENCY or "Count Currency totals",
+                  tooltip = L.PANEL_OPTION_ITEM_COUNT_CURRENCY_TOOLTIP,
+                  getValue = function() return db.ItemCountCurrency ~= false end,
+                  setValue = function(v) SetLF("ItemCountCurrency", v) end,
+                  disabled = function() return LFDisabled() or db.ItemCount ~= true end },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_LEVEL or "Add Item Level",
+                  tooltip = L.PANEL_OPTION_ITEM_LEVEL_TOOLTIP,
+                  getValue = function() return db.ItemLevel ~= false end,
+                  setValue = function(v)
+                      SetLF("ItemLevel", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_LEVEL_EQUIP_ONLY or "Show for equipment only",
+                  tooltip = L.PANEL_OPTION_ITEM_LEVEL_EQUIP_ONLY_TOOLTIP,
+                  getValue = function() return db.ItemLevelEquipmentOnly ~= false end,
+                  setValue = function(v) SetLF("ItemLevelEquipmentOnly", v) end,
+                  disabled = function() return LFDisabled() or db.ItemLevel == false end },
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_TIER or "Add Tier Indicator",
+                  tooltip = L.PANEL_OPTION_ITEM_TIER_TOOLTIP,
+                  getValue = function() return db.ItemTier ~= false end,
+                  setValue = function(v)
+                      SetLF("ItemTier", v)
+                      if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                  end,
+                  disabled = LFDisabled })
+            y = y - h
+
+            _, h = W:DualRow(parent, y,
+                { type = "toggle", text = L.PANEL_OPTION_ITEM_TIER_AS_TEXT or "Show as text",
+                  tooltip = L.PANEL_OPTION_ITEM_TIER_AS_TEXT_TOOLTIP,
+                  getValue = function() return db.ItemTierAsText ~= false end,
+                  setValue = function(v) SetLF("ItemTierAsText", v) end,
+                  disabled = function() return LFDisabled() or db.ItemTier == false end },
+                EllesmereUI.BlankRowCfg())
+            y = y - h
+
+            _, h = W:SectionHeader(parent, "MESSAGE GROUPS", y); y = y - h
+
+            local function PrettyGroup(group)
+                local label = tostring(group or "")
+                label = label:gsub("(%u)(%u%l)", "%1 %2")
+                label = label:gsub("(%l)(%u)", "%1 %2")
+                return label
+            end
+
+            local groupNames = {}
+            for _, group in pairs(lf.Messages.LootFeedMessageGroup) do
+                groupNames[#groupNames + 1] = group
+            end
+            table.sort(groupNames)
+            local groupItems = {}
+            for _, group in ipairs(groupNames) do
+                groupItems[#groupItems + 1] = { key = group, label = PrettyGroup(group) }
+            end
+
+            local enabledGroupsTooltip = L.PANEL_OPTION_ENABLED_GROUPS_TOOLTIP
+                or "Select message groups Loot Feed should process and format. Selecting a group here removes it from Ignored groups. Groups selected in neither list use Blizzard's original chat output."
+            local ignoredGroupsTooltip = L.PANEL_OPTION_IGNORED_GROUPS_TOOLTIP
+                or "Select message groups Loot Feed should suppress from chat. Selecting a group here removes it from Enabled groups. Groups selected in neither list use Blizzard's original chat output."
+
+            local groupRow
+            groupRow, h = W:DualRow(parent, y,
+                { type = "dropdown", text = L.PANEL_OPTION_ENABLED_GROUPS or "Enabled groups",
+                  tooltip = enabledGroupsTooltip,
+                  values = { __placeholder = "..." }, order = { "__placeholder" },
+                  getValue = function() return "__placeholder" end, setValue = function() end },
+                { type = "dropdown", text = L.PANEL_OPTION_IGNORED_GROUPS or "Ignored groups",
+                  tooltip = ignoredGroupsTooltip,
+                  values = { __placeholder = "..." }, order = { "__placeholder" },
+                  getValue = function() return "__placeholder" end, setValue = function() end })
+            y = y - h
+
+            local groupDropdownRefresh = {}
+            local function RefreshGroupDropdowns()
+                for _, refresh in pairs(groupDropdownRefresh) do
+                    refresh()
+                end
+            end
+
+            local function InstallGroupDropdown(region, key, enabledSemantics, tooltip)
+                if region._control then region._control:Hide() end
+                local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                    region, 170, region:GetFrameLevel() + 2, groupItems,
+                    function(group)
+                        if enabledSemantics then
+                            return db.EnabledGroups[group] ~= false and db.IgnoredGroups[group] ~= true
+                        end
+                        return db.IgnoredGroups[group] == true
+                    end,
+                    function(group, value)
+                        if enabledSemantics then
+                            db.EnabledGroups[group] = value and true or false
+                            if value then
+                                db.IgnoredGroups[group] = nil
+                            end
+                        else
+                            db.IgnoredGroups[group] = value and true or nil
+                            if value then
+                                db.EnabledGroups[group] = false
+                            end
+                        end
+                        NotifySettingChanged(key, db[key], db[key])
+                        RefreshGroupDropdowns()
+                    end,
+                    nil, 12, true)
+                PP.Point(cbDD, "RIGHT", region, "RIGHT", -20, 0)
+                region._control = cbDD
+                groupDropdownRefresh[key] = cbDDRefresh
+                EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
+
+                cbDD:HookScript("OnEnter", function()
+                    if tooltip and not (cbDD._ddMenu and cbDD._ddMenu:IsShown()) and EllesmereUI.ShowWidgetTooltip then
+                        EllesmereUI.ShowWidgetTooltip(cbDD, tooltip)
+                    end
+                end)
+                cbDD:HookScript("OnLeave", function()
+                    if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                end)
+                cbDD:HookScript("OnClick", function()
+                    if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
+                end)
+
+                local function UpdateDisabled()
+                    local off = LFDisabled()
+                    cbDD:SetAlpha(off and 0.3 or 1)
+                    cbDD:EnableMouse(not off)
+                    if region._label then region._label:SetAlpha(off and 0.3 or 1) end
+                end
+                UpdateDisabled()
+                EllesmereUI.RegisterWidgetRefresh(UpdateDisabled)
+            end
+
+            InstallGroupDropdown(groupRow._leftRegion, "EnabledGroups", true, enabledGroupsTooltip)
+            InstallGroupDropdown(groupRow._rightRegion, "IgnoredGroups", false, ignoredGroupsTooltip)
+
+            -- Debounce Groups, Enabled Tooltips and Filters are intentionally not
+            -- exposed here: the embedded version has no useful configurable rows
+            -- for those sections.
+            return math.abs(y)
+        end
 
         -- Stock styles (Blizzard Style / Classic WoW UI) reveal Blizzard's own
         -- chat frame art and input box: the panel background, panel border and
@@ -1633,274 +1974,26 @@ initFrame:SetScript("OnEvent", function(self)
 
         end -- isChat
 
+        -- Moved to Blizz UI Enhanced; this page only points there.
         if isBubbles then
-
-        local function BBDB() return ECHAT.BubblesDB and ECHAT.BubblesDB() end
-        -- Same defaults table the renderer reads, so a widget can never offer a value the
-        -- bubble would not actually draw. Falling back per key also keeps a slider off nil
-        -- if a profile predates the setting and the merge has not run for it yet.
-        local function CBVal(key)
-            local db = BBDB()
-            local v = db and db[key]
-            if v ~= nil then return v end
-            local d = ECHAT.BubbleDefaults and ECHAT.BubbleDefaults()
-            return d and d[key]
+            y = EllesmereUI.BuildLinkRow(parent, y, "Chat Bubbles moved to Blizzard Skins+",
+                "EllesmereUIBlizzardSkin", "Chat Bubbles", "DISPLAY")
         end
-        -- Structural write: can change whether we draw at all, or which of Blizzard's
-        -- CVars we hold down, so it runs the renderer's full pass.
-        local function CBSet(key, v)
-            local db = BBDB()
-            if not db then return end
-            db[key] = v
-            if ns.ChatBubbles then ns.ChatBubbles.Refresh() end
-        end
-        -- Appearance write: nothing here can move a channel or one of Blizzard's CVars, so
-        -- it only re-styles what is already on screen. Worth the split because a slider
-        -- fires this per STEP while it is dragged, and the full pass re-diffs every event
-        -- registration and round-trips Blizzard's three switches every time.
-        local function CBSetStyle(key, v)
-            local db = BBDB()
-            if not db then return end
-            db[key] = v
-            local cb = ns.ChatBubbles
-            if not cb then return end
-            if cb.RefreshStyle then cb.RefreshStyle() else cb.Refresh() end
-        end
-        local function CBColor(key)
-            local c = CBVal(key)
-            if not c then return 1, 1, 1, 1 end
-            return c.r, c.g, c.b, c.a or 1
-        end
-        local function Off() return CBVal("enabled") ~= true end
-        local GATE = "Enable Chat Bubbles Customization"
-        -- The toggle's own label reads as an instruction; DisabledTooltip wraps whatever it
-        -- is handed in "This option requires %1$s to be enabled", which needs a plain noun.
-        local GATE_REQ = "Chat Bubbles"
-
-        -- Red warning banner: NOT a section header for what follows -- our own bubbles
-        -- never show inside instances, unconditionally, and that has to be visible before
-        -- the player reads any option below it, not styled as their category label.
-        -- Skipped while the search index prebuilds the page off screen: the banner carries
-        -- no setting to index and parent:GetWidth() is not meaningful there. The height
-        -- still comes off y in both passes, so everything below lands identically.
-        if not EllesmereUI._prebuilding then
-            local warnFrame = CreateFrame("Frame", nil, parent)
-            PP.Size(warnFrame, parent:GetWidth() - EllesmereUI.CONTENT_PAD * 2, 30)
-            PP.Point(warnFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y)
-            local warnFS = EllesmereUI.MakeFont(warnFrame, 14, "", 1, 0.25, 0.25, 1)
-            warnFS:SetPoint("LEFT", warnFrame, "LEFT", 0, 0)
-            warnFS:SetText(EllesmereUI.L("Only works outside of Instances"))
-        end
-        y = y - 30
-
-        _, h = W:SectionHeader(parent, "DISPLAY", y);  y = y - h
-
-        local channelsRow
-        channelsRow, h = W:DualRow(parent, y,
-            { type="toggle", text=GATE,
-              tooltip="Restyle Blizzard's chat bubbles for the channels you pick beside this.\n\nEllesmereUI keeps Blizzard's bubbles switched on and draws over them, so every bubble stays where the game put it, including the one over your own head. Nameplates are not involved and do not need to be visible.\n\nChannels you leave off keep Blizzard's own look.",
-              getValue=function() return CBVal("enabled") == true end,
-              setValue=function(v)
-                if not v then
-                    CBSet("enabled", false)
-                    EllesmereUI:RefreshPage()
-                    return
-                end
-                local message = "EllesmereUI restyles Blizzard's chat bubbles and turns on the switches it needs. Party and Raid keep your current setting, and everything is put back when you turn this off."
-                EllesmereUI:ShowConfirmPopup({
-                    title = GATE,
-                    message = message,
-                    confirmText = "Enable",
-                    cancelText = "Cancel",
-                    onConfirm = function()
-                        CBSet("enabled", true)
-                        EllesmereUI:RefreshPage()
-                    end,
-                    onCancel = function() EllesmereUI:RefreshPage() end,
-                })
-              end },
-            { type="dropdown", text="Channels",
-              rawTooltip = true,
-              tooltip="Choose which channels get a bubble.\n\nSay, Yell, NPCs and Emotes share one Blizzard switch. It is turned on while at least one of the four is ticked, and put back the way you had it once you clear the last one. Party and Raid have switches of their own and start out matching what you already had, so no group bubbles turn up in a chat that had none.\n\nGuild is not offered: Blizzard draws no bubble for guild chat, and there is nothing for us to restyle.",
-              disabled = Off, disabledTooltip = GATE_REQ,
-              values={ __placeholder = "..." }, order={ "__placeholder" },
-              getValue=function() return "__placeholder" end,
-              setValue=function() end });  y = y - h
-
-        if not EllesmereUI._prebuilding then
-            local rgn = channelsRow._rightRegion
-            if rgn._control then rgn._control:Hide() end
-            local channelItems = {
-                { key="say",   label="Say" },
-                { key="yell",  label="Yell" },
-                { key="party", label="Party",
-                  tooltip="Uses Blizzard's own party switch, independent of the other channels. Instance chat, the one an LFG or LFR group talks in, is covered here too." },
-                { key="raid",  label="Raid",
-                  tooltip="Uses Blizzard's own raid switch, which it ships off. Ticking this turns that switch on, and it is put back the way you had it when you untick it or switch the feature off." },
-                { key="npc",   label="NPCs" },
-                { key="emote", label="Emotes" },
-            }
-            local chDD, chDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
-                rgn, 240, rgn:GetFrameLevel() + 2,
-                channelItems,
-                function(k) return CBVal(k) == true end,
-                function(k, v) CBSet(k, v) end)
-            PP.Point(chDD, "RIGHT", rgn, "RIGHT", -20, 0)
-            rgn._control = chDD
-            rgn._lastInline = nil
-
-            local chBlock = CreateFrame("Frame", nil, chDD)
-            chBlock:SetAllPoints()
-            chBlock:SetFrameLevel(chDD:GetFrameLevel() + 20)
-            chBlock:EnableMouse(true)
-            chBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(chDD, EllesmereUI.DisabledTooltip(GATE_REQ))
-            end)
-            chBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function chUpdateDisabled()
-                if Off() then chDD:SetAlpha(0.4); chBlock:Show()
-                else chDD:SetAlpha(1); chBlock:Hide() end
-            end
-            EllesmereUI.RegisterWidgetRefresh(chDDRefresh)
-            EllesmereUI.RegisterWidgetRefresh(chUpdateDisabled)
-            chUpdateDisabled()
-        end
-
-        -- Structural, not appearance: it decides which of Blizzard's switches we hold and at
-        -- what value, so it takes the full pass. Half-empty right slot is allowed here because
-        -- this is the last row of its section.
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Hide Chat Bubbles in Instances",
-              tooltip="Switch Blizzard's chat bubbles off for as long as you are inside a dungeon, raid, scenario or battleground, and back on the way out.\n\nEllesmereUI never restyles bubbles inside an instance: the game's bubble frames are off limits to addons there. This decides whether Blizzard's own are visible at all.",
-              getValue=function() return CBVal("hideInInstances") == true end,
-              setValue=function(v) CBSet("hideInInstances", v) end,
-              disabled = Off, disabledTooltip = GATE_REQ },
-            { type="label", text="" });  y = y - h
-
-        _, h = W:SectionHeader(parent, "APPEARANCE", y);  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="slider", text="Padding", min=2, max=24, step=1,
-              tooltip="Space between the text and the edge of the bubble.",
-              getValue=function() return CBVal("padding") end,
-              setValue=function(v) CBSetStyle("padding", v) end,
-              disabled = Off, disabledTooltip = GATE_REQ },
-            { type="slider", text="Maximum Width", min=120, max=500, step=10,
-              getValue=function() return CBVal("maxWidth") end,
-              setValue=function(v) CBSetStyle("maxWidth", v) end,
-              disabled = Off, disabledTooltip = GATE_REQ });  y = y - h
-
-        local fontBorderRow
-        fontBorderRow, h = W:DualRow(parent, y,
-            { type="slider", text="Font", min=8, max=24, step=1,
-              tooltip="Font size.",
-              getValue=function() return CBVal("fontSize") end,
-              setValue=function(v) CBSetStyle("fontSize", v) end,
-              disabled = Off, disabledTooltip = GATE_REQ },
-            { type="slider", text="Border", min=0, max=4, step=1,
-              tooltip="Border size. Set to 0 for no border.",
-              getValue=function() return CBVal("borderSize") end,
-              setValue=function(v) CBSetStyle("borderSize", v) end,
-              disabled = Off, disabledTooltip = GATE_REQ });  y = y - h
-
-        -- BuildInlineSwatches, not a hand-rolled BuildColorSwatch: it is the house form for
-        -- a swatch riding on a slider half (see the Chat page's own font row above). It
-        -- anchors through PP.Point, registers the swatch's refresh so a profile switch
-        -- repaints it, and builds the greyed-out block plus tooltip from opts.disabled.
-        if not EllesmereUI._prebuilding then
-            EllesmereUI.BuildInlineSwatches(fontBorderRow._leftRegion, {
-                { getValue = function() local r, g, b = CBColor("textColor"); return r, g, b, 1 end,
-                  setValue = function(r, g, b) CBSetStyle("textColor", { r=r, g=g, b=b }) end,
-                  -- Two reasons this swatch can be dead, so the tip is resolved per reason:
-                  -- the wrapper sentence fits the gate, but not "something else owns this".
-                  disabled = function() return Off() or CBVal("followBlizzardColor") == true end,
-                  disabledTooltip = function()
-                      if Off() then return GATE_REQ end
-                      return "Blizzard's own color is in use. Turn Follow Blizzard Default Color off in the cog to pick your own."
-                  end,
-                  rawTooltip = function() return not Off() end },
-            }, { disabled = Off, disabledTooltip = GATE_REQ })
-
-            -- Built AFTER the swatch on purpose: BuildInlineSwatches chains _lastInline, so a
-            -- cog made afterwards lands to its left rather than on top of it.
-            EllesmereUI.BuildInlineCog(fontBorderRow._leftRegion, {
-                disabled = Off,
-                disabledTooltip = GATE_REQ,
-                title = "Text Color",
-                rows = {
-                    { type = "toggle", label = "Follow Blizzard Default Color",
-                      get = function() return CBVal("followBlizzardColor") == true end,
-                      set = function(v)
-                          CBSetStyle("followBlizzardColor", v)
-                          EllesmereUI:RefreshPage()
-                      end },
-                },
-            })
-
-            EllesmereUI.BuildInlineSwatches(fontBorderRow._rightRegion, {
-                { getValue = function() return CBColor("borderColor") end,
-                  setValue = function(r, g, b, a) CBSetStyle("borderColor", { r=r, g=g, b=b, a=a }) end,
-                  hasAlpha = true },
-            }, { disabled = Off, disabledTooltip = GATE_REQ })
-        end
-
-        local bgRow
-        bgRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Background",
-              tooltip="Draw a filled background behind the text and border. Off draws the text and border on their own.",
-              getValue=function() return CBVal("background") ~= false end,
-              setValue=function(v) CBSetStyle("background", v); EllesmereUI:RefreshPage() end,
-              disabled = Off, disabledTooltip = GATE_REQ },
-            { type="slider", text="Vertical Offset", min=-80, max=80, step=2,
-              tooltip="Nudge the bubble up or down from where the game put it. Zero sits exactly on Blizzard's own position, which is already over the speaker's head.",
-              getValue=function() return CBVal("offsetY") end,
-              setValue=function(v) CBSetStyle("offsetY", v) end,
-              disabled = Off, disabledTooltip = GATE_REQ });  y = y - h
-
-        -- Colour and opacity are one swatch but two stored keys, so the write goes straight
-        -- to the DB rather than through CBSetStyle. rawTooltip keeps the sentence as written
-        -- instead of running it through DisabledTooltip's "This option requires" wrapper:
-        -- there is nothing to colour while the background is off, or the feature is.
-        if not EllesmereUI._prebuilding then
-            EllesmereUI.BuildInlineSwatches(bgRow._leftRegion, {
-                { getValue = function()
-                      local r, g, b = CBColor("bgColor")
-                      return r, g, b, CBVal("bgAlpha")
-                  end,
-                  setValue = function(r, g, b, a)
-                      local db = BBDB(); if not db then return end
-                      db.bgColor = { r=r, g=g, b=b }
-                      db.bgAlpha = a
-                      local cb = ns.ChatBubbles
-                      if not cb then return end
-                      if cb.RefreshStyle then cb.RefreshStyle() else cb.Refresh() end
-                  end,
-                  hasAlpha = true,
-                  disabled = function() return Off() or CBVal("background") == false end,
-                  disabledTooltip = "Turn Background on to set a color.",
-                  rawTooltip = true },
-            })
-        end
-
-        end -- isBubbles
 
         return math.abs(y)
     end
 
     _G._EBS_BuildChatPage = BuildPage
 
-    -- The bubble page is offered only while the module can both STORE and DRAW its settings.
-    -- The store alone is not enough: a .toc that lost the renderer's load line (an addon
-    -- update replacing the folder is all it takes) leaves every setting readable and nothing
-    -- listening to them, so the page would look healthy and do absolutely nothing.
     -- Blizzard Style shows Blizzard's own chat tabs, which take none of the
     -- Tabs page's settings, so the page is not offered there (WoW Forever
     -- paints its own tabs with the Tabs page's typography).
     local blizzTabsStyle = EllesmereUI.BlizzStyle and EllesmereUI.BlizzStyle.Active("chat") == "blizzard"
         and not EllesmereUI.BlizzStyle.Forever("chat")
     local chatPages = blizzTabsStyle and { "Chat", "Sidebar" } or { "Chat", "Tabs", "Sidebar" }
-    if ECHAT.BubblesDB and ECHAT.BubbleDefaults and ns.ChatBubbles then
-        chatPages[#chatPages + 1] = "Chat Bubbles"
+    if EllesmereUI.ChatBubbles then chatPages[#chatPages + 1] = "Chat Bubbles" end
+    if ns.LootFeed and ns.LootFeed.Settings and ns.LootFeed.Messages then
+        chatPages[#chatPages + 1] = "Loot Feed"
     end
 
     EllesmereUI:RegisterModule("EllesmereUIChat", {
@@ -1908,7 +2001,7 @@ initFrame:SetScript("OnEvent", function(self)
         description = "Chat frame reskin, clickable URLs, copy chat, sidebar icons.",
         pages       = chatPages,
         buildPage   = function(pageName, p, yOffset) return BuildPage(pageName, p, yOffset) end,
-        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size hide learned unlearned spell ability passive effect spec talent loadout system messages bubbles bubble speech balloon nameplate",
+        searchTerms = "chat tabs border spacing background sidebar friends voice url copy whisper channel abbreviate shortened class color names timestamps timestamp all messages font size hide learned unlearned spell ability passive effect spec talent loadout system messages bubbles bubble speech balloon nameplate loot feed loot rolls need greed transmog currency item level tooltips filters",
         onReset = function()
             local d = _G._ECHAT_DB
             if d and d.ResetProfile then d:ResetProfile() end

@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Modern chat enhancements with useful utilities.
 ## Author: Ellesmere
-## Version: 9.3.4
+## Version: 9.3.5
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIChatDB
 ## SavedVariablesPerCharacter: EllesmereUIChatScrollDB
@@ -28,9 +28,18 @@ EllesmereUIChat_SidebarStock.lua
 # panel frames, tabs and sidebar kit on our own frames
 EllesmereUIChat_Forever.lua
 
-# Chat bubbles: Blizzard's own bubbles stay on, we blank their chrome and draw a styled
-# frame on the frame that carries their position.
-EllesmereUIChat_Bubbles.lua
+# Loot Feed: loot-message processing integrated as a native Chat feature.
+EllesmereUIChat_LootFeed_Locale.lua
+EllesmereUIChat_LootFeed_Links.lua
+EllesmereUIChat_LootFeed_Utils.lua
+EllesmereUIChat_LootFeed_Filters.lua
+EllesmereUIChat_LootFeed_Messages.lua
+EllesmereUIChat_LootFeed_Settings.lua
+EllesmereUIChat_LootFeed_Reporting.lua
+EllesmereUIChat_LootFeed_Formatter.lua
+EllesmereUIChat_LootFeed_Output.lua
+EllesmereUIChat_LootFeed_Tooltips.lua
+EllesmereUIChat_LootFeed.lua
 
 # Options
 

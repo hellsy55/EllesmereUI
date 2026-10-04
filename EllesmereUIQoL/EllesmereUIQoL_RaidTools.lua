@@ -78,7 +78,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  separate per-panel enable toggles:
 --
 --    "one"     -- the default. Both content groups in the Group & Pull shell,
---                 which grows to fit and retitles to "Raid Tools"; ONE unlock
+--                 which grows to fit and titles itself "Raid Tools"; ONE unlock
 --                 element positioned by pos.Group. The markers holder
 --                 re-parents (OOC) into the shell; holders are plain frames,
 --                 so the move is an ordinary SetParent and the secure buttons
@@ -121,21 +121,23 @@ local ICON_SZ      = 30
 local PULL_SLOTS   = 3
 local PULL_DEFAULTS = { 3, 5, 10 }   -- also seeded into DB_DEFAULTS below
 ns.PULL_DEFAULTS = PULL_DEFAULTS
+ns.BREAK_DEFAULT = 300                -- 5 minutes, stored in seconds
+ns.BREAK_MAX = 1800                   -- 30 minutes
 
 -- The collapse ("close") button sits at the same literal corner Open
 -- Direction anchors the collapsed icon to, so the panel closes at the exact
--- spot it opened from. ApplyLayout leaves it room instead of confining it to
--- the title band: the title's inset widens (TOPLEFT only -- every other
--- corner already lands clear of the title text) and a BOTTOM corner's shell
--- gets a little extra height underneath (the content column always fills
--- top-down regardless of opening direction, so that padding is otherwise
--- unused space at the bottom edge, not a layout flip).
-local BTN_MARGIN         = 6
-local BTN_TITLE_RESERVE  = PAD + BTN_MARGIN + 14 + 6  -- inset, gap, button, clearance
-local BTN_BOTTOM_RESERVE = BTN_MARGIN + 14 + 5         -- gap, button, clearance
+-- spot it opened from. The whole corner-control row uses the same 10px edge
+-- inset as the content rows and the same 22px height as ordinary action
+-- buttons, keeping Minimize / Raid Groups / Raid Check visually aligned with
+-- the rows immediately inside the shell in every grow direction.
+local CORNER_BTN_SZ      = ROW_H
+local BTN_MARGIN         = PAD
+local BTN_TITLE_RESERVE  = BTN_MARGIN + CORNER_BTN_SZ + 6
+local BTN_BOTTOM_RESERVE = CORNER_BTN_SZ + ROW_GAP * 2
+local GROUP_TOP_RESERVE  = BTN_MARGIN + CORNER_BTN_SZ + ROW_GAP * 2
 local COLLAPSE_OFFSET = {
-    TOPLEFT     = {  BTN_MARGIN, -TOPBAR_H / 2 },
-    TOPRIGHT    = { -BTN_MARGIN, -TOPBAR_H / 2 },
+    TOPLEFT     = {  BTN_MARGIN, -BTN_MARGIN },
+    TOPRIGHT    = { -BTN_MARGIN, -BTN_MARGIN },
     BOTTOMLEFT  = {  BTN_MARGIN,  BTN_MARGIN },
     BOTTOMRIGHT = { -BTN_MARGIN,  BTN_MARGIN },
 }
@@ -144,33 +146,30 @@ local COLLAPSE_OFFSET = {
 -- RaidGroups.lua). Lives only on the Group & Pull shell, riding the inward
 -- side of the close button -- same corner, one gap further into the panel --
 -- so it never competes with Open Direction for its own spot.
-local COG_SZ  = 14   -- matches the shell's own close button
+local COG_SZ  = CORNER_BTN_SZ
 local COG_GAP = 4
--- Raid Check button rides the cog's own inward side the same way, so the row
--- reads close -> Raid Groups -> Raid Check without any of them competing
--- with Open Direction for a spot. The title reserve below has to know about
--- both riders, not just the first.
+-- Raid Check and Invite Tools continue inward from the Raid Groups cog. This
+-- makes Invite Tools sit immediately to the RIGHT of Raid Check while the
+-- menu grows right, and immediately to its LEFT while the menu grows left.
+-- The title reserve covers all three riders.
 local RAIDCHECK_GAP = COG_GAP
-local GROUP_COG_RESERVE = (COG_GAP + COG_SZ) + (RAIDCHECK_GAP + COG_SZ) + 6  -- two riders, gap, clearance
+local INVITETOOLS_GAP = COG_GAP
+local GROUP_COG_RESERVE = (COG_GAP + COG_SZ) + (RAIDCHECK_GAP + COG_SZ)
+                        + (INVITETOOLS_GAP + COG_SZ) + 6  -- three riders + clearance
 
--- Consumable/repair report row: five more riders past Raid Check, same
--- corner, chained further inward. Full name on each (not an abbreviation);
--- width is measured per-label at layout time (see ApplyLayout) rather than
--- fixed, since "Repair"/"Vantus" and "Food"/"Rune" are not the same length.
--- REPORT_BTN_PAD is the horizontal padding inside each button, both sides.
-local REPORT_GAP = COG_GAP
-local REPORT_BTN_PAD = 5
+-- Consumable/repair reports live on their own full-width content row, kept
+-- separate from the corner chrome (collapse / Raid Groups / Raid Check / Invite Tools).
+-- They read left-to-right in the same order shown in the Raid Tools UI and
+-- share the exact row sizing/gap math used by Ready/Disband and Pull Timer.
 local REPORT_COLUMNS = {
-    { key = "flask",      title = "Flask" },
     { key = "food",       title = "Food" },
-    -- Abbreviated on the button itself (still "Repair" in the tooltip) --
-    -- the longest full name here, and the one most worth trimming.
-    { key = "durability", title = "Repair", label = "Rep" },
-    { key = "rune",       title = "Rune" },
+    { key = "flask",      title = "Flask" },
+    { key = "durability", title = "Repair" },
     { key = "vantus",     title = "Vantus" },
+    { key = "rune",       title = "Rune" },
 }
 
--- Make Everyone Assistant checkbox: first row of Group & Pull content.
+-- Make Everyone Assistant checkbox: fixed row beneath the report-button row.
 local ASSIST_CHK_SZ = 14
 
 -- Raid Groups row: one toggle per raid subgroup, showing/hiding it on the
@@ -284,13 +283,20 @@ local wasInGroup = false       -- edge-detects joining a group, for ResetGroupFi
 local previewOn = false        -- Raid Tools settings page is in front (see ApplyVisibility)
 local lastSuppressed           -- assist gate verdict currently ON SCREEN (see AssistSuppressed)
 local toggleButton             -- keybind target; also the out-of-combat path
-local runtime = {}             -- Quick Fire's lazily-created secure state
+local runtime = {}             -- lazily-created runtime state
+runtime.roleColumns = {
+    { role = "TANK",    label = "Tank" },
+    { role = "HEALER",  label = "Heal" },
+    { role = "DAMAGER", label = "DPS"  },
+}
 local sections = {}            -- key -> shell frame
 local shellTitle = {}          -- key -> title fontstring
+local shellTitleFont = {}      -- key -> tracked font entry (combined title can be slightly larger)
 local groupHolder, markersHolder   -- plain content holders (see header)
 local iconBtn                  -- collapsed-state square
 local raidGroupsCogBtn          -- opens the Raid Groups composition window (Group shell only)
 local raidCheckBtn              -- re-runs and shows the Raid Check window on demand (Group shell only)
+local inviteToolsBtn            -- opens Invite Tools (Group shell only)
 local reportBtns = {}           -- Flask/Food/Repair/Rune/Vantus report buttons (Group shell only)
 local assistCheckRow, assistCheckTex   -- Make Everyone Assistant row (Group shell, raid-only)
 -- Markers are fixed at build; the Group & Pull height follows the settings and
@@ -425,8 +431,15 @@ local fontOwners = {}          -- filled at build: shells + holders
 local function TrackFont(owner, fs, size)
     local t = owner._fonts
     if not t then t = {}; owner._fonts = t end
-    t[#t + 1] = { fs = fs, size = size }
-    return fs
+    local entry = { fs = fs, size = size }
+    t[#t + 1] = entry
+    return fs, entry
+end
+local function SetTrackedFontSize(entry, size)
+    if not entry then return end
+    entry.size = size
+    local path, _, flags = entry.fs:GetFont()
+    if path then entry.fs:SetFont(path, size, flags or "") end
 end
 local function ApplyFonts()
     local path = EllesmereUI.GetFontPath(FONT_KEY)
@@ -444,9 +457,13 @@ end
 
 local groupButtons = {}        -- plain buttons, enable-gated on assist
 local markerButtons = {}       -- secure buttons, dimmed on assist
+local markerRowButtons = { target = {}, world = {} }
+local markerRowLabels = {}
 local pullButtons = {}         -- fixed set of 3; only the ones above 0s show
 local raidGroupButtons = {}    -- plain buttons, gated on the raid frames only
+runtime.roleCountButtons = {}  -- display-only raid role counters
 local raidGroupsRowLabel
+local COMBINED_MARKERS_TOP = 0 -- y-offset of the marker block inside combined Group holder
 -- Individually hideable content. Every one of these is created at build and
 -- kept for the lifetime of the session; the layout pass decides which of them
 -- reach the screen. Ready Check is the one action button with no switch -- a
@@ -527,6 +544,26 @@ local DB_DEFAULTS = {
         -- matters while it's on.
         autoMinimize      = false,
         autoMinimizeDelay = 30,
+        -- Embedded JacaInviteTools state. Standalone-only minimap settings are
+        -- deliberately absent: Raid Tools owns the launcher in EUI.
+        inviteTools = {
+            Current            = 1,
+            ListScale          = 1,
+            List1              = "",
+            AutoInvite         = true,
+            AutoInviteInterval = 30,
+            AutoAcceptShared   = false,
+            AutoAcceptFriendly = false,
+            ClearOnBossKill     = true,
+            ShareIgnoreSeconds = 30,
+            Width              = 430,
+            Height             = 436,
+            PositionX          = 0,
+            PositionY          = 50,
+            Unlocked           = false,
+            History            = {},
+            HiddenFriends      = {},
+        },
         -- Three slots is a LAYOUT choice (they fill one row beside Stop), not
         -- a security constraint -- the pull buttons are plain, only the marker
         -- buttons are secure. Growing the count later means growing the panel,
@@ -536,12 +573,19 @@ local DB_DEFAULTS = {
         -- share the width. All three at 0 takes the row away entirely, Stop
         -- included (see LayoutGroupContent).
         pullTimes     = { PULL_DEFAULTS[1], PULL_DEFAULTS[2], PULL_DEFAULTS[3] },
-        -- Per-button switches for the three optional actions. Ready Check has
-        -- none on purpose. Same flow rule as the pull slots: a hidden button
-        -- leaves no hole, the rest close up.
+        -- Break is stored in seconds as well. 0 removes its row; values are
+        -- clamped to 30 minutes when read so old/manual profiles cannot push
+        -- an invalid duration into a boss-mod timer.
+        breakTime     = ns.BREAK_DEFAULT,
+        -- Optional controls compact around anything the user hides. Pings and
+        -- Difficulty are leader-only at runtime; role counts only render
+        -- while the player is actually in a raid group.
+        showPings     = true,
+        showDifficulty = true,
         showRoleCheck = true,
         showConvert   = true,
         showDisband   = true,
+        showRoles     = true,
         -- Per-section: pos[key] = { point, relPoint, x, y }
         pos           = {},
     },
@@ -783,6 +827,7 @@ local function MakeMarkerButton(parent, index, kind)
     end)
 
     markerButtons[#markerButtons + 1] = b
+    markerRowButtons[kind][#markerRowButtons[kind] + 1] = b
     return b
 end
 
@@ -836,6 +881,19 @@ local function VisiblePullTimes()
         if secs and secs > 0 then out[#out + 1] = secs end
     end
     return out
+end
+
+function runtime.BreakTime()
+    local secs = P() and tonumber(P().breakTime)
+    if secs == nil then secs = ns.BREAK_DEFAULT end
+    secs = math.floor((secs + 30) / 60) * 60
+    if secs < 0 then secs = 0 end
+    if secs > ns.BREAK_MAX then secs = ns.BREAK_MAX end
+    return secs
+end
+
+function runtime.RolesShown()
+    return ButtonShown("showRoles") and IsInRaid()
 end
 
 -------------------------------------------------------------------------------
@@ -965,6 +1023,39 @@ local function RefreshRaidGroups(force)
 end
 
 -------------------------------------------------------------------------------
+--  Raid role counts -- raid-only display row kept at the marker edge nearest
+--  Break in the combined window. These are assigned group roles, not specialization guesses.
+-------------------------------------------------------------------------------
+
+function runtime.RefreshRoleCounts(force)
+    local visible = runtime.RolesShown()
+    local layoutChanged = runtime.lastRolesVisible ~= nil and visible ~= runtime.lastRolesVisible
+    runtime.lastRolesVisible = visible
+
+    if visible then
+        local counts = { TANK = 0, HEALER = 0, DAMAGER = 0 }
+        local maxRaid = _G.MAX_RAID_MEMBERS or 40
+        for i = 1, maxRaid do
+            local name, _, _, _, _, _, _, _, _, _, _, role = GetRaidRosterInfo(i)
+            if name and role then
+                local secret = _G.issecretvalue and _G.issecretvalue(role)
+                if not secret and counts[role] ~= nil then
+                    counts[role] = counts[role] + 1
+                end
+            end
+        end
+        for i, def in ipairs(runtime.roleColumns) do
+            local b = runtime.roleCountButtons[i]
+            if b and b._lbl then
+                b._lbl:SetText(EllesmereUI.L(def.label) .. " " .. tostring(counts[def.role] or 0))
+            end
+        end
+    end
+
+    return not force and layoutChanged
+end
+
+-------------------------------------------------------------------------------
 --  Make Everyone Assistant -- a raid-only checkbox, not a one-shot button:
 --  its own checked state is never stored, only read live off the roster
 --  (AllAssistants), so it can never drift from what the raid actually looks
@@ -1000,7 +1091,7 @@ local function SetEveryoneAssistant(on)
     if InCombatLockdown() then
         EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " ..
             EllesmereUI.L("Raid ranks cannot be changed in combat."))
-        return
+        return false
     end
     local n = GetNumGroupMembers()
     for i = 1, n do
@@ -1013,14 +1104,170 @@ local function SetEveryoneAssistant(on)
             DemoteAssistant("raid" .. i)
         end
     end
+    return true
 end
 
--- Reads the roster fresh rather than toggling a remembered boolean: called
--- from RefreshPermissions, which already runs on every roster/leadership
--- event, so the box is never more than one event stale.
+-- Reads the roster fresh rather than storing a separate checkbox value. It
+-- is refreshed directly from roster/role events as well as permission passes,
+-- so promotions or demotions made here or elsewhere cannot leave it stale.
 local function RefreshAssistCheckbox()
     if not assistCheckTex then return end
     assistCheckTex:SetShown(AllAssistants())
+end
+
+-------------------------------------------------------------------------------
+--  Leader controls: ping restrictions and dungeon/raid difficulty.
+--  Both use the same modern menu API as Blizzard's Compact Raid Manager.
+-------------------------------------------------------------------------------
+
+function runtime.ShowPingMenu(button)
+    -- This Raid Tools control is intentionally raid-leader-only. Keep the
+    -- click guard identical to the visual permission gate below so it stays
+    -- visibly unavailable in parties and for non-leaders.
+    if not IsInRaid() or not UnitIsGroupLeader("player") or InCombatLockdown() then return end
+    if not (MenuUtil and MenuUtil.CreateContextMenu and C_PartyInfo.GetRestrictPings
+            and C_PartyInfo.SetRestrictPings and Enum and Enum.RestrictPingsTo) then
+        return
+    end
+
+    MenuUtil.CreateContextMenu(button, function(_, root)
+        root:SetTag("EUI_RAID_TOOLS_RESTRICT_PINGS")
+        local function IsSelected(value)
+            return C_PartyInfo.GetRestrictPings() == value
+        end
+        local function SetSelected(value)
+            if InCombatLockdown() or not IsInRaid() or not UnitIsGroupLeader("player") then return end
+            local newValue = IsSelected(value) and Enum.RestrictPingsTo.None or value
+            C_PartyInfo.SetRestrictPings(newValue)
+
+            -- Match Blizzard's own Compact Raid Manager behavior: radio
+            -- selections close the menu, then the next open reads the
+            -- authoritative server-backed value from GetRestrictPings().
+            -- Forcing MenuResponse.Refresh here refreshes synchronously,
+            -- before the restriction has necessarily propagated, which can
+            -- redraw the old selection and make the control look stale.
+        end
+
+        root:CreateRadio(_G.NONE or "None", IsSelected, SetSelected, Enum.RestrictPingsTo.None)
+        root:CreateRadio(_G.RAID_MANAGER_RESTRICT_PINGS_TO_LEAD or "Leader Only",
+            IsSelected, SetSelected, Enum.RestrictPingsTo.Lead)
+        root:CreateRadio(_G.RAID_MANAGER_RESTRICT_PINGS_TO_ASSIST or "Leader & Assistants",
+            IsSelected, SetSelected, Enum.RestrictPingsTo.Assist)
+        root:CreateRadio(_G.RAID_MANAGER_RESTRICT_PINGS_TO_TANKS_HEALERS or "Tanks & Healers",
+            IsSelected, SetSelected, Enum.RestrictPingsTo.TankHealer)
+    end)
+end
+
+function runtime.DifficultyIDs()
+    local ids = _G.DifficultyUtil and _G.DifficultyUtil.ID
+    return ids or {
+        DungeonNormal = 1, DungeonHeroic = 2, DungeonMythic = 23,
+        PrimaryRaidNormal = 14, PrimaryRaidHeroic = 15, PrimaryRaidMythic = 16,
+    }
+end
+
+function runtime.UsesRaidDifficulty()
+    -- Raid difficulty belongs only to an actual raid group. Parties and solo
+    -- always read/write the dungeon difficulty, so converting between party
+    -- and raid also changes what the button reports without carrying the
+    -- previous group's difficulty type across the transition.
+    return IsInGroup() and IsInRaid()
+end
+
+function runtime.DifficultySuffix()
+    local ids = runtime.DifficultyIDs()
+    if runtime.UsesRaidDifficulty() then
+        local util = _G.DifficultyUtil
+        if util and util.DoesCurrentRaidDifficultyMatch then
+            if util.DoesCurrentRaidDifficultyMatch(ids.PrimaryRaidMythic) then return "M" end
+            if util.DoesCurrentRaidDifficultyMatch(ids.PrimaryRaidHeroic) then return "H" end
+            if util.DoesCurrentRaidDifficultyMatch(ids.PrimaryRaidNormal) then return "N" end
+        end
+        local id = GetRaidDifficultyID and GetRaidDifficultyID()
+        if id == ids.PrimaryRaidMythic then return "M" end
+        if id == ids.PrimaryRaidHeroic or id == 5 or id == 6 then return "H" end
+        if id == ids.PrimaryRaidNormal or id == 3 or id == 4 then return "N" end
+    else
+        local id = GetDungeonDifficultyID and GetDungeonDifficultyID()
+        if id == ids.DungeonMythic then return "M" end
+        if id == ids.DungeonHeroic then return "H" end
+        if id == ids.DungeonNormal then return "N" end
+    end
+end
+
+function runtime.RefreshDifficultyLabel()
+    if not runtime.difficultyButton or not runtime.difficultyButton._lbl then return end
+    local suffix = runtime.DifficultySuffix()
+    local text = EllesmereUI.L("Difficulty")
+    runtime.difficultyButton._lbl:SetText(suffix and (text .. " (" .. suffix .. ")") or text)
+end
+
+function runtime.ShowDifficultyMenu(button)
+    -- Difficulty can be changed while solo. Once grouped, only the group
+    -- leader may change it, matching Blizzard's own difficulty controls.
+    if not IsLeader() or InCombatLockdown() then return end
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+
+    MenuUtil.CreateContextMenu(button, function(_, root)
+        root:SetTag("EUI_RAID_TOOLS_DIFFICULTY")
+        local ids = runtime.DifficultyIDs()
+        local util = _G.DifficultyUtil
+
+        if runtime.UsesRaidDifficulty() then
+            local function IsSelected(id)
+                if util and util.DoesCurrentRaidDifficultyMatch then
+                    return util.DoesCurrentRaidDifficultyMatch(id)
+                end
+                return GetRaidDifficultyID and GetRaidDifficultyID() == id
+            end
+            local function SetSelected(id)
+                if InCombatLockdown() or not UnitIsGroupLeader("player") then return end
+                if _G.SetRaidDifficulties then
+                    _G.SetRaidDifficulties(true, id)
+                elseif SetRaidDifficultyID then
+                    SetRaidDifficultyID(id)
+                end
+                runtime.RefreshDifficultyLabel()
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, runtime.RefreshDifficultyLabel)
+                end
+            end
+            local data = {
+                { ids.PrimaryRaidNormal, _G.PLAYER_DIFFICULTY1 or "Normal" },
+                { ids.PrimaryRaidHeroic, _G.PLAYER_DIFFICULTY2 or "Heroic" },
+                { ids.PrimaryRaidMythic, _G.PLAYER_DIFFICULTY6 or "Mythic" },
+            }
+            for _, item in ipairs(data) do
+                local radio = root:CreateRadio(item[2], IsSelected, SetSelected, item[1])
+                if util and util.IsRaidDifficultyEnabled then
+                    radio:SetEnabled(util.IsRaidDifficultyEnabled(item[1]))
+                end
+            end
+        else
+            local function IsSelected(id)
+                return GetDungeonDifficultyID and GetDungeonDifficultyID() == id
+            end
+            local function SetSelected(id)
+                if InCombatLockdown() or not IsLeader() then return end
+                if SetDungeonDifficultyID then SetDungeonDifficultyID(id) end
+                runtime.RefreshDifficultyLabel()
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, runtime.RefreshDifficultyLabel)
+                end
+            end
+            local data = {
+                { ids.DungeonNormal, _G.PLAYER_DIFFICULTY1 or "Normal" },
+                { ids.DungeonHeroic, _G.PLAYER_DIFFICULTY2 or "Heroic" },
+                { ids.DungeonMythic, _G.PLAYER_DIFFICULTY6 or "Mythic" },
+            }
+            for _, item in ipairs(data) do
+                local radio = root:CreateRadio(item[2], IsSelected, SetSelected, item[1])
+                if util and util.IsDungeonDifficultyEnabled then
+                    radio:SetEnabled(util.IsDungeonDifficultyEnabled(item[1]))
+                end
+            end
+        end
+    end)
 end
 
 -- GROUP_ROSTER_UPDATE is one of the chattiest events in a raid -- it bursts on
@@ -1042,6 +1289,18 @@ local function RefreshPermissions(force)
     -- an actual group to be assist or leader of.
     for _, b in ipairs(groupButtons) do
         local on = grouped and (b.needsLeader and leader or assist)
+
+        -- Pings is raid-leader-only. Difficulty remains usable while solo,
+        -- and once grouped it requires the group leader. Both use the exact
+        -- same disabled treatment as Make Everyone Assistant (alpha + mouse
+        -- input), so their state is visually unambiguous instead of merely
+        -- refusing the click.
+        if b == runtime.pingButton then
+            on = raid and leader
+        elseif b == runtime.difficultyButton then
+            on = leader
+        end
+
         -- Convert to Party can't succeed with more than 5 members in the
         -- raid group -- the server just refuses it -- so grey the button out
         -- in that case regardless of leader/assist, the same way the other
@@ -1076,6 +1335,7 @@ local function RefreshPermissions(force)
         convertButton._lbl:SetText(raid and EllesmereUI.L("Convert to Party")
                                          or EllesmereUI.L("Convert to Raid"))
     end
+    runtime.RefreshDifficultyLabel()
 
     -- Leader-only: unlike Ready Check/Role Check, this one actually requires
     -- the raid leader specifically -- an assistant can promote a single
@@ -1128,6 +1388,33 @@ local function StopPull()
     local handler = BossModPullHandler()
     if handler then handler("0") end
     if not ChatLocked() then C_PartyInfo.DoCountdown(0) end
+end
+
+function runtime.BossModBreakHandler()
+    return SlashCmdList["break"] or SlashCmdList.BIGWIGSBREAK
+        or SlashCmdList.DEADLYBOSSMODSBREAK
+end
+
+function runtime.StartBreak(secs)
+    secs = tonumber(secs)
+    if not secs or secs <= 0 then return end
+    secs = math.floor((secs + 30) / 60) * 60
+    if secs > ns.BREAK_MAX then secs = ns.BREAK_MAX end
+    if IsEncounterInProgress and IsEncounterInProgress() then
+        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Break timer unavailable during an encounter."))
+        return
+    end
+
+    local handler = runtime.BossModBreakHandler()
+    if not handler then
+        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Break timer requires BigWigs or DBM."))
+        return
+    end
+    handler(tostring(secs / 60))
+end
+
+function runtime.BreakLabel(secs)
+    return EllesmereUI.L("Break") .. " (" .. tostring(secs / 60) .. "m)"
 end
 
 -------------------------------------------------------------------------------
@@ -1245,25 +1532,34 @@ local function MakeShell(key)
     -- treatment; the accent stays on interactions, not chrome). Re-pointed by
     -- ApplyLayout to clear whichever corner Open Direction puts the collapse
     -- button in.
-    local fs = TrackFont(f, EllesmereUI.MakeFont(f, 12, nil, 1, 1, 1), 12)
+    local fs, fsFont = TrackFont(f, EllesmereUI.MakeFont(f, 12, nil, 1, 1, 1), 12)
     fs:SetPoint("LEFT", f, "TOPLEFT", PAD, -TOPBAR_H / 2)  -- re-pointed by ApplyLayout
     fs:SetText(EllesmereUI.L(SECTION_LABEL[key]))
     shellTitle[key] = fs
+    shellTitleFont[key] = fsFont
 
     -- Collapse button: small secure corner control riding the title band,
     -- only meaningful (and only shown -- ApplyLayout owns that) while Default
     -- to Collapsed Icon is on. Wears the skins' button chrome.
     local col = CreateFrame("Button", nil, f, "SecureHandlerClickTemplate")
-    col:SetSize(14, 14)
+    col:SetSize(CORNER_BTN_SZ, CORNER_BTN_SZ)
     col:SetPoint("TOPRIGHT", f, "TOPRIGHT", -6, -TOPBAR_H / 2)  -- re-pointed by ApplyLayout
     col:RegisterForClicks("AnyDown")
     SkinButtonChrome(col)
-    local colFs = TrackFont(f, EllesmereUI.MakeFont(col, 14, nil, 1, 1, 1), 14)
+    local colFs = TrackFont(f, EllesmereUI.MakeFont(col, 16, nil, 1, 1, 1), 16)
     colFs:SetPoint("CENTER", col, "CENTER", 0, 1)
     colFs:SetText("-")
     colFs:SetAlpha(0.7)
-    col:SetScript("OnEnter", function() colFs:SetAlpha(1) end)
-    col:SetScript("OnLeave", function() colFs:SetAlpha(0.7) end)
+    col:SetScript("OnEnter", function(self)
+        colFs:SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(EllesmereUI.L("Minimize"))
+        GameTooltip:Show()
+    end)
+    col:SetScript("OnLeave", function()
+        colFs:SetAlpha(0.7)
+        GameTooltip:Hide()
+    end)
     col:SetAttribute("_onclick", COLLAPSE_SNIPPET)
     f._collapseBtn = col
 
@@ -1284,60 +1580,134 @@ local function LayoutGroupContent()
     if not groupHolder then return end
     local f = groupHolder
 
-    -- Row plan first, geometry second: collect what is actually shown, two
-    -- action buttons per row in the fixed order below, so a hidden button
-    -- closes the gap instead of leaving a hole. A row that ends up with a
-    -- single button takes the full width.
-    local rows, pair = {}, {}
-    local function Add(b)
-        pair[#pair + 1] = b
-        if #pair == 2 then rows[#rows + 1] = pair; pair = {} end
+    local function PackRows(buttons, perRow)
+        local rows, row = {}, {}
+        perRow = perRow or 2
+        for _, b in ipairs(buttons) do
+            if b then
+                row[#row + 1] = b
+                if #row == perRow then rows[#rows + 1] = row; row = {} end
+            end
+        end
+        if #row > 0 then rows[#rows + 1] = row end
+        return rows
     end
-    Add(readyButton)
-    if ButtonShown("showRoleCheck") then Add(roleButton) end
-    if ButtonShown("showConvert")   then Add(convertButton) end
-    if ButtonShown("showDisband")   then Add(disbandButton) end
-    if #pair > 0 then rows[#rows + 1] = pair end
 
-    -- Pull row: the slots left above 0, sharing the row with Stop. The
-    -- duration lives on the button (the click closure reads it back), so the
-    -- surviving durations simply move onto the leading buttons.
-    --
-    -- All three at 0 drops the row entirely, Stop included: a Stop button
-    -- alone is a pull-timer row with no pull timer.
+    -- Pings and Difficulty sit directly between Make Everyone Assistant and
+    -- the ordinary action block. Every optional survivor compacts leftward.
+    local pre = {}
+    if ButtonShown("showPings") and C_PartyInfo.GetRestrictPings and C_PartyInfo.SetRestrictPings then
+        pre[#pre + 1] = runtime.pingButton
+    end
+    if ButtonShown("showDifficulty") then pre[#pre + 1] = runtime.difficultyButton end
+    local preRows = PackRows(pre, 2)
+
+    local actions = { readyButton }
+    if ButtonShown("showRoleCheck") then actions[#actions + 1] = roleButton end
+    if ButtonShown("showConvert")   then actions[#actions + 1] = convertButton end
+    if ButtonShown("showDisband")   then actions[#actions + 1] = disbandButton end
+    local actionRows = PackRows(actions, 2)
+
+    -- Keep the existing Pull/Stop row exactly as it was. Break is the next
+    -- control after Stop: when that row currently has fewer than three buttons
+    -- it fills the next slot; once the Stop row already has three (or more)
+    -- controls, Break gets the immediately adjacent row by itself.
+    local timerRows = {}
+    local pullRow
     local times = VisiblePullTimes()
     if #times > 0 then
-        local pull = {}
+        pullRow = {}
         for i, secs in ipairs(times) do
             local b = pullButtons[i]
             b.secs = secs
             b._lbl:SetText(tostring(secs))
-            pull[i] = b
+            pullRow[#pullRow + 1] = b
         end
-        pull[#pull + 1] = stopButton
-        rows[#rows + 1] = pull
+        pullRow[#pullRow + 1] = stopButton
+        timerRows[#timerRows + 1] = pullRow
     end
 
-    -- Hide first, show what the plan placed: anything the switches dropped
-    -- stops at this line.
+    local breakSecs = runtime.BreakTime()
+    if breakSecs > 0 then
+        runtime.breakButton.secs = breakSecs
+        runtime.breakButton._lbl:SetText(runtime.BreakLabel(breakSecs))
+        if pullRow and #pullRow < 3 then
+            pullRow[#pullRow + 1] = runtime.breakButton
+        else
+            timerRows[#timerRows + 1] = { runtime.breakButton }
+        end
+    end
+
     for _, b in ipairs(groupButtons) do b:Hide() end
 
-    -- Make Everyone Assistant sits above this flow, fixed at the top of the
-    -- holder (see BuildGroupContent) -- reserve its row before laying out
-    -- the buttons below it.
-    local y = -(ROW_H + ROW_GAP)
-    for _, row in ipairs(rows) do
+    local fullW = PANEL_W - PAD * 2
+    local function PlaceRow(row, y)
+        if not row or #row == 0 then return end
         local n = #row
-        local w = (PANEL_W - PAD * 2 - ROW_GAP * (n - 1)) / n
+        local w = (fullW - ROW_GAP * (n - 1)) / n
         for i, b in ipairs(row) do
             b:SetWidth(w)
             b:ClearAllPoints()
             b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
             b:Show()
         end
-        y = y - ROW_H - ROW_GAP
     end
-    y = y + ROW_GAP   -- the last row's trailing gap is not content
+
+    local hasReports = #reportBtns > 0
+    local isUp = AnchorCorner():find("BOTTOM") ~= nil
+    local blocks = {}
+    local function Push(kind, payload, h)
+        blocks[#blocks + 1] = { kind = kind, payload = payload, h = h }
+    end
+    local function PushRows(rows, reverse)
+        if reverse then
+            for i = #rows, 1, -1 do Push("row", rows[i], ROW_H) end
+        else
+            for _, row in ipairs(rows) do Push("row", row, ROW_H) end
+        end
+    end
+
+    -- Restore the pre-feature Raid Tools stack and insert the new controls at
+    -- the requested boundaries. With Grow Direction = UP, physical top->bottom
+    -- is: Assistant -> Pings/Difficulty -> actions -> Pull/Stop -> Break ->
+    -- Roles -> Target -> World -> Raid Groups -> reports. DOWN is its vertical
+    -- mirror. Roles lives in the markers holder, at the edge touching Break.
+    if isUp then
+        Push("assist", nil, ROW_H)
+        PushRows(preRows, true)
+        PushRows(actionRows, true)
+        PushRows(timerRows, false)
+        if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
+        if hasReports then Push("row", reportBtns, ROW_H) end
+    else
+        if hasReports then Push("row", reportBtns, ROW_H) end
+        if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
+        PushRows(timerRows, true)
+        PushRows(actionRows, false)
+        PushRows(preRows, false)
+        Push("assist", nil, ROW_H)
+    end
+
+    local y = 0
+    COMBINED_MARKERS_TOP = 0
+    for i, block in ipairs(blocks) do
+        if block.kind == "row" then
+            PlaceRow(block.payload, y)
+        elseif block.kind == "assist" then
+            assistCheckRow:ClearAllPoints()
+            assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+            assistCheckRow:Show()
+        elseif block.kind == "markers" then
+            COMBINED_MARKERS_TOP = -y
+        end
+
+        y = y - block.h
+        if i < #blocks then
+            local nextBlock = blocks[i + 1]
+            local aroundMarkers = block.kind == "markers" or nextBlock.kind == "markers"
+            y = y - (aroundMarkers and ROW_GAP * 2 or ROW_GAP)
+        end
+    end
 
     GROUP_CONTENT_H = -y
     f:SetHeight(GROUP_CONTENT_H)
@@ -1354,13 +1724,13 @@ local function BuildGroupContent()
     local f = groupHolder
     local full = PANEL_W - PAD * 2
 
-    -- Make Everyone Assistant: first row, right under the title, fixed in
-    -- place (not part of LayoutGroupContent's flow). Whole-row button (not
+    -- Make Everyone Assistant is a fixed full-width row whose edge position
+    -- follows Grow Direction (LayoutGroupContent positions it). Whole-row button (not
     -- just the box) so the label is as clickable as the tick -- same
     -- reasoning as the pull/marker rows' generous hit targets.
     assistCheckRow = CreateFrame("Button", nil, f)
     assistCheckRow:SetSize(PANEL_W - PAD * 2, ROW_H)
-    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, 0)
+    assistCheckRow:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, 0) -- re-pointed by LayoutGroupContent
     local chkBox = CreateFrame("Frame", nil, assistCheckRow)
     chkBox:SetSize(ASSIST_CHK_SZ, ASSIST_CHK_SZ)
     chkBox:SetPoint("LEFT", assistCheckRow, "LEFT", 0, 0)
@@ -1384,13 +1754,24 @@ local function BuildGroupContent()
     chkLbl:SetJustifyH("LEFT")
     chkLbl:SetText(EllesmereUI.L("Make Everyone Assistant"))
     assistCheckRow:SetScript("OnClick", function()
-        SetEveryoneAssistant(not AllAssistants())
-        RefreshAssistCheckbox()
+        local desired = not AllAssistants()
+        if SetEveryoneAssistant(desired) then
+            -- Show the requested state immediately; roster events below
+            -- reconcile it with the authoritative server state as promotions
+            -- or demotions arrive. Re-reading the roster synchronously here
+            -- used to restore the old state before the server had answered.
+            assistCheckTex:SetShown(desired)
+        end
     end)
-    -- MakeGroupButton runs labels through L itself. All four action buttons
-    -- are born unplaced at full-row width; LayoutGroupContent re-flows the
-    -- survivors (per the showRoleCheck/showConvert/showDisband switches)
-    -- starting below this fixed checkbox row.
+    -- Leader controls are created first because their layout block sits before
+    -- Ready Check. They remain visible-but-grey to non-leaders rather than
+    -- disappearing, so the panel does not jump around as leadership changes.
+    runtime.pingButton = MakeGroupButton(f, "Pings", full, function(self) runtime.ShowPingMenu(self) end, true)
+    runtime.difficultyButton = MakeGroupButton(f, "Difficulty", full,
+        function(self) runtime.ShowDifficultyMenu(self) end, true)
+
+    -- MakeGroupButton runs labels through L itself. Action buttons are born
+    -- unplaced at full-row width; LayoutGroupContent re-flows the survivors.
     readyButton = MakeGroupButton(f, "Ready Check", full, function() DoReadyCheck() end)
     roleButton  = MakeGroupButton(f, "Role Check", full, function() InitiateRolePoll() end)
 
@@ -1411,62 +1792,133 @@ local function BuildGroupContent()
     end
     stopButton = MakeGroupButton(f, "Stop", full, StopPull)
 
+    local b
+    b = MakeGroupButton(f, "Break", full, function() runtime.StartBreak(b.secs) end)
+    runtime.breakButton = b
+    runtime.RefreshDifficultyLabel()
+
     -- A height right away: BuildAll has callers (the slash command, unlock
     -- mode) that reach the shells without going through Apply.
     LayoutGroupContent()
 end
 
--- Row order matches how they are used: unit markers first, ground markers
--- under them. Labels reach L as variables (see the SECTIONS comment).
+-- Marker rows mirror with the combined window. In UP, Roles is the first
+-- marker row so it sits directly below Break, followed by Target / World /
+-- Raid Groups. DOWN reverses that stack, leaving Roles at the bottom edge next
+-- to Break. Party/solo layouts omit Roles.
 local MARKER_ROWS = {
-    { kind = "target", label = "Target" },
-    { kind = "world",  label = "World"  },
+    { kind = "target", label = "Target Markers" },
+    { kind = "world",  label = "World Markers"  },
 }
+
+local function LayoutMarkersContent()
+    if not markersHolder or not raidGroupsRowLabel then return end
+    local f = markersHolder
+    local isUp = AnchorCorner():find("BOTTOM") ~= nil
+    local roles = runtime.RolesShown()
+    local order
+    if isUp then
+        order = roles and { "roles", "target", "world", "groups" }
+                      or { "target", "world", "groups" }
+    else
+        order = roles and { "groups", "world", "target", "roles" }
+                      or { "groups", "world", "target" }
+    end
+    local y = 0
+    local step = (PANEL_W - PAD * 2 - MARKER_SZ) / 8
+
+    if runtime.roleCountRowLabel then runtime.roleCountRowLabel:SetShown(roles) end
+    for _, b in ipairs(runtime.roleCountButtons) do b:SetShown(roles) end
+
+    local function PlaceMarkerRow(kind)
+        local lbl = markerRowLabels[kind]
+        lbl:ClearAllPoints()
+        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+        y = y - MARKER_LBL_H - 2
+        for i, b in ipairs(markerRowButtons[kind]) do
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + step * (i - 1), y)
+        end
+        y = y - MARKER_SZ
+    end
+
+    local function PlaceRolesRow()
+        runtime.roleCountRowLabel:ClearAllPoints()
+        runtime.roleCountRowLabel:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+        y = y - MARKER_LBL_H - 2
+        local n = #runtime.roleColumns
+        local w = (PANEL_W - PAD * 2 - (n - 1) * ROW_GAP) / n
+        for i, b in ipairs(runtime.roleCountButtons) do
+            b:SetWidth(w)
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (w + ROW_GAP) * (i - 1), y)
+        end
+        y = y - ROW_H
+    end
+
+    local function PlaceGroupsRow()
+        raidGroupsRowLabel:ClearAllPoints()
+        raidGroupsRowLabel:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
+        y = y - MARKER_LBL_H - 2
+        local gw = (PANEL_W - PAD * 2 - (RAID_GROUPS - 1) * ROW_GAP) / RAID_GROUPS
+        for i, gb in ipairs(raidGroupButtons) do
+            gb:SetWidth(gw)
+            gb:ClearAllPoints()
+            gb:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (gw + ROW_GAP) * (i - 1), y)
+        end
+        y = y - ROW_H
+    end
+
+    for i, kind in ipairs(order) do
+        if kind == "groups" then
+            PlaceGroupsRow()
+        elseif kind == "roles" then
+            PlaceRolesRow()
+        else
+            PlaceMarkerRow(kind)
+        end
+        if i < #order then y = y - ROW_GAP * 2 end
+    end
+
+    MARKERS_CONTENT_H = -y
+    f:SetHeight(MARKERS_CONTENT_H)
+end
 
 local function BuildMarkersContent()
     markersHolder = CreateFrame("Frame", nil, sections.Markers)
     markersHolder:SetWidth(PANEL_W)
     fontOwners[#fontOwners + 1] = markersHolder
     local f = markersHolder
-    local y = 0
 
-    -- 8 markers + a clear button per row, evenly spread across the width.
-    local step = (PANEL_W - PAD * 2 - MARKER_SZ) / 8
-    for r, row in ipairs(MARKER_ROWS) do
+    -- Secure marker buttons are built once; only their anchors move later.
+    for _, row in ipairs(MARKER_ROWS) do
         local lbl = TrackFont(f, EllesmereUI.MakeFont(f, 9, nil, 1, 1, 1), 9)
         lbl:SetAlpha(0.55)
-        lbl:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
         lbl:SetText(EllesmereUI.L(row.label))
-        y = y - MARKER_LBL_H - 2
-
+        markerRowLabels[row.kind] = lbl
         for i = 0, 8 do
-            local b = MakeMarkerButton(f, i == 8 and 0 or (i + 1), row.kind)
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + step * i, y)
+            MakeMarkerButton(f, i == 8 and 0 or (i + 1), row.kind)
         end
-        y = y - MARKER_SZ
-        if r < #MARKER_ROWS then y = y - ROW_GAP * 2 end
     end
 
-    -- Raid Groups row: last row of the panel, right after Target and World --
-    -- one toggle per subgroup, showing/hiding it on the EllesmereUI Raid
-    -- Frames. The sub-label doubles as the no-raid-frames explanation --
-    -- RefreshRaidGroups owns its text.
-    y = y - ROW_GAP * 2
+    runtime.roleCountRowLabel = TrackFont(f, EllesmereUI.MakeFont(f, 9, nil, 1, 1, 1), 9)
+    runtime.roleCountRowLabel:SetAlpha(0.55)
+    runtime.roleCountRowLabel:SetText(EllesmereUI.L("Roles"))
+    local roleW = (PANEL_W - PAD * 2 - (#runtime.roleColumns - 1) * ROW_GAP) / #runtime.roleColumns
+    for _, def in ipairs(runtime.roleColumns) do
+        local b = MakeGroupButton(f, "", roleW, nil, nil, runtime.roleCountButtons)
+        b:EnableMouse(false)
+        b._lbl:SetText(EllesmereUI.L(def.label) .. " 0")
+    end
+
     raidGroupsRowLabel = TrackFont(f, EllesmereUI.MakeFont(f, 9, nil, 1, 1, 1), 9)
     raidGroupsRowLabel:SetAlpha(0.55)
-    raidGroupsRowLabel:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, y)
     raidGroupsRowLabel:SetText(EllesmereUI.L(RAIDGROUPS_ROW_LABEL))
-    y = y - MARKER_LBL_H - 2
 
     local gw = (PANEL_W - PAD * 2 - (RAID_GROUPS - 1) * ROW_GAP) / RAID_GROUPS
-    for i = 1, RAID_GROUPS do
-        local gb = MakeRaidGroupButton(f, i, gw)
-        gb:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + (gw + ROW_GAP) * (i - 1), y)
-    end
-    y = y - ROW_H
+    for i = 1, RAID_GROUPS do MakeRaidGroupButton(f, i, gw) end
 
-    MARKERS_CONTENT_H = -y
-    f:SetHeight(MARKERS_CONTENT_H)
+    LayoutMarkersContent()
 end
 
 -- The collapsed-state square: bg + border + the icon, expanding on click.
@@ -1539,7 +1991,7 @@ end
 -- is gained (see ns.RaidGroupsPermitted in EllesmereUIQoL_RaidGroups.lua) --
 -- so gating the door as well would only hide the one place that shows it is
 -- about to become usable.
--- Same chrome and size as the shell's own close button (14x14, SkinButtonChrome,
+-- Same chrome and size as the shell's own close button (22x22, SkinButtonChrome,
 -- a single font glyph) so the two read as one matched pair riding the same
 -- corner -- "+" opens the roster, "-" right beside it closes the panel.
 local function BuildRaidGroupsCog()
@@ -1552,7 +2004,7 @@ local function BuildRaidGroupsCog()
     -- its line than "-" or "*" do -- same SetPoint/SetSize as its neighbors
     -- would leave it looking thin and off-center even though the numbers
     -- matched.
-    local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 16, nil, 1, 1, 1), 16)
+    local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 18, nil, 1, 1, 1), 18)
     lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
     lbl:SetText("+")
     lbl:SetAlpha(0.7)
@@ -1585,8 +2037,8 @@ local function BuildRaidCheckButton()
     b:SetSize(COG_SZ, COG_SZ)
     b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
     SkinButtonChrome(b)
-    local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 14, nil, 1, 1, 1), 14)
-    lbl:SetPoint("CENTER", b, "CENTER", 0, -3)
+    local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 16, nil, 1, 1, 1), 16)
+    lbl:SetPoint("CENTER", b, "CENTER", 0, -2)
     lbl:SetText("*")
     lbl:SetAlpha(0.7)
     b:SetScript("OnEnter", function(self)
@@ -1607,6 +2059,39 @@ local function BuildRaidCheckButton()
     raidCheckBtn = b
 end
 
+-- Embedded Invite Tools launcher. The supplied .blp is intentionally used
+-- only here; the Invite Tools window itself follows EUI's normal chrome.
+local function BuildInviteToolsButton()
+    local b = CreateFrame("Button", nil, sections.Group)
+    b:SetSize(COG_SZ, COG_SZ)
+    b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
+    SkinButtonChrome(b)
+
+    local tex = b:CreateTexture(nil, "ARTWORK")
+    tex:SetSize(14, 14)
+    tex:SetPoint("CENTER")
+    tex:SetTexture("Interface\\AddOns\\EllesmereUIQoL\\Media\\InviteTools.blp")
+    tex:SetAlpha(0.7)
+
+    b:SetScript("OnEnter", function(self)
+        tex:SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(EllesmereUI.L("Invite Tools"))
+        GameTooltip:AddLine(EllesmereUI.L("Opens Invite Tools for managing and sharing invite lists."), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function()
+        tex:SetAlpha(0.7)
+        GameTooltip:Hide()
+    end)
+    b:SetScript("OnClick", function()
+        if ns.ToggleInviteTools then ns.ToggleInviteTools() end
+    end)
+
+    b._icon = tex
+    inviteToolsBtn = b
+end
+
 -- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
 -- missing it (or, for Repair, everyone's durability percentage) to this
 -- client's own chat frame only; right-click posts the same thing to /guild
@@ -1616,29 +2101,25 @@ end
 -- on Food specifically, it reports who is missing a food buff whose name
 -- starts with "Hearty" instead of the ordinary Well Fed check
 -- (ns.ReportHeartyFood) -- both defined in EllesmereUIQoL_RaidCheck.lua.
--- Small title-bar riders, same family
--- as the Raid Groups cog and Raid Check button, but with the full name on
--- each instead of a single glyph -- so every button is sized to its own
--- measured label (see ApplyLayout) rather than a shared fixed width. Not
--- gated on lead/assist -- reading auras and durability someone volunteered
--- is not an action that needs rank -- and, unlike Convert/Disband, NOT
--- greyed out during a boss pull either: reporting a status line mid-fight
--- carries no game-state risk, so these stay clickable through combat and
--- encounters (see RefreshReportButtons).
+-- Full-row content buttons, deliberately separate from the corner chrome.
+-- They use the same 22px row height and equal-width distribution as the rest
+-- of Group & Pull. Not gated on lead/assist -- reading auras and durability
+-- someone volunteered is not an action that needs rank -- and, unlike
+-- Convert/Disband, NOT greyed out during a boss pull either: reporting a
+-- status line mid-fight carries no game-state risk, so these stay clickable
+-- through combat and encounters (see RefreshReportButtons).
 local function BuildReportButtons()
     for _, def in ipairs(REPORT_COLUMNS) do
-        local b = CreateFrame("Button", nil, sections.Group)
-        b:SetHeight(COG_SZ)
-        b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
+        local b = CreateFrame("Button", nil, groupHolder)
+        b:SetHeight(ROW_H)
         b:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
         SkinButtonChrome(b)
-        local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 8, nil, 1, 1, 1), 8)
+        local lbl = TrackFont(groupHolder, EllesmereUI.MakeFont(b, 11, nil, 1, 1, 1), 11)
         lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
-        lbl:SetText(EllesmereUI.L(def.label or def.title))
+        lbl:SetText(EllesmereUI.L(def.title))
         lbl:SetAlpha(0.7)
-        -- A first pass now (ApplyLayout re-measures and resizes every pass,
-        -- since a Global Font change moves GetStringWidth without a reload).
-        b:SetWidth(math.ceil((lbl:GetStringWidth() or 20) + REPORT_BTN_PAD * 2))
+        -- Width is assigned by LayoutGroupContent so all five buttons fill
+        -- exactly one panel row with the same spacing as the action rows.
         b:SetScript("OnEnter", function(self)
             lbl:SetAlpha(1)
             GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
@@ -1677,6 +2158,7 @@ local function BuildReportButtons()
         b._lbl = lbl
         reportBtns[#reportBtns + 1] = b
     end
+    LayoutGroupContent()
 end
 
 -- No combat gate: reporting who is missing a flask/food/rune/vantus, or
@@ -1698,6 +2180,7 @@ local function BuildAll()
     BuildCollapsedIcon()
     BuildRaidGroupsCog()
     BuildRaidCheckButton()
+    BuildInviteToolsButton()
     BuildReportButtons()
     iconBtn:ClearAllPoints()
     iconBtn:SetPoint("TOPLEFT", sections.Group, "TOPLEFT", 0, 0)
@@ -1745,7 +2228,8 @@ end
 -- icon at TOPLEFT = windows extend down-right (the original behaviour),
 -- icon at BOTTOMLEFT = up-right, and so on. See GROW_DIRECTION_CORNER /
 -- AnchorCorner above -- title insets, the collapse buttons, the Raid
--- Groups cog and the Raid Check button all share this same corner.
+-- Groups cog, Raid Check button and Invite Tools button all share this same corner. Reports
+-- are content-row buttons and do not participate in corner placement.
 
 -- Show-as arrangement. OOC only (Apply gates); the holders are plain frames,
 -- so the re-parent is an ordinary SetParent.
@@ -1770,50 +2254,62 @@ local function ApplyLayout()
     -- height so the button never sits over the last content row. The Group
     -- shell alone also carries the Raid Groups cog riding the button's inward
     -- side, so its own reserve is a little wider.
-    -- Report row: measured fresh every pass (not cached at build time) so a
-    -- Global Font change is picked up without a UI reload -- see
-    -- BuildReportButtons for REPORT_BTN_PAD/REPORT_GAP.
-    local reportReserve = 0
-    for _, b in ipairs(reportBtns) do
-        local w = math.ceil((b._lbl:GetStringWidth() or 20) + REPORT_BTN_PAD * 2)
-        b:SetWidth(w)
-        b._reportWidth = w
-        reportReserve = reportReserve + REPORT_GAP + w
-    end
-
     local corner = AnchorCorner()
     local isBottom = corner == "BOTTOMLEFT" or corner == "BOTTOMRIGHT"
+    -- In the combined shell the title now shares the corner-control row, on
+    -- the opposite horizontal edge. Down-left/down-right carry that row on
+    -- TOP, so content starts after the 22px controls plus an 8px gap. Up-left/
+    -- up-right carry it on BOTTOM, so the content can still start at PAD and
+    -- the old empty title-band space does not come back. Split mode keeps its
+    -- ordinary top title when controls live on the bottom edge.
+    local groupContentTop
+    if showAs == "one" then
+        groupContentTop = isBottom and PAD or GROUP_TOP_RESERVE
+    else
+        groupContentTop = isBottom and CONTENT_TOP or GROUP_TOP_RESERVE
+    end
     local function Reserve(hasBtn, extra)
         local titleReserve  = (hasBtn and corner == "TOPLEFT")
             and (BTN_TITLE_RESERVE + (extra or 0)) or PAD
         local bottomReserve = (hasBtn and isBottom) and BTN_BOTTOM_RESERVE or 0
         return titleReserve, bottomReserve
     end
-    local groupTitleReserve, groupBottomReserve = Reserve(collapseUI, GROUP_COG_RESERVE + reportReserve)
+    -- Raid Groups / Raid Check exist independently of the collapse toggle,
+    -- and keep the collapse slot reserved even when Minimize itself is hidden.
+    -- That prevents the larger bottom-corner controls from ever landing over
+    -- the last content row and keeps split-mode titles clear of them as well.
+    local groupHasCornerControls = collapseUI or raidGroupsCogBtn ~= nil or raidCheckBtn ~= nil or inviteToolsBtn ~= nil
+    local groupTitleReserve, groupBottomReserve = Reserve(groupHasCornerControls, GROUP_COG_RESERVE)
     local markersTitleReserve, markersBottomReserve = Reserve(markersHasBtn)
 
     if showAs == "one" then
+        -- Combined mode keeps a compact Raid Tools title in the unused side
+        -- of the same edge that carries Minimize / Raid Groups / Raid Check / Invite Tools.
+        -- Its exact anchor is assigned below after the shell is sized.
+        shellTitle.Group:SetShown(true)
         shellTitle.Group:SetText(EllesmereUI.L(COMBINED_LABEL))
+        SetTrackedFontSize(shellTitleFont.Group, 14)
         groupHolder:SetShown(true)
         groupHolder:SetParent(winGroup)
         groupHolder:ClearAllPoints()
-        groupHolder:SetPoint("TOPLEFT", winGroup, "TOPLEFT", 0, -CONTENT_TOP)
+        groupHolder:SetPoint("TOPLEFT", winGroup, "TOPLEFT", 0, -groupContentTop)
         markersHolder:SetShown(true)
         markersHolder:SetParent(winGroup)
         markersHolder:ClearAllPoints()
         markersHolder:SetPoint("TOPLEFT", winGroup, "TOPLEFT", 0,
-            -CONTENT_TOP - GROUP_CONTENT_H - ROW_GAP * 2)
-        winGroup:SetHeight(CONTENT_TOP + GROUP_CONTENT_H + ROW_GAP * 2
-            + MARKERS_CONTENT_H + PAD + groupBottomReserve)
+            -groupContentTop - COMBINED_MARKERS_TOP)
+        winGroup:SetHeight(groupContentTop + GROUP_CONTENT_H + PAD + groupBottomReserve)
     else
         -- Every split mode parents each holder to its own shell; which shells
         -- actually SHOW is ApplyVisibility's call (the enabled attribute).
+        shellTitle.Group:SetShown(true)
         shellTitle.Group:SetText(EllesmereUI.L(SECTION_LABEL.Group))
+        SetTrackedFontSize(shellTitleFont.Group, 12)
         groupHolder:SetParent(winGroup)
         groupHolder:SetShown(true)
         groupHolder:ClearAllPoints()
-        groupHolder:SetPoint("TOPLEFT", winGroup, "TOPLEFT", 0, -CONTENT_TOP)
-        winGroup:SetHeight(CONTENT_TOP + GROUP_CONTENT_H + PAD + groupBottomReserve)
+        groupHolder:SetPoint("TOPLEFT", winGroup, "TOPLEFT", 0, -groupContentTop)
+        winGroup:SetHeight(groupContentTop + GROUP_CONTENT_H + PAD + groupBottomReserve)
 
         markersHolder:SetParent(winMarkers)
         markersHolder:SetShown(true)
@@ -1822,10 +2318,35 @@ local function ApplyLayout()
         winMarkers:SetHeight(CONTENT_TOP + MARKERS_CONTENT_H + PAD + markersBottomReserve)
     end
 
-    -- Title insets: pushed clear of the collapse button on whichever shell
-    -- carries one and opens from TOPLEFT; PAD everywhere else.
+    -- Group title: in combined mode it occupies the free side opposite the
+    -- corner controls and follows them to TOP/BOTTOM with Grow Direction. In
+    -- split mode it keeps the normal top-left title placement and reserve.
     shellTitle.Group:ClearAllPoints()
-    shellTitle.Group:SetPoint("LEFT", winGroup, "TOPLEFT", groupTitleReserve, -TOPBAR_H / 2)
+    if showAs == "one" then
+        local controlsOnLeft = corner:find("LEFT") ~= nil
+        if isBottom then
+            local y = BTN_MARGIN + CORNER_BTN_SZ / 2
+            if controlsOnLeft then
+                shellTitle.Group:SetPoint("RIGHT", winGroup, "BOTTOMRIGHT", -PAD, y)
+                shellTitle.Group:SetJustifyH("RIGHT")
+            else
+                shellTitle.Group:SetPoint("LEFT", winGroup, "BOTTOMLEFT", PAD, y)
+                shellTitle.Group:SetJustifyH("LEFT")
+            end
+        else
+            local y = -(BTN_MARGIN + CORNER_BTN_SZ / 2)
+            if controlsOnLeft then
+                shellTitle.Group:SetPoint("RIGHT", winGroup, "TOPRIGHT", -PAD, y)
+                shellTitle.Group:SetJustifyH("RIGHT")
+            else
+                shellTitle.Group:SetPoint("LEFT", winGroup, "TOPLEFT", PAD, y)
+                shellTitle.Group:SetJustifyH("LEFT")
+            end
+        end
+    else
+        shellTitle.Group:SetPoint("LEFT", winGroup, "TOPLEFT", groupTitleReserve, -TOPBAR_H / 2)
+        shellTitle.Group:SetJustifyH("LEFT")
+    end
     shellTitle.Markers:ClearAllPoints()
     shellTitle.Markers:SetPoint("LEFT", winMarkers, "TOPLEFT", markersTitleReserve, -TOPBAR_H / 2)
 
@@ -1844,35 +2365,30 @@ local function ApplyLayout()
     -- always lands beside the close button instead of past the shell's edge.
     if raidGroupsCogBtn then
         local isLeftCorner = corner:find("LEFT") ~= nil
-        local inward = COG_GAP + 14   -- 14 = the close button's own width
+        local inward = COG_GAP + CORNER_BTN_SZ
         local cogDx = off[1] + (isLeftCorner and inward or -inward)
         raidGroupsCogBtn:ClearAllPoints()
         raidGroupsCogBtn:SetPoint(corner, winGroup, corner, cogDx, off[2])
     end
 
-    -- Raid Check button: same corner, one further gap inward past the cog --
-    -- close, then Raid Groups, then Raid Check, reading outward to inward.
+    -- Raid Check button: same corner, one further gap inward past the cog.
     if raidCheckBtn then
         local isLeftCorner = corner:find("LEFT") ~= nil
-        local inward = (COG_GAP + 14) + (RAIDCHECK_GAP + COG_SZ)
+        local inward = (COG_GAP + CORNER_BTN_SZ) + (RAIDCHECK_GAP + COG_SZ)
         local rcDx = off[1] + (isLeftCorner and inward or -inward)
         raidCheckBtn:ClearAllPoints()
         raidCheckBtn:SetPoint(corner, winGroup, corner, rcDx, off[2])
     end
 
-    -- Report row: five more riders past Raid Check, same corner, same
-    -- outward-to-inward reading (close, Raid Groups, Raid Check, then
-    -- Flask/Food/Repair/Rune/Vantus) -- each sized to its own measured
-    -- label (see above) rather than a fixed width, so the full name fits.
-    if #reportBtns > 0 then
+    -- Invite Tools sits directly beyond Raid Check in the grow direction:
+    -- right of '*' for right-growing menus, left of '*' for left-growing ones.
+    if inviteToolsBtn then
         local isLeftCorner = corner:find("LEFT") ~= nil
-        local edge = (COG_GAP + 14) + (RAIDCHECK_GAP + COG_SZ) + COG_SZ + REPORT_GAP
-        for _, b in ipairs(reportBtns) do
-            local dx = off[1] + (isLeftCorner and edge or -edge)
-            b:ClearAllPoints()
-            b:SetPoint(corner, winGroup, corner, dx, off[2])
-            edge = edge + b._reportWidth + REPORT_GAP
-        end
+        local inward = (COG_GAP + CORNER_BTN_SZ) + (RAIDCHECK_GAP + COG_SZ)
+                    + (INVITETOOLS_GAP + COG_SZ)
+        local itDx = off[1] + (isLeftCorner and inward or -inward)
+        inviteToolsBtn:ClearAllPoints()
+        inviteToolsBtn:SetPoint(corner, winGroup, corner, itDx, off[2])
     end
 
     -- The collapsed icon rides the shell the mode actually shows -- Markers-
@@ -2448,7 +2964,19 @@ local function EnsureEvents()
                     PrimeQuickFire(runtime.qfPlace)
                 end
             end
+            local roleLayoutChanged = runtime.RefreshRoleCounts()
+            if roleLayoutChanged then
+                Apply()
+                return
+            end
             RefreshPermissions()
+            -- Permission inputs are memoized, but these stateful controls can
+            -- change while leader/assist/group type stays identical. Always
+            -- refresh them from their authoritative APIs on the registered
+            -- roster/roles/difficulty events instead of hiding that update
+            -- behind RefreshPermissions' early-return cache.
+            RefreshAssistCheckbox()
+            runtime.RefreshDifficultyLabel()
             RefreshRaidGroups()
             RefreshAssistGate()
             RefreshReportButtons()
@@ -2457,6 +2985,8 @@ local function EnsureEvents()
     ev:RegisterEvent("GROUP_ROSTER_UPDATE")
     ev:RegisterEvent("PARTY_LEADER_CHANGED")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    ev:RegisterEvent("PLAYER_DIFFICULTY_CHANGED")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
     ev:RegisterEvent("ENCOUNTER_START")
     ev:RegisterEvent("ENCOUNTER_END")
@@ -2586,8 +3116,10 @@ function Apply()
     EnsureEvents()
     RegisterUnlock()
     BuildAll()
-    -- Before ApplyLayout: it sizes the shells from GROUP_CONTENT_H, which the
-    -- hidden buttons and the 0-second pull slots move.
+    -- Before ApplyLayout: marker order follows Grow Direction, then Group
+    -- layout reserves that marker block at the exact point in the combined
+    -- stack while also sizing around hidden buttons / 0-second pull slots.
+    LayoutMarkersContent()
     LayoutGroupContent()
     ApplyLayout()
     -- One Window Scale for everything the feature draws.
@@ -2606,6 +3138,7 @@ function Apply()
     ApplyQuickFireBindings()
     ApplyFonts()
     RefreshPermissions(true)
+    runtime.RefreshRoleCounts(true)
     RefreshRaidGroups(true)
     RefreshReportButtons()
 end

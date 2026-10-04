@@ -1378,6 +1378,9 @@ local DEFAULTS = {
             showIcon      = true,
             iconOnRight   = false,  -- attach the spell icon to the right of the bar instead of the left
             showIconDivider = false,  -- draw a 1px divider at the icon/bar seam (interior seam has no border otherwise)
+            iconSize      = 0,  -- 0 = the bar height
+            iconOffsetX   = 0,
+            iconOffsetY   = 0,
             width         = 220,
             height        = 20,
             anchorX       = 0,
@@ -1418,6 +1421,7 @@ local DEFAULTS = {
             showGCDBoundary   = false,
             gcdBoundaryR = 1.0, gcdBoundaryG = 0.82, gcdBoundaryB = 0.0, gcdBoundaryA = 0.95,
             coloredEmpowerStages = false,  -- Color empowered spells from red to green per stage
+            outOfRangeGray = false,  -- Gray fill while the target is out of the cast's range
             showTotalDuration = false,
             latencyEnabled    = false,
             latencyShowText   = false,
@@ -3363,7 +3367,7 @@ local function BuildBars()
         if not healthBar then
             healthBar = CreateStatusBar(mainFrame, "ERB_HealthBar", hpWidth, hpHeight,
                 hp.borderSize, hp.borderR, hp.borderG, hp.borderB, hp.borderA)
-            healthBar:SetFrameStrata(g.frameStrata or "MEDIUM")
+            healthBar:SetFrameStrata(hp.frameStrata or g.frameStrata or "MEDIUM")
             healthBar:SetFrameLevel(10)
         end
         if not hp.enabled then
@@ -3380,6 +3384,7 @@ local function BuildBars()
                 healthBar:SetPoint(hp.unlockPos.point, UIParent, rp, sx, sy)
             end
             EllesmereUI.SetElementVisibility(healthBar, false)
+            ns.HealthIndicatorsApply(healthBar, nil)
         else
         local healthAnchorKey = NormalizeAnchorKey(hp.anchorTo)
         if EllesmereUI._TryOverrideAnchor and EllesmereUI._TryOverrideAnchor("ERB_Health", healthBar) then
@@ -3440,7 +3445,8 @@ local function BuildBars()
         end
 
         -- Bar texture (must be applied before colors since SetStatusBarTexture resets vertex color).
-        -- "Choose texture per bar" (splitTex) gives health its own key; nil follows the main row.
+        -- Health's own texture (the Texture cog) counts only while splitTex is on; nil or false
+        -- matches the main row.
         ApplyBarTexture(healthBar, (p.splitTex == true and hp.barTexture) or g.barTexture or "none")
 
         -- Colors: custom colored > class color. Gradient is additive: when enabled
@@ -3487,6 +3493,9 @@ local function BuildBars()
         if IsSpecDisabled(hp) then
             EllesmereUI.SetElementVisibility(healthBar, false)
         end
+        -- Absorb / heal absorb / max health reduction overlays
+        -- (EUI_ResourceBars_HealthIndicators.lua): settings pass only.
+        ns.HealthIndicatorsApply(healthBar, (not IsSpecDisabled(hp)) and hp or nil, hpOri)
         end
     end
 
@@ -3510,7 +3519,7 @@ local function BuildBars()
         -- "Shift Elements if No Resource" checks (IsSpecDisabled +
         -- GetSecondaryResource) plus the master-disable case.
         if sp2.enabled == false or IsSpecDisabled(sp2) or not GetSecondaryResource() then
-            ppExpandDelta = sp2.pipHeight or 20
+            ppExpandDelta = math.max(0, (sp2.pipHeight or 20) + (pp.expandIfNoResourceExtraY or 0))
             ppHeight = ppHeight + ppExpandDelta
             ppDirSign = ResolveExpandDirSign(pp, sp2)
         end
@@ -3534,7 +3543,7 @@ local function BuildBars()
     if not primaryBar then
         primaryBar = CreateStatusBar(mainFrame, "ERB_PrimaryBar", ppWidth, ppHeight,
             pp.borderSize, pp.borderR, pp.borderG, pp.borderB, pp.borderA)
-        primaryBar:SetFrameStrata(g.frameStrata or "MEDIUM")
+        primaryBar:SetFrameStrata(pp.frameStrata or g.frameStrata or "MEDIUM")
         primaryBar:SetFrameLevel(10)
     end
     if pp.enabled ~= false and cachedPrimary then
@@ -4403,7 +4412,8 @@ local function UpdateHealthBar()
 
     local cur = UnitHealth("player")
     local mx = UnitHealthMax("player")
-    if not cur or not mx or mx <= 0 then return end
+    if not cur or not mx then return end
+    if not (issecretvalue and issecretvalue(mx)) and mx <= 0 then return end
 
     healthBar:SetMinMaxValues(0, mx)
 
@@ -4666,7 +4676,42 @@ local function UpdatePrimaryBar()
     local _ppBandOn, _ppBands, _ppBandMode, _ppBandRev = pc.bandOn, pc.bands, pc.bandMode, pc.bandRev
     local ft = primaryBar:GetStatusBarTexture()
     local _ppTextInstead = _ppTsEntry and _ppTsEntry.thresholdTextInstead and pp.textFormat ~= "none"
-    if (_ppTsEntry or _ppBandOn) and ft and UnitPowerPercent then
+    -- A castable tracked spender outranks threshold and band coloring; Recolor
+    -- Text Instead sends it to the text.
+    local spOn = ns.PowTracks()
+    local spR, spG, spB, spA, spW
+    if spOn then spR, spG, spB, spA, spW = ns.PowSpenderColor() end
+    local spText = spOn and ns.PTK.entry.thresholdTextInstead and pp.textFormat ~= "none"
+    if not spR and primaryBar._ovW then
+        if primaryBar._ovTI then
+            if pp.textCustomColored == false then
+                local tpc = POWER_COLORS[cachedPrimary]
+                if tpc then
+                    primaryBar._text:SetTextColor(tpc[1], tpc[2], tpc[3], 1)
+                else
+                    primaryBar._text:SetTextColor(1, 1, 1, 1)
+                end
+            else
+                primaryBar._text:SetTextColor(pp.textFillR or 1, pp.textFillG or 1, pp.textFillB or 1, pp.textFillA or 1)
+            end
+        end
+        primaryBar._ovW, primaryBar._ovGen, primaryBar._ovTI = nil, nil, nil
+        primaryBar._colCur, primaryBar._colGen = nil, nil
+    end
+    if spR then
+        if not (primaryBar._ovW == spW and primaryBar._ovGen == ns.CfgGen
+                and primaryBar._ovTI == spText) then
+            primaryBar._ovW, primaryBar._ovGen, primaryBar._ovTI = spW, ns.CfgGen, spText
+            primaryBar._colCur, primaryBar._colGen = nil, nil
+            if spText then
+                primaryBar._text:SetTextColor(spR, spG, spB, spA or 1)
+            elseif ft then
+                -- The curve paints raw, so the flat memo may be stale.
+                ft._lfOn = nil
+                ApplyBarFlat(ft, spR, spG, spB, spA or 1)
+            end
+        end
+    elseif (_ppTsEntry or _ppBandOn) and ft and UnitPowerPercent then
         local curve
         local baseR, baseG, baseB
         if pp.customColored then
@@ -4730,6 +4775,19 @@ local function UpdatePrimaryBar()
                     ApplyBarFlat(ft, baseR, baseG, baseB, 1)
                 end
             end
+        end
+    elseif spOn and not spText then
+        -- Spender coloring keeps the base flat, as threshold coloring does.
+        if primaryBar._colGen ~= ns.CfgGen or primaryBar._colPow ~= cachedPrimary then
+            primaryBar._colGen, primaryBar._colPow = ns.CfgGen, cachedPrimary
+            local r, g, b
+            if pp.customColored then
+                r, g, b = pp.fillR, pp.fillG, pp.fillB
+            else
+                local pc = POWER_COLORS[cachedPrimary]
+                if pc then r, g, b = pc[1], pc[2], pc[3] else r, g, b = 1, 1, 1 end
+            end
+            ApplyBarFlat(ft, r, g, b, 1)
         end
     elseif not pp.customColored then
         -- Static per config generation + power type (same stamp as above).
@@ -4942,11 +5000,14 @@ end
 -- the bump (a rebuild in combat must not send every spell back to a live read):
 -- a spell that leaves the list is pruned, and disarming wipes them all.
 ns.STK = { ids = {}, oncd = {} }
+-- The Power Bar's counterpart (entry, spend, ids, w, oncd).
+ns.PTK = { ids = {}, oncd = {} }
 
 -- True when the entry colors by spenders and at least one row names a spell (a
--- blank "+ Add Spender" row arms nothing). Refills ns.STK.ids with those spells.
-function ns.SecondaryTracksSpender(e)
-    local ids = ns.STK.ids
+-- blank "+ Add Spender" row arms nothing). Refills ids (default ns.STK.ids) with
+-- those spells.
+function ns.SecondaryTracksSpender(e, ids)
+    ids = ids or ns.STK.ids
     wipe(ids)
     local list = e and e.spenderColorEnabled and e.spenderColors
     if not list then return false end
@@ -4979,6 +5040,26 @@ function ns.SecTracks()
     return t.buff, t.spend
 end
 
+-- The Power Bar's counterpart of ns.SecTracks. Returns spend. A Power Bar that
+-- cannot show (IsPowerBarHidden: off, hidden in this form or by Hide Power Bar if
+-- Resource, no primary power) tracks nothing, so no spender events stay armed.
+function ns.PowTracks()
+    local t = ns.PTK
+    if t.gen ~= ns.CfgGen then
+        t.gen = ns.CfgGen
+        local pp = _G._ERB_ResolvePowerCfg()
+        local e = pp and not IsPowerBarHidden() and ResolveThresholdSpecEntry(pp) or nil
+        t.entry = e
+        t.spend = ns.SecondaryTracksSpender(e, t.ids)
+        t.w = nil
+        local oncd, ids = t.oncd, t.ids
+        for id in pairs(oncd) do
+            if not ids[id] then oncd[id] = nil end
+        end
+    end
+    return t.spend
+end
+
 -- Spender coloring: the FIRST castable spell in the entry's list wins. Each spell
 -- is read through its current override (transforming spells). Castable means
 -- IsSpellUsable (resource, range, known) and not on a real cooldown: IsSpellUsable
@@ -4989,11 +5070,13 @@ end
 -- recharging spell falls back to the latched verdict like every other spell. The
 -- latch stands in for a live read because isOnGCD is only trustworthy inside
 -- SPELL_UPDATE_COOLDOWN; a live read covers a spell only until its first latch.
--- Returns the winning index, 0 for none.
-function ns.SpenderScan(entry)
+-- oncd: the bar's verdicts (default ns.STK.oncd). Returns the winning index, 0
+-- for none.
+function ns.SpenderScan(entry, oncd)
     local list = entry and entry.spenderColorEnabled and entry.spenderColors
     if not list then return 0 end
-    local S, oncd = C_Spell, ns.STK.oncd
+    local S = C_Spell
+    oncd = oncd or ns.STK.oncd
     for i = 1, #list do
         local sid = list[i].spellID
         if sid then
@@ -5046,6 +5129,27 @@ function ns.ActiveSpenderColor(entry)
     local w = ns.SpenderWinner()
     local e = w > 0 and entry.spenderColors[w]
     if e then return e.r, e.g, e.b, e.a end
+    return nil
+end
+
+-- The Power Bar's counterpart of ns.SpenderWinner. Call after ns.PowTracks().
+function ns.PowSpenderWinner()
+    local t = ns.PTK
+    local w = t.w
+    if w == nil then
+        w = t.spend and ns.SpenderScan(t.entry, t.oncd) or 0
+        t.w = w
+    end
+    return w
+end
+
+-- The Power Bar's override color and winning index. Separate from
+-- ns.ActiveSpenderColor so class-resource paints pay nothing for it.
+function ns.PowSpenderColor()
+    if not ns.PowTracks() then return nil end
+    local w = ns.PowSpenderWinner()
+    local e = w > 0 and ns.PTK.entry.spenderColors[w]
+    if e then return e.r, e.g, e.b, e.a, w end
     return nil
 end
 
@@ -7007,10 +7111,10 @@ ns.PollTick = EllesmereUI.Tick.NewAnimTicker(CreateFrame("Frame"), function()   
     end
 end, 0.05)
 
--- Spender pass (Class Resource Bar spender coloring). SPELL_UPDATE_USABLE,
+-- Spender pass (Class Resource Bar and Power Bar spender coloring). SPELL_UPDATE_USABLE,
 -- SPELL_UPDATE_COOLDOWN, SPELL_UPDATE_ICON and each tracked spell's cooldown-end
 -- edge only request it: one hidden frame runs it on the next frame (its OnUpdate
--- hides the frame first), scans once and repaints only when the winning spender
+-- hides the frame first), scans once and repaints a bar only when its winning spender
 -- changed. A cooldown that ends on its own fires no event, so each tracked row
 -- gets a hidden Cooldown widget fed the spell's cooldown duration object (GCD
 -- ignored; the object is secret-safe) and its OnCooldownDone is the ready edge.
@@ -7040,11 +7144,14 @@ do
 
     local function OnDone(cd)
         if not ns._spenderEvents then return end
-        if cd._sid then ns.STK.oncd[cd._sid] = false end
+        if cd._sid and cd._oncd then cd._oncd[cd._sid] = false end
         pass:Show()
     end
 
-    local function Feed(list)
+    -- Feeds list's rows into the widgets after position n, tagged with the bar's
+    -- verdicts; returns the last position used.
+    local function Feed(list, n, oncd)
+        if not list then return n end
         if not host then
             host = CreateFrame("Frame")
             host:SetSize(1, 1)
@@ -7054,7 +7161,8 @@ do
         host:Show()
         local S = C_Spell
         for i = 1, #list do
-            local cd = cds[i]
+            local k = n + i
+            local cd = cds[k]
             if not cd then
                 cd = CreateFrame("Cooldown", nil, host, "CooldownFrameTemplate")
                 cd:SetAllPoints()
@@ -7062,32 +7170,47 @@ do
                 cd:SetDrawBling(false)
                 cd:EnableMouse(false)
                 cd:SetScript("OnCooldownDone", OnDone)
-                cds[i] = cd
+                cds[k] = cd
             end
             local id = list[i].spellID
             cd._sid = id
+            cd._oncd = oncd
             local dur = id and S.GetSpellCooldownDuration(S.GetOverrideSpell(id) or id, true)
             if dur then cd:SetCooldownFromDurationObject(dur) else cd:Clear() end
         end
-        for i = #list + 1, #cds do
-            cds[i]._sid = nil
-            cds[i]:Clear()
-        end
+        return n + #list
     end
 
     pass:SetScript("OnUpdate", function(self)
         self:Hide()
         local _, spend = ns.SecTracks()
-        if not (spend and ns._spenderEvents) then return end
-        local t = ns.STK
+        local pspend = ns.PowTracks()
+        spend, pspend = spend and ns._spenderSec, pspend and ns._spenderPow
+        if not (spend or pspend) then return end
+        local t, pt = ns.STK, ns.PTK
         if feed then
             feed = false
-            Feed(t.entry.spenderColors)
+            local n = Feed(spend and t.entry.spenderColors, 0, t.oncd)
+            n = Feed(pspend and pt.entry.spenderColors, n, pt.oncd)
+            for i = n + 1, #cds do
+                cds[i]._sid = nil
+                cds[i]._oncd = nil
+                cds[i]:Clear()
+            end
         end
-        local w = ns.SpenderScan(t.entry)
-        if w ~= t.w then
-            t.w = w
-            UpdateSecondaryResource()
+        if spend then
+            local w = ns.SpenderScan(t.entry)
+            if w ~= t.w then
+                t.w = w
+                UpdateSecondaryResource()
+            end
+        end
+        if pspend then
+            local w = ns.SpenderScan(pt.entry, pt.oncd)
+            if w ~= pt.w then
+                pt.w = w
+                UpdatePrimaryBar()
+            end
         end
     end)
 
@@ -7099,16 +7222,20 @@ do
     function ns.SpenderEvent(_, event, spellID, baseSpellID, category, recoveryCat)
         if event == "SPELL_UPDATE_COOLDOWN" then
             local _, spend = ns.SecTracks()
-            if not spend then return end
-            local t = ns.STK
+            local pspend = ns.PowTracks()
+            spend, pspend = spend and ns._spenderSec, pspend and ns._spenderPow
+            if not (spend or pspend) then return end
+            local t, pt = ns.STK, ns.PTK
             -- A named update for an untracked spell changes nothing here unless it
             -- started the GCD; a nil or unreadable spellID updates every cooldown.
             if not (issecretvalue and issecretvalue(spellID)) and spellID
-               and not t.ids[spellID] and not (baseSpellID and t.ids[baseSpellID])
+               and not t.ids[spellID] and not pt.ids[spellID]
+               and not (baseSpellID and (t.ids[baseSpellID] or pt.ids[baseSpellID]))
                and recoveryCat ~= Constants.SpellCooldownConsts.GLOBAL_RECOVERY_CATEGORY then
                 return
             end
-            Latch(t.entry.spenderColors, t.oncd)
+            if spend then Latch(t.entry.spenderColors, t.oncd) end
+            if pspend then Latch(pt.entry.spenderColors, pt.oncd) end
             feed = true
         elseif event == "SPELL_UPDATE_ICON" then
             -- An override appeared or went away: re-feed the widgets from the
@@ -7123,6 +7250,7 @@ do
         pass:Hide()
         ns.STK.fedGen = nil
         wipe(ns.STK.oncd)
+        wipe(ns.PTK.oncd)
         for i = 1, #cds do cds[i]:Clear() end
         if host then host:Hide() end
     end
@@ -7155,9 +7283,14 @@ function ns.ArmTick()
         ns.EMTick.Start()
     end
     -- Spender coloring: its three events are registered on the addon's own event
-    -- frame only while an enabled bar's entry tracks spenders and the pips are
-    -- ours to paint. Arming and every config bump re-feed the spender pass.
-    local want = (tracksSpender and cs and not ns._erbArtOn) and true or false
+    -- frame only while an enabled bar's entry tracks spenders (the class-resource
+    -- bar only while its pips are ours to paint). Arming and every config bump
+    -- re-feed the spender pass.
+    local swant = (tracksSpender and cs and not ns._erbArtOn) and true or false
+    local pwant = (ns.PowTracks() and cachedPrimary and cachedPrimary ~= "EBON_MIGHT")
+        and true or false
+    local want = swant or pwant
+    ns._spenderSec, ns._spenderPow = swant, pwant
     if want ~= (ns._spenderEvents or false) then
         ns._spenderEvents = want
         if want then
@@ -7358,11 +7491,29 @@ function ns.ERB_SeedStockCast(cb)
     cb.stockTextureSeeded = true
     cb.texture = "blizzard"
 end
+-- Health and power each match the main texture (general.barTexture) or take
+-- their own (the Texture cog's Health / Power Texture). An own key counts only
+-- while splitTex is on, so a key left from an older split never comes back by
+-- itself; the setter keeps splitTex on exactly while one bar has its own.
+-- barKey = "health" or "primary"; tex = a texture key, or false to match the
+-- main texture. Keys are stored false, not nil: profile sync copies only keys
+-- that exist.
+function ns.ERB_BarTexture(p, barKey)
+    return p.splitTex == true and p[barKey].barTexture or nil
+end
+function ns.ERB_SetBarTexture(p, barKey, tex)
+    if tex and p.splitTex ~= true then
+        p.health.barTexture, p.primary.barTexture = false, false
+        p.splitTex = true
+    end
+    p[barKey].barTexture = tex or false
+    if not (p.health.barTexture or p.primary.barTexture) then p.splitTex = false end
+end
 -- Classic WoW UI on the health, power and class resource bars, once per
 -- profile (the controls stay the user's afterwards): Border Around All on
 -- when the shown bars already sit as one anchored stack, and "Plating" as
--- the bar texture (on the health and power keys too while "Choose texture per
--- bar" is on). Run by the Style page on the switch and at enable for a
+-- the bar texture (on the health and power keys too where a bar has its own
+-- texture). Run by the Style page on the switch and at enable for a
 -- profile that arrives already switched.
 function ns.ERB_SeedStockBars(p, styleKey)
     local g = p and p.general
@@ -7380,9 +7531,8 @@ function ns.ERB_SeedStockBars(p, styleKey)
     if g.classicTextureSeeded then return end
     g.classicTextureSeeded = true
     g.barTexture = "plating"
-    if p.splitTex == true then
-        p.health.barTexture, p.primary.barTexture = "plating", "plating"
-    end
+    if ns.ERB_BarTexture(p, "health") then p.health.barTexture = "plating" end
+    if ns.ERB_BarTexture(p, "primary") then p.primary.barTexture = "plating" end
 end
 -- The style the health, power and class resource bars render this session,
 -- latched like the cast bar's. Blizzard Style: the personal resource
@@ -8610,12 +8760,42 @@ end
 -- the icon stays a square of the bar height). The frame width, the fill
 -- inset and the unlock sizing all take it from here.
 function ns.ERB_CastIconW(cb)
-    if cb.showIcon == false then return 0 end
+    if cb.showIcon == false or ns.ERB_CastIconFree(cb) then return 0 end
     local h = cb.height
     if ns.ERB_CastStyle() == "blizzard" and cb.showSpellText and ns.ERB_BlizzAtlas("textbox") then
         return h + 13
     end
     return h
+end
+-- Icon Size / Offset: a custom size or any offset takes the icon out of the
+-- frame (ERB_CastIconW is 0) and it floats beside the bar with its own border.
+-- The stock styles keep it inside their frame art.
+function ns.ERB_CastIconFree(cb)
+    if cb.showIcon == false or ns.ERB_CastStyle() ~= "eui" then return false end
+    return (cb.iconSize or 0) > 0 or (cb.iconOffsetX or 0) ~= 0 or (cb.iconOffsetY or 0) ~= 0
+end
+-- Lays out a floating icon (live bar and options preview), or hides its border.
+function ns.ERB_LayoutFreeCastIcon(iconFrame, host, cb, free)
+    local P = EllesmereUI.PP
+    if not free then
+        if P.GetBorders(iconFrame) then P.HideBorder(iconFrame) end
+        return
+    end
+    local size = (cb.iconSize or 0) > 0 and cb.iconSize or cb.height
+    iconFrame:SetSize(size, size)
+    iconFrame:ClearAllPoints()
+    if cb.iconOnRight then
+        iconFrame:SetPoint("LEFT", host, "RIGHT", cb.iconOffsetX or 0, cb.iconOffsetY or 0)
+    else
+        iconFrame:SetPoint("RIGHT", host, "LEFT", cb.iconOffsetX or 0, cb.iconOffsetY or 0)
+    end
+    if (cb.borderSize or 0) > 0 then
+        if not P.GetBorders(iconFrame) then P.CreateBorder(iconFrame, 0, 0, 0, 1, 1) end
+        P.SetBorderColor(iconFrame, cb.borderR or 0, cb.borderG or 0, cb.borderB or 0, cb.borderA or 1)
+        P.ShowBorder(iconFrame)
+    elseif P.GetBorders(iconFrame) then
+        P.HideBorder(iconFrame)
+    end
 end
 -- Fill art for the current cast kind ("cast" | "channel" | "interrupted").
 -- One field test when the style is off; a memo skips repeat atlas swaps.
@@ -8915,7 +9095,11 @@ BuildCastBar = function()
     -- Icon: left or right side (iconOnRight), full height, no inset
     local iconFrame = castBarFrame._iconFrame
     local iconOnRight = hasIcon and cb.iconOnRight
-    if hasIcon then
+    local iconFree = ns.ERB_CastIconFree(cb)
+    ns.ERB_LayoutFreeCastIcon(iconFrame, castBarFrame, cb, iconFree)
+    if iconFree then
+        iconFrame:Show()
+    elseif hasIcon then
         -- A square of the bar height; under the style it also spans the stock
         -- text box under the bar (see ns.ERB_CastIconW), hung from the same
         -- top corner, as the unit frame cast bars do.
@@ -8945,9 +9129,10 @@ BuildCastBar = function()
     local iconDivider = castBarFrame._iconDivider
     -- Border Art Divider: the border style's vertical companion art in place of
     -- the solid line below (ns.ERB_CastDividerArt; inert unless it was ever on).
-    if ns.ERB_CastDividerArt(iconDivider, hasIcon and cb.showIconDivider, iconFrame, iconOnRight, cb, blizz) then
+    local showDivider = hasIcon and not iconFree and cb.showIconDivider
+    if ns.ERB_CastDividerArt(iconDivider, showDivider, iconFrame, iconOnRight, cb, blizz) then
         iconDivider:Show()
-    elseif hasIcon and cb.showIconDivider then
+    elseif showDivider then
         local des = castBarFrame:GetEffectiveScale()
         local onePixel = des > 0 and (PP.perfect / des) or PP.mult
         local dbs = cb.borderSize or 1
@@ -8981,8 +9166,8 @@ BuildCastBar = function()
     -- The icon-adjacent side sits FLUSH against the icon (no inset): that seam is
     -- interior with no border, and insetting it exposes a 1px background column
     -- next to the icon. Outer edges keep the inset so the fill never bleeds out.
-    local clipLeft  = (hasIcon and not iconOnRight) and iconW or bdrInset
-    local clipRight = (hasIcon and iconOnRight) and iconW or bdrInset
+    local clipLeft  = (iconW > 0 and not iconOnRight) and iconW or bdrInset
+    local clipRight = (iconW > 0 and iconOnRight) and iconW or bdrInset
     clipFrame:SetPoint("TOPLEFT", castBarFrame, "TOPLEFT", clipLeft, -bdrInset)
     clipFrame:SetPoint("BOTTOMRIGHT", castBarFrame, "BOTTOMRIGHT", -clipRight, bdrInset)
     clipFrame:SetFrameLevel(castBarFrame:GetFrameLevel() + 1)
@@ -9081,6 +9266,10 @@ else
         fillTex:SetVertexColor(fR, fG, fB, fA * fillOp)
     end
 end
+    -- The fill was just repainted from the settings: a live cast re-resolves its
+    -- cached settings on the next tick and re-reads the Out of Range Gray.
+    castBarFrame._rangeOut = nil
+    castBarFrame._cstKey = nil
 
     local spark = castBarFrame._spark
     -- Blizzard Style: the stock pip replaces the spark art (once; the swap is
@@ -9701,6 +9890,18 @@ UpdateCastBar = function(dt)
         if castBarFrame._rawFill and not castBarFrame._nativeFill and ns._rawFillDriver then
             ns._rawFillDriver:Show()
         end
+        -- Out of Range Gray: armed for this cast only while the option is on and
+        -- the spell has a range (self casts, crafting and mounts never read it).
+        local sid = castBarFrame._spellID
+        castBarFrame._cstRangeSpell = (cb.outOfRangeGray and sid and C_Spell.SpellHasRange(sid)) and sid or nil
+        castBarFrame._cstRangeAt = 0
+    end
+    -- Out of Range Gray: at most five target range reads a second, on this tick,
+    -- during an armed cast; the fill repaints only when the answer flips.
+    local rangeSpell = castBarFrame._cstRangeSpell
+    if rangeSpell and now >= castBarFrame._cstRangeAt then
+        castBarFrame._cstRangeAt = now + 0.2
+        ns.ERB_CastRangeTint(C_Spell.IsSpellInRange(rangeSpell, "target") == false)
     end
     local showTimer = castBarFrame._cstShowTimer
 
@@ -9745,7 +9946,7 @@ UpdateCastBar = function(dt)
         end
 
         -- Apply empowered stage coloring if enabled
-        if castBarFrame._empowering and castBarFrame._cstEmpStages then
+        if castBarFrame._empowering and castBarFrame._cstEmpStages and not castBarFrame._rangeOut then
             local numStages = castBarFrame._numStages or 0
             local stage = GetCurrentEmpowerStage(progress, numStages)
             local r, g, b = GetEmpowerStageColor(stage, numStages)
@@ -9920,6 +10121,7 @@ function ns.ShowIdleCastBar()
     castBarFrame._nativeFill = nil
     castBarFrame._cstKey = nil
     if ns._rawFillDriver then ns._rawFillDriver:Hide() end
+    if castBarFrame._rangeOut then ns.ERB_CastRangeTint(false) end
 
     -- Cast decoration has nothing to show without a cast. The spark in
     -- particular is anchored to the RIGHT edge of the fill, so at value 0 it
@@ -9983,6 +10185,7 @@ OnCastStart = function()
     castBarFrame._startTime = startTimeMS / 1000
     castBarFrame._endTime = endTimeMS / 1000
     castBarFrame._spellName = name
+    castBarFrame._spellID = spellID
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
     castBarFrame._nameText:SetText(name)
     ns.ERB_SetBlizzCastFill("cast")
@@ -10050,6 +10253,7 @@ OnChannelStart = function()
     castBarFrame._startTime = startTimeMS / 1000
     castBarFrame._endTime = endTimeMS / 1000
     castBarFrame._spellName = name
+    castBarFrame._spellID = spellID
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
     castBarFrame._nameText:SetText(name)
     ns.ERB_SetBlizzCastFill("channel")
@@ -10189,15 +10393,10 @@ local function OnChannelStop()
     end)
 end
 
--- Undo the per-stage empower tint and put the configured fill back. Shared by
--- OnEmpowerStop and OnCastStop: the 1s-overrun safety path routes a missed
--- EMPOWER_STOP through OnCastStop, which clears _empowering, and OnEmpowerStop
--- then early-returns on that very flag -- so without this call there the stage
--- tint stayed painted for the rest of the session, the same stuck-fill symptom
--- by a second route. On ns to respect the 200-local cap.
-ns.ResetEmpowerFillColor = function()
-    if not (castBarFrame and castBarFrame._empowerColorApplied) then return end
-    castBarFrame._empowerColorApplied = false
+-- Put the configured fill back after a tint (empower stages, Out of Range
+-- Gray): Blizzard Style white, the gradient re-issued, or the solid colour.
+-- On ns to respect the 200-local cap.
+ns.ERB_RestoreCastFill = function()
     local cb = ERB.db.profile.castBar
     -- Blizzard Style (build stamp): the fill atlas is its own colour; restore plain white.
     if castBarFrame._blizzFill then
@@ -10235,6 +10434,30 @@ ns.ResetEmpowerFillColor = function()
     else
         local fillTex = castBarFrame._bar:GetStatusBarTexture()
         fillTex:SetVertexColor(fR, fG, fB, fA * ((cb.fillOpacity or 100) / 100))
+    end
+end
+
+-- Undo the per-stage empower tint. Shared by OnEmpowerStop and OnCastStop: the
+-- 1s-overrun safety path routes a missed EMPOWER_STOP through OnCastStop, which
+-- clears _empowering, and OnEmpowerStop then early-returns on that very flag --
+-- so without this call there the stage tint stayed painted for the rest of the
+-- session, the same stuck-fill symptom by a second route.
+ns.ResetEmpowerFillColor = function()
+    if not (castBarFrame and castBarFrame._empowerColorApplied) then return end
+    castBarFrame._empowerColorApplied = false
+    ns.ERB_RestoreCastFill()
+end
+
+-- Out of Range Gray (castBar.outOfRangeGray): the fill turns gray while the
+-- target is out of the cast's range and takes its configured paint back when it
+-- returns or the cast ends. Writes only on a flip.
+ns.ERB_CastRangeTint = function(out)
+    if (castBarFrame._rangeOut or false) == out then return end
+    castBarFrame._rangeOut = out or nil
+    if out then
+        castBarFrame._bar:GetStatusBarTexture():SetVertexColor(0.4, 0.4, 0.4, castBarFrame._cstFillAlpha or 1)
+    else
+        ns.ERB_RestoreCastFill()
     end
 end
 
@@ -10355,6 +10578,7 @@ OnEmpowerStart = function()
     castBarFrame._startTime = startTimeMS / 1000
     castBarFrame._endTime = endTimeMS / 1000
     castBarFrame._spellName = name
+    castBarFrame._spellID = spellID
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
     HideLatencyOverlay()
     castBarFrame._nameText:SetText(name)
@@ -11462,7 +11686,7 @@ end
 --
 -- Taint: PingManager reads these three through securecallfunction and securecopies the
 -- returned table, so our tainted execution stays contained. Safe HERE and not on the
--- unit frames (see the "NO ping mixin here" note in EllesmereUIUnitFrames.lua): this
+-- unit frames (see the "NO ping mixin here" note in EUI_UnitFrames_Init.lua): this
 -- receiver only ever names the player, whose GUID is never secret-content, so the
 -- securecopy that hard-errors on a restricted unit has nothing to choke on.
 local function ApplyPingReceivers()
@@ -11510,12 +11734,13 @@ function ERB:ApplyAll()
     -- scheduled to finish it. Arm unconditionally; the tick disarms itself.
     if ns.ArmTick then ns.ArmTick() end
 
-    -- Apply frame strata to all existing bar frames (covers live changes)
+    -- Apply frame strata to all existing bar frames (covers live changes). Health and
+    -- power may take their own from the Frame Strata cog (false matches the main row).
     local g = ERB.db.profile.general or DEFAULTS.profile.general
     local barStrata = g.frameStrata or "MEDIUM"
     if mainFrame then mainFrame:SetFrameStrata(barStrata) end
-    if healthBar then healthBar:SetFrameStrata(barStrata) end
-    if primaryBar then primaryBar:SetFrameStrata(barStrata) end
+    if healthBar then healthBar:SetFrameStrata(ERB.db.profile.health.frameStrata or barStrata) end
+    if primaryBar then primaryBar:SetFrameStrata(ERB.db.profile.primary.frameStrata or barStrata) end
     if secondaryFrame then secondaryFrame:SetFrameStrata(barStrata) end
     local tb = ERB.db.profile.totemBar
     if totemBarFrame then totemBarFrame:SetFrameStrata(tb and tb.frameStrata or "MEDIUM") end
@@ -11688,6 +11913,9 @@ local function OnEvent(self, event, ...)
                     -- buff -- leaves bars that a visibility condition had hidden
                     -- parked visible until the next visibility event.
                     UpdateVisibility()
+                    -- BuildBars repainted the Power Bar's base fill; repaint its
+                    -- live colors now rather than at the next power change.
+                    UpdatePrimaryBar()
                 end
             end
             UpdateSecondaryResource()
@@ -11746,6 +11974,9 @@ local function OnEvent(self, event, ...)
         if oldMax ~= newMax then
             cachedSecondary = newSec
             BuildBars()
+            -- Repaint both bars on the rebuilt frames, as UNIT_MAXPOWER does.
+            UpdatePrimaryBar()
+            UpdateSecondaryResource()
         end
         UpdateVisibility()
     elseif event == "GROUP_ROSTER_UPDATE" then
@@ -11803,13 +12034,10 @@ local function OnEvent(self, event, ...)
         end
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         -- Route to manual resource trackers (12.0+ secret-value safe)
-        local unit, castGUID, spellID = ...
+        local unit, _, spellID = ...
         if unit == "player" then
             HandleIronfurCast(spellID)
             IP.HandleCast(spellID)
-            if EllesmereUI then
-                EllesmereUI.HandleTipOfTheSpear(event, unit, castGUID, spellID)
-            end
             if cachedSecondary and (cachedSecondary.type == "custom"
                or cachedSecondary.power == "IRONFUR_BAR") then
                 UpdateSecondaryResource()
@@ -11820,9 +12048,6 @@ local function OnEvent(self, event, ...)
         wipe(ironfurTicks)
         ironfurGoEUntil = 0
         IP.hashEndTime = 0
-        if EllesmereUI then
-            EllesmereUI.HandleTipOfTheSpear(event)
-        end
     elseif event == "PLAYER_ENTERING_WORLD" then
         C_Timer.After(0.5, function()
             ERB:ApplyAll()

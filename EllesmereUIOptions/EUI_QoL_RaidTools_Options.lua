@@ -44,6 +44,25 @@ initFrame:SetScript("OnEvent", function(self)
         if _G._EUI_RaidTools_Apply then _G._EUI_RaidTools_Apply() end
     end
 
+    local function InviteDB()
+        local p = DB()
+        return p and p.inviteTools
+    end
+
+    local function InviteCfg(key)
+        local p = InviteDB()
+        return p and p[key]
+    end
+
+    local function InviteSet(key, val)
+        local p = InviteDB()
+        if p then p[key] = val end
+    end
+
+    local function InviteRefresh()
+        if ns.InviteToolsApplySettings then ns.InviteToolsApplySettings() end
+    end
+
     local function Disabled()
         return (Cfg("mode") or "never") == "never"
     end
@@ -68,6 +87,23 @@ initFrame:SetScript("OnEvent", function(self)
         local t = Cfg("pullTimes")
         if not t then return end
         t[i] = v
+        Refresh()
+    end
+
+    local function BreakGet()
+        local v = tonumber(Cfg("breakTime"))
+        if v == nil then v = ns.BREAK_DEFAULT or 300 end
+        v = math.floor((v + 30) / 60)
+        if v < 0 then v = 0 end
+        if v > 30 then v = 30 end
+        return v
+    end
+
+    local function BreakSet(v)
+        v = math.floor((tonumber(v) or 0) + 0.5)
+        if v < 0 then v = 0 end
+        if v > 30 then v = 30 end
+        Set("breakTime", v * 60)
         Refresh()
     end
 
@@ -221,9 +257,9 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "dropdown", text = "Menu Grow Direction",
               tooltip = "Which way the windows extend from the collapsed icon when they open. The close button always lands at that same corner.",
               disabled = Disabled,
-              values = { downright = "Down Right", upright = "Up Right",
-                         downleft = "Down Left", upleft = "Up Left" },
-              order = { "downright", "upright", "downleft", "upleft" },
+              values = { downright = "Down Right", downleft = "Down Left",
+                         upright = "Up Right", upleft = "Up Left" },
+              order = { "downright", "downleft", "upright", "upleft" },
               getValue = function() return Cfg("growDir") or "downright" end,
               setValue = function(v)
                   Set("growDir", v)
@@ -278,6 +314,103 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   Set("autoMinimizeDelay", v)
                   Refresh()
+              end }
+        );  y = y - h
+
+        -- INVITE TOOLS
+        -- JacaInviteTools' standalone cog panel is represented here using the
+        -- same EUI widgets as the rest of Raid Tools. The standalone minimap
+        -- option is intentionally omitted because Raid Tools owns its launcher.
+        _, h = W:SectionHeader(parent, "INVITE TOOLS", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "colorpicker", text = "Accent Color", hasAlpha = false,
+              tooltip = "Accent color used by the Invite Tools window. By default it follows the EllesmereUI accent color.",
+              disabled = Disabled,
+              getValue = function()
+                  local c = InviteCfg("AccentColor")
+                  if type(c) == "table" and c[1] then return c[1], c[2], c[3], 1 end
+                  local r, g, b = EllesmereUI.GetAccentColor()
+                  return r, g, b, 1
+              end,
+              setValue = function(r, g, b)
+                  InviteSet("AccentColor", { r, g, b })
+                  InviteRefresh()
+              end },
+            { type = "slider", text = "List Size", min = 100, max = 135, step = 1,
+              tooltip = "Scales the invite-list rows, header and text from 100% to 135%.",
+              disabled = Disabled,
+              getValue = function() return math.floor(((InviteCfg("ListScale") or 1) * 100) + 0.5) end,
+              setValue = function(v)
+                  InviteSet("ListScale", v / 100)
+                  InviteRefresh()
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "colorpicker", text = "Window Background", hasAlpha = true,
+              tooltip = "Background color and opacity of the Invite Tools window.",
+              disabled = Disabled,
+              getValue = function()
+                  local c = InviteCfg("BgColor")
+                  if type(c) == "table" and c[1] then return c[1], c[2], c[3], c[4] or 1 end
+                  return 0.06, 0.08, 0.10, 0.95
+              end,
+              setValue = function(r, g, b, a)
+                  InviteSet("BgColor", { r, g, b, a or 1 })
+                  InviteRefresh()
+              end },
+            { type = "colorpicker", text = "List Background", hasAlpha = true,
+              tooltip = "Background color and opacity of the names list inside Invite Tools.",
+              disabled = Disabled,
+              getValue = function()
+                  local c = InviteCfg("ListBgColor")
+                  if type(c) == "table" and c[1] then return c[1], c[2], c[3], c[4] or 1 end
+                  local bg = InviteCfg("BgColor")
+                  local r, g, b, a = 0.06, 0.08, 0.10, 0.95
+                  if type(bg) == "table" and bg[1] then r, g, b, a = bg[1], bg[2], bg[3], bg[4] or 1 end
+                  return math.min(1, r + 0.024), math.min(1, g + 0.024), math.min(1, b + 0.024), 1
+              end,
+              setValue = function(r, g, b, a)
+                  InviteSet("ListBgColor", { r, g, b, a or 1 })
+                  InviteRefresh()
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Allow Window Resize",
+              tooltip = "Shows a resize handle in the bottom-right corner. The Invite Tools window can always be moved by dragging it.",
+              disabled = Disabled,
+              getValue = function() return InviteCfg("Unlocked") == true end,
+              setValue = function(v)
+                  InviteSet("Unlocked", v and true or false)
+                  InviteRefresh()
+              end },
+            { type = "toggle", text = "Auto Accept Shared Lists",
+              tooltip = "Automatically accepts Invite Tools lists sent by your current group leader or a raid assistant. Lists from anyone else still require the normal Accept/Decline popup.",
+              disabled = Disabled,
+              getValue = function() return InviteCfg("AutoAcceptShared") == true end,
+              setValue = function(v)
+                  InviteSet("AutoAcceptShared", v and true or false)
+                  InviteRefresh()
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Ignore Repeat Shares (Seconds)", min = 0, max = 600, step = 5,
+              tooltip = "Ignores a new shared-list offer from the same player if they already shared within this many seconds. Set to 0 to disable this filter.",
+              disabled = Disabled,
+              getValue = function() return math.max(0, tonumber(InviteCfg("ShareIgnoreSeconds")) or 30) end,
+              setValue = function(v)
+                  InviteSet("ShareIgnoreSeconds", math.max(0, tonumber(v) or 0))
+              end },
+            { type = "toggle", text = "Clear List When Ula'tek Dies",
+              tooltip = "Clears the Invite List when Ula'tek is killed (not on a wipe). If the kill happens while still in combat, the list is cleared after combat. Existing joined/left History entries are preserved.",
+              disabled = Disabled,
+              getValue = function() return InviteCfg("ClearOnBossKill") ~= false end,
+              setValue = function(v)
+                  InviteSet("ClearOnBossKill", v and true or false)
+                  InviteRefresh()
               end }
         );  y = y - h
 
@@ -357,6 +490,12 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:DualRow(parent, y,
+            ButtonToggle("showPings", "Show Pings",
+                "Shows the ping-restriction control near Ready Check. It is greyed out unless you are the raid leader, and also stays greyed out outside a raid group."),
+            ButtonToggle("showDifficulty", "Show Difficulty",
+                "Shows the dungeon/raid difficulty control near Ready Check. It is greyed out unless you are the group leader.")
+        );  y = y - h
+        _, h = W:DualRow(parent, y,
             ButtonToggle("showRoleCheck", "Show Role Check",
                 "Shows the Role Check button. Turn it off and the remaining buttons close the gap."),
             ButtonToggle("showConvert", "Show Convert to Raid",
@@ -365,7 +504,8 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:DualRow(parent, y,
             ButtonToggle("showDisband", "Show Disband",
                 "Shows the Disband button. It always asks before disbanding, but hiding it puts it out of misclick range for good."),
-            { type = "spacer" }
+            ButtonToggle("showRoles", "Show Raid Role Counts",
+                "Shows Tank, Heal and DPS counts next to the Target Markers boundary. The row only appears while you are actually in a raid group and mirrors with Grow Direction.")
         );  y = y - h
 
         -- PULL TIMER
@@ -382,7 +522,13 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _, h = W:DualRow(parent, y, PullSlider(1), PullSlider(2));      y = y - h
-        _, h = W:DualRow(parent, y, PullSlider(3), { type="spacer" });  y = y - h
+        _, h = W:DualRow(parent, y, PullSlider(3),
+            { type="slider", text="Break Timer (Minutes)", min=0, max=30, step=1,
+              tooltip="Break timer length in whole minutes, up to 30 minutes. Set it to 0 to hide the Break button. The button uses BigWigs or DBM break-timer support.",
+              disabled=Disabled,
+              getValue=BreakGet,
+              setValue=BreakSet }
+        );  y = y - h
 
         -- RAID CHECK
         --

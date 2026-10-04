@@ -60,6 +60,7 @@ local UnitExists, UnitIsPlayer = UnitExists, UnitIsPlayer
 local UnitIsUnit          = UnitIsUnit
 local UnitIsDeadOrGhost   = UnitIsDeadOrGhost
 local InCombatLockdown    = InCombatLockdown
+local IsEncounterInProgress = IsEncounterInProgress
 local SendChatMessage     = SendChatMessage
 local UnitName, UnitClass, UnitIsConnected = UnitName, UnitClass, UnitIsConnected
 local UnitPhaseReason     = UnitPhaseReason
@@ -860,6 +861,34 @@ local function ReportChannel()
     return nil   -- solo: nobody to report to
 end
 
+-- Raid Check chat reports are deliberately blocked during any combat lockdown
+-- or active encounter. The report buttons remain clickable so the player gets
+-- an immediate local explanation instead of a silent no-op. Left-click/local
+-- prints are unaffected; this gate only applies when a real party/guild report
+-- channel exists. The short notice cooldown also keeps a Report All that crosses
+-- into combat from printing the same warning once per delayed report/chunk.
+local REPORT_BLOCK_NOTICE_COOLDOWN = 2
+local lastReportBlockNotice = -math.huge
+
+local function ChatReportBlocked()
+    if InCombatLockdown() then return true end
+    return IsEncounterInProgress ~= nil and IsEncounterInProgress() == true
+end
+
+local function WarnChatReportBlocked()
+    local now = GetTime()
+    if now - lastReportBlockNotice < REPORT_BLOCK_NOTICE_COOLDOWN then return end
+    lastReportBlockNotice = now
+    EllesmereUI.Print("|cff0cd29fEllesmereUI:|r "
+        .. EllesmereUI.L("Raid Check reports cannot be sent to chat during an encounter or combat."))
+end
+
+local function CanSendRaidCheckChatReport(toChat)
+    if not toChat or not ReportChannel() or not ChatReportBlocked() then return true end
+    WarnChatReportBlocked()
+    return false
+end
+
 -- The client refuses (and taints) any single SendChatMessage over this many
 -- characters -- a raid-wide Repair/Flask/etc. report blows past it easily
 -- once the roster is more than a handful of names, so a long report has to
@@ -912,12 +941,23 @@ end
 -- trailing the first by CHAT_CHUNK_DELAY apiece. A short report (the common
 -- case) is a single immediate SendChatMessage, same as before this existed.
 local function SendChatChunks(text, channel)
+    if ChatReportBlocked() then
+        WarnChatReportBlocked()
+        return
+    end
+
     local chunks = ChatChunks(text)
     SendChatMessage(chunks[1], channel)
     for i = 2, #chunks do
         local msg = CHAT_CONT_PREFIX .. chunks[i]
         local delay = (i - 1) * CHAT_CHUNK_DELAY
-        C_Timer.After(delay, function() SendChatMessage(msg, channel) end)
+        C_Timer.After(delay, function()
+            if ChatReportBlocked() then
+                WarnChatReportBlocked()
+                return
+            end
+            SendChatMessage(msg, channel)
+        end)
     end
 end
 
@@ -929,6 +969,7 @@ local function SendOrPrint(text, toChat)
     if toChat then
         local channel = ReportChannel()
         if channel then
+            if not CanSendRaidCheckChatReport(true) then return end
             SendChatChunks(text, channel)
             return
         end
@@ -1045,18 +1086,32 @@ local function HeartyFoodReportLine()
 
     local roster = ReadMembers()
     local missing = {}
+    local now = GetTime()
     for _, e in ipairs(roster) do
         local has = false
+        local lowRemain
         for i = 1, AURA_SCAN_LIMIT do
             local aura = GetAuraDataByIndex(e.unit, i, "HELPFUL")
             if not aura then break end
             if aura.name and aura.name:find(HEARTY_FOOD_PREFIX, 1, true) == 1 then
                 has = true
+
+                -- Match the normal Food report: Hearty Food with 5 minutes
+                -- or less remaining is included in chat with its time left.
+                if aura.expirationTime and aura.expirationTime > 0 then
+                    local remain = aura.expirationTime - now
+                    if remain > 0 and remain <= LOW_DURATION_THRESHOLD_MIN * 60 then
+                        lowRemain = remain
+                    end
+                end
                 break
             end
         end
         if not has then
             missing[#missing + 1] = e.name
+        elseif lowRemain then
+            local mins = math.max(0, math.floor(lowRemain / 60))
+            missing[#missing + 1] = e.name .. " (" .. mins .. "m)"
         end
     end
 
@@ -1069,6 +1124,7 @@ end
 
 -- toChat: same meaning as ns.ReportConsumable's.
 function ns.ReportHeartyFood(toChat)
+    if not CanSendRaidCheckChatReport(toChat) then return end
     SendOrPrint(HeartyFoodReportLine(), toChat)
 end
 
@@ -1085,6 +1141,7 @@ local ALL_CONSUMABLE_KEYS = { "flask", "food", "rune", "vantus", DURABILITY_KEY 
 local ALL_REPORT_STAGGER = 0.4 -- seconds between each of the five reports
 
 function ns.ReportAllConsumables(toChat)
+    if not CanSendRaidCheckChatReport(toChat) then return end
     for i, key in ipairs(ALL_CONSUMABLE_KEYS) do
         C_Timer.After((i - 1) * ALL_REPORT_STAGGER, function()
             ns.ReportConsumable(key, toChat)
@@ -1096,6 +1153,7 @@ end
 -- toChat: true = right-click (post to /guild in a raid, /party in a party); false = left-click
 -- (this client's own chat frame only).
 function ns.ReportConsumable(key, toChat)
+    if not CanSendRaidCheckChatReport(toChat) then return end
     if key == DURABILITY_KEY then
         local LD = LibDur()
         if LD then LD:RequestDurability() end

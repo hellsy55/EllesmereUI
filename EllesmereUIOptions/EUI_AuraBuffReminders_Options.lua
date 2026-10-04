@@ -814,10 +814,10 @@ initFrame:SetScript("OnEvent", function(self)
 
                 local boxBg = box:CreateTexture(nil, "BACKGROUND")
                 boxBg:SetAllPoints()
-                boxBg:SetColorTexture(0.12, 0.12, 0.14, 1)
+                boxBg:SetColorTexture(0.114, 0.106, 0.099, 1)
                 if boxBg.SetSnapToPixelGrid then boxBg:SetSnapToPixelGrid(false); boxBg:SetTexelSnappingBias(0) end
 
-                local boxBrd = EllesmereUI.MakeBorder(box, 0.25, 0.25, 0.28, 0.6, EllesmereUI.PanelPP)
+                local boxBrd = EllesmereUI.MakeBorder(box, 0.224, 0.215, 0.207, 0.6, EllesmereUI.PanelPP)
 
                 local check = box:CreateTexture(nil, "ARTWORK")
                 check:SetPoint("TOPLEFT", box, "TOPLEFT", 3, -3)
@@ -839,7 +839,7 @@ initFrame:SetScript("OnEvent", function(self)
                     else
                         check:Hide()
                         label:SetAlpha(0.5)
-                        boxBrd:SetColor(0.25, 0.25, 0.28, 0.6)
+                        boxBrd:SetColor(0.224, 0.215, 0.207, 0.6)
                     end
                 end
                 ApplyVisual()
@@ -1809,7 +1809,7 @@ initFrame:SetScript("OnEvent", function(self)
             local rgn = row._rightRegion
             local eg = EllesmereUI.ELLESMERE_GREEN or {r=0, g=0.82, b=0.62}
             local lerp = EllesmereUI.lerp
-            local DARK_BG = EllesmereUI.DARK_BG or { r = 0.05, g = 0.07, b = 0.09 }
+            local DARK_BG = EllesmereUI.DARK_BG
 
             local zoneBtn = CreateFrame("Button", nil, rgn)
             zoneBtn:SetSize(110, 24)
@@ -2190,7 +2190,7 @@ initFrame:SetScript("OnEvent", function(self)
         zoneDDBtn:SetFrameLevel(zoneRow:GetFrameLevel() + 1)
         local zoneDDBg = zoneDDBtn:CreateTexture(nil, "BACKGROUND")
         zoneDDBg:SetAllPoints()
-        zoneDDBg:SetColorTexture(0.075, 0.113, 0.141, 0.9)
+        zoneDDBg:SetColorTexture(0.103, 0.095, 0.088, 0.9)
         EllesmereUI.MakeBorder(zoneDDBtn, 1, 1, 1, 0.20, EllesmereUI.PanelPP)
 
         local zoneDDLbl = zoneDDBtn:CreateFontString(nil, "OVERLAY")
@@ -2218,7 +2218,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local popupBg = zonePopup:CreateTexture(nil, "BACKGROUND")
         popupBg:SetAllPoints()
-        popupBg:SetColorTexture(0.10, 0.10, 0.12, 0.97)
+        popupBg:SetColorTexture(0.098, 0.090, 0.082, 0.97)
         EllesmereUI.MakeBorder(zonePopup, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
 
         -- Search box at top of zone popup
@@ -2280,7 +2280,7 @@ initFrame:SetScript("OnEvent", function(self)
             cb:SetPoint("LEFT", item, "LEFT", 10, 0)
             local cbBg = cb:CreateTexture(nil, "BACKGROUND")
             cbBg:SetAllPoints()
-            cbBg:SetColorTexture(0.06, 0.06, 0.08, 1)
+            cbBg:SetColorTexture(0.064, 0.052, 0.041, 1)
             EllesmereUI.MakeBorder(cb, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
             local cbCheck = cb:CreateTexture(nil, "OVERLAY")
             cbCheck:SetSize(10, 10)
@@ -2364,10 +2364,10 @@ initFrame:SetScript("OnEvent", function(self)
             if zonePopup:IsShown() then zonePopup:Hide() else zonePopup:Show() end
         end)
         zoneDDBtn:SetScript("OnEnter", function()
-            zoneDDBg:SetColorTexture(0.095, 0.143, 0.181, 1)
+            zoneDDBg:SetColorTexture(0.128, 0.120, 0.113, 1)
         end)
         zoneDDBtn:SetScript("OnLeave", function()
-            zoneDDBg:SetColorTexture(0.075, 0.113, 0.141, 0.9)
+            zoneDDBg:SetColorTexture(0.103, 0.095, 0.088, 0.9)
         end)
 
         y = y - ZONE_ROW_H
@@ -2404,7 +2404,7 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetFrameLevel(parentRow:GetFrameLevel() + 1)
             local btnBg = btn:CreateTexture(nil, "BACKGROUND")
             btnBg:SetAllPoints()
-            btnBg:SetColorTexture(0.075, 0.113, 0.141, 0.9)
+            btnBg:SetColorTexture(0.103, 0.095, 0.088, 0.9)
             EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.20, EllesmereUI.PanelPP)
             local btnLbl = btn:CreateFontString(nil, "OVERLAY")
             btnLbl:SetFont(fontPath, 13, GetABROptOutline())
@@ -2416,8 +2416,8 @@ initFrame:SetScript("OnEvent", function(self)
             local arrow = EllesmereUI.MakeDropdownArrow(btn, 12, EllesmereUI.PanelPP)
             btnLbl:SetPoint("LEFT", btn, "LEFT", 12, 0)
             btnLbl:SetPoint("RIGHT", arrow, "LEFT", -5, 0)
-            btn:SetScript("OnEnter", function() btnBg:SetColorTexture(0.095, 0.143, 0.181, 1) end)
-            btn:SetScript("OnLeave", function() btnBg:SetColorTexture(0.075, 0.113, 0.141, 0.9) end)
+            btn:SetScript("OnEnter", function() btnBg:SetColorTexture(0.128, 0.120, 0.113, 1) end)
+            btn:SetScript("OnLeave", function() btnBg:SetColorTexture(0.103, 0.095, 0.088, 0.9) end)
 
             -- Popup with search
             local T_ITEM_H = 26
@@ -2430,7 +2430,7 @@ initFrame:SetScript("OnEvent", function(self)
             popup:Hide()
             local popBg = popup:CreateTexture(nil, "BACKGROUND")
             popBg:SetAllPoints()
-            popBg:SetColorTexture(0.10, 0.10, 0.12, 0.97)
+            popBg:SetColorTexture(0.098, 0.090, 0.082, 0.97)
             EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
 
             -- Search
@@ -2568,7 +2568,7 @@ initFrame:SetScript("OnEvent", function(self)
         addBtn:SetSize(160, 36)
         addBtn:SetPoint("CENTER", addBtnFrame, "CENTER", 0, 0)
 
-        local DARK_BG = EllesmereUI.DARK_BG or { r = 0.05, g = 0.07, b = 0.09 }
+        local DARK_BG = EllesmereUI.DARK_BG
         local addBtnBg = EllesmereUI.SolidTex(addBtn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, 0.92)
         addBtnBg:SetAllPoints()
 
@@ -2828,7 +2828,7 @@ initFrame:SetScript("OnEvent", function(self)
                 toggleBox:SetPoint("RIGHT", row, "RIGHT", -SIDE_PAD, 0)
                 local toggleBg = toggleBox:CreateTexture(nil, "BACKGROUND")
                 toggleBg:SetAllPoints()
-                toggleBg:SetColorTexture(0.06, 0.06, 0.08, 1)
+                toggleBg:SetColorTexture(0.064, 0.052, 0.041, 1)
                 EllesmereUI.MakeBorder(toggleBox, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
                 local toggleCheck = toggleBox:CreateTexture(nil, "OVERLAY")
                 toggleCheck:SetSize(12, 12)
