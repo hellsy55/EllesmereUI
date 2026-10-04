@@ -5,7 +5,7 @@ description: Evaluate or implement a PR from EllesmereGaming/EllesmereUI on a us
 
 # Implement an upstream PR
 
-First validate that the URL identifies a PR on `EllesmereGaming/EllesmereUI`. If it is another repository, stop and ask before doing anything else. Ask which target branch (`12.1-new-features` or `12.1.5-PTR-features`) before any analysis; never assume a default.
+First validate that the URL identifies a PR on `EllesmereGaming/EllesmereUI`. If it is another repository, stop and ask before doing anything else. Ask which target branch (`new-features` or `12.1.5-PTR-features`) before any analysis; never assume a default.
 
 Start with compact PR metadata (`gh pr view <url> --json number,title,state,baseRefName,headRefName,additions,deletions,changedFiles`) and a changed-file list (`gh pr view <url> --json files`). Identify affected modules and change size before fetching `gh pr diff <url>`. For a large PR, capture the diff locally and read only the relevant file sections. Fetch full raw files only if the diff cannot show the real effect, such as logic in untouched sections, renamed symbols, or dependencies on other functions. Compare affected code with the chosen local branch; do not analyze unaffected files deeply.
 
