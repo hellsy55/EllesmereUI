@@ -4,8 +4,8 @@ Stop at a real merge conflict. Never resolve it on your own. Inspect the necessa
 
 Offer exactly these choices, naming the actual branches:
 
-a) Upstream: keep the incoming version (`upstream/main` in Sync A or `12.1-new-features` in Sync B).
-b) Local: keep the current branch version (`main` or `12.1-new-features` in Sync A, or `12.1.5-PTR-features` in Sync B).
+a) Upstream: keep the incoming version (`upstream/main` in Sync A or `new-features` in Sync B).
+b) Local: keep the current branch version (`main` or `new-features` in Sync A, or `12.1.5-PTR-features` in Sync B).
 c) Combine: propose a concrete combination when technically feasible.
 d) Abort: abort the merge; nothing is applied to that branch.
 
