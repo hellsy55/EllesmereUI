@@ -21,6 +21,9 @@ EllesmereUIQoL_Shifter.lua
 EllesmereUIQoL_MovementAlert.lua
 EllesmereUIQoL_RaidGroups.lua
 EllesmereUIQoL_RaidTools.lua
+EllesmereUIQoL_InviteTools.lua
+EllesmereUIQoL_InviteToolsRealmNames.lua
+EllesmereUIQoL_InviteToolsList.lua
 EllesmereUIQoL_RaidToolsCompactBand.lua
 EllesmereUIQoL_RaidCheck.lua
 EllesmereUIQoL_FailedCastAlert.lua

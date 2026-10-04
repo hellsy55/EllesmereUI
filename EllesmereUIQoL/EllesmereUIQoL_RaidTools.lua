@@ -148,15 +148,17 @@ local COLLAPSE_OFFSET = {
 -- so it never competes with Open Direction for its own spot.
 local COG_SZ  = CORNER_BTN_SZ
 local COG_GAP = 4
--- Raid Check button rides the cog's own inward side the same way, so the row
--- reads close -> Raid Groups -> Raid Check without any of them competing
--- with Open Direction for a spot. The title reserve below has to know about
--- both riders, not just the first.
+-- Raid Check and Invite Tools continue inward from the Raid Groups cog. This
+-- makes Invite Tools sit immediately to the RIGHT of Raid Check while the
+-- menu grows right, and immediately to its LEFT while the menu grows left.
+-- The title reserve covers all three riders.
 local RAIDCHECK_GAP = COG_GAP
-local GROUP_COG_RESERVE = (COG_GAP + COG_SZ) + (RAIDCHECK_GAP + COG_SZ) + 6  -- two riders, gap, clearance
+local INVITETOOLS_GAP = COG_GAP
+local GROUP_COG_RESERVE = (COG_GAP + COG_SZ) + (RAIDCHECK_GAP + COG_SZ)
+                        + (INVITETOOLS_GAP + COG_SZ) + 6  -- three riders + clearance
 
 -- Consumable/repair reports live on their own full-width content row, kept
--- separate from the corner chrome (collapse / Raid Groups / Raid Check).
+-- separate from the corner chrome (collapse / Raid Groups / Raid Check / Invite Tools).
 -- They read left-to-right in the same order shown in the Raid Tools UI and
 -- share the exact row sizing/gap math used by Ready/Disband and Pull Timer.
 local REPORT_COLUMNS = {
@@ -294,6 +296,7 @@ local groupHolder, markersHolder   -- plain content holders (see header)
 local iconBtn                  -- collapsed-state square
 local raidGroupsCogBtn          -- opens the Raid Groups composition window (Group shell only)
 local raidCheckBtn              -- re-runs and shows the Raid Check window on demand (Group shell only)
+local inviteToolsBtn            -- opens Invite Tools (Group shell only)
 local reportBtns = {}           -- Flask/Food/Repair/Rune/Vantus report buttons (Group shell only)
 local assistCheckRow, assistCheckTex   -- Make Everyone Assistant row (Group shell, raid-only)
 -- Markers are fixed at build; the Group & Pull height follows the settings and
@@ -541,6 +544,26 @@ local DB_DEFAULTS = {
         -- matters while it's on.
         autoMinimize      = false,
         autoMinimizeDelay = 30,
+        -- Embedded JacaInviteTools state. Standalone-only minimap settings are
+        -- deliberately absent: Raid Tools owns the launcher in EUI.
+        inviteTools = {
+            Current            = 1,
+            ListScale          = 1,
+            List1              = "",
+            AutoInvite         = true,
+            AutoInviteInterval = 30,
+            AutoAcceptShared   = false,
+            AutoAcceptFriendly = false,
+            ClearOnBossKill     = true,
+            ShareIgnoreSeconds = 30,
+            Width              = 430,
+            Height             = 436,
+            PositionX          = 0,
+            PositionY          = 50,
+            Unlocked           = false,
+            History            = {},
+            HiddenFriends      = {},
+        },
         -- Three slots is a LAYOUT choice (they fill one row beside Stop), not
         -- a security constraint -- the pull buttons are plain, only the marker
         -- buttons are secure. Growing the count later means growing the panel,
@@ -2036,6 +2059,39 @@ local function BuildRaidCheckButton()
     raidCheckBtn = b
 end
 
+-- Embedded Invite Tools launcher. The supplied .blp is intentionally used
+-- only here; the Invite Tools window itself follows EUI's normal chrome.
+local function BuildInviteToolsButton()
+    local b = CreateFrame("Button", nil, sections.Group)
+    b:SetSize(COG_SZ, COG_SZ)
+    b:SetFrameLevel(sections.Group:GetFrameLevel() + 5)
+    SkinButtonChrome(b)
+
+    local tex = b:CreateTexture(nil, "ARTWORK")
+    tex:SetSize(14, 14)
+    tex:SetPoint("CENTER")
+    tex:SetTexture("Interface\\AddOns\\EllesmereUIQoL\\Media\\InviteTools.blp")
+    tex:SetAlpha(0.7)
+
+    b:SetScript("OnEnter", function(self)
+        tex:SetAlpha(1)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine(EllesmereUI.L("Invite Tools"))
+        GameTooltip:AddLine(EllesmereUI.L("Opens Invite Tools for managing and sharing invite lists."), 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function()
+        tex:SetAlpha(0.7)
+        GameTooltip:Hide()
+    end)
+    b:SetScript("OnClick", function()
+        if ns.ToggleInviteTools then ns.ToggleInviteTools() end
+    end)
+
+    b._icon = tex
+    inviteToolsBtn = b
+end
+
 -- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
 -- missing it (or, for Repair, everyone's durability percentage) to this
 -- client's own chat frame only; right-click posts the same thing to /guild
@@ -2124,6 +2180,7 @@ local function BuildAll()
     BuildCollapsedIcon()
     BuildRaidGroupsCog()
     BuildRaidCheckButton()
+    BuildInviteToolsButton()
     BuildReportButtons()
     iconBtn:ClearAllPoints()
     iconBtn:SetPoint("TOPLEFT", sections.Group, "TOPLEFT", 0, 0)
@@ -2171,7 +2228,7 @@ end
 -- icon at TOPLEFT = windows extend down-right (the original behaviour),
 -- icon at BOTTOMLEFT = up-right, and so on. See GROW_DIRECTION_CORNER /
 -- AnchorCorner above -- title insets, the collapse buttons, the Raid
--- Groups cog and the Raid Check button all share this same corner. Reports
+-- Groups cog, Raid Check button and Invite Tools button all share this same corner. Reports
 -- are content-row buttons and do not participate in corner placement.
 
 -- Show-as arrangement. OOC only (Apply gates); the holders are plain frames,
@@ -2221,13 +2278,13 @@ local function ApplyLayout()
     -- and keep the collapse slot reserved even when Minimize itself is hidden.
     -- That prevents the larger bottom-corner controls from ever landing over
     -- the last content row and keeps split-mode titles clear of them as well.
-    local groupHasCornerControls = collapseUI or raidGroupsCogBtn ~= nil or raidCheckBtn ~= nil
+    local groupHasCornerControls = collapseUI or raidGroupsCogBtn ~= nil or raidCheckBtn ~= nil or inviteToolsBtn ~= nil
     local groupTitleReserve, groupBottomReserve = Reserve(groupHasCornerControls, GROUP_COG_RESERVE)
     local markersTitleReserve, markersBottomReserve = Reserve(markersHasBtn)
 
     if showAs == "one" then
         -- Combined mode keeps a compact Raid Tools title in the unused side
-        -- of the same edge that carries Minimize / Raid Groups / Raid Check.
+        -- of the same edge that carries Minimize / Raid Groups / Raid Check / Invite Tools.
         -- Its exact anchor is assigned below after the shell is sized.
         shellTitle.Group:SetShown(true)
         shellTitle.Group:SetText(EllesmereUI.L(COMBINED_LABEL))
@@ -2314,14 +2371,24 @@ local function ApplyLayout()
         raidGroupsCogBtn:SetPoint(corner, winGroup, corner, cogDx, off[2])
     end
 
-    -- Raid Check button: same corner, one further gap inward past the cog --
-    -- close, then Raid Groups, then Raid Check, reading outward to inward.
+    -- Raid Check button: same corner, one further gap inward past the cog.
     if raidCheckBtn then
         local isLeftCorner = corner:find("LEFT") ~= nil
         local inward = (COG_GAP + CORNER_BTN_SZ) + (RAIDCHECK_GAP + COG_SZ)
         local rcDx = off[1] + (isLeftCorner and inward or -inward)
         raidCheckBtn:ClearAllPoints()
         raidCheckBtn:SetPoint(corner, winGroup, corner, rcDx, off[2])
+    end
+
+    -- Invite Tools sits directly beyond Raid Check in the grow direction:
+    -- right of '*' for right-growing menus, left of '*' for left-growing ones.
+    if inviteToolsBtn then
+        local isLeftCorner = corner:find("LEFT") ~= nil
+        local inward = (COG_GAP + CORNER_BTN_SZ) + (RAIDCHECK_GAP + COG_SZ)
+                    + (INVITETOOLS_GAP + COG_SZ)
+        local itDx = off[1] + (isLeftCorner and inward or -inward)
+        inviteToolsBtn:ClearAllPoints()
+        inviteToolsBtn:SetPoint(corner, winGroup, corner, itDx, off[2])
     end
 
     -- The collapsed icon rides the shell the mode actually shows -- Markers-
