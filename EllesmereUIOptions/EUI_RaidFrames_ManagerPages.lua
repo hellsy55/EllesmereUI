@@ -2050,6 +2050,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
     sidebarScroll:SetScrollChild(sidebarChild)
     sidebarScroll:EnableMouseWheel(true)
     sidebarScroll:SetScript("OnMouseWheel", function(self, delta)
+        if EllesmereUI._ShiftWheelScale(delta) then return end
         local scroll = self:GetVerticalScroll()
         local maxS = max(0, sidebarChild:GetHeight() - self:GetHeight())
         self:SetVerticalScroll(max(0, math.min(maxS, scroll - delta * 30)))
@@ -2274,6 +2275,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
                 local DD_GAP = 11   -- dropdown to next label/button
 
                 popup = CreateFrame("Frame", nil, UIParent)
+                popup:Hide()  -- start hidden so Show() triggers OnShow
                 popup:SetFrameStrata("DIALOG")
                 popup:SetFrameLevel(200)
                 popup:SetSize(POPUP_W, POPUP_PAD
@@ -2655,7 +2657,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
 
     local UpdateThumb = EllesmereUI.AttachSmoothScrollbar(settingsScroll, {
         step = 60, width = 5, rightInset = 31, topInset = 12, level = 20,
-        trackAlpha = 0.05, thumbAlpha = 0.22, child = settingsChild })
+        trackAlpha = 0.05, thumbAlpha = 0.22, child = settingsChild, panelWheel = true })
 
     -- Read-only pane for an INHERITED row (group tile or the All Specs base
     -- grid): where it lives, a jump link to the owning group, and a pointer
@@ -2804,7 +2806,7 @@ function ns.BMP_ShowFilterEditor()
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
     popup:EnableMouse(true)
-    local popBg = EllesmereUI.SolidTex(popup, "BACKGROUND", 0.06, 0.08, 0.10, 1)
+    local popBg = EllesmereUI.SolidTex(popup, "BACKGROUND", 0.077, 0.068, 0.058, 1)
     popBg:SetAllPoints()
     EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15)
     local ppScale = EllesmereUI.GetPopupScale() or 1
@@ -3222,7 +3224,7 @@ function ns.BMP_ShowFilterEditor()
         box:SetPoint("LEFT", srow, "LEFT", 6, 0)
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints()
-        boxBg:SetColorTexture(0.12, 0.12, 0.14, 1)
+        boxBg:SetColorTexture(0.114, 0.106, 0.099, 1)
         local boxBrd = EllesmereUI.MakeBorder(box, 0.4, 0.4, 0.4, 0.6)
         local chk = box:CreateTexture(nil, "ARTWORK")
         chk:SetPoint("TOPLEFT", box, "TOPLEFT", 2, -2)
@@ -3615,8 +3617,7 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
             local rgn = orow._rightRegion
             -- Effective arrangement: stored order first (stale ids skipped),
             -- then any newly-resolved spells appended in prioritized order.
-            -- Items snapshot at popup build like the Class Sorting cog; a
-            -- page rebuild re-snapshots.
+            -- The cog reads the items again each time its list opens.
             local function OrderItems()
                 local resolved = (ns.BM2_ResolveSpells and ns.BM2_ResolveSpells(ind)) or ind.spells or {}
                 local present, seen, out = {}, {}, {}

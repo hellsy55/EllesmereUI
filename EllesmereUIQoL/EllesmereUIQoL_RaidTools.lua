@@ -1807,8 +1807,8 @@ end
 -- Raid Groups. DOWN reverses that stack, leaving Roles at the bottom edge next
 -- to Break. Party/solo layouts omit Roles.
 local MARKER_ROWS = {
-    { kind = "target", label = "Target" },
-    { kind = "world",  label = "World"  },
+    { kind = "target", label = "Target Markers" },
+    { kind = "world",  label = "World Markers"  },
 }
 
 local function LayoutMarkersContent()
