@@ -49,7 +49,9 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  result is what would remove that, and is the road the enchant column is
 --  already on -- read locally, reported outward.
 -------------------------------------------------------------------------------
-local _, ns = ...
+local addonName, ns = ...
+local db
+local NICK_ADDON = addonName:find("Standalone") and addonName or "EllesmereUI"
 
 local GetRaidRosterInfo   = GetRaidRosterInfo
 local GetNumGroupMembers  = GetNumGroupMembers
@@ -424,6 +426,90 @@ local function FullName(unit)
     return name
 end
 
+-- Presentation-only nickname resolution. Identity-sensitive paths in this file
+-- keep using UnitName/FullName: whispers, comms, durability lookup and roster
+-- identity always target the real character. The Raid Check grid and its chat
+-- reports may use this display name. Every external provider call is isolated
+-- with pcall and secret values are rejected before concatenation or display.
+local function RaidCheckDisplayName(unit)
+    local name, surname = UnitName(unit)
+    if not name then return "?" end
+    if not UnitIsPlayer(unit) then return name end
+
+    local p = db and db.profile and db.profile.raidCheck
+    if p and p.showNicknames == false then
+        return EllesmereUI.WithSurname(name, surname)
+    end
+
+    local nameSecret = issecretvalue and issecretvalue(name)
+    local display
+
+    -- MethodInternal owns the selected surface for known Method players. Raid
+    -- Check follows its raid-frame surface while retaining an independent EUI
+    -- module toggle above.
+    if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok, dn, handled = pcall(
+            EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "raidFrames")
+        if ok and handled == true then
+            if type(dn) == "string"
+               and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+                return dn
+            end
+            return EllesmereUI.WithSurname(name, surname)
+        end
+    end
+
+    if not nameSecret and NSAPI and NSAPI.GetName then
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        if ok and type(dn) == "string"
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
+            display = dn
+        end
+    end
+
+    if not display then
+        local TR = TimelineReminders
+        if TR and TR.GetNickname and TR.HasNickname and TR.NicknamesEnabledForAddOn then
+            local okGate, enabled = pcall(TR.NicknamesEnabledForAddOn, TR, NICK_ADDON)
+            if okGate and enabled then
+                local okHas, has = pcall(TR.HasNickname, TR, unit)
+                if okHas and has then
+                    local ok, dn = pcall(TR.GetNickname, TR, unit)
+                    if ok and type(dn) == "string"
+                       and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+                        display = dn
+                    end
+                end
+            end
+        end
+    end
+
+    if not display and not nameSecret and LiquidAPI and LiquidAPI.GetNicknameForEllesmereUI then
+        local ok, dn = pcall(LiquidAPI.GetNicknameForEllesmereUI, name)
+        if ok and type(dn) == "string"
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
+            display = dn
+        end
+    end
+
+    -- RakGaming Aliases is the final source on Raid Frames; mirror that here,
+    -- but only while its EllesmereUI module is enabled. Read the flag here
+    -- rather than registering another callback: Raid Check already refreshes
+    -- its roster every two seconds while visible.
+    if not display and _G.RG_UnitName then
+        local rga = RG_ALTS_SETTINGS and RG_ALTS_SETTINGS.settings
+        if rga and rga["ellesmereui"] then
+            local ok, dn = pcall(_G.RG_UnitName, unit)
+            if ok and type(dn) == "string"
+               and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
+                display = dn
+            end
+        end
+    end
+
+    return display or EllesmereUI.WithSurname(name, surname)
+end
+
 -- Raid buffs are checked for every online player -- being far away or in a
 -- different phase doesn't stop UnitAura from answering, so there's no
 -- reason to blank the column for someone just because they're across the
@@ -784,11 +870,16 @@ local function ReadMembers()
         if not UnitExists(unit) or not UnitIsPlayer(unit) then return end
         local _, class = UnitClass(unit)
         out[#out + 1] = {
-            unit   = unit,
-            name   = UnitName(unit) or "?",
-            class  = class,
+            unit        = unit,
+            name        = UnitName(unit) or "?",
+            displayName = RaidCheckDisplayName(unit),
+            class       = class,
             online = UnitIsConnected(unit),
             group  = subgroup or 1,
+            -- Preserve the roster API order inside each subgroup. Raid Check
+            -- sorts groups 1 -> 8 below, but never alphabetizes the members
+            -- within a group, so the vertical list mirrors Raid Groups.
+            rosterOrder = #out + 1,
             -- Not a cosmetic flag: your own row is the one that can be read
             -- locally instead of waited for.
             isSelf = UnitIsUnit(unit, "player"),
@@ -807,10 +898,14 @@ local function ReadMembers()
         Add("player")
     end
 
-    -- Plain A-Z by name, subgroup ignored entirely: a raid leader hunting one
-    -- name reads the grid top-to-bottom once instead of finding the right
-    -- subgroup block first.
-    table.sort(out, function(a, b) return a.name < b.name end)
+    -- Match the Raid Groups roster: groups 1 -> 8 from top to bottom, while
+    -- keeping the roster API order of players inside each group. Party/solo
+    -- members all use group 1, so their original player/party-unit order is
+    -- preserved as well.
+    table.sort(out, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        return a.rosterOrder < b.rosterOrder
+    end)
     return out
 end
 
@@ -1006,7 +1101,7 @@ local function BooleanReportLine(key)
     for _, e in ipairs(roster) do
         local checks = UnitChecks(e.unit, answerable, restricted)
         if checks[key] == false then
-            missing[#missing + 1] = e.name
+            missing[#missing + 1] = e.displayName or e.name
         elseif trackDuration and checks[key] == true and checks._expires and checks._expires[key] then
             -- Has it, but it is about to run out -- called out the same as
             -- someone missing it entirely, since that is what it will be a
@@ -1016,7 +1111,7 @@ local function BooleanReportLine(key)
             local remain = checks._expires[key] - now
             if remain > 0 and remain <= LOW_DURATION_THRESHOLD_MIN * 60 then
                 local mins = math.max(0, math.floor(remain / 60))
-                missing[#missing + 1] = e.name .. " (" .. mins .. "m)"
+                missing[#missing + 1] = (e.displayName or e.name) .. " (" .. mins .. "m)"
             end
         end
     end
@@ -1046,7 +1141,7 @@ local function DurabilityReportLine()
         if pct then
             anyData = true
             if pct <= DURABILITY_REPORT_THRESHOLD then
-                rows[#rows + 1] = { name = e.name, pct = pct }
+                rows[#rows + 1] = { name = e.displayName or e.name, pct = pct }
             end
         end
     end
@@ -1108,10 +1203,10 @@ local function HeartyFoodReportLine()
             end
         end
         if not has then
-            missing[#missing + 1] = e.name
+            missing[#missing + 1] = e.displayName or e.name
         elseif lowRemain then
             local mins = math.max(0, math.floor(lowRemain / 60))
-            missing[#missing + 1] = e.name .. " (" .. mins .. "m)"
+            missing[#missing + 1] = (e.displayName or e.name) .. " (" .. mins .. "m)"
         end
     end
 
@@ -1169,7 +1264,6 @@ end
 --  Permission
 -------------------------------------------------------------------------------
 
-local db
 local function P()
     return db and db.profile and db.profile.raidCheck
 end
@@ -1195,6 +1289,10 @@ local DB_DEFAULTS = {
         -- ask for, so it is opt-in like every other QoL feature.
         enabled          = false,
         showWithoutRank  = false,
+        -- Display-only and independent from Unit/Raid Frames. Default ON so
+        -- enabling Raid Check immediately follows the nickname providers the
+        -- user already configured; turning it off restores character names.
+        showNicknames    = true,
         -- Drop columns nothing in this group can satisfy instead of dimming
         -- them. On by default -- a dimmed column still costs the width and the
         -- eye that a used one would.
@@ -2018,7 +2116,7 @@ local function Refresh()
         local r, e = rows[i], roster[i]
         if e then
             local c = EllesmereUI.GetClassColor(e.class)
-            r._name:SetText(e.name)
+            r._name:SetText(e.displayName or e.name)
             -- Same dim for both: offline and "elsewhere" (a different
             -- instance/phase -- UnitPhaseReason returns nil when the unit is
             -- right there with you) read the same way at a glance, and
@@ -2408,6 +2506,14 @@ function ns.RaidCheckShowWithoutRank(v)
     if not p then return end
     p.showWithoutRank = v
     if not MayShow() then ns.HideRaidCheck() end
+end
+
+function ns.RaidCheckShowNicknames(v)
+    local p = P()
+    if v == nil then return not p or p.showNicknames ~= false end
+    if not p then return end
+    p.showNicknames = v
+    Refresh()
 end
 
 -------------------------------------------------------------------------------

@@ -994,6 +994,9 @@ end
 function IL:PLAYER_ENTERING_WORLD()
     -- Loading screens: take the roster as it is, without recording anyone.
     self:TrackRoster(true)
+    -- Auto-accepting guild shares needs the sender's guild rank. Prime the
+    -- roster so Guild Master / Officer checks are normally available at once.
+    if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
 end
 
 function IL:OnInviteSystemMsg(_, msg)
@@ -1359,7 +1362,7 @@ local function Who(name, classFile, resume)
     if not color then return short end
     return string.format("|cff%02x%02x%02x%s|r%s", color.r * 255 + 0.5, color.g * 255 + 0.5, color.b * 255 + 0.5, short, resume or "")
 end
-local YELLOW, RED = "|cffffd100", "|cffff4040"
+local YELLOW, RED, GREY = "|cffffd100", "|cffff4040", "|cff999999"
 
 local function HistoryClass(db, name)
     local hist = db and db.History
@@ -1525,17 +1528,24 @@ local function BuildChunks(names)
     return chunks, total
 end
 
+-- "1 name" / "5 names" (translated when a locale provides the keys).
+local function CountText(n)
+    return string.format(n == 1 and L["%d name"] or L["%d names"], n)
+end
+
 -- Adds names to my list (skipping duplicates and myself). Works with or
 -- without the window ever having been opened.
 function IL:MergeNames(incoming)
     local names = self.names or ParseList(self:GetListText(1))
-    local have, added, duplicates = {}, 0, 0
+    local have, added, duplicates, mine = {}, 0, 0, 0
     for _, n in ipairs(names) do have[n:lower()] = true end
     for _, n in ipairs(incoming) do
         local key = n:lower()
-        if have[key] then
+        if IsMe(n) then
+            mine = mine + 1
+        elseif have[key] then
             duplicates = duplicates + 1
-        elseif not IsMe(n) then
+        else
             have[key] = true
             names[#names + 1] = n
             added = added + 1
@@ -1544,7 +1554,7 @@ function IL:MergeNames(incoming)
     self.names = names
     self:SaveNames()
     if self.frame and self.frame:IsShown() and self.frame.Layout then self.frame.Layout() end
-    return added, duplicates
+    return added, duplicates, mine
 end
 
 local ULATEK_ENCOUNTER_ID = 3492
@@ -1689,20 +1699,73 @@ local function SendShareReply(sender, id, code)
     Enqueue("R~" .. id .. "~" .. code .. "~" .. MyClass(), "WHISPER", sender)
 end
 
--- Somebody offered me their list: ask first, take nothing yet.
-function IL:OnShareOffer(sender, id, count, classFile)
+-- An offer I am not going to show: report why locally and send one compact
+-- busy reply to the sender. Local lines are throttled per sender so repeated
+-- offers cannot spam chat.
+local ignoredOfferNote = {}
+local function NoteIgnoredOffer(sender, id, why, classFile)
+    local key = NormSender(sender)
+    local now = GetTime()
+    if ignoredOfferNote[key] and now - ignoredOfferNote[key] < 30 then return end
+    ignoredOfferNote[key] = now
+    SendShareReply(sender, id, "b")
+    local text
+    if why == "cooldown" then
+        text = L["Ignored a list offer from %s: they already offered one a moment ago."]
+    elseif why == "busy" then
+        text = L["Ignored a list offer from %s: you are still waiting for another list."]
+    else
+        text = L["Ignored a list offer from %s: another list popup is still open."]
+    end
+    JT:Print(GREY .. string.format(text, Who(sender, classFile, GREY)) .. "|r")
+end
+
+-- Guild rank gate for Auto-accept shared lists. WoW rank index 0 is Guild
+-- Master and 1 is the next rank (normally Officer); lower ranks are not trusted.
+local GUILD_MAX_RANK_INDEX = 1
+local function GuildRankIndexOf(name)
+    if not name or not IsInGuild() then return nil end
+    local count = GetNumGuildMembers and GetNumGuildMembers() or 0
+    for i = 1, count do
+        local fullName, _, rankIndex = GetGuildRosterInfo(i)
+        if type(fullName) == "string" and not (issecretvalue and issecretvalue(fullName))
+            and SameChar(fullName, name) then
+            return rankIndex
+        end
+    end
+    return nil
+end
+
+-- Somebody offered me their list: ask first, take nothing yet. `channel` is
+-- how the offer reached me (GUILD, PARTY, RAID, WHISPER...).
+function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
     if InCombatLockdown() or IsMe(sender) then return end
     local key = NormSender(sender)
 
-    -- Do not stack share prompts or receive two lists at once. Tell a newer
-    -- sender why its offer was not shown; old senders harmlessly ignore R.
+    -- Guild auto-accept trusts only Guild Master / Officers. If the guild
+    -- roster is not ready yet, request it and retry the offer once. Lower
+    -- ranks are ignored silently, matching the standalone behavior.
+    local guildTrusted = false
+    if channel == "GUILD" and self:SharedOn() then
+        local rank = GuildRankIndexOf(sender)
+        if rank == nil then
+            if not retried then
+                if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
+                C_Timer.After(2, function() IL:OnShareOffer(sender, id, count, classFile, channel, true) end)
+            end
+            return
+        end
+        if rank > GUILD_MAX_RANK_INDEX then return end
+        guildTrusted = true
+    end
+
     local pending = self.incoming
     if pending and pending.dialog and not pending.dialog:IsShown() then
         self.incoming = nil
         pending = nil
     end
     if pending and GetTime() < pending.untilT then
-        SendShareReply(sender, id, "b")
+        NoteIgnoredOffer(sender, id, "popup", classFile)
         return
     end
     local awaiting = self.awaiting
@@ -1711,7 +1774,7 @@ function IL:OnShareOffer(sender, id, count, classFile)
         awaiting = nil
     end
     if awaiting then
-        SendShareReply(sender, id, "b")
+        NoteIgnoredOffer(sender, id, "busy", classFile)
         return
     end
     if not id:match("^%x%x%x%x$") then return end
@@ -1724,10 +1787,9 @@ function IL:OnShareOffer(sender, id, count, classFile)
     if ignoreSeconds > 0 then
         local seen = self.offerSeen[key]
         if seen and now - seen < ignoreSeconds then
-            SendShareReply(sender, id, "b")
+            NoteIgnoredOffer(sender, id, "cooldown", classFile)
             return
         end
-        -- Keep the table small on a long session.
         local n = 0
         for _ in pairs(self.offerSeen) do n = n + 1 end
         if n > 50 then wipe(self.offerSeen) end
@@ -1739,10 +1801,9 @@ function IL:OnShareOffer(sender, id, count, classFile)
         if ok and ignored then return end
     end
 
-    -- Auto-accept only trusted group leadership. The accepted list stays silent
-    -- UI-wise: the transfer result is printed in chat, but the main window is
-    -- not opened automatically.
-    if self:SharedOn() and self:IsLeadOrAssist(sender) then
+    -- Auto-accept from trusted group leadership, or from Guild Master / Officer
+    -- when the offer itself arrived through the guild channel.
+    if self:SharedOn() and (guildTrusted or (channel ~= "GUILD" and self:IsLeadOrAssist(sender))) then
         self:AcceptShare({
             sender = sender, id = id, count = count, auto = true,
             classFile = ClassOf(sender, classFile),
@@ -1750,7 +1811,6 @@ function IL:OnShareOffer(sender, id, count, classFile)
         return
     end
 
-    -- Sender's name in their class colour (the class comes with the offer).
     local shown = ShortName(sender)
     local color = type(classFile) == "string" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
     if color then
@@ -1775,9 +1835,6 @@ function IL:OnShareOffer(sender, id, count, classFile)
             if IL.incoming == data then IL.incoming = nil end
             if not data.answered then
                 data.answered = true
-                -- The standalone treats either Decline or closing the popup as
-                -- a decline for protocol purposes. Keep the local chat print
-                -- specific to the explicit Decline button, as requested.
                 SendShareReply(data.sender, data.id, "d")
             end
             if reason == "decline" then
@@ -1787,8 +1844,6 @@ function IL:OnShareOffer(sender, id, count, classFile)
     })
     data.dialog = dialog
 
-    -- Unanswered offers expire after one minute and report that fact to the
-    -- sender.
     C_Timer.After(60, function()
         if not data.answered then
             data.answered = true
@@ -1939,23 +1994,28 @@ function IL:OnShareData(sender, id, i, n, payload)
             if ValidName(name) and #names < SHARE_MAX_NAMES then names[#names + 1] = name end
         end
     end
+    local whoYellow, who = Who(a.sender, a.classFile, YELLOW), Who(a.sender, a.classFile)
     if #names == 0 then
         SendShareReply(a.sender, a.id, "r~0~0")
-        JT:Print(YELLOW .. string.format(L["Shared list from %s had no usable names."], Who(a.sender, a.classFile, YELLOW)) .. "|r")
+        JT:Print(YELLOW .. string.format(L["List from %s had no usable names, so nothing changed."], whoYellow) .. "|r")
         return
     end
 
-    local added, duplicates = self:MergeNames(names)
+    local added, duplicates, mine = self:MergeNames(names)
     -- Tell a current sender exactly what its list did here. Older senders
     -- ignore this packet.
     SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names)
 
-    local sent = tonumber(a.sentCount) or #names
-    local msg = string.format(L["Shared list received: %d of %d names accepted."], added, sent)
-    if duplicates > 0 then
-        msg = msg .. " " .. string.format(L["%d duplicate names ignored."], duplicates)
+    local got = CountText(#names)
+    if added > 0 then
+        JT:Print(string.format(L["List from %s - received: %s; added to your list: %d."], who, got, added))
+    elseif duplicates > 0 and mine == 0 then
+        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it."], whoYellow, got) .. "|r")
+    elseif mine > 0 and duplicates == 0 then
+        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the only name(s) received are you."], whoYellow) .. "|r")
+    else
+        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it (or are you)."], whoYellow, got) .. "|r")
     end
-    JT:Print(msg)
     -- Accepted lists open the window so the new names are right there.
     -- (Declining never gets here, so nothing opens.)
     if not a.auto and not InCombatLockdown() and not (self.frame and self.frame:IsShown()) then
@@ -1963,14 +2023,14 @@ function IL:OnShareData(sender, id, i, n, payload)
     end
 end
 
-function IL:CHAT_MSG_ADDON(_, prefix, text, _, sender)
+function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
     if prefix ~= PREFIX then return end
     if type(text) ~= "string" or type(sender) ~= "string" then return end
     if issecretvalue and (issecretvalue(text) or issecretvalue(sender)) then return end
     if #text > 255 then return end
     local kind, a, b, c, d, e = strsplit("~", text, 6)
     if kind == "O" and a and b then
-        self:OnShareOffer(sender, a, b, c)
+        self:OnShareOffer(sender, a, b, c, channel)
     elseif kind == "A" and a then
         if not IsMe(sender) then self:OnShareAccepted(sender, a, b) end
     elseif kind == "R" and a and b then
@@ -2457,6 +2517,7 @@ function IL:CreateFrame()
     local rows = {}
     local locked = false
     local friendlyFill
+    local sharedFill
     local layingOut = false
 
     local function SetWidgetEnabled(w, enabled)
@@ -2847,6 +2908,7 @@ function IL:CreateFrame()
     local function UpdateStatusUI()
         UpdateRowStatuses()
         checkFill:SetShown(IL:AutoOn())
+        if sharedFill then sharedFill:SetShown(IL:SharedOn()) end
         local text, c
         if IL.session and InCombatLockdown() then
             text = L["Paused"] -- combat: the countdown is frozen
@@ -2916,10 +2978,55 @@ function IL:CreateFrame()
         IL:StopAuto()
     end)
 
+    -- Auto-accept shared lists: [x] Auto-accept shared lists ---------------
+    -- This is intentionally one row above Auto-invite, matching the standalone
+    -- JacaInviteTools layout while keeping EUI's existing trusted-sender rule.
+    local bar2 = CreateFrame("Frame", nil, f)
+    bar2:SetHeight(22)
+    bar2:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 94)
+    bar2:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 94)
+
+    local sharedCheck = CreateFrame("Button", nil, bar2, "BackdropTemplate")
+    sharedCheck:SetSize(18, 18)
+    sharedCheck:SetPoint("LEFT", bar2, "LEFT", 0, 0)
+    sharedCheck:SetBackdrop(backdrop)
+    BG(sharedCheck, "dark")
+    sharedCheck:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+
+    sharedFill = sharedCheck:CreateTexture(nil, "ARTWORK")
+    sharedFill:SetPoint("TOPLEFT", sharedCheck, "TOPLEFT", 4, -4)
+    sharedFill:SetPoint("BOTTOMRIGHT", sharedCheck, "BOTTOMRIGHT", -4, 4)
+    sharedFill:SetColorTexture(accent[1], accent[2], accent[3], 1)
+    sharedFill:SetShown(IL:SharedOn())
+
+    local sharedLabel = bar2:CreateFontString(nil, "OVERLAY")
+    sharedLabel:SetPoint("LEFT", sharedCheck, "RIGHT", 6, 0)
+    StyleFont(sharedLabel, "normal")
+    Tint(sharedLabel)
+    sharedLabel:SetText(L["Auto-accept shared lists"])
+    -- Clicking the label toggles the checkbox too.
+    sharedCheck:SetHitRectInsets(0, -((sharedLabel:GetStringWidth() or 0) + 8), 0, 0)
+
+    sharedCheck:SetScript("OnClick", function()
+        if InCombatLockdown() or locked then return end
+        IL:SetShared(not IL:SharedOn())
+    end)
+    sharedCheck:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+        GameTooltip:SetText(L["Auto-accept shared lists"], 1, 1, 1)
+        GameTooltip:AddLine(L["Accepts lists sent by your group leader or a raid assistant without asking. Lists shared through the guild are only accepted from the Guild Master and Officers; lists from lower ranks are ignored. Lists from anybody else still show the popup."], 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    sharedCheck:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        GameTooltip:Hide()
+    end)
+
     -- Clear list -----------------------------------------------------------
-    local clear = MakeButton(f, L["Clear list"])
+    local clear = MakeButton(bar2, L["Clear list"])
     clear:SetSize(70, 20)
-    clear:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 94)
+    clear:SetPoint("RIGHT", bar2, "RIGHT", 0, 0)
     local clearToken = 0
     local function DisarmClear()
         clearToken = clearToken + 1
@@ -3509,6 +3616,22 @@ function IL:CreateFrame()
         return db.HiddenFriends
     end
 
+    -- Alphabetical ordering follows the light-blue name actually displayed in
+    -- the Friend List. When nickname display is enabled and a nickname exists,
+    -- that nickname is therefore the sort key. Case and common accents are
+    -- ignored so names sort naturally.
+    local FRIEND_SORT_ACCENTS = {
+        ["á"]="a",["à"]="a",["â"]="a",["ã"]="a",["ä"]="a",["é"]="e",["è"]="e",["ê"]="e",["ë"]="e",
+        ["í"]="i",["ì"]="i",["î"]="i",["ï"]="i",["ó"]="o",["ò"]="o",["ô"]="o",["õ"]="o",["ö"]="o",
+        ["ú"]="u",["ù"]="u",["û"]="u",["ü"]="u",["ç"]="c",["ñ"]="n",
+        ["Á"]="a",["À"]="a",["Â"]="a",["Ã"]="a",["Ä"]="a",["É"]="e",["È"]="e",["Ê"]="e",["Ë"]="e",
+        ["Í"]="i",["Ì"]="i",["Î"]="i",["Ï"]="i",["Ó"]="o",["Ò"]="o",["Ô"]="o",["Õ"]="o",["Ö"]="o",
+        ["Ú"]="u",["Ù"]="u",["Û"]="u",["Ü"]="u",["Ç"]="c",["Ñ"]="n",
+    }
+    local function FriendSortKey(name)
+        return (name or ""):lower():gsub("[\195][\128-\191]", function(ch) return FRIEND_SORT_ACCENTS[ch] end)
+    end
+
     -- Online WoW favourites get one row per character; offline/other-game
     -- favourites get one grey Battle.net-name row. Hidden entries are shown only
     -- through the Hidden button and always sort after normal entries.
@@ -3535,7 +3658,6 @@ function IL:CreateFrame()
                     else
                         bnet = "?"
                     end
-                    local sortName = (tag or "~"):lower()
                     local found = false
                     for j = 1, (C_BattleNet.GetFriendNumGameAccounts(i) or 0) do
                         local g = C_BattleNet.GetFriendGameAccountInfo(i, j)
@@ -3557,7 +3679,18 @@ function IL:CreateFrame()
                             local c = cf and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cf]
                             local cc = c and string.format("|cff%02x%02x%02x", c.r * 255 + 0.5, c.g * 255 + 0.5, c.b * 255 + 0.5) or "|cffffffff"
                             local realmPart = other and ("|cff999999-" .. realm .. "|r") or ""
-                            local text = LIGHT_BLUE .. bnet .. "|r " .. cc .. "(" .. g.characterName .. "|r" .. realmPart .. cc .. ")|r"
+                            local blueName = bnet
+                            if IL.db.ShowNicknames ~= false then
+                                -- Friend List only: replace the light-blue Battle.net label
+                                -- with a nickname when one can be resolved. The character in
+                                -- parentheses and `inviteName` remain the real character name.
+                                local unit = FindGroupUnit(inviteName)
+                                local nickname = unit and ns.GetNicknameForUnit(unit)
+                                    or ns.GetNicknameForName(g.characterName)
+                                if nickname then blueName = nickname end
+                            end
+                            local text = LIGHT_BLUE .. blueName .. "|r " .. cc .. "(" .. g.characterName .. "|r" .. realmPart .. cc .. ")|r"
+                            local sortName = FriendSortKey(blueName) .. "|" .. (tag or "~"):lower()
                             out[#out + 1] = {
                                 key = key, bnet = bnet, online = true, hidden = isHidden, invite = inviteName,
                                 text = text, char = g.characterName .. (other and ("-" .. realm) or ""),
@@ -3569,7 +3702,7 @@ function IL:CreateFrame()
                         out[#out + 1] = {
                             key = key, bnet = bnet, online = false, hidden = isHidden,
                             text = OFFLINE_GREY .. bnet .. "|r",
-                            rank = isHidden and 3 or 2, sort = sortName,
+                            rank = isHidden and 3 or 2, sort = FriendSortKey(bnet) .. "|" .. (tag or "~"):lower(),
                         }
                     end
                 end
@@ -3856,6 +3989,7 @@ function IL:CreateFrame()
         SetWidgetEnabled(inviteAllBtn, canInviteAll)
         inviteAllBtn.text:SetTextColor(canInviteAll and accent[1] or 0.5, canInviteAll and accent[2] or 0.5, canInviteAll and accent[3] or 0.5, 1)
     end
+    f.RefreshFriends = RefreshFriends
 
     -- Deterministic order, left to right: Friends then History. Normally the
     -- main window sits between them; near a screen edge both panels move to the
@@ -4020,6 +4154,7 @@ function IL:CreateFrame()
         Theme.accent[1], Theme.accent[2], Theme.accent[3], Theme.accent[4] = r, g, b, 1
         thumb:SetColorTexture(r, g, b, 0.6)
         checkFill:SetColorTexture(r, g, b, 1)
+        if sharedFill then sharedFill:SetColorTexture(r, g, b, 1) end
         if friendlyFill then friendlyFill:SetColorTexture(r, g, b, 1) end
         timerEdit:SetBackdropBorderColor(r, g, b, 1)
         for i = 1, #tinted do tinted[i]:SetTextColor(r, g, b, 1) end
@@ -4142,7 +4277,6 @@ SlashCmdList["EUIINVITETOOLS"] = function(msg)
     if n then
         IL:InviteFromList(n)
     else
-        if IL.frame and IL.frame:IsShown() then return end
         IL:Toggle()
     end
 end
@@ -4176,6 +4310,7 @@ ns.InviteToolsApplySettings = function()
     end
     if f.ApplyListScale then f.ApplyListScale(IL.db.ListScale or 1) end
     if f.ApplyResizable then f.ApplyResizable(IL.db.Unlocked == true) end
+    if f.RefreshFriends then f.RefreshFriends() end
 end
 
 

@@ -8,6 +8,91 @@ EllesmereUI._ModuleNS[ADDON_NAME] = ns  -- LOD options files read this module ns
 ns.CombatQueue = EllesmereUI.NewCombatQueue(CreateFrame("Frame"))
 local EMT = EllesmereUI.Lite.NewAddon(ADDON_NAME)
 
+-- Nickname providers key the suite as EllesmereUI; a standalone build keeps
+-- its folder name. Resolution is display-only: real names/GUIDs remain the
+-- identity used by death tracking and Run Summary collection.
+ns.NICK_ADDON = ADDON_NAME:find("Standalone") and ADDON_NAME or "EllesmereUI"
+function ns.ResolveNicknameForUnit(unit)
+    local name, surname = UnitName(unit)
+    if not name then return nil end
+    if not UnitIsPlayer(unit) then return name end
+    local fallback = EllesmereUI.WithSurname(name, surname)
+    local nameSecret = issecretvalue and issecretvalue(name)
+    local display
+
+    if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok, dn, handled = pcall(
+            EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "raidFrames")
+        if ok and handled == true then
+            if type(dn) == "string" and dn ~= ""
+               and not (issecretvalue and issecretvalue(dn)) then
+                return dn
+            end
+            return fallback
+        end
+    end
+
+    if not nameSecret and NSAPI and NSAPI.GetName then
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        if ok and type(dn) == "string" and dn ~= ""
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= name then
+            display = dn
+        end
+    end
+
+    if not display then
+        local TR = TimelineReminders
+        if TR and TR.GetNickname and TR.HasNickname and TR.NicknamesEnabledForAddOn then
+            local okGate, enabled = pcall(TR.NicknamesEnabledForAddOn, TR, ns.NICK_ADDON)
+            if okGate and enabled then
+                local okHas, has = pcall(TR.HasNickname, TR, unit)
+                if okHas and has then
+                    local ok, dn = pcall(TR.GetNickname, TR, unit)
+                    if ok and type(dn) == "string" and dn ~= ""
+                       and not (issecretvalue and issecretvalue(dn)) then
+                        display = dn
+                    end
+                end
+            end
+        end
+    end
+
+    if not display and not nameSecret and LiquidAPI and LiquidAPI.GetNicknameForEllesmereUI then
+        local ok, dn = pcall(LiquidAPI.GetNicknameForEllesmereUI, name)
+        if ok and type(dn) == "string" and dn ~= ""
+           and not (issecretvalue and issecretvalue(dn)) then
+            display = dn
+        end
+    end
+
+    if not display and _G.RG_UnitName then
+        local rga = RG_ALTS_SETTINGS and RG_ALTS_SETTINGS.settings
+        if rga and rga["ellesmereui"] then
+            local ok, dn = pcall(_G.RG_UnitName, unit)
+            if ok and type(dn) == "string" and dn ~= ""
+               and not (issecretvalue and issecretvalue(dn))
+               and (nameSecret or dn ~= name) then
+                display = dn
+            end
+        end
+    end
+
+    return display or fallback
+end
+
+function ns.GetNicknameForUnit(unit)
+    local name, surname = UnitName(unit)
+    if not name or (issecretvalue and issecretvalue(name)) then return nil end
+    local fallback = EllesmereUI.WithSurname(name, surname)
+    local display = ns.ResolveNicknameForUnit(unit)
+    if type(display) ~= "string" or display == ""
+       or (issecretvalue and issecretvalue(display))
+       or display == name or display == fallback then
+        return nil
+    end
+    return display
+end
+
 -- Upvalues
 local floor, min, max, abs = math.floor, math.min, math.max, math.abs
 local format = string.format
@@ -153,6 +238,7 @@ local DB_DEFAULTS = {
         showPlusThreeTimer = true,
         showThreshRemaining = false,
         showDeaths        = true,
+        showNicknames     = true,
         showObjectives    = true,
         showObjectiveTimes = true,
         objectiveTimePosition = "RIGHT",
@@ -399,6 +485,7 @@ local currentRun = {
 -- Midnight removed CLEU, so we detect deaths by comparing the API death
 -- count each tick and scanning the party for who is newly dead.
 local playerDeaths = {}
+local playerDeathDisplay = {} -- [real name] = nickname/display captured while a unit token exists
 local _prevDeathCount = 0
 local _partyAlive = {}  -- [name] = true while alive, removed on death detection
 
@@ -434,6 +521,7 @@ local function CheckForNewDeaths(newDeathCount)
         local name = UnitName(unit)
         if name and _partyAlive[name] and UnitIsDeadOrGhost(unit) then
             playerDeaths[name] = (playerDeaths[name] or 0) + 1
+            playerDeathDisplay[name] = ns.GetNicknameForUnit(unit) or playerDeathDisplay[name]
             _partyAlive[name] = nil
         end
     end
@@ -441,6 +529,7 @@ local function CheckForNewDeaths(newDeathCount)
         local name = UnitName("player")
         if name and _partyAlive[name] and UnitIsDeadOrGhost("player") then
             playerDeaths[name] = (playerDeaths[name] or 0) + 1
+            playerDeathDisplay[name] = ns.GetNicknameForUnit("player") or playerDeathDisplay[name]
             _partyAlive[name] = nil
         end
     end
@@ -972,6 +1061,7 @@ local function StartRun()
     currentRun.deaths        = 0
     currentRun.deathTimeLost = 0
     wipe(playerDeaths)
+    wipe(playerDeathDisplay)
     _prevDeathCount = 0
     ScanPartyAlive()
     currentRun.affixes       = affixes or {}
@@ -1035,6 +1125,7 @@ local function ResetRun()
     currentRun.deaths    = 0
     currentRun.deathTimeLost = 0
     wipe(playerDeaths)
+    wipe(playerDeathDisplay)
     _prevDeathCount = 0
     wipe(_partyAlive)
     currentRun.preciseStart = nil
@@ -1708,6 +1799,36 @@ local function CreateStandaloneFrame()
         end
     end
 
+    local function DeathTooltipDisplayName(realName)
+        local shortReal = Ambiguate and Ambiguate(realName, "short") or realName
+        if db and db.profile and db.profile.showNicknames == false then return shortReal end
+
+        local function FromUnit(unit)
+            if not UnitExists(unit) then return nil end
+            local n = UnitName(unit)
+            if type(n) ~= "string" or (issecretvalue and issecretvalue(n)) or n ~= realName then
+                return nil
+            end
+            return ns.GetNicknameForUnit(unit)
+        end
+
+        local shown = FromUnit("player")
+        if not shown and IsInGroup() then
+            local prefix = IsInRaid() and "raid" or "party"
+            local count = GetNumGroupMembers()
+            for i = 1, (IsInRaid() and count or max(0, count - 1)) do
+                shown = FromUnit(prefix .. i)
+                if shown then break end
+            end
+        end
+        shown = shown or playerDeathDisplay[realName]
+        if type(shown) == "string" and shown ~= ""
+           and not (issecretvalue and issecretvalue(shown)) then
+            return shown
+        end
+        return shortReal
+    end
+
     f._deathHit:SetScript("OnEnter", function(self)
         local deaths = playerDeaths
         if not next(deaths) and currentRun.deaths and currentRun.deaths > 0 then
@@ -1739,8 +1860,8 @@ local function CreateStandaloneFrame()
             local row = deathTT._rows[i]
             local classFile = select(2, UnitClass(entry.name))
             local color = classFile and (RAID_CLASS_COLORS[classFile] or RAID_CLASS_COLORS["PRIEST"])
-            local short = Ambiguate and Ambiguate(entry.name, "short") or entry.name
-            local colored = color and color:WrapTextInColorCode(short) or short
+            local shown = DeathTooltipDisplayName(entry.name)
+            local colored = color and color:WrapTextInColorCode(shown) or shown
             row.name:SetText(colored)
             row.name:SetTextColor(1, 1, 1, 0.80)
             row.count:SetText(entry.count)

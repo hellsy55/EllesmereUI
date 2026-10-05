@@ -12,9 +12,10 @@ local PAGE_REMINDERS = "Auras, Buffs & Consumables"
 local PAGE_TALENTS   = "Talent Reminders"
 local PAGE_UNLOCK    = "Unlock Mode"
 
--- WoW Forever: the page keeps CORE and DISPLAY and swaps every retail section
--- for the one Forever section (Camp Benefits + custom spell IDs); the Talent
--- Reminders page does not exist there.
+-- WoW Forever: the page keeps CORE, DISPLAY and RAID BUFFS (that client's
+-- locations and four buffs) and swaps every other retail section for the one
+-- Forever section (Camp Benefits + custom spell IDs); the Talent Reminders
+-- page does not exist there.
 local FOREVER = EllesmereUI.IS_FOREVER == true
 
 local SECTION_CORE         = "CORE"
@@ -586,6 +587,7 @@ initFrame:SetScript("OnEvent", function(self)
         { key="timewalking",       label="Timewalking" },
         { key="delve",             label="Delve" },
         { key="lair",              label="Lair" },
+        { key="scenario",          label="Scenario" },
         -- Orthogonal state gate (not a location): unchecking hides this
         -- section while in combat.
         { key="in_combat",         label="In Combat" },
@@ -984,11 +986,7 @@ initFrame:SetScript("OnEvent", function(self)
             line1:SetTextColor(1, 1, 1, 0.75)
             line1:SetPoint("TOP", infoFrame, "TOP", 0, 0)
             line1:SetJustifyH("CENTER")
-            if FOREVER then
-                line1:SetText(EllesmereUI.L("Middle Click a reminder to hide it until the next load screen"))
-            else
-                line1:SetText(EllesmereUI.L("Left Click to apply buffs (out of combat), Middle Click to hide until next load screen"))
-            end
+            line1:SetText(EllesmereUI.L("Left Click to apply buffs (out of combat), Middle Click to hide until next load screen"))
             y = y - 32
         end
 
@@ -1365,7 +1363,44 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
-        --  WOW FOREVER section: on that client the whole page past DISPLAY.
+        --  RAID BUFFS section (WoW Forever: its own locations and its four
+        --  buffs, which the module exports as the raid buff list there)
+        -----------------------------------------------------------------------
+        local raidBufHdr
+        raidBufHdr, h = W:SectionHeader(parent, SECTION_RAID_BUFFS, y);  y = y - h
+
+        -- Where to Show | Show When (+ reminder sound cog)
+        _, h = SectionControlRow(parent, y, {
+            whereStore = RWhere, whereItems = FOREVER and FOREVER_WHERE_ITEMS or nil,
+            whereTooltip = "Pick which content this section's reminders appear in.\nRested areas (cities and inns) always stay hidden.",
+            showWhenStore = RShowWhen,
+            showWhenTooltip = "Others are missing my buff: remind when a groupmate is missing a buff you can cast.\nI am missing others' buffs: remind when you are missing a buff a groupmate could give you (only shown when someone who can cast it is present). Off by default.",
+            soundSec = RDB, soundField = "sectionSound",
+            onChange = RefreshAll,
+            onShowWhenChange = function() if _G._EABR_UpdateGroupAuraRegistration then _G._EABR_UpdateGroupAuraRegistration() end end,
+        });  y = y - h
+
+        -- 4-column checkbox grid for individual raid buffs
+        do
+            local RAID_BUFFS = _G._EABR_RAID_BUFFS or {}
+            local gridItems = {}
+            for _, buff in ipairs(RAID_BUFFS) do
+                gridItems[#gridItems+1] = {
+                    label = _G._EABR_SpellName(buff.castSpell, buff.name),
+                    classToken = buff.class,
+                    key = buff.key,
+                    getVal = function() local r = RDB(); return r and r.enabled and r.enabled[buff.key] end,
+                    setVal = function(v) local r = RDB(); if r and r.enabled then r.enabled[buff.key] = v end end,
+                }
+            end
+            h = BuildCheckboxGrid(parent, y, gridItems, function() RefreshAll(); RebuildPreviewHeader() end, _gridCellRefs)
+            y = y - h
+        end
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        -----------------------------------------------------------------------
+        --  WOW FOREVER section: on that client the rest of the page.
         --  Camp Benefits toggle, a spell-ID entry that adds a custom reminder
         --  and one row per tracked spell; the retail sections below never build.
         -----------------------------------------------------------------------
@@ -1413,42 +1448,6 @@ initFrame:SetScript("OnEvent", function(self)
             -- No preview header here, so no click-to-scroll mappings to wire.
             return math.abs(y)
         end
-
-        -----------------------------------------------------------------------
-        --  RAID BUFFS section
-        -----------------------------------------------------------------------
-        local raidBufHdr
-        raidBufHdr, h = W:SectionHeader(parent, SECTION_RAID_BUFFS, y);  y = y - h
-
-        -- Where to Show | Show When (+ reminder sound cog)
-        _, h = SectionControlRow(parent, y, {
-            whereStore = RWhere,
-            whereTooltip = "Pick which content this section's reminders appear in.\nRested areas (cities and inns) always stay hidden.",
-            showWhenStore = RShowWhen,
-            showWhenTooltip = "Others are missing my buff: remind when a groupmate is missing a buff you can cast.\nI am missing others' buffs: remind when you are missing a buff a groupmate could give you (only shown when someone who can cast it is present). Off by default.",
-            soundSec = RDB, soundField = "sectionSound",
-            onChange = RefreshAll,
-            onShowWhenChange = function() if _G._EABR_UpdateGroupAuraRegistration then _G._EABR_UpdateGroupAuraRegistration() end end,
-        });  y = y - h
-
-        -- 4-column checkbox grid for individual raid buffs
-        do
-            local RAID_BUFFS = _G._EABR_RAID_BUFFS or {}
-            local gridItems = {}
-            for _, buff in ipairs(RAID_BUFFS) do
-                gridItems[#gridItems+1] = {
-                    label = _G._EABR_SpellName(buff.castSpell, buff.name),
-                    classToken = buff.class,
-                    key = buff.key,
-                    getVal = function() local r = RDB(); return r and r.enabled and r.enabled[buff.key] end,
-                    setVal = function(v) local r = RDB(); if r and r.enabled then r.enabled[buff.key] = v end end,
-                }
-            end
-            h = BuildCheckboxGrid(parent, y, gridItems, function() RefreshAll(); RebuildPreviewHeader() end, _gridCellRefs)
-            y = y - h
-        end
-
-        _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
         --  AURAS section

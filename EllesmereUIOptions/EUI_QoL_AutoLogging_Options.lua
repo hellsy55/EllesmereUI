@@ -124,7 +124,14 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
               local popup = _G.EUIKeysPopup
               if popup then popup:SetScale(v / 100) end
           end },
-        { type = "label", text = "" }
+        { type    = "toggle",
+          text    = "Show Nicknames in Party",
+          tooltip = "Show supported player nicknames in the Party section of the /keys popup. Guild entries stay unchanged and keystone data remains keyed by character name.",
+          getValue = function() return KeysCfg().showNicknames ~= false end,
+          setValue = function(v)
+              KeysCfg().showNicknames = v and true or false
+              if _G._EUI_RefreshKeystonePopup then _G._EUI_RefreshKeystonePopup() end
+          end }
     ); y = y - h
     end   -- close /keys popup hidden-while-disabled gate
 

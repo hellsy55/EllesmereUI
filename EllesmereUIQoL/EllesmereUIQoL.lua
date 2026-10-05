@@ -15,9 +15,108 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  into the SAME profile table, repointed by the profile system on swap.
 -------------------------------------------------------------------------------
 if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring
-local ns = select(2, ...)
+local QOL_ADDON_NAME, ns = ...
 EllesmereUI._ModuleNS["EllesmereUIQoL"] = ns  -- LOD options files read this module ns via the registry
 ns.CombatQueue = EllesmereUI.NewCombatQueue(CreateFrame("Frame"))
+
+-- Shared display-only nickname resolver for QoL features that already have a
+-- trustworthy group unit token. Identity-sensitive code must keep the real
+-- UnitName/GUID; callers use this only when writing text to their own frames.
+local QOL_NICK_ADDON = QOL_ADDON_NAME:find("Standalone") and QOL_ADDON_NAME or "EllesmereUI"
+local function CleanNickname(v)
+    if type(v) ~= "string" or v == "" then return nil end
+    if issecretvalue and issecretvalue(v) then return nil end
+    return v
+end
+
+function ns.ResolveNicknameForUnit(unit)
+    local name, surname = UnitName(unit)
+    if not name then return nil end
+    if not UnitIsPlayer(unit) then return name end
+
+    local fallback = EllesmereUI.WithSurname(name, surname)
+    local nameSecret = issecretvalue and issecretvalue(name)
+    local display
+
+    -- MethodInternal's per-surface selection is authoritative for known Method
+    -- players, matching Raid Frames for the group-oriented QoL surfaces.
+    if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok, dn, handled = pcall(
+            EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "raidFrames")
+        if ok and handled == true then
+            return CleanNickname(dn) or fallback
+        end
+    end
+
+    if not nameSecret and NSAPI and NSAPI.GetName then
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        dn = ok and CleanNickname(dn) or nil
+        if dn and dn ~= name then display = dn end
+    end
+
+    if not display then
+        local TR = TimelineReminders
+        if TR and TR.GetNickname and TR.HasNickname and TR.NicknamesEnabledForAddOn then
+            local okGate, enabled = pcall(TR.NicknamesEnabledForAddOn, TR, QOL_NICK_ADDON)
+            if okGate and enabled then
+                local okHas, has = pcall(TR.HasNickname, TR, unit)
+                if okHas and has then
+                    local ok, dn = pcall(TR.GetNickname, TR, unit)
+                    if ok then display = CleanNickname(dn) end
+                end
+            end
+        end
+    end
+
+    if not display and not nameSecret and LiquidAPI and LiquidAPI.GetNicknameForEllesmereUI then
+        local ok, dn = pcall(LiquidAPI.GetNicknameForEllesmereUI, name)
+        if ok then display = CleanNickname(dn) end
+    end
+
+    if not display and _G.RG_UnitName then
+        local rga = RG_ALTS_SETTINGS and RG_ALTS_SETTINGS.settings
+        if rga and rga["ellesmereui"] then
+            local ok, dn = pcall(_G.RG_UnitName, unit)
+            dn = ok and CleanNickname(dn) or nil
+            if dn and (nameSecret or dn ~= name) then display = dn end
+        end
+    end
+
+    return display or fallback
+end
+
+-- Returns nil unless a provider actually changed the visible character name.
+-- Useful where the existing non-nickname label (for example a Battle.net
+-- account name) must remain intact when no nickname is available.
+function ns.GetNicknameForUnit(unit)
+    local name, surname = UnitName(unit)
+    if not name or (issecretvalue and issecretvalue(name)) then return nil end
+    local fallback = EllesmereUI.WithSurname(name, surname)
+    local display = ns.ResolveNicknameForUnit(unit)
+    display = CleanNickname(display)
+    if not display or display == name or display == fallback then return nil end
+    return display
+end
+
+-- No unit token exists for an out-of-group Battle.net friend. Only consult the
+-- providers that explicitly accept a plain character name; do not fabricate a
+-- unit/GUID path for MethodInternal, TimelineReminders or RGA.
+function ns.GetNicknameForName(name)
+    if type(name) ~= "string" or name == "" then return nil end
+    if issecretvalue and issecretvalue(name) then return nil end
+
+    if NSAPI and NSAPI.GetName then
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        dn = ok and CleanNickname(dn) or nil
+        if dn and dn ~= name then return dn end
+    end
+    if LiquidAPI and LiquidAPI.GetNicknameForEllesmereUI then
+        local ok, dn = pcall(LiquidAPI.GetNicknameForEllesmereUI, name)
+        dn = ok and CleanNickname(dn) or nil
+        if dn and dn ~= name then return dn end
+    end
+    return nil
+end
 
 local _qolExtrasDB
 local function QoLExtrasProfile()
@@ -1355,6 +1454,77 @@ qolFrame:SetScript("OnEvent", function(self)
             end
         end
         EllesmereUI._applyQuickLoot()
+    end
+
+    ---------------------------------------------------------------------------
+    --  Auto Select Single Gossip -- picks the only gossip option. Skipped when
+    --  the NPC offers a quest or has one ready to turn in. GOSSIP_SHOW and
+    --  GOSSIP_CLOSED are registered only while the toggle is on.
+    ---------------------------------------------------------------------------
+    do
+        local gossipFrame
+        -- Page and option pairs picked in this conversation (cleared when it
+        -- ends): each is picked once, so two single-option pages that lead to
+        -- each other cannot flip back and forth.
+        local picked = {}
+
+        local function OnGossipShow()
+            local db = EllesmereUIDB
+            if db.autoGossipShiftSkip ~= false and IsShiftKeyDown() then return end
+            if db.autoGossipDisableInstance ~= false and IsInInstance() then return end
+
+            local options = C_GossipInfo.GetOptions()
+            if not options or #options ~= 1 then return end
+            local option = options[1]
+            -- A locked or unavailable option would only fail again.
+            if option.status ~= Enum.GossipOptionStatus.Available then return end
+            local key = (C_GossipInfo.GetText() or "") .. "\0" .. (option.gossipOptionID or option.name)
+            if picked[key] then return end
+
+            -- Trivial quests only stay ignorable if Quest Tracker auto-accept also ignores them.
+            local qtDB = _G._EQT_DB
+            local qt = qtDB and qtDB.profile and qtDB.profile.questTracker
+            local ignoreTrivial = db.autoGossipIgnoreTrivial
+                and not (qt and qt.enabled ~= false and qt.autoAccept and not qt.autoAcceptIgnoreTrivial)
+            for _, quest in ipairs(C_GossipInfo.GetAvailableQuests()) do
+                if not (ignoreTrivial and quest.isTrivial) then return end
+            end
+            local active = C_GossipInfo.GetActiveQuests()
+            for _, quest in ipairs(active) do
+                if quest.isComplete then return end
+            end
+
+            -- Blizzard already auto-selects this case itself.
+            if #active == 0 and C_GossipInfo.GetNumAvailableQuests() == 0
+                and option.selectOptionWhenOnlyOption then return end
+
+            picked[key] = true
+            C_GossipInfo.SelectOptionByIndex(option.orderIndex)
+        end
+
+        local function OnGossipEvent(_, event)
+            if event == "GOSSIP_CLOSED" then
+                wipe(picked)
+            else
+                OnGossipShow()
+            end
+        end
+
+        EllesmereUI._applyAutoGossip = function()
+            if EllesmereUIDB and EllesmereUIDB.autoGossip then
+                if not gossipFrame then
+                    gossipFrame = CreateFrame("Frame")
+                    gossipFrame:SetScript("OnEvent", OnGossipEvent)
+                end
+                gossipFrame:RegisterEvent("GOSSIP_SHOW")
+                gossipFrame:RegisterEvent("GOSSIP_CLOSED")
+            elseif gossipFrame then
+                gossipFrame:UnregisterEvent("GOSSIP_SHOW")
+                gossipFrame:UnregisterEvent("GOSSIP_CLOSED")
+                wipe(picked)
+            end
+        end
+        EllesmereUI._applyAutoGossip()
     end
 
     ---------------------------------------------------------------------------
@@ -4138,6 +4308,15 @@ do
         alertOverlay:Hide()
     end
 
+    local function DeathDisplayName(unit)
+        local name = UnitName(unit)
+        if not name then return nil end
+        if EllesmereUIDB and EllesmereUIDB.groupDeathShowNicknames == false then
+            return name
+        end
+        return ns.GetNicknameForUnit(unit) or name
+    end
+
     local function ShowAlert(name, classToken)
         if not name then return end
         CreateAlertOverlay()
@@ -4220,7 +4399,7 @@ do
             -- (first sighting/rejoin) primes state silently so an already-dead member at start is never announced.
             if deadState[guid] == false and dead then
                 local _, classToken = UnitClass(u)
-                newlyDeadName = UnitName(u)
+                newlyDeadName = DeathDisplayName(u)
                 newlyDeadClass = classToken
                 newlyDeadCount = (newlyDeadCount or 0) + 1
             end
@@ -4274,14 +4453,14 @@ do
     -- Fires a sample alert (with sound) so the look/sound can be checked without a real death; uses your own name/class as preview text.
     EllesmereUI._announceGroupDeathsPreview = function()
         local _, classToken = UnitClass("player")
-        ShowAlert(UnitName("player"), classToken)
+        ShowAlert(DeathDisplayName("player"), classToken)
         PlayDeathSound()
     end
 
     -- Visual-only preview (used by the Text Size slider so dragging it doesn't repeatedly fire the sound).
     EllesmereUI._groupDeathShowVisual = function()
         local _, classToken = UnitClass("player")
-        ShowAlert(UnitName("player"), classToken)
+        ShowAlert(DeathDisplayName("player"), classToken)
     end
 
     EllesmereUI._groupDeathPlaySound = PlayDeathSound

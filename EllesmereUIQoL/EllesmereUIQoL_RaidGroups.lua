@@ -84,6 +84,7 @@ local DB_DEFAULTS = {
   profile = {
     raidGroups = {
         scale = 1,
+        showNicknames = true,
         pos   = {},   -- { point, relPoint, x, y }, written on drag stop
     },
   },
@@ -117,7 +118,15 @@ local function ReadRoster()
         -- one that has not arrived yet.
         if name then
             local list = groups[subgroup]
-            list[#list + 1] = { index = i, name = name, class = class, online = online }
+            local displayName = name
+            local p = P()
+            if not p or p.showNicknames ~= false then
+                displayName = ns.GetNicknameForUnit("raid" .. i) or name
+            end
+            list[#list + 1] = {
+                index = i, name = name, displayName = displayName,
+                class = class, online = online,
+            }
         end
     end
     return groups
@@ -232,7 +241,7 @@ local function StartDrag(slot)
     -- same name at the same weight as the one on the cursor.
     slot._lbl:SetAlpha(LIFTED_ALPHA)
 
-    ghost._lbl:SetText(slot._member.name)
+    ghost._lbl:SetText(slot._member.displayName or slot._member.name)
     ghost:Show()
     ghost:SetScript("OnUpdate", GhostOnUpdate)
 
@@ -450,7 +459,7 @@ function Refresh()
             local m = list[n]
             s._member = m
             if m then
-                s._lbl:SetText(m.name)
+                s._lbl:SetText(m.displayName or m.name)
                 local c = EllesmereUI.GetClassColor(m.class)
                 s._lbl:SetTextColor(c.r, c.g, c.b, m.online and 1 or 0.4)
             else
@@ -479,6 +488,14 @@ function ns.RaidGroupsScale(v)
     if not p then return end
     p.scale = v
     ns.ApplyRaidGroupsScale()
+end
+
+function ns.RaidGroupsShowNicknames(v)
+    local p = P()
+    if v == nil then return not p or p.showNicknames ~= false end
+    if not p then return end
+    p.showNicknames = v and true or false
+    if win and win:IsShown() then Refresh() end
 end
 
 function ns.ShowRaidGroupsWindow()

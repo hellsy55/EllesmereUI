@@ -409,6 +409,7 @@ local function ScanRoster(withStartScore)
                 local rec = EnsureMember(guid)
                 rec.unit = unit
                 rec.name = rec.name or PlainString(UnitName(unit))
+                rec.nickname = rec.nickname or PlainString(ns.GetNicknameForUnit(unit))
                 if not rec.class then
                     local _, classFile = UnitClass(unit)
                     rec.class = PlainString(classFile)
@@ -872,7 +873,7 @@ local function SortMembers(list)
 end
 
 local MEMBER_FIELDS = {
-    "guid", "name", "class", "role", "specIcon", "ilvl", "score", "scoreGain",
+    "guid", "name", "nickname", "class", "role", "specIcon", "ilvl", "score", "scoreGain",
     "damage", "dps", "damageTaken", "interrupts", "deaths", "lootID", "lootLink",
 }
 
@@ -1387,7 +1388,11 @@ end
 
 local function CellText(col, m, c)
     local k = col.key
-    if k == "name" then return format("|cff%s%s|r", ClassHex(m.class), ShortName(m.name)) end
+    if k == "name" then
+        local p = db and db.profile
+        local shown = (not p or p.showNicknames ~= false) and m.nickname or nil
+        return format("|cff%s%s|r", ClassHex(m.class), shown or ShortName(m.name))
+    end
     if k == "score" then return ScoreText(m) end
     if k == "dps" then return Abbrev(NonZero(m.dps)) or "-" end
     if k == "damageTaken" then return Abbrev(NonZero(m.damageTaken)) or "-" end

@@ -5,6 +5,7 @@ if EllesmereUI and EllesmereUI.IS_FOREVER then return end -- no keystones on WoW
 --  /keys slash command: displays party keystone levels in a styled popup.
 --  Uses LibKeystone (BigWigs/DBM) for keystone data exchange.
 -------------------------------------------------------------------------------
+local _, ns = ...
 local LibKeystone = LibStub and LibStub("LibKeystone", true)
 
 local myRealm = (GetRealmName():gsub("%s", ""))
@@ -412,7 +413,7 @@ end
 
 local function PopulateRow(r, e, ccMap)
     ApplyRowFontSize(r)
-    r._nameFS:SetText(StripRealm(e.name)); r._nameFS:SetWidth(80)
+    r._nameFS:SetText(e.displayName or StripRealm(e.name)); r._nameFS:SetWidth(80)
     -- Cheap paths first: the entry's own classFile, then the per-rebuild map
     local cf = e.classFile
     if not cf and ccMap then cf = ccMap[StripRealm(e.name)] end
@@ -454,21 +455,46 @@ ShowKeystonePopup = function()
     local contentW = POPUP_W - PAD * 2
 
     -- Collect party keys (only current group members)
-    local currentMembers = {}
-    currentMembers[PlayerName("player")] = true
+    local currentMembers, exactUnits, shortUnits = {}, {}, {}
+    local function AddCurrentMember(unit)
+        local name = PlayerName(unit)
+        if not name then return end
+        local short = StripRealm(name)
+        currentMembers[name], currentMembers[short] = true, true
+        exactUnits[name] = unit
+        if shortUnits[short] == nil then
+            shortUnits[short] = unit
+        elseif shortUnits[short] ~= unit then
+            -- Two cross-realm players can share a short character name. Keep
+            -- the row membership behavior, but do not attach the wrong unit's
+            -- nickname when a LibKeystone entry itself is only short-named.
+            shortUnits[short] = false
+        end
+    end
+    AddCurrentMember("player")
     if IsInGroup() then
         local prefix = IsInRaid() and "raid" or "party"
         local count = GetNumGroupMembers()
         for i = 1, (IsInRaid() and count or count - 1) do
-            local name = PlayerName(prefix .. i)
-            if name then currentMembers[name] = true end
+            AddCurrentMember(prefix .. i)
         end
     end
     local partyEntries = {}
+    local keyCfg = EllesmereUIDB and EllesmereUIDB.keystonePopup
     for name, info in pairs(partyKeys) do
-        if currentMembers[name] or currentMembers[StripRealm(name)] then
+        local short = StripRealm(name)
+        if currentMembers[name] or currentMembers[short] then
+            local unit = exactUnits[name] or shortUnits[short]
             local dName = DungeonNameFromMap(info.dungeon)
-            partyEntries[#partyEntries + 1] = { name = name, dungeonName = dName, lvl = info.keyLevel or 0, rating = info.rating or 0, classFile = info.classFile, mapID = info.dungeon }
+            local displayName
+            if unit and (not keyCfg or keyCfg.showNicknames ~= false) then
+                displayName = ns.GetNicknameForUnit(unit)
+            end
+            partyEntries[#partyEntries + 1] = {
+                name = name, displayName = displayName,
+                dungeonName = dName, lvl = info.keyLevel or 0,
+                rating = info.rating or 0, classFile = info.classFile, mapID = info.dungeon,
+            }
         end
     end
     table.sort(partyEntries, function(a, b)

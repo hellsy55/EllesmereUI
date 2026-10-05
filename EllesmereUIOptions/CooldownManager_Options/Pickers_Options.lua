@@ -116,7 +116,7 @@ local function EnsureAssignedSpells(barKeyE)
         -- after its left neighbour so it takes its true Blizzard-CDM position;
         -- appending at the end piled talent-swap spells after trinket/racial slots and
         -- never survived /reload. Presence check AND position cursor must be
-        -- variant-aware (mirrors the reseed pass in EllesmereUICooldownManager.lua): an
+        -- variant-aware (mirrors the reseed pass in EUI_CDM_Reconcile.lua): an
         -- exact-match set misses a stored entry with a different variant form, re-inserting a duplicate the normalize pass above then dedupes by deleting the saved slot.
         local insertPos = nil
         for _, icon in ipairs(liveIcons) do
@@ -333,7 +333,7 @@ local function EnsureAssignedSpells(barKeyE)
     -- Keep/drop reconciliation now lives in the resident module (single
     -- implementation shared with the automatic reseed/settings-close
     -- triggers -- see ns.ReconcileAssignedSpellDrops in
-    -- EllesmereUICooldownManager.lua for the full decision ladder).
+    -- EUI_CDM_Reconcile.lua for the full decision ladder).
     if ns.ReconcileAssignedSpellDrops then
         sd = ns.ReconcileAssignedSpellDrops(barKeyE) or sd
     end

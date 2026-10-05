@@ -8629,3 +8629,4 @@ L["~%dx  Veteran Crest\r\n|cff888888Scan at Upgrader for exact costs|r"] = "~%dx
 L["简体中文 (Simplified Chinese)"] = true
 L["繁體中文 (Traditional Chinese)"] = true
 L["한국어 (Korean)"] = true
+L["Scenario"] = "Gesta"

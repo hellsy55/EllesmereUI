@@ -6958,22 +6958,50 @@ local function StartAddon()
     ToggleAllBags = SmartToggleBags
     -- Hook ToggleBackpack/ToggleBag via hooksecurefunc (avoids tainting the global)
     hooksecurefunc("ToggleBackpack", SmartToggleBags)
-    hooksecurefunc("ToggleBag", function() SmartToggleBags() end)
 
     -- Hide Blizzard bag frames by reparenting to a hidden container (never write .Show/.Hide onto Blizzard frames -- causes taint).
     local _blizzBagHidden = CreateFrame("Frame")
     _blizzBagHidden:Hide()
 
+    -- WoW Forever's keyring (bag -2) has no place in our bag window, so its
+    -- button keeps opening Blizzard's own keyring window: the one bag frame
+    -- let back out of the hidden container while it shows.
+    local KEYRING = EUI.IS_FOREVER and Enum.BagIndex and Enum.BagIndex.Keyring or nil
+    local function IsKeyringFrame(f)
+        return KEYRING ~= nil and f:IsShown() and f.MatchesBagID ~= nil and f:MatchesBagID(KEYRING)
+    end
+
     local function KillBlizzard()
         for i = 1, 13 do
             local f = _G["ContainerFrame"..i]
-            if f then f:SetParent(_blizzBagHidden) end
+            if f and not IsKeyringFrame(f) then f:SetParent(_blizzBagHidden) end
         end
         if ContainerFrameCombinedBags then
             ContainerFrameCombinedBags:SetParent(_blizzBagHidden)
         end
     end
     KillBlizzard()
+
+    local keyringHooked = setmetatable({}, { __mode = "k" })
+    hooksecurefunc("ToggleBag", function(id)
+        if KEYRING and id == KEYRING then
+            -- Blizzard just opened or closed it; only an open one comes out.
+            local f = ContainerFrameUtil_GetShownFrameForID and ContainerFrameUtil_GetShownFrameForID(KEYRING)
+            if f then
+                f:SetParent(ContainerFrameContainer or UIParent)
+                if not keyringHooked[f] then
+                    keyringHooked[f] = true
+                    -- The frames are shared: once closed (its own shown flag
+                    -- clear, not just a hidden UI), any bag it shows next stays hidden.
+                    f:HookScript("OnHide", function(self)
+                        if not self:IsShown() then self:SetParent(_blizzBagHidden) end
+                    end)
+                end
+            end
+            return
+        end
+        SmartToggleBags()
+    end)
 
     hooksecurefunc("OpenAllBags", function()
         if not EUI_Bags:IsVisible() then ToggleEUI() end

@@ -2,11 +2,11 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 --  EllesmereUI Action Bars - XP Bar
 --  The XP bar's own runtime: its frame art styles and profession flipbook
---  fill, the dividers and Smart Ticks, the XP / rested update and tooltip,
---  the text positions (texts in and around the bar, each showing one or
---  more items, with the session clock, XP rate, completed quest and time this
---  level trackers behind them), and the style getter and setter the XP Bar
---  options tab uses. What it shares with the reputation and House Favor bars
+--  fill, the dividers and Smart Ticks, the Quest XP Overlay, the XP / rested
+--  update and tooltip, the text positions (texts in and around the bar, each
+--  showing one or more items, with the session clock, XP rate, completed
+--  quest and time this level trackers behind them), and the style getter
+--  and setter the XP Bar options tab uses. What it shares with the reputation and House Favor bars
 --  (the data bar frame, layout, border, Center text placement, visibility,
 --  hover and Unlock Mode) is in EUI_ActionBars_DataBars.lua and the main
 --  file, which load first and call into this file through ns at run time.
@@ -484,6 +484,56 @@ function ns.ApplyXPBarStyle(frame, s)
     ApplyXPArt(frame, s)
     PaintXPBackground(frame, s)
     ns.ApplyXPFlipFill(frame, s)
+    ns.ApplyXPQuestOverlay(frame, s)
+end
+
+-- Quest XP Overlay (s.questOverlay): two bars over the fill's own rect,
+-- between the rested bar (ARTWORK 1) and the fill (4): incomplete quests
+-- (s.questOverlayColor, gold; ARTWORK 2) under completed ones
+-- (s.questOverlayDoneColor, green; ARTWORK 3). Built on first enable; off,
+-- built ones hide.
+-- A colour, its unset fields at the default (green / gold at 60%); the
+-- options swatches read it too.
+local QUEST_DONE = { r = 0, g = 127/255, b = 0, a = 0.6 }
+local QUEST_INC = { r = 1, g = 0.82, b = 0, a = 0.6 }
+function ns.XPQuestColor(s, done)
+    local d, c
+    if done then
+        d, c = QUEST_DONE, s.questOverlayDoneColor
+    else
+        d, c = QUEST_INC, s.questOverlayColor
+    end
+    c = c or d
+    return c.r or d.r, c.g or d.g, c.b or d.b, c.a or d.a
+end
+
+local function StyleQuestBar(qb, s, tex, sub, done)
+    local orient = s.orientation or "HORIZONTAL"
+    qb:SetStatusBarTexture(tex)
+    qb:GetStatusBarTexture():SetDrawLayer("ARTWORK", sub)
+    qb:SetOrientation(orient)
+    qb:SetRotatesTexture(orient ~= "HORIZONTAL")
+    qb:SetStatusBarColor(ns.XPQuestColor(s, done))
+    qb:Show()
+end
+
+function ns.ApplyXPQuestOverlay(frame, s)
+    local qb, db = frame._questBar, frame._questDoneBar
+    if not s.questOverlay then
+        if qb then qb:Hide(); db:Hide() end
+        return
+    end
+    if not qb then
+        local bar = frame._bar
+        qb = CreateFrame("StatusBar", nil, frame)
+        qb:SetAllPoints(bar)
+        db = CreateFrame("StatusBar", nil, frame)
+        db:SetAllPoints(bar)
+        frame._questBar, frame._questDoneBar = qb, db
+    end
+    local tex = frame._xpArtOn == "frame" and "Interface\\BUTTONS\\WHITE8X8" or ns.ResolveDataBarTexture(s.barTexture)
+    StyleQuestBar(qb, s, tex, 2, false)
+    StyleQuestBar(db, s, tex, 3, true)
 end
 
 -------------------------------------------------------------------------------
@@ -1126,33 +1176,64 @@ local function XPRepaint(frame, filter)
     XPPaintText(frame, s, filter, UnitXP("player"), mx, GetXPExhaustion() or 0, UnitLevel("player"))
 end
 
--- The XP of every quest in the log that is ready to hand in.
+-- The XP of every quest in the log that is ready to hand in (the quest
+-- texts), then the Quest XP Overlay's completed and incomplete XP, filtered
+-- by Completed Quests Only (s.questOverlayCompleted) and Current Zone Only
+-- (s.questOverlayZone).
 local GetQuestLogRewardXP = GetQuestLogRewardXP  -- missing on a client: reads 0
-local function XPCompletedQuestXP()
-    if not GetQuestLogRewardXP then return 0 end
+local function XPQuestXP(s)
+    if not GetQuestLogRewardXP then return 0, 0, 0 end
     local QL = C_QuestLog
-    local total = 0
+    local ov = s.questOverlay
+    local all, onlyZone = ov and not s.questOverlayCompleted, ov and s.questOverlayZone
+    local total, done, inc = 0, 0, 0
     for i = 1, QL.GetNumQuestLogEntries() do
         local q = QL.GetQuestIDForLogIndex(i)
-        if q and q > 0 and QL.IsComplete(q) then
-            total = total + (GetQuestLogRewardXP(q) or 0)
+        if q and q > 0 then
+            local complete = QL.IsComplete(q)
+            if complete or all then
+                local xp = GetQuestLogRewardXP(q) or 0
+                if complete then total = total + xp end
+                if ov and (not onlyZone or QL.IsOnMap(q)) then
+                    if complete then done = done + xp else inc = inc + xp end
+                end
+            end
         end
     end
-    return total
+    return total, done, inc
+end
+
+-- The Quest XP Overlay: completed quest XP ahead of the fill, incomplete
+-- quest XP past it (built on first enable, ns.ApplyXPQuestOverlay).
+local function XPPaintQuestOverlay(frame, cur, mx)
+    local qb = frame._questBar
+    if not (qb and qb:IsShown()) then return end
+    local done = cur + (frame._xpQuestDone or 0)
+    qb:SetMinMaxValues(0, mx)
+    qb:SetValue(min(done + (frame._xpQuestInc or 0), mx))
+    local db = frame._questDoneBar
+    db:SetMinMaxValues(0, mx)
+    db:SetValue(min(done, mx))
 end
 
 -- QUEST_LOG_UPDATE only shows the hidden scan frame; its one-shot OnUpdate
--- hides it, scans once for the whole burst and repaints the quest texts when
--- the total changed.
+-- hides it, scans once for the whole burst and repaints the quest texts and
+-- overlay when a total changed.
 local function OnXPQuestScan(self)
     self:Hide()
     local frame = dataBarFrames.XPBar
-    if not frame then return end
+    local s = EAB.db and EAB.db.profile.bars.XPBar
+    if not (frame and s) then return end
     frame._xpQuestOK = true
-    local total = XPCompletedQuestXP()
+    local total, done, inc = XPQuestXP(s)
     if total ~= frame._xpQuestXP then
         frame._xpQuestXP = total
         XPRepaint(frame, "nq")
+    end
+    if done ~= frame._xpQuestDone or inc ~= frame._xpQuestInc then
+        frame._xpQuestDone, frame._xpQuestInc = done, inc
+        local mx = UnitXPMax("player")
+        XPPaintQuestOverlay(frame, UnitXP("player"), mx > 0 and mx or 1)
     end
 end
 
@@ -1175,10 +1256,17 @@ local function XPSyncQuestEvents(frame, vis)
             frame._xpQuestOn = true
             xpQuestEv:RegisterEvent("QUEST_LOG_UPDATE")
         end
+        -- Current Zone Only: a new zone changes which quests count.
+        if frame._xpQuestZone then
+            xpQuestEv:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+        else
+            xpQuestEv:UnregisterEvent("ZONE_CHANGED_NEW_AREA")
+        end
         if not frame._xpQuestOK then xpQuestEv:Show() end
     elseif frame._xpQuestOn then
         frame._xpQuestOn, frame._xpQuestOK = nil, nil
         xpQuestEv:UnregisterEvent("QUEST_LOG_UPDATE")
+        xpQuestEv:UnregisterEvent("ZONE_CHANGED_NEW_AREA")
         xpQuestEv:Hide()
     end
 end
@@ -1323,7 +1411,7 @@ function ns.XPBarTextSlots(frame, s)
     -- No Center text: no Text Background behind it either.
     if not kind and frame._textBg then frame._textBg:Hide() end
 
-    local quest, rate, clock, levelTime = c.nq, c.nr, c.nc, c.nl
+    local quest, rate, clock, levelTime = c.nq or s.questOverlay, c.nr, c.nc, c.nl
     local horizontal = s.orientation ~= "VERTICAL"
     local host, slots = frame._textHost, frame._xpSlot
     local size, bgOn, bc = s.textSize or 9, s.showTextBg, s.textBgColor
@@ -1404,6 +1492,10 @@ function ns.XPBarTextSlots(frame, s)
     if not frame._xpLive then quest, rate, clock, levelTime = false, false, false, false end
     local wasRate, wasLevel = frame._xpNeedRate, frame._xpNeedLevelTime
     frame._xpNeedQuest = quest and true or false
+    frame._xpQuestZone = (quest and s.questOverlay and s.questOverlayZone) and true or nil
+    -- An overlay filter change rescans.
+    local sig = (s.questOverlay and 1 or 0) + (s.questOverlayCompleted and 2 or 0) + (s.questOverlayZone and 4 or 0)
+    if sig ~= frame._xpQuestSig then frame._xpQuestSig, frame._xpQuestOK = sig, nil end
     frame._xpNeedRate = rate and true or false
     frame._xpNeedLevelTime = levelTime
     frame._xpNeedClock = clock and true or false
@@ -1575,6 +1667,7 @@ local function UpdateXPBar(levelUp)
         end
         restedBar:Hide()
     end
+    XPPaintQuestOverlay(frame, currentXP, maxXP)
 
     -- The texts (Center's "classic" is the bar's original text), only when an
     -- input changed: the XP values, a layout pass or a rate gain
@@ -1607,7 +1700,7 @@ function ns.CreateXPBar()
     end
     restedBar:SetMinMaxValues(0, 1)
     restedBar:SetValue(0)
-    restedBar:GetStatusBarTexture():SetDrawLayer("ARTWORK", 2)
+    restedBar:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
     restedBar:Hide()
     holder._restedBar = restedBar
 

@@ -521,12 +521,19 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                 lblAnchor = ico
             end
+            -- Opt-in dimmed rows (item.dimFn): a pick that has no effect here right now
+            -- (it shows somewhere else) rests dimmed but stays clickable, and hovering it
+            -- shows item.dimTooltip (string or function) in place of item.tooltip.
+            local function Dimmed()
+                return (item.dimFn and item.dimFn()) and true or false
+            end
             -- Modifier rows rest in the accent only while active; read live, since a
             -- sibling's click flips the checked state (UpdateCheck runs on every row).
             local function RestColor()
                 if item.isModifier and getFn(item.key) then
                     return EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b
                 end
+                if Dimmed() then return 0.5, 0.5, 0.5 end
                 return 0.75, 0.75, 0.75
             end
             local lbl = row:CreateFontString(nil, "OVERLAY")
@@ -662,6 +669,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 lbl:SetTextColor(1, 1, 1, 1)
                 hl:SetColorTexture(1, 1, 1, 0.04)
                 local tip = item.tooltip
+                if item.dimTooltip and Dimmed() then tip = item.dimTooltip end
                 if type(tip) == "function" then tip = tip() end
                 if tip then
                     EllesmereUI.ShowWidgetTooltip(row, tip)
@@ -676,7 +684,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 end
                 lbl:SetTextColor(RestColor())
                 hl:SetColorTexture(1, 1, 1, 0)
-                if item.tooltip then
+                if item.tooltip or item.dimTooltip then
                     EllesmereUI.HideWidgetTooltip()
                 end
             end)

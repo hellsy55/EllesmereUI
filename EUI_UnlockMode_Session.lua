@@ -1164,8 +1164,8 @@ local function RevertPositions()
                 if snap and not snap._fromLiveFrame then
                     if not UM.ApplyCenterPosition(barKey, snap) then
                         pcall(function()
-                            bar:ClearAllPoints()
-                            bar:SetPoint(snap.point, UIParent, snap.relPoint, snap.x, snap.y)
+                            EllesmereUI.ClearFramePoints(bar)
+                            EllesmereUI.SetFramePoint(bar, snap.point, UIParent, snap.relPoint, snap.x, snap.y)
                         end)
                     end
                 elseif bar.UpdateGridLayout then

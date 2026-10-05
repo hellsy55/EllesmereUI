@@ -125,12 +125,12 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
           end },
         -- Show Nicknames moved up from the section's old trailing half-row into the
         -- slot the Visibility Options dropdown left behind, so neither row is half
-        -- empty. ONE global toggle for all main frames (default OFF, not per-unit,
+        -- empty. ONE global toggle for all main frames (default ON, not per-unit,
         -- hence db.profile). Gates ns.ResolveUnitNickname: off = raw names, on =
         -- provider nicknames.
         { type="toggle", text="Show Nicknames",
           tooltip="Show player nicknames from supported addons instead of character names on your main frames.",
-          getValue=function() return db.profile.showNicknames or false end,
+          getValue=function() return db.profile.showNicknames ~= false end,
           setValue=function(v)
               db.profile.showNicknames = v
               if ns.RefreshAllUnitNames then ns.RefreshAllUnitNames() end

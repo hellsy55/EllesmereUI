@@ -1494,6 +1494,17 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
                   return SVal("nameColorMode", "class") == "accent" and 1 or 0.3
               end },
           } });  y = y - h
+
+    _, h = W:DualRow(parent, y,
+        { type="toggle", text="Show Nicknames",
+          tooltip="Show player nicknames from supported addons instead of character names on Raid Frames. This setting only affects Raid Frames.",
+          getValue=function() return db.profile.showNicknames ~= false end,
+          setValue=function(v)
+              db.profile.showNicknames = v
+              if ns.RefreshAllNames then ns.RefreshAllNames() end
+          end },
+        EllesmereUI.BlankRowCfg());  y = y - h
+
     -- Name char cap + text stacking cog, on the Name Size slider. WoW Forever
     -- heads it with Name Format (the character name's first or last word; First
     -- and Last is the default). "full" is stored, not nil: a party section's nil

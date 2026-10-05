@@ -77,6 +77,11 @@ local function InstallAutoQuests()
                 if Cfg("autoAccept") and C_GossipInfo.GetAvailableQuests then
                     if Cfg("autoAcceptShiftSkip") and IsShiftKeyDown() then return end
                     local available = C_GossipInfo.GetAvailableQuests()
+                    if available and Cfg("autoAcceptIgnoreTrivial") then
+                        for i = #available, 1, -1 do
+                            if available[i].isTrivial then table.remove(available, i) end
+                        end
+                    end
                     if available and #available > 0 then
                         local npcGUID = UnitGUID("npc")
                         if Cfg("autoAcceptPreventMulti") then
@@ -110,6 +115,7 @@ local function InstallAutoQuests()
         if event == "QUEST_DETAIL" then
             if not Cfg("autoAccept") then return end
             if Cfg("autoAcceptShiftSkip") and IsShiftKeyDown() then return end
+            if Cfg("autoAcceptIgnoreTrivial") and C_QuestLog.IsQuestTrivial(GetQuestID()) then return end
             AcceptQuest()
         elseif event == "QUEST_COMPLETE" then
             if not Cfg("autoTurnIn") then return end
