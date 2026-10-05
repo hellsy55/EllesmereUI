@@ -466,6 +466,7 @@ local defaults = {
         topNameBarBottom        = false,    -- Show on Bottom: the bar takes the frame's bottom edge
 
         -- Text
+        showNicknames    = true, -- per-module nickname toggle; true preserves the pre-toggle behavior
         nameSize         = 10,
         nameMaxLength    = 15,  -- max characters shown for unit names (0 = off / no cap)
         nameColorMode    = "custom",  -- "class", "accent", "custom"
@@ -1922,6 +1923,16 @@ ns.RF_NAME_WIDTH_FRACTION = 1.0
 local function ResolveDisplayName(unit, applyCap, s)
     local name, surname = UnitName(unit)
     name = name or ""
+    -- Per-module toggle: provider settings remain untouched, but Raid Frames can
+    -- independently opt out and always show the character name. Default ON keeps
+    -- existing profiles behaving exactly as they did before this toggle existed.
+    if db and db.profile and db.profile.showNicknames == false then
+        if Ambiguate then name = Ambiguate(name, "short") end
+        local raw = EllesmereUI.WithSurname(name, surname)
+        if ns.RF_FormatName then raw = ns.RF_FormatName(raw, s) end
+        if applyCap then raw = ns.CapName(raw, s) end
+        return raw
+    end
     local display
     if NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")

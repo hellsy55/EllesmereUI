@@ -3557,7 +3557,17 @@ function IL:CreateFrame()
                             local c = cf and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cf]
                             local cc = c and string.format("|cff%02x%02x%02x", c.r * 255 + 0.5, c.g * 255 + 0.5, c.b * 255 + 0.5) or "|cffffffff"
                             local realmPart = other and ("|cff999999-" .. realm .. "|r") or ""
-                            local text = LIGHT_BLUE .. bnet .. "|r " .. cc .. "(" .. g.characterName .. "|r" .. realmPart .. cc .. ")|r"
+                            local blueName = bnet
+                            if IL.db.ShowNicknames ~= false then
+                                -- Friend List only: replace the light-blue Battle.net label
+                                -- with a nickname when one can be resolved. The character in
+                                -- parentheses and `inviteName` remain the real character name.
+                                local unit = FindGroupUnit(inviteName)
+                                local nickname = unit and ns.GetNicknameForUnit(unit)
+                                    or ns.GetNicknameForName(g.characterName)
+                                if nickname then blueName = nickname end
+                            end
+                            local text = LIGHT_BLUE .. blueName .. "|r " .. cc .. "(" .. g.characterName .. "|r" .. realmPart .. cc .. ")|r"
                             out[#out + 1] = {
                                 key = key, bnet = bnet, online = true, hidden = isHidden, invite = inviteName,
                                 text = text, char = g.characterName .. (other and ("-" .. realm) or ""),
@@ -3856,6 +3866,7 @@ function IL:CreateFrame()
         SetWidgetEnabled(inviteAllBtn, canInviteAll)
         inviteAllBtn.text:SetTextColor(canInviteAll and accent[1] or 0.5, canInviteAll and accent[2] or 0.5, canInviteAll and accent[3] or 0.5, 1)
     end
+    f.RefreshFriends = RefreshFriends
 
     -- Deterministic order, left to right: Friends then History. Normally the
     -- main window sits between them; near a screen edge both panels move to the
@@ -4176,6 +4187,7 @@ ns.InviteToolsApplySettings = function()
     end
     if f.ApplyListScale then f.ApplyListScale(IL.db.ListScale or 1) end
     if f.ApplyResizable then f.ApplyResizable(IL.db.Unlocked == true) end
+    if f.RefreshFriends then f.RefreshFriends() end
 end
 
 

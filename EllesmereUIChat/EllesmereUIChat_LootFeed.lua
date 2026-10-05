@@ -1,5 +1,3 @@
--- Loot Feed incorporates loot-message processing adapted from MiniLoot by Vladinator.
--- Integrated into EllesmereUI Chat as a native feature; no standalone MiniLoot UI or SavedVariables are used.
 local rootNS = select(2, ...)
 rootNS.LootFeed = rootNS.LootFeed or {}
 local ns = rootNS.LootFeed ---@class LootFeedNS

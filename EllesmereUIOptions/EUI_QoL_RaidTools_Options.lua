@@ -289,15 +289,18 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = ns.RaidGroupsScale }
         );  y = y - h
 
-        -- Row 6: Auto-Minimize -- collapses the windows back to the icon on
-        -- their own once they've sat open (and unhovered) for the delay
-        -- beside it, no click needed. The delay only matters while the toggle
-        -- is on, so it greys out alongside it exactly like the rest of this
-        -- page greys out alongside Show Raid Tools.
+        -- Row 6: keep the nickname control packed beside the next option instead
+        -- of consuming a half-empty row. Auto-Minimize's delay remains below
+        -- because this section has an odd number of controls.
         local function AutoMinDisabled()
             return Disabled() or not (Cfg("autoMinimize") and true)
         end
         _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Nicknames in Raid Groups",
+              tooltip = "Show supported player nicknames in Raid Groups. Drag, swap and subgroup actions continue to use the real raid member identity.",
+              disabled = Disabled,
+              getValue = ns.RaidGroupsShowNicknames,
+              setValue = ns.RaidGroupsShowNicknames },
             { type = "toggle", text = "Auto-Minimize",
               tooltip = "Collapses the windows back to the icon on their own after they've been open (and the cursor hasn't been over them) for the delay below -- the same result as clicking the close button, just on a timer. Moving the cursor over the windows pauses the timer and it starts over once you look away.",
               disabled = Disabled,
@@ -306,7 +309,10 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("autoMinimize", v)
                   Refresh()
                   EllesmereUI:RefreshPage()  -- the delay slider's disabled state follows
-              end },
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "slider", text = "Auto-Minimize Delay (Seconds)", min = 5, max = 120, step = 1,
               tooltip = "How long the windows stay open, cursor off them, before Auto-Minimize collapses them.",
               disabled = AutoMinDisabled,
@@ -314,7 +320,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   Set("autoMinimizeDelay", v)
                   Refresh()
-              end }
+              end },
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         -- INVITE TOOLS
@@ -348,6 +355,14 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
 
         _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Nicknames in Friend List",
+              tooltip = "Replace the light-blue Battle.net name with a supported nickname when available. The character name in parentheses and all invite actions continue to use the real character name.",
+              disabled = Disabled,
+              getValue = function() return InviteCfg("ShowNicknames") ~= false end,
+              setValue = function(v)
+                  InviteSet("ShowNicknames", v and true or false)
+                  InviteRefresh()
+              end },
             { type = "colorpicker", text = "Window Background", hasAlpha = true,
               tooltip = "Background color and opacity of the Invite Tools window.",
               disabled = Disabled,
@@ -359,7 +374,10 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(r, g, b, a)
                   InviteSet("BgColor", { r, g, b, a or 1 })
                   InviteRefresh()
-              end },
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "colorpicker", text = "List Background", hasAlpha = true,
               tooltip = "Background color and opacity of the names list inside Invite Tools.",
               disabled = Disabled,
@@ -374,10 +392,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(r, g, b, a)
                   InviteSet("ListBgColor", { r, g, b, a or 1 })
                   InviteRefresh()
-              end }
-        );  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              end },
             { type = "toggle", text = "Allow Window Resize",
               tooltip = "Shows a resize handle in the bottom-right corner. The Invite Tools window can always be moved by dragging it.",
               disabled = Disabled,
@@ -385,7 +400,10 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   InviteSet("Unlocked", v and true or false)
                   InviteRefresh()
-              end },
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Auto Accept Shared Lists",
               tooltip = "Automatically accepts Invite Tools lists sent by your current group leader or a raid assistant. Lists from anyone else still require the normal Accept/Decline popup.",
               disabled = Disabled,
@@ -393,17 +411,17 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   InviteSet("AutoAcceptShared", v and true or false)
                   InviteRefresh()
-              end }
-        );  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              end },
             { type = "slider", text = "Ignore Repeat Shares (Seconds)", min = 0, max = 600, step = 5,
               tooltip = "Ignores a new shared-list offer from the same player if they already shared within this many seconds. Set to 0 to disable this filter.",
               disabled = Disabled,
               getValue = function() return math.max(0, tonumber(InviteCfg("ShareIgnoreSeconds")) or 30) end,
               setValue = function(v)
                   InviteSet("ShareIgnoreSeconds", math.max(0, tonumber(v) or 0))
-              end },
+              end }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Clear List When Ula'tek Dies",
               tooltip = "Clears the Invite List when Ula'tek is killed (not on a wipe). If the kill happens while still in combat, the list is cleared after combat. Existing joined/left History entries are preserved.",
               disabled = Disabled,
@@ -411,7 +429,8 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v)
                   InviteSet("ClearOnBossKill", v and true or false)
                   InviteRefresh()
-              end }
+              end },
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         -- QUICK FIRE
@@ -557,41 +576,50 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
 
         _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Nicknames",
+              tooltip = "Show player nicknames from supported addons instead of character names in Raid Check and its chat reports. Whispers and identity-sensitive actions continue to use character names.",
+              disabled = RCDisabled,
+              getValue = ns.RaidCheckShowNicknames,
+              setValue = ns.RaidCheckShowNicknames },
             { type = "slider", text = "Raid Check Window Scale", min = 0.5, max = 2.0, step = 0.05,
               disabled = RCDisabled,
               getValue = ns.RaidCheckScale,
-              setValue = ns.RaidCheckScale },
+              setValue = ns.RaidCheckScale }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Hide Inapplicable Columns",
               tooltip = "Drops columns nothing in this group can satisfy instead of greying them: no mage means no Intellect column, and a Mythic+ key means no Vantus. Turn off to keep every column in place whatever the group.",
               disabled = RCDisabled,
               getValue = ns.RaidCheckHideInapplicable,
-              setValue = ns.RaidCheckHideInapplicable }
-        );  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              setValue = ns.RaidCheckHideInapplicable },
             { type = "toggle", text = "Show Only Players Missing Something",
               tooltip = "Lists only the people something is actually wrong with, so a thirty-man roster becomes the three names you need to whisper. Someone whose client has not reported yet is not counted as missing.",
               disabled = RCDisabled,
               getValue = ns.RaidCheckHideReady,
-              setValue = ns.RaidCheckHideReady },
+              setValue = ns.RaidCheckHideReady }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Auto-Repair",
               tooltip = "Raid only. Left-click the Durability column's header icon anytime to use the Auto-Hammer (item 132514) -- no one needs to be low first. When a player's Durability reading drops to 25% or below, their name blinks as a heads-up, but that's just a warning, not a requirement to click.",
               disabled = RCDisabled,
               getValue = ns.RaidCheckAutoRepair,
-              setValue = ns.RaidCheckAutoRepair }
-        );  y = y - h
-
-        _, h = W:DualRow(parent, y,
+              setValue = ns.RaidCheckAutoRepair },
             { type = "toggle", text = "Raid Buff Whisper",
               tooltip = "Works in and out of combat, unlike Auto-Repair. When a group-wide raid buff's column header shows it's missing on someone, the icon blinks and sends the buff's spell link. In a raid, left-click reaches a provider in groups 1-4 and right-click one in groups 5-8; outside a raid, left-click reaches the only provider found. Hovering the icon always shows who each click would whisper, or that everyone already has it.",
               disabled = RCDisabled,
               getValue = ns.RaidCheckBuffWhisper,
-              setValue = ns.RaidCheckBuffWhisper },
+              setValue = ns.RaidCheckBuffWhisper }
+        );  y = y - h
+
+        _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Auto-Feast",
               tooltip = "Raid only. Left-click the Food column's header icon anytime to drop a feast at your own feet: Feast of Knowledge, falling back to Amani Cornucopia and then Loa's Gathering depending on what's in your bags. Disarmed while you already have a Well Fed buff active, so there's no wasted click.",
               disabled = RCDisabled,
               getValue = ns.RaidCheckAutoFeast,
-              setValue = ns.RaidCheckAutoFeast }
+              setValue = ns.RaidCheckAutoFeast },
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         -- COMPACT BAND (standalone)

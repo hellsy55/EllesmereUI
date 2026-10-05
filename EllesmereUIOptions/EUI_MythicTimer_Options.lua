@@ -163,28 +163,32 @@ initFrame:SetScript("OnEvent", function(self)
               end })
         y = y - h
 
-        -- Scale + Background Opacity: side-by-side dual row.
+        -- Keep the nickname toggle packed with Scale so DISPLAY has no empty
+        -- half-row between the nickname control and the next setting.
         local scaleRow
         scaleRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Nicknames",
+              tooltip="Show supported player nicknames in the Mythic+ death tooltip and Run Summary. Real character names and GUIDs remain the stored identity.",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="the module",
+              getValue=function() return Cfg("showNicknames") ~= false end,
+              setValue=function(v)
+                  Set("showNicknames", v and true or false)
+                  Refresh()
+                  if ns.RS_Refresh then ns.RS_Refresh() end
+              end },
             { type="slider", text="Scale",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="the module",
               min=0.5, max=2.0, step=0.01, isPercent=false,
               getValue=function() return Cfg("scale") or 1.0 end,
-              setValue=function(v) Set("scale", v); Refresh() end },
-            { type="slider", text="Background Opacity",
-              disabled=function() return Cfg("enabled") == false end,
-              disabledTooltip="the module",
-              min=0, max=100, step=5, isPercent=false,
-              -- Stored 0..1 internally; displayed 0..100 to the user.
-              getValue=function() return (Cfg("standaloneAlpha") or 0) * 100 end,
-              setValue=function(v) Set("standaloneAlpha", v / 100); Refresh() end })
+              setValue=function(v) Set("scale", v); Refresh() end })
         y = y - h
 
         -- Inline RESIZE cog on Scale: Frame Width slider
         if not EllesmereUI._prebuilding then
-            local leftRgn = scaleRow._leftRegion
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            local rightRgn = scaleRow._rightRegion
+            EllesmereUI.BuildInlineCog(rightRgn, {
                 title = "Frame Width",
                 rows = {
                     { type="slider", label="Width", min=180, max=420, step=1,
@@ -208,18 +212,29 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         row, h = W:DualRow(parent, y,
+            { type="slider", text="Background Opacity",
+              disabled=function() return Cfg("enabled") == false end,
+              disabledTooltip="the module",
+              min=0, max=100, step=5, isPercent=false,
+              -- Stored 0..1 internally; displayed 0..100 to the user.
+              getValue=function() return (Cfg("standaloneAlpha") or 0) * 100 end,
+              setValue=function(v) Set("standaloneAlpha", v / 100); Refresh() end },
             { type="slider", text="Bar Width",
               disabled=_barsOff,
               disabledTooltip=_barsReq,
               min=120, max=420, step=1, isPercent=false,
               getValue=function() return Cfg("barWidth") or 210 end,
-              setValue=function(v) Set("barWidth", v); Refresh() end },
+              setValue=function(v) Set("barWidth", v); Refresh() end })
+        y = y - h
+
+        row, h = W:DualRow(parent, y,
             { type="toggle", text="Custom Border Style",
               tooltip="Show the border style and size controls for the timer bars.",
               disabled=_barsOff,
               disabledTooltip=_barsReq,
               getValue=function() return Cfg("customBorderStyle") == true end,
-              setValue=function(v) Set("customBorderStyle", v); ApplyBorder(); EllesmereUI:RefreshPage(true) end })
+              setValue=function(v) Set("customBorderStyle", v); ApplyBorder(); EllesmereUI:RefreshPage(true) end },
+            EllesmereUI.BlankRowCfg())
         y = y - h
 
         --Border Style (+ cog) | Border Size (+ inline swatch)

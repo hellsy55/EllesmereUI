@@ -202,6 +202,7 @@ local defaults = {
         -- names one of their own ("blizzard" = the vanilla cast fill).
         castBarTexture = "inherit",
         darkTheme = false,
+        showNicknames = true,
         -- One decimal on abbreviated values (240.5k) and percents (77.3%); global, read by text tags via _G flags.
         showDecimalOnText = false,
         -- With decimals on, boss frames use two (240.55k / 77.30%); inline cog on "Show Decimal on Health Text".
@@ -2849,10 +2850,14 @@ function ns.ResolveUnitNickname(unit)
     if not UnitIsPlayer(unit) then return name end
     local nameSecret = issecretvalue and issecretvalue(name)
     local display
+    -- Per-module toggle (Unit Frames > Display, default ON). It gates EVERY
+    -- provider, including MethodInternal, so turning nicknames off here always
+    -- means character names on Unit Frames without affecting any other module.
+    if db and db.profile and db.profile.showNicknames == false then
+        return EllesmereUI.WithSurname(name, surname)
+    end
     -- MethodInternal's surface choice is authoritative for known Method players,
-    -- including Character Name (which deliberately equals the raw name). It sits
-    -- ahead of the EUI master toggle so the MethodInternal-owned setting works on
-    -- its selected surface; unknown players continue through EUI's normal chain.
+    -- including Character Name (which deliberately equals the raw name).
     if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
         local ok, dn, handled = pcall(
             EasyNicknameAPI.GetNicknameForUnitForSurface, unit, "unitFrames")
@@ -2864,10 +2869,6 @@ function ns.ResolveUnitNickname(unit)
             return EllesmereUI.WithSurname(name, surname)
         end
     end
-    -- Master toggle (Unit Frames > main frames > Display, default OFF): when off,
-    -- skip the remaining provider lookups and show the raw unit name (display-safe;
-    -- with the surname on WoW Forever).
-    if not (db and db.profile and db.profile.showNicknames) then return EllesmereUI.WithSurname(name, surname) end
     if not nameSecret and NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
         if ok and type(dn) == "string"

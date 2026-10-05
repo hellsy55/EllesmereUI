@@ -27,6 +27,7 @@ local LootFeedChatFrame = {
 ---@field DebounceGroups table<LootFeedMessageGroup, number?>
 ---@field EnabledTooltips table<LootFeedTooltipHandlerType, boolean?>
 ---@field Filters LootFeedFilters
+---@field ShowGroupNicknames boolean
 
 ---@class LootFeedNSSettingsOptions
 local DefaultOptions = {
@@ -37,6 +38,7 @@ local DefaultOptions = {
     Debounce = 2, --- gather loot messages and when it settles this many seconds later we print the summary
     DebounceInCombat = true, --- if debounce should wait until combat ends before counting down
     ShortenPlayerNames = true, --- enable to remove the realm name
+    ShowGroupNicknames = true, --- show supported nicknames for current party/raid members
     ShortenFactionNames = true, --- enable to reduce the length of faction names
     ShortenFactionNamesLength = 10, --- specify the length before reduction activates
     IconTrim = 8, --- the px we want to trim from the texture icons

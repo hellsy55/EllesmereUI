@@ -554,6 +554,7 @@ local DB_DEFAULTS = {
             AutoInviteInterval = 30,
             AutoAcceptShared   = false,
             AutoAcceptFriendly = false,
+            ShowNicknames       = true,
             ClearOnBossKill     = true,
             ShareIgnoreSeconds = 30,
             Width              = 430,

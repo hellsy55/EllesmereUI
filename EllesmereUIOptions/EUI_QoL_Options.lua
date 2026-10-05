@@ -740,7 +740,7 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Inline cog (Text Size) on the Announce Group Deaths toggle
+        -- Inline cog for Group Death Alert settings on the Announce Group Deaths toggle
         if not EllesmereUI._prebuilding then
             local leftRgn = deathRow._leftRegion
             local function deathOff()
@@ -778,6 +778,16 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.BuildInlineCog(leftRgn, {
                 title = "Group Death Alert Settings",
                 rows = {
+                    { type="toggle", label="Show Nicknames",
+                      tooltip="Show supported player nicknames instead of character names in the Group Death Alert when available. This only changes the displayed alert; death detection continues to use the real group unit and GUID.",
+                      get=function()
+                        return not EllesmereUIDB or EllesmereUIDB.groupDeathShowNicknames ~= false
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.groupDeathShowNicknames = v and true or false
+                        if EllesmereUI._groupDeathShowVisual then EllesmereUI._groupDeathShowVisual() end
+                      end },
                     { type="slider", label="Text Size",
                       min=14, max=64, step=1,
                       get=function()
@@ -2581,6 +2591,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.lootHistoryDelay = nil
                 if EllesmereUI._applyHideLootHistory then EllesmereUI._applyHideLootHistory() end
                 EllesmereUIDB.announceGroupDeaths = false
+                EllesmereUIDB.groupDeathShowNicknames = true
                 EllesmereUIDB.groupDeathTextSize = nil
                 EllesmereUIDB.groupDeathAlertPos = nil
                 EllesmereUIDB.groupDeathSound = nil      -- legacy boolean (pre-dropdown)
