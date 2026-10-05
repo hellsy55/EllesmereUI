@@ -8,6 +8,8 @@ local PAGE_WINDOWSKINS   = "Blizzard Window Skins"
 local PAGE_TOOLTIPS      = "Tooltips, Menus & Popups"
 local PAGE_DRAGONRIDING  = "Dragon Riding"
 local PAGE_CHATBUBBLES   = "Chat Bubbles"
+-- A link tab: opens Quality of Life's Shifter (see pageLinks below).
+local PAGE_WINDOWMOVER   = "Window Mover"
 -- Display-only tab labels: the page names above stay the pages' identities
 -- (nav links, Unlock Mode, saved state).
 EllesmereUI.TAB_LABEL_OVERRIDES[PAGE_WINDOWSKINS] = "Window Skins"
@@ -781,6 +783,61 @@ initFrame:SetScript("OnEvent", function(self)
                           if not EllesmereUIDB then EllesmereUIDB = {} end
                           EllesmereUIDB.itemStackModifier = v
                       end },
+                },
+            })
+        end
+
+        local ttBuffsRow
+        ttBuffsRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Player Buffs",
+              tooltip="Shows a player's buffs on their tooltip.",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.tooltipShowBuffs or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipShowBuffs = v
+                  if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
+                  EllesmereUI:RefreshPage()  -- update the position cog disabled state
+              end },
+            EllesmereUI.BlankRowCfg()
+        );  y = y - h
+
+        if not EllesmereUI._prebuilding then
+            local function ttBuffsOff()
+                return ttReskinOff() or not (EllesmereUIDB and EllesmereUIDB.tooltipShowBuffs)
+            end
+            local function setBuffs(key, v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB[key] = v
+                if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
+            end
+            EllesmereUI.BuildInlineCog(ttBuffsRow._leftRegion, {
+                icon = EllesmereUI.DIRECTIONS_ICON, gap = 9,
+                disabled = ttBuffsOff,
+                disabledTooltip = function()
+                    return ttReskinOff() and "Reskin Tooltip" or "Show Player Buffs"
+                end,
+                title = "Tooltip Buffs",
+                rows = {
+                    { type="dropdown", label="Position",
+                      values={ bottom="Bottom", top="Top", left="Left", right="Right" },
+                      order={ "bottom", "top", "left", "right" },
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipBuffPosition or "bottom" end,
+                      set=function(v) setBuffs("tooltipBuffPosition", v) end },
+                    { type="slider", label="Icon Size", min=12, max=40, step=1,
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipBuffSize or 20 end,
+                      set=function(v) setBuffs("tooltipBuffSize", v) end },
+                    { type="slider", label="Icons Per Row", min=1, max=16, step=1,
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipBuffsPerRow or 8 end,
+                      set=function(v) setBuffs("tooltipBuffsPerRow", v) end },
+                    { type="slider", label="Offset X", min=-100, max=100, step=1,
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipBuffOffsetX or 0 end,
+                      set=function(v) setBuffs("tooltipBuffOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-100, max=100, step=1,
+                      get=function() return EllesmereUIDB and EllesmereUIDB.tooltipBuffOffsetY or 0 end,
+                      set=function(v) setBuffs("tooltipBuffOffsetY", v) end },
                 },
             })
         end
@@ -3741,15 +3798,20 @@ initFrame:SetScript("OnEvent", function(self)
         return math.abs(y)
     end
 
+    -- WoW Forever has no skyriding: the Dragon Riding tab is not registered there
+    -- (its resident file returns at load, so the page would have no DB to read).
+    -- Window Mover, right after Window Skins, links to Quality of Life's Shifter,
+    -- so it is offered only while Quality of Life is loaded.
+    local pages = EllesmereUI.IS_FOREVER and { PAGE_WINDOWSKINS, PAGE_TOOLTIPS, PAGE_CHATBUBBLES }
+        or { PAGE_WINDOWSKINS, PAGE_TOOLTIPS, PAGE_CHATBUBBLES, PAGE_DRAGONRIDING }
+    if EllesmereUI._ModuleNS["EllesmereUIQoL"] then table.insert(pages, 2, PAGE_WINDOWMOVER) end
     EllesmereUI:RegisterModule("EllesmereUIBlizzardSkin", {
         title       = "Blizzard Skins+",
-        -- WoW Forever has no skyriding: the Dragon Riding tab is not registered there
-        -- (its resident file returns at load, so the page would have no DB to read).
         description = EllesmereUI.IS_FOREVER and "Themed Blizzard frames: window skins, tooltips, menus, popups, chat bubbles."
             or "Themed Blizzard frames: window skins, tooltips, menus, popups, chat bubbles, Dragon Riding HUD.",
         searchTerms = "blizzard skin character sheet tooltip menu popup dragon riding skyriding window skins lfg group finder premade queue pause game menu great vault inspect collections mounts pets toys spellbook talents adventure guide encounter journal professions guild communities calendar achievements mail catalyst gem socket item upgrade upgrades crest loot window loot toast you received popup micro menu modern delves companion brann loot roll need greed pass disenchant loot rolls pending rolls group invite invited to a group role chat bubbles bubble speech balloon",
-        pages       = EllesmereUI.IS_FOREVER and { PAGE_WINDOWSKINS, PAGE_TOOLTIPS, PAGE_CHATBUBBLES }
-            or { PAGE_WINDOWSKINS, PAGE_TOOLTIPS, PAGE_CHATBUBBLES, PAGE_DRAGONRIDING },
+        pages       = pages,
+        pageLinks   = { [PAGE_WINDOWMOVER] = { module = "EllesmereUIQoL", page = "Shifter" } },
         buildPage   = function(pageName, parent, yOffset)
             if pageName == PAGE_WINDOWSKINS then
                 return BuildWindowSkinsPage(pageName, parent, yOffset)
@@ -3817,6 +3879,13 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.tooltipShowGuildRank = nil
                 EllesmereUIDB.tooltipShowMount = nil
                 EllesmereUIDB.tooltipShowTarget = nil
+                EllesmereUIDB.tooltipShowBuffs = nil
+                EllesmereUIDB.tooltipBuffPosition = nil
+                EllesmereUIDB.tooltipBuffSize = nil
+                EllesmereUIDB.tooltipBuffsPerRow = nil
+                EllesmereUIDB.tooltipBuffOffsetX = nil
+                EllesmereUIDB.tooltipBuffOffsetY = nil
+                if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
                 EllesmereUIDB.reskinQueuePopup = nil
                 EllesmereUIDB.resurrectAcceptGlow = nil
                 -- Clear any glow on a currently visible popup (the setting

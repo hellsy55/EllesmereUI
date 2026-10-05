@@ -4057,6 +4057,22 @@ function EllesmereUI:SelectPage(pageName)
     if not activeModule or not modules[activeModule] then return end
     if pageName == activePage then return end
 
+    -- A link tab (config.pageLinks[pageName] = { module =, page = }) opens another
+    -- module's page instead of one of its own. Nothing here changes, so coming
+    -- back lands on the page that was open.
+    local links = modules[activeModule].pageLinks
+    local link = links and links[pageName]
+    if link then
+        if modules[link.module] then
+            -- SelectModule opens a module on its last page: make that the target,
+            -- so the module's previous page is never built on the way.
+            _lastPagePerModule[link.module] = link.page
+            self:SelectModule(link.module)
+            if activePage ~= link.page then self:SelectPage(link.page) end
+        end
+        return
+    end
+
     -- "Unlock Mode" is a fake nav item -- fire unlock mode without changing page state.
     -- Capture the current module + page so DoClose can restore them exactly.
     if pageName == "Unlock Mode" then

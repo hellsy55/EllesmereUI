@@ -196,8 +196,8 @@ function EllesmereUI.RecenterBarAnchor(barKey)
     end
 
     pcall(function()
-        b:ClearAllPoints()
-        b:SetPoint(anchor, UIParent, "CENTER", setX, setY)
+        EllesmereUI.ClearFramePoints(b)
+        EllesmereUI.SetFramePoint(b, anchor, UIParent, "CENTER", setX, setY)
     end)
 
     -- Keep mover's stored center in sync so drag/snap logic stays consistent
@@ -452,7 +452,9 @@ function EllesmereUI.MatchGuard(barKey, axis, existingDisabled, existingTooltip)
         local target = getFn(barKey)
         if target then
             local name = (EllesmereUI.GetBarLabel and EllesmereUI.GetBarLabel(target)) or target
-            return axis .. " matched to " .. name .. ". Unmatch in Unlock Mode to edit."
+            return isWidth
+                and EllesmereUI.Lf("Width matched to %1$s. Unmatch in Unlock Mode to edit.", EllesmereUI.L(name))
+                or EllesmereUI.Lf("Height matched to %1$s. Unmatch in Unlock Mode to edit.", EllesmereUI.L(name))
         end
         if existingTooltip then
             return type(existingTooltip) == "function" and existingTooltip() or existingTooltip
@@ -1756,8 +1758,8 @@ do
                         local bar = UM.GetBarFrame(key)
                         if bar then
                             pcall(function()
-                                bar:ClearAllPoints()
-                                bar:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+                                EllesmereUI.ClearFramePoints(bar)
+                                EllesmereUI.SetFramePoint(bar, pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
                             end)
                         end
                     end
@@ -1943,8 +1945,8 @@ do
             end
         end
         pcall(function()
-            childBar:ClearAllPoints()
-            childBar:SetPoint("CENTER", UIParent, "CENTER", bCenterX, bCenterY)
+            EllesmereUI.ClearFramePoints(childBar)
+            EllesmereUI.SetFramePoint(childBar, "CENTER", UIParent, "CENTER", bCenterX, bCenterY)
         end)
         -- Children anchored to THIS child must follow it to the fallback spot.
         UM._pendingAnchorKeys[childKey] = "all"

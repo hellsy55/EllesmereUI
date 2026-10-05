@@ -1126,11 +1126,18 @@ do
         local ok, secret = pcall(C_Secrets.ShouldCooldownsBeSecret)
         return (ok and secret) and true or false
     end
-    local function ApplyBroadcaster()
+    -- WoW Forever: cooldowns read secret in combat there too, and the check
+    -- above cannot see it coming at PLAYER_REGEN_DISABLED, so the tick set
+    -- stands down for every fight: dropped at that edge (combatEdge), back at
+    -- PLAYER_REGEN_ENABLED. Our dispatcher still paints ExtraActionButton1.
+    local function ApplyBroadcaster(combatEdge)
         local want = (_vehNeed or _extraNeed) and "full" or "off"
         -- Folded into `want` so the mode comparison below sees the change and
         -- re-applies; PLAYER_ENTERING_WORLD and the REGEN edges re-run this.
-        if want == "full" and CooldownsSecret() then want = "off" end
+        if want == "full" and (CooldownsSecret()
+            or (EllesmereUI.IS_FOREVER and (combatEdge or InCombatLockdown()))) then
+            want = "off"
+        end
         if want == _broadcasterMode then return end
         _broadcasterMode = want
         -- Drop to the quiet state first (the two seeding registrations survive
@@ -1181,8 +1188,9 @@ do
     barFrame:SetScript("OnEvent", function(_, event, unit)
         if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
             -- Undeferred, and a secrecy re-check only: the needs are unchanged
-            -- at a combat edge, so this early-outs unless the secret state moved.
-            ApplyBroadcaster()
+            -- at a combat edge, so this early-outs unless the secret state moved
+            -- (or, on WoW Forever, the fight began or ended).
+            ApplyBroadcaster(event == "PLAYER_REGEN_DISABLED")
             return
         end
         C_Timer.After(0, RefreshBroadcasterNeeds) -- deferred so IsShown reflects post-event state

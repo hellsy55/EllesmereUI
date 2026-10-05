@@ -2,10 +2,13 @@
 
 Engine button reads and post-initialization writes deliberately fail. Aura
 changes only go through the mock engine, never through addon aura events.
-By default a slot's button is born at its first matching aura; --eager
-creates it at declaration instead (the live engine's batches). Either way a
-tint draws above every tint whose root slot was declared before it, and a
-combo (a nested chain) above every single debuff.
+As in the live engine, a container is born enabled on unit "none", a hidden
+one processes nothing and a shown one reads its unit in full. By default a
+slot's button is born at its first matching aura; --eager creates it at
+declaration instead (the live engine's batches). Either way a tint ranks by
+its slot path from the root (each level's declaration order), so a
+later-declared slot draws on top, and a combo (a nested chain) draws above
+every single debuff.
 
 Run: python .tools/tests/test_nameplate_debuff_colors.py [--eager]  (needs lupa)
 """
@@ -18,7 +21,9 @@ lua = lua51.LuaRuntime(unpack_returned_tuples=True)
 lua.globals().EAGER = '--eager' in sys.argv
 lua.execute(r'''
 ns = { defaults = { debuffColorsEnabled = false, debuffColorsPlayerOnly = true,
-    healthBarTexture = "custom" }, plates = {}, healthBarTextures = {} }
+    debuffColorsBorder = false, debuffColorsBorderExtra = 0,
+    healthBarTexture = "custom", customBorderTexture = "solid", customBorderSize = 1 },
+    plates = {}, healthBarTextures = {} }
 profile = {}
 ns.db = { profile = profile }
 function ns.NP_GetProfile() return profile end
@@ -27,6 +32,37 @@ EllesmereUI = {
     IS_FOREVER = false,
     ResolveTexturePath = function(_, key) return "test-texture-" .. key end,
 }
+-- The plate border Color Border draws over (the nameplate main file's helpers),
+-- set per case: Basic by default.
+border = { blizz = false, custom = false, basic = true, size = 1 }
+function ns.NP_Blizz() return border.blizz end
+function ns.IsCustomBorderEnabled() return border.custom end
+function ns.IsBorderEnabled() return border.basic end
+function ns.NP_BorderSize() return border.size end
+EllesmereUI.PP = { perfect = 0.5, mult = 0.75 }
+-- The exact size string ("px|step|texture") counts only for its own step and texture.
+function EllesmereUI.BorderPx(value, step, tex)
+    if type(value) ~= "string" then return nil end
+    local px, s, t = value:match("^(%d+)|(%d+)|(.*)$")
+    px, s = tonumber(px), tonumber(s)
+    if not px or px <= 0 or s ~= step then return nil end
+    if not tex or tex == "" then tex = "solid" end
+    if t ~= tex then return nil end
+    return px
+end
+function EllesmereUI.ResolveBorderTexture(key) if key == "pixels" then return "path-pixels" end end
+EllesmereUI.SECRET_BORDER_UV = {}
+for i, key in ipairs({ "topLeft", "topRight", "bottomLeft", "bottomRight", "top", "bottom", "left", "right" }) do
+    EllesmereUI.SECRET_BORDER_UV[key] = { i, i + 0.5 }
+end
+geometry = {}
+function EllesmereUI.SecretBorderGeometry(owner, size, tex, ox, oy, sx, sy, addon, sizeKey, edgeScale, edgePx)
+    geometry[#geometry+1] = { owner=owner, size=size, tex=tex, ox=ox, oy=oy, sx=sx, sy=sy,
+        addon=addon, sizeKey=sizeKey, edgeScale=edgeScale, px=edgePx }
+    return 7, -1, 2, 3, -4
+end
+pxReapply = {}
+function EllesmereUI.RegisterPxReapply(owner, fn) pxReapply.owner, pxReapply.fn = owner, fn end
 C_AddOns = { IsAddOnLoaded = function() return true end }
 function UnitClass() return "Druid", "DRUID" end
 combat = false
@@ -51,7 +87,6 @@ function methods:SetSize(w, h) Mutable(self); states[self].size = { w, h } end
 function methods:SetAlpha(alpha) Mutable(self); states[self].alpha = alpha end
 function UIState(obj) return states[obj] end
 function methods:EnableMouse(value) Mutable(self); states[self].mouse = value end
-function methods:SetTexture(value) Mutable(self); states[self].texture = value end
 function methods:SetVertexColor(...) Mutable(self); states[self].color = {...} end
 function methods:AddMaskTexture(mask) Mutable(self); states[self].mask = mask end
 function methods:Hide() Mutable(self); states[self].shown = false end
@@ -61,9 +96,34 @@ function methods:GetParent() error("addon inspected engine-owned parent") end
 function methods:RegisterEvent(event) states[self].events[event] = true end
 function methods:UnregisterEvent(event) states[self].events[event] = nil end
 function methods:SetScript(event, callback) states[self].scripts[event] = callback end
-function methods:SetEnabled(enabled) states[self].enabled = enabled end
-function methods:SetUnit(unit) states[self].unit = unit end
+local calls = { enabled = 0, unit = 0 }
+function methods:SetEnabled(enabled) states[self].enabled = enabled; calls.enabled = calls.enabled + 1 end
+function methods:SetUnit(unit) states[self].unit = unit; calls.unit = calls.unit + 1 end
+function ResetCalls() calls.enabled, calls.unit = 0, 0 end
+function Calls() return calls.enabled, calls.unit end
 function methods:GetStatusBarTexture() return states[self].fill end
+function methods:SetFrameStrata(strata) Mutable(self); states[self].strata = strata end
+function methods:SetIgnoreParentScale(v) Mutable(self); states[self].ignoreParentScale = v end
+function methods:SetScale(v) Mutable(self); states[self].scale = v end
+function methods:GetEffectiveScale()
+    assert(not states[self].locked)
+    return states[self].ignoreParentScale and (states[self].scale or 1) or 0.8
+end
+function methods:SetColorTexture(r, g, b, a) Mutable(self); states[self].color = { r, g, b, a } end
+function methods:SetSnapToPixelGrid(v) Mutable(self); states[self].snap = v end
+function methods:SetTexelSnappingBias(v) Mutable(self); states[self].bias = v end
+function methods:SetWidth(w) Mutable(self); states[self].width = w end
+function methods:SetHeight(h) Mutable(self); states[self].height = h end
+function methods:SetTexCoord(...) Mutable(self); states[self].texCoord = {...} end
+function methods:SetTexture(value, wrapH, wrapV)
+    Mutable(self); states[self].texture = value; states[self].wrap = { wrapH, wrapV }
+end
+function EllesmereUI.LayoutSecretBorderEdges(edges, owner, edge, aL, aT, aR, aB)
+    for key, tx in pairs(edges) do
+        Mutable(tx)
+        states[tx].slice, states[tx].layout = key, { owner=owner, edge=edge, aL=aL, aT=aT, aR=aR, aB=aB }
+    end
+end
 
 local function New(kind, parent)
     local obj = setmetatable({}, { __index = methods })
@@ -77,7 +137,11 @@ function CreateFrame(kind, _, parent, template)
         assert(template == "CustomAuraContainerTemplate")
     end
     local obj = New(kind, parent)
-    if kind == "AuraContainer" then containers[#containers+1] = obj end
+    if kind == "AuraContainer" then
+        -- The intrinsic AuraContainer's KeyValues: enabled, on unit "none".
+        states[obj].enabled, states[obj].unit = true, "none"
+        containers[#containers+1] = obj
+    end
     return obj
 end
 function methods:CreateTexture(_, layer, _, sublevel)
@@ -90,10 +154,14 @@ end
 local function Birth(slot)
     slot.button = New("AuraButton", slot.container)
     states[slot.button].slot = slot
+    local first = #frames + 1
     slot.init(slot.button)
     states[slot.button].locked = true
-    for _, tex in ipairs(textures) do
-        if states[tex].parent == slot.button then states[tex].locked = true end
+    -- What the init decorated is engine-owned afterwards: its textures and
+    -- plain frames (a nested container stays the kit's).
+    for i = first, #frames do
+        local kind = states[frames[i]].kind
+        if kind == "Texture" or kind == "Frame" then states[frames[i]].locked = true end
     end
 end
 function methods:AddAuraSlot(key, filter, spec)
@@ -112,6 +180,28 @@ function SlotCount(container)
     for _ in pairs(states[container].slots) do n = n + 1 end
     return n
 end
+-- The plate's current bundle root (its holder is shown), and how many
+-- containers that bundle owns, nested ones included.
+function RootOf(plate)
+    for i = #containers, 1, -1 do
+        local c = containers[i]
+        local holder = states[c].parent
+        if states[holder].kind == "Frame" and states[holder].parent == plate.health
+            and states[holder].shown and states[c].shown then
+            return c
+        end
+    end
+end
+function LiveContainers(plate)
+    local holder = states[RootOf(plate)].parent
+    local n = 0
+    for _, c in ipairs(containers) do
+        local obj = c
+        while obj and obj ~= holder do obj = states[obj].parent end
+        if obj then n = n + 1 end
+    end
+    return n
+end
 
 local function Matches(slot, unit)
     for _, aura in ipairs(unitAuras[unit] or {}) do
@@ -119,42 +209,51 @@ local function Matches(slot, unit)
     end
     return false
 end
-local function UpdateEngine()
-    local i = 1
-    while i <= #containers do
-        local c = containers[i]
-        local state = states[c]
-        for _, slot in pairs(state.slots) do
-            local active = state.enabled and Matches(slot, state.unit)
-            if active and not slot.button then Birth(slot) end
-            if slot.button then states[slot.button].shown = active end
-        end
-        i = i + 1
-    end
-end
-function Auras(unit, auras) unitAuras[unit] = auras; UpdateEngine() end
 local function Visible(obj)
     local state = states[obj]
     if not state.shown then return false end
     return not state.parent or Visible(state.parent)
 end
--- Draw order: the tint whose ROOT slot was declared last is on top, and a
--- nested chain (a combo) above every root-level tint.
-local function Rank(tex)
-    local slot = states[states[tex].parent].slot
-    local nested = false
-    while states[states[slot.container].parent].slot do
-        slot = states[states[slot.container].parent].slot
-        nested = true
+local function UpdateEngine()
+    local i = 1
+    while i <= #containers do
+        local c = containers[i]
+        local state = states[c]
+        -- A hidden container processes nothing; a shown one reads its unit in
+        -- full (the live engine's parse on show).
+        if Visible(c) then
+            for _, slot in pairs(state.slots) do
+                local active = state.enabled and Matches(slot, state.unit)
+                if active and not slot.button then Birth(slot) end
+                if slot.button then states[slot.button].shown = active end
+            end
+        end
+        i = i + 1
     end
-    return (nested and 1000000 or 0) + slot.decl
 end
+function Auras(unit, auras) unitAuras[unit] = auras; UpdateEngine() end
+-- Draw order: buttons are born in declaration order (a nested container's
+-- slots inside its button's init), so a tint ranks by its slot path from the
+-- root, each level's declaration index in turn; a nested chain (a combo)
+-- also sits above every root-level tint.
+local function Rank(tex)
+    local path = {}
+    local owner = states[tex].parent
+    while owner and not states[owner].slot do owner = states[owner].parent end
+    local slot = owner and states[owner].slot
+    while slot do
+        table.insert(path, 1, string.format("%08d", slot.decl))
+        slot = states[states[slot.container].parent].slot
+    end
+    return (#path > 1 and "1:" or "0:") .. table.concat(path, ".")
+end
+-- Color Nameplate: the top visible tint (a texture right in a slot button).
 function Paint(plate)
     UpdateEngine()
     local chosen, best
     for _, tex in ipairs(textures) do
         local state = states[tex]
-        if state.color and Visible(tex) then
+        if state.color and Visible(tex) and states[state.parent].kind == "AuraButton" then
             local parent = tex
             while parent and parent ~= plate.health do parent = states[parent].parent end
             if parent then
@@ -186,12 +285,73 @@ function AssertColor(plate, r, g, b, msg)
     assert(painted.points[2][2] == states[plate.health].fill)
     assert(states[plate.health].baseColor[1] == .2, "mutated base health color")
 end
+-- Color Border: the top visible border drawn in a slot (a plain frame in a slot
+-- button holding the pieces): its state and its pieces' states.
+function BorderPaint(plate)
+    UpdateEngine()
+    local chosen, best
+    for _, f in ipairs(frames) do
+        local state = states[f]
+        local button = state.parent
+        if state.kind == "Frame" and button and states[button].kind == "AuraButton" and Visible(f) then
+            local parent = f
+            while parent and parent ~= plate.health do parent = states[parent].parent end
+            if parent then
+                local rank = Rank(f)
+                if not best or rank > best then chosen, best = f, rank end
+            end
+        end
+    end
+    if not chosen then return nil end
+    local pieces = {}
+    for _, tex in ipairs(textures) do
+        if states[tex].parent == chosen then pieces[#pieces+1] = states[tex] end
+    end
+    return states[chosen], pieces
+end
+function AssertBorder(plate, r, g, b, msg)
+    local f, pieces = BorderPaint(plate)
+    if r == nil then assert(not f, msg or "stale debuff border"); return end
+    assert(f, msg or "missing debuff border")
+    assert(#pieces == 4 or #pieces == 8, "a debuff border without its pieces")
+    for _, piece in ipairs(pieces) do
+        local c = piece.color
+        assert(c and c[1] == r and c[2] == g and c[3] == b and c[4] == 1,
+            (msg or "wrong border color") .. ": got " .. tostring(c and c[1]) .. "," ..
+            tostring(c and c[2]) .. "," .. tostring(c and c[3]))
+    end
+    assert(not Paint(plate), "Color Border also tinted the health bar")
+    assert(states[plate.health].baseColor[1] == .2, "mutated base health color")
+    return f, pieces
+end
 function RunWorker()
     for _, frame in ipairs(frames) do
         if states[frame].shown and states[frame].scripts.OnUpdate then
             states[frame].scripts.OnUpdate(frame, .2)
         end
     end
+end
+-- The frames registered for an event (none while nothing needs it).
+function Watching(event)
+    local n = 0
+    for _, frame in ipairs(frames) do
+        if states[frame].events[event] then n = n + 1 end
+    end
+    return n
+end
+function FireEvent(event)
+    for _, frame in ipairs(frames) do
+        if states[frame].events[event] then states[frame].scripts.OnEvent(frame, event) end
+    end
+end
+-- Where the plate's own custom border draws, as the nameplate module places
+-- it (ns.ApplyCustomBorderStyle): its frame one level above the bar (one below
+-- when behind); a textured border on that frame, a Solid one on the pixel
+-- border's container one level higher.
+function CustomBorderLevel(plate, behind, solid)
+    local bar = states[plate.health].level
+    local frame = behind and math.max(1, bar - 1) or (bar + 1)
+    return solid and frame + 1 or frame
 end
 function Regen()
     combat = false
@@ -254,26 +414,23 @@ assert(#frames == 0 and not ns.DebuffColors_Attach and not ns.DebuffColors_Detac
 ns.DebuffColors_Refresh()
 ns.DebuffColors_RequestRefresh()
 assert(#frames == 0, "disabled feature built a frame or worker")
-assert(not ns.DebuffColors_Pending())
 local p = NewPlate("nameplate1")
 
 -- Enabled with nothing listed: still no plate hooks or containers.
 profile.debuffColorsEnabled = true
-assert(ns.DebuffColors_Pending(), "first enable is not pending")
 ns.DebuffColors_Refresh()
 assert(not ns.DebuffColors_Attach and #containers == 0, "empty lists hooked the plates")
-assert(not ns.DebuffColors_Pending())
 
 -- Another class's list is never read; the player's own builds after combat.
 profile.debuffColorsROGUE = "589:" .. BLUE .. "/"
-assert(not ns.DebuffColors_Pending(), "another class's list changed the plates")
+ns.DebuffColors_Refresh()
+assert(not ns.DebuffColors_Attach and #containers == 0, "another class's list changed the plates")
 profile.debuffColorsDRUID = "703:" .. ORANGE .. ";1943:" .. RED .. "/703+1943:" .. GREEN
-assert(ns.DebuffColors_Pending())
 combat = true
 ns.DebuffColors_Refresh()
 assert(not ns.DebuffColors_Attach and #containers == 0, "combat change was not deferred")
 Regen()
-assert(ns.DebuffColors_Attach and not ns.DebuffColors_Pending())
+assert(ns.DebuffColors_Attach)
 AssertColor(p, nil)
 
 -- Secret combat aura changes: engine visibility must be sufficient on its own.
@@ -301,6 +458,29 @@ ns.DebuffColors_Attach(p, "nameplate2")
 Auras("nameplate2", {{ id=1943, mine=true }})
 AssertColor(p, .8, .2, .1)
 assert(#containers == before, "plate reuse rebuilt its aura containers")
+
+-- Plate churn: parking is only a hide, and the same token rebinds with only a
+-- show, which re-reads the unit (the debuff fell off while parked); a new
+-- token sets each container's unit once. Nothing is disabled or re-enabled.
+ResetCalls()
+ns.DebuffColors_Detach(p)
+Auras("nameplate2", {})
+ns.DebuffColors_Attach(p, "nameplate2")
+local enabledCalls, unitCalls = Calls()
+assert(enabledCalls == 0 and unitCalls == 0, "a park and same-token rebind toggled the containers")
+AssertColor(p, nil, nil, nil, "a reshown bundle kept a stale tint")
+ns.DebuffColors_Detach(p)
+ns.plates.nameplate2, ns.plates.nameplate5 = nil, p
+ResetCalls()
+ns.DebuffColors_Attach(p, "nameplate5")
+enabledCalls, unitCalls = Calls()
+assert(enabledCalls == 0 and unitCalls == LiveContainers(p) and unitCalls == 2,
+    "a new token did not set each container's unit exactly once")
+Auras("nameplate5", {{ id=703, mine=true }, { id=1943, mine=true }})
+AssertColor(p, .1, .88, .32)
+ns.DebuffColors_Detach(p)
+ns.plates.nameplate5, ns.plates.nameplate2 = nil, p
+ns.DebuffColors_Attach(p, "nameplate2")
 
 -- The higher entry wins, in both cast orders; Only My Debuffs off.
 combat = false
@@ -352,6 +532,47 @@ ns.DebuffColors_Refresh()
 Auras("nameplate2", {{ id=703, mine=true }, { id=1943, mine=true }, { id=589, mine=true }})
 AssertColor(p, .2, .4, 1, "reordered combos kept the old winner")
 
+-- Neighbouring combos with a debuff in common share their first slot: fewer
+-- root slots, the same winners. Saved top first: the bottom three share 589
+-- (MAGENTA's chain starts with it although it is saved second), GREEN shares
+-- nothing with its neighbour.
+local YELLOW, MAGENTA = "0.9,0.9,0.1", "0.5,0.1,0.5"
+local SINGLES = "703:" .. ORANGE .. ";1943:" .. RED .. ";589:" .. PURPLE
+profile.debuffColorsDRUID = SINGLES .. "/1943+703:" .. GREEN .. ";703+589:" .. BLUE ..
+    ";703+1943+589:" .. YELLOW .. ";1943+589:" .. MAGENTA
+ns.DebuffColors_Refresh()
+assert(SlotCount(RootOf(p)) == 5, "neighbouring combos did not share a first slot")
+combat = true
+Auras("nameplate2", {{ id=703, mine=true }, { id=1943, mine=true }, { id=589, mine=true }})
+AssertColor(p, .1, .88, .32, "the top combo lost to a shared run")
+Auras("nameplate2", {{ id=703, mine=true }, { id=589, mine=true }})
+AssertColor(p, .2, .4, 1)
+Auras("nameplate2", {{ id=1943, mine=true }, { id=589, mine=true }})
+AssertColor(p, .5, .1, .5, "a combo reordered to share its slot lost its tint")
+Auras("nameplate2", {{ id=589, mine=true }})
+AssertColor(p, .6, .2, .8, "a shared slot tinted on its own")
+-- Inside one run the higher combo still wins: top, middle and bottom.
+combat = false
+profile.debuffColorsDRUID = SINGLES .. "/703+589:" .. BLUE .. ";703+1943+589:" .. YELLOW .. ";589+1943:" .. MAGENTA
+ns.DebuffColors_Refresh()
+assert(SlotCount(RootOf(p)) == 4, "one run built more than one first slot")
+Auras("nameplate2", {{ id=703, mine=true }, { id=1943, mine=true }, { id=589, mine=true }})
+AssertColor(p, .2, .4, 1, "the top of a run lost")
+profile.debuffColorsDRUID = SINGLES .. "/589+155722:" .. GREEN .. ";703+1943+589:" .. YELLOW .. ";703+589:" .. BLUE
+ns.DebuffColors_Refresh()
+AssertColor(p, .9, .9, .1, "the middle of a run lost")
+profile.debuffColorsDRUID = SINGLES .. "/589+1943:" .. MAGENTA .. ";703+1943+589:" .. YELLOW .. ";703+589:" .. BLUE
+ns.DebuffColors_Refresh()
+AssertColor(p, .5, .1, .5, "the reordered top of a run lost")
+Auras("nameplate2", {{ id=703, mine=true }, { id=589, mine=true }})
+AssertColor(p, .2, .4, 1, "the bottom of a run lost")
+-- A neighbour with nothing in common keeps combos apart.
+profile.debuffColorsDRUID = SINGLES .. "/703+589:" .. BLUE .. ";1943+155722:" .. GREEN .. ";703+1079:" .. YELLOW
+ns.DebuffColors_Refresh()
+assert(SlotCount(RootOf(p)) == 6, "combos shared a slot across a neighbour")
+Auras("nameplate2", {{ id=703, mine=true }, { id=589, mine=true }, { id=1079, mine=true }})
+AssertColor(p, .2, .4, 1)
+
 -- Unchosen debuffs, duplicates and one-spell combos never get a slot.
 profile.debuffColorsDRUID = "0:1,1,1;703:" .. ORANGE .. ";703:" .. RED .. "/703+703:" .. GREEN .. ";1943:" .. BLUE
 ns.DebuffColors_Refresh()
@@ -359,9 +580,11 @@ local root = containers[#containers]
 assert(SlotCount(root) == 1, "an unchosen, duplicate or one-spell entry got a slot")
 Auras("nameplate2", {{ id=703, mine=true }, { id=1943, mine=true }})
 AssertColor(p, 1, .43, .04, "a duplicate entry drew over its higher copy")
--- Edits that cannot change the plates are not pending.
+-- Edits that cannot change the plates rebuild nothing.
 profile.debuffColorsDRUID = profile.debuffColorsDRUID .. ";0:0,0,0"
-assert(not ns.DebuffColors_Pending(), "a no-op edit is pending")
+before = #containers
+ns.DebuffColors_Refresh()
+assert(#containers == before, "a no-op edit rebuilt the plates")
 
 -- Coalesce repeated requests into one rebuild.
 before = #containers
@@ -384,13 +607,12 @@ AssertColor(p, .5, .5, .2)
 Regen()
 AssertColor(p, nil)
 assert(not ns.DebuffColors_Attach and not ns.DebuffColors_Detach)
-assert(not ns.DebuffColors_Pending())
 for _, frame in ipairs(frames) do
     assert(not UIState(frame).events.PLAYER_REGEN_ENABLED, "disabled feature left an event registered")
     assert(not UIState(frame).scripts.OnUpdate, "disabled feature left an update callback armed")
 end
 
--- Profile swaps refresh active AND pooled rigs, including textures.
+-- Profile swaps refresh active AND pooled bundles, including textures.
 profile.debuffColorsEnabled = true
 ns.DebuffColors_Refresh()
 local pooled = NewPlate("nameplate3")
@@ -419,6 +641,213 @@ Auras("nameplate2", {{ id=316099, mine=true }})
 AssertColor(p, .3, .4, .5)
 assert(profile.debuffColorsDRUID == "316099:0.3,0.4,0.5/", "reading rewrote the saved list")
 
+-- Color Border: the plate's own border drawn again in the debuff color over
+-- it, never a fill tint. Basic: four strips in scale-1 space, as thick as the
+-- border plus Extra Border Size, one level above the border's own strips.
+combat = false
+UseProfile({ debuffColorsEnabled=true, debuffColorsBorder=true, debuffColorsBorderExtra=1,
+    debuffColorsDRUID="703:" .. ORANGE .. ";1943:" .. RED .. "/703+1943:" .. GREEN })
+border.blizz, border.custom, border.basic, border.size = false, false, true, 2
+ns.DebuffColors_Refresh()
+assert(ns.DebuffColors_Attach, "Color Border over a Basic border built nothing")
+-- Strips are drawn in physical pixels: a resolution change redraws them, a UI
+-- scale change (the pixel re-apply) does not.
+assert(pxReapply.fn == nil, "strips joined the UI scale re-apply")
+assert(Watching("DISPLAY_SIZE_CHANGED") == 1, "strips do not follow a resolution change")
+combat = true
+Auras("nameplate2", {})
+AssertBorder(p, nil)
+Auras("nameplate2", {{ id=1943, mine=true }})
+local f, pieces = AssertBorder(p, .8, .2, .1)
+assert(f.anchor == UIState(RootOf(p)).parent and f.ignoreParentScale == true and f.scale == 1
+    and not f.strata, "Basic's color is not in scale-1 space over the bar")
+assert(f.level == UIState(p.health).level + 2, "the color is not just above the border")
+-- 3 px at 0.5 units a pixel: top and bottom 1.5 high, the sides 1.5 wide and
+-- inset by it, so no corner is drawn twice.
+local rows, sides = 0, 0
+for _, piece in ipairs(pieces) do
+    assert(piece.layer == "OVERLAY" and piece.snap == false)
+    if piece.height then
+        assert(piece.height == 1.5)
+        rows = rows + 1
+    else
+        assert(piece.width == 1.5 and piece.points[1][5] == -1.5 and piece.points[2][5] == 1.5,
+            "a side strip overlaps a corner")
+        sides = sides + 1
+    end
+end
+assert(rows == 2 and sides == 2)
+Auras("nameplate2", {{ id=703, mine=true }, { id=1943, mine=true }})
+AssertBorder(p, .1, .88, .32, "the combo's border did not win")
+Auras("nameplate2", {{ id=703, mine=true }})
+AssertBorder(p, 1, .43, .04)
+-- The bar texture is not a Color Border input; the border size and Extra
+-- Border Size are.
+combat = false
+local before = #containers
+profile.healthBarTexture = "other"
+ns.DebuffColors_Refresh()
+assert(#containers == before, "a bar texture edit rebuilt Color Border")
+border.size = 1
+profile.debuffColorsBorderExtra = 0
+ns.DebuffColors_Refresh()
+assert(#containers > before, "a border size edit kept the old thickness")
+f, pieces = AssertBorder(p, 1, .43, .04)
+for _, piece in ipairs(pieces) do
+    assert((piece.height or piece.width) == .5, "a 1 px border drew " .. tostring(piece.height or piece.width))
+end
+-- The strips' grid is the physical pixel: a UI scale change alone keeps them;
+-- a resolution change redraws them at the new pixel size.
+before = #containers
+EllesmereUI.PP.mult = 0.6
+ns.DebuffColors_Refresh()
+assert(#containers == before, "a UI scale change rebuilt strips drawn in physical pixels")
+EllesmereUI.PP.perfect = 0.25
+FireEvent("DISPLAY_SIZE_CHANGED")
+RunWorker()
+assert(#containers > before, "a resolution change kept the old pixel size")
+f, pieces = AssertBorder(p, 1, .43, .04)
+for _, piece in ipairs(pieces) do
+    assert((piece.height or piece.width) == .25, "the strips missed the new pixel size")
+end
+EllesmereUI.PP.perfect, EllesmereUI.PP.mult = 0.5, 0.75
+ns.DebuffColors_Refresh()
+-- A slider drag (Extra Border Size, the Display page's border sliders, UI
+-- Scale) rebuilds nothing until it is released, then once.
+before = #containers
+EllesmereUI._sliderDragging = 1
+for step = 1, 4 do
+    profile.debuffColorsBorderExtra = step
+    ns.DebuffColors_RequestRefresh()
+    RunWorker()
+end
+assert(#containers == before, "a slider drag rebuilt the bundles on every step")
+assert(EllesmereUI._deferredDriftChecks and EllesmereUI._deferredDriftChecks[ns.DebuffColors_RequestRefresh],
+    "the drag left no refresh for its release")
+EllesmereUI._sliderDragging = nil
+local releases = EllesmereUI._deferredDriftChecks
+EllesmereUI._deferredDriftChecks = nil
+for fn in pairs(releases) do fn() end
+RunWorker()
+assert(#containers > before, "the drag's release did not apply")
+f, pieces = AssertBorder(p, 1, .43, .04)
+for _, piece in ipairs(pieces) do assert((piece.height or piece.width) == 2.5) end
+profile.debuffColorsBorderExtra = 0
+ns.DebuffColors_Refresh()
+
+-- Custom Solid: the same strips, on the custom border's MEDIUM strata, from its
+-- exact size (only one saved for its own size and texture), one level above the
+-- pixel border's container its strips draw on; drawn behind, the same.
+border.custom = true
+profile.customBorderTexture, profile.customBorderSize, profile.customBorderSizePx = "solid", 2, "3|2|solid"
+profile.debuffColorsBorderExtra = 1
+ns.DebuffColors_Refresh()
+f, pieces = AssertBorder(p, 1, .43, .04)
+assert(f.strata == "MEDIUM" and f.ignoreParentScale)
+assert(f.level == CustomBorderLevel(p, false, true) + 1, "the color is not just above the Solid border's strips")
+for _, piece in ipairs(pieces) do assert((piece.height or piece.width) == 2) end
+profile.customBorderSizePx = "3|1|solid"
+ns.DebuffColors_Refresh()
+f, pieces = AssertBorder(p, 1, .43, .04)
+for _, piece in ipairs(pieces) do
+    assert((piece.height or piece.width) == 1.5, "an exact size saved for another step was used")
+end
+profile.customBorderSizePx = "3|2|solid"
+profile.customBorderBehind = true
+ns.DebuffColors_Refresh()
+f = AssertBorder(p, 1, .43, .04)
+assert(f.level == CustomBorderLevel(p, true, true) + 1, "a border drawn behind lost its color or rose above the bar")
+
+-- A textured custom border: its eight slices in the color on its own geometry
+-- (offsets and size as saved) just above the border frame they draw on; Extra
+-- Border Size does not apply. Slices follow a UI scale change (the pixel
+-- re-apply), not a resolution change.
+profile.customBorderBehind = nil
+profile.customBorderTexture, profile.customBorderSizePx = "pixels", nil
+profile.customBorderOffset, profile.customBorderShiftY = 2, -1
+local g0 = #geometry
+ns.DebuffColors_Refresh()
+f, pieces = AssertBorder(p, 1, .43, .04)
+assert(#pieces == 8 and f.strata == "MEDIUM" and not f.ignoreParentScale)
+assert(f.level == CustomBorderLevel(p, false, false) + 1, "the color is not just above the textured border")
+assert(pxReapply.owner == DC and pxReapply.fn == ns.DebuffColors_RequestRefresh, "slices left the UI scale re-apply")
+assert(Watching("DISPLAY_SIZE_CHANGED") == 0, "slices kept the resolution watch")
+before = #containers
+EllesmereUI.PP.perfect = 0.25
+ns.DebuffColors_Refresh()
+assert(#containers == before, "a pixel size change alone rebuilt the slices")
+EllesmereUI.PP.mult = 0.6
+pxReapply.fn(pxReapply.owner)
+RunWorker()
+assert(#containers > before, "a UI scale change kept the slices' old geometry")
+EllesmereUI.PP.perfect, EllesmereUI.PP.mult = 0.5, 0.75
+ns.DebuffColors_Refresh()
+profile.customBorderBehind = true
+ns.DebuffColors_Refresh()
+f = AssertBorder(p, 1, .43, .04)
+assert(f.level == CustomBorderLevel(p, true, false) + 1, "a textured border drawn behind lost its color")
+profile.customBorderBehind = nil
+g0 = #geometry
+ns.DebuffColors_Refresh()
+f, pieces = AssertBorder(p, 1, .43, .04)
+local g
+for i = g0 + 1, #geometry do
+    if UIState(geometry[i].owner) == f then g = geometry[i] end
+end
+assert(g and g.size == 2 and g.tex == "pixels" and g.ox == 2
+    and g.oy == nil and g.sy == -1 and g.px == nil and g.addon == "nameplates" and g.sizeKey == 2
+    and g.edgeScale == nil, "the slices are not on the border's own geometry")
+for _, piece in ipairs(pieces) do
+    assert(piece.texture == "path-pixels" and piece.wrap[1] == true and piece.wrap[2] == true)
+    assert(piece.texCoord[1] == EllesmereUI.SECRET_BORDER_UV[piece.slice][1], "a slice has another one's cut")
+    assert(piece.layout.edge == 7 and piece.layout.aL == -1 and UIState(piece.layout.owner) == f)
+end
+-- An exact custom size reaches the slices' geometry; one saved for another
+-- texture does not.
+profile.customBorderSizePx = "5|2|pixels"
+g0 = #geometry
+ns.DebuffColors_Refresh()
+f = AssertBorder(p, 1, .43, .04)
+g = nil
+for i = g0 + 1, #geometry do
+    if UIState(geometry[i].owner) == f then g = geometry[i] end
+end
+assert(g and g.px == 5 and g.size == 2, "the slices lost the border's exact size")
+profile.customBorderSizePx = "5|2|solid"
+g0 = #geometry
+ns.DebuffColors_Refresh()
+f = AssertBorder(p, 1, .43, .04)
+g = nil
+for i = g0 + 1, #geometry do
+    if UIState(geometry[i].owner) == f then g = geometry[i] end
+end
+assert(g and g.px == nil, "the slices took an exact size saved for another texture")
+profile.customBorderSizePx = nil
+
+-- Nothing to color (an unresolved texture, Border None, a stock style): no
+-- plate hooks, no containers, out of the pixel re-apply.
+for _, case in ipairs({
+    function() profile.customBorderTexture = "missing" end,
+    function() border.custom, border.basic = false, false end,
+    function() border.basic, border.blizz = true, true end,
+}) do
+    case()
+    before = #containers
+    ns.DebuffColors_Refresh()
+    assert(not ns.DebuffColors_Attach and #containers == before and pxReapply.fn == nil
+        and Watching("DISPLAY_SIZE_CHANGED") == 0,
+        "Color Border built over a plate with no border")
+    AssertBorder(p, nil)
+end
+border.blizz = false
+
+-- Back to Color Nameplate: the fill tint again, out of the pixel re-apply.
+profile.debuffColorsBorder = false
+ns.DebuffColors_Refresh()
+assert(pxReapply.fn == nil, "Color Nameplate stayed in the pixel re-apply")
+AssertColor(p, 1, .43, .04)
+assert(not BorderPaint(p), "Color Nameplate drew a border")
+
 assert(#ns.DebuffColorPresets == 13)
 assert(ns.DebuffColorPresetByID[1259790][2] == "Unstable Affliction")
 assert(ns.DebuffColorPresetByID[445474][2] == "Wither")
@@ -426,8 +855,9 @@ for _, id in ipairs({121411, 2818, 259491, 106830, 335467, 55078, 55095, 191587,
     assert(not ns.DebuffColorPresetByID[id], "unwanted or obsolete preset remains")
 end
 ''')
-print('PASS: list codec, caps, class scoping, priority by order, combos (chains of 2-4), duplicates,')
-print('      ownership, combat deferral, pooling, profiles, textures, coalesced refreshes, pending state.')
+print('PASS: list codec, caps, class scoping, priority by order, combos (chains of 2-4, shared first slots),')
+print('      duplicates, ownership, plate churn, combat deferral, pooling, profiles, textures, coalesced')
+print('      refreshes, no-op edits, Color Border (Basic, Custom Solid, textured, no border, stock style).')
 
 # Execute the actual Colors-page builder against mocked widgets.
 options = (ROOT / 'EllesmereUIOptions/Nameplates_Options/ColorsPage_Options.lua').read_text()
@@ -461,6 +891,7 @@ function uiMethods:HookScript(e, f)
 end
 function uiMethods:Show() self.shown = true end
 function uiMethods:Hide() self.shown = false end
+function uiMethods:SetShown(v) self.shown = v and true or false end
 function uiMethods:IsShown() return self.shown end
 function uiMethods:IsMouseOver() return false end
 function uiMethods:SetText(t) self.text = t end
@@ -475,7 +906,15 @@ end
 function CreateFrame(kind, _, parent) return UIObj(kind, parent) end
 
 uiRows, uiRefreshers, uiSwatches, uiCB, uiWarn, uiMenus = {}, {}, {}, {}, {}, {}
-uiNotified, uiErrors, uiOnHide, uiTips = {}, {}, {}, {}
+uiNotified, uiErrors, uiOnHide, uiTips, uiCogs, uiHeaders = {}, {}, {}, {}, {}, {}
+stockStyle = nil
+EllesmereUI.BlizzStyle = { Get = function() return stockStyle end }
+function EllesmereUI.BuildInlineCog(rgn, opts)
+    local btn = UIObj("Button", rgn)
+    btn.cogOpts = opts
+    uiCogs[#uiCogs+1] = btn
+    return btn
+end
 local builds = 0
 local function Region(row, cfg)
     local rgn = UIObj("Frame", row)
@@ -496,7 +935,7 @@ local function Region(row, cfg)
     return rgn
 end
 EllesmereUI.Widgets = {
-    SectionHeader=function() return {}, 30 end,
+    SectionHeader=function(_, _, text) uiHeaders[#uiHeaders+1] = text; return {}, 30 end,
     Spacer=function() return {}, 20 end,
     DualRow=function(_, _, _, left, right)
         local row = UIObj("Frame")
@@ -555,11 +994,11 @@ function GetClassInfo(i) return CLASSES[i][1], CLASSES[i][2], i end
 C_Spell = {
     GetSpellName=function(id) return "Spell " .. id end,
     GetSpellTexture=function(id) return id + 100000 end,
-    GetSpellInfo=function(id) if id == 155722 or id == 33333 then return { name="Known" } end end,
+    GetSpellInfo=function(id) if id == 155722 or id == 33333 or id == 44444 then return { name="Known" } end end,
 }
 function EllesmereUI:RefreshPage(force)
     if force then
-        uiRows, uiRefreshers, uiSwatches, uiCB, uiWarn = {}, {}, {}, {}, {}
+        uiRows, uiRefreshers, uiSwatches, uiCB, uiWarn, uiCogs, uiHeaders = {}, {}, {}, {}, {}, {}, {}
         uiApply = nil
         builds = builds + 1
         BuildPage()
@@ -601,19 +1040,32 @@ function BuildPage() ns.NP_BuildDebuffColorsOptions({}, 0) end
 UseProfile({ debuffColorsEnabled=false })
 ns.DebuffColors_Refresh()
 
--- Off: only the switch row; no Apply button, no lists.
+-- Off: only the mode row; no lists.
 EllesmereUI:RefreshPage(true)
 assert(#uiRows == 1 and uiApply == nil)
-assert(uiRows[1][1].text == "Enable Debuff Coloring" and uiRows[1][2].text == "Only My Debuffs")
+assert(uiHeaders[1] == "DEBUFF BASED NAMEPLATE COLORING", "the section kept its old name")
+local mode = uiRows[1][1]
+assert(mode.type == "dropdown" and mode.text == "Debuff Coloring" and uiRows[1][2].text == "Only My Debuffs")
+assert(mode.order[1] == "none" and mode.order[2] == "nameplate" and mode.order[3] == "border"
+    and mode.values.none == "None" and mode.values.nameplate == "Color Nameplate"
+    and mode.values.border == "Color Border")
+assert(mode.getValue() == "none" and #uiCogs == 0)
 assert(uiRows[1][2].disabled())
 
--- Enabling applies at once and builds the section: Apply, then the two Add buttons.
-uiRows[1][1].setValue(true)
-assert(profile.debuffColorsEnabled == true and not ns.DebuffColors_Pending())
-assert(uiApply and uiApply.text == "Apply Coloring" and uiApply.button.alpha == .35)
+-- Every edit asks the runtime for a refresh at once (it rebuilds at most once a
+-- frame, and only for the player's own class): count the requests.
+local requests = 0
+local request = ns.DebuffColors_RequestRefresh
+ns.DebuffColors_RequestRefresh = function() requests = requests + 1; request() end
+
+-- Color Nameplate applies at once and builds the section: the two Add buttons,
+-- with no Apply button, no close hook and no Color Border cog.
+uiRows[1][1].setValue("nameplate")
+assert(profile.debuffColorsEnabled == true and profile.debuffColorsBorder == false and #uiCogs == 0)
+assert(uiApply == nil, "the Apply Coloring button is back")
 assert(#uiRows == 2 and uiRows[2][1].text == "+ Add Debuff" and uiRows[2][2].text == "+ Add Combo")
 assert(not uiRows[2][1].disabled() and uiRows[2][2].disabled(), "Add Combo enabled with no debuffs")
-assert(#uiOnHide == 1, "the close hook was not registered once")
+assert(#uiOnHide == 0, "a close hook was registered")
 
 -- Add Debuff opens the classes (the player's first) and adds an unchosen debuff.
 local addRgn = uiRows[2].frame._leftRegion
@@ -626,25 +1078,33 @@ assert(profile.debuffColorsDRUID == "0:1,0.43,0.04/", "Add Debuff saved " .. tos
 local d1 = Cell("Druid Debuff 1")
 assert(d1 and d1.cfg.getValue() == "none" and d1.cfg.values.none == "None")
 assert(uiNotified[#uiNotified] == d1.rgn, "the new row did not report the write")
-assert(not ns.DebuffColors_Pending(), "an unchosen debuff is pending")
 assert(d1.cfg.tooltip == "Higher in the list wins when several are up.")
-assert(d1.cfg.order[1] == "remove" and d1.cfg.order[2] == "custom" and d1.cfg.order[3] == "1079",
-    "the class's presets do not come first")
+-- Only the class's own presets, in its order.
+local o = d1.cfg.order
+assert(#o == 6 and o[1] == "remove" and o[2] == "custom" and o[3] == "164812" and o[4] == "164815"
+    and o[5] == "1079" and o[6] == "155722", "a Druid debuff does not offer Moonfire, Sunfire, Rip, Rake")
+assert(not d1.cfg.values["980"] and not d1.cfg.values["703"], "another class's preset is offered")
 local sw = uiSwatches[1]
 assert(sw.rgn == d1.rgn and sw.list[1].disabled(), "the color is not gated on a chosen debuff")
 
--- Choosing a spell saves it; Apply lights, applies, and dims again.
+-- Choosing a spell applies at once; a color drag (the picker open) applies
+-- once, when the picker closes.
+requests = 0
 d1.cfg.setValue("1079")
 assert(profile.debuffColorsDRUID == "1079:1,0.43,0.04/")
-assert(ns.DebuffColors_Pending() and uiApply.button.alpha == 1)
-Fire(uiApply.button, "OnClick")
-assert(not ns.DebuffColors_Pending() and uiApply.button.alpha == .35)
+assert(requests == 1, "choosing a spell did not apply")
+EllesmereUI._colorPickerOpen = true
+sw.list[1].setValue(.9, .3, .4)
+sw.list[1].setValue(.5, .3, .4)
 sw.list[1].setValue(.2, .3, .4)
-assert(profile.debuffColorsDRUID == "1079:0.2,0.3,0.4/" and ns.DebuffColors_Pending())
-assert(uiApply.button.alpha == 1, "a color change (no page refresh) left Apply dim")
-uiOnHide[1]()
+assert(profile.debuffColorsDRUID == "1079:0.2,0.3,0.4/")
+assert(requests == 1, "a color drag applied on every frame")
+EllesmereUI._colorPickerOpen = false
+local checks = EllesmereUI._deferredDriftChecks
+EllesmereUI._deferredDriftChecks = nil
+for fn in pairs(checks or {}) do fn() end
+assert(requests == 2, "closing the picker did not apply the drag once")
 RunWorker()
-assert(not ns.DebuffColors_Pending(), "closing the options left changes unapplied")
 
 -- A second debuff, then the arrows reorder (first up / last down disabled).
 Fire(Cell("+ Add Debuff").rgn._control, "OnClick")
@@ -661,23 +1121,50 @@ up2 = Arrows(Cell("Druid Debuff 2").rgn)
 Fire(up2, "OnClick")
 assert(profile.debuffColorsDRUID == "1079:0.2,0.3,0.4;155722:1,0.43,0.04/", "move up did not swap")
 
--- Custom spells: invalid IDs refused, a valid one saved and named, empty clears.
+-- In use: a spell another debuff of the class holds is greyed in the menu,
+-- with the reason; the row's own spell, the rest and the actions stay open.
+local IN_USE = "Already in use. Use the arrows to reorder."
+local u1, u2 = Cell("Druid Debuff 1"), Cell("Druid Debuff 2")
+assert(u1.cfg.disabledValues("155722") == IN_USE and u2.cfg.disabledValues("1079") == IN_USE,
+    "a spell another debuff holds is pickable")
+assert(not u1.cfg.disabledValues("1079") and not u1.cfg.disabledValues("164812")
+    and not u1.cfg.disabledValues("custom") and not u1.cfg.disabledValues("remove"),
+    "a free spell or an action is greyed")
+
+-- Custom spells: Custom Spell... only adds (an empty popup, its own label
+-- never changes); each added spell joins every menu of its class, a second
+-- one too, and leaves once nothing holds it.
 d1 = Cell("Druid Debuff 1")
+local d2 = Cell("Druid Debuff 2")
 d1.cfg.values.custom.action()
-assert(uiPopup.allowEmpty and uiPopup.initialText == "" and uiPopup.title == "Druid Debuff 1")
+assert(not uiPopup.allowEmpty and (uiPopup.initialText or "") == "" and uiPopup.title == "Druid Debuff 1")
+assert(uiPopup.confirmText == "Add" and uiPopup.message == "Enter the debuff's spell ID.")
 uiPopup.onConfirm("garbage")
 uiPopup.onConfirm("-1")
 uiPopup.onConfirm("99999999")
 assert(#uiErrors == 3 and profile.debuffColorsDRUID:sub(1, 5) == "1079:")
 uiPopup.onConfirm(" 33333 ")
-assert(profile.debuffColorsDRUID:sub(1, 6) == "33333:" and d1.cfg.getValue() == "custom")
-assert(d1.cfg.values.custom.text == "Spell 33333 (Custom)", "custom label: " .. d1.cfg.values.custom.text)
-assert((d1.rgn.invalidations or 0) >= 1, "the custom name left a stale menu")
-d1.cfg.values.custom.action()
-assert(uiPopup.initialText == "33333")
-uiPopup.onConfirm("")
-assert(profile.debuffColorsDRUID:sub(1, 2) == "0:" and d1.cfg.getValue() == "none")
+assert(profile.debuffColorsDRUID:sub(1, 6) == "33333:" and d1.cfg.getValue() == "33333")
+assert(d1.cfg.values.custom.text == "Custom Spell...", "Custom Spell... renamed itself")
+local function Tail(cell, k) local list = cell.cfg.order; return list[#list - (k or 0)] end
+assert(Tail(d1) == "33333" and Tail(d2) == "33333", "an added spell did not join its class's menus")
+assert(d2.cfg.values["33333"] == "Spell 33333" and (d2.rgn.invalidations or 0) >= 1,
+    "another row's menu kept a stale list")
+assert(d2.cfg.disabledValues("33333") == IN_USE, "an added spell another debuff holds is pickable")
+local errs = #uiErrors
+d2.cfg.values.custom.action()
+uiPopup.onConfirm("33333")
+assert(#uiErrors == errs + 1 and uiErrors[#uiErrors] == IN_USE and d2.cfg.getValue() == "155722",
+    "Custom Spell... took a spell another debuff holds")
+d2.cfg.values.custom.action()
+assert((uiPopup.initialText or "") == "", "Custom Spell... opened with a spell filled in")
+uiPopup.onConfirm("44444")
+assert(Tail(d1, 1) == "33333" and Tail(d1) == "44444" and #d1.cfg.order == 8,
+    "a second added spell did not join")
 d1.cfg.setValue("1079")
+assert(Tail(d2) == "44444" and Tail(d2, 1) == "155722", "a spell nothing holds stayed listed")
+d2.cfg.setValue("155722")
+assert(#d2.cfg.order == 6 and #d1.cfg.order == 6, "a menu kept a spell nothing holds")
 
 -- Add Combo pairs the class's top two debuffs; a checkbox list edits it.
 local addCombo = Cell("+ Add Combo")
@@ -726,16 +1213,93 @@ assert(profile.debuffColorsDRUID == nil, "an emptied list left a saved value")
 local ten = ("1:1,1,1;"):rep(10)
 UseProfile({ debuffColorsEnabled=true, debuffColorsDRUID=ten .. "/", debuffColorsROGUE="703:1,1,1/" })
 EllesmereUI:RefreshPage(true)
-local cells = Cells() -- the first two: Enable Debuff Coloring | Only My Debuffs
+local cells = Cells() -- the first two: Debuff Coloring | Only My Debuffs
 assert(cells[3].cfg.text == "Druid Debuff 1" and cells[13].cfg.text == "Rogue Debuff 1")
 assert(cells[14].cfg.text == "+ Add Debuff" and cells[15].cfg.text == "+ Add Combo")
 assert(cells[16].cfg.type == "label", "the odd last slot is not blank")
 Fire(cells[14].rgn._control, "OnClick")
 assert(uiMenus[cells[14].rgn._control].disabled("DRUID") and not uiMenus[cells[14].rgn._control].disabled("ROGUE"))
 
--- Only My Debuffs waits for Apply too.
+-- Only My Debuffs applies at once too.
+requests = 0
 uiRows[1][2].setValue(false)
-assert(profile.debuffColorsPlayerOnly == false and ns.DebuffColors_Pending())
+assert(profile.debuffColorsPlayerOnly == false and requests == 1, "Only My Debuffs did not apply")
+
+-- A row offers only its class's presets; another class's preset it holds reads
+-- as a custom spell, and a class without presets offers none.
+UseProfile({ debuffColorsEnabled=true, debuffColorsROGUE="589:1,1,1/", debuffColorsWARRIOR="0:1,1,1/" })
+EllesmereUI:RefreshPage(true)
+local r1 = Cell("Rogue Debuff 1")
+o = r1.cfg.order
+assert(#o == 5 and o[3] == "703" and o[4] == "1943" and o[5] == "589",
+    "a Rogue debuff does not offer Garrote, Rupture and the spell it holds")
+assert(r1.cfg.getValue() == "589" and r1.cfg.values["589"] == "Spell 589",
+    "another class's preset a row holds is not listed as its spell")
+assert(#Cell("Warrior Debuff 1").cfg.order == 2, "a class without presets offered some")
+-- A list saved with a duplicate: each row's own spell stays open (lit label).
+UseProfile({ debuffColorsEnabled=true, debuffColorsDRUID="1079:1,1,1;1079:1,1,1/" })
+EllesmereUI:RefreshPage(true)
+assert(not Cell("Druid Debuff 1").cfg.disabledValues("1079") and not Cell("Druid Debuff 2").cfg.disabledValues("1079"),
+    "a row's own spell is greyed")
+
+-- Debuff Coloring is a view over the saved keys: the old toggle's on reads
+-- Color Nameplate, and Color Border adds its own key beside it.
+UseProfile({ debuffColorsEnabled=true })
+EllesmereUI:RefreshPage(true)
+assert(uiRows[1][1].getValue() == "nameplate", "a profile with the old toggle on changed mode")
+UseProfile({ debuffColorsEnabled=false, debuffColorsBorder=true })
+EllesmereUI:RefreshPage(true)
+assert(uiRows[1][1].getValue() == "none")
+requests = 0
+uiRows[1][1].setValue("border")
+assert(profile.debuffColorsEnabled == true and profile.debuffColorsBorder == true
+    and uiRows[1][1].getValue() == "border")
+-- Color Border's cog: Extra Border Size (0-4), shown over Basic or Custom
+-- Solid only, following border edits made on another page.
+local cog = uiCogs[1]
+assert(#uiCogs == 1 and cog.parent == uiRows[1].frame._leftRegion, "Color Border has no cog on its row")
+local extra = cog.cogOpts.rows[1]
+assert(#cog.cogOpts.rows == 1 and extra.label == "Extra Border Size" and extra.min == 0 and extra.max == 4)
+assert(cog.shown, "the cog is hidden over a Basic border")
+local function PageShown() for _, fn in ipairs(uiRefreshers) do fn() end end
+profile.customBorderEnabled, profile.customBorderTexture = true, "pixels"
+PageShown()
+assert(not cog.shown, "the cog shows over a textured border")
+profile.customBorderTexture = "solid"
+PageShown()
+assert(cog.shown, "the cog is hidden over a Custom Solid border")
+stockStyle = "classic"
+PageShown()
+assert(not cog.shown, "the cog shows under a stock style")
+stockStyle = nil
+PageShown()
+extra.set(2)
+assert(profile.debuffColorsBorderExtra == 2 and extra.get() == 2 and requests == 1,
+    "Extra Border Size did not apply")
+-- Color Border needs a border: greyed with the reason while there is none.
+profile.customBorderEnabled, profile.showBorder = false, false
+assert(uiRows[1][1].disabledValues("border") == "This option requires a Border to be selected")
+assert(not uiRows[1][1].disabledValues("nameplate") and not uiRows[1][1].disabledValues("none"))
+profile.showBorder = true
+assert(not uiRows[1][1].disabledValues("border"))
+-- A custom border the runtime draws nothing for counts as none, cog hidden:
+-- Solid at size 0, or a texture that no longer resolves.
+profile.customBorderEnabled, profile.customBorderTexture, profile.customBorderSize = true, "solid", 0
+PageShown()
+assert(uiRows[1][1].disabledValues("border") and not cog.shown, "Custom Solid at size 0 offers Color Border")
+profile.customBorderSize, profile.customBorderTexture = 2, "missing"
+PageShown()
+assert(uiRows[1][1].disabledValues("border") and not cog.shown, "an unresolved texture offers Color Border")
+profile.customBorderTexture = "pixels"
+PageShown()
+assert(not uiRows[1][1].disabledValues("border") and not cog.shown)
+profile.customBorderEnabled, profile.customBorderTexture, profile.customBorderSize = false, nil, nil
+-- Color Nameplate drops the cog; None keeps the border choice for later.
+uiRows[1][1].setValue("nameplate")
+assert(profile.debuffColorsBorder == false and #uiCogs == 0)
+uiRows[1][1].setValue("border")
+uiRows[1][1].setValue("none")
+assert(profile.debuffColorsEnabled == false and profile.debuffColorsBorder == true and #uiRows == 1)
 
 -- WoW Forever: its own class roster and no presets (custom IDs only).
 EllesmereUI.IS_FOREVER = true
@@ -755,8 +1319,10 @@ local before = #uiNotified
 EllesmereUI._prebuilding = true
 uiSwatches, uiCB = {}, {}
 EllesmereUI:RefreshPage(true)
-assert(#uiSwatches == 0 and #uiCB == 0 and #uiOnHide == 1)
+assert(#uiSwatches == 0 and #uiCB == 0 and #uiOnHide == 0)
 EllesmereUI._prebuilding = nil
 ''')
-print('PASS: options page: gate, Apply Coloring (pending, apply, apply on close), class picker, add/remove,')
-print('      reorder arrows, custom spells, combo list (2-4 spells, warn, remove), caps, prebuild.')
+print('PASS: options page: gate, live apply (every edit, color drags on picker close), class picker,')
+print('      add/remove, reorder arrows, class-only presets, in-use spells greyed, custom spells (add-only,')
+print('      listed while held), combo list (2-4 spells, warn, remove), caps, prebuild, Debuff Coloring')
+print('      modes (a view over the saved keys), Color Border cog and its border gates.')

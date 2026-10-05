@@ -54,10 +54,10 @@ end
 -- EllesmereUINameplates_DebuffColors.lua). Debuffs, then combos, two to a
 -- row, each named after its class with up/down arrows beside the name that
 -- reorder it (the higher entry wins); an Add button after each list picks
--- the class. Edits save at once but reach the plates only through Apply
--- Coloring (or when the options window closes), never per edit: applying
--- replaces every plate's secure aura slots. debuffColorAdded: the entry
--- Add just made, kept across the page rebuild Add runs so the rebuilt row
+-- the class. Every edit reaches the plates as it is made (the runtime
+-- rebuilds at most once a frame, and only for the player's own class); a
+-- color drag waits for the picker to close. debuffColorAdded: the entry Add
+-- just made, kept across the page rebuild Add runs so the rebuilt row
 -- reports the write to Spec Overrides.
 local debuffColorAdded
 function ns.NP_BuildDebuffColorsOptions(parent, y)
@@ -72,12 +72,20 @@ function ns.NP_BuildDebuffColorsOptions(parent, y)
     end
     local function Off() return Get("debuffColorsEnabled") ~= true end
     local function Read(class) return DC.Read(class, Get) end
-    -- The Apply Coloring button's state; set once the button exists.
-    local SyncApply = function() end
+    -- Every edit applies at once. The color picker writes on every frame of a
+    -- drag, so while it is open the refresh waits for it to close.
+    local function Apply()
+        if EllesmereUI._colorPickerOpen then
+            EllesmereUI._deferredDriftChecks = EllesmereUI._deferredDriftChecks or {}
+            EllesmereUI._deferredDriftChecks[ns.DebuffColors_RequestRefresh] = true
+        else
+            ns.DebuffColors_RequestRefresh()
+        end
+    end
     local function Write(class, singles, combos, rgn)
         ns.db.profile[DC.Key(class)] = DC.Encode(singles, combos)
         if rgn then EllesmereUI._NotifySettingWrite(rgn) end
-        SyncApply()
+        Apply()
     end
     local function Rebuild() EllesmereUI:RefreshPage(true) end
     local function SpellName(id, fallback)
@@ -134,32 +142,42 @@ function ns.NP_BuildDebuffColorsOptions(parent, y)
     end
 
     -- The presets for the spell menus (WoW Forever lists none: they are
-    -- retail spell IDs); each list puts its class's presets first, the rest
-    -- alphabetic, so native menu search works on the actual spell names.
-    local presets, presetByKey = {}, {}
+    -- retail spell IDs). A debuff row offers only its own class's presets, in
+    -- the preset table's order; any other spell it holds reads as custom.
+    local classPresets = {}
     if not EllesmereUI.IS_FOREVER then
-        for index, spell in ipairs(ns.DebuffColorPresets) do
-            local s = { id = spell[1], name = SpellName(spell[1], spell[2]), class = spell[3],
-                token = spell[3]:gsub("%s", ""):upper(), index = index }
-            presets[#presets + 1] = s
-            presetByKey[tostring(s.id)] = s
+        for _, spell in ipairs(ns.DebuffColorPresets) do
+            local token = spell[3]:gsub("%s", ""):upper()
+            local set = classPresets[token]
+            if not set then
+                set = { order = { "remove", "custom" }, byKey = {} }
+                classPresets[token] = set
+            end
+            local key = tostring(spell[1])
+            set.order[#set.order + 1] = key
+            set.byKey[key] = { id = spell[1], name = SpellName(spell[1], spell[2]), class = spell[3] }
         end
     end
-    local menuOrders = {}
-    local function MenuOrder(class)
-        if menuOrders[class] then return menuOrders[class] end
-        local list = {}
-        for i, s in ipairs(presets) do list[i] = s end
-        table.sort(list, function(a, b)
-            local am, bm = a.token == class, b.token == class
-            if am ~= bm then return am end
-            if am then return a.index < b.index end
-            return a.name < b.name
-        end)
-        local order = { "remove", "custom" }
-        for _, s in ipairs(list) do order[#order + 1] = tostring(s.id) end
-        menuOrders[class] = order
-        return order
+    local NO_PRESETS = { order = { "remove", "custom" }, byKey = {} }
+    local function Presets(class) return classPresets[class] or NO_PRESETS end
+    -- A class's custom spells: every spell its lists hold that is not one of
+    -- its presets, once each, debuffs first. Each is an item of the class's
+    -- spell menus for as long as something holds it.
+    local function Customs(class)
+        local own, out, seen = Presets(class).byKey, {}, {}
+        local singles, combos = Read(class)
+        local function Add(id)
+            local key = tostring(id)
+            if id > 0 and not own[key] and not seen[key] then
+                seen[key] = true
+                out[#out + 1] = key
+            end
+        end
+        for _, e in ipairs(singles) do Add(e.spell) end
+        for _, k in ipairs(combos) do
+            for _, id in ipairs(k.spells) do Add(id) end
+        end
+        return out
     end
 
     local function Label(cell)
@@ -171,6 +189,16 @@ function ns.NP_BuildDebuffColorsOptions(parent, y)
     local function SpellOf(cell)
         local e = Read(cell.class)[cell.n]
         return e and e.spell or 0
+    end
+    -- A spell another debuff of the class already holds: picking it again
+    -- would only duplicate that row, so its menu item is greyed with the
+    -- reason and Custom Spell... refuses it (the arrows move a debuff).
+    local IN_USE = "Already in use. Use the arrows to reorder."
+    local function HeldElsewhere(cell, id)
+        for n, e in ipairs((Read(cell.class))) do
+            if n ~= cell.n and e.spell == id then return true end
+        end
+        return false
     end
     local function ComboSpells(cell)
         local _, combos = Read(cell.class)
@@ -230,60 +258,87 @@ function ns.NP_BuildDebuffColorsOptions(parent, y)
         debuffColorAdded = nil
     end
 
-    local _, h
-    _, h = W:SectionHeader(parent, "DEBUFF COLORS", y); y = y - h
-    _, h = W:DualRow(parent, y,
-        { type="toggle", text="Enable Debuff Coloring",
-          getValue=function() return not Off() end,
+    -- Debuff Coloring: a pure view over debuffColorsEnabled (off = None) and
+    -- debuffColorsBorder (on = Color Border, else Color Nameplate). Color
+    -- Border's cog (Extra Border Size) shows only over a Basic or Custom Solid
+    -- border; a textured custom border is recolored as it is. Both checks
+    -- follow the runtime's border reading (BorderSpec in the module).
+    local function Mode()
+        if Off() then return "none" end
+        return Get("debuffColorsBorder") == true and "border" or "nameplate"
+    end
+    local function NoBorder()
+        if EllesmereUI.BlizzStyle.Get("nameplates") then return true end
+        if Get("customBorderEnabled") then
+            if (Get("customBorderSize") or 0) <= 0 then return true end
+            -- A textured border whose art no longer resolves (its media pack
+            -- removed) draws nothing.
+            local tex = Get("customBorderTexture")
+            return tex ~= nil and tex ~= "" and tex ~= "solid"
+                and not EllesmereUI.ResolveBorderTexture(tex)
+        end
+        return Get("showBorder") == false
+    end
+    local function StripBorder()
+        if NoBorder() then return false end
+        if Get("customBorderEnabled") then
+            local tex = Get("customBorderTexture")
+            return not tex or tex == "" or tex == "solid"
+        end
+        return true
+    end
+    local _, h, modeRow
+    _, h = W:SectionHeader(parent, "DEBUFF BASED NAMEPLATE COLORING", y); y = y - h
+    modeRow, h = W:DualRow(parent, y,
+        { type="dropdown", text="Debuff Coloring",
+          values={ none = "None", nameplate = "Color Nameplate", border = "Color Border" },
+          order={ "none", "nameplate", "border" },
+          disabledValues=function(key)
+              if key == "border" and NoBorder() then return "This option requires a Border to be selected" end
+              return false
+          end,
+          getValue=Mode,
           setValue=EllesmereUI.SectionToggleSetValue(function(v)
-              ns.db.profile.debuffColorsEnabled = v
+              ns.db.profile.debuffColorsEnabled = v ~= "none"
+              if v ~= "none" then ns.db.profile.debuffColorsBorder = v == "border" end
               ns.DebuffColors_Refresh()
           end),
-          tooltip="Colors enemy health bars while the chosen debuffs are on them." },
+          tooltip="Colors enemy health bars, or their borders, while the chosen debuffs are on them." },
         { type="toggle", text="Only My Debuffs",
           getValue=function() return Get("debuffColorsPlayerOnly") ~= false end,
           setValue=function(v)
               ns.db.profile.debuffColorsPlayerOnly = v
-              SyncApply()
+              Apply()
           end,
           disabled=Off, disabledTooltip="Debuff Coloring",
           tooltip="Counts only the debuffs you applied." }); y = y - h
 
+    -- Color Border's cog, built while it is picked (the dropdown rebuilds the
+    -- page) and shown only over a border drawn as strips; a border change on
+    -- the Display page reaches it through the page's refreshers.
+    if Mode() == "border" and not EllesmereUI._prebuilding then
+        local cog = EllesmereUI.BuildInlineCog(modeRow._leftRegion, {
+            title = "Color Border",
+            rows = {
+                { type="slider", label="Extra Border Size", min=0, max=4, step=1,
+                  tooltip="Thickens the border by this many pixels while it shows a debuff color.",
+                  get=function() return Get("debuffColorsBorderExtra") or 0 end,
+                  set=function(v)
+                      ns.db.profile.debuffColorsBorderExtra = v
+                      Apply()
+                  end },
+            },
+        })
+        local function ShowCog() cog:SetShown(StripBorder()) end
+        ShowCog()
+        EllesmereUI.RegisterWidgetRefresh(ShowCog)
+    end
+
     -- Section gate: the rows below exist only while Debuff Coloring is on (the
-    -- toggle's SectionToggleSetValue rebuilds the page).
+    -- dropdown's SectionToggleSetValue rebuilds the page).
     if Off() then
         _, h = W:Spacer(parent, y, 20); y = y - h
         return y
-    end
-
-    -- Apply Coloring: lit while the saved lists differ from the plates. A
-    -- change left unapplied is applied when the options window closes.
-    local applyRow
-    applyRow, h = W:WideButton(parent, "Apply Coloring", y, function()
-        if not ns.DebuffColors_Pending() then return end
-        ns.DebuffColors_Refresh()
-        SyncApply()
-    end, 300); y = y - h
-    if not EllesmereUI._prebuilding then
-        local btn = applyRow:GetChildren()
-        SyncApply = function() btn:SetAlpha(ns.DebuffColors_Pending() and 1 or 0.35) end
-        btn:HookScript("OnEnter", function()
-            local tip = "Your debuff colors are applied."
-            if ns.DebuffColors_Pending() then
-                tip = InCombatLockdown() and "Applies once combat ends."
-                    or "Applies your debuff color changes to the nameplates."
-            end
-            EllesmereUI.ShowWidgetTooltip(btn, tip)
-        end)
-        btn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-        SyncApply()
-        EllesmereUI.RegisterWidgetRefresh(SyncApply)
-    end
-    if not ns._debuffColorsApplyOnHide then
-        ns._debuffColorsApplyOnHide = true
-        EllesmereUI:RegisterOnHide(function()
-            if ns.DebuffColors_Pending() then ns.DebuffColors_RequestRefresh() end
-        end)
     end
 
     -- Up/down arrows beside a row's name (white, the accent while hovered;
@@ -334,28 +389,52 @@ function ns.NP_BuildDebuffColorsOptions(parent, y)
     local SINGLE_TIP = "Higher in the list wins when several are up."
     local COMBO_TIP = "Combos win over single debuffs; higher in the list wins."
 
-    -- A debuff: its spell menu (Remove, Custom Spell..., the presets) with its
-    -- color inline.
+    -- A debuff: its spell menu (Remove, Custom Spell..., the class's presets,
+    -- then its custom spells) with its color inline. The custom tail follows
+    -- edits on every row of the class (cell.syncCustoms, run by the row's
+    -- refresher); Custom Spell... is an action: it adds a spell and keeps its label.
     local function SingleCfg(cell)
+        local own = Presets(cell.class)
         local values = { _noLoc = true, none = EllesmereUI.L("None"),
             remove = { text = EllesmereUI.L("Remove"), action = function() Remove(cell) end } }
-        for _, s in ipairs(presets) do values[tostring(s.id)] = s.name end
+        for key, s in pairs(own.byKey) do values[key] = s.name end
+        local order = {}
+        for i, key in ipairs(own.order) do order[i] = key end
+        local base = #order
+        -- True when the menu's items changed (it must rebuild).
+        function cell.syncCustoms()
+            local customs, changed = Customs(cell.class), false
+            for i, key in ipairs(customs) do
+                if order[base + i] ~= key then
+                    order[base + i] = key
+                    changed = true
+                end
+                local name = SpellName(tonumber(key), "Spell " .. key)
+                if values[key] ~= name then
+                    values[key] = name
+                    changed = true
+                end
+            end
+            for i = #order, base + #customs + 1, -1 do
+                order[i] = nil
+                changed = true
+            end
+            return changed
+        end
+        cell.syncCustoms()
         values.custom = { text = EllesmereUI.L("Custom Spell..."), action = function()
-            local id = SpellOf(cell)
-            if presetByKey[tostring(id)] then id = 0 end
             EllesmereUI:ShowInputPopup({
-                title=Label(cell), confirmText="Apply", cancelText="Cancel",
-                message="Enter the debuff's spell ID.\nLeave empty to clear this selection.",
-                placeholder="Spell ID", initialText=id > 0 and tostring(id) or "",
-                maxLetters=10, allowEmpty=true,
+                title=Label(cell), confirmText="Add", cancelText="Cancel",
+                message="Enter the debuff's spell ID.",
+                placeholder="Spell ID", maxLetters=10,
                 onConfirm=function(text)
-                    if (text or ""):match("^%s*$") then
-                        SetSpell(cell, 0, cell.rgn)
-                        return
-                    end
                     local value = DC.SpellID((text or ""):match("^%s*(%d+)%s*$"))
                     if not (value and C_Spell and C_Spell.GetSpellInfo(value)) then
                         EllesmereUI.PrintError(EllesmereUI.L("Enter a valid debuff spell ID."))
+                        return
+                    end
+                    if HeldElsewhere(cell, value) then
+                        EllesmereUI.PrintError(EllesmereUI.L("Already in use. Use the arrows to reorder."))
                         return
                     end
                     SetSpell(cell, value, cell.rgn)
@@ -365,46 +444,44 @@ function ns.NP_BuildDebuffColorsOptions(parent, y)
         values._menuOpts = {
             searchable=true, itemHeight=28, maxHeight=280, iconNativeColor=true,
             icon=function(key)
-                local id = key == "custom" and SpellOf(cell) or tonumber(key)
+                local id = tonumber(key)
                 return SpellIcon(id and id > 0 and id), .08, .92, .08, .92
             end,
             onItemHover=function(key, item)
-                local spell = presetByKey[key]
+                local spell = own.byKey[key]
                 if spell then
-                    EllesmereUI.ShowWidgetTooltip(item, spell.class .. " | Spell ID: " .. spell.id)
+                    EllesmereUI.ShowWidgetTooltip(item, spell.class .. " | " .. EllesmereUI.Lf("Spell ID: %1$s", spell.id))
+                elseif tonumber(key) then
+                    EllesmereUI.ShowWidgetTooltip(item, EllesmereUI.Lf("Spell ID: %1$s", key))
                 end
             end,
             onItemLeave=function() EllesmereUI.HideWidgetTooltip() end,
         }
-        return { type="dropdown", text=Label(cell), values=values, order=MenuOrder(cell.class),
+        return { type="dropdown", text=Label(cell), values=values, order=order,
             getValue=function()
                 local id = SpellOf(cell)
                 if id == 0 then return "none" end
-                if presetByKey[tostring(id)] then return tostring(id) end
-                return "custom"
+                return tostring(id)
             end,
             setValue=function(v)
                 local id = DC.SpellID(v)
                 if id then SetSpell(cell, id) end
             end,
+            -- Never the row's own spell (a list saved with a duplicate keeps
+            -- its label lit).
+            disabledValues=function(key)
+                local id = tonumber(key)
+                if id and id ~= SpellOf(cell) and HeldElsewhere(cell, id) then return IN_USE end
+                return false
+            end,
             tooltip=SINGLE_TIP }
     end
     local function SingleChrome(rgn, cell)
         ReorderArrows(rgn, cell)
-        -- The custom item names a custom spell; the menu rebuilds only when
-        -- that name changes.
-        local values = rgn._cfg.values
-        local shown
+        -- The menu rebuilds only when its custom spells change.
         local function Sync()
-            local id = SpellOf(cell)
-            if id > 0 and not presetByKey[tostring(id)] then
-                values.custom.text = EllesmereUI.Lf("%1$s (Custom)", SpellName(id, "Spell " .. id))
-            else
-                values.custom.text = EllesmereUI.L("Custom Spell...")
-            end
             local ctrl = rgn._control
-            if shown and shown ~= values.custom.text and ctrl._invalidateMenu then ctrl._invalidateMenu() end
-            shown = values.custom.text
+            if cell.syncCustoms() and ctrl._invalidateMenu then ctrl._invalidateMenu() end
             if ctrl._refreshLabel then ctrl._refreshLabel() end
         end
         Sync()

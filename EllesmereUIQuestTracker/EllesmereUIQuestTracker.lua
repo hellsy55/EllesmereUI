@@ -76,6 +76,7 @@ local QT_DEFAULTS = {
             autoAccept           = false,
             autoAcceptPreventMulti = true,
             autoAcceptShiftSkip  = true,
+            autoAcceptIgnoreTrivial = false,
             autoTurnIn           = false,
             autoTurnInShiftSkip  = true,
             questItemHotkey      = nil,

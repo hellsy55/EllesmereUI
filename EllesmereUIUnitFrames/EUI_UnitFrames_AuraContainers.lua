@@ -1723,7 +1723,7 @@ local function CastbarBelowFrame(unit, frame)
         vb = b or 0
     end
     -- frame.Castbar is the status bar; its PARENT is the holder the unlock
-    -- system moves (see CreateCastBar in EllesmereUIUnitFrames.lua).
+    -- system moves (see CreateCastBar in EUI_UnitFrames_Castbar.lua).
     local cb = frame and frame.Castbar and frame.Castbar:GetParent()
     if not cb then return true end
     local fl, fr, fb = frame:GetLeft(), frame:GetRight(), frame:GetBottom()

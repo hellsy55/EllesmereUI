@@ -1074,6 +1074,7 @@ initFrame:SetScript("OnEvent", function(self)
         { key="timewalking",       label="Timewalking" },
         { key="delve",             label="Delve" },
         { key="lair",              label="Lair" },
+        { key="scenario",          label="Scenario" },
         { key="in_combat",         label="In Combat" },
         { key="out_of_combat",     label="Out of Combat" },
     }

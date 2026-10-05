@@ -304,7 +304,7 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                 end
                 -- Cd-claimed collided-buff slot: settings key is the collision "c"..
                 -- cooldownID form directly -- the marker's mere presence already proves
-                -- this slot's identity (no ambiguity, unlike ResolveBuffSettingsKey's buff-bar case). Matches ResolveSpellSettings' runtime key exactly (EllesmereUICdmHooks.lua, settings["c"..cdID]).
+                -- this slot's identity (no ambiguity, unlike ResolveBuffSettingsKey's buff-bar case). Matches ResolveSpellSettings' runtime key exactly (EUI_CDM_HookResolve.lua, settings["c"..cdID]).
                 local cdClaimS = spellID and ns.CdClaimMarkerToCdID and ns.CdClaimMarkerToCdID(spellID)
                 if cdClaimS then
                     spellID = "c" .. cdClaimS

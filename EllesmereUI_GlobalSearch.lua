@@ -789,7 +789,9 @@ local function RunPrebuildPass(onComplete)
                 -- buildPage captures to hidden-build versions that a later
                 -- cache-restore could pick up instead of the live ones.
                 local cacheKey = folder .. "::" .. page
-                if not (ns.pageCache and ns.pageCache[cacheKey]) then
+                -- A link tab (config.pageLinks) has no page of its own to build.
+                if not (ns.pageCache and ns.pageCache[cacheKey])
+                   and not (config.pageLinks and config.pageLinks[page]) then
                     -- Selector-driven pages (CDM bar / unit dropdowns) expand to one
                     -- job PER variant so each tick stays one build; the last variant
                     -- job carries the restore of the player's own selection.

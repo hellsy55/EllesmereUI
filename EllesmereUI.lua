@@ -2403,6 +2403,11 @@ EllesmereUI._IS_STANDALONE  = IS_STANDALONE
 --    onLiveMove (function(key))  called after every mover-driven placement of
 --               the frame: drag start, each drag frame, drag stop, arrow/cog
 --               nudge. Runs before the anchor chain reads the frame's rect.
+--    ownsPosition (boolean) the module alone places the frame from its saved
+--               position (main chat, whose spot Blizzard's Edit Mode also
+--               applies): anchor links never move it and it offers no link or
+--               screen-edge menu, so no link becomes a third owner of the frame.
+--               Mover drags and nudges still move it and save through savePos
 --    linkedKeys (table)  list of element keys that move with this one
 --    noResize   (boolean) true for Blizzard elements that cannot be resized
 --    sizeFixedByLook (boolean) the current look fixes the element's size
@@ -2444,6 +2449,7 @@ function EllesmereUI.MakeUnlockElement(opts)
         isHidden      = opts.isHidden,
         isAnchored    = opts.isAnchored,
         onLiveMove    = opts.onLiveMove,
+        ownsPosition  = opts.ownsPosition,
         linkedKeys    = opts.linkedKeys,
         noResize          = opts.noResize,
         linkedDimensions  = opts.linkedDimensions,
@@ -2918,7 +2924,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "9.3.6"
+EllesmereUI.VERSION = "9.3.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -3086,11 +3092,7 @@ EllesmereUI._RunConflictCheck = function()
         local pending = {}
         for _, entry in ipairs(conflicts) do
             local moduleActive = not entry.moduleCheck or entry.moduleCheck()
-            -- Suppress Ayije_CDM here if the CDM module's crash-prevention early-bail already fired -- its own popup supersedes this one.
-            local suppressedBySpecific =
-                (entry.addon == "Ayije_CDM" and _G._EUI_ECME_HandledAyijeCDM)
-            if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon)
-               and moduleActive and not suppressedBySpecific then
+            if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon) and moduleActive then
                 local affected = {}
                 if entry.targets == "all" then
                     local allTargets = {

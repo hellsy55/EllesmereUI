@@ -6,12 +6,12 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  reputation and House Favor bars come from the data bar kit
 --  (ns.ABO_DataBarKit, defined in MenuBagsRepPage_Options.lua and read at
 --  build time); this file holds the XP bar's own: XP Bar Style, Show Dividers
---  and its settings row, Fill Style, Rested Color, Background, the bar's
---  texts (a list of the ones that show something: what each shows, the
---  position it sits at, its Size, offsets and Show Rested cog; Add Text
---  Slot), Text Background and the Visibility cog (with Click Through).
---  Definitions only; the shared helpers come from ns._ABO_OptEnv (filled by
---  EUI_ActionBars_Options.lua).
+--  and its settings row, Fill Style, Rested Color, Background, Quest XP
+--  Overlay and its cog, the bar's texts (a list of the ones that show
+--  something: what each shows, the position it sits at, its Size, offsets
+--  and Show Rested cog; Add Text Slot), Text Background and the Visibility
+--  cog (with Click Through). Definitions only; the shared helpers come from
+--  ns._ABO_OptEnv (filled by EUI_ActionBars_Options.lua).
 -------------------------------------------------------------------------------
 local ns = EllesmereUI._ModuleNS["EllesmereUIActionBars"]
 if not ns then return end  -- module disabled: no options page
@@ -74,7 +74,8 @@ local addedKey
 --                    a row), then Add Text Slot
 --    DISPLAY         Text Size | Text Background, Border Style | Border
 --                    Size (and the offsets of a textured style), Fill
---                    Style | Rested Color, Background | Bar Texture
+--                    Style | Rested Color, Background | Bar Texture,
+--                    Quest XP Overlay
 --  While the bar's visibility is Never only the first row is built.
 ---------------------------------------------------------------------------
 
@@ -1036,6 +1037,81 @@ local function BuildXPBarPage(pageName, parent, yOffset)
                 return "This option requires Background above 0%"
             end,
             rawTooltip = _blizzDis })
+    end
+
+    -- Quest XP Overlay: the completed / incomplete colours as inline swatches
+    -- (green / gold at 60% until set, ns.XPQuestColor), the filters in its cog.
+    local questRow
+    questRow, h = W:DualRow(parent, y,
+        { type="toggle", text="Quest XP Overlay",
+          tooltip="Shows the XP from quests in your quest log ahead of the fill.",
+          disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP, rawTooltip=true,
+          getValue=function() return S().questOverlay end,
+          setValue=function(v)
+              S().questOverlay = v
+              ns.ApplyDataBarLayout(XP)
+              EllesmereUI:RefreshPage()
+          end },
+        EllesmereUI.BlankRowCfg());  y = y - h
+    if chrome then
+        local rgn = questRow._leftRegion
+        local function overlayOff() return _blizzDis() or not S().questOverlay end
+        EllesmereUI.BuildInlineSwatches(rgn, {
+            { tooltip = "Completed Color", hasAlpha = true,
+              getValue = function() return ns.XPQuestColor(S(), true) end,
+              setValue = function(r, g, b, a)
+                  S().questOverlayDoneColor = { r = r, g = g, b = b, a = a or 0.6 }
+                  ns.ApplyDataBarLayout(XP)
+              end },
+            { tooltip = "Incomplete Color", hasAlpha = true,
+              disabled = function() return S().questOverlayCompleted end,
+              disabledTooltip = function()
+                  if _blizzDis() then return BLIZZ_DIS_TIP end
+                  if not S().questOverlay then return "Quest XP Overlay" end
+                  return "Completed Quests Only"
+              end,
+              requireState = function()
+                  if S().questOverlay and not _blizzDis() then return "disabled" end
+              end,
+              rawTooltip = _blizzDis,
+              getValue = function() return ns.XPQuestColor(S(), false) end,
+              setValue = function(r, g, b, a)
+                  S().questOverlayColor = { r = r, g = g, b = b, a = a or 0.6 }
+                  ns.ApplyDataBarLayout(XP)
+              end },
+        }, { size = 20, disabled = overlayOff,
+            disabledTooltip = function()
+                if _blizzDis() then return BLIZZ_DIS_TIP end
+                return "Quest XP Overlay"
+            end,
+            rawTooltip = _blizzDis })
+        EllesmereUI.BuildInlineCog(rgn, {
+            title = "Quest XP Overlay",
+            captureRegion = rgn,
+            disabled = overlayOff,
+            disabledTooltip = function()
+                if _blizzDis() then return BLIZZ_DIS_TIP end
+                return "Quest XP Overlay"
+            end,
+            rawTooltip = _blizzDis,
+            rows = {
+                { type="toggle", label="Completed Quests Only",
+                  tooltip="Only counts quests that are ready to turn in.",
+                  get=function() return S().questOverlayCompleted end,
+                  set=function(v)
+                      S().questOverlayCompleted = v or nil
+                      ns.ApplyDataBarLayout(XP)
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="toggle", label="Current Zone Only",
+                  tooltip="Only counts quests in your current zone.",
+                  get=function() return S().questOverlayZone end,
+                  set=function(v)
+                      S().questOverlayZone = v or nil
+                      ns.ApplyDataBarLayout(XP)
+                  end },
+            },
+        })
     end
 
     return math.abs(y)
