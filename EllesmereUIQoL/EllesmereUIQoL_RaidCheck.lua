@@ -876,6 +876,10 @@ local function ReadMembers()
             class       = class,
             online = UnitIsConnected(unit),
             group  = subgroup or 1,
+            -- Preserve the roster API order inside each subgroup. Raid Check
+            -- sorts groups 1 -> 8 below, but never alphabetizes the members
+            -- within a group, so the vertical list mirrors Raid Groups.
+            rosterOrder = #out + 1,
             -- Not a cosmetic flag: your own row is the one that can be read
             -- locally instead of waited for.
             isSelf = UnitIsUnit(unit, "player"),
@@ -894,10 +898,14 @@ local function ReadMembers()
         Add("player")
     end
 
-    -- Plain A-Z by name, subgroup ignored entirely: a raid leader hunting one
-    -- name reads the grid top-to-bottom once instead of finding the right
-    -- subgroup block first.
-    table.sort(out, function(a, b) return a.name < b.name end)
+    -- Match the Raid Groups roster: groups 1 -> 8 from top to bottom, while
+    -- keeping the roster API order of players inside each group. Party/solo
+    -- members all use group 1, so their original player/party-unit order is
+    -- preserved as well.
+    table.sort(out, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        return a.rosterOrder < b.rosterOrder
+    end)
     return out
 end
 
