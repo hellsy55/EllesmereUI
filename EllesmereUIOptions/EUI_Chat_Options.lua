@@ -203,18 +203,14 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
 
             _, h = W:DualRow(parent, y,
-                { type = "toggle", text = "Show Group Nicknames",
-                  tooltip = "Show supported nicknames instead of character names for current party or raid members in Loot Feed. Player links, class colors, parsing and message identity continue to use the real character name.",
-                  getValue = function() return db.ShowGroupNicknames ~= false end,
-                  setValue = function(v) SetLF("ShowGroupNicknames", v and true or false) end,
-                  disabled = LFDisabled },
                 NumberSlider("ShortenFactionNamesLength", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH or "Short Faction name length", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH_TOOLTIP, 1, 50, 1,
-                    function() return db.ShortenFactionNames ~= false end))
+                    function() return db.ShortenFactionNames ~= false end),
+                NumberSlider("IconSize", L.PANEL_OPTION_ICON_SIZE or "Icon Size", L.PANEL_OPTION_ICON_SIZE_TOOLTIP, 1, 64, 1, nil, true))
             y = y - h
 
             _, h = W:DualRow(parent, y,
-                NumberSlider("IconSize", L.PANEL_OPTION_ICON_SIZE or "Icon Size", L.PANEL_OPTION_ICON_SIZE_TOOLTIP, 1, 64, 1, nil, true),
-                NumberSlider("IconTrim", L.PANEL_OPTION_ICON_TRIM or "Icon Trim", L.PANEL_OPTION_ICON_TRIM_TOOLTIP, 0, 50, 1))
+                NumberSlider("IconTrim", L.PANEL_OPTION_ICON_TRIM or "Icon Trim", L.PANEL_OPTION_ICON_TRIM_TOOLTIP, 0, 50, 1),
+                EllesmereUI.BlankRowCfg())
             y = y - h
 
             _, h = W:SectionHeader(parent, "ITEM DISPLAY", y); y = y - h
