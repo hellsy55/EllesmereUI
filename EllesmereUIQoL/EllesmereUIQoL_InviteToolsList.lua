@@ -2457,6 +2457,7 @@ function IL:CreateFrame()
     local rows = {}
     local locked = false
     local friendlyFill
+    local sharedFill
     local layingOut = false
 
     local function SetWidgetEnabled(w, enabled)
@@ -2847,6 +2848,7 @@ function IL:CreateFrame()
     local function UpdateStatusUI()
         UpdateRowStatuses()
         checkFill:SetShown(IL:AutoOn())
+        if sharedFill then sharedFill:SetShown(IL:SharedOn()) end
         local text, c
         if IL.session and InCombatLockdown() then
             text = L["Paused"] -- combat: the countdown is frozen
@@ -2916,10 +2918,55 @@ function IL:CreateFrame()
         IL:StopAuto()
     end)
 
+    -- Auto-accept shared lists: [x] Auto-accept shared lists ---------------
+    -- This is intentionally one row above Auto-invite, matching the standalone
+    -- JacaInviteTools layout while keeping EUI's existing trusted-sender rule.
+    local bar2 = CreateFrame("Frame", nil, f)
+    bar2:SetHeight(22)
+    bar2:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 94)
+    bar2:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 94)
+
+    local sharedCheck = CreateFrame("Button", nil, bar2, "BackdropTemplate")
+    sharedCheck:SetSize(18, 18)
+    sharedCheck:SetPoint("LEFT", bar2, "LEFT", 0, 0)
+    sharedCheck:SetBackdrop(backdrop)
+    BG(sharedCheck, "dark")
+    sharedCheck:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+
+    sharedFill = sharedCheck:CreateTexture(nil, "ARTWORK")
+    sharedFill:SetPoint("TOPLEFT", sharedCheck, "TOPLEFT", 4, -4)
+    sharedFill:SetPoint("BOTTOMRIGHT", sharedCheck, "BOTTOMRIGHT", -4, 4)
+    sharedFill:SetColorTexture(accent[1], accent[2], accent[3], 1)
+    sharedFill:SetShown(IL:SharedOn())
+
+    local sharedLabel = bar2:CreateFontString(nil, "OVERLAY")
+    sharedLabel:SetPoint("LEFT", sharedCheck, "RIGHT", 6, 0)
+    StyleFont(sharedLabel, "normal")
+    Tint(sharedLabel)
+    sharedLabel:SetText(L["Auto-accept shared lists"])
+    -- Clicking the label toggles the checkbox too.
+    sharedCheck:SetHitRectInsets(0, -((sharedLabel:GetStringWidth() or 0) + 8), 0, 0)
+
+    sharedCheck:SetScript("OnClick", function()
+        if InCombatLockdown() or locked then return end
+        IL:SetShared(not IL:SharedOn())
+    end)
+    sharedCheck:SetScript("OnEnter", function(self)
+        self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+        GameTooltip:SetText(L["Auto-accept shared lists"], 1, 1, 1)
+        GameTooltip:AddLine(L["Accepts lists sent by your group leader or a raid assistant without asking. Lists from anybody else still show the popup."], 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    sharedCheck:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        GameTooltip:Hide()
+    end)
+
     -- Clear list -----------------------------------------------------------
-    local clear = MakeButton(f, L["Clear list"])
+    local clear = MakeButton(bar2, L["Clear list"])
     clear:SetSize(70, 20)
-    clear:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 94)
+    clear:SetPoint("RIGHT", bar2, "RIGHT", 0, 0)
     local clearToken = 0
     local function DisarmClear()
         clearToken = clearToken + 1
@@ -4031,6 +4078,7 @@ function IL:CreateFrame()
         Theme.accent[1], Theme.accent[2], Theme.accent[3], Theme.accent[4] = r, g, b, 1
         thumb:SetColorTexture(r, g, b, 0.6)
         checkFill:SetColorTexture(r, g, b, 1)
+        if sharedFill then sharedFill:SetColorTexture(r, g, b, 1) end
         if friendlyFill then friendlyFill:SetColorTexture(r, g, b, 1) end
         timerEdit:SetBackdropBorderColor(r, g, b, 1)
         for i = 1, #tinted do tinted[i]:SetTextColor(r, g, b, 1) end
