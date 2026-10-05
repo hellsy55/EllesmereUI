@@ -10,12 +10,13 @@ This repository is a fork of https://github.com/EllesmereGaming/EllesmereUI.
 - Write each commit subject in English, imperative mood, on one line, covering all meaningful changes concisely. Use `Module (type): brief description`, with a recognizable module and an appropriate type such as `fix`, `feature`, `chore`, or `docs`. Group descriptions of the same module and type with `; `. Keep different types for one module adjacent. Separate sections with `. ` and omit a final period. This applies to sync and library commits too. Examples: `CDM (fix): guard secret spellID values. Raid Tools (feature): disable Convert to Party for raids over 5 members`; `Libraries (chore): update LibSharedMedia to <version>`.
 - Before every commit, show `git diff --cached --stat`, `git diff --cached --name-status`, and the relevant staged diff when it is small enough to review. Stage only user-facing addon changes or intentionally maintained project files. Stop and ask if anything staged is unexpected.
 - Preserve preexisting and unrelated changes. Never commit local-only test scripts, scratch files, generated diagnostic helpers, or temporary tooling unless the user explicitly requests that exact file be versioned.
+- Maintenance workflows require Python 3. Resolve a compatible platform runtime once using [Python preflight](.agents/references/python-runtime.md); reuse it for all helpers. No specific launcher is required. If none is valid, stop before modifying branches.
 - Never resolve a merge conflict, apply an upstream PR, or vendor an external library without the workflow's explicit human choice. Never run an install without the install menu choice. An install menu choice of option (a) is sufficient confirmation.
 
 ## Branches and command routing
 
 - `main` mirrors `upstream/main` on the fork and receives no direct feature commits.
-- `new-features` is Retail and syncs directly from `upstream/main`.
+- `new-features` is Retail and syncs directly from the latest release commit in `upstream/main`, excluding later upstream commits.
 - `12.1.5-PTR-features` is PTR and receives Retail changes by merging `new-features`, after Retail is synced.
 - For `update`, `atualizar`, `update retail`, `atualizar retail`, `atualizar o retail`, and close case-insensitive variants, use [eui-update](.agents/skills/eui-update/SKILL.md) in Retail mode.
 - For `update PTR`, `atualizar PTR`, and close case-insensitive variants, use [eui-update](.agents/skills/eui-update/SKILL.md) in PTR mode.

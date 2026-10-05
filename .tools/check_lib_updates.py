@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Check external library versions; vendor only with explicit --apply approval.
+
+Canonical maintenance checker used by the update workflows.
+Uses standard-library parsing of the restricted .pkgmeta externals format.
+Requires Git and, for WowAce sources, SVN.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+PKGMETA_PATH = '.pkgmeta'
+LOCKFILE_PATH = '.pkgmeta-lock.json'
+CACHE_DIR = '.pkgmeta-cache'
+
+def parse_externals(pkgmeta_text: str) -> dict:
+    lines = pkgmeta_text.splitlines()
+    externals = {}
+    in_externals = False
+    current_path = None
+    current = {}
+
+    def flush():
+        if current_path is not None:
+            externals[current_path] = current.copy()
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(' '))
+        stripped = line.strip()
+        if stripped == 'externals:':
+            in_externals = True
+            continue
+        if not in_externals:
+            continue
+        if indent == 0 and stripped.endswith(':') and (stripped != 'externals:'):
+            flush()
+            in_externals = False
+            current_path = None
+            current = {}
+            continue
+        if indent <= 2 and stripped.endswith(':') and (':' not in stripped[:-1]):
+            flush()
+            current_path = stripped[:-1]
+            current = {}
+            continue
+        m = re.match('([\\w-]+):\\s*(.+)', stripped)
+        if m and current_path is not None:
+            key, value = (m.group(1), m.group(2).strip())
+            current[key] = value
+    flush()
+    return externals
+
+def short_name(path: str) -> str:
+    return path.rstrip('/').split('/')[-1]
+
+def run(cmd, **kwargs):
+    return subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60, **kwargs)
+
+def latest_git_tag(url: str) -> str | None:
+    result = run(['git', 'ls-remote', '--tags', '--sort=-v:refname', url])
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        parts = line.split('refs/tags/')
+        if len(parts) == 2:
+            tag = parts[1]
+            if tag.endswith('^{}'):
+                tag = tag[:-3]
+            return tag
+    return None
+
+def latest_git_commit(url: str, branch: str='HEAD') -> str | None:
+    result = run(['git', 'ls-remote', url, branch])
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.split()[0]
+
+def latest_svn_revision(url: str) -> str | None:
+    result = run(['svn', 'info', '--xml', url])
+    if result.returncode != 0:
+        return None
+    try:
+        root = ET.fromstring(result.stdout)
+    except ET.ParseError:
+        return None
+    commit = root.find('.//entry/commit')
+    if commit is None:
+        return None
+    return commit.get('revision')
+
+def resolve_upstream_version(entry: dict) -> tuple[str, str] | None:
+    url = entry.get('url', '')
+    tag = entry.get('tag')
+    if 'repos.wowace.com' in url:
+        rev = latest_svn_revision(url)
+        return ('svn-rev', rev) if rev else None
+    clean_url = url.split('.git/')[0]
+    if not clean_url.endswith('.git'):
+        clean_url = clean_url
+    if tag == 'latest':
+        t = latest_git_tag(clean_url)
+        return ('git-tag', t) if t else None
+    else:
+        c = latest_git_commit(clean_url)
+        return ('git-commit', c) if c else None
+
+def load_lockfile() -> dict:
+    if os.path.exists(LOCKFILE_PATH):
+        with open(LOCKFILE_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_lockfile(data: dict) -> None:
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         dir=os.path.dirname(os.path.abspath(LOCKFILE_PATH)),
+                                         delete=False) as f:
+            temporary_path = f.name
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        os.replace(temporary_path, LOCKFILE_PATH)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+def main():
+    try:
+        return check_updates()
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f'[error] {error}', file=sys.stderr)
+        return 1
+
+def check_updates():
+    parser = argparse.ArgumentParser(description='Check updates for .pkgmeta external libraries')
+    parser.add_argument('--apply', metavar='NAME', help="Short library name to vendor (or 'all' for all pending updates). Without this flag, only report.")
+    args = parser.parse_args()
+    if not os.path.exists(PKGMETA_PATH):
+        print(f'Could not find {PKGMETA_PATH} on the current branch.', file=sys.stderr)
+        sys.exit(1)
+    branch = run(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).stdout.strip() or '?'
+    with open(PKGMETA_PATH, 'r', encoding='utf-8') as f:
+        pkgmeta_text = f.read()
+    externals = parse_externals(pkgmeta_text)
+    lock = load_lockfile()
+    pending = {}
+    current = 0
+    unresolved = 0
+    for path, entry in externals.items():
+        name = short_name(path)
+        resolved = resolve_upstream_version(entry)
+        if resolved is None:
+            unresolved += 1
+            print(f"[?] {name} ({path}) - could not resolve upstream version (url: {entry.get('url')})")
+            continue
+        kind, upstream_version = resolved
+        locked = lock.get(path, {})
+        locked_version = locked.get('value')
+        if locked_version == upstream_version:
+            current += 1
+            continue
+        pending[path] = {'name': name, 'entry': entry, 'kind': kind, 'old': locked_version, 'new': upstream_version}
+        old_display = locked_version or '(never vendored on this branch)'
+        print(f'[!] {name}: update available')
+        print(f'    current: {old_display}')
+        print(f'    new    : {upstream_version}')
+    print(f'Libraries | branch={branch} | current={current} | pending={len(pending)} | unresolved={unresolved}')
+    if unresolved:
+        print('Library check incomplete; unresolved sources are not confirmed current.', file=sys.stderr)
+        return 1
+    if not pending:
+        return 0
+    if not args.apply:
+        print('\nAfter approval, run --apply <name> (or --apply all) to vendor the listed libraries on this branch.')
+        return
+    targets = list(pending.keys()) if args.apply == 'all' else [p for p, info in pending.items() if info['name'] == args.apply]
+    if not targets:
+        print(f"\nNo pending library named '{args.apply}'.", file=sys.stderr)
+        sys.exit(1)
+    for path in targets:
+        info = pending[path]
+        vendor_lib(path, info)
+    # Publish version records only after every requested vendoring succeeds.
+    for path in targets:
+        info = pending[path]
+        lock[path] = {'kind': info['kind'], 'value': info['new']}
+    save_lockfile(lock)
+    for path in targets:
+        info = pending[path]
+        print(f"{info['name']} updated to {info['new']} into {path}")
+    print(f'\n{LOCKFILE_PATH} updated. Review `git diff` before committing.')
+    return 0
+
+def require_success(result, operation):
+    if result.returncode != 0:
+        raise RuntimeError(f'{operation} failed ({result.returncode}): {result.stderr.strip()}')
+
+def vendor_lib(path: str, info: dict) -> None:
+    entry = info['entry']
+    url = entry.get('url', '')
+    name = info['name']
+    print(f'\nVendoring {name} into {path}')
+    with tempfile.TemporaryDirectory() as tmp:
+        if 'repos.wowace.com' in url:
+            result = run(['svn', 'export', '--force', '-r', info['new'], url, tmp])
+            require_success(result, f'SVN export for {name}')
+        else:
+            clean_url, _, subpath = url.partition('.git/')
+            if not clean_url.endswith('.git'):
+                pass
+            clone_dir = os.path.join(tmp, '_clone')
+            ref_args = []
+            if info['kind'] == 'git-tag':
+                ref_args = ['--branch', info['new']]
+            result = run(['git', 'clone', '--depth', '1', *ref_args, clean_url, clone_dir])
+            if result.returncode != 0 and info['kind'] == 'git-tag':
+                if os.path.exists(clone_dir):
+                    shutil.rmtree(clone_dir)
+                result = run(['git', 'clone', clean_url, clone_dir])
+                require_success(result, f'Git clone for {name}')
+                result = run(['git', 'checkout', info['new']], cwd=clone_dir)
+                require_success(result, f'Git checkout for {name}')
+            require_success(result, f'Git clone for {name}')
+            if info['kind'] == 'git-commit':
+                result = run(['git', 'checkout', info['new']], cwd=clone_dir)
+                require_success(result, f'Git checkout for {name}')
+            src = clone_dir
+            if subpath:
+                src = os.path.join(clone_dir, subpath)
+            shutil.rmtree(os.path.join(tmp, 'export'), ignore_errors=True)
+            shutil.copytree(src, os.path.join(tmp, 'export'), ignore=shutil.ignore_patterns('.git'))
+            tmp = os.path.join(tmp, 'export')
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        if os.path.exists(path):
+            shutil.rmtree(path)
+        shutil.copytree(tmp, path)
+    cache_path = os.path.join(CACHE_DIR, name, info['new'])
+    if not os.path.exists(cache_path):
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        shutil.copytree(path, cache_path)
+if __name__ == '__main__':
+    sys.exit(main())
