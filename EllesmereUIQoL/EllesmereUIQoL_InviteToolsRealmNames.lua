@@ -6,10 +6,10 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -- dropped when a name is written ("Argent Dawn" -> "ArgentDawn"), because that
 -- is how the client wants them in an invite; apostrophes, hyphens and accents
 -- stay as written here.
----@class JT
+---@class InviteTools
 local _, ns = ...
-local JT = ns.InviteTools
-if not JT then return end
+local InviteTools = ns.InviteTools
+if not InviteTools then return end
 
 local REALMS = {
     "Aegwynn",
@@ -312,7 +312,7 @@ local REALMS = {
 }
 
 local RN = {}
-JT.RealmNames = RN
+InviteTools.RealmNames = RN
 
 ------------------------------------------------------------------------
 -- Matching

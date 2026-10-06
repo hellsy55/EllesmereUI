@@ -325,9 +325,8 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
 
         -- INVITE TOOLS
-        -- JacaInviteTools' standalone cog panel is represented here using the
-        -- same EUI widgets as the rest of Raid Tools. The standalone minimap
-        -- option is intentionally omitted because Raid Tools owns its launcher.
+        -- Invite Tools settings use the same EUI widgets as the rest of Raid
+        -- Tools. Raid Tools owns the launcher, so no separate minimap option is needed.
         _, h = W:SectionHeader(parent, "INVITE TOOLS", y);  y = y - h
 
         _, h = W:DualRow(parent, y,
@@ -355,8 +354,8 @@ initFrame:SetScript("OnEvent", function(self)
         );  y = y - h
 
         _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Show Nicknames in Friend List",
-              tooltip = "Replace the light-blue Battle.net name with a supported nickname when available. The character name in parentheses and all invite actions continue to use the real character name.",
+            { type = "toggle", text = "Show Nicknames in Invite Tools",
+              tooltip = "Use supported nicknames in Friend List, Factions, and Shared List popups/chat feedback. The main invite list, History, invites, whispers, stored names and addon messages always use the real character name.",
               disabled = Disabled,
               getValue = function() return InviteCfg("ShowNicknames") ~= false end,
               setValue = function(v)

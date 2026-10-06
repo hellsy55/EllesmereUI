@@ -1,10 +1,10 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local _, ns = ...
-local JT = ns.InviteTools
-if not JT then return end
-local IL = JT.InviteList
-local L = JT.L
-local Theme = JT.Theme
+local InviteTools = ns.InviteTools
+if not InviteTools then return end
+local IL = InviteTools.InviteList
+local L = InviteTools.L
+local Theme = InviteTools.Theme
 
 local CreateFrame = CreateFrame
 local UIParent = UIParent
@@ -20,11 +20,11 @@ local math_max, math_min = math.max, math.min
 ------------------------------------------------------------------------
 -- Invite by List
 --
--- Ported from the "Invite by list" part of MRT's Invite Tools module.
+-- Invite Tools keeps a list of names and invites everyone not already grouped.
 -- You keep up to four lists of names ("Name-Realm", one per line), and one
 -- button invites everyone on the active list who is not already in your group.
 --
--- HOW THE RAID CONVERSION WORKS (same flow as MRT): a party holds five, so
+-- HOW THE RAID CONVERSION WORKS: a party holds five, so
 -- with no raid yet only the first four names are invited. The remainder stays
 -- queued; once somebody accepts and the group exists, it is converted to a raid
 -- and the queue is invited in full. The queue expires so a half-finished
@@ -45,9 +45,9 @@ function IL:UpdateDB()
     local root = get and get()
     local current = root and root.profile and root.profile.raidTools and root.profile.raidTools.inviteTools
     if current then
-        JT.db = current
+        InviteTools.db = current
     end
-    self.db = current or JT.db
+    self.db = current or InviteTools.db
 end
 
 ------------------------------------------------------------------------
@@ -117,7 +117,7 @@ local function ParseList(text, report)
 
         -- Check the realm against the realm list (Bartilas -> Barthilas).
         local char, realm = name:match("^([^%-]+)%-(.+)$")
-        local RN = JT.RealmNames
+        local RN = InviteTools.RealmNames
         if char and realm and RN then
             local canon, how = RN.Resolve(realm)
             if canon then
@@ -247,11 +247,11 @@ local function PrintReport(report)
     end
     local fixed = Uniq(report.fixed)
     if #fixed > 0 then
-        JT:Print(string.format(L["Realm corrected: %s"], Join(fixed)))
+        InviteTools:Print(string.format(L["Realm corrected: %s"], Join(fixed)))
     end
     local unknown = Uniq(report.unknown)
     if #unknown > 0 then
-        JT:Print(string.format(L["Realm not recognized (kept as typed): %s"], Join(unknown)))
+        InviteTools:Print(string.format(L["Realm not recognized (kept as typed): %s"], Join(unknown)))
     end
 end
 
@@ -326,6 +326,19 @@ local function InGroup(name)
     return FindGroupUnit(name) ~= nil
 end
 
+-- Display-only nickname resolver used only by Friend List, Factions, and
+-- Shared List UI/chat feedback. All identity-sensitive operations (invites,
+-- whispers, list storage and protocol messages) continue to use the real name.
+local function DisplayName(name, unit)
+    if type(name) ~= "string" or name == "" or not IL.db or IL.db.ShowNicknames == false then
+        return name
+    end
+    local nick
+    if unit and ns.GetNicknameForUnit then nick = ns.GetNicknameForUnit(unit) end
+    if not nick and ns.GetNicknameForName then nick = ns.GetNicknameForName(ShortName(name)) end
+    return nick or name
+end
+
 -- Class file name ("WARRIOR") of a name that is already in the group, or nil.
 local function GroupClass(name)
     if not name then return nil end
@@ -374,7 +387,7 @@ end
 
 local function InviteUnit(name)
     -- The client refuses very long "Name-Realm" strings; the short name is
-    -- enough then (same guard MRT has).
+    -- enough then.
     if name:len() >= 45 then
         name = ShortName(name)
     end
@@ -621,7 +634,7 @@ local HISTORY_MAX = 25
 -- kind: "joined" (default), "declined" or "removed". `how` records why
 -- the entry exists ("list", "declined", "removed" or "cleared"). Newest goes
 -- first and the same realm-aware character is never listed twice.
-function IL:RecordJoin(name, kind, class, how)
+function IL:RecordJoin(name, kind, class, how, by)
     local db = self.db
     if not db or type(name) ~= "string" or name == "" or IsMe(name) then return end
     local hist = db.History
@@ -645,6 +658,7 @@ function IL:RecordJoin(name, kind, class, how)
         name = keepName,
         kind = kind or "joined",
         how = how,
+        by = by,
         class = class or GroupClass(keepName),
         t = time(),
     })
@@ -968,7 +982,7 @@ function IL:OnInviteUIError(_, _, msg)
     self.lastInvite = nil
     local st = self.state[li.name:lower()]
     if st then st.status = "unfriendly" end
-    JT:Print("|cffff4040" .. string.format(L["Invite to %s failed: %s"], ShortName(li.name), msg) .. "|r")
+    InviteTools:Print("|cffff4040" .. string.format(L["Invite to %s failed: %s"], ShortName(li.name), msg) .. "|r")
     self:UpdateUI()
 end
 
@@ -1109,7 +1123,7 @@ end
 
 function IL:InviteFromList(index)
     if InCombatLockdown() then
-        JT:Print(L["Invite List is disabled in combat."])
+        InviteTools:Print(L["Invite List is disabled in combat."])
         return
     end
     index = tonumber(index) or self.db.Current or 1
@@ -1117,14 +1131,14 @@ function IL:InviteFromList(index)
 
     local list = ParseList(self:GetListText(index))
     if #list == 0 then
-        JT:Print(L["List is empty."])
+        InviteTools:Print(L["List is empty."])
         return
     end
 
     self:StartSession(list)
     local sent = self:InviteNames(list, false)
     if sent == 0 and not self.pendingList then
-        JT:Print(L["Everyone on the list is already in your group."])
+        InviteTools:Print(L["Everyone on the list is already in your group."])
     end
 end
 
@@ -1313,7 +1327,7 @@ end
 --     every received name is checked.
 ------------------------------------------------------------------------
 
-PREFIX = "JTInvList"
+PREFIX = "InviteTools"
 local SHARE_MAX_NAMES = 100
 local SHARE_OFFER_TTL = 60     -- seconds an offer can still be accepted (and the whole send must finish)
 local SHARE_MAX_RECIPIENTS = 21  -- only people with the addon receive anything, so this is plenty
@@ -1356,7 +1370,7 @@ local function MyClass()
     return ValidClass(classFile) or ""
 end
 local function Who(name, classFile, resume)
-    local short = ShortName(name)
+    local short = DisplayName(name, FindGroupUnit(name)) or ShortName(name)
     local cf = ClassOf(name, classFile)
     local color = cf and RAID_CLASS_COLORS[cf]
     if not color then return short end
@@ -1380,7 +1394,13 @@ function IL:DropFromList(gone)
             if SameChar(self.names[k], name) then
                 local removed = table.remove(self.names, k)
                 changed = true
-                JT:Print(string.format(L["%s left the group: removed from the list."], Who(removed, HistoryClass(self.db, removed))))
+                local cf = ClassOf(removed, HistoryClass(self.db, removed))
+                local color = cf and RAID_CLASS_COLORS[cf]
+                local shown = ShortName(removed)
+                if color then
+                    shown = string.format("|cff%02x%02x%02x%s|r", color.r * 255 + 0.5, color.g * 255 + 0.5, color.b * 255 + 0.5, shown)
+                end
+                InviteTools:Print(string.format(L["%s left the group: removed from the list."], shown))
             end
         end
     end
@@ -1451,14 +1471,14 @@ function IL:CancelShare()
     wipe(outQueue)
     self.offer = nil
     if self.awaiting then
-        JT:Print(YELLOW .. string.format(L["Cancelled: the list from %s was not received because you entered combat."], Who(self.awaiting.sender, self.awaiting.classFile, YELLOW)) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["Cancelled: the list from %s was not received because you entered combat."], Who(self.awaiting.sender, self.awaiting.classFile, YELLOW)) .. "|r")
     end
     self.awaiting = nil
     if self.incoming then
         self.incoming = nil
-        if JT.activePrompt then
-            JT.activePrompt:Hide()
-            JT.activePrompt = nil
+        if InviteTools.activePrompt then
+            InviteTools.activePrompt:Hide()
+            InviteTools.activePrompt = nil
         end
     end
     self.lastShare = 0
@@ -1490,7 +1510,7 @@ local function PumpOut()
         end
     end
     if not sent then
-        JT:Print(RED .. L["A share message could not be sent (game limit or unavailable). Try sharing again."] .. "|r")
+        InviteTools:Print(RED .. L["A share message could not be sent (game limit or unavailable). Try sharing again."] .. "|r")
     end
     table.remove(outQueue, 1)
     C_Timer.After(SHARE_SEND_GAP, PumpOut)
@@ -1571,7 +1591,7 @@ end
 
 function IL:ClearOnKill(bossName)
     self:ClearList("killed")
-    JT:Print(string.format(L["%s defeated: list cleared."], bossName or "Ula'tek"))
+    InviteTools:Print(string.format(L["%s defeated: list cleared."], bossName or "Ula'tek"))
 end
 
 function IL:ENCOUNTER_END(_, encounterID, encounterName, _, _, success)
@@ -1598,15 +1618,17 @@ end
 -- Empties the whole list. `how` distinguishes a manual Clear List from the
 -- automatic Ula'tek kill clear so History can preserve the reason. Existing
 -- joined entries keep their joined/left timestamps; a kill adds a green note.
-function IL:ClearList(how)
+function IL:ClearList(how, by, keep)
     how = how or "cleared"
     local old = self.names or ParseList(self:GetListText(1))
     for i = #old, 1, -1 do
         local name = old[i]
         if type(name) == "string" and name ~= "" then
             local joined = JoinedEntry(self.db, name)
-            if not joined then
-                self:RecordJoin(name, "removed", nil, how)
+            if keep and keep[name:lower()] then
+                -- Still present on the replacement list, so it was not removed.
+            elseif not joined then
+                self:RecordJoin(name, "removed", nil, how, by)
             elseif how == "killed" then
                 joined.clearedBy = "killed"
             end
@@ -1690,9 +1712,8 @@ function IL:Share(mode)
     return true
 end
 
--- Tiny reply sent back to the player who offered a list. Newer standalone
--- JacaInviteTools versions use the same R packet, while older versions simply
--- ignore it, so the basic O/A/D protocol remains backward-compatible.
+-- Tiny reply sent back to the player who offered a list. The R packet
+-- carries compact sender-side delivery feedback for the Invite Tools protocol.
 -- code: d = declined, t = popup timed out, b = busy, r~added~total = result.
 local function SendShareReply(sender, id, code)
     if InCombatLockdown() or type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
@@ -1717,7 +1738,7 @@ local function NoteIgnoredOffer(sender, id, why, classFile)
     else
         text = L["Ignored a list offer from %s: another list popup is still open."]
     end
-    JT:Print(GREY .. string.format(text, Who(sender, classFile, GREY)) .. "|r")
+    InviteTools:Print(GREY .. string.format(text, Who(sender, classFile, GREY)) .. "|r")
 end
 
 -- Guild rank gate for Auto-accept shared lists. WoW rank index 0 is Guild
@@ -1744,7 +1765,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
 
     -- Guild auto-accept trusts only Guild Master / Officers. If the guild
     -- roster is not ready yet, request it and retry the offer once. Lower
-    -- ranks are ignored silently, matching the standalone behavior.
+    -- ranks are ignored silently by Invite Tools.
     local guildTrusted = false
     if channel == "GUILD" and self:SharedOn() then
         local rank = GuildRankIndexOf(sender)
@@ -1811,7 +1832,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         return
     end
 
-    local shown = ShortName(sender)
+    local shown = DisplayName(sender, FindGroupUnit(sender)) or ShortName(sender)
     local color = type(classFile) == "string" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
     if color then
         shown = string.format("|cff%02x%02x%02x%s|r", color.r * 255 + 0.5, color.g * 255 + 0.5, color.b * 255 + 0.5, shown)
@@ -1823,9 +1844,10 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
     }
     self.incoming = data
     local dialog
-    dialog = JT:CreatePrompt({
+    dialog = InviteTools:CreatePrompt({
         title = L["List Share"],
-        text = string.format(L["%s wants to share an invite list with you."], shown),
+        text = string.format(L["%s wants to share an invite list with you."], shown)
+            .. "\n\n" .. L["Accepting replaces your current list."],
         acceptText = L["Accept"],
         cancelText = L["Decline"],
         acceptColor = { 0.25, 0.90, 0.25 },
@@ -1838,7 +1860,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
                 SendShareReply(data.sender, data.id, "d")
             end
             if reason == "decline" then
-                JT:Print(string.format(L["Shared list from %s declined."], shown))
+                InviteTools:Print(string.format(L["Shared list from %s declined."], shown))
             end
         end,
     })
@@ -1850,15 +1872,15 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
             SendShareReply(data.sender, data.id, "t")
         end
         if IL.incoming == data then IL.incoming = nil end
-        if dialog and dialog:IsShown() and JT.activePrompt == dialog then
+        if dialog and dialog:IsShown() and InviteTools.activePrompt == dialog then
             dialog:Hide()
-            JT.activePrompt = nil
+            InviteTools.activePrompt = nil
         end
     end)
 end
 
 -- Accept pressed: tell the sender, then wait for the names. The optional class
--- appended to A is understood by current standalone/EUI and ignored by old
+-- appended to A is optional protocol metadata and can be ignored by receivers
 -- parsers that only cared about the id.
 function IL:AcceptShare(data)
     self.incoming = nil
@@ -1887,7 +1909,7 @@ function IL:AcceptShare(data)
         else
             msg = string.format(L["List from %s was not received: no answer within %ds (they may be in combat, offline, or the offer expired)."], who, WAIT_DATA_TTL)
         end
-        JT:Print(RED .. msg .. "|r")
+        InviteTools:Print(RED .. msg .. "|r")
     end)
 end
 
@@ -1899,32 +1921,32 @@ function IL:OnShareAccepted(sender, id, classFile)
     local o = self.offer
     if not o or o.id ~= id then return end
     if GetTime() > o.expires then
-        JT:Print(YELLOW .. string.format(L["%s accepted your list after the offer expired. Share again."], Who(sender, nil, YELLOW)) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["%s accepted your list after the offer expired. Share again."], Who(sender, nil, YELLOW)) .. "|r")
         return
     end
     local key = NormSender(sender)
     if o.sent[key] then return end
     if o.served >= SHARE_MAX_RECIPIENTS then
-        JT:Print(YELLOW .. string.format(L["%s accepted your list, but the limit of %d people was reached."], Who(sender, nil, YELLOW), SHARE_MAX_RECIPIENTS) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["%s accepted your list, but the limit of %d people was reached."], Who(sender, nil, YELLOW), SHARE_MAX_RECIPIENTS) .. "|r")
         return
     end
     -- Would the last message for this person still go out before the offer
     -- expires? If not, do not start a transfer that cannot finish in time.
     if GetTime() + QueueETA(#o.chunks) + SEND_MARGIN > o.expires then
-        JT:Print(YELLOW .. string.format(L["%s accepted your list too late to be sent in time. Share again."], Who(sender, nil, YELLOW)) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["%s accepted your list too late to be sent in time. Share again."], Who(sender, nil, YELLOW)) .. "|r")
         return
     end
     o.sent[key] = true
     o.served = o.served + 1
-    JT:Print(string.format(L["%s accepted your list. Sending it."], Who(sender)))
+    InviteTools:Print(string.format(L["%s accepted your list. Sending it."], Who(sender)))
     local n = #o.chunks
     for i, chunk in ipairs(o.chunks) do
         Enqueue("D~" .. id .. "~" .. i .. "~" .. n .. "~" .. chunk, "WHISPER", sender)
     end
 end
 
--- R reply from a current standalone/EUI receiver. This is sender-side feedback
--- only; old addon versions never send R and continue to work normally.
+-- R reply from an Invite Tools receiver. This is sender-side feedback
+-- only; older Invite Tools versions may not send R and can ignore it.
 local MAX_REPLY_LINES = 10
 function IL:OnShareReply(sender, id, code, c, d, e)
     local o = self.offer
@@ -1940,11 +1962,11 @@ function IL:OnShareReply(sender, id, code, c, d, e)
         o.result[key] = true
         local whoYellow, who = Who(sender, nil, YELLOW), Who(sender)
         if total == 0 then
-            JT:Print(YELLOW .. string.format(L["%s received your list, but it had no usable names."], whoYellow) .. "|r")
+            InviteTools:Print(YELLOW .. string.format(L["%s received your list, but it had no usable names."], whoYellow) .. "|r")
         elseif added == 0 then
-            JT:Print(YELLOW .. string.format(L["%s received your list, but nothing changed: the names were already on their list."], whoYellow) .. "|r")
+            InviteTools:Print(YELLOW .. string.format(L["%s received your list, but nothing changed: the names were already on their list."], whoYellow) .. "|r")
         else
-            JT:Print(string.format(L["%s received your list: %d new of %d."], who, added, total))
+            InviteTools:Print(string.format(L["%s received your list: %d new of %d."], who, added, total))
         end
         return
     end
@@ -1964,9 +1986,9 @@ function IL:OnShareReply(sender, id, code, c, d, e)
     o.replied[key] = true
     o.replies = o.replies + 1
     if o.replies <= MAX_REPLY_LINES then
-        JT:Print(YELLOW .. string.format(text, Who(sender, nil, YELLOW)) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(text, Who(sender, nil, YELLOW)) .. "|r")
     elseif o.replies == MAX_REPLY_LINES + 1 then
-        JT:Print(YELLOW .. L["More people declined or ignored your list."] .. "|r")
+        InviteTools:Print(YELLOW .. L["More people declined or ignored your list."] .. "|r")
     end
 end
 
@@ -1997,8 +2019,38 @@ function IL:OnShareData(sender, id, i, n, payload)
     local whoYellow, who = Who(a.sender, a.classFile, YELLOW), Who(a.sender, a.classFile)
     if #names == 0 then
         SendShareReply(a.sender, a.id, "r~0~0")
-        JT:Print(YELLOW .. string.format(L["List from %s had no usable names, so nothing changed."], whoYellow) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["List from %s had no usable names, so nothing changed."], whoYellow) .. "|r")
         return
+    end
+
+    -- A received list replaces the current one. Old names that are absent from
+    -- the incoming list are recorded in History with the sender as the reason.
+    -- If both sets are identical, keep the current statuses/session untouched.
+    local replaced
+    do
+        local fresh, nFresh = {}, 0
+        for _, name in ipairs(names) do
+            local key = name:lower()
+            if not IsMe(name) and not fresh[key] then
+                fresh[key] = true
+                nFresh = nFresh + 1
+            end
+        end
+        local old = self.names or ParseList(self:GetListText(1))
+        local same = #old == nFresh
+        if same then
+            for _, name in ipairs(old) do
+                if not fresh[name:lower()] then same = false break end
+            end
+        end
+        if nFresh > 0 and not same then
+            local by = ShortName(a.sender)
+            replaced = 0
+            for _, name in ipairs(old) do
+                if not fresh[name:lower()] then replaced = replaced + 1 end
+            end
+            self:ClearList("shared", by, fresh)
+        end
     end
 
     local added, duplicates, mine = self:MergeNames(names)
@@ -2007,14 +2059,16 @@ function IL:OnShareData(sender, id, i, n, payload)
     SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names)
 
     local got = CountText(#names)
-    if added > 0 then
-        JT:Print(string.format(L["List from %s - received: %s; added to your list: %d."], who, got, added))
+    if replaced then
+        InviteTools:Print(string.format(L["List from %s - received: %s; your list was replaced (%d old name(s) went to the History)."], who, got, replaced))
+    elseif added > 0 then
+        InviteTools:Print(string.format(L["List from %s - received: %s; added to your list: %d."], who, got, added))
     elseif duplicates > 0 and mine == 0 then
-        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it."], whoYellow, got) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it."], whoYellow, got) .. "|r")
     elseif mine > 0 and duplicates == 0 then
-        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the only name(s) received are you."], whoYellow) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the only name(s) received are you."], whoYellow) .. "|r")
     else
-        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it (or are you)."], whoYellow, got) .. "|r")
+        InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it (or are you)."], whoYellow, got) .. "|r")
     end
     -- Accepted lists open the window so the new names are right there.
     -- (Declining never gets here, so nothing opens.)
@@ -2046,8 +2100,8 @@ local function Color(c, fallback)
 end
 
 local function StyleFont(fs, size)
-    if JT.ApplyThemeFont then
-        JT:ApplyThemeFont(fs, size or "normal")
+    if InviteTools.ApplyThemeFont then
+        InviteTools:ApplyThemeFont(fs, size or "normal")
     else
         fs:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
     end
@@ -2292,7 +2346,7 @@ function IL:CreateFrame()
     -- window keeps the suite's simple centered text header.
     local title = f:CreateFontString(nil, "OVERLAY")
     StyleFont(title, "large")
-    title:SetPoint("TOP", f, "TOP", 0, -16)
+    title:SetPoint("TOP", f, "TOP", 0, -8)
     title:SetText(L["Invite Tools"])
     Tint(title)
 
@@ -2735,9 +2789,10 @@ function IL:CreateFrame()
             row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -((i - 1) * (RowH() + ROW_GAP)))
             row.num:SetText(i)
             -- Leave the text alone while someone is typing in it, so the cursor
-            -- does not jump.
-            if row.edit:GetText() ~= names[i] then
-                row.edit:SetText(names[i])
+            -- does not jump. Main-list rows always show the real character name.
+            local shown = names[i]
+            if row.edit:GetText() ~= shown then
+                row.edit:SetText(shown)
                 row.edit:SetCursorPosition(0)
             end
             row:Show()
@@ -2794,7 +2849,7 @@ function IL:CreateFrame()
         if #tokens == 0 or not IL.names then return end
         PrintReport(report)
         if fixes and fixes > 0 then
-            JT:Print(L["Cleaned up the pasted names (fixed odd characters, removed /inv and similar)."])
+            InviteTools:Print(L["Cleaned up the pasted names (fixed odd characters, removed /inv and similar)."])
         end
         adding = true
         addBox:SetText("")
@@ -2853,10 +2908,19 @@ function IL:CreateFrame()
     invite:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
     invite:SetHeight(24)
     invite:SetScript("OnClick", function()
-        if InCombatLockdown() then return end
+        if InCombatLockdown() or not IsInRaid() then return end
         ClearAllFocus()
         IL:InviteFromList(IL.currentList)
     end)
+    invite:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(L["Invite"], 1, 1, 1)
+        if not IsInRaid() then
+            GameTooltip:AddLine(L["Available only while you are in a raid group."], 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    invite:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Auto-invite controls: [x] Auto-invite [30s]            [Stop] ---------
     local bar = CreateFrame("Frame", nil, f)
@@ -2907,6 +2971,10 @@ function IL:CreateFrame()
 
     local function UpdateStatusUI()
         UpdateRowStatuses()
+        local inviteUsable = IsInRaid() and not locked and not InCombatLockdown()
+        SetWidgetEnabled(invite, inviteUsable)
+        invite:SetAlpha(inviteUsable and 1 or 0.45)
+        invite.text:SetTextColor(inviteUsable and accent[1] or 0.5, inviteUsable and accent[2] or 0.5, inviteUsable and accent[3] or 0.5, 1)
         checkFill:SetShown(IL:AutoOn())
         if sharedFill then sharedFill:SetShown(IL:SharedOn()) end
         local text, c
@@ -2979,8 +3047,8 @@ function IL:CreateFrame()
     end)
 
     -- Auto-accept shared lists: [x] Auto-accept shared lists ---------------
-    -- This is intentionally one row above Auto-invite, matching the standalone
-    -- JacaInviteTools layout while keeping EUI's existing trusted-sender rule.
+    -- This is intentionally one row above Auto-invite while keeping EUI's
+    -- existing trusted-sender rule.
     local bar2 = CreateFrame("Frame", nil, f)
     bar2:SetHeight(22)
     bar2:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 94)
@@ -3165,6 +3233,7 @@ function IL:CreateFrame()
 
     -- Friend List is built after History; History needs to know which side it occupies.
     local friends, friendsOnLeft = nil, true
+    local FA
     local PlaceHistory, PlaceFriends
 
     -- History: names that joined your group, with a Re-invite button --------
@@ -3313,13 +3382,17 @@ function IL:CreateFrame()
             local e = self.entry
             if not e then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(e.name, 1, 1, 1)
+            local shownName = e.name
+            GameTooltip:SetText(shownName, 1, 1, 1)
             local how = e.how
             if not how then
                 how = (e.kind == "declined" and "declined") or (e.kind == "removed" and "removed") or "list"
             end
             if how == "killed" then
                 GameTooltip:AddLine(L["Cleared by killing Ula'tek"], 0.35, 0.9, 0.35)
+            elseif how == "shared" then
+                local by = e.by or "?"
+                GameTooltip:AddLine(string.format(L["Removed by accepting a shared list from %s"], by), 0.8, 0.8, 0.8)
             else
                 local why = (how == "list" and L["Invited via list"])
                     or (how == "declined" and L["Declined your invite"])
@@ -3409,8 +3482,8 @@ function IL:CreateFrame()
         histCount:SetText(#list .. "/" .. HISTORY_MAX)
     end
 
-    -- History/Friends placement is decided together below so their order is
-    -- deterministic regardless of which panel is opened first.
+    -- History/Friends/Factions placement is decided together below so their
+    -- order is deterministic regardless of which panel is opened first.
     local PlacePanels
     PlaceHistory = function()
         if PlacePanels then PlacePanels("hist") end
@@ -3425,7 +3498,7 @@ function IL:CreateFrame()
         historyBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         DisarmHistClear()
         GameTooltip:Hide()
-        if PlacePanels and friends and friends:IsShown() then PlacePanels() end
+        if PlacePanels and ((friends and friends:IsShown()) or (FA and FA.frame and FA.frame:IsShown())) then PlacePanels() end
     end)
 
     historyBtn:SetScript("OnClick", function()
@@ -3991,48 +4064,340 @@ function IL:CreateFrame()
     end
     f.RefreshFriends = RefreshFriends
 
-    -- Deterministic order, left to right: Friends then History. Normally the
+    -- Factions: raid groups 1-4 (or the current party), with a direct Whisper
+    -- action on each row. The message is shared by every row and edited from a
+    -- header button aligned above the row buttons.
+    FA = { W = 300 }
+    do
+        local FA_W, FA_ROW_H, FA_GAP = FA.W, 24, 2
+        local FACTION_TEX = "Interface\\AddOns\\EllesmereUIQoL\\Media\\InviteToolsFaction.png"
+        local ALLY_C, HORDE_C = { 0.30, 0.58, 1.00 }, { 0.90, 0.25, 0.25 }
+        local DEFAULT_WHISPER = "Send invites for the shared list, please"
+
+        local faction = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        faction:SetWidth(FA_W)
+        faction:SetFrameStrata(f:GetFrameStrata())
+        faction:EnableMouse(true)
+        faction:SetBackdrop(backdrop)
+        BG(faction, "main")
+        faction:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        faction:Hide()
+
+        local factionTitle = faction:CreateFontString(nil, "OVERLAY")
+        factionTitle:SetPoint("TOP", faction, "TOP", 0, -8)
+        StyleFont(factionTitle, "large")
+        factionTitle:SetText(L["Factions"])
+        Tint(factionTitle)
+
+        local factionClose = CreateFrame("Button", nil, faction)
+        factionClose:SetSize(18, 18)
+        factionClose:SetPoint("TOPRIGHT", faction, "TOPRIGHT", -6, -5)
+        local factionCloseTex = factionClose:CreateTexture(nil, "ARTWORK")
+        factionCloseTex:SetPoint("CENTER")
+        factionCloseTex:SetSize(13, 13)
+        factionCloseTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png")
+        factionCloseTex:SetVertexColor(0.851, 0.851, 0.851, 1)
+        factionClose:SetScript("OnEnter", function() factionCloseTex:SetVertexColor(accent[1], accent[2], accent[3], 1) end)
+        factionClose:SetScript("OnLeave", function() factionCloseTex:SetVertexColor(0.851, 0.851, 0.851, 1) end)
+        factionClose:SetScript("OnClick", function() faction:Hide() end)
+
+        local function WhisperText()
+            local t = IL.db and IL.db.CustomWhisper
+            if type(t) ~= "string" or strtrim(t) == "" then return DEFAULT_WHISPER end
+            return t
+        end
+
+        local editWhisper = MakeButton(faction, L["Edit whisper"])
+        editWhisper:SetSize(94, 18)
+        editWhisper:SetPoint("TOPRIGHT", faction, "TOPRIGHT", -10, -29)
+
+        local factionCount = faction:CreateFontString(nil, "OVERLAY")
+        factionCount:SetPoint("TOPLEFT", faction, "TOPLEFT", 12, -32)
+        factionCount:SetPoint("RIGHT", editWhisper, "LEFT", -6, 0)
+        factionCount:SetJustifyH("LEFT")
+        factionCount:SetWordWrap(false)
+        StyleFont(factionCount, "small")
+        factionCount:SetTextColor(textSec[1], textSec[2], textSec[3], 1)
+
+        local editor = CreateFrame("Frame", nil, faction, "BackdropTemplate")
+        editor:SetSize(FA_W, 44)
+        editor:SetPoint("BOTTOMRIGHT", faction, "TOPRIGHT", 0, 4)
+        editor:SetFrameLevel(faction:GetFrameLevel() + 30)
+        editor:SetClampedToScreen(true)
+        editor:EnableMouse(true)
+        editor:SetBackdrop(backdrop)
+        BG(editor, "dark")
+        editor:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        editor:Hide()
+
+        local whisperEdit = CreateFrame("EditBox", nil, editor, "BackdropTemplate")
+        whisperEdit:SetAutoFocus(false)
+        whisperEdit:SetMaxLetters(255)
+        whisperEdit:SetTextInsets(6, 6, 0, 0)
+        whisperEdit:SetPoint("TOPLEFT", editor, "TOPLEFT", 8, -8)
+        whisperEdit:SetPoint("BOTTOMRIGHT", editor, "BOTTOMRIGHT", -8, 8)
+        StyleFont(whisperEdit, "normal")
+        whisperEdit:SetTextColor(textPri[1], textPri[2], textPri[3], 1)
+        whisperEdit:SetBackdrop(backdrop)
+        BG(whisperEdit, "medium")
+        whisperEdit:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+
+        local function SaveWhisper()
+            local t = strtrim(whisperEdit:GetText() or "")
+            if t == "" then t = DEFAULT_WHISPER end
+            IL.db.CustomWhisper = t
+            whisperEdit:SetText(t)
+            whisperEdit:SetCursorPosition(0)
+        end
+        whisperEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); editor:Hide() end)
+        whisperEdit:SetScript("OnEscapePressed", function(self)
+            self:SetText(WhisperText())
+            self:ClearFocus()
+            editor:Hide()
+        end)
+        whisperEdit:SetScript("OnEditFocusGained", function(self)
+            self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+            self:HighlightText()
+        end)
+        whisperEdit:SetScript("OnEditFocusLost", function(self)
+            self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+            SaveWhisper()
+        end)
+        editor:SetScript("OnShow", function()
+            whisperEdit:SetText(WhisperText())
+            whisperEdit:SetFocus()
+            whisperEdit:HighlightText()
+        end)
+        editor:SetScript("OnHide", function() whisperEdit:ClearFocus() end)
+
+        editWhisper:SetScript("OnClick", function()
+            if InCombatLockdown() or locked then return end
+            editor:SetShown(not editor:IsShown())
+        end)
+        editWhisper:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(L["Edit whisper"], 1, 1, 1)
+            GameTooltip:AddLine(L["Edits the message sent by every Whisper button in this panel."], 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        editWhisper:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+        local factionHolder = CreateFrame("Frame", nil, faction, "BackdropTemplate")
+        factionHolder:SetPoint("TOPLEFT", faction, "TOPLEFT", 10, -50)
+        factionHolder:SetPoint("BOTTOMRIGHT", faction, "BOTTOMRIGHT", -10, 10)
+        factionHolder:SetBackdrop(backdrop)
+        BG(factionHolder, "medium")
+        factionHolder:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+
+        local ascroll = CreateFrame("ScrollFrame", nil, factionHolder)
+        ascroll:SetPoint("TOPLEFT", factionHolder, "TOPLEFT", 4, -4)
+        ascroll:SetPoint("BOTTOMRIGHT", factionHolder, "BOTTOMRIGHT", -4, 4)
+        ascroll:EnableMouseWheel(true)
+        local acontent = CreateFrame("Frame", nil, ascroll)
+        acontent:SetPoint("TOPLEFT", ascroll, "TOPLEFT", 0, 0)
+        acontent:SetSize(FA_W - 28, 1)
+        ascroll:SetScrollChild(acontent)
+        ascroll:SetScript("OnMouseWheel", function(self, delta)
+            if InCombatLockdown() or locked then return end
+            local range = self:GetVerticalScrollRange() or 0
+            local cur = self:GetVerticalScroll() or 0
+            self:SetVerticalScroll(math_max(0, math_min(range, cur - delta * FA_ROW_H * 2)))
+        end)
+
+        local factionEmpty = factionHolder:CreateFontString(nil, "OVERLAY")
+        factionEmpty:SetPoint("CENTER", factionHolder, "CENTER", 0, 0)
+        StyleFont(factionEmpty, "normal")
+        factionEmpty:SetTextColor(textSec[1], textSec[2], textSec[3], 0.8)
+        factionEmpty:SetText(L["You are not in a group."])
+
+        local function PaintFactionIcon(a, h, fac)
+            if fac == "Alliance" then
+                a:SetVertexColor(ALLY_C[1], ALLY_C[2], ALLY_C[3], 1)
+                h:SetVertexColor(0.6, 0.6, 0.6, 0.18)
+            elseif fac == "Horde" then
+                a:SetVertexColor(0.6, 0.6, 0.6, 0.18)
+                h:SetVertexColor(HORDE_C[1], HORDE_C[2], HORDE_C[3], 1)
+            else
+                a:SetVertexColor(0.6, 0.6, 0.6, 0.4)
+                h:SetVertexColor(0.6, 0.6, 0.6, 0.4)
+            end
+        end
+
+        local arows = {}
+        local function MakeFactionRow()
+            local row = CreateFrame("Frame", nil, acontent)
+            row:SetHeight(FA_ROW_H)
+
+            row.iconA = row:CreateTexture(nil, "ARTWORK")
+            row.iconA:SetSize(8, 16)
+            row.iconA:SetPoint("LEFT", row, "LEFT", 4, 0)
+            row.iconA:SetTexture(FACTION_TEX)
+            row.iconA:SetTexCoord(0, 0.5, 0, 1)
+            row.iconH = row:CreateTexture(nil, "ARTWORK")
+            row.iconH:SetSize(8, 16)
+            row.iconH:SetPoint("LEFT", row.iconA, "RIGHT", 0, 0)
+            row.iconH:SetTexture(FACTION_TEX)
+            row.iconH:SetTexCoord(0.5, 1, 0, 1)
+
+            local whisper = MakeButton(row, L["Whisper"])
+            whisper:SetSize(74, FA_ROW_H - 4)
+            whisper:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+            row.whisper = whisper
+
+            row.nameText = row:CreateFontString(nil, "OVERLAY")
+            row.nameText:SetPoint("LEFT", row.iconH, "RIGHT", 6, 0)
+            row.nameText:SetPoint("RIGHT", whisper, "LEFT", -6, 0)
+            row.nameText:SetJustifyH("LEFT")
+            row.nameText:SetWordWrap(false)
+            StyleFont(row.nameText, "normal")
+
+            whisper:SetScript("OnClick", function()
+                local e = row.entry
+                if InCombatLockdown() or locked or not e or e.isMe then return end
+                local msg = WhisperText()
+                if type(msg) == "string" and msg ~= "" and SendChatMessage then
+                    SendChatMessage(msg, "WHISPER", nil, e.name)
+                    whisper.text:SetText(L["Sent"])
+                    C_Timer.After(1.5, function()
+                        if row.entry == e and whisper.text:GetText() == L["Sent"] then
+                            whisper.text:SetText(L["Whisper"])
+                        end
+                    end)
+                end
+            end)
+            row:SetScript("OnEnter", function(self)
+                local e = self.entry
+                if not e then return end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(e.display or e.name, 1, 1, 1)
+                if e.display and e.display ~= e.name then GameTooltip:AddLine(e.name, 0.7, 0.7, 0.7) end
+                local c = (e.faction == "Alliance" and ALLY_C) or (e.faction == "Horde" and HORDE_C) or { 0.6, 0.6, 0.6 }
+                GameTooltip:AddLine(e.factionText, c[1], c[2], c[3])
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            return row
+        end
+
+        local function GroupFactions()
+            local out = {}
+            local function add(unit)
+                if not UnitExists(unit) then return end
+                local name, realm = UnitName(unit)
+                if not IsReadable(name) or name == "" then return end
+                if IsReadable(realm) and realm ~= "" then name = name .. "-" .. realm end
+                local eng, loc = UnitFactionGroup(unit)
+                if not IsReadable(eng) then eng, loc = nil, nil end
+                if eng ~= "Alliance" and eng ~= "Horde" then eng = nil end
+                local _, cf = UnitClass(unit)
+                local display = DisplayName(name, unit)
+                out[#out + 1] = {
+                    name = name,
+                    display = display,
+                    isMe = UnitIsUnit(unit, "player"),
+                    faction = eng,
+                    factionText = (IsReadable(loc) and loc ~= "" and loc) or L["Unknown"],
+                    class = IsReadable(cf) and ValidClass(cf) or nil,
+                    rank = eng == "Alliance" and 1 or (eng == "Horde" and 2 or 3),
+                    sort = FriendSortKey(display or name),
+                }
+            end
+            if IsInRaid() then
+                for i = 1, (GetNumGroupMembers() or 0) do
+                    local _, _, subgroup = GetRaidRosterInfo(i)
+                    if type(subgroup) == "number" and subgroup <= 4 then add("raid" .. i) end
+                end
+            elseif IsInGroup() then
+                add("player")
+                for i = 1, (GetNumSubgroupMembers() or 0) do add("party" .. i) end
+            end
+            table.sort(out, function(x, y)
+                if x.rank ~= y.rank then return x.rank < y.rank end
+                return x.sort < y.sort
+            end)
+            return out
+        end
+
+        local function RefreshFaction()
+            if InCombatLockdown() then return end
+            local list = GroupFactions()
+            local nA, nH = 0, 0
+            for i = 1, #list do
+                local e = list[i]
+                local row = arows[i]
+                if not row then row = MakeFactionRow(); arows[i] = row end
+                row.entry = e
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", acontent, "TOPLEFT", 0, -((i - 1) * (FA_ROW_H + FA_GAP)))
+                row:SetPoint("TOPRIGHT", acontent, "TOPRIGHT", 0, -((i - 1) * (FA_ROW_H + FA_GAP)))
+                row.nameText:SetText(e.display or e.name)
+                local c = e.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[e.class]
+                if c then row.nameText:SetTextColor(c.r, c.g, c.b, 1) else row.nameText:SetTextColor(textPri[1], textPri[2], textPri[3], 1) end
+                PaintFactionIcon(row.iconA, row.iconH, e.faction)
+                if e.faction == "Alliance" then nA = nA + 1 elseif e.faction == "Horde" then nH = nH + 1 end
+                row.whisper.text:SetText(L["Whisper"])
+                local canWhisper = not locked and not e.isMe
+                SetWidgetEnabled(row.whisper, canWhisper)
+                row.whisper:SetAlpha(canWhisper and 1 or 0.45)
+                row:Show()
+            end
+            for i = #list + 1, #arows do arows[i].entry = nil; arows[i]:Hide() end
+            acontent:SetHeight(math_max(1, #list * (FA_ROW_H + FA_GAP)))
+            factionEmpty:SetShown(#list == 0)
+            factionCount:SetText(string.format("|cff4d94ff%s %d|r   |cffe64040%s %d|r", FACTION_ALLIANCE or "Alliance", nA, FACTION_HORDE or "Horde", nH))
+        end
+
+        FA.frame, FA.scroll, FA.Refresh, FA.editor = faction, ascroll, RefreshFaction, editor
+    end
+
+    -- Deterministic order, left to right: Factions, Friends, History. Normally the
     -- main window sits between them; near a screen edge both panels move to the
     -- side that fits while preserving Friends -> History.
     PlacePanels = function(opening)
-        local fShown = friends:IsShown() or opening == "friends"
-        local hShown = hist:IsShown() or opening == "hist"
+        local show = {
+            [FA.frame] = FA.frame:IsShown() or opening == "faction",
+            [friends] = friends:IsShown() or opening == "friends",
+            [hist] = hist:IsShown() or opening == "hist",
+        }
         local left, right, screen = f:GetLeft(), f:GetRight(), UIParent:GetRight()
         local layout = "normal"
         if left and right and screen then
-            local fw = fShown and (FR_W + 4) or 0
-            local hw = hShown and (HIST_W + 4) or 0
-            if left - fw < 0 or right + hw > screen then
-                if left - fw - hw >= 0 then
-                    layout = "left"   -- Friends | History | window
-                elseif right + fw + hw <= screen then
-                    layout = "right"  -- window | Friends | History
+            local lw = (show[FA.frame] and (FA.W + 4) or 0) + (show[friends] and (FR_W + 4) or 0)
+            local rw = show[hist] and (HIST_W + 4) or 0
+            if left - lw < 0 or right + rw > screen then
+                if left - lw - rw >= 0 then
+                    layout = "left"
+                elseif right + lw + rw <= screen then
+                    layout = "right"
                 end
             end
         end
 
-        friends:ClearAllPoints()
-        hist:ClearAllPoints()
+        local function Stack(list, side)
+            local anchor = f
+            for _, panel in ipairs(list) do
+                panel:ClearAllPoints()
+                if side == "left" then
+                    panel:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, 0)
+                    panel:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMLEFT", -4, 0)
+                else
+                    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+                    panel:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
+                end
+                if show[panel] then anchor = panel end
+            end
+        end
+
         if layout == "normal" then
             friendsOnLeft, histOnLeft = true, false
-            friends:SetPoint("TOPRIGHT", f, "TOPLEFT", -4, 0)
-            friends:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", -4, 0)
-            hist:SetPoint("TOPLEFT", f, "TOPRIGHT", 4, 0)
-            hist:SetPoint("BOTTOMLEFT", f, "BOTTOMRIGHT", 4, 0)
+            Stack({ friends, FA.frame }, "left")
+            Stack({ hist }, "right")
         elseif layout == "left" then
             friendsOnLeft, histOnLeft = true, true
-            hist:SetPoint("TOPRIGHT", f, "TOPLEFT", -4, 0)
-            hist:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", -4, 0)
-            local anchor = hShown and hist or f
-            friends:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, 0)
-            friends:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMLEFT", -4, 0)
+            Stack({ hist, friends, FA.frame }, "left")
         else
             friendsOnLeft, histOnLeft = false, false
-            friends:SetPoint("TOPLEFT", f, "TOPRIGHT", 4, 0)
-            friends:SetPoint("BOTTOMLEFT", f, "BOTTOMRIGHT", 4, 0)
-            local anchor = fShown and friends or f
-            hist:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
-            hist:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
+            Stack({ FA.frame, friends, hist }, "right")
         end
     end
     PlaceFriends = function()
@@ -4040,10 +4405,11 @@ function IL:CreateFrame()
     end
     f:HookScript("OnDragStop", function() if PlacePanels then PlacePanels() end end)
 
-    -- Text button immediately to the left of History, as part of the EUI header row.
+    -- Friend List and Factions form the left-side header group, opposite
+    -- History / Share List on the right. Both use the same EUI text-button style.
     local friendsBtn = MakeButton(f, L["Friend list"])
     friendsBtn:SetSize(78, 18)
-    friendsBtn:SetPoint("RIGHT", historyBtn, "LEFT", -4, 0)
+    friendsBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -29)
     friendsBtn:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
         if friends:IsShown() then
@@ -4062,6 +4428,28 @@ function IL:CreateFrame()
         GameTooltip:Show()
     end)
     friendsBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local factionBtn = MakeButton(f, L["Factions"])
+    factionBtn:SetSize(72, 18)
+    factionBtn:SetPoint("LEFT", friendsBtn, "RIGHT", 4, 0)
+    factionBtn:SetScript("OnClick", function()
+        if InCombatLockdown() or locked then return end
+        if FA.frame:IsShown() then
+            FA.frame:Hide()
+        else
+            PlacePanels("faction")
+            FA.Refresh()
+            FA.scroll:SetVerticalScroll(0)
+            FA.frame:Show()
+        end
+    end)
+    factionBtn:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(L["Factions"], 1, 1, 1)
+        GameTooltip:AddLine(L["Shows Alliance/Horde members in your group (raid groups 1 to 4) and lets you whisper each player."], 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    factionBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     local friendsQueued = false
     friends:SetScript("OnEvent", function()
@@ -4083,11 +4471,35 @@ function IL:CreateFrame()
         friendsBtn.selected = nil
         friendsBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         GameTooltip:Hide()
-        if PlacePanels and hist:IsShown() then PlacePanels() end
+        if PlacePanels and (hist:IsShown() or FA.frame:IsShown()) then PlacePanels() end
+    end)
+
+    local factionQueued = false
+    FA.frame:SetScript("OnEvent", function()
+        if factionQueued then return end
+        factionQueued = true
+        C_Timer.After(0.3, function()
+            factionQueued = false
+            if FA.frame:IsShown() then FA.Refresh() end
+        end)
+    end)
+    FA.frame:SetScript("OnShow", function()
+        pcall(FA.frame.RegisterEvent, FA.frame, "GROUP_ROSTER_UPDATE")
+        pcall(FA.frame.RegisterEvent, FA.frame, "PLAYER_REGEN_ENABLED")
+        factionBtn.selected = true
+        factionBtn:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+    end)
+    FA.frame:SetScript("OnHide", function()
+        FA.frame:UnregisterAllEvents()
+        if FA.editor then FA.editor:Hide() end
+        factionBtn.selected = nil
+        factionBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        GameTooltip:Hide()
+        if PlacePanels and (hist:IsShown() or friends:IsShown()) then PlacePanels() end
     end)
 
     -- Runtime settings -------------------------------------------------------
-    -- The standalone cog panel is intentionally not ported. Raid Tools options
+    -- Invite Tools settings are exposed through Raid Tools options
     -- own these settings; this block only applies them to the already-built UI.
     local function ApplyListScale(v)
         listScale = ClampScale(v)
@@ -4184,6 +4596,7 @@ function IL:CreateFrame()
             shareMenu:Hide()
             hist:Hide()
             friends:Hide()
+            if FA and FA.frame then FA.frame:Hide() end
             DisarmHistClear()
             grip:Hide()
             combatBlocker:Show()
@@ -4200,6 +4613,7 @@ function IL:CreateFrame()
     f.scroll = scroll
     f.Layout = Layout
     f.RefreshHistory = RefreshHistory
+    f.RefreshFactions = FA and FA.Refresh or nil
     f.ClearAllFocus = ClearAllFocus
     -- Anything half-typed is saved (focus loss) when the window closes.
     f:SetScript("OnHide", function()
@@ -4207,6 +4621,7 @@ function IL:CreateFrame()
         SavePosition()
         hist:Hide()
         friends:Hide()
+        if FA and FA.frame then FA.frame:Hide() end
         ClearAllFocus()
     end)
     self.frame = f
@@ -4266,10 +4681,7 @@ end
 SLASH_EUIINVITETOOLS1 = "/invlist"
 SLASH_EUIINVITETOOLS2 = "/invitelist"
 SLASH_EUIINVITETOOLS3 = "/invitetools"
-SLASH_EUIINVITETOOLS4 = "/jaca"
-SLASH_EUIINVITETOOLS5 = "/jacatools"
-SLASH_EUIINVITETOOLS6 = "/il"
-SLASH_EUIINVITETOOLS7 = "/jt"
+SLASH_EUIINVITETOOLS4 = "/il"
 SlashCmdList["EUIINVITETOOLS"] = function(msg)
     IL:UpdateDB()
     msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -4310,7 +4722,10 @@ ns.InviteToolsApplySettings = function()
     end
     if f.ApplyListScale then f.ApplyListScale(IL.db.ListScale or 1) end
     if f.ApplyResizable then f.ApplyResizable(IL.db.Unlocked == true) end
+    if f.Layout then f.Layout() end
+    if f.RefreshHistory then f.RefreshHistory() end
     if f.RefreshFriends then f.RefreshFriends() end
+    if f.RefreshFactions then f.RefreshFactions() end
 end
 
 

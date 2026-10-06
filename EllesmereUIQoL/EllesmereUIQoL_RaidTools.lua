@@ -544,8 +544,8 @@ local DB_DEFAULTS = {
         -- matters while it's on.
         autoMinimize      = false,
         autoMinimizeDelay = 30,
-        -- Embedded JacaInviteTools state. Standalone-only minimap settings are
-        -- deliberately absent: Raid Tools owns the launcher in EUI.
+        -- Invite Tools state. Raid Tools owns the launcher in EUI, so no
+        -- separate minimap launcher settings are needed here.
         inviteTools = {
             Current            = 1,
             ListScale          = 1,
@@ -555,6 +555,7 @@ local DB_DEFAULTS = {
             AutoAcceptShared   = false,
             AutoAcceptFriendly = false,
             ShowNicknames       = true,
+            CustomWhisper       = "Send invites for the shared list, please",
             ClearOnBossKill     = true,
             ShareIgnoreSeconds = 30,
             Width              = 430,
