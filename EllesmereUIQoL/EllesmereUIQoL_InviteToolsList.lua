@@ -1822,6 +1822,12 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         if ok and ignored then return end
     end
 
+    -- A valid incoming shared-list offer brings Invite Tools to the foreground
+    -- immediately, before the confirmation popup or trusted auto-accept path.
+    if not (self.frame and self.frame:IsShown()) then
+        self:Toggle()
+    end
+
     -- Auto-accept from trusted group leadership, or from Guild Master / Officer
     -- when the offer itself arrived through the guild channel.
     if self:SharedOn() and (guildTrusted or (channel ~= "GUILD" and self:IsLeadOrAssist(sender))) then
@@ -2070,11 +2076,7 @@ function IL:OnShareData(sender, id, i, n, payload)
     else
         InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it (or are you)."], whoYellow, got) .. "|r")
     end
-    -- Accepted lists open the window so the new names are right there.
-    -- (Declining never gets here, so nothing opens.)
-    if not a.auto and not InCombatLockdown() and not (self.frame and self.frame:IsShown()) then
-        self:Toggle()
-    end
+    -- The window was already opened when the valid share offer arrived.
 end
 
 function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
