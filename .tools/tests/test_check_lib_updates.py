@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -39,7 +40,7 @@ class CheckerTests(unittest.TestCase):
 
     def test_no_lock_real_advance_is_pending(self):
         code, output = self.report(('git-tag', 'v2'), ('v1', 'v2'))
-        self.assertIsNone(code)
+        self.assertEqual(code, 1)
         self.assertIn('pending=1', output)
 
     def test_failed_lookup_stays_unknown(self):
@@ -77,52 +78,52 @@ class CheckerTests(unittest.TestCase):
         remote = {'A.lua': b'LibStub:NewLibrary("A", 8)\nnew code'}
         code, output = self.content_report(local, remote)
         self.assertEqual(code, 1)
-        self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+        self.assertIn('current=0 | accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_identical_content_without_lock_is_current(self):
         files = {'A.lua': b'LibStub:NewLibrary("A", 8)', 'load.xml': b'<Ui/>'}
         code, output = self.content_report(files, dict(files))
         self.assertEqual(code, 0)
-        self.assertIn('current=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
+        self.assertIn('current=1 | accepted-drift=0 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_inconclusive_content_comparison_is_unknown(self):
         for failure in [RuntimeError('comparison unavailable'), subprocess.TimeoutExpired('git', 60)]:
             code, output = self.content_report({}, {}, failure=failure)
             self.assertEqual(code, 1)
-            self.assertIn('current=0 | pending=0 | DRIFT=0 | UNKNOWN=1', output)
+            self.assertIn('current=0 | accepted-drift=0 | pending=0 | DRIFT=0 | UNKNOWN=1', output)
 
     def test_exact_declared_pin_requires_payload_equivalence(self):
         with patch.object(checker, 'declared_git_commit', return_value='c' * 40):
             code, output = self.content_report({'A.lua': b'same'}, {'A.lua': b'same'}, entry={'url': 'repo', 'tag': 'v1.1.4'})
         self.assertEqual(code, 0)
-        self.assertIn('current=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
+        self.assertIn('current=1 | accepted-drift=0 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_missing_runtime_file_or_changed_manifest_is_not_current(self):
         local = {'A.lua': b'LibStub:NewLibrary("A", 8)', 'load.xml': b'<Ui/>'}
         for remote in [{'A.lua': local['A.lua']}, dict(local, **{'load.xml': b'<Ui changed/>'}), dict(local, **{'extra.lua': b'extra'})]:
             code, output = self.content_report(local, remote)
             self.assertEqual(code, 1)
-            self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+            self.assertIn('current=0 | accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_proven_minor_advance_is_pending(self):
         code, output = self.content_report({'A.lua': b'LibStub:NewLibrary("A", 8)'}, {'A.lua': b'LibStub:NewLibrary("A", 9)'})
-        self.assertIsNone(code)
-        self.assertIn('current=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
+        self.assertEqual(code, 1)
+        self.assertIn('current=0 | accepted-drift=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_older_minor_is_drift(self):
         code, output = self.content_report({'A.lua': b'LibStub:NewLibrary("A", 8)'}, {'A.lua': b'LibStub:NewLibrary("A", 7)'})
         self.assertEqual(code, 1)
-        self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+        self.assertIn('current=0 | accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_equal_release_marker_does_not_prove_content_equivalence(self):
         code, output = self.content_report({'A.lua': b'local _VERSION = "1.0.2-release"\nold'}, {'A.lua': b'local _VERSION = "1.0.2-release"\nnew'})
         self.assertEqual(code, 1)
-        self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+        self.assertIn('current=0 | accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_proven_release_advance_is_pending(self):
         code, output = self.content_report({'A.lua': b'local _VERSION = "1.0.2-release"'}, {'A.lua': b'local _VERSION = "1.0.3-release"'})
-        self.assertIsNone(code)
-        self.assertIn('current=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
+        self.assertEqual(code, 1)
+        self.assertIn('current=0 | accepted-drift=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_moving_alias_is_not_a_declared_pin(self):
         for alias in ['latest', 'Alpha', 'Beta', 'HEAD']:
@@ -257,7 +258,7 @@ class ExternalPackagingTests(unittest.TestCase):
         self.assertEqual(remote, {'LibDeflate.lua': runtime})
         code, output = CheckerTests().content_report(remote, remote)
         self.assertEqual(code, 0)
-        self.assertIn('current=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
+        self.assertIn('current=1 | accepted-drift=0 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_ignores_are_exact_paths_not_global_test_exclusion(self):
         files = {'tests/Test.lua': b'test', 'other/tests/A.lua': b'keep', 'tests2.lua': b'keep'}
@@ -279,6 +280,121 @@ class ExternalPackagingTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('pending=0 | DRIFT=1 | UNKNOWN=0', output)
         self.assertNotIn('update available', output)
+
+
+class AcceptedDriftTests(unittest.TestCase):
+    def fixtures(self, name):
+        path = 'Libs/' + name
+        entry = {'url': 'https://repos.wowace.com/wow/' + name + '/trunk'}
+        if name == 'LibStub':
+            entry['tag'] = '1.0'
+            lua = b'local LIBSTUB_MAJOR, LIBSTUB_MINOR = "LibStub", 2'
+        else:
+            lua = b'LibStub:NewLibrary("LibDurability", 4)'
+        resolved = ('svn-rev', '72')
+        local = {name + '.lua': lua, 'helper.lua': b'audited helper'}
+        upstream = dict(local, **{'load.xml': b'<Ui/>'})
+        return path, entry, resolved, local, upstream
+
+    def report(self, name='LibStub', mutate=None, failure=None, config='exact', lookup_failure=None, exact_changed_baseline=False):
+        path, entry, resolved, local, upstream = self.fixtures(name)
+        baseline = checker.drift_record(path, entry, resolved, local, upstream)
+        if mutate:
+            path, entry, resolved = mutate(path, entry, resolved, local, upstream)
+        if exact_changed_baseline:
+            baseline = checker.drift_record(path, entry, resolved, local, upstream)
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            location = Path(directory) / 'baselines.json'
+            if config != 'absent':
+                location.write_text('{' if config == 'invalid' else json.dumps({'schema': 1, 'baselines': [baseline]}))
+            with patch.object(checker, 'DRIFT_BASELINES_PATH', location), patch.object(sys, 'argv', ['checker']), patch.object(checker, 'parse_externals', return_value={path: entry}), patch.object(checker, 'load_lockfile', return_value={}), patch.object(checker, 'resolve_upstream_version', return_value=resolved, side_effect=lookup_failure), patch.object(checker, 'relevant_files', return_value=local), patch.object(checker, 'upstream_files', return_value=upstream, side_effect=failure), patch.object(checker, 'run', return_value=subprocess.CompletedProcess([], 0, 'new-features', '')), contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                code = checker.main()
+        return code, output.getvalue()
+
+    def test_exact_libstub_and_libdurability_baselines_are_accepted(self):
+        for name in ['LibStub', 'LibDurability']:
+            with self.subTest(name=name):
+                code, output = self.report(name)
+                self.assertEqual(code, 0)
+                self.assertIn(name + ': accepted-drift;', output)
+                self.assertIn('current=0 | accepted-drift=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
+
+    def test_local_and_upstream_content_paths_added_removed_invalidate(self):
+        for side in ['local', 'upstream']:
+            for change in ['content', 'added', 'removed', 'renamed']:
+                def mutate(path, entry, resolved, local, upstream):
+                    files = local if side == 'local' else upstream
+                    if change == 'content':
+                        files['LibStub.lua'] += b'\n-- changed'
+                    elif change == 'added':
+                        files['extra.lua'] = b'extra'
+                    elif change == 'removed':
+                        del files['helper.lua']
+                    else:
+                        files['renamed.lua'] = files.pop('helper.lua')
+                    return path, entry, resolved
+                with self.subTest(side=side, change=change):
+                    code, output = self.report(mutate=mutate)
+                    self.assertEqual(code, 1)
+                    self.assertIn('accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+
+    def test_identity_changes_are_not_accepted(self):
+        for field in ['source', 'tag', 'version', 'snapshot_source', 'path', 'kind']:
+            def mutate(path, entry, resolved, local, upstream):
+                if field == 'source':
+                    entry['url'] += '/different'
+                elif field == 'tag':
+                    entry['tag'] = '2.0'
+                elif field == 'snapshot_source':
+                    entry['_snapshot_url'] = entry['url'] + '/different'
+                elif field == 'version':
+                    resolved = (resolved[0], '73')
+                elif field == 'kind':
+                    resolved = ('git-tag', resolved[1])
+                else:
+                    path = 'Elsewhere/LibStub'
+                return path, entry, resolved
+            code, output = self.report(mutate=mutate)
+            self.assertEqual(code, 1)
+            self.assertIn('accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+
+    def test_proven_minor_advance_bypasses_acceptance(self):
+        def mutate(path, entry, resolved, local, upstream):
+            upstream['LibStub.lua'] = upstream['LibStub.lua'].replace(b'2', b'3')
+            return path, entry, resolved
+        code, output = self.report(mutate=mutate, exact_changed_baseline=True)
+        self.assertEqual(code, 1)
+        self.assertIn('accepted-drift=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
+
+    def test_network_parsing_comparison_failures_remain_unknown(self):
+        for failure in [RuntimeError('network denied'), ValueError('invalid metadata'), subprocess.TimeoutExpired('svn', 60)]:
+            code, output = self.report(failure=failure)
+            self.assertEqual(code, 1)
+            self.assertIn('accepted-drift=0 | pending=0 | DRIFT=0 | UNKNOWN=1', output)
+        code, output = self.report(lookup_failure=RuntimeError('lookup denied'))
+        self.assertEqual(code, 1)
+        self.assertIn('UNKNOWN=1', output)
+        code, output = self.report(config='invalid')
+        self.assertEqual(code, 1)
+        self.assertIn('UNKNOWN=1', output)
+
+    def test_absent_baseline_remains_drift(self):
+        code, output = self.report(config='absent')
+        self.assertEqual(code, 1)
+        self.assertIn('accepted-drift=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
+
+    def test_fingerprint_order_framing_and_paths(self):
+        self.assertEqual(checker.payload_fingerprint({'b.lua': b'b', 'a.lua': b'a'}), checker.payload_fingerprint({'a.lua': b'a', 'b.lua': b'b'}))
+        self.assertNotEqual(checker.payload_fingerprint({'a.lua': b'bc'}), checker.payload_fingerprint({'ab.lua': b'c'}))
+        self.assertNotEqual(checker.payload_fingerprint({'a.lua': b'a'}), checker.payload_fingerprint({'b.lua': b'a'}))
+
+    def test_configured_local_fingerprints_match_audited_payloads(self):
+        data = json.loads(checker.DRIFT_BASELINES_PATH.read_text())
+        self.assertEqual({record['path'] for record in data['baselines']}, {'Libs/LibStub', 'Libs/LibDurability'})
+        for record in data['baselines']:
+            self.assertEqual(record['local_sha256'], checker.payload_fingerprint(checker.relevant_files(ROOT / record['path'])))
+            self.assertTrue(checker.accepted_drift(record))
 
 
 class ProxyTests(unittest.TestCase):

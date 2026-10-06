@@ -8,6 +8,7 @@ Requires Git and, for WowAce sources, SVN.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -117,6 +118,54 @@ def relevant_files(directory: Path) -> dict[str, bytes]:
 
 class PayloadDrift(RuntimeError):
     """Comparable versions without an advance, but different packaged content."""
+
+
+DRIFT_BASELINES_PATH = Path(__file__).with_name('library_drift_baselines.json')
+
+
+class AcceptedDrift(RuntimeError):
+    """Exact audited drift, still distinct from identical packaged content."""
+
+
+def payload_fingerprint(files: dict[str, bytes]) -> str:
+    """SHA-256 over sorted UTF-8 paths and bytes, each length-prefixed.
+
+    Domain/version and framing prevent ambiguous path/content concatenations.
+    """
+    digest = hashlib.sha256(b'eui-library-payload-v1\0')
+    for name in sorted(files):
+        for value in [name.encode('utf-8'), files[name]]:
+            digest.update(len(value).to_bytes(8, 'big'))
+            digest.update(value)
+    return digest.hexdigest()
+
+
+def drift_record(path: str, entry: dict, resolved: tuple[str, str],
+                 local: dict[str, bytes], upstream: dict[str, bytes]) -> dict:
+    return {
+        'path': path, 'source': entry['url'], 'tag': entry.get('tag'),
+        'kind': resolved[0], 'version': resolved[1],
+        'snapshot_source': entry.get('_snapshot_url', entry['url']),
+        'local_sha256': payload_fingerprint(local),
+        'upstream_sha256': payload_fingerprint(upstream),
+    }
+
+
+def accepted_drift(record: dict) -> bool:
+    if not DRIFT_BASELINES_PATH.exists():
+        return False
+    data = json.loads(DRIFT_BASELINES_PATH.read_text(encoding='utf-8'))
+    if not isinstance(data, dict) or data.get('schema') != 1 or not isinstance(data.get('baselines'), list):
+        raise RuntimeError('Invalid drift baseline configuration')
+    fields = set(record)
+    for baseline in data['baselines']:
+        if not isinstance(baseline, dict) or set(baseline) != fields:
+            raise RuntimeError('Invalid drift baseline record')
+        if not all(isinstance(baseline[key], str) for key in fields - {'tag'}) or baseline['tag'] is not None and not isinstance(baseline['tag'], str):
+            raise RuntimeError('Invalid drift baseline identity')
+        if not all(re.fullmatch(r'[0-9a-f]{64}', baseline[key]) for key in ['local_sha256', 'upstream_sha256']):
+            raise RuntimeError('Invalid drift baseline fingerprint')
+    return record in data['baselines']
 
 
 def package_ignores(text: str) -> list[str]:
@@ -293,6 +342,10 @@ def baseline_without_lock(path: str, entry: dict, resolved: tuple[str, str]):
         new = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-release', remote[1])
         if old and new and tuple(map(int, new.groups())) > tuple(map(int, old.groups())):
             return local[1], remote[1]
+    # Only a completed comparison without a proven advance reaches acceptance.
+    record = drift_record(path, entry, resolved, local_files, remote_files)
+    if accepted_drift(record):
+        raise AcceptedDrift(f'local={local[1]}; upstream={remote[1]}; audited payload baseline matches')
     raise PayloadDrift(f'local={local[1]}; upstream={remote[1]}; packaged payload differs without a proven version advance')
 
 def latest_svn_revision(url: str) -> str | None:
@@ -368,6 +421,7 @@ def check_updates():
     current = 0
     unresolved = 0
     drift = 0
+    accepted = 0
     for path, entry in externals.items():
         name = short_name(path)
         try:
@@ -384,6 +438,10 @@ def check_updates():
                 old, new = locked_version, upstream_version
             else:
                 old, new = baseline_without_lock(path, entry, resolved)
+        except AcceptedDrift as error:
+            accepted += 1
+            print(f'    {name}: accepted-drift; {error}')
+            continue
         except PayloadDrift as error:
             drift += 1
             print(f'[D] DRIFT {name} ({path}) - {error}')
@@ -403,7 +461,7 @@ def check_updates():
         print(f'    new    : {upstream_version}')
         if new != upstream_version:
             print(f'    upstream local-version marker: {new}')
-    print(f'Libraries | branch={branch} | CHECKED={len(externals)} | current={current} | pending={len(pending)} | DRIFT={drift} | UNKNOWN={unresolved} | unresolved={unresolved}')
+    print(f'Libraries | branch={branch} | CHECKED={len(externals)} | current={current} | accepted-drift={accepted} | pending={len(pending)} | DRIFT={drift} | UNKNOWN={unresolved} | unresolved={unresolved}')
     if unresolved:
         print('Library check incomplete; unresolved sources are not confirmed current.', file=sys.stderr)
         return 1
@@ -414,7 +472,7 @@ def check_updates():
         return 0
     if not args.apply:
         print('\nAfter approval, run --apply <name> (or --apply all) to vendor the listed libraries on this branch.')
-        return
+        return 1
     targets = list(pending.keys()) if args.apply == 'all' else [p for p, info in pending.items() if info['name'] == args.apply]
     if not targets:
         print(f"\nNo pending library named '{args.apply}'.", file=sys.stderr)

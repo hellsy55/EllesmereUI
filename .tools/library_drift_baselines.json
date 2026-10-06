@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "baselines": [
+    {
+      "path": "Libs/LibStub",
+      "source": "https://repos.wowace.com/wow/libstub/trunk",
+      "tag": "1.0",
+      "kind": "svn-rev",
+      "version": "90",
+      "snapshot_source": "https://repos.wowace.com/wow/libstub/tags/1.0",
+      "local_sha256": "816ba006968593761f84cd9639457d9d313df2e24ca4a11228174a0ba4dbbf67",
+      "upstream_sha256": "5806205c2de6a891c61458988ccd3881ba1eb5cfe97f8ef6e1edbf1f858ae447"
+    },
+    {
+      "path": "Libs/LibDurability",
+      "source": "https://repos.wowace.com/wow/libdurability/trunk/LibDurability",
+      "tag": null,
+      "kind": "svn-rev",
+      "version": "72",
+      "snapshot_source": "https://repos.wowace.com/wow/libdurability/trunk/LibDurability",
+      "local_sha256": "c0eefa81a657e1030120f1cdb31cba05c5413e8ef0f03669144ab005d2e7f38b",
+      "upstream_sha256": "321ef7afabfb96ce4dda7c3ffd9a412f102c2081a46d5e7bdef1f11bab29052a"
+    }
+  ]
+}
