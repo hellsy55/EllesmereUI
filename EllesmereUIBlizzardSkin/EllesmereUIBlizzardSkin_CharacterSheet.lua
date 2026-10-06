@@ -371,8 +371,16 @@ local function EUI_BuildSocketIconRow(itemLink, paintPasses)
     for i = 1, 4 do
         local _, gemLink = C_Item.GetItemGem(itemLink, i)
         if gemLink then
-            gemLinks[#gemLinks + 1] = gemLink
-            local icon = C_Item.GetItemIconByID(gemLink)
+            -- Store a minimal item:<id> link for hover tooltips. It does not
+            -- depend on the fully-localized hyperlink remaining hydrated after
+            -- the paint pass, while still resolving to the same gem tooltip.
+            local gemID
+            if GetItemInfoInstant then
+                gemID = select(1, GetItemInfoInstant(gemLink))
+            end
+            gemLinks[#gemLinks + 1] = gemID and ("item:" .. gemID) or gemLink
+
+            local icon = C_Item.GetItemIconByID(gemID or gemLink)
             if not icon and GetItemInfoInstant then
                 icon = select(5, GetItemInfoInstant(gemLink))
             end
@@ -4379,6 +4387,10 @@ local function SkinCharacterSheet()
     local RefreshAllSocketIcons
     if not ns.CharSheetStock() then
     local globalSocketContainer = CreateFrame("Frame", "EUI_CharSheet_SocketContainer", frame)
+    -- Give the overlay a real hit rect. The gem children can render outside a
+    -- zero-sized parent, but they do not receive mouse input reliably there;
+    -- matching the Inspect Sheet overlay makes gem hover tooltips interactive.
+    globalSocketContainer:SetAllPoints(frame)
     globalSocketContainer:SetFrameLevel(100)
     local isCharacterTab = (frame.selectedTab or 1) == 1
     if isCharacterTab then
@@ -4404,6 +4416,60 @@ local function SkinCharacterSheet()
         end
         return 0.75, 0.75, 0.75, 1       -- silver
     end
+
+    -- Character equipment slots can remain the mouse-focus owner even while a
+    -- gem overlay is visibly above them. Keep a tiny watcher active only while
+    -- one slot is hovered; it geometrically tests the two gem regions and
+    -- supplies the same gem tooltip even when the overlay itself never gets an
+    -- OnEnter. This leaves the slot's normal clicks and item tooltip intact.
+    local socketHoverWatcher = CreateFrame("Frame", nil, globalSocketContainer)
+    socketHoverWatcher:Hide()
+    local socketHoverSlot
+    local socketHoverGemFrame
+
+    local function ShowCharacterGemTooltip(gemFrame)
+        local liveLink = gemFrame and gemFrame.euiGemLink
+        if not liveLink then return false end
+        GameTooltip:SetOwner(gemFrame, "ANCHOR_RIGHT")
+        GameTooltip:SetHyperlink(liveLink)
+        GameTooltip:Show()
+        return true
+    end
+
+    local function RestoreCharacterSlotTooltip(slot)
+        if not slot or not slot:IsShown() or not slot:IsMouseOver() then return end
+        local slotID = slot:GetID()
+        if not slotID or slotID <= 0 then return end
+        GameTooltip:SetOwner(slot, "ANCHOR_RIGHT")
+        GameTooltip:SetInventoryItem("player", slotID)
+        GameTooltip:Show()
+    end
+
+    socketHoverWatcher:SetScript("OnUpdate", function(self)
+        local slot = socketHoverSlot
+        if not slot or not slot:IsShown() or not slot:IsMouseOver() then
+            socketHoverSlot = nil
+            socketHoverGemFrame = nil
+            self:Hide()
+            return
+        end
+
+        local hitFrame
+        for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
+            if gemFrame:IsShown() and gemFrame.euiGemLink and gemFrame:IsMouseOver() then
+                hitFrame = gemFrame
+                break
+            end
+        end
+
+        if hitFrame == socketHoverGemFrame then return end
+        socketHoverGemFrame = hitFrame
+        if hitFrame then
+            ShowCharacterGemTooltip(hitFrame)
+        else
+            RestoreCharacterSlotTooltip(slot)
+        end
+    end)
 
     -- Each socket is a small Frame (not a raw texture) so it can carry a 1px pixel-perfect border.
     local function GetOrCreateSocketIcons(slot, side, slotIndex)
@@ -4432,6 +4498,22 @@ local function SkinCharacterSheet()
             GetFFD(slot).charSocketsIcons[i]  = icon
         end
 
+        if not GetFFD(slot).charSocketHoverHooked then
+            GetFFD(slot).charSocketHoverHooked = true
+            slot:HookScript("OnEnter", function(self)
+                socketHoverSlot = self
+                socketHoverGemFrame = nil
+                socketHoverWatcher:Show()
+            end)
+            slot:HookScript("OnLeave", function(self)
+                if socketHoverSlot == self then
+                    socketHoverSlot = nil
+                    socketHoverGemFrame = nil
+                    socketHoverWatcher:Hide()
+                end
+            end)
+        end
+
         GetFFD(slot).charSocketsSide = side
         GetFFD(slot).charSocketsSlotIndex = slotIndex
 
@@ -4451,6 +4533,7 @@ local function SkinCharacterSheet()
         local gemsEnabled = not (EllesmereUIDB and EllesmereUIDB.showGems == false)
         if not invLink or not gemsEnabled then
             for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
+                gemFrame.euiGemLink = nil
                 gemFrame:Hide()
             end
             return
@@ -4520,24 +4603,26 @@ local function SkinCharacterSheet()
                     local r, g, b, a = GemBorderColor(rarity)
                     PP_GEM.SetBorderColor(gemFrame, r, g, b, a)
 
+                    -- Keep the resolved link on the icon frame itself. This avoids
+                    -- relying on the loop index after the paint pass and makes the
+                    -- Character Sheet hover behavior match the Inspect Sheet.
+                    gemFrame.euiGemLink = gemLink
                     gemFrame:Show()
 
                     gemFrame:SetScript("OnEnter", function(self)
-                        if GetFFD(slot).gemLinks[i] then
-                            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                            GameTooltip:SetHyperlink(GetFFD(slot).gemLinks[i])
-                            GameTooltip:Show()
-                        end
+                        ShowCharacterGemTooltip(self)
                     end)
                     gemFrame:SetScript("OnLeave", function()
                         GameTooltip:Hide()
                     end)
                 elseif gemFrame then
+                    gemFrame.euiGemLink = nil
                     gemFrame:Hide()
                 end
             end
         else
             for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
+                gemFrame.euiGemLink = nil
                 gemFrame:Hide()
             end
         end
