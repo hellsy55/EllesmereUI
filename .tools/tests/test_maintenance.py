@@ -284,7 +284,9 @@ checker.run = fake_run
 checker.shutil.copytree = copytree
 if scenario == 'lockfile-failure':
     checker.os.replace = replace_failure
-sys.argv = [checker_path, '--apply', selected]
+# Vendoring tests operate only on disposable fixtures. Do not execute an apply CLI.
+sys.argv = [checker_path]
+checker.argparse.ArgumentParser.parse_args = lambda self: checker.argparse.Namespace(apply=selected)
 sys.exit(checker.main())
 '''
 

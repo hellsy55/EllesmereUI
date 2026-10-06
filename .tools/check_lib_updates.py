@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from pathlib import Path
 PKGMETA_PATH = '.pkgmeta'
 LOCKFILE_PATH = '.pkgmeta-lock.json'
 CACHE_DIR = '.pkgmeta-cache'
@@ -36,16 +37,16 @@ def parse_externals(pkgmeta_text: str) -> dict:
             continue
         indent = len(raw_line) - len(raw_line.lstrip(' '))
         stripped = line.strip()
-        if stripped == 'externals:':
-            in_externals = True
-            continue
-        if not in_externals:
-            continue
-        if indent == 0 and stripped.endswith(':') and (stripped != 'externals:'):
+        if in_externals and indent == 0:
             flush()
             in_externals = False
             current_path = None
             current = {}
+            continue
+        if stripped == 'externals:':
+            in_externals = True
+            continue
+        if not in_externals:
             continue
         if indent <= 2 and stripped.endswith(':') and (':' not in stripped[:-1]):
             flush()
@@ -67,8 +68,7 @@ def run(cmd, **kwargs):
 
 def latest_git_tag(url: str) -> str | None:
     result = run(['git', 'ls-remote', '--tags', '--sort=-v:refname', url])
-    if result.returncode != 0:
-        return None
+    require_success(result, 'Git tag lookup')
     for line in result.stdout.splitlines():
         parts = line.split('refs/tags/')
         if len(parts) == 2:
@@ -80,14 +80,107 @@ def latest_git_tag(url: str) -> str | None:
 
 def latest_git_commit(url: str, branch: str='HEAD') -> str | None:
     result = run(['git', 'ls-remote', url, branch])
-    if result.returncode != 0 or not result.stdout.strip():
+    require_success(result, 'Git commit lookup')
+    if not result.stdout.strip():
         return None
     return result.stdout.split()[0]
 
+def declared_git_commit(url: str, tag: str) -> str | None:
+    result = run(['git', 'ls-remote', url, f'refs/tags/{tag}', f'refs/tags/{tag}^{{}}'])
+    require_success(result, 'Git declared tag lookup')
+    refs = {ref: commit for line in result.stdout.splitlines() if len(line.split()) == 2
+            for commit, ref in [line.split()]}
+    return refs.get(f'refs/tags/{tag}^{{}}') or refs.get(f'refs/tags/{tag}')
+
+def local_version(text: str) -> tuple[str, str] | None:
+    version = re.search(r'local\s+_VERSION\s*=\s*"([^"]+)"', text)
+    if version:
+        return ('release', version.group(1))
+    minor = re.search(r'NewLibrary\("[^"]+",\s*(\d+)\)', text)
+    if not minor:
+        minor = re.search(r'(?:LIBSTUB_MINOR|MAJOR, MINOR)\s*=\s*"[^"]+",\s*(\d+)', text)
+    return ('minor', minor.group(1)) if minor else None
+
+def relevant_files(directory: Path) -> dict[str, bytes]:
+    """Compare all EUI library runtime sources and loading manifests byte for byte."""
+    files = {}
+    for source in directory.rglob('*'):
+        if source.suffix.lower() not in {'.lua', '.xml', '.toc'}:
+            continue
+        if source.is_symlink() or any(parent.is_symlink() for parent in source.parents):
+            raise RuntimeError('Cannot prove equivalence of symbolic links')
+        if source.is_file():
+            files[source.relative_to(directory).as_posix()] = source.read_bytes()
+    if not files:
+        raise RuntimeError('No relevant library content to compare')
+    return files
+
+def upstream_files(entry: dict, resolved: tuple[str, str]) -> dict[str, bytes]:
+    """Read an exact upstream snapshot in temporary storage, never into the addon."""
+    kind, version = resolved
+    url = entry.get('url', '')
+    with tempfile.TemporaryDirectory(prefix='eui-library-compare-') as temporary:
+        snapshot = Path(temporary) / 'snapshot'
+        if kind == 'svn-rev':
+            result = run(['svn', 'export', '-r', version, url, str(snapshot)])
+            require_success(result, 'SVN snapshot comparison')
+            return relevant_files(snapshot)
+        repo_url, _, subpath = url.partition('.git/')
+        commit = declared_git_commit(repo_url, version) if kind == 'git-tag' else version
+        if not commit or not re.fullmatch(r'[0-9a-f]{40}', commit):
+            raise RuntimeError('Could not resolve an exact upstream Git snapshot')
+        require_success(run(['git', 'init', '--bare', str(snapshot)]), 'Git comparison initialization')
+        require_success(run(['git', '-C', str(snapshot), 'fetch', '--depth=1', '--no-tags', repo_url, commit]), 'Git snapshot comparison')
+        tree = run(['git', '-C', str(snapshot), 'ls-tree', '-r', '-z', commit])
+        require_success(tree, 'Git snapshot manifest lookup')
+        files = {}
+        prefix = subpath.rstrip('/') + '/' if subpath else ''
+        for line in filter(None, tree.stdout.split('\0')):
+            metadata, filename = line.split('\t', 1)
+            if not filename.startswith(prefix) or Path(filename).suffix.lower() not in {'.lua', '.xml', '.toc'}:
+                continue
+            mode, object_type, blob = metadata.split()
+            if mode not in {'100644', '100755'} or object_type != 'blob':
+                raise RuntimeError('Cannot prove equivalence of non-regular Git files')
+            content = subprocess.run(['git', '-C', str(snapshot), 'cat-file', 'blob', blob],
+                                     capture_output=True, timeout=60)
+            require_success(content, 'Git snapshot content lookup')
+            files[filename[len(prefix):]] = content.stdout
+        if not files:
+            raise RuntimeError('No relevant upstream library content to compare')
+        return files
+
+def baseline_without_lock(path: str, entry: dict, resolved: tuple[str, str]):
+    """Return comparable old/new versions; absence of evidence is UNKNOWN."""
+    kind, upstream = resolved
+    tag = entry.get('tag')
+    url = entry.get('url', '')
+    if kind == 'git-commit' and tag and tag.lower() not in {'latest', 'alpha', 'beta', 'head'}:
+        baseline = declared_git_commit(url.split('.git/')[0], tag)
+        if not baseline:
+            raise RuntimeError(f'Could not resolve declared tag {tag}')
+        return baseline, upstream
+    local_files = relevant_files(Path(path))
+    remote_files = upstream_files(entry, resolved)
+    if local_files == remote_files:
+        return upstream, upstream
+    filename = short_name(path) + '.lua'
+    local = local_version(local_files.get(filename, b'').decode('utf-8'))
+    remote = local_version(remote_files.get(filename, b'').decode('utf-8'))
+    if not local or not remote or local[0] != remote[0]:
+        raise RuntimeError('Upstream and local version markers are not comparable')
+    if local[0] == 'minor' and int(remote[1]) > int(local[1]):
+        return local[1], remote[1]
+    if local[0] == 'release':
+        old = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-release', local[1])
+        new = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-release', remote[1])
+        if old and new and tuple(map(int, new.groups())) > tuple(map(int, old.groups())):
+            return local[1], remote[1]
+    raise RuntimeError('Content differs without a proven version advance; equivalence is UNKNOWN')
+
 def latest_svn_revision(url: str) -> str | None:
     result = run(['svn', 'info', '--xml', url])
-    if result.returncode != 0:
-        return None
+    require_success(result, 'SVN revision lookup')
     try:
         root = ET.fromstring(result.stdout)
     except ET.ParseError:
@@ -157,23 +250,30 @@ def check_updates():
     unresolved = 0
     for path, entry in externals.items():
         name = short_name(path)
-        resolved = resolve_upstream_version(entry)
-        if resolved is None:
+        try:
+            resolved = resolve_upstream_version(entry)
+            if resolved is None:
+                raise RuntimeError('Could not resolve upstream version')
+            kind, upstream_version = resolved
+            locked = lock.get(path, {})
+            locked_version = locked.get('value')
+            old, new = (locked_version, upstream_version) if locked_version is not None else baseline_without_lock(path, entry, resolved)
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as error:
             unresolved += 1
-            print(f"[?] {name} ({path}) - could not resolve upstream version (url: {entry.get('url')})")
+            print(f'[?] UNKNOWN {name} ({path}) - {error} (url: {entry.get("url")})')
             continue
-        kind, upstream_version = resolved
-        locked = lock.get(path, {})
-        locked_version = locked.get('value')
-        if locked_version == upstream_version:
+        if old == new:
             current += 1
+            print(f'    {name}: current={old}; upstream={upstream_version}')
             continue
-        pending[path] = {'name': name, 'entry': entry, 'kind': kind, 'old': locked_version, 'new': upstream_version}
-        old_display = locked_version or '(never vendored on this branch)'
+        pending[path] = {'name': name, 'entry': entry, 'kind': kind, 'old': old, 'new': upstream_version}
+        old_display = old
         print(f'[!] {name}: update available')
         print(f'    current: {old_display}')
         print(f'    new    : {upstream_version}')
-    print(f'Libraries | branch={branch} | current={current} | pending={len(pending)} | unresolved={unresolved}')
+        if new != upstream_version:
+            print(f'    upstream local-version marker: {new}')
+    print(f'Libraries | branch={branch} | CHECKED={len(externals)} | current={current} | pending={len(pending)} | UNKNOWN={unresolved} | unresolved={unresolved}')
     if unresolved:
         print('Library check incomplete; unresolved sources are not confirmed current.', file=sys.stderr)
         return 1

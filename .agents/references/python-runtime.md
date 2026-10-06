@@ -55,6 +55,10 @@ explicitly on subsequent calls. Never require the user to change their commands.
 
 ## Dependencies and Cloud setup
 
+This is EUI's canonical Cloud preparation reference. For rootless SVN setup,
+follow [Cloud SVN bootstrap](cloud-svn.md). Setup is separate from addon update
+and installation workflows; it does not change Retail/PTR release selection.
+
 `python_runtime.py`, `release_target.py`, `classify_library_range.py`, and
 `check_lib_updates.py` use only the Python standard library. No pip install or
 PyYAML is required. PyYAML is only relevant to optional generic YAML validation;
