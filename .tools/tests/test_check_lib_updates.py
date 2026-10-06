@@ -57,7 +57,7 @@ class CheckerTests(unittest.TestCase):
 
     def test_pin_compared_to_head_without_lock(self):
         for head, expected in [('commit', ('commit', 'commit')), ('new', ('commit', 'new'))]:
-            with patch.object(checker, 'declared_git_commit', return_value='commit'):
+            with patch.object(checker, 'require_version_advance'), patch.object(checker, 'declared_git_commit', return_value='commit'), patch.object(checker, 'relevant_files', return_value={'A.lua': b'same'}), patch.object(checker, 'upstream_files', return_value={'A.lua': b'same'}):
                 self.assertEqual(checker.baseline_without_lock('Libs/A', {'url': 'repo', 'tag': 'v1.1.4'}, ('git-commit', head)), expected)
 
     def test_failed_pin_lookup_is_not_success(self):
@@ -72,57 +72,57 @@ class CheckerTests(unittest.TestCase):
             code = checker.main()
         return code, output.getvalue()
 
-    def test_same_minor_different_content_is_unknown(self):
+    def test_same_minor_different_content_is_drift(self):
         local = {'A.lua': b'LibStub:NewLibrary("A", 8)\nold code'}
         remote = {'A.lua': b'LibStub:NewLibrary("A", 8)\nnew code'}
         code, output = self.content_report(local, remote)
         self.assertEqual(code, 1)
-        self.assertIn('current=0 | pending=0 | UNKNOWN=1', output)
+        self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_identical_content_without_lock_is_current(self):
         files = {'A.lua': b'LibStub:NewLibrary("A", 8)', 'load.xml': b'<Ui/>'}
         code, output = self.content_report(files, dict(files))
         self.assertEqual(code, 0)
-        self.assertIn('current=1 | pending=0 | UNKNOWN=0', output)
+        self.assertIn('current=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_inconclusive_content_comparison_is_unknown(self):
         for failure in [RuntimeError('comparison unavailable'), subprocess.TimeoutExpired('git', 60)]:
             code, output = self.content_report({}, {}, failure=failure)
             self.assertEqual(code, 1)
-            self.assertIn('current=0 | pending=0 | UNKNOWN=1', output)
+            self.assertIn('current=0 | pending=0 | DRIFT=0 | UNKNOWN=1', output)
 
-    def test_exact_declared_pin_is_current_without_content_guess(self):
+    def test_exact_declared_pin_requires_payload_equivalence(self):
         with patch.object(checker, 'declared_git_commit', return_value='c' * 40):
-            code, output = self.content_report({}, {}, failure=AssertionError('Must use declared pin'), entry={'url': 'repo', 'tag': 'v1.1.4'})
+            code, output = self.content_report({'A.lua': b'same'}, {'A.lua': b'same'}, entry={'url': 'repo', 'tag': 'v1.1.4'})
         self.assertEqual(code, 0)
-        self.assertIn('current=1 | pending=0 | UNKNOWN=0', output)
+        self.assertIn('current=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_missing_runtime_file_or_changed_manifest_is_not_current(self):
         local = {'A.lua': b'LibStub:NewLibrary("A", 8)', 'load.xml': b'<Ui/>'}
         for remote in [{'A.lua': local['A.lua']}, dict(local, **{'load.xml': b'<Ui changed/>'}), dict(local, **{'extra.lua': b'extra'})]:
             code, output = self.content_report(local, remote)
             self.assertEqual(code, 1)
-            self.assertIn('current=0 | pending=0 | UNKNOWN=1', output)
+            self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_proven_minor_advance_is_pending(self):
         code, output = self.content_report({'A.lua': b'LibStub:NewLibrary("A", 8)'}, {'A.lua': b'LibStub:NewLibrary("A", 9)'})
         self.assertIsNone(code)
-        self.assertIn('current=0 | pending=1 | UNKNOWN=0', output)
+        self.assertIn('current=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
 
-    def test_older_minor_is_unknown(self):
+    def test_older_minor_is_drift(self):
         code, output = self.content_report({'A.lua': b'LibStub:NewLibrary("A", 8)'}, {'A.lua': b'LibStub:NewLibrary("A", 7)'})
         self.assertEqual(code, 1)
-        self.assertIn('current=0 | pending=0 | UNKNOWN=1', output)
+        self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_equal_release_marker_does_not_prove_content_equivalence(self):
         code, output = self.content_report({'A.lua': b'local _VERSION = "1.0.2-release"\nold'}, {'A.lua': b'local _VERSION = "1.0.2-release"\nnew'})
         self.assertEqual(code, 1)
-        self.assertIn('current=0 | pending=0 | UNKNOWN=1', output)
+        self.assertIn('current=0 | pending=0 | DRIFT=1 | UNKNOWN=0', output)
 
     def test_proven_release_advance_is_pending(self):
         code, output = self.content_report({'A.lua': b'local _VERSION = "1.0.2-release"'}, {'A.lua': b'local _VERSION = "1.0.3-release"'})
         self.assertIsNone(code)
-        self.assertIn('current=0 | pending=1 | UNKNOWN=0', output)
+        self.assertIn('current=0 | pending=1 | DRIFT=0 | UNKNOWN=0', output)
 
     def test_moving_alias_is_not_a_declared_pin(self):
         for alias in ['latest', 'Alpha', 'Beta', 'HEAD']:
@@ -174,6 +174,111 @@ class CheckerTests(unittest.TestCase):
         with patch.object(checker, 'run', return_value=response) as run:
             self.assertEqual(checker.latest_git_tag('repo'), '1.0.2-release')
             self.assertIn('--sort=-v:refname', run.call_args.args[0])
+
+
+class ExternalPackagingTests(unittest.TestCase):
+    def test_locked_advance_requires_monotonic_revision_or_tag(self):
+        for kind, old, new in [('svn-rev', '10', '11'), ('git-tag', 'v1', 'v2'), ('git-tag', '1.0.2-release', '1.0.3-release')]:
+            checker.require_version_advance(kind, old, new, {})
+            with self.assertRaises(RuntimeError):
+                checker.require_version_advance(kind, new, old, {})
+        with self.assertRaises(RuntimeError):
+            checker.require_version_advance('git-tag', 'alpha', 'beta', {})
+
+    def test_different_git_commits_require_proven_ancestry(self):
+        for code in [0, 1, 128]:
+            def run(command, **kwargs):
+                return subprocess.CompletedProcess(command, code if 'merge-base' in command else 0, '', 'failure')
+            with patch.object(checker, 'run', side_effect=run):
+                if code == 0:
+                    checker.require_version_advance('git-commit', 'a' * 40, 'b' * 40, {'url': 'repo'})
+                else:
+                    with self.assertRaises(RuntimeError):
+                        checker.require_version_advance('git-commit', 'a' * 40, 'b' * 40, {'url': 'repo'})
+
+    def test_svn_trunk_without_tag(self):
+        entry = {'url': 'https://repos.wowace.com/wow/A/trunk'}
+        with patch.object(checker, 'latest_svn_revision', return_value='42') as lookup:
+            self.assertEqual(checker.resolve_upstream_version(entry), ('svn-rev', '42'))
+        lookup.assert_called_once_with(entry['url'])
+
+    def test_svn_explicit_tag_and_subdirectory(self):
+        for suffix in ['', '/A']:
+            entry = {'url': 'https://repos.wowace.com/wow/A/trunk' + suffix, 'tag': '1.0'}
+            expected = 'https://repos.wowace.com/wow/A/tags/1.0' + suffix
+            with patch.object(checker, 'latest_svn_revision', return_value='20') as lookup:
+                self.assertEqual(checker.resolve_upstream_version(entry), ('svn-rev', '20'))
+            lookup.assert_called_once_with(expected)
+            self.assertEqual(entry['_snapshot_url'], expected)
+
+    def test_failed_svn_tag_is_unknown_without_trunk_fallback(self):
+        for result in [None, RuntimeError('SVN tag lookup failed: not found')]:
+            entry = {'url': 'https://repos.wowace.com/wow/A/trunk', 'tag': 'missing'}
+            output = io.StringIO()
+            with patch.object(sys, 'argv', ['checker']), patch.object(checker, 'parse_externals', return_value={'Libs/A': entry}), patch.object(checker, 'load_lockfile', return_value={}), patch.object(checker, 'run', return_value=subprocess.CompletedProcess([], 0, 'work', '')), patch.object(checker, 'latest_svn_revision', return_value=result if result is None else None, side_effect=result if isinstance(result, Exception) else None) as lookup, contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(checker.main(), 1)
+            lookup.assert_called_once_with('https://repos.wowace.com/wow/A/tags/missing')
+            self.assertIn('DRIFT=0 | UNKNOWN=1', output.getvalue())
+
+    def test_svn_latest_uses_latest_log_addition_not_numeric_sort(self):
+        xml = '<log><logentry><paths><path action="M">/tags/old</path><path action="A">/tags/v2/A</path><path action="A">/tags/v99</path></paths></logentry></log>'
+        with patch.object(checker, 'run', return_value=subprocess.CompletedProcess([], 0, xml, '')) as run:
+            self.assertEqual(checker.svn_external_url({'url': 'repo/trunk/A', 'tag': 'latest'}), 'repo/tags/v2/A')
+        self.assertEqual(run.call_args.args[0], ['svn', 'log', '--xml', '--verbose', '--limit', '1', 'repo/tags'])
+
+    def test_svn_latest_missing_or_network_error_fails_closed(self):
+        for code, xml in [(0, '<log/>'), (1, '')]:
+            with patch.object(checker, 'run', return_value=subprocess.CompletedProcess([], code, xml, 'denied')):
+                with self.assertRaises(RuntimeError):
+                    checker.svn_external_url({'url': 'repo/trunk', 'tag': 'latest'})
+
+    def test_svn_export_uses_resolved_tag_snapshot_and_metadata(self):
+        def export(command, **kwargs):
+            self.assertEqual(command[2:5], ['-r', '20', 'repo/tags/1.0/A'])
+            root = Path(command[-1])
+            root.mkdir()
+            (root / 'A.lua').write_bytes(b'runtime')
+            (root / 'tests').mkdir()
+            (root / 'tests/test.lua').write_bytes(b'test')
+            (root / '.pkgmeta').write_text('ignore:\n  - tests\n')
+            return subprocess.CompletedProcess(command, 0, '', '')
+        with patch.object(checker, 'run', side_effect=export):
+            files = checker.upstream_files({'url': 'repo/trunk/A', '_snapshot_url': 'repo/tags/1.0/A'}, ('svn-rev', '20'))
+        self.assertEqual(files, {'A.lua': b'runtime'})
+
+    def test_libdeflate_git_metadata_excludes_tests_and_is_current(self):
+        runtime = b'local _VERSION = "1.0.2-release"'
+        blobs = {'a': runtime, 'b': b'test', 'c': b'ignore:\n  - tests\n  - rockspecs\n'}
+        def run(command, **kwargs):
+            tree = '100644 blob a\tLibDeflate.lua\0' + '100644 blob b\ttests/Test.lua\0' + '100644 blob b\ttests/LibCompress/LibCompress.lua\0' + '100644 blob c\t.pkgmeta\0'
+            return subprocess.CompletedProcess(command, 0, tree if 'ls-tree' in command else '', '')
+        with patch.object(checker, 'run', side_effect=run), patch.object(checker.subprocess, 'run', side_effect=lambda command, **kwargs: subprocess.CompletedProcess(command, 0, blobs[command[-1]], b'')):
+            remote = checker.upstream_files({'url': 'repo'}, ('git-commit', 'c' * 40))
+        self.assertEqual(remote, {'LibDeflate.lua': runtime})
+        code, output = CheckerTests().content_report(remote, remote)
+        self.assertEqual(code, 0)
+        self.assertIn('current=1 | pending=0 | DRIFT=0 | UNKNOWN=0', output)
+
+    def test_ignores_are_exact_paths_not_global_test_exclusion(self):
+        files = {'tests/Test.lua': b'test', 'other/tests/A.lua': b'keep', 'tests2.lua': b'keep'}
+        self.assertEqual(checker.packaged_files(files), files)
+        self.assertEqual(set(checker.packaged_files(files, b'ignore:\n  - tests\n')), {'other/tests/A.lua', 'tests2.lua'})
+
+    def test_unsupported_ignore_is_unknown(self):
+        for metadata in [b'ignore: [tests]', b'ignore:\n  - "tests"', b'ignore:\n  - **/tests', b'ignore:\n  - ../tests', b'ignore:\n- tests', b'"ignore":\n  - tests', b'<<: *defaults']:
+            with self.assertRaises(RuntimeError):
+                checker.packaged_files({'A.lua': b'code'}, metadata)
+        code, output = CheckerTests().content_report({}, {}, failure=RuntimeError('Unsupported external pkgmeta ignore rule'))
+        self.assertEqual(code, 1)
+        self.assertIn('DRIFT=0 | UNKNOWN=1', output)
+
+    def test_libdurability_missing_xml_is_drift_not_update(self):
+        lua = b'LibStub:NewLibrary("LibDurability", 4)'
+        with patch.object(checker, 'short_name', return_value='LibDurability'):
+            code, output = CheckerTests().content_report({'LibDurability.lua': lua}, {'LibDurability.lua': lua, 'LibDurability.xml': b'<Ui/>'})
+        self.assertEqual(code, 1)
+        self.assertIn('pending=0 | DRIFT=1 | UNKNOWN=0', output)
+        self.assertNotIn('update available', output)
 
 
 class ProxyTests(unittest.TestCase):

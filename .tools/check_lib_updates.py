@@ -115,16 +115,90 @@ def relevant_files(directory: Path) -> dict[str, bytes]:
         raise RuntimeError('No relevant library content to compare')
     return files
 
+class PayloadDrift(RuntimeError):
+    """Comparable versions without an advance, but different packaged content."""
+
+
+def package_ignores(text: str) -> list[str]:
+    """Support literal pkgmeta paths; unsupported YAML/rules fail closed.
+
+    No implicit test-directory exclusion. BigWigs reads external .pkgmeta ignores.
+    """
+    paths = []
+    active = False
+    seen = False
+    for raw in text.splitlines():
+        line = raw.split('#', 1)[0].rstrip()
+        if not line.strip():
+            continue
+        if (active and line.startswith('-')) or re.match(r'''^["']ignore["']\s*:''', line):
+            raise RuntimeError('Unsupported external pkgmeta ignore declaration')
+        if line.startswith(('<<:', '{')):
+            raise RuntimeError('Unsupported external pkgmeta structure')
+        if not line[0].isspace():
+            active = bool(re.match(r'^ignore\s*:', line))
+            if active:
+                if seen or line.strip() != 'ignore:':
+                    raise RuntimeError('Unsupported external pkgmeta ignore declaration')
+                seen = True
+            continue
+        if not active:
+            continue
+        match = re.fullmatch(r'\s+-\s+([A-Za-z0-9_. /-]+)', line)
+        if not match:
+            raise RuntimeError('Unsupported external pkgmeta ignore rule')
+        path = match[1].strip().strip('/')
+        if not path or any(part in {'', '.', '..'} for part in path.split('/')):
+            raise RuntimeError('Unsafe external pkgmeta ignore path')
+        paths.append(path)
+    return paths
+
+
+def packaged_files(files: dict[str, bytes], metadata: bytes = b'') -> dict[str, bytes]:
+    ignores = package_ignores(metadata.decode('utf-8-sig'))
+    return {name: content for name, content in files.items()
+            if not any(name == path or name.startswith(path + '/') for path in ignores)}
+
+
+def svn_external_url(entry: dict) -> str:
+    """BigWigs release.sh checkout_external: replace /trunk with /tags/tag.
+
+    latest follows the first added /tags/ path in the latest verbose log entry.
+    Unlike the packager's fallback, an unresolved latest stays UNKNOWN here.
+    """
+    url = entry['url'].rstrip('/')
+    tag = entry.get('tag')
+    if not tag:
+        return url
+    match = re.fullmatch(r'(.*)/trunk(?:/(.*))?', url)
+    if not match:
+        raise RuntimeError('Cannot resolve tagged SVN external outside trunk')
+    root, subpath = match.groups()
+    if tag == 'latest':
+        result = run(['svn', 'log', '--xml', '--verbose', '--limit', '1', root + '/tags'])
+        require_success(result, 'SVN latest tag lookup')
+        log = ET.fromstring(result.stdout)
+        tag = next((path.text.split('/')[2] for path in log.findall('.//path')
+                    if path.get('action') == 'A' and path.text
+                    and re.match(r'^/tags/[^/]+', path.text)), None)
+        if not tag:
+            raise RuntimeError('Could not resolve latest SVN tag')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+', tag) or tag in {'.', '..'}:
+        raise RuntimeError('Unsupported SVN tag')
+    return root + '/tags/' + tag + ('/' + subpath if subpath else '')
+
+
 def upstream_files(entry: dict, resolved: tuple[str, str]) -> dict[str, bytes]:
     """Read an exact upstream snapshot in temporary storage, never into the addon."""
     kind, version = resolved
-    url = entry.get('url', '')
+    url = entry.get('_snapshot_url', entry.get('url', ''))
     with tempfile.TemporaryDirectory(prefix='eui-library-compare-') as temporary:
         snapshot = Path(temporary) / 'snapshot'
         if kind == 'svn-rev':
             result = run(['svn', 'export', '-r', version, url, str(snapshot)])
             require_success(result, 'SVN snapshot comparison')
-            return relevant_files(snapshot)
+            metadata = snapshot / '.pkgmeta'
+            return packaged_files(relevant_files(snapshot), metadata.read_bytes() if metadata.exists() else b'')
         repo_url, _, subpath = url.partition('.git/')
         commit = declared_git_commit(repo_url, version) if kind == 'git-tag' else version
         if not commit or not re.fullmatch(r'[0-9a-f]{40}', commit):
@@ -134,21 +208,62 @@ def upstream_files(entry: dict, resolved: tuple[str, str]) -> dict[str, bytes]:
         tree = run(['git', '-C', str(snapshot), 'ls-tree', '-r', '-z', commit])
         require_success(tree, 'Git snapshot manifest lookup')
         files = {}
+        metadata = b''
         prefix = subpath.rstrip('/') + '/' if subpath else ''
         for line in filter(None, tree.stdout.split('\0')):
-            metadata, filename = line.split('\t', 1)
-            if not filename.startswith(prefix) or Path(filename).suffix.lower() not in {'.lua', '.xml', '.toc'}:
+            attributes, filename = line.split('\t', 1)
+            if (not filename.startswith(prefix) and filename != '.pkgmeta') or (Path(filename).suffix.lower() not in {'.lua', '.xml', '.toc'} and filename != '.pkgmeta'):
                 continue
-            mode, object_type, blob = metadata.split()
+            mode, object_type, blob = attributes.split()
             if mode not in {'100644', '100755'} or object_type != 'blob':
                 raise RuntimeError('Cannot prove equivalence of non-regular Git files')
             content = subprocess.run(['git', '-C', str(snapshot), 'cat-file', 'blob', blob],
                                      capture_output=True, timeout=60)
             require_success(content, 'Git snapshot content lookup')
-            files[filename[len(prefix):]] = content.stdout
+            if filename == '.pkgmeta':
+                metadata = content.stdout
+            else:
+                files[filename[len(prefix):]] = content.stdout
         if not files:
             raise RuntimeError('No relevant upstream library content to compare')
-        return files
+        # Git metadata paths are relative to the checkout root, including subpaths.
+        rooted = {prefix + name: data for name, data in files.items()}
+        return {name[len(prefix):]: data for name, data in packaged_files(rooted, metadata).items()}
+
+def require_version_advance(kind: str, old: str, new: str, entry: dict) -> None:
+    """A different identifier alone is not proof of an upstream advance."""
+    if kind == 'svn-rev':
+        if not old.isdigit() or not new.isdigit():
+            raise RuntimeError('SVN revisions are not comparable')
+        if int(new) > int(old):
+            return
+        raise RuntimeError(f'local revision={old}; upstream revision={new}; no proven revision advance')
+    if kind == 'git-tag':
+        pattern = r'v?(\d+(?:\.\d+)*)(-release)?'
+        before, after = re.fullmatch(pattern, old), re.fullmatch(pattern, new)
+        if not before or not after or before[2] != after[2]:
+            raise RuntimeError('Git tags do not prove a comparable version advance')
+        previous = tuple(map(int, before[1].split('.')))
+        latest = tuple(map(int, after[1].split('.')))
+        width = max(len(previous), len(latest))
+        if latest + (0,) * (width - len(latest)) > previous + (0,) * (width - len(previous)):
+            return
+        raise RuntimeError(f'local tag={old}; upstream tag={new}; no proven tag advance')
+    if kind == 'git-commit':
+        if not all(re.fullmatch(r'[0-9a-f]{40}', value) for value in [old, new]):
+            raise RuntimeError('Git baseline is not an exact commit')
+        with tempfile.TemporaryDirectory(prefix='eui-library-history-') as directory:
+            require_success(run(['git', 'init', '--bare', directory]), 'Git history initialization')
+            repo = entry['url'].split('.git/')[0]
+            require_success(run(['git', '-C', directory, 'fetch', '--no-tags', repo, old, new]), 'Git history lookup')
+            result = run(['git', '-C', directory, 'merge-base', '--is-ancestor', old, new])
+            if result.returncode == 0:
+                return
+            if result.returncode != 1:
+                require_success(result, 'Git ancestry comparison')
+        raise RuntimeError('Upstream Git commit is not a proven descendant of the baseline')
+    raise RuntimeError('Unsupported version kind')
+
 
 def baseline_without_lock(path: str, entry: dict, resolved: tuple[str, str]):
     """Return comparable old/new versions; absence of evidence is UNKNOWN."""
@@ -159,7 +274,9 @@ def baseline_without_lock(path: str, entry: dict, resolved: tuple[str, str]):
         baseline = declared_git_commit(url.split('.git/')[0], tag)
         if not baseline:
             raise RuntimeError(f'Could not resolve declared tag {tag}')
-        return baseline, upstream
+        if baseline != upstream:
+            require_version_advance(kind, baseline, upstream, entry)
+            return baseline, upstream
     local_files = relevant_files(Path(path))
     remote_files = upstream_files(entry, resolved)
     if local_files == remote_files:
@@ -176,7 +293,7 @@ def baseline_without_lock(path: str, entry: dict, resolved: tuple[str, str]):
         new = re.fullmatch(r'(\d+)\.(\d+)\.(\d+)-release', remote[1])
         if old and new and tuple(map(int, new.groups())) > tuple(map(int, old.groups())):
             return local[1], remote[1]
-    raise RuntimeError('Content differs without a proven version advance; equivalence is UNKNOWN')
+    raise PayloadDrift(f'local={local[1]}; upstream={remote[1]}; packaged payload differs without a proven version advance')
 
 def latest_svn_revision(url: str) -> str | None:
     result = run(['svn', 'info', '--xml', url])
@@ -194,6 +311,8 @@ def resolve_upstream_version(entry: dict) -> tuple[str, str] | None:
     url = entry.get('url', '')
     tag = entry.get('tag')
     if 'repos.wowace.com' in url:
+        url = svn_external_url(entry)
+        entry['_snapshot_url'] = url
         rev = latest_svn_revision(url)
         return ('svn-rev', rev) if rev else None
     clean_url = url.split('.git/')[0]
@@ -248,6 +367,7 @@ def check_updates():
     pending = {}
     current = 0
     unresolved = 0
+    drift = 0
     for path, entry in externals.items():
         name = short_name(path)
         try:
@@ -257,8 +377,18 @@ def check_updates():
             kind, upstream_version = resolved
             locked = lock.get(path, {})
             locked_version = locked.get('value')
-            old, new = (locked_version, upstream_version) if locked_version is not None else baseline_without_lock(path, entry, resolved)
-        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as error:
+            if locked_version is not None and locked_version != upstream_version:
+                if locked.get('kind') != kind:
+                    raise RuntimeError('Lock baseline and upstream version kinds are not comparable')
+                require_version_advance(kind, locked_version, upstream_version, entry)
+                old, new = locked_version, upstream_version
+            else:
+                old, new = baseline_without_lock(path, entry, resolved)
+        except PayloadDrift as error:
+            drift += 1
+            print(f'[D] DRIFT {name} ({path}) - {error}')
+            continue
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError, ET.ParseError) as error:
             unresolved += 1
             print(f'[?] UNKNOWN {name} ({path}) - {error} (url: {entry.get("url")})')
             continue
@@ -273,9 +403,12 @@ def check_updates():
         print(f'    new    : {upstream_version}')
         if new != upstream_version:
             print(f'    upstream local-version marker: {new}')
-    print(f'Libraries | branch={branch} | CHECKED={len(externals)} | current={current} | pending={len(pending)} | UNKNOWN={unresolved} | unresolved={unresolved}')
+    print(f'Libraries | branch={branch} | CHECKED={len(externals)} | current={current} | pending={len(pending)} | DRIFT={drift} | UNKNOWN={unresolved} | unresolved={unresolved}')
     if unresolved:
         print('Library check incomplete; unresolved sources are not confirmed current.', file=sys.stderr)
+        return 1
+    if drift:
+        print('Library payload drift detected; no automatic correction is available.', file=sys.stderr)
         return 1
     if not pending:
         return 0
