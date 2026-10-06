@@ -1327,7 +1327,7 @@ end
 --     every received name is checked.
 ------------------------------------------------------------------------
 
-PREFIX = "InviteTools"
+PREFIX = "JTInvList"
 local SHARE_MAX_NAMES = 100
 local SHARE_OFFER_TTL = 60     -- seconds an offer can still be accepted (and the whole send must finish)
 local SHARE_MAX_RECIPIENTS = 21  -- only people with the addon receive anything, so this is plenty
