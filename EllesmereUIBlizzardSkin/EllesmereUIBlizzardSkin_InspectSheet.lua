@@ -49,6 +49,405 @@ local slotGridMap = {
     InspectSecondaryHandSlot = {slot = "SecondaryHand"},
 }
 
+
+-- Gem icons mirror the themed Character Sheet: 15px icons sit inside the
+-- equipment slot at bottom-right, with additional gems stacking upward.
+-- Inspect links can expose socketed gem IDs before C_Item.GetItemGem resolves
+-- them, so this sheet also reads the gem fields encoded directly in the item
+-- hyperlink. That keeps the renderer identical while making inspected gear
+-- independent of the player's own inventory cache.
+local INSPECT_GEM_SIZE = 15
+
+local EUI_INSPECT_EMPTY_SOCKET_ATLAS = {
+    EMPTY_SOCKET_META       = "socket-meta",
+    EMPTY_SOCKET_RED        = "socket-red",
+    EMPTY_SOCKET_YELLOW     = "socket-yellow",
+    EMPTY_SOCKET_BLUE       = "socket-blue",
+    EMPTY_SOCKET_HYDRAULIC  = "socket-hydraulic",
+    EMPTY_SOCKET_COGWHEEL   = "socket-cogwheel",
+    EMPTY_SOCKET_PRISMATIC  = "socket-prismatic",
+    EMPTY_SOCKET_PUNCHCARDRED    = "socket-punchcardred",
+    EMPTY_SOCKET_PUNCHCARDYELLOW = "socket-punchcardyellow",
+    EMPTY_SOCKET_PUNCHCARDBLUE   = "socket-punchcardblue",
+    EMPTY_SOCKET_DOMINATION = "socket-domination",
+    EMPTY_SOCKET_CYPHER     = "socket-cypher",
+    EMPTY_SOCKET_PRIMORDIAL = "socket-primordial",
+    EMPTY_SOCKET_TINKER     = "socket-tinker",
+}
+
+local function EUI_GetInspectGemIDsFromLink(itemLink)
+    if type(itemLink) ~= "string" then return {} end
+    if issecretvalue and issecretvalue(itemLink) then return {} end
+    local payload = itemLink:match("|Hitem:([^|]+)|h") or itemLink:match("^item:(.+)$")
+    if not payload then return {} end
+
+    local _, _, gem1, gem2, gem3, gem4 = strsplit(":", payload)
+    local ids = {}
+    local values = { gem1 or "", gem2 or "", gem3 or "", gem4 or "" }
+    for i = 1, 4 do
+        local gemID = tonumber(values[i])
+        if gemID and gemID > 0 then
+            ids[#ids + 1] = gemID
+        end
+    end
+    return ids
+end
+
+local function EUI_GetInspectGemLink(gemID)
+    if not gemID then return nil end
+    if C_Item and C_Item.GetItemInfo then
+        local link = select(2, C_Item.GetItemInfo(gemID))
+        if link then return link end
+    end
+    return "item:" .. gemID
+end
+
+local function EUI_GetInspectGemIcon(gemID)
+    if not gemID or not C_Item then return nil end
+    local icon = C_Item.GetItemIconByID and C_Item.GetItemIconByID(gemID)
+    if not icon and C_Item.GetItemInfoInstant then
+        icon = select(5, C_Item.GetItemInfoInstant(gemID))
+    end
+    return icon
+end
+
+local INSPECT_GEM_LINE_TYPE = (Enum and Enum.TooltipDataLineType and Enum.TooltipDataLineType.GemSocket) or 3
+
+local function EUI_BuildInspectSocketIconRow(inspectUnit, slotIndex, itemLink, paintPasses)
+    local row, gemLinks = {}, {}
+    if not itemLink then return row, 0, 0, gemLinks end
+
+    local itemLinkUsable = not (issecretvalue and issecretvalue(itemLink))
+    local stats = itemLinkUsable and C_Item and C_Item.GetItemStats and C_Item.GetItemStats(itemLink)
+    local statsSockets, firstAtlas = 0, nil
+    if stats then
+        for key, count in pairs(stats) do
+            local atlas = EUI_INSPECT_EMPTY_SOCKET_ATLAS[key]
+            if atlas and count and count > 0 then
+                statsSockets = statsSockets + count
+                firstAtlas = firstAtlas or atlas
+            end
+        end
+    end
+
+    -- The inspected unit's tooltip data is the primary source. Blizzard already
+    -- exposes each socket line with gemIcon/socketType here, even when the
+    -- inspected item's gem bytes have not hydrated through C_Item.GetItemGem.
+    local tooltipSockets, tooltipGems = 0, 0
+    local tooltipRows = {}
+    if C_TooltipInfo and C_TooltipInfo.GetInventoryItem and inspectUnit and slotIndex then
+        local data = C_TooltipInfo.GetInventoryItem(inspectUnit, slotIndex)
+        if data and TooltipUtil and TooltipUtil.SurfaceArgs then
+            TooltipUtil.SurfaceArgs(data)
+        end
+        if data and data.lines then
+            for _, line in ipairs(data.lines) do
+                if line.type == INSPECT_GEM_LINE_TYPE then
+                    tooltipSockets = tooltipSockets + 1
+                    local gemIcon = line.gemIcon
+                    if gemIcon and not (issecretvalue and issecretvalue(gemIcon)) then
+                        tooltipGems = tooltipGems + 1
+                        tooltipRows[#tooltipRows + 1] = { icon = gemIcon, isAtlas = false, hasGem = true }
+                    else
+                        local socketType = line.socketType
+                        if firstAtlas then
+                            tooltipRows[#tooltipRows + 1] = { icon = firstAtlas, isAtlas = true, hasGem = false }
+                        elseif socketType and not (issecretvalue and issecretvalue(socketType)) then
+                            tooltipRows[#tooltipRows + 1] = {
+                                icon = "Interface\\ItemSocketingFrame\\UI-EmptySocket-" .. socketType,
+                                isAtlas = false,
+                                hasGem = false,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- Item links encode gem item IDs directly. Keep these for gem tooltips and
+    -- as a second visual source if tooltip data has not arrived yet. Duplicates
+    -- are intentional: two equal gems in two sockets must render twice.
+    local encodedGemIDs = EUI_GetInspectGemIDsFromLink(itemLink)
+    for _, gemID in ipairs(encodedGemIDs) do
+        gemLinks[#gemLinks + 1] = EUI_GetInspectGemLink(gemID)
+    end
+
+    if tooltipSockets > 0 then
+        -- Tooltip socket rows are authoritative for inspect: unlike the item-link
+        -- cache they tell us immediately whether each visible socket is filled or
+        -- empty. Pair encoded gem links only with filled rows so an empty socket
+        -- before a filled one cannot shift the hover tooltip onto the wrong icon.
+        local gemLinkIndex = 1
+        for _, entry in ipairs(tooltipRows) do
+            if entry.hasGem then
+                entry.gemLink = gemLinks[gemLinkIndex]
+                gemLinkIndex = gemLinkIndex + 1
+            end
+        end
+        row = tooltipRows
+        return row, tooltipSockets, tooltipGems, gemLinks, true
+    end
+
+    -- Fallback to the gem IDs embedded in the hyperlink. This path is what
+    -- makes inspect independent of C_Item.GetItemGem's cache state.
+    for _, gemID in ipairs(encodedGemIDs) do
+        row[#row + 1] = { icon = EUI_GetInspectGemIcon(gemID) or 134400, isAtlas = false }
+    end
+    local nGems = #encodedGemIDs
+
+    -- Last fallback for clients/links where the gem fields are not available.
+    if nGems == 0 and itemLinkUsable and C_Item and C_Item.GetItemGem then
+        for i = 1, 4 do
+            local _, gemLink = C_Item.GetItemGem(itemLink, i)
+            if gemLink then
+                gemLinks[#gemLinks + 1] = gemLink
+                local gemID = C_Item.GetItemInfoInstant and C_Item.GetItemInfoInstant(gemLink)
+                row[#row + 1] = { icon = EUI_GetInspectGemIcon(gemID) or 134400, isAtlas = false }
+            end
+        end
+        nGems = #gemLinks
+    end
+
+    local suppressEmptyAtlas = statsSockets > 0 and nGems == 0 and (paintPasses or 0) < 40
+    if stats and not suppressEmptyAtlas and firstAtlas then
+        local emptyCount = math.max(0, statsSockets - nGems)
+        for _ = 1, emptyCount do
+            row[#row + 1] = { icon = firstAtlas, isAtlas = true }
+        end
+    end
+
+    return row, statsSockets, nGems, gemLinks, false
+end
+
+local function EUI_InspectGemBorderColor(rarity)
+    if (rarity or 0) >= 3 then
+        return 1.00, 0.82, 0.00, 1
+    end
+    return 0.75, 0.75, 0.75, 1
+end
+
+local function EUI_EnsureInspectSocketContainer(frame)
+    local d = GetFFD(frame)
+    if d.socketContainer then return d.socketContainer end
+
+    local container = CreateFrame("Frame", "EUI_InspectSheet_SocketContainer", frame)
+    container:SetAllPoints(frame)
+    container:SetFrameLevel(100)
+    container:Hide()
+    d.socketContainer = container
+    return container
+end
+
+local function EUI_GetOrCreateInspectSocketIcons(slot, container)
+    local d = GetFFD(slot)
+    if d.inspectSocketIcons then return d.inspectSocketIcons end
+
+    local PP = EllesmereUI and EllesmereUI.PanelPP
+    d.inspectSocketIcons = {}
+    d.inspectSocketFrames = {}
+    d.inspectGemLinks = {}
+
+    for i = 1, 2 do -- keep the same two-icon display cap as the Character Sheet
+        local gemFrame = CreateFrame("Frame", nil, container)
+        gemFrame:SetSize(INSPECT_GEM_SIZE, INSPECT_GEM_SIZE)
+        gemFrame:EnableMouse(true)
+        gemFrame:Hide()
+
+        local icon = gemFrame:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(gemFrame)
+
+        if PP then
+            PP.CreateBorder(gemFrame, 1, 1, 1, 1, 2, "OVERLAY", 1)
+            local gemBdr = PP.GetBorders(gemFrame)
+            if gemBdr then gemBdr:SetFrameLevel(gemFrame:GetFrameLevel()) end
+        end
+
+        d.inspectSocketFrames[i] = gemFrame
+        d.inspectSocketIcons[i] = icon
+    end
+
+    return d.inspectSocketIcons
+end
+
+local function EUI_ClearInspectSlotGems(slot, clearTextures)
+    if not slot then return end
+    local d = GetFFD(slot)
+    d.inspectGemPaintPasses = 0
+    d.inspectGemLinks = {}
+    d.inspectGemItemLink = nil
+
+    for _, gemFrame in ipairs(d.inspectSocketFrames or {}) do
+        gemFrame.euiGemLink = nil
+        gemFrame:Hide()
+    end
+    if clearTextures then
+        for _, icon in ipairs(d.inspectSocketIcons or {}) do
+            icon:SetTexture(nil)
+            if icon.SetAtlas then icon:SetAtlas(nil) end
+        end
+    end
+end
+
+local function EUI_UpdateInspectSocketIcons(slotName)
+    local frame = InspectFrame
+    if not frame then return false end
+    local inspectUnit = frame.unit
+    local slot = _G[slotName]
+    if not inspectUnit or not slot then return false end
+
+    local container = EUI_EnsureInspectSocketContainer(frame)
+    local socketIcons = EUI_GetOrCreateInspectSocketIcons(slot, container)
+    local d = GetFFD(slot)
+    local slotIndex = slot:GetID()
+    local invLink = GetInventoryItemLink(inspectUnit, slotIndex)
+
+    -- Blizzard reuses these slot frames for every inspected character. Reset
+    -- immediately when the underlying item changes so gems from the previous
+    -- target can never remain visible while the new inspect data hydrates.
+    if d.inspectGemItemLink ~= invLink then
+        EUI_ClearInspectSlotGems(slot, true)
+        d.inspectGemItemLink = invLink
+    end
+
+    local gemsEnabled = not (EllesmereUIDB and EllesmereUIDB.showGems == false)
+    if not invLink or not gemsEnabled then
+        for _, gemFrame in ipairs(d.inspectSocketFrames or {}) do
+            gemFrame:Hide()
+        end
+        return false
+    end
+
+    local passes = d.inspectGemPaintPasses or 0
+    local socketTextures, totalSockets, nGems, gemLinks, socketsResolved =
+        EUI_BuildInspectSocketIconRow(inspectUnit, slotIndex, invLink, passes)
+    local pendingHydration = totalSockets > 0 and nGems == 0 and not socketsResolved and passes < 40
+
+    if totalSockets > 0 and nGems == 0 and not socketsResolved then
+        local iid = GetInventoryItemID(inspectUnit, slotIndex)
+        if iid and not (issecretvalue and issecretvalue(iid)) and iid > 0
+            and C_Item and C_Item.RequestLoadItemDataByID then
+            C_Item.RequestLoadItemDataByID(iid)
+        end
+        d.inspectGemPaintPasses = passes + 1
+    else
+        d.inspectGemPaintPasses = 0
+    end
+
+    d.inspectGemLinks = gemLinks
+
+    local PP = EllesmereUI and EllesmereUI.PanelPP
+    local mult = (PP and PP.mult) or 1
+    local pad = mult
+    local insetX = 2 * mult
+    local insetY = 2 * mult
+    local gemFrames = d.inspectSocketFrames or {}
+
+    for i, icon in ipairs(socketIcons) do
+        local gemFrame = gemFrames[i]
+        local entry = socketTextures[i]
+        if gemFrame and entry then
+            if entry.isAtlas then
+                if icon.SetAtlas then icon:SetAtlas(nil) end
+                icon:SetTexture(nil)
+                if icon.SetVertexColor then icon:SetVertexColor(1, 1, 1, 1) end
+                if icon.SetAtlas and entry.icon then
+                    icon:SetColorTexture(0, 0, 0, 0)
+                    icon:SetAtlas(entry.icon)
+                else
+                    if icon.SetAtlas then icon:SetAtlas(nil) end
+                    icon:SetColorTexture(0.22, 0.22, 0.26, 0.85)
+                end
+            else
+                if icon.SetAtlas then icon:SetAtlas(nil) end
+                icon:SetColorTexture(0, 0, 0, 0)
+                icon:SetTexture(nil)
+                if icon.SetVertexColor then icon:SetVertexColor(1, 1, 1, 1) end
+                icon:SetTexture(entry.icon)
+            end
+
+            gemFrame:ClearAllPoints()
+            gemFrame:SetPoint("BOTTOMRIGHT", slot, "BOTTOMRIGHT",
+                -insetX, insetY + (i - 1) * (INSPECT_GEM_SIZE + pad))
+
+            local gemLink = entry.gemLink
+            if gemLink == nil and entry.hasGem ~= false then
+                gemLink = d.inspectGemLinks and d.inspectGemLinks[i]
+            end
+            gemFrame.euiGemLink = gemLink
+            local rarity = 2
+            if gemLink then
+                local _, _, r = GetItemInfo(gemLink)
+                if r then rarity = r end
+            end
+            if PP then
+                local r, g, b, a = EUI_InspectGemBorderColor(rarity)
+                PP.SetBorderColor(gemFrame, r, g, b, a)
+            end
+
+            gemFrame:SetScript("OnEnter", function(self)
+                local liveLink = self.euiGemLink
+                if liveLink then
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:SetHyperlink(liveLink)
+                    GameTooltip:Show()
+                end
+            end)
+            gemFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            gemFrame:Show()
+        elseif gemFrame then
+            gemFrame.euiGemLink = nil
+            gemFrame:Hide()
+        end
+    end
+
+    return pendingHydration
+end
+
+local function EUI_RefreshAllInspectSocketIcons()
+    local frame = InspectFrame
+    if not frame then return false end
+    local container = EUI_EnsureInspectSocketContainer(frame)
+    local isTab1 = InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown()
+    if not isTab1 then
+        container:Hide()
+        return false
+    end
+
+    local pending = false
+    for _, slotName in ipairs(EUI_ALL_SLOTS) do
+        if EUI_UpdateInspectSocketIcons(slotName) then pending = true end
+    end
+    container:Show()
+    return pending
+end
+
+local function EUI_ClearAllInspectSocketIcons(clearTextures)
+    for _, slotName in ipairs(EUI_ALL_SLOTS) do
+        EUI_ClearInspectSlotGems(_G[slotName], clearTextures)
+    end
+    if InspectFrame and GetFFD(InspectFrame).socketContainer then
+        GetFFD(InspectFrame).socketContainer:Hide()
+    end
+end
+
+local function EUI_QueueInspectSocketRefresh(delay)
+    local frame = InspectFrame
+    if not frame or not frame:IsShown() then return end
+    local fd = GetFFD(frame)
+    if fd.socketRefreshTimer then
+        fd.socketRefreshTimer:Cancel()
+        fd.socketRefreshTimer = nil
+    end
+    fd.socketRefreshTimer = C_Timer.NewTimer(delay or 0.12, function()
+        fd.socketRefreshTimer = nil
+        if not InspectFrame or not InspectFrame:IsShown() then return end
+        if EUI_RefreshAllInspectSocketIcons() then
+            EUI_QueueInspectSocketRefresh(0.12)
+        end
+    end)
+end
+
 -- Drop every label a previous styling pass left on this slot. The widgets
 -- are parked in per-slot cache fields and reused by the next pass: the
 -- client never frees frames or font strings, so recreating them on every
@@ -255,6 +654,11 @@ end
 local function ApplyTabVisibility(showLabels)
     local frame = InspectFrame
     if not frame then return end
+
+    -- Gem icons belong to the equipment tab just like the slot labels.
+    if GetFFD(frame).socketContainer then
+        GetFFD(frame).socketContainer:SetShown(showLabels)
+    end
 
     -- Show/hide individual labels based on settings
     local showItemLevel = (not EllesmereUIDB) or (EllesmereUIDB.inspectShowItemLevel ~= false)
@@ -758,6 +1162,11 @@ local function SkinInspectSheet()
         InspectSecondaryHandSlot:SetPoint("TOPLEFT", InspectMainHandSlot, "TOPRIGHT", 12, 0)
     end
 
+    -- Paint inspected gems after every styling pass. A short trailing refresh
+    -- catches item-link/gem data that finishes loading just after the inspect UI.
+    EUI_RefreshAllInspectSocketIcons()
+    EUI_QueueInspectSocketRefresh(0.12)
+
     -- Average item level + M+ score, centered below the title/level text.
     -- Anchored to frame TOP so they sit below the character info header.
     do
@@ -976,6 +1385,7 @@ local function SkinInspectSheet()
                     UpdateTabVisuals()
                     local isTab1 = (frame.selectedTab or 1) == 1
                     ApplyTabVisibility(isTab1)
+                    if isTab1 then EUI_QueueInspectSocketRefresh(0) end
                 end)
             end
         end
@@ -1202,8 +1612,12 @@ if EllesmereUI then
         _inspHooked = true
 
         InspectFrame:HookScript("OnShow", function()
+            -- Never flash gems from the previously inspected unit while the
+            -- shared Blizzard slot frames are being repopulated.
+            EUI_ClearAllInspectSocketIcons(true)
             skinned = false
             ApplyThemedInspectSheet()
+            EUI_QueueInspectSocketRefresh(0.12)
             RefreshDock()
             C_Timer.After(0.1, function()
                 if not InspectFrame or not InspectFrame:IsShown() then return end
@@ -1221,7 +1635,30 @@ if EllesmereUI then
 
         InspectFrame:HookScript("OnHide", function()
             skinned = false
+            local fd = GetFFD(InspectFrame)
+            if fd.socketRefreshTimer then
+                fd.socketRefreshTimer:Cancel()
+                fd.socketRefreshTimer = nil
+            end
+            EUI_ClearAllInspectSocketIcons(true)
             RefreshDock()
+        end)
+
+        -- Item/gem bytes can finish hydrating after INSPECT_READY. Listen only
+        -- while the Inspect Sheet is open and debounce the burst into one repaint.
+        local inspectSocketWatcher = CreateFrame("Frame")
+        inspectSocketWatcher:SetScript("OnEvent", function()
+            if InspectFrame and InspectFrame:IsShown() then
+                EUI_QueueInspectSocketRefresh(0.12)
+            end
+        end)
+        InspectFrame:HookScript("OnShow", function()
+            inspectSocketWatcher:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+            inspectSocketWatcher:RegisterEvent("TOOLTIP_DATA_UPDATE")
+            inspectSocketWatcher:RegisterEvent("UNIT_INVENTORY_CHANGED")
+        end)
+        InspectFrame:HookScript("OnHide", function()
+            inspectSocketWatcher:UnregisterAllEvents()
         end)
 
         -- When the inspect window itself moves (Shifter drag, Blizzard relayout),
@@ -1303,10 +1740,12 @@ if EllesmereUI then
     inspectHook:RegisterEvent("INSPECT_READY")
     inspectHook:SetScript("OnEvent", function(self, event, guid)
         if not InspectFrame or not InspectFrame:IsShown() then return end
+        EUI_ClearAllInspectSocketIcons(true)
         skinned = false
         ApplyThemedInspectSheet()
         EnsureInspectNineSliceHidden()
         RefreshSlotStyles()
+        EUI_QueueInspectSocketRefresh(0.12)
         local frame = InspectFrame
         if frame then
             ApplyTabVisibility(InspectPaperDollItemsFrame and InspectPaperDollItemsFrame:IsShown())

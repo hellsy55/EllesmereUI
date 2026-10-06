@@ -222,7 +222,7 @@ class LibraryTests(unittest.TestCase):
     def test_compact_healthy_and_unresolved(self):
         for resolved, expected in [(('git-tag', 'v1'), 0), (None, 1)]:
             output = io.StringIO()
-            with patch.object(sys, 'argv', ['checker']), patch.object(libraries, 'parse_externals', return_value={'Libs/A': {'url': 'example'}}), patch.object(libraries, 'load_lockfile', return_value={'Libs/A': {'value': 'v1'}}), patch.object(libraries, 'resolve_upstream_version', return_value=resolved), patch.object(libraries, 'run', return_value=subprocess.CompletedProcess([], 0, 'retail', '')), contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            with patch.object(sys, 'argv', ['checker']), patch.object(libraries, 'parse_externals', return_value={'Libs/A': {'url': 'example'}}), patch.object(libraries, 'load_lockfile', return_value={'Libs/A': {'value': 'v1'}}), patch.object(libraries, 'resolve_upstream_version', return_value=resolved), patch.object(libraries, 'relevant_files', return_value={'A.lua': b'payload'}), patch.object(libraries, 'upstream_files', return_value={'A.lua': b'payload'}), patch.object(libraries, 'run', return_value=subprocess.CompletedProcess([], 0, 'retail', '')), contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(libraries.main(), expected)
             self.assertIn('Libraries | branch=', output.getvalue())
             self.assertNotIn('[=]', output.getvalue())
@@ -281,10 +281,14 @@ def replace_failure(*args):
     raise PermissionError('simulated lockfile publication failure')
 
 checker.run = fake_run
+# Synthetic version IDs exercise vendoring I/O; advance proof has separate tests.
+checker.require_version_advance = lambda *args: None
 checker.shutil.copytree = copytree
 if scenario == 'lockfile-failure':
     checker.os.replace = replace_failure
-sys.argv = [checker_path, '--apply', selected]
+# Vendoring tests operate only on disposable fixtures. Do not execute an apply CLI.
+sys.argv = [checker_path]
+checker.argparse.ArgumentParser.parse_args = lambda self: checker.argparse.Namespace(apply=selected)
 sys.exit(checker.main())
 '''
 
