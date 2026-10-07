@@ -37,6 +37,11 @@ local PARTY_SIZE = 5
 local PENDING_TTL = 120 -- seconds a queued invite stays valid
 
 IL.pendingList = nil
+IL.pendingSync = {}      -- live raid-sync changes received during combat
+IL.syncBase = nil        -- true once this list matches the raid leader baseline
+IL.syncTries, IL.syncLast, IL.syncWanted = 0, 0, 0
+IL.syncRequesters = {}   -- leader-side members waiting for a baseline
+IL.syncBcastPending = false
 IL.pendingUntil = 0
 IL.convertToRaid = false
 
@@ -1011,6 +1016,7 @@ function IL:PLAYER_ENTERING_WORLD()
     -- Auto-accepting guild shares needs the sender's guild rank. Prime the
     -- roster so Guild Master / Officer checks are normally available at once.
     if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
+    if IsInRaid() then self:ScheduleSyncCheck() end
 end
 
 function IL:OnInviteSystemMsg(_, msg)
@@ -1219,6 +1225,13 @@ function IL:GROUP_INVITE_CONFIRMATION()
 end
 
 function IL:GROUP_ROSTER_UPDATE()
+    if IsInRaid() then
+        self:ScheduleSyncCheck()
+    else
+        self.syncBase = nil
+        self.syncTries = 0
+        wipe(self.syncRequesters)
+    end
     if inviteAccepted then
         inviteAccepted = false
         if _G.LFGInvitePopup then StaticPopupSpecial_Hide(_G.LFGInvitePopup) end
@@ -1288,6 +1301,14 @@ function IL:PLAYER_REGEN_ENABLED()
         if self.pendingList then self.pendingUntil = self.pendingUntil + paused end
     end
     if self.frame then self.frame.SetLocked(false) end
+    if #self.pendingSync > 0 then
+        local queued = self.pendingSync
+        self.pendingSync = {}
+        if self:SyncOn() then
+            for _, r in ipairs(queued) do self:ApplySyncDelta(r.kind, r.sender, r.payload) end
+        end
+    end
+    self:ScheduleSyncCheck()
     if self.pendingKillClear then
         local boss = self.pendingKillClear
         self.pendingKillClear = nil
@@ -1334,6 +1355,7 @@ local SHARE_MAX_RECIPIENTS = 21  -- only people with the addon receive anything,
 local SHARE_COOLDOWN = 5       -- seconds between two shares
 local SHARE_CHUNK = 220        -- bytes of names per message
 local SHARE_SEND_GAP = 0.3     -- seconds between two outgoing messages
+local OFFER_RESHARE_GAP = 4    -- newer offer id from same sender may replace the old one after this gap
 local WAIT_DATA_TTL = 60       -- seconds to wait for the names after Accept
 local SEND_MARGIN = 3           -- seconds of slack when checking that a new accept still fits in the offer's time
 
@@ -1342,6 +1364,7 @@ IL.incoming = nil   -- an offer whose popup is on screen
 IL.awaiting = nil   -- an offer I accepted: { sender, id, untilT, parts, got, total }
 IL.lastShare = 0
 IL.offerSeen = {}
+IL.offerSeenId = {}
 
 local function NormSender(name)
     return ((Ambiguate and Ambiguate(name, "none")) or name):lower()
@@ -1470,9 +1493,6 @@ end
 function IL:CancelShare()
     wipe(outQueue)
     self.offer = nil
-    if self.awaiting then
-        InviteTools:Print(YELLOW .. string.format(L["Cancelled: the list from %s was not received because you entered combat."], Who(self.awaiting.sender, self.awaiting.classFile, YELLOW)) .. "|r")
-    end
     self.awaiting = nil
     if self.incoming then
         self.incoming = nil
@@ -1508,9 +1528,6 @@ local function PumpOut()
             C_Timer.After(THROTTLE_RETRY, PumpOut)
             return
         end
-    end
-    if not sent then
-        InviteTools:Print(RED .. L["A share message could not be sent (game limit or unavailable). Try sharing again."] .. "|r")
     end
     table.remove(outQueue, 1)
     C_Timer.After(SHARE_SEND_GAP, PumpOut)
@@ -1670,6 +1687,223 @@ function IL:IsLeadOrAssist(name)
     return false
 end
 
+-- Live Raid Sync ---------------------------------------------------------
+-- While enabled and in a raid, the raid leader provides the initial baseline.
+-- Later add/remove/clear changes from the leader or assistants are mirrored by
+-- everybody who already has that baseline. All traffic uses the existing
+-- Invite Tools addon-message queue and never appears in public chat.
+function IL:SyncEnabled()
+    return not self.db or self.db.SyncRaid ~= false
+end
+
+function IL:SyncOn()
+    return self:SyncEnabled() and IsInRaid()
+end
+
+function IL:SetSync(on)
+    if not self.db then return end
+    self.db.SyncRaid = on and true or false
+    if on then
+        self.syncTries = 0
+        self:ScheduleSyncCheck()
+    else
+        self.syncBase = nil
+        self.pendingSync = {}
+    end
+    self:UpdateUI()
+end
+
+function IL:SyncChannel()
+    return IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "INSTANCE_CHAT" or "RAID"
+end
+
+function IL:HasBase()
+    return UnitIsGroupLeader("player") or self.syncBase or false
+end
+
+function IL:CanAnnounce()
+    return not InCombatLockdown() and self:SyncOn() and self:CanShare()
+end
+
+function IL:AnnounceRemoval(name)
+    if not ValidName(name) or not self:CanAnnounce() then return end
+    Enqueue("X~" .. name, self:SyncChannel())
+end
+
+function IL:AnnounceAdd(names)
+    if type(names) ~= "table" or not self:CanAnnounce() then return end
+    local chunks = BuildChunks(names)
+    local dist = self:SyncChannel()
+    for _, chunk in ipairs(chunks) do Enqueue("N~" .. chunk, dist) end
+end
+
+function IL:AnnounceClear()
+    if not self:CanAnnounce() then return end
+    Enqueue("C~1", self:SyncChannel())
+end
+
+function IL:IsLeaderName(name)
+    if not name or not IsInGroup() then return false end
+    local raid = IsInRaid()
+    local n = GetNumGroupMembers() or 0
+    for i = 1, (raid and n or n - 1) do
+        local unit = (raid and "raid" or "party") .. i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+            local uname = GetUnitName(unit, true)
+            if IsReadable(uname) and type(uname) == "string" and SameChar(uname, name) then
+                return UnitIsGroupLeader(unit) or false
+            end
+        end
+    end
+    return false
+end
+
+local syncCheckPending = false
+function IL:ScheduleSyncCheck()
+    if syncCheckPending then return end
+    syncCheckPending = true
+    C_Timer.After(3, function()
+        syncCheckPending = false
+        IL:RequestSync()
+    end)
+end
+
+function IL:RequestSync()
+    if not self:SyncOn() or self:HasBase() or InCombatLockdown() then return end
+    local now = GetTime()
+    if self.syncTries >= 4 or now - self.syncLast < 15 then return end
+    self.syncTries = self.syncTries + 1
+    self.syncLast = now
+    self.syncWanted = now + 25
+    Enqueue("S?", self:SyncChannel())
+    C_Timer.After(16, function() IL:RequestSync() end)
+end
+
+function IL:OnSyncRequest(sender, channel)
+    if IsMe(sender) or not self:SyncOn() or InCombatLockdown() or not UnitIsGroupLeader("player") then return end
+    if channel ~= "RAID" and channel ~= "INSTANCE_CHAT" then return end
+    local req = self.syncRequesters
+    local n = 0
+    for _ in pairs(req) do n = n + 1 end
+    if n > 60 then wipe(req) end
+    req[sender] = true
+    if self.syncBcastPending then return end
+    self.syncBcastPending = true
+    C_Timer.After(2, function()
+        IL.syncBcastPending = false
+        IL:BroadcastSync()
+    end)
+end
+
+function IL:BroadcastSync()
+    local req = self.syncRequesters
+    if not self:SyncOn() or InCombatLockdown() or not UnitIsGroupLeader("player") then
+        wipe(req)
+        return
+    end
+    local targets = {}
+    for who in pairs(req) do
+        if #targets < SHARE_MAX_RECIPIENTS then
+            targets[#targets + 1] = who
+            req[who] = nil
+        end
+    end
+    if #targets == 0 then return end
+    local names = self.names or ParseList(self:GetListText(1))
+    local chunks, count = BuildChunks(names)
+    if count == 0 then
+        for _, who in ipairs(targets) do Enqueue("S0", "WHISPER", who) end
+        return
+    end
+    local now = GetTime()
+    local id = string.format("%04x", math.random(0, 65535))
+    self.offer = {
+        id = id, expires = now + SHARE_OFFER_TTL, chunks = chunks, served = 0,
+        sent = {}, replied = {}, replies = 0, result = {}, sync = true,
+    }
+    local _, classFile = UnitClass("player")
+    for _, who in ipairs(targets) do
+        Enqueue("O~" .. id .. "~" .. count .. "~" .. (classFile or "") .. "~S", "WHISPER", who)
+    end
+end
+
+function IL:OnSyncEmpty(sender, channel)
+    if channel ~= "WHISPER" or not self:SyncOn() or self:HasBase() then return end
+    if GetTime() > self.syncWanted or not self:IsLeaderName(sender) then return end
+    self.syncBase = true
+    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+end
+
+local function ShortSender(sender)
+    return (Ambiguate and Ambiguate(sender, "short")) or sender
+end
+
+function IL:ApplyRemoval(sender, name)
+    local names = self.names or ParseList(self:GetListText(1))
+    for k, n in ipairs(names) do
+        if SameChar(n, name) then
+            table.remove(names, k)
+            self.names = names
+            self:ForgetName(n)
+            for i = #self.sendQueue, 1, -1 do
+                if SameChar(self.sendQueue[i], n) then table.remove(self.sendQueue, i) end
+            end
+            if type(self.pendingList) == "table" then
+                for i = #self.pendingList, 1, -1 do
+                    if SameChar(self.pendingList[i], n) then table.remove(self.pendingList, i) end
+                end
+            end
+            self:RecordJoin(n, "removed", nil, "leader", ShortSender(sender))
+            self:SaveNames()
+            if self.frame and self.frame.Layout then self.frame.Layout() end
+            return
+        end
+    end
+end
+
+function IL:ApplyAdd(sender, payload)
+    local list = {}
+    for name in payload:gmatch("[^,]+") do
+        if ValidName(name) and #list < SHARE_MAX_NAMES then list[#list + 1] = name end
+    end
+    if #list == 0 then return end
+    local added = self:MergeNames(list)
+    if added <= 0 then return end
+end
+
+function IL:ApplyClear(sender)
+    if #(self.names or ParseList(self:GetListText(1))) == 0 then return end
+    self:ClearList("cleared", ShortSender(sender))
+end
+
+function IL:ApplySyncDelta(kind, sender, payload)
+    if kind == "X" then
+        self:ApplyRemoval(sender, payload)
+    elseif kind == "N" then
+        self:ApplyAdd(sender, payload)
+    elseif kind == "C" then
+        self:ApplyClear(sender)
+    end
+end
+
+function IL:OnSyncDelta(kind, sender, payload, channel)
+    if IsMe(sender) or not self:SyncOn() then return end
+    if channel ~= "RAID" and channel ~= "INSTANCE_CHAT" then return end
+    if not self:IsLeadOrAssist(sender) then return end
+    if not self:HasBase() then
+        self:ScheduleSyncCheck()
+        return
+    end
+    if kind ~= "C" and not ValidName(kind == "N" and (payload:match("^[^,]+") or "") or payload) then return end
+    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+    if InCombatLockdown() then
+        local q = self.pendingSync
+        if #q < 60 then q[#q + 1] = { kind = kind, sender = sender, payload = payload } end
+        return
+    end
+    self:ApplySyncDelta(kind, sender, payload)
+end
+
 -- mode: "GROUP", "GUILD" or "TARGET". Returns true, or false and a reason.
 function IL:Share(mode)
     if InCombatLockdown() then return false, "combat" end
@@ -1724,21 +1958,12 @@ end
 -- busy reply to the sender. Local lines are throttled per sender so repeated
 -- offers cannot spam chat.
 local ignoredOfferNote = {}
-local function NoteIgnoredOffer(sender, id, why, classFile)
+local function NoteIgnoredOffer(sender, id)
     local key = NormSender(sender)
     local now = GetTime()
     if ignoredOfferNote[key] and now - ignoredOfferNote[key] < 30 then return end
     ignoredOfferNote[key] = now
     SendShareReply(sender, id, "b")
-    local text
-    if why == "cooldown" then
-        text = L["Ignored a list offer from %s: they already offered one a moment ago."]
-    elseif why == "busy" then
-        text = L["Ignored a list offer from %s: you are still waiting for another list."]
-    else
-        text = L["Ignored a list offer from %s: another list popup is still open."]
-    end
-    InviteTools:Print(GREY .. string.format(text, Who(sender, classFile, GREY)) .. "|r")
 end
 
 -- Guild rank gate for Auto-accept shared lists. WoW rank index 0 is Guild
@@ -1759,9 +1984,27 @@ end
 
 -- Somebody offered me their list: ask first, take nothing yet. `channel` is
 -- how the offer reached me (GUILD, PARTY, RAID, WHISPER...).
-function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
+function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
     if InCombatLockdown() or IsMe(sender) then return end
     local key = NormSender(sender)
+
+    -- A baseline requested by Live Raid Sync is accepted silently, but only
+    -- from the current raid leader, by whisper, while our request is fresh.
+    if sync then
+        if not (self:SyncOn() and not self:HasBase() and GetTime() < self.syncWanted
+            and channel == "WHISPER" and self:IsLeaderName(sender)) then return end
+        local aw = self.awaiting
+        if aw and GetTime() <= aw.untilT then return end
+        if type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
+        count = tonumber(count)
+        if not count or count < 1 or count > SHARE_MAX_NAMES then return end
+        if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+        self:AcceptShare({
+            sender = sender, id = id, count = count, auto = true, sync = true,
+            classFile = ClassOf(sender, classFile),
+        })
+        return
+    end
 
     -- Guild auto-accept trusts only Guild Master / Officers. If the guild
     -- roster is not ready yet, request it and retry the offer once. Lower
@@ -1780,13 +2023,32 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         guildTrusted = true
     end
 
+    -- A newer share from the same sender replaces the old popup/transfer after
+    -- a short guard gap instead of being blocked by the normal repeat filter.
+    if type(id) == "string" and id:match("^%x%x%x%x$")
+        and (not self.offerSeen[key] or GetTime() - self.offerSeen[key] >= OFFER_RESHARE_GAP) then
+        local inc = self.incoming
+        if inc and inc.id ~= id and NormSender(inc.sender) == key then
+            inc.answered = true
+            self.incoming = nil
+            if inc.dialog and inc.dialog:IsShown() then
+                inc.dialog:Hide()
+                if InviteTools.activePrompt == inc.dialog then InviteTools.activePrompt = nil end
+            end
+        end
+        local wait = self.awaiting
+        if wait and wait.id ~= id and NormSender(wait.sender) == key then
+            self.awaiting = nil
+        end
+    end
+
     local pending = self.incoming
     if pending and pending.dialog and not pending.dialog:IsShown() then
         self.incoming = nil
         pending = nil
     end
     if pending and GetTime() < pending.untilT then
-        NoteIgnoredOffer(sender, id, "popup", classFile)
+        NoteIgnoredOffer(sender, id)
         return
     end
     local awaiting = self.awaiting
@@ -1795,7 +2057,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         awaiting = nil
     end
     if awaiting then
-        NoteIgnoredOffer(sender, id, "busy", classFile)
+        NoteIgnoredOffer(sender, id)
         return
     end
     if not id:match("^%x%x%x%x$") then return end
@@ -1803,19 +2065,19 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
     if not count or count < 1 or count > SHARE_MAX_NAMES then return end
 
     local now = GetTime()
-    local ignoreSeconds = tonumber(self.db and self.db.ShareIgnoreSeconds) or 30
-    ignoreSeconds = math_max(0, ignoreSeconds)
-    if ignoreSeconds > 0 then
-        local seen = self.offerSeen[key]
-        if seen and now - seen < ignoreSeconds then
-            NoteIgnoredOffer(sender, id, "cooldown", classFile)
-            return
-        end
-        local n = 0
-        for _ in pairs(self.offerSeen) do n = n + 1 end
-        if n > 50 then wipe(self.offerSeen) end
-        self.offerSeen[key] = now
+    local ignoreSeconds = math_max(0, tonumber(self.db and self.db.ShareIgnoreSeconds) or 30)
+    local seen = self.offerSeen[key]
+    local differentId = self.offerSeenId[key] ~= id
+    local gap = differentId and OFFER_RESHARE_GAP or ignoreSeconds
+    if gap > 0 and seen and now - seen < gap then
+        NoteIgnoredOffer(sender, id)
+        return
     end
+    local n = 0
+    for _ in pairs(self.offerSeen) do n = n + 1 end
+    if n > 50 then wipe(self.offerSeen); wipe(self.offerSeenId) end
+    self.offerSeen[key] = now
+    self.offerSeenId[key] = id
 
     if C_FriendList and C_FriendList.IsIgnored then
         local ok, ignored = pcall(C_FriendList.IsIgnored, sender)
@@ -1865,9 +2127,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
                 data.answered = true
                 SendShareReply(data.sender, data.id, "d")
             end
-            if reason == "decline" then
-                InviteTools:Print(string.format(L["Shared list from %s declined."], shown))
-            end
+            -- Decline is reported only to the sender.
         end,
     })
     data.dialog = dialog
@@ -1898,7 +2158,7 @@ function IL:AcceptShare(data)
     local awaiting = {
         sender = data.sender, id = data.id, sentCount = data.count,
         untilT = GetTime() + WAIT_DATA_TTL, parts = {}, got = 0,
-        classFile = data.classFile, auto = data.auto and true or false,
+        classFile = data.classFile, auto = data.auto and true or false, sync = data.sync and true or false,
     }
     self.awaiting = awaiting
     Enqueue("A~" .. data.id .. "~" .. MyClass(), "WHISPER", data.sender)
@@ -1908,43 +2168,23 @@ function IL:AcceptShare(data)
     C_Timer.After(WAIT_DATA_TTL + 1, function()
         if IL.awaiting ~= awaiting then return end
         IL.awaiting = nil
-        local who = Who(awaiting.sender, awaiting.classFile, RED)
-        local msg
-        if awaiting.got > 0 then
-            msg = string.format(L["List from %s was not received: only part of it arrived within %ds."], who, WAIT_DATA_TTL)
-        else
-            msg = string.format(L["List from %s was not received: no answer within %ds (they may be in combat, offline, or the offer expired)."], who, WAIT_DATA_TTL)
-        end
-        InviteTools:Print(RED .. msg .. "|r")
     end)
 end
 
--- Somebody accepted my offer: send them the names and print the sender-side
--- state in the same EllesmereUI Invite Tools chat style as the rest of the
--- module.
+-- Somebody accepted my offer: send them the names.
 function IL:OnShareAccepted(sender, id, classFile)
     ClassOf(sender, classFile)
     local o = self.offer
     if not o or o.id ~= id then return end
-    if GetTime() > o.expires then
-        InviteTools:Print(YELLOW .. string.format(L["%s accepted your list after the offer expired. Share again."], Who(sender, nil, YELLOW)) .. "|r")
-        return
-    end
+    if GetTime() > o.expires then return end
     local key = NormSender(sender)
     if o.sent[key] then return end
-    if o.served >= SHARE_MAX_RECIPIENTS then
-        InviteTools:Print(YELLOW .. string.format(L["%s accepted your list, but the limit of %d people was reached."], Who(sender, nil, YELLOW), SHARE_MAX_RECIPIENTS) .. "|r")
-        return
-    end
+    if o.served >= SHARE_MAX_RECIPIENTS then return end
     -- Would the last message for this person still go out before the offer
     -- expires? If not, do not start a transfer that cannot finish in time.
-    if GetTime() + QueueETA(#o.chunks) + SEND_MARGIN > o.expires then
-        InviteTools:Print(YELLOW .. string.format(L["%s accepted your list too late to be sent in time. Share again."], Who(sender, nil, YELLOW)) .. "|r")
-        return
-    end
+    if GetTime() + QueueETA(#o.chunks) + SEND_MARGIN > o.expires then return end
     o.sent[key] = true
     o.served = o.served + 1
-    InviteTools:Print(string.format(L["%s accepted your list. Sending it."], Who(sender)))
     local n = #o.chunks
     for i, chunk in ipairs(o.chunks) do
         Enqueue("D~" .. id .. "~" .. i .. "~" .. n .. "~" .. chunk, "WHISPER", sender)
@@ -1953,7 +2193,6 @@ end
 
 -- R reply from an Invite Tools receiver. This is sender-side feedback
 -- only; older Invite Tools versions may not send R and can ignore it.
-local MAX_REPLY_LINES = 10
 function IL:OnShareReply(sender, id, code, c, d, e)
     local o = self.offer
     if not o or o.id ~= id then return end
@@ -1966,35 +2205,17 @@ function IL:OnShareReply(sender, id, code, c, d, e)
         local added, total = tonumber(c), tonumber(d)
         if not added or not total or added < 0 or total < 0 or added > total or total > SHARE_MAX_NAMES then return end
         o.result[key] = true
-        local whoYellow, who = Who(sender, nil, YELLOW), Who(sender)
-        if total == 0 then
-            InviteTools:Print(YELLOW .. string.format(L["%s received your list, but it had no usable names."], whoYellow) .. "|r")
-        elseif added == 0 then
-            InviteTools:Print(YELLOW .. string.format(L["%s received your list, but nothing changed: the names were already on their list."], whoYellow) .. "|r")
-        else
-            InviteTools:Print(string.format(L["%s received your list: %d new of %d."], who, added, total))
-        end
+        InviteTools:Print(string.format(L["%s received your list: %d new of %d."], Who(sender), added, total))
         return
     end
 
     if GetTime() > o.expires + 30 then return end
     if o.replied[key] or o.sent[key] then return end
-    local text
-    if code == "d" then
-        text = L["%s declined your list."]
-    elseif code == "t" then
-        text = L["%s did not answer your list (popup ignored)."]
-    elseif code == "b" then
-        text = L["%s could not look at your list right now (busy)."]
-    else
-        return
-    end
+    if code ~= "d" and code ~= "t" and code ~= "b" then return end
     o.replied[key] = true
     o.replies = o.replies + 1
-    if o.replies <= MAX_REPLY_LINES then
-        InviteTools:Print(YELLOW .. string.format(text, Who(sender, nil, YELLOW)) .. "|r")
-    elseif o.replies == MAX_REPLY_LINES + 1 then
-        InviteTools:Print(YELLOW .. L["More people declined or ignored your list."] .. "|r")
+    if code == "d" then
+        InviteTools:Print(YELLOW .. string.format(L["%s declined your list."], Who(sender, nil, YELLOW)) .. "|r")
     end
 end
 
@@ -2022,10 +2243,9 @@ function IL:OnShareData(sender, id, i, n, payload)
             if ValidName(name) and #names < SHARE_MAX_NAMES then names[#names + 1] = name end
         end
     end
-    local whoYellow, who = Who(a.sender, a.classFile, YELLOW), Who(a.sender, a.classFile)
+    if a.sync and #names > 0 then self.syncBase = true end
     if #names == 0 then
         SendShareReply(a.sender, a.id, "r~0~0")
-        InviteTools:Print(YELLOW .. string.format(L["List from %s had no usable names, so nothing changed."], whoYellow) .. "|r")
         return
     end
 
@@ -2062,21 +2282,9 @@ function IL:OnShareData(sender, id, i, n, payload)
     local added, duplicates, mine = self:MergeNames(names)
     -- Tell a current sender exactly what its list did here. Older senders
     -- ignore this packet.
-    SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names)
+    if not a.sync then SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names) end
 
-    local got = CountText(#names)
-    if replaced then
-        InviteTools:Print(string.format(L["List from %s - received: %s; your list was replaced (%d old name(s) went to the History)."], who, got, replaced))
-    elseif added > 0 then
-        InviteTools:Print(string.format(L["List from %s - received: %s; added to your list: %d."], who, got, added))
-    elseif duplicates > 0 and mine == 0 then
-        InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it."], whoYellow, got) .. "|r")
-    elseif mine > 0 and duplicates == 0 then
-        InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the only name(s) received are you."], whoYellow) .. "|r")
-    else
-        InviteTools:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it (or are you)."], whoYellow, got) .. "|r")
-    end
-    -- The window was already opened when the valid share offer arrived.
+    -- Shared-list and Live Raid Sync receiver-side chat feedback stays silent.
 end
 
 function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
@@ -2086,13 +2294,19 @@ function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
     if #text > 255 then return end
     local kind, a, b, c, d, e = strsplit("~", text, 6)
     if kind == "O" and a and b then
-        self:OnShareOffer(sender, a, b, c, channel)
+        self:OnShareOffer(sender, a, b, c, channel, nil, d == "S")
     elseif kind == "A" and a then
         if not IsMe(sender) then self:OnShareAccepted(sender, a, b) end
     elseif kind == "R" and a and b then
         if not IsMe(sender) then self:OnShareReply(sender, a, b, c, d, e) end
     elseif kind == "D" and a and b and c and d then
         if not IsMe(sender) then self:OnShareData(sender, a, b, c, d) end
+    elseif (kind == "X" or kind == "N" or kind == "C") and a then
+        self:OnSyncDelta(kind, sender, a, channel)
+    elseif kind == "S?" then
+        self:OnSyncRequest(sender, channel)
+    elseif kind == "S0" then
+        self:OnSyncEmpty(sender, channel)
     end
 end
 
@@ -2469,7 +2683,7 @@ function IL:CreateFrame()
 
     local scroll = CreateFrame("ScrollFrame", nil, holder)
     scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -(4 + headerH))
-    scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -10, 4)
+    scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -16, 4)
     scroll:EnableMouseWheel(true)
 
     local content = CreateFrame("Frame", nil, scroll)
@@ -2498,7 +2712,7 @@ function IL:CreateFrame()
     headClass:SetText(L["Class"])
 
     local headStatus = holder:CreateFontString(nil, "OVERLAY")
-    headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(10 + 2 + M(20) + 4), -5) -- lines up with the status column
+    headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(16 + 2 + M(20) + 4), -5) -- lines up with the status column
     headStatus:SetWidth(M(STATUS_W))
     headStatus:SetJustifyH("RIGHT")
     StyleFont(headStatus, "small")
@@ -2523,7 +2737,7 @@ function IL:CreateFrame()
     local function PlaceHeaders()
         scroll:ClearAllPoints()
         scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -(4 + headerH))
-        scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -10, 4)
+        scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -16, 4)
         headLine:ClearAllPoints()
         headLine:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -(4 + headerH) + 1)
         headLine:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -4, -(4 + headerH) + 1)
@@ -2532,34 +2746,94 @@ function IL:CreateFrame()
         headName:ClearAllPoints()
         headName:SetPoint("TOPLEFT", holder, "TOPLEFT", NameX(), -5)
         headStatus:ClearAllPoints()
-        headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(10 + 2 + M(20) + 4), -5)
+        headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(16 + 2 + M(20) + 4), -5)
         headStatus:SetWidth(M(STATUS_W))
         emptyText:ClearAllPoints()
         emptyText:SetPoint("TOP", holder, "TOP", 0, -(14 + headerH))
     end
 
-    -- Thin scroll indicator on the right.
-    local thumb = holder:CreateTexture(nil, "OVERLAY")
-    thumb:SetWidth(3)
-    thumb:SetColorTexture(accent[1], accent[2], accent[3], 0.6)
-    thumb:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -4, -(4 + headerH))
-    thumb:Hide()
+    -- 10 px interactive scroll bar: click the track to jump and drag the
+    -- thumb directly. Mouse-wheel scrolling continues to work as before.
+    local SB_W = 10
+    local track = CreateFrame("Frame", nil, holder)
+    track:SetWidth(SB_W)
+    track:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -3, -(4 + headerH))
+    track:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -3, 4)
+    track:EnableMouse(true)
+    track:Hide()
+    local trackBg = track:CreateTexture(nil, "BACKGROUND")
+    trackBg:SetAllPoints()
+    trackBg:SetColorTexture(1, 1, 1, 0.06)
+
+    local thumbBtn = CreateFrame("Button", nil, track)
+    thumbBtn:SetWidth(SB_W)
+    local thumb = thumbBtn:CreateTexture(nil, "OVERLAY")
+    thumb:SetAllPoints()
+    thumb:SetColorTexture(accent[1], accent[2], accent[3], 0.85)
+    thumb:SetAlpha(0.7)
+
+    local function ThumbSize(viewH, contentH)
+        return math_max(28, viewH * (viewH / contentH))
+    end
 
     local function UpdateThumb()
         local viewH = scroll:GetHeight()
         local contentH = content:GetHeight()
         if not viewH or viewH <= 0 or contentH <= viewH + 1 then
-            thumb:Hide()
+            track:Hide()
             return
         end
         local range = contentH - viewH
-        local thumbH = math_max(16, viewH * (viewH / contentH))
+        local thumbH = ThumbSize(viewH, contentH)
         local pos = ((scroll:GetVerticalScroll() or 0) / range) * (viewH - thumbH)
-        thumb:SetHeight(thumbH)
-        thumb:ClearAllPoints()
-        thumb:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -4, -(4 + headerH) - pos)
-        thumb:Show()
+        thumbBtn:SetHeight(thumbH)
+        thumbBtn:ClearAllPoints()
+        thumbBtn:SetPoint("TOP", track, "TOP", 0, -pos)
+        track:Show()
     end
+
+    local dragGrab = 0
+    local function CursorY()
+        local _, y = GetCursorPosition()
+        return y / (track:GetEffectiveScale() or 1)
+    end
+    local function ScrollToCursor()
+        local viewH, contentH = scroll:GetHeight() or 0, content:GetHeight() or 0
+        local range = contentH - viewH
+        local top = track:GetTop()
+        if range <= 0 or not top then return end
+        local thumbH = ThumbSize(viewH, contentH)
+        local frac = ((top - CursorY()) - dragGrab) / math_max(1, viewH - thumbH)
+        scroll:SetVerticalScroll(math_max(0, math_min(range, frac * range)))
+    end
+    local function BeginDrag(grab)
+        if InCombatLockdown() then return end
+        dragGrab = grab
+        thumb:SetAlpha(1)
+        track:SetScript("OnUpdate", function()
+            if InCombatLockdown() or not IsMouseButtonDown("LeftButton") then
+                track:SetScript("OnUpdate", nil)
+                thumb:SetAlpha(thumbBtn:IsMouseOver() and 1 or 0.7)
+                return
+            end
+            ScrollToCursor()
+        end)
+        ScrollToCursor()
+    end
+    thumbBtn:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        BeginDrag((self:GetTop() or 0) - CursorY())
+    end)
+    track:SetScript("OnMouseDown", function(_, button)
+        if button ~= "LeftButton" then return end
+        local viewH, contentH = scroll:GetHeight() or 0, content:GetHeight() or 0
+        if contentH <= viewH then return end
+        BeginDrag(ThumbSize(viewH, contentH) / 2)
+    end)
+    thumbBtn:SetScript("OnEnter", function() thumb:SetAlpha(1) end)
+    thumbBtn:SetScript("OnLeave", function()
+        if not track:GetScript("OnUpdate") then thumb:SetAlpha(0.7) end
+    end)
 
     scroll:SetScript("OnMouseWheel", function(self, delta)
         if InCombatLockdown() then return end -- no scrolling in combat either
@@ -2621,12 +2895,15 @@ function IL:CreateFrame()
         IL:ForgetName(row.name) -- renamed or removed: its status goes with it
         if #tokens == 0 then
             table.remove(names, i) -- emptied the row: the name is gone
+            IL:AnnounceRemoval(row.name)
         else
             names[i] = tokens[1]
             -- Several names typed/pasted into one row: split them into rows.
             for k = 2, #tokens do
                 table.insert(names, i + k - 1, tokens[k])
             end
+            IL:AnnounceRemoval(row.name)
+            IL:AnnounceAdd(tokens)
         end
         IL:SaveNames()
         Layout()
@@ -2672,6 +2949,7 @@ function IL:CreateFrame()
                 if n:lower() == name:lower() then
                     table.remove(IL.names, k)
                     IL:RecordJoin(n, "removed", nil, "removed") -- removed with the X: goes to the history
+                    IL:AnnounceRemoval(n)
                     break
                 end
             end
@@ -2858,16 +3136,18 @@ function IL:CreateFrame()
         adding = false
         placeholder:Show()
 
-        local have = {}
+        local have, addedNow = {}, {}
         for _, n in ipairs(IL.names) do have[n:lower()] = true end
         for _, n in ipairs(tokens) do
             local key = n:lower()
             if not have[key] then
                 have[key] = true
                 IL.names[#IL.names + 1] = n
+                addedNow[#addedNow + 1] = n
             end
         end
         IL:SaveNames()
+        IL:AnnounceAdd(addedNow)
         Layout()
         -- The scroll range is only updated on the next frame.
         C_Timer.After(0, function()
@@ -3127,6 +3407,7 @@ function IL:CreateFrame()
         DisarmClear()
         ClearAllFocus()
         IL:ClearList()
+        IL:AnnounceClear()
     end)
 
     -- Share list: button above the Status column, with a small menu --------
@@ -3427,6 +3708,7 @@ function IL:CreateFrame()
             -- The entry STAYS in the history (it only leaves by its X, by Clear
             -- list or when the 25 limit pushes it out).
             local added = IL:MergeNames({ e.name })
+            if added > 0 then IL:AnnounceAdd({ e.name }) end
             local shown = added > 0 and L["Added"] or L["In list"] -- "In list": already there (or it is you)
             if added > 0 then
                 C_Timer.After(0, function()
@@ -4702,6 +4984,7 @@ ns.ToggleInviteTools = function() IL:Toggle() end
 ns.InviteToolsSetAccent = function(r, g, b) IL:SetAccent(r, g, b) end
 ns.InviteToolsSetBackground = function(r, g, b, a) IL:SetBackground(r, g, b, a) end
 ns.InviteToolsSetListBackground = function(r, g, b, a) IL:SetListBackground(r, g, b, a) end
+ns.InviteToolsSetSync = function(on) IL:SetSync(on) end
 ns.InviteToolsApplySettings = function()
     IL:UpdateDB()
     if not IL.db then return end

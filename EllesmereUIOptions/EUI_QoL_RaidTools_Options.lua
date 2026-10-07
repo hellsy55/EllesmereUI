@@ -429,7 +429,18 @@ initFrame:SetScript("OnEvent", function(self)
                   InviteSet("ClearOnBossKill", v and true or false)
                   InviteRefresh()
               end },
-            EllesmereUI.BlankRowCfg()
+            { type = "toggle", text = "Live Raid Sync",
+              tooltip = "Keeps Invite Tools synchronized with the raid leader and assistants while you are in a raid. The leader provides the initial list; later adds, removals and clears are mirrored automatically.",
+              disabled = Disabled,
+              getValue = function() return InviteCfg("SyncRaid") ~= false end,
+              setValue = function(v)
+                  if ns.InviteToolsSetSync then
+                      ns.InviteToolsSetSync(v and true or false)
+                  else
+                      InviteSet("SyncRaid", v and true or false)
+                  end
+                  InviteRefresh()
+              end }
         );  y = y - h
 
         -- QUICK FIRE

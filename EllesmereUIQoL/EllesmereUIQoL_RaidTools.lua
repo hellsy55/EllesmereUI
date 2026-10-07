@@ -554,6 +554,7 @@ local DB_DEFAULTS = {
             AutoInviteInterval = 30,
             AutoAcceptShared   = false,
             AutoAcceptFriendly = false,
+            SyncRaid            = true,
             ShowNicknames       = true,
             CustomWhisper       = "Send invites for the shared list, please",
             ClearOnBossKill     = true,
