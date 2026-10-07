@@ -435,6 +435,11 @@ local defaults = {
             classPowerCustomColor = { r = 1, g = 0.82, b = 0 },
             classPowerBgColor = { r = 0.082, g = 0.082, b = 0.082, a = 1.0 },
             classPowerEmptyColor = { r = 0.2, g = 0.2, b = 0.2, a = 1.0 },
+            -- WoW Forever: where the WoW Forever style's "Blizzard" class
+            -- resource (the combo point arc) shows -- "target" (the stock
+            -- spot), "player" or "never". Player only; nil on every other
+            -- client.
+            foreverComboLocation = (EllesmereUI.IS_FOREVER == true) and "target" or nil,
             borderSize = 1,
             borderColor = { r = 0, g = 0, b = 0 },
             borderTexture = "solid",
@@ -1421,6 +1426,11 @@ local defaults = {
         dispelOverlayOpacity = 100,
         dispelOverlayByMe    = false,    -- only debuffs the player can dispel (engine filter token)
         dispelCustomBorder   = false,    -- Color Custom Borders: the frame border copied in the dispel type color
+        showDispelIcons      = false,    -- Type Icon Position: the type's icon on a health bar corner
+        dispelIconPosition   = "right",
+        dispelIconSize       = 16,
+        dispelIconOffsetX    = 0,
+        dispelIconOffsetY    = 0,
         dispelColorMagic   = { r = 0.349, g = 0.475, b = 1.0 },
         dispelColorCurse   = { r = 0.636, g = 0.0,   b = 0.64 },
         dispelColorDisease = { r = 0.671, g = 0.384, b = 0.098 },

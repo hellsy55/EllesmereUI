@@ -1407,11 +1407,13 @@ local REFRESH_ADDON_STEPS = {
     function() if _G._ECHAT_RefreshAll then _G._ECHAT_RefreshAll() end end,
     -- Chat Bubbles (Blizz UI Enhanced; settings on the profile root)
     function() if _G._EBS_RefreshChatBubbles then _G._EBS_RefreshChatBubbles() end end,
-    -- Bags (window order follows the selected profile immediately)
+    -- Bags (window order, categories and the Junk Marker follow the selected
+    -- profile immediately)
     function()
         if _G.EUI_Bags and _G.EUI_Bags.ApplyWindowLayering then
             _G.EUI_Bags:ApplyWindowLayering()
         end
+        if _G.EUI_Bags and _G.EUI_Bags.OnProfileApplied then _G.EUI_Bags:OnProfileApplied() end
     end,
     -- Friends List + Mythic Timer
     function()
@@ -2118,6 +2120,8 @@ do
         -- LFG / Merchant cards
         "lfgRememberRoles",
         "merchantShowAsList", "merchantListRowHeight", "merchantShowItemLevel",
+        -- Friends List card (WoW Forever: the friend tiles and auto-accept)
+        "friendsListCard",
     })
 end
 

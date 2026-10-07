@@ -307,12 +307,11 @@ local ApplyMouseoverFade       -- forward: ApplyVisibility and the mouseover tic
 
 -- ONE representation of each secure decision, run from both paths.
 --
--- The keybind clicks the button, which is the only thing that works during
--- combat. Out of combat the same snippet is run through SecureHandlerExecute
--- instead of being re-implemented in Lua. EllesmereUIRaidFrames.lua does
--- exactly this, for exactly this reason: the driver manager only fires the
--- attribute handlers on value CHANGES, so a reapply with unchanged states
--- would otherwise never run.
+-- The keybind clicks the button, which is the only thing that works during combat. Out
+-- of combat the same snippet is run through SecureHandlerExecute instead of being
+-- re-implemented in Lua. EUI_RaidFrames_BossFrames.lua does exactly this, for exactly this
+-- reason: the driver manager only fires the attribute handlers on value CHANGES, so a
+-- reapply with unchanged states would otherwise never run.
 local RUN_APPLY = [[ self:RunAttribute("apply") ]]
 
 -- The keybind's job depends on Default to Collapsed When Shown:

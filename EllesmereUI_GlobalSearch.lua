@@ -311,7 +311,13 @@ local QUERY_SYNONYMS = {
     { "transparent",     { "fade" } },
     { "hide when",       { "fade" } },
     { "quest",           { "objective", "tracker" } },
+    -- A choice inside a dropdown (dropdown values are not indexed): its row
+    { "compact",         { "bag display", "bank display" } },
 }
+-- WoW Forever's Name Format (first or last names; Forever Essentials > General).
+if EllesmereUI.IS_FOREVER then
+    QUERY_SYNONYMS[#QUERY_SYNONYMS + 1] = { "surname", { "name format" } }
+end
 local SYNONYM_MIN_PREFIX = 3
 
 local function SearchIndex(query, maxResults)

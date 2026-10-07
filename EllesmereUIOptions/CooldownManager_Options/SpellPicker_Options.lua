@@ -1356,10 +1356,14 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                     { val = "hiddenReadyShift", label = "Hidden CD Ready (Shift Icons)" },
                     { val = "hiddenUnusableShift", label = "Hidden Until Usable (Shift Icons)",
                       tooltip = "Only shown while usable and off cooldown, such as Overpower or Victory Rush after a proc. Low resources do not hide it." },
+                    { val = "hiddenFormShift", label = "Hidden Outside Form/Stance (Shift Icons)",
+                      tooltip = "Only shown in the form or stance the spell needs, even while it is on cooldown." },
                     { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                     { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                     { val = "hiddenUnusable",  label = "Hidden (Until Usable)",
                       tooltip = "Only shown while usable and off cooldown, such as Overpower or Victory Rush after a proc. Low resources do not hide it." },
+                    { val = "hiddenForm",      label = "Hidden (Outside Form/Stance)",
+                      tooltip = "Only shown in the form or stance the spell needs, even while it is on cooldown." },
                     -- One CD Ready glow per variant; the style is its own row below
                     -- (cdStateGlowStyle). The stored button* values still render as
                     -- Action Button Glow and read back as the matching entry here.
@@ -2796,10 +2800,14 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                         { val = "hiddenReadyShift", label = "Hidden CD Ready (Shift Icons)" },
                         { val = "hiddenUnusableShift", label = "Hidden Until Usable (Shift Icons)",
                           tooltip = "Only shown while usable and off cooldown, such as Overpower or Victory Rush after a proc. Low resources do not hide it." },
+                        { val = "hiddenFormShift", label = "Hidden Outside Form/Stance (Shift Icons)",
+                          tooltip = "Only shown in the form or stance the spell needs, even while it is on cooldown." },
                         { val = "hiddenOnCD",      label = "Hidden (On CD)" },
                         { val = "hiddenReady",     label = "Hidden (CD Ready)" },
                         { val = "hiddenUnusable",  label = "Hidden (Until Usable)",
                           tooltip = "Only shown while usable and off cooldown, such as Overpower or Victory Rush after a proc. Low resources do not hide it." },
+                        { val = "hiddenForm",      label = "Hidden (Outside Form/Stance)",
+                          tooltip = "Only shown in the form or stance the spell needs, even while it is on cooldown." },
                         { val = "pixelGlowReady", label = "Pixel Glow (CD Ready)" },
                     { val = "shapeGlowReady", label = "Shape Glow (CD Ready)" },
                     { val = "buttonGlowReady", label = "Button Glow (CD Ready)" },
@@ -4416,7 +4424,7 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
             end
 
             local function SetStatus(text, r, g, b)
-                popup._status:SetText(text)
+                popup._status:SetText(EllesmereUI.L(text))
                 popup._status:SetTextColor(r or 1, g or 0.3, b or 0.3, 1)
                 if popup._statusTimer then popup._statusTimer:Cancel() end
                 if text ~= "" then

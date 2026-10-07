@@ -1220,6 +1220,14 @@ qolFrame:SetScript("OnEvent", function(self)
         end
 
         SellJunk = function()
+            -- Bags' Junk Marker on: sell what it calls junk (marked items, and
+            -- greys not filed in another category) instead of every grey. The
+            -- merchant is vouched for only while it is open: a sweep the repair
+            -- watch held back can run after it closed.
+            local bags, cats = _G.EUI_Bags, _G.EUI_CategoryManager
+            if bags and bags.SellJunk and cats and cats:IsJunkMarkerEnabled() then
+                return bags:SellJunk(merchantOpen)
+            end
             if not (C_MerchantFrame and C_MerchantFrame.SellAllJunkItems) then return end
             StopJunkSweep()
             passes, lastCount, stalls, warned = 0, math.huge, 0, false

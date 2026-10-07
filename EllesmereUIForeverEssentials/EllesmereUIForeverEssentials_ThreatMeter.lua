@@ -370,6 +370,7 @@ local function Style()
     local showValue, showPercent = Get("showValue"), Get("showPercent")
     dm.showValue, dm.showPercent = showValue, showPercent
     dm.pullPercent = Get("percentMode") == "pull"
+    dm.nameFormat = Get("nameFormat")
     -- The widest value text a row realistically shows; the first row painted
     -- with this style measures it in the row font to size the value column.
     local sampleValue = EUI.AbbreviateNumber(888888)
@@ -644,12 +645,20 @@ local function PaintRow(row, e, dm, top, gen)
         row._own = e.own == true
         row.self:SetShown(row._own)
         row._aggro, row._name = nil, nil
-        if not e.unit then row.label:SetText(e.pull and EllesmereUI.L("Pull Aggro") or e.name) end
+        if not e.unit then
+            -- A preview row: the Name Format reaches your own sample name.
+            local name = e.pull and EllesmereUI.L("Pull Aggro") or e.name
+            if e.own and dm.nameFormat then name = EUI.ForeverShortName(name, dm.nameFormat) end
+            row.label:SetText(name)
+        end
     end
     -- A live name is re-read (it can arrive after the roster does). A secret
-    -- name goes straight to the font string and cannot be compared.
+    -- name goes straight to the font string and cannot be compared. The Name
+    -- Format (dm.nameFormat, so a change restyles every row) shortens a
+    -- player's name; a pet keeps its own and a secret passes whole.
     if e.unit then
         local name = EUI.WithSurname(UnitName(e.unit))
+        if dm.nameFormat and not e.isPet then name = EUI.ForeverShortName(name, dm.nameFormat) end
         if issecretvalue(name) then
             row.label:SetText(name)
             row._name = nil
