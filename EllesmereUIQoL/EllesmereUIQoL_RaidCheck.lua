@@ -158,8 +158,33 @@ local FOOD_ICONS = {
     [136000] = true,   -- the stat "Well Fed"
     [134062] = true,   -- plain "Well Fed", no stat line
     [132805] = true,
-    [133950] = true,
 }
+
+-- Eating/drinking regeneration auras are not the raid consumable buff. Some
+-- of them reuse food-looking icons and names such as "Food", "Drink", or
+-- "Food & Drink", so matching the icon alone can incorrectly mark a player
+-- as fed while they are merely sitting down to eat/drink. The generic eating
+-- channel itself uses 133950 in the current client; the duration guard catches
+-- equivalent/localized food and drink regeneration auras without depending on
+-- their display name. Actual Well Fed buffs last far longer than this window.
+local GENERIC_FOOD_DRINK_ICON = 133950
+local GENERIC_FOOD_DRINK_MAX_DURATION = 30
+
+local function IsRealFoodBuffAura(aura)
+    if not aura then return false end
+
+    local icon = aura.icon
+    if not icon or (issecretvalue and issecretvalue(icon)) then return false end
+    if icon == GENERIC_FOOD_DRINK_ICON or not FOOD_ICONS[icon] then return false end
+
+    local duration = aura.duration
+    if duration ~= nil and not (issecretvalue and issecretvalue(duration))
+       and duration > 0 and duration <= GENERIC_FOOD_DRINK_MAX_DURATION then
+        return false
+    end
+
+    return true
+end
 
 -- Empty on purpose -- see the comment on the "food" CHECKS entry below for
 -- why this exists and how to fill it in (/euiraidcheck buffs). Spell ids of
@@ -219,6 +244,7 @@ local CHECKS = {
     -- safe blank-under-restriction behavior until ids actually get filled in.
     { key = "food",   label = "Food",   icon = 136000, icons = FOOD_ICONS,
       ids = next(FOOD_IDS) and FOOD_IDS or nil, nameTooltip = true,
+      auraFilter = IsRealFoodBuffAura,
       note = "Feast of Knowledge, falling back to Amani Cornucopia then Loa's Gathering." },
     { key = "rune",   label = "Rune",   seed = 1264426, nameTooltip = true,
       ids = { [1264426] = true } },
@@ -302,7 +328,7 @@ local function HasFoodBuff()
     for i = 1, AURA_SCAN_LIMIT do
         local ok, aura = pcall(GetAuraDataByIndex, "player", i, "HELPFUL")
         if not ok or not aura then return false end
-        if aura.icon and FOOD_ICONS[aura.icon] then return true end
+        if IsRealFoodBuffAura(aura) then return true end
     end
     return false
 end
@@ -755,7 +781,7 @@ local function SweepBody(unit, out)
             if aura.icon then
                 for j = 1, #ICON_COLS do
                     local def = ICON_COLS[j]
-                    if def.icons[aura.icon] then
+                    if def.icons[aura.icon] and (not def.auraFilter or def.auraFilter(aura)) then
                         out[def.key] = true
                         if aura.name and def.nameTooltip then
                             out._names = out._names or {}
