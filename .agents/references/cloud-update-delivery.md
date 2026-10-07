@@ -66,6 +66,31 @@ with `; `, separate different groups with `. `, and omit the final period. Be
 concise without omitting relevant functional changes. Show each summary in one
 copy-ready code block.
 
+## Additional Google Drive delivery
+
+Preserve normal Codex artifact delivery. After each final ZIP produced by a
+workflow loading this reference is complete and validated, upload that exact
+local file using the official Google Drive plugin/connector to `EUI`
+(`1h6YGWoHsGcxPwTyoGrfSYQFeGaur8tvb`) under `Codex Artifacts`. This shared rule
+applies to all final ZIPs, including independent Retail and PTR installers.
+Upload only nonempty ZIPs containing valid packaged files; if none are produced,
+skip Drive delivery. Do not regenerate ZIPs for Drive or add artificial entries
+for deletions; the existing packaging and manual-deletion rules still apply.
+Do not introduce external tools, dependencies, manual OAuth, API keys, or secrets.
+
+After every upload, read the uploaded file's metadata again through the connector
+and verify its filename, existence, and parent folder against the destination
+above. Compare its size with the local ZIP when the remote size is available.
+An upload response alone is not success; report `Google Drive: OK` only after
+successful readback and matching metadata.
+
+Drive is an additional post-generation delivery channel, never a prerequisite
+for merge, update, commit, or push. If the connector or write capability is
+unavailable, or upload or readback fails, report the actual error or missing
+capability separately from the completed main workflow. Never claim Drive
+success or revert or invalidate a correctly completed update/commit because
+Drive delivery failed. Continue delivering any remaining valid final ZIPs.
+
 ## Final delivery report
 
 For each target/installer, report in Portuguese:
@@ -75,3 +100,8 @@ For each target/installer, report in Portuguese:
 - ZIP filename, packaged file count, and required manual deletion paths (or none).
 - Confirmation that the ZIP contains only the final net diff and that no files
   were installed into the WoW folder.
+- For each ZIP with attempted Drive delivery: filename, local size, local SHA-256
+  (reuse an existing hash or calculate it when inexpensive), `Google Drive: OK`
+  or the actual error/missing capability, and the file link/ID returned by the
+  connector when available. Keep delivery status separate from the functional
+  update summary and distinguish main-workflow completion from Drive failure.
