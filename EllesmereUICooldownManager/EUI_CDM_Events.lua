@@ -127,6 +127,9 @@ local function ScheduleTalentRebuild()
             if db and db.sv and db.sv.multiChargeSpells then
                 wipe(db.sv.multiChargeSpells)
             end
+            -- Hidden Outside Form/Stance answers (a talent can change which
+            -- forms a spell needs)
+            if ns.CdmWipeFormCache then ns.CdmWipeFormCache() end
         end
         -- Rebuild the cdID route map against the new talent set. The stored
         -- assignedSpells is left untouched (it's pure user intent); the route map is
@@ -453,7 +456,8 @@ end
 -- /cd toggles Blizzard's Cooldown Manager settings: out of combat, a frame
 -- later (off the chat line, as the parent's commands run). WoW Forever's
 -- Gamepad interface style blocks opening a Blizzard panel from addon code.
-SLASH_EUIBLIZZCDM1 = "/cd"
+-- The /cd alias itself is set in ECME:OnInitialize, and only while Quality of
+-- Life's "Type /cd to open Blizzard CDM" is on.
 SlashCmdList.EUIBLIZZCDM = function()
     C_Timer.After(0, function()
         if InCombatLockdown() then

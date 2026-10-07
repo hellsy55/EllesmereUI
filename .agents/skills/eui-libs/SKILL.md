@@ -17,13 +17,13 @@ The checker states are:
 - `DRIFT`: a deterministic payload difference without proven advancement that does not match an accepted baseline. This blocks the workflow and must not be treated as an automatic update.
 - `UNKNOWN`: inconclusive querying, parsing, or evidence. This blocks the workflow and must never be called current.
 
-Cloud SVN preparation belongs to the canonical [Cloud setup reference](../../references/python-runtime.md)
-and its [rootless SVN bootstrap](../../references/cloud-svn.md), not the update workflow.
+Only in a confirmed Cloud environment, and only when setup is needed, consult
+[Cloud preparation](../../references/cloud-svn.md); do not bootstrap tools from the update workflow.
 The checker reports CHECKED and status counts, and comparable local/upstream versions.
 Missing lock records are not proof of outdated or unvendored libraries: use a
 declared pin or a safely comparable local version. Missing evidence remains UNKNOWN.
 
-Reuse `python_runtime` from eui-update, or run the shared [Python preflight](../../references/python-runtime.md) once before a standalone library check. Run `<python_runtime> .tools/check_lib_updates.py` on the current branch, then interpret the results in this order:
+Reuse the frozen [maintenance context](../../references/python-runtime.md) from eui-update, or initialize it once before a standalone library check. Check required Git/SVN availability once when this accepted stage first needs them and retain the result across Both branches. Run `<python_runtime> .tools/check_lib_updates.py` on the current branch, then interpret the results in this order:
 
 1. If UNKNOWN > 0, report that the check is inconclusive; if DRIFT is also present, report that drift too. Do not claim the libraries are current, do not vendor, and stop.
 2. If UNKNOWN=0 and DRIFT > 0, report the drift and stop for investigation. Do not treat it as an update, apply an automatic correction, or vendor.

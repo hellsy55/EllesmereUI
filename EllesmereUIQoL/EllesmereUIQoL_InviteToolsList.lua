@@ -1,10 +1,10 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local _, ns = ...
-local JT = ns.InviteTools
-if not JT then return end
-local IL = JT.InviteList
-local L = JT.L
-local Theme = JT.Theme
+local InviteTools = ns.InviteTools
+if not InviteTools then return end
+local IL = InviteTools.InviteList
+local L = InviteTools.L
+local Theme = InviteTools.Theme
 
 local CreateFrame = CreateFrame
 local UIParent = UIParent
@@ -20,11 +20,11 @@ local math_max, math_min = math.max, math.min
 ------------------------------------------------------------------------
 -- Invite by List
 --
--- Ported from the "Invite by list" part of MRT's Invite Tools module.
+-- Invite Tools keeps a list of names and invites everyone not already grouped.
 -- You keep up to four lists of names ("Name-Realm", one per line), and one
 -- button invites everyone on the active list who is not already in your group.
 --
--- HOW THE RAID CONVERSION WORKS (same flow as MRT): a party holds five, so
+-- HOW THE RAID CONVERSION WORKS: a party holds five, so
 -- with no raid yet only the first four names are invited. The remainder stays
 -- queued; once somebody accepts and the group exists, it is converted to a raid
 -- and the queue is invited in full. The queue expires so a half-finished
@@ -37,6 +37,11 @@ local PARTY_SIZE = 5
 local PENDING_TTL = 120 -- seconds a queued invite stays valid
 
 IL.pendingList = nil
+IL.pendingSync = {}      -- live raid-sync changes received during combat
+IL.syncBase = nil        -- true once this list matches the raid leader baseline
+IL.syncTries, IL.syncLast, IL.syncWanted = 0, 0, 0
+IL.syncRequesters = {}   -- leader-side members waiting for a baseline
+IL.syncBcastPending = false
 IL.pendingUntil = 0
 IL.convertToRaid = false
 
@@ -45,9 +50,9 @@ function IL:UpdateDB()
     local root = get and get()
     local current = root and root.profile and root.profile.raidTools and root.profile.raidTools.inviteTools
     if current then
-        JT.db = current
+        InviteTools.db = current
     end
-    self.db = current or JT.db
+    self.db = current or InviteTools.db
 end
 
 ------------------------------------------------------------------------
@@ -117,7 +122,7 @@ local function ParseList(text, report)
 
         -- Check the realm against the realm list (Bartilas -> Barthilas).
         local char, realm = name:match("^([^%-]+)%-(.+)$")
-        local RN = JT.RealmNames
+        local RN = InviteTools.RealmNames
         if char and realm and RN then
             local canon, how = RN.Resolve(realm)
             if canon then
@@ -247,11 +252,11 @@ local function PrintReport(report)
     end
     local fixed = Uniq(report.fixed)
     if #fixed > 0 then
-        JT:Print(string.format(L["Realm corrected: %s"], Join(fixed)))
+        InviteTools:Print(string.format(L["Realm corrected: %s"], Join(fixed)))
     end
     local unknown = Uniq(report.unknown)
     if #unknown > 0 then
-        JT:Print(string.format(L["Realm not recognized (kept as typed): %s"], Join(unknown)))
+        InviteTools:Print(string.format(L["Realm not recognized (kept as typed): %s"], Join(unknown)))
     end
 end
 
@@ -326,6 +331,19 @@ local function InGroup(name)
     return FindGroupUnit(name) ~= nil
 end
 
+-- Display-only nickname resolver used only by Friend List, Factions, and
+-- Shared List UI/chat feedback. All identity-sensitive operations (invites,
+-- whispers, list storage and protocol messages) continue to use the real name.
+local function DisplayName(name, unit)
+    if type(name) ~= "string" or name == "" or not IL.db or IL.db.ShowNicknames == false then
+        return name
+    end
+    local nick
+    if unit and ns.GetNicknameForUnit then nick = ns.GetNicknameForUnit(unit) end
+    if not nick and ns.GetNicknameForName then nick = ns.GetNicknameForName(ShortName(name)) end
+    return nick or name
+end
+
 -- Class file name ("WARRIOR") of a name that is already in the group, or nil.
 local function GroupClass(name)
     if not name then return nil end
@@ -374,7 +392,7 @@ end
 
 local function InviteUnit(name)
     -- The client refuses very long "Name-Realm" strings; the short name is
-    -- enough then (same guard MRT has).
+    -- enough then.
     if name:len() >= 45 then
         name = ShortName(name)
     end
@@ -621,7 +639,7 @@ local HISTORY_MAX = 25
 -- kind: "joined" (default), "declined" or "removed". `how` records why
 -- the entry exists ("list", "declined", "removed" or "cleared"). Newest goes
 -- first and the same realm-aware character is never listed twice.
-function IL:RecordJoin(name, kind, class, how)
+function IL:RecordJoin(name, kind, class, how, by)
     local db = self.db
     if not db or type(name) ~= "string" or name == "" or IsMe(name) then return end
     local hist = db.History
@@ -645,6 +663,7 @@ function IL:RecordJoin(name, kind, class, how)
         name = keepName,
         kind = kind or "joined",
         how = how,
+        by = by,
         class = class or GroupClass(keepName),
         t = time(),
     })
@@ -968,7 +987,7 @@ function IL:OnInviteUIError(_, _, msg)
     self.lastInvite = nil
     local st = self.state[li.name:lower()]
     if st then st.status = "unfriendly" end
-    JT:Print("|cffff4040" .. string.format(L["Invite to %s failed: %s"], ShortName(li.name), msg) .. "|r")
+    InviteTools:Print("|cffff4040" .. string.format(L["Invite to %s failed: %s"], ShortName(li.name), msg) .. "|r")
     self:UpdateUI()
 end
 
@@ -997,6 +1016,7 @@ function IL:PLAYER_ENTERING_WORLD()
     -- Auto-accepting guild shares needs the sender's guild rank. Prime the
     -- roster so Guild Master / Officer checks are normally available at once.
     if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
+    if IsInRaid() then self:ScheduleSyncCheck() end
 end
 
 function IL:OnInviteSystemMsg(_, msg)
@@ -1109,7 +1129,7 @@ end
 
 function IL:InviteFromList(index)
     if InCombatLockdown() then
-        JT:Print(L["Invite List is disabled in combat."])
+        InviteTools:Print(L["Invite List is disabled in combat."])
         return
     end
     index = tonumber(index) or self.db.Current or 1
@@ -1117,14 +1137,14 @@ function IL:InviteFromList(index)
 
     local list = ParseList(self:GetListText(index))
     if #list == 0 then
-        JT:Print(L["List is empty."])
+        InviteTools:Print(L["List is empty."])
         return
     end
 
     self:StartSession(list)
     local sent = self:InviteNames(list, false)
     if sent == 0 and not self.pendingList then
-        JT:Print(L["Everyone on the list is already in your group."])
+        InviteTools:Print(L["Everyone on the list is already in your group."])
     end
 end
 
@@ -1205,6 +1225,13 @@ function IL:GROUP_INVITE_CONFIRMATION()
 end
 
 function IL:GROUP_ROSTER_UPDATE()
+    if IsInRaid() then
+        self:ScheduleSyncCheck()
+    else
+        self.syncBase = nil
+        self.syncTries = 0
+        wipe(self.syncRequesters)
+    end
     if inviteAccepted then
         inviteAccepted = false
         if _G.LFGInvitePopup then StaticPopupSpecial_Hide(_G.LFGInvitePopup) end
@@ -1274,6 +1301,14 @@ function IL:PLAYER_REGEN_ENABLED()
         if self.pendingList then self.pendingUntil = self.pendingUntil + paused end
     end
     if self.frame then self.frame.SetLocked(false) end
+    if #self.pendingSync > 0 then
+        local queued = self.pendingSync
+        self.pendingSync = {}
+        if self:SyncOn() then
+            for _, r in ipairs(queued) do self:ApplySyncDelta(r.kind, r.sender, r.payload) end
+        end
+    end
+    self:ScheduleSyncCheck()
     if self.pendingKillClear then
         local boss = self.pendingKillClear
         self.pendingKillClear = nil
@@ -1320,6 +1355,7 @@ local SHARE_MAX_RECIPIENTS = 21  -- only people with the addon receive anything,
 local SHARE_COOLDOWN = 5       -- seconds between two shares
 local SHARE_CHUNK = 220        -- bytes of names per message
 local SHARE_SEND_GAP = 0.3     -- seconds between two outgoing messages
+local OFFER_RESHARE_GAP = 4    -- newer offer id from same sender may replace the old one after this gap
 local WAIT_DATA_TTL = 60       -- seconds to wait for the names after Accept
 local SEND_MARGIN = 3           -- seconds of slack when checking that a new accept still fits in the offer's time
 
@@ -1328,6 +1364,7 @@ IL.incoming = nil   -- an offer whose popup is on screen
 IL.awaiting = nil   -- an offer I accepted: { sender, id, untilT, parts, got, total }
 IL.lastShare = 0
 IL.offerSeen = {}
+IL.offerSeenId = {}
 
 local function NormSender(name)
     return ((Ambiguate and Ambiguate(name, "none")) or name):lower()
@@ -1356,7 +1393,7 @@ local function MyClass()
     return ValidClass(classFile) or ""
 end
 local function Who(name, classFile, resume)
-    local short = ShortName(name)
+    local short = DisplayName(name, FindGroupUnit(name)) or ShortName(name)
     local cf = ClassOf(name, classFile)
     local color = cf and RAID_CLASS_COLORS[cf]
     if not color then return short end
@@ -1380,7 +1417,13 @@ function IL:DropFromList(gone)
             if SameChar(self.names[k], name) then
                 local removed = table.remove(self.names, k)
                 changed = true
-                JT:Print(string.format(L["%s left the group: removed from the list."], Who(removed, HistoryClass(self.db, removed))))
+                local cf = ClassOf(removed, HistoryClass(self.db, removed))
+                local color = cf and RAID_CLASS_COLORS[cf]
+                local shown = ShortName(removed)
+                if color then
+                    shown = string.format("|cff%02x%02x%02x%s|r", color.r * 255 + 0.5, color.g * 255 + 0.5, color.b * 255 + 0.5, shown)
+                end
+                InviteTools:Print(string.format(L["%s left the group: removed from the list."], shown))
             end
         end
     end
@@ -1450,15 +1493,12 @@ end
 function IL:CancelShare()
     wipe(outQueue)
     self.offer = nil
-    if self.awaiting then
-        JT:Print(YELLOW .. string.format(L["Cancelled: the list from %s was not received because you entered combat."], Who(self.awaiting.sender, self.awaiting.classFile, YELLOW)) .. "|r")
-    end
     self.awaiting = nil
     if self.incoming then
         self.incoming = nil
-        if JT.activePrompt then
-            JT.activePrompt:Hide()
-            JT.activePrompt = nil
+        if InviteTools.activePrompt then
+            InviteTools.activePrompt:Hide()
+            InviteTools.activePrompt = nil
         end
     end
     self.lastShare = 0
@@ -1488,9 +1528,6 @@ local function PumpOut()
             C_Timer.After(THROTTLE_RETRY, PumpOut)
             return
         end
-    end
-    if not sent then
-        JT:Print(RED .. L["A share message could not be sent (game limit or unavailable). Try sharing again."] .. "|r")
     end
     table.remove(outQueue, 1)
     C_Timer.After(SHARE_SEND_GAP, PumpOut)
@@ -1571,7 +1608,7 @@ end
 
 function IL:ClearOnKill(bossName)
     self:ClearList("killed")
-    JT:Print(string.format(L["%s defeated: list cleared."], bossName or "Ula'tek"))
+    InviteTools:Print(string.format(L["%s defeated: list cleared."], bossName or "Ula'tek"))
 end
 
 function IL:ENCOUNTER_END(_, encounterID, encounterName, _, _, success)
@@ -1598,15 +1635,17 @@ end
 -- Empties the whole list. `how` distinguishes a manual Clear List from the
 -- automatic Ula'tek kill clear so History can preserve the reason. Existing
 -- joined entries keep their joined/left timestamps; a kill adds a green note.
-function IL:ClearList(how)
+function IL:ClearList(how, by, keep)
     how = how or "cleared"
     local old = self.names or ParseList(self:GetListText(1))
     for i = #old, 1, -1 do
         local name = old[i]
         if type(name) == "string" and name ~= "" then
             local joined = JoinedEntry(self.db, name)
-            if not joined then
-                self:RecordJoin(name, "removed", nil, how)
+            if keep and keep[name:lower()] then
+                -- Still present on the replacement list, so it was not removed.
+            elseif not joined then
+                self:RecordJoin(name, "removed", nil, how, by)
             elseif how == "killed" then
                 joined.clearedBy = "killed"
             end
@@ -1646,6 +1685,223 @@ function IL:IsLeadOrAssist(name)
         end
     end
     return false
+end
+
+-- Live Raid Sync ---------------------------------------------------------
+-- While enabled and in a raid, the raid leader provides the initial baseline.
+-- Later add/remove/clear changes from the leader or assistants are mirrored by
+-- everybody who already has that baseline. All traffic uses the existing
+-- Invite Tools addon-message queue and never appears in public chat.
+function IL:SyncEnabled()
+    return not self.db or self.db.SyncRaid ~= false
+end
+
+function IL:SyncOn()
+    return self:SyncEnabled() and IsInRaid()
+end
+
+function IL:SetSync(on)
+    if not self.db then return end
+    self.db.SyncRaid = on and true or false
+    if on then
+        self.syncTries = 0
+        self:ScheduleSyncCheck()
+    else
+        self.syncBase = nil
+        self.pendingSync = {}
+    end
+    self:UpdateUI()
+end
+
+function IL:SyncChannel()
+    return IsInGroup(LE_PARTY_CATEGORY_INSTANCE) and "INSTANCE_CHAT" or "RAID"
+end
+
+function IL:HasBase()
+    return UnitIsGroupLeader("player") or self.syncBase or false
+end
+
+function IL:CanAnnounce()
+    return not InCombatLockdown() and self:SyncOn() and self:CanShare()
+end
+
+function IL:AnnounceRemoval(name)
+    if not ValidName(name) or not self:CanAnnounce() then return end
+    Enqueue("X~" .. name, self:SyncChannel())
+end
+
+function IL:AnnounceAdd(names)
+    if type(names) ~= "table" or not self:CanAnnounce() then return end
+    local chunks = BuildChunks(names)
+    local dist = self:SyncChannel()
+    for _, chunk in ipairs(chunks) do Enqueue("N~" .. chunk, dist) end
+end
+
+function IL:AnnounceClear()
+    if not self:CanAnnounce() then return end
+    Enqueue("C~1", self:SyncChannel())
+end
+
+function IL:IsLeaderName(name)
+    if not name or not IsInGroup() then return false end
+    local raid = IsInRaid()
+    local n = GetNumGroupMembers() or 0
+    for i = 1, (raid and n or n - 1) do
+        local unit = (raid and "raid" or "party") .. i
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") then
+            local uname = GetUnitName(unit, true)
+            if IsReadable(uname) and type(uname) == "string" and SameChar(uname, name) then
+                return UnitIsGroupLeader(unit) or false
+            end
+        end
+    end
+    return false
+end
+
+local syncCheckPending = false
+function IL:ScheduleSyncCheck()
+    if syncCheckPending then return end
+    syncCheckPending = true
+    C_Timer.After(3, function()
+        syncCheckPending = false
+        IL:RequestSync()
+    end)
+end
+
+function IL:RequestSync()
+    if not self:SyncOn() or self:HasBase() or InCombatLockdown() then return end
+    local now = GetTime()
+    if self.syncTries >= 4 or now - self.syncLast < 15 then return end
+    self.syncTries = self.syncTries + 1
+    self.syncLast = now
+    self.syncWanted = now + 25
+    Enqueue("S?", self:SyncChannel())
+    C_Timer.After(16, function() IL:RequestSync() end)
+end
+
+function IL:OnSyncRequest(sender, channel)
+    if IsMe(sender) or not self:SyncOn() or InCombatLockdown() or not UnitIsGroupLeader("player") then return end
+    if channel ~= "RAID" and channel ~= "INSTANCE_CHAT" then return end
+    local req = self.syncRequesters
+    local n = 0
+    for _ in pairs(req) do n = n + 1 end
+    if n > 60 then wipe(req) end
+    req[sender] = true
+    if self.syncBcastPending then return end
+    self.syncBcastPending = true
+    C_Timer.After(2, function()
+        IL.syncBcastPending = false
+        IL:BroadcastSync()
+    end)
+end
+
+function IL:BroadcastSync()
+    local req = self.syncRequesters
+    if not self:SyncOn() or InCombatLockdown() or not UnitIsGroupLeader("player") then
+        wipe(req)
+        return
+    end
+    local targets = {}
+    for who in pairs(req) do
+        if #targets < SHARE_MAX_RECIPIENTS then
+            targets[#targets + 1] = who
+            req[who] = nil
+        end
+    end
+    if #targets == 0 then return end
+    local names = self.names or ParseList(self:GetListText(1))
+    local chunks, count = BuildChunks(names)
+    if count == 0 then
+        for _, who in ipairs(targets) do Enqueue("S0", "WHISPER", who) end
+        return
+    end
+    local now = GetTime()
+    local id = string.format("%04x", math.random(0, 65535))
+    self.offer = {
+        id = id, expires = now + SHARE_OFFER_TTL, chunks = chunks, served = 0,
+        sent = {}, replied = {}, replies = 0, result = {}, sync = true,
+    }
+    local _, classFile = UnitClass("player")
+    for _, who in ipairs(targets) do
+        Enqueue("O~" .. id .. "~" .. count .. "~" .. (classFile or "") .. "~S", "WHISPER", who)
+    end
+end
+
+function IL:OnSyncEmpty(sender, channel)
+    if channel ~= "WHISPER" or not self:SyncOn() or self:HasBase() then return end
+    if GetTime() > self.syncWanted or not self:IsLeaderName(sender) then return end
+    self.syncBase = true
+    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+end
+
+local function ShortSender(sender)
+    return (Ambiguate and Ambiguate(sender, "short")) or sender
+end
+
+function IL:ApplyRemoval(sender, name)
+    local names = self.names or ParseList(self:GetListText(1))
+    for k, n in ipairs(names) do
+        if SameChar(n, name) then
+            table.remove(names, k)
+            self.names = names
+            self:ForgetName(n)
+            for i = #self.sendQueue, 1, -1 do
+                if SameChar(self.sendQueue[i], n) then table.remove(self.sendQueue, i) end
+            end
+            if type(self.pendingList) == "table" then
+                for i = #self.pendingList, 1, -1 do
+                    if SameChar(self.pendingList[i], n) then table.remove(self.pendingList, i) end
+                end
+            end
+            self:RecordJoin(n, "removed", nil, "leader", ShortSender(sender))
+            self:SaveNames()
+            if self.frame and self.frame.Layout then self.frame.Layout() end
+            return
+        end
+    end
+end
+
+function IL:ApplyAdd(sender, payload)
+    local list = {}
+    for name in payload:gmatch("[^,]+") do
+        if ValidName(name) and #list < SHARE_MAX_NAMES then list[#list + 1] = name end
+    end
+    if #list == 0 then return end
+    local added = self:MergeNames(list)
+    if added <= 0 then return end
+end
+
+function IL:ApplyClear(sender)
+    if #(self.names or ParseList(self:GetListText(1))) == 0 then return end
+    self:ClearList("cleared", ShortSender(sender))
+end
+
+function IL:ApplySyncDelta(kind, sender, payload)
+    if kind == "X" then
+        self:ApplyRemoval(sender, payload)
+    elseif kind == "N" then
+        self:ApplyAdd(sender, payload)
+    elseif kind == "C" then
+        self:ApplyClear(sender)
+    end
+end
+
+function IL:OnSyncDelta(kind, sender, payload, channel)
+    if IsMe(sender) or not self:SyncOn() then return end
+    if channel ~= "RAID" and channel ~= "INSTANCE_CHAT" then return end
+    if not self:IsLeadOrAssist(sender) then return end
+    if not self:HasBase() then
+        self:ScheduleSyncCheck()
+        return
+    end
+    if kind ~= "C" and not ValidName(kind == "N" and (payload:match("^[^,]+") or "") or payload) then return end
+    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+    if InCombatLockdown() then
+        local q = self.pendingSync
+        if #q < 60 then q[#q + 1] = { kind = kind, sender = sender, payload = payload } end
+        return
+    end
+    self:ApplySyncDelta(kind, sender, payload)
 end
 
 -- mode: "GROUP", "GUILD" or "TARGET". Returns true, or false and a reason.
@@ -1690,9 +1946,8 @@ function IL:Share(mode)
     return true
 end
 
--- Tiny reply sent back to the player who offered a list. Newer standalone
--- JacaInviteTools versions use the same R packet, while older versions simply
--- ignore it, so the basic O/A/D protocol remains backward-compatible.
+-- Tiny reply sent back to the player who offered a list. The R packet
+-- carries compact sender-side delivery feedback for the Invite Tools protocol.
 -- code: d = declined, t = popup timed out, b = busy, r~added~total = result.
 local function SendShareReply(sender, id, code)
     if InCombatLockdown() or type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
@@ -1703,21 +1958,12 @@ end
 -- busy reply to the sender. Local lines are throttled per sender so repeated
 -- offers cannot spam chat.
 local ignoredOfferNote = {}
-local function NoteIgnoredOffer(sender, id, why, classFile)
+local function NoteIgnoredOffer(sender, id)
     local key = NormSender(sender)
     local now = GetTime()
     if ignoredOfferNote[key] and now - ignoredOfferNote[key] < 30 then return end
     ignoredOfferNote[key] = now
     SendShareReply(sender, id, "b")
-    local text
-    if why == "cooldown" then
-        text = L["Ignored a list offer from %s: they already offered one a moment ago."]
-    elseif why == "busy" then
-        text = L["Ignored a list offer from %s: you are still waiting for another list."]
-    else
-        text = L["Ignored a list offer from %s: another list popup is still open."]
-    end
-    JT:Print(GREY .. string.format(text, Who(sender, classFile, GREY)) .. "|r")
 end
 
 -- Guild rank gate for Auto-accept shared lists. WoW rank index 0 is Guild
@@ -1738,13 +1984,31 @@ end
 
 -- Somebody offered me their list: ask first, take nothing yet. `channel` is
 -- how the offer reached me (GUILD, PARTY, RAID, WHISPER...).
-function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
+function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
     if InCombatLockdown() or IsMe(sender) then return end
     local key = NormSender(sender)
 
+    -- A baseline requested by Live Raid Sync is accepted silently, but only
+    -- from the current raid leader, by whisper, while our request is fresh.
+    if sync then
+        if not (self:SyncOn() and not self:HasBase() and GetTime() < self.syncWanted
+            and channel == "WHISPER" and self:IsLeaderName(sender)) then return end
+        local aw = self.awaiting
+        if aw and GetTime() <= aw.untilT then return end
+        if type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
+        count = tonumber(count)
+        if not count or count < 1 or count > SHARE_MAX_NAMES then return end
+        if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+        self:AcceptShare({
+            sender = sender, id = id, count = count, auto = true, sync = true,
+            classFile = ClassOf(sender, classFile),
+        })
+        return
+    end
+
     -- Guild auto-accept trusts only Guild Master / Officers. If the guild
     -- roster is not ready yet, request it and retry the offer once. Lower
-    -- ranks are ignored silently, matching the standalone behavior.
+    -- ranks are ignored silently by Invite Tools.
     local guildTrusted = false
     if channel == "GUILD" and self:SharedOn() then
         local rank = GuildRankIndexOf(sender)
@@ -1759,13 +2023,32 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         guildTrusted = true
     end
 
+    -- A newer share from the same sender replaces the old popup/transfer after
+    -- a short guard gap instead of being blocked by the normal repeat filter.
+    if type(id) == "string" and id:match("^%x%x%x%x$")
+        and (not self.offerSeen[key] or GetTime() - self.offerSeen[key] >= OFFER_RESHARE_GAP) then
+        local inc = self.incoming
+        if inc and inc.id ~= id and NormSender(inc.sender) == key then
+            inc.answered = true
+            self.incoming = nil
+            if inc.dialog and inc.dialog:IsShown() then
+                inc.dialog:Hide()
+                if InviteTools.activePrompt == inc.dialog then InviteTools.activePrompt = nil end
+            end
+        end
+        local wait = self.awaiting
+        if wait and wait.id ~= id and NormSender(wait.sender) == key then
+            self.awaiting = nil
+        end
+    end
+
     local pending = self.incoming
     if pending and pending.dialog and not pending.dialog:IsShown() then
         self.incoming = nil
         pending = nil
     end
     if pending and GetTime() < pending.untilT then
-        NoteIgnoredOffer(sender, id, "popup", classFile)
+        NoteIgnoredOffer(sender, id)
         return
     end
     local awaiting = self.awaiting
@@ -1774,7 +2057,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         awaiting = nil
     end
     if awaiting then
-        NoteIgnoredOffer(sender, id, "busy", classFile)
+        NoteIgnoredOffer(sender, id)
         return
     end
     if not id:match("^%x%x%x%x$") then return end
@@ -1782,23 +2065,29 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
     if not count or count < 1 or count > SHARE_MAX_NAMES then return end
 
     local now = GetTime()
-    local ignoreSeconds = tonumber(self.db and self.db.ShareIgnoreSeconds) or 30
-    ignoreSeconds = math_max(0, ignoreSeconds)
-    if ignoreSeconds > 0 then
-        local seen = self.offerSeen[key]
-        if seen and now - seen < ignoreSeconds then
-            NoteIgnoredOffer(sender, id, "cooldown", classFile)
-            return
-        end
-        local n = 0
-        for _ in pairs(self.offerSeen) do n = n + 1 end
-        if n > 50 then wipe(self.offerSeen) end
-        self.offerSeen[key] = now
+    local ignoreSeconds = math_max(0, tonumber(self.db and self.db.ShareIgnoreSeconds) or 30)
+    local seen = self.offerSeen[key]
+    local differentId = self.offerSeenId[key] ~= id
+    local gap = differentId and OFFER_RESHARE_GAP or ignoreSeconds
+    if gap > 0 and seen and now - seen < gap then
+        NoteIgnoredOffer(sender, id)
+        return
     end
+    local n = 0
+    for _ in pairs(self.offerSeen) do n = n + 1 end
+    if n > 50 then wipe(self.offerSeen); wipe(self.offerSeenId) end
+    self.offerSeen[key] = now
+    self.offerSeenId[key] = id
 
     if C_FriendList and C_FriendList.IsIgnored then
         local ok, ignored = pcall(C_FriendList.IsIgnored, sender)
         if ok and ignored then return end
+    end
+
+    -- A valid incoming shared-list offer brings Invite Tools to the foreground
+    -- immediately, before the confirmation popup or trusted auto-accept path.
+    if not (self.frame and self.frame:IsShown()) then
+        self:Toggle()
     end
 
     -- Auto-accept from trusted group leadership, or from Guild Master / Officer
@@ -1811,7 +2100,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
         return
     end
 
-    local shown = ShortName(sender)
+    local shown = DisplayName(sender, FindGroupUnit(sender)) or ShortName(sender)
     local color = type(classFile) == "string" and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
     if color then
         shown = string.format("|cff%02x%02x%02x%s|r", color.r * 255 + 0.5, color.g * 255 + 0.5, color.b * 255 + 0.5, shown)
@@ -1823,9 +2112,10 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
     }
     self.incoming = data
     local dialog
-    dialog = JT:CreatePrompt({
+    dialog = InviteTools:CreatePrompt({
         title = L["List Share"],
-        text = string.format(L["%s wants to share an invite list with you."], shown),
+        text = string.format(L["%s wants to share an invite list with you."], shown)
+            .. "\n\n" .. L["Accepting replaces your current list."],
         acceptText = L["Accept"],
         cancelText = L["Decline"],
         acceptColor = { 0.25, 0.90, 0.25 },
@@ -1837,9 +2127,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
                 data.answered = true
                 SendShareReply(data.sender, data.id, "d")
             end
-            if reason == "decline" then
-                JT:Print(string.format(L["Shared list from %s declined."], shown))
-            end
+            -- Decline is reported only to the sender.
         end,
     })
     data.dialog = dialog
@@ -1850,15 +2138,15 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried)
             SendShareReply(data.sender, data.id, "t")
         end
         if IL.incoming == data then IL.incoming = nil end
-        if dialog and dialog:IsShown() and JT.activePrompt == dialog then
+        if dialog and dialog:IsShown() and InviteTools.activePrompt == dialog then
             dialog:Hide()
-            JT.activePrompt = nil
+            InviteTools.activePrompt = nil
         end
     end)
 end
 
 -- Accept pressed: tell the sender, then wait for the names. The optional class
--- appended to A is understood by current standalone/EUI and ignored by old
+-- appended to A is optional protocol metadata and can be ignored by receivers
 -- parsers that only cared about the id.
 function IL:AcceptShare(data)
     self.incoming = nil
@@ -1870,7 +2158,7 @@ function IL:AcceptShare(data)
     local awaiting = {
         sender = data.sender, id = data.id, sentCount = data.count,
         untilT = GetTime() + WAIT_DATA_TTL, parts = {}, got = 0,
-        classFile = data.classFile, auto = data.auto and true or false,
+        classFile = data.classFile, auto = data.auto and true or false, sync = data.sync and true or false,
     }
     self.awaiting = awaiting
     Enqueue("A~" .. data.id .. "~" .. MyClass(), "WHISPER", data.sender)
@@ -1880,52 +2168,31 @@ function IL:AcceptShare(data)
     C_Timer.After(WAIT_DATA_TTL + 1, function()
         if IL.awaiting ~= awaiting then return end
         IL.awaiting = nil
-        local who = Who(awaiting.sender, awaiting.classFile, RED)
-        local msg
-        if awaiting.got > 0 then
-            msg = string.format(L["List from %s was not received: only part of it arrived within %ds."], who, WAIT_DATA_TTL)
-        else
-            msg = string.format(L["List from %s was not received: no answer within %ds (they may be in combat, offline, or the offer expired)."], who, WAIT_DATA_TTL)
-        end
-        JT:Print(RED .. msg .. "|r")
     end)
 end
 
--- Somebody accepted my offer: send them the names and print the sender-side
--- state in the same EllesmereUI Invite Tools chat style as the rest of the
--- module.
+-- Somebody accepted my offer: send them the names.
 function IL:OnShareAccepted(sender, id, classFile)
     ClassOf(sender, classFile)
     local o = self.offer
     if not o or o.id ~= id then return end
-    if GetTime() > o.expires then
-        JT:Print(YELLOW .. string.format(L["%s accepted your list after the offer expired. Share again."], Who(sender, nil, YELLOW)) .. "|r")
-        return
-    end
+    if GetTime() > o.expires then return end
     local key = NormSender(sender)
     if o.sent[key] then return end
-    if o.served >= SHARE_MAX_RECIPIENTS then
-        JT:Print(YELLOW .. string.format(L["%s accepted your list, but the limit of %d people was reached."], Who(sender, nil, YELLOW), SHARE_MAX_RECIPIENTS) .. "|r")
-        return
-    end
+    if o.served >= SHARE_MAX_RECIPIENTS then return end
     -- Would the last message for this person still go out before the offer
     -- expires? If not, do not start a transfer that cannot finish in time.
-    if GetTime() + QueueETA(#o.chunks) + SEND_MARGIN > o.expires then
-        JT:Print(YELLOW .. string.format(L["%s accepted your list too late to be sent in time. Share again."], Who(sender, nil, YELLOW)) .. "|r")
-        return
-    end
+    if GetTime() + QueueETA(#o.chunks) + SEND_MARGIN > o.expires then return end
     o.sent[key] = true
     o.served = o.served + 1
-    JT:Print(string.format(L["%s accepted your list. Sending it."], Who(sender)))
     local n = #o.chunks
     for i, chunk in ipairs(o.chunks) do
         Enqueue("D~" .. id .. "~" .. i .. "~" .. n .. "~" .. chunk, "WHISPER", sender)
     end
 end
 
--- R reply from a current standalone/EUI receiver. This is sender-side feedback
--- only; old addon versions never send R and continue to work normally.
-local MAX_REPLY_LINES = 10
+-- R reply from an Invite Tools receiver. This is sender-side feedback
+-- only; older Invite Tools versions may not send R and can ignore it.
 function IL:OnShareReply(sender, id, code, c, d, e)
     local o = self.offer
     if not o or o.id ~= id then return end
@@ -1938,35 +2205,17 @@ function IL:OnShareReply(sender, id, code, c, d, e)
         local added, total = tonumber(c), tonumber(d)
         if not added or not total or added < 0 or total < 0 or added > total or total > SHARE_MAX_NAMES then return end
         o.result[key] = true
-        local whoYellow, who = Who(sender, nil, YELLOW), Who(sender)
-        if total == 0 then
-            JT:Print(YELLOW .. string.format(L["%s received your list, but it had no usable names."], whoYellow) .. "|r")
-        elseif added == 0 then
-            JT:Print(YELLOW .. string.format(L["%s received your list, but nothing changed: the names were already on their list."], whoYellow) .. "|r")
-        else
-            JT:Print(string.format(L["%s received your list: %d new of %d."], who, added, total))
-        end
+        InviteTools:Print(string.format(L["%s received your list: %d new of %d."], Who(sender), added, total))
         return
     end
 
     if GetTime() > o.expires + 30 then return end
     if o.replied[key] or o.sent[key] then return end
-    local text
-    if code == "d" then
-        text = L["%s declined your list."]
-    elseif code == "t" then
-        text = L["%s did not answer your list (popup ignored)."]
-    elseif code == "b" then
-        text = L["%s could not look at your list right now (busy)."]
-    else
-        return
-    end
+    if code ~= "d" and code ~= "t" and code ~= "b" then return end
     o.replied[key] = true
     o.replies = o.replies + 1
-    if o.replies <= MAX_REPLY_LINES then
-        JT:Print(YELLOW .. string.format(text, Who(sender, nil, YELLOW)) .. "|r")
-    elseif o.replies == MAX_REPLY_LINES + 1 then
-        JT:Print(YELLOW .. L["More people declined or ignored your list."] .. "|r")
+    if code == "d" then
+        InviteTools:Print(YELLOW .. string.format(L["%s declined your list."], Who(sender, nil, YELLOW)) .. "|r")
     end
 end
 
@@ -1994,33 +2243,48 @@ function IL:OnShareData(sender, id, i, n, payload)
             if ValidName(name) and #names < SHARE_MAX_NAMES then names[#names + 1] = name end
         end
     end
-    local whoYellow, who = Who(a.sender, a.classFile, YELLOW), Who(a.sender, a.classFile)
+    if a.sync and #names > 0 then self.syncBase = true end
     if #names == 0 then
         SendShareReply(a.sender, a.id, "r~0~0")
-        JT:Print(YELLOW .. string.format(L["List from %s had no usable names, so nothing changed."], whoYellow) .. "|r")
         return
+    end
+
+    -- A received list replaces the current one. Old names that are absent from
+    -- the incoming list are recorded in History with the sender as the reason.
+    -- If both sets are identical, keep the current statuses/session untouched.
+    local replaced
+    do
+        local fresh, nFresh = {}, 0
+        for _, name in ipairs(names) do
+            local key = name:lower()
+            if not IsMe(name) and not fresh[key] then
+                fresh[key] = true
+                nFresh = nFresh + 1
+            end
+        end
+        local old = self.names or ParseList(self:GetListText(1))
+        local same = #old == nFresh
+        if same then
+            for _, name in ipairs(old) do
+                if not fresh[name:lower()] then same = false break end
+            end
+        end
+        if nFresh > 0 and not same then
+            local by = ShortName(a.sender)
+            replaced = 0
+            for _, name in ipairs(old) do
+                if not fresh[name:lower()] then replaced = replaced + 1 end
+            end
+            self:ClearList("shared", by, fresh)
+        end
     end
 
     local added, duplicates, mine = self:MergeNames(names)
     -- Tell a current sender exactly what its list did here. Older senders
     -- ignore this packet.
-    SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names)
+    if not a.sync then SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names) end
 
-    local got = CountText(#names)
-    if added > 0 then
-        JT:Print(string.format(L["List from %s - received: %s; added to your list: %d."], who, got, added))
-    elseif duplicates > 0 and mine == 0 then
-        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it."], whoYellow, got) .. "|r")
-    elseif mine > 0 and duplicates == 0 then
-        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the only name(s) received are you."], whoYellow) .. "|r")
-    else
-        JT:Print(YELLOW .. string.format(L["List from %s did not change your list: the %s received were already on it (or are you)."], whoYellow, got) .. "|r")
-    end
-    -- Accepted lists open the window so the new names are right there.
-    -- (Declining never gets here, so nothing opens.)
-    if not a.auto and not InCombatLockdown() and not (self.frame and self.frame:IsShown()) then
-        self:Toggle()
-    end
+    -- Shared-list and Live Raid Sync receiver-side chat feedback stays silent.
 end
 
 function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
@@ -2030,13 +2294,19 @@ function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
     if #text > 255 then return end
     local kind, a, b, c, d, e = strsplit("~", text, 6)
     if kind == "O" and a and b then
-        self:OnShareOffer(sender, a, b, c, channel)
+        self:OnShareOffer(sender, a, b, c, channel, nil, d == "S")
     elseif kind == "A" and a then
         if not IsMe(sender) then self:OnShareAccepted(sender, a, b) end
     elseif kind == "R" and a and b then
         if not IsMe(sender) then self:OnShareReply(sender, a, b, c, d, e) end
     elseif kind == "D" and a and b and c and d then
         if not IsMe(sender) then self:OnShareData(sender, a, b, c, d) end
+    elseif (kind == "X" or kind == "N" or kind == "C") and a then
+        self:OnSyncDelta(kind, sender, a, channel)
+    elseif kind == "S?" then
+        self:OnSyncRequest(sender, channel)
+    elseif kind == "S0" then
+        self:OnSyncEmpty(sender, channel)
     end
 end
 
@@ -2046,8 +2316,8 @@ local function Color(c, fallback)
 end
 
 local function StyleFont(fs, size)
-    if JT.ApplyThemeFont then
-        JT:ApplyThemeFont(fs, size or "normal")
+    if InviteTools.ApplyThemeFont then
+        InviteTools:ApplyThemeFont(fs, size or "normal")
     else
         fs:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
     end
@@ -2292,7 +2562,7 @@ function IL:CreateFrame()
     -- window keeps the suite's simple centered text header.
     local title = f:CreateFontString(nil, "OVERLAY")
     StyleFont(title, "large")
-    title:SetPoint("TOP", f, "TOP", 0, -16)
+    title:SetPoint("TOP", f, "TOP", 0, -8)
     title:SetText(L["Invite Tools"])
     Tint(title)
 
@@ -2413,7 +2683,7 @@ function IL:CreateFrame()
 
     local scroll = CreateFrame("ScrollFrame", nil, holder)
     scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -(4 + headerH))
-    scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -10, 4)
+    scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -16, 4)
     scroll:EnableMouseWheel(true)
 
     local content = CreateFrame("Frame", nil, scroll)
@@ -2442,7 +2712,7 @@ function IL:CreateFrame()
     headClass:SetText(L["Class"])
 
     local headStatus = holder:CreateFontString(nil, "OVERLAY")
-    headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(10 + 2 + M(20) + 4), -5) -- lines up with the status column
+    headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(16 + 2 + M(20) + 4), -5) -- lines up with the status column
     headStatus:SetWidth(M(STATUS_W))
     headStatus:SetJustifyH("RIGHT")
     StyleFont(headStatus, "small")
@@ -2467,7 +2737,7 @@ function IL:CreateFrame()
     local function PlaceHeaders()
         scroll:ClearAllPoints()
         scroll:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -(4 + headerH))
-        scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -10, 4)
+        scroll:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -16, 4)
         headLine:ClearAllPoints()
         headLine:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -(4 + headerH) + 1)
         headLine:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -4, -(4 + headerH) + 1)
@@ -2476,34 +2746,94 @@ function IL:CreateFrame()
         headName:ClearAllPoints()
         headName:SetPoint("TOPLEFT", holder, "TOPLEFT", NameX(), -5)
         headStatus:ClearAllPoints()
-        headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(10 + 2 + M(20) + 4), -5)
+        headStatus:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -(16 + 2 + M(20) + 4), -5)
         headStatus:SetWidth(M(STATUS_W))
         emptyText:ClearAllPoints()
         emptyText:SetPoint("TOP", holder, "TOP", 0, -(14 + headerH))
     end
 
-    -- Thin scroll indicator on the right.
-    local thumb = holder:CreateTexture(nil, "OVERLAY")
-    thumb:SetWidth(3)
-    thumb:SetColorTexture(accent[1], accent[2], accent[3], 0.6)
-    thumb:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -4, -(4 + headerH))
-    thumb:Hide()
+    -- 10 px interactive scroll bar: click the track to jump and drag the
+    -- thumb directly. Mouse-wheel scrolling continues to work as before.
+    local SB_W = 10
+    local track = CreateFrame("Frame", nil, holder)
+    track:SetWidth(SB_W)
+    track:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -3, -(4 + headerH))
+    track:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -3, 4)
+    track:EnableMouse(true)
+    track:Hide()
+    local trackBg = track:CreateTexture(nil, "BACKGROUND")
+    trackBg:SetAllPoints()
+    trackBg:SetColorTexture(1, 1, 1, 0.06)
+
+    local thumbBtn = CreateFrame("Button", nil, track)
+    thumbBtn:SetWidth(SB_W)
+    local thumb = thumbBtn:CreateTexture(nil, "OVERLAY")
+    thumb:SetAllPoints()
+    thumb:SetColorTexture(accent[1], accent[2], accent[3], 0.85)
+    thumb:SetAlpha(0.7)
+
+    local function ThumbSize(viewH, contentH)
+        return math_max(28, viewH * (viewH / contentH))
+    end
 
     local function UpdateThumb()
         local viewH = scroll:GetHeight()
         local contentH = content:GetHeight()
         if not viewH or viewH <= 0 or contentH <= viewH + 1 then
-            thumb:Hide()
+            track:Hide()
             return
         end
         local range = contentH - viewH
-        local thumbH = math_max(16, viewH * (viewH / contentH))
+        local thumbH = ThumbSize(viewH, contentH)
         local pos = ((scroll:GetVerticalScroll() or 0) / range) * (viewH - thumbH)
-        thumb:SetHeight(thumbH)
-        thumb:ClearAllPoints()
-        thumb:SetPoint("TOPRIGHT", holder, "TOPRIGHT", -4, -(4 + headerH) - pos)
-        thumb:Show()
+        thumbBtn:SetHeight(thumbH)
+        thumbBtn:ClearAllPoints()
+        thumbBtn:SetPoint("TOP", track, "TOP", 0, -pos)
+        track:Show()
     end
+
+    local dragGrab = 0
+    local function CursorY()
+        local _, y = GetCursorPosition()
+        return y / (track:GetEffectiveScale() or 1)
+    end
+    local function ScrollToCursor()
+        local viewH, contentH = scroll:GetHeight() or 0, content:GetHeight() or 0
+        local range = contentH - viewH
+        local top = track:GetTop()
+        if range <= 0 or not top then return end
+        local thumbH = ThumbSize(viewH, contentH)
+        local frac = ((top - CursorY()) - dragGrab) / math_max(1, viewH - thumbH)
+        scroll:SetVerticalScroll(math_max(0, math_min(range, frac * range)))
+    end
+    local function BeginDrag(grab)
+        if InCombatLockdown() then return end
+        dragGrab = grab
+        thumb:SetAlpha(1)
+        track:SetScript("OnUpdate", function()
+            if InCombatLockdown() or not IsMouseButtonDown("LeftButton") then
+                track:SetScript("OnUpdate", nil)
+                thumb:SetAlpha(thumbBtn:IsMouseOver() and 1 or 0.7)
+                return
+            end
+            ScrollToCursor()
+        end)
+        ScrollToCursor()
+    end
+    thumbBtn:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" then return end
+        BeginDrag((self:GetTop() or 0) - CursorY())
+    end)
+    track:SetScript("OnMouseDown", function(_, button)
+        if button ~= "LeftButton" then return end
+        local viewH, contentH = scroll:GetHeight() or 0, content:GetHeight() or 0
+        if contentH <= viewH then return end
+        BeginDrag(ThumbSize(viewH, contentH) / 2)
+    end)
+    thumbBtn:SetScript("OnEnter", function() thumb:SetAlpha(1) end)
+    thumbBtn:SetScript("OnLeave", function()
+        if not track:GetScript("OnUpdate") then thumb:SetAlpha(0.7) end
+    end)
 
     scroll:SetScript("OnMouseWheel", function(self, delta)
         if InCombatLockdown() then return end -- no scrolling in combat either
@@ -2565,12 +2895,15 @@ function IL:CreateFrame()
         IL:ForgetName(row.name) -- renamed or removed: its status goes with it
         if #tokens == 0 then
             table.remove(names, i) -- emptied the row: the name is gone
+            IL:AnnounceRemoval(row.name)
         else
             names[i] = tokens[1]
             -- Several names typed/pasted into one row: split them into rows.
             for k = 2, #tokens do
                 table.insert(names, i + k - 1, tokens[k])
             end
+            IL:AnnounceRemoval(row.name)
+            IL:AnnounceAdd(tokens)
         end
         IL:SaveNames()
         Layout()
@@ -2616,6 +2949,7 @@ function IL:CreateFrame()
                 if n:lower() == name:lower() then
                     table.remove(IL.names, k)
                     IL:RecordJoin(n, "removed", nil, "removed") -- removed with the X: goes to the history
+                    IL:AnnounceRemoval(n)
                     break
                 end
             end
@@ -2735,9 +3069,10 @@ function IL:CreateFrame()
             row:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, -((i - 1) * (RowH() + ROW_GAP)))
             row.num:SetText(i)
             -- Leave the text alone while someone is typing in it, so the cursor
-            -- does not jump.
-            if row.edit:GetText() ~= names[i] then
-                row.edit:SetText(names[i])
+            -- does not jump. Main-list rows always show the real character name.
+            local shown = names[i]
+            if row.edit:GetText() ~= shown then
+                row.edit:SetText(shown)
                 row.edit:SetCursorPosition(0)
             end
             row:Show()
@@ -2794,23 +3129,25 @@ function IL:CreateFrame()
         if #tokens == 0 or not IL.names then return end
         PrintReport(report)
         if fixes and fixes > 0 then
-            JT:Print(L["Cleaned up the pasted names (fixed odd characters, removed /inv and similar)."])
+            InviteTools:Print(L["Cleaned up the pasted names (fixed odd characters, removed /inv and similar)."])
         end
         adding = true
         addBox:SetText("")
         adding = false
         placeholder:Show()
 
-        local have = {}
+        local have, addedNow = {}, {}
         for _, n in ipairs(IL.names) do have[n:lower()] = true end
         for _, n in ipairs(tokens) do
             local key = n:lower()
             if not have[key] then
                 have[key] = true
                 IL.names[#IL.names + 1] = n
+                addedNow[#addedNow + 1] = n
             end
         end
         IL:SaveNames()
+        IL:AnnounceAdd(addedNow)
         Layout()
         -- The scroll range is only updated on the next frame.
         C_Timer.After(0, function()
@@ -2853,10 +3190,19 @@ function IL:CreateFrame()
     invite:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
     invite:SetHeight(24)
     invite:SetScript("OnClick", function()
-        if InCombatLockdown() then return end
+        if InCombatLockdown() or not IsInRaid() then return end
         ClearAllFocus()
         IL:InviteFromList(IL.currentList)
     end)
+    invite:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(L["Invite"], 1, 1, 1)
+        if not IsInRaid() then
+            GameTooltip:AddLine(L["Available only while you are in a raid group."], 0.8, 0.8, 0.8, true)
+        end
+        GameTooltip:Show()
+    end)
+    invite:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- Auto-invite controls: [x] Auto-invite [30s]            [Stop] ---------
     local bar = CreateFrame("Frame", nil, f)
@@ -2907,6 +3253,10 @@ function IL:CreateFrame()
 
     local function UpdateStatusUI()
         UpdateRowStatuses()
+        local inviteUsable = IsInRaid() and not locked and not InCombatLockdown()
+        SetWidgetEnabled(invite, inviteUsable)
+        invite:SetAlpha(inviteUsable and 1 or 0.45)
+        invite.text:SetTextColor(inviteUsable and accent[1] or 0.5, inviteUsable and accent[2] or 0.5, inviteUsable and accent[3] or 0.5, 1)
         checkFill:SetShown(IL:AutoOn())
         if sharedFill then sharedFill:SetShown(IL:SharedOn()) end
         local text, c
@@ -2979,8 +3329,8 @@ function IL:CreateFrame()
     end)
 
     -- Auto-accept shared lists: [x] Auto-accept shared lists ---------------
-    -- This is intentionally one row above Auto-invite, matching the standalone
-    -- JacaInviteTools layout while keeping EUI's existing trusted-sender rule.
+    -- This is intentionally one row above Auto-invite while keeping EUI's
+    -- existing trusted-sender rule.
     local bar2 = CreateFrame("Frame", nil, f)
     bar2:SetHeight(22)
     bar2:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 94)
@@ -3057,6 +3407,7 @@ function IL:CreateFrame()
         DisarmClear()
         ClearAllFocus()
         IL:ClearList()
+        IL:AnnounceClear()
     end)
 
     -- Share list: button above the Status column, with a small menu --------
@@ -3165,6 +3516,7 @@ function IL:CreateFrame()
 
     -- Friend List is built after History; History needs to know which side it occupies.
     local friends, friendsOnLeft = nil, true
+    local FA
     local PlaceHistory, PlaceFriends
 
     -- History: names that joined your group, with a Re-invite button --------
@@ -3313,13 +3665,17 @@ function IL:CreateFrame()
             local e = self.entry
             if not e then return end
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(e.name, 1, 1, 1)
+            local shownName = e.name
+            GameTooltip:SetText(shownName, 1, 1, 1)
             local how = e.how
             if not how then
                 how = (e.kind == "declined" and "declined") or (e.kind == "removed" and "removed") or "list"
             end
             if how == "killed" then
                 GameTooltip:AddLine(L["Cleared by killing Ula'tek"], 0.35, 0.9, 0.35)
+            elseif how == "shared" then
+                local by = e.by or "?"
+                GameTooltip:AddLine(string.format(L["Removed by accepting a shared list from %s"], by), 0.8, 0.8, 0.8)
             else
                 local why = (how == "list" and L["Invited via list"])
                     or (how == "declined" and L["Declined your invite"])
@@ -3352,6 +3708,7 @@ function IL:CreateFrame()
             -- The entry STAYS in the history (it only leaves by its X, by Clear
             -- list or when the 25 limit pushes it out).
             local added = IL:MergeNames({ e.name })
+            if added > 0 then IL:AnnounceAdd({ e.name }) end
             local shown = added > 0 and L["Added"] or L["In list"] -- "In list": already there (or it is you)
             if added > 0 then
                 C_Timer.After(0, function()
@@ -3409,8 +3766,8 @@ function IL:CreateFrame()
         histCount:SetText(#list .. "/" .. HISTORY_MAX)
     end
 
-    -- History/Friends placement is decided together below so their order is
-    -- deterministic regardless of which panel is opened first.
+    -- History/Friends/Factions placement is decided together below so their
+    -- order is deterministic regardless of which panel is opened first.
     local PlacePanels
     PlaceHistory = function()
         if PlacePanels then PlacePanels("hist") end
@@ -3425,7 +3782,7 @@ function IL:CreateFrame()
         historyBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         DisarmHistClear()
         GameTooltip:Hide()
-        if PlacePanels and friends and friends:IsShown() then PlacePanels() end
+        if PlacePanels and ((friends and friends:IsShown()) or (FA and FA.frame and FA.frame:IsShown())) then PlacePanels() end
     end)
 
     historyBtn:SetScript("OnClick", function()
@@ -3991,48 +4348,340 @@ function IL:CreateFrame()
     end
     f.RefreshFriends = RefreshFriends
 
-    -- Deterministic order, left to right: Friends then History. Normally the
+    -- Factions: raid groups 1-4 (or the current party), with a direct Whisper
+    -- action on each row. The message is shared by every row and edited from a
+    -- header button aligned above the row buttons.
+    FA = { W = 300 }
+    do
+        local FA_W, FA_ROW_H, FA_GAP = FA.W, 24, 2
+        local FACTION_TEX = "Interface\\AddOns\\EllesmereUIQoL\\Media\\InviteToolsFaction.png"
+        local ALLY_C, HORDE_C = { 0.30, 0.58, 1.00 }, { 0.90, 0.25, 0.25 }
+        local DEFAULT_WHISPER = "Send invites for the shared list, please"
+
+        local faction = CreateFrame("Frame", nil, f, "BackdropTemplate")
+        faction:SetWidth(FA_W)
+        faction:SetFrameStrata(f:GetFrameStrata())
+        faction:EnableMouse(true)
+        faction:SetBackdrop(backdrop)
+        BG(faction, "main")
+        faction:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        faction:Hide()
+
+        local factionTitle = faction:CreateFontString(nil, "OVERLAY")
+        factionTitle:SetPoint("TOP", faction, "TOP", 0, -8)
+        StyleFont(factionTitle, "large")
+        factionTitle:SetText(L["Factions"])
+        Tint(factionTitle)
+
+        local factionClose = CreateFrame("Button", nil, faction)
+        factionClose:SetSize(18, 18)
+        factionClose:SetPoint("TOPRIGHT", faction, "TOPRIGHT", -6, -5)
+        local factionCloseTex = factionClose:CreateTexture(nil, "ARTWORK")
+        factionCloseTex:SetPoint("CENTER")
+        factionCloseTex:SetSize(13, 13)
+        factionCloseTex:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-close.png")
+        factionCloseTex:SetVertexColor(0.851, 0.851, 0.851, 1)
+        factionClose:SetScript("OnEnter", function() factionCloseTex:SetVertexColor(accent[1], accent[2], accent[3], 1) end)
+        factionClose:SetScript("OnLeave", function() factionCloseTex:SetVertexColor(0.851, 0.851, 0.851, 1) end)
+        factionClose:SetScript("OnClick", function() faction:Hide() end)
+
+        local function WhisperText()
+            local t = IL.db and IL.db.CustomWhisper
+            if type(t) ~= "string" or strtrim(t) == "" then return DEFAULT_WHISPER end
+            return t
+        end
+
+        local editWhisper = MakeButton(faction, L["Edit whisper"])
+        editWhisper:SetSize(94, 18)
+        editWhisper:SetPoint("TOPRIGHT", faction, "TOPRIGHT", -10, -29)
+
+        local factionCount = faction:CreateFontString(nil, "OVERLAY")
+        factionCount:SetPoint("TOPLEFT", faction, "TOPLEFT", 12, -32)
+        factionCount:SetPoint("RIGHT", editWhisper, "LEFT", -6, 0)
+        factionCount:SetJustifyH("LEFT")
+        factionCount:SetWordWrap(false)
+        StyleFont(factionCount, "small")
+        factionCount:SetTextColor(textSec[1], textSec[2], textSec[3], 1)
+
+        local editor = CreateFrame("Frame", nil, faction, "BackdropTemplate")
+        editor:SetSize(FA_W, 44)
+        editor:SetPoint("BOTTOMRIGHT", faction, "TOPRIGHT", 0, 4)
+        editor:SetFrameLevel(faction:GetFrameLevel() + 30)
+        editor:SetClampedToScreen(true)
+        editor:EnableMouse(true)
+        editor:SetBackdrop(backdrop)
+        BG(editor, "dark")
+        editor:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        editor:Hide()
+
+        local whisperEdit = CreateFrame("EditBox", nil, editor, "BackdropTemplate")
+        whisperEdit:SetAutoFocus(false)
+        whisperEdit:SetMaxLetters(255)
+        whisperEdit:SetTextInsets(6, 6, 0, 0)
+        whisperEdit:SetPoint("TOPLEFT", editor, "TOPLEFT", 8, -8)
+        whisperEdit:SetPoint("BOTTOMRIGHT", editor, "BOTTOMRIGHT", -8, 8)
+        StyleFont(whisperEdit, "normal")
+        whisperEdit:SetTextColor(textPri[1], textPri[2], textPri[3], 1)
+        whisperEdit:SetBackdrop(backdrop)
+        BG(whisperEdit, "medium")
+        whisperEdit:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+
+        local function SaveWhisper()
+            local t = strtrim(whisperEdit:GetText() or "")
+            if t == "" then t = DEFAULT_WHISPER end
+            IL.db.CustomWhisper = t
+            whisperEdit:SetText(t)
+            whisperEdit:SetCursorPosition(0)
+        end
+        whisperEdit:SetScript("OnEnterPressed", function(self) self:ClearFocus(); editor:Hide() end)
+        whisperEdit:SetScript("OnEscapePressed", function(self)
+            self:SetText(WhisperText())
+            self:ClearFocus()
+            editor:Hide()
+        end)
+        whisperEdit:SetScript("OnEditFocusGained", function(self)
+            self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+            self:HighlightText()
+        end)
+        whisperEdit:SetScript("OnEditFocusLost", function(self)
+            self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+            SaveWhisper()
+        end)
+        editor:SetScript("OnShow", function()
+            whisperEdit:SetText(WhisperText())
+            whisperEdit:SetFocus()
+            whisperEdit:HighlightText()
+        end)
+        editor:SetScript("OnHide", function() whisperEdit:ClearFocus() end)
+
+        editWhisper:SetScript("OnClick", function()
+            if InCombatLockdown() or locked then return end
+            editor:SetShown(not editor:IsShown())
+        end)
+        editWhisper:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText(L["Edit whisper"], 1, 1, 1)
+            GameTooltip:AddLine(L["Edits the message sent by every Whisper button in this panel."], 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        editWhisper:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+        local factionHolder = CreateFrame("Frame", nil, faction, "BackdropTemplate")
+        factionHolder:SetPoint("TOPLEFT", faction, "TOPLEFT", 10, -50)
+        factionHolder:SetPoint("BOTTOMRIGHT", faction, "BOTTOMRIGHT", -10, 10)
+        factionHolder:SetBackdrop(backdrop)
+        BG(factionHolder, "medium")
+        factionHolder:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+
+        local ascroll = CreateFrame("ScrollFrame", nil, factionHolder)
+        ascroll:SetPoint("TOPLEFT", factionHolder, "TOPLEFT", 4, -4)
+        ascroll:SetPoint("BOTTOMRIGHT", factionHolder, "BOTTOMRIGHT", -4, 4)
+        ascroll:EnableMouseWheel(true)
+        local acontent = CreateFrame("Frame", nil, ascroll)
+        acontent:SetPoint("TOPLEFT", ascroll, "TOPLEFT", 0, 0)
+        acontent:SetSize(FA_W - 28, 1)
+        ascroll:SetScrollChild(acontent)
+        ascroll:SetScript("OnMouseWheel", function(self, delta)
+            if InCombatLockdown() or locked then return end
+            local range = self:GetVerticalScrollRange() or 0
+            local cur = self:GetVerticalScroll() or 0
+            self:SetVerticalScroll(math_max(0, math_min(range, cur - delta * FA_ROW_H * 2)))
+        end)
+
+        local factionEmpty = factionHolder:CreateFontString(nil, "OVERLAY")
+        factionEmpty:SetPoint("CENTER", factionHolder, "CENTER", 0, 0)
+        StyleFont(factionEmpty, "normal")
+        factionEmpty:SetTextColor(textSec[1], textSec[2], textSec[3], 0.8)
+        factionEmpty:SetText(L["You are not in a group."])
+
+        local function PaintFactionIcon(a, h, fac)
+            if fac == "Alliance" then
+                a:SetVertexColor(ALLY_C[1], ALLY_C[2], ALLY_C[3], 1)
+                h:SetVertexColor(0.6, 0.6, 0.6, 0.18)
+            elseif fac == "Horde" then
+                a:SetVertexColor(0.6, 0.6, 0.6, 0.18)
+                h:SetVertexColor(HORDE_C[1], HORDE_C[2], HORDE_C[3], 1)
+            else
+                a:SetVertexColor(0.6, 0.6, 0.6, 0.4)
+                h:SetVertexColor(0.6, 0.6, 0.6, 0.4)
+            end
+        end
+
+        local arows = {}
+        local function MakeFactionRow()
+            local row = CreateFrame("Frame", nil, acontent)
+            row:SetHeight(FA_ROW_H)
+
+            row.iconA = row:CreateTexture(nil, "ARTWORK")
+            row.iconA:SetSize(8, 16)
+            row.iconA:SetPoint("LEFT", row, "LEFT", 4, 0)
+            row.iconA:SetTexture(FACTION_TEX)
+            row.iconA:SetTexCoord(0, 0.5, 0, 1)
+            row.iconH = row:CreateTexture(nil, "ARTWORK")
+            row.iconH:SetSize(8, 16)
+            row.iconH:SetPoint("LEFT", row.iconA, "RIGHT", 0, 0)
+            row.iconH:SetTexture(FACTION_TEX)
+            row.iconH:SetTexCoord(0.5, 1, 0, 1)
+
+            local whisper = MakeButton(row, L["Whisper"])
+            whisper:SetSize(74, FA_ROW_H - 4)
+            whisper:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+            row.whisper = whisper
+
+            row.nameText = row:CreateFontString(nil, "OVERLAY")
+            row.nameText:SetPoint("LEFT", row.iconH, "RIGHT", 6, 0)
+            row.nameText:SetPoint("RIGHT", whisper, "LEFT", -6, 0)
+            row.nameText:SetJustifyH("LEFT")
+            row.nameText:SetWordWrap(false)
+            StyleFont(row.nameText, "normal")
+
+            whisper:SetScript("OnClick", function()
+                local e = row.entry
+                if InCombatLockdown() or locked or not e or e.isMe then return end
+                local msg = WhisperText()
+                if type(msg) == "string" and msg ~= "" and SendChatMessage then
+                    SendChatMessage(msg, "WHISPER", nil, e.name)
+                    whisper.text:SetText(L["Sent"])
+                    C_Timer.After(1.5, function()
+                        if row.entry == e and whisper.text:GetText() == L["Sent"] then
+                            whisper.text:SetText(L["Whisper"])
+                        end
+                    end)
+                end
+            end)
+            row:SetScript("OnEnter", function(self)
+                local e = self.entry
+                if not e then return end
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(e.display or e.name, 1, 1, 1)
+                if e.display and e.display ~= e.name then GameTooltip:AddLine(e.name, 0.7, 0.7, 0.7) end
+                local c = (e.faction == "Alliance" and ALLY_C) or (e.faction == "Horde" and HORDE_C) or { 0.6, 0.6, 0.6 }
+                GameTooltip:AddLine(e.factionText, c[1], c[2], c[3])
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            return row
+        end
+
+        local function GroupFactions()
+            local out = {}
+            local function add(unit)
+                if not UnitExists(unit) then return end
+                local name, realm = UnitName(unit)
+                if not IsReadable(name) or name == "" then return end
+                if IsReadable(realm) and realm ~= "" then name = name .. "-" .. realm end
+                local eng, loc = UnitFactionGroup(unit)
+                if not IsReadable(eng) then eng, loc = nil, nil end
+                if eng ~= "Alliance" and eng ~= "Horde" then eng = nil end
+                local _, cf = UnitClass(unit)
+                local display = DisplayName(name, unit)
+                out[#out + 1] = {
+                    name = name,
+                    display = display,
+                    isMe = UnitIsUnit(unit, "player"),
+                    faction = eng,
+                    factionText = (IsReadable(loc) and loc ~= "" and loc) or L["Unknown"],
+                    class = IsReadable(cf) and ValidClass(cf) or nil,
+                    rank = eng == "Alliance" and 1 or (eng == "Horde" and 2 or 3),
+                    sort = FriendSortKey(display or name),
+                }
+            end
+            if IsInRaid() then
+                for i = 1, (GetNumGroupMembers() or 0) do
+                    local _, _, subgroup = GetRaidRosterInfo(i)
+                    if type(subgroup) == "number" and subgroup <= 4 then add("raid" .. i) end
+                end
+            elseif IsInGroup() then
+                add("player")
+                for i = 1, (GetNumSubgroupMembers() or 0) do add("party" .. i) end
+            end
+            table.sort(out, function(x, y)
+                if x.rank ~= y.rank then return x.rank < y.rank end
+                return x.sort < y.sort
+            end)
+            return out
+        end
+
+        local function RefreshFaction()
+            if InCombatLockdown() then return end
+            local list = GroupFactions()
+            local nA, nH = 0, 0
+            for i = 1, #list do
+                local e = list[i]
+                local row = arows[i]
+                if not row then row = MakeFactionRow(); arows[i] = row end
+                row.entry = e
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", acontent, "TOPLEFT", 0, -((i - 1) * (FA_ROW_H + FA_GAP)))
+                row:SetPoint("TOPRIGHT", acontent, "TOPRIGHT", 0, -((i - 1) * (FA_ROW_H + FA_GAP)))
+                row.nameText:SetText(e.display or e.name)
+                local c = e.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[e.class]
+                if c then row.nameText:SetTextColor(c.r, c.g, c.b, 1) else row.nameText:SetTextColor(textPri[1], textPri[2], textPri[3], 1) end
+                PaintFactionIcon(row.iconA, row.iconH, e.faction)
+                if e.faction == "Alliance" then nA = nA + 1 elseif e.faction == "Horde" then nH = nH + 1 end
+                row.whisper.text:SetText(L["Whisper"])
+                local canWhisper = not locked and not e.isMe
+                SetWidgetEnabled(row.whisper, canWhisper)
+                row.whisper:SetAlpha(canWhisper and 1 or 0.45)
+                row:Show()
+            end
+            for i = #list + 1, #arows do arows[i].entry = nil; arows[i]:Hide() end
+            acontent:SetHeight(math_max(1, #list * (FA_ROW_H + FA_GAP)))
+            factionEmpty:SetShown(#list == 0)
+            factionCount:SetText(string.format("|cff4d94ff%s %d|r   |cffe64040%s %d|r", FACTION_ALLIANCE or "Alliance", nA, FACTION_HORDE or "Horde", nH))
+        end
+
+        FA.frame, FA.scroll, FA.Refresh, FA.editor = faction, ascroll, RefreshFaction, editor
+    end
+
+    -- Deterministic order, left to right: Factions, Friends, History. Normally the
     -- main window sits between them; near a screen edge both panels move to the
     -- side that fits while preserving Friends -> History.
     PlacePanels = function(opening)
-        local fShown = friends:IsShown() or opening == "friends"
-        local hShown = hist:IsShown() or opening == "hist"
+        local show = {
+            [FA.frame] = FA.frame:IsShown() or opening == "faction",
+            [friends] = friends:IsShown() or opening == "friends",
+            [hist] = hist:IsShown() or opening == "hist",
+        }
         local left, right, screen = f:GetLeft(), f:GetRight(), UIParent:GetRight()
         local layout = "normal"
         if left and right and screen then
-            local fw = fShown and (FR_W + 4) or 0
-            local hw = hShown and (HIST_W + 4) or 0
-            if left - fw < 0 or right + hw > screen then
-                if left - fw - hw >= 0 then
-                    layout = "left"   -- Friends | History | window
-                elseif right + fw + hw <= screen then
-                    layout = "right"  -- window | Friends | History
+            local lw = (show[FA.frame] and (FA.W + 4) or 0) + (show[friends] and (FR_W + 4) or 0)
+            local rw = show[hist] and (HIST_W + 4) or 0
+            if left - lw < 0 or right + rw > screen then
+                if left - lw - rw >= 0 then
+                    layout = "left"
+                elseif right + lw + rw <= screen then
+                    layout = "right"
                 end
             end
         end
 
-        friends:ClearAllPoints()
-        hist:ClearAllPoints()
+        local function Stack(list, side)
+            local anchor = f
+            for _, panel in ipairs(list) do
+                panel:ClearAllPoints()
+                if side == "left" then
+                    panel:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, 0)
+                    panel:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMLEFT", -4, 0)
+                else
+                    panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+                    panel:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
+                end
+                if show[panel] then anchor = panel end
+            end
+        end
+
         if layout == "normal" then
             friendsOnLeft, histOnLeft = true, false
-            friends:SetPoint("TOPRIGHT", f, "TOPLEFT", -4, 0)
-            friends:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", -4, 0)
-            hist:SetPoint("TOPLEFT", f, "TOPRIGHT", 4, 0)
-            hist:SetPoint("BOTTOMLEFT", f, "BOTTOMRIGHT", 4, 0)
+            Stack({ friends, FA.frame }, "left")
+            Stack({ hist }, "right")
         elseif layout == "left" then
             friendsOnLeft, histOnLeft = true, true
-            hist:SetPoint("TOPRIGHT", f, "TOPLEFT", -4, 0)
-            hist:SetPoint("BOTTOMRIGHT", f, "BOTTOMLEFT", -4, 0)
-            local anchor = hShown and hist or f
-            friends:SetPoint("TOPRIGHT", anchor, "TOPLEFT", -4, 0)
-            friends:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMLEFT", -4, 0)
+            Stack({ hist, friends, FA.frame }, "left")
         else
             friendsOnLeft, histOnLeft = false, false
-            friends:SetPoint("TOPLEFT", f, "TOPRIGHT", 4, 0)
-            friends:SetPoint("BOTTOMLEFT", f, "BOTTOMRIGHT", 4, 0)
-            local anchor = fShown and friends or f
-            hist:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
-            hist:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
+            Stack({ FA.frame, friends, hist }, "right")
         end
     end
     PlaceFriends = function()
@@ -4040,10 +4689,11 @@ function IL:CreateFrame()
     end
     f:HookScript("OnDragStop", function() if PlacePanels then PlacePanels() end end)
 
-    -- Text button immediately to the left of History, as part of the EUI header row.
+    -- Friend List and Factions form the left-side header group, opposite
+    -- History / Share List on the right. Both use the same EUI text-button style.
     local friendsBtn = MakeButton(f, L["Friend list"])
     friendsBtn:SetSize(78, 18)
-    friendsBtn:SetPoint("RIGHT", historyBtn, "LEFT", -4, 0)
+    friendsBtn:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -29)
     friendsBtn:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
         if friends:IsShown() then
@@ -4062,6 +4712,28 @@ function IL:CreateFrame()
         GameTooltip:Show()
     end)
     friendsBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local factionBtn = MakeButton(f, L["Factions"])
+    factionBtn:SetSize(72, 18)
+    factionBtn:SetPoint("LEFT", friendsBtn, "RIGHT", 4, 0)
+    factionBtn:SetScript("OnClick", function()
+        if InCombatLockdown() or locked then return end
+        if FA.frame:IsShown() then
+            FA.frame:Hide()
+        else
+            PlacePanels("faction")
+            FA.Refresh()
+            FA.scroll:SetVerticalScroll(0)
+            FA.frame:Show()
+        end
+    end)
+    factionBtn:HookScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText(L["Factions"], 1, 1, 1)
+        GameTooltip:AddLine(L["Shows Alliance/Horde members in your group (raid groups 1 to 4) and lets you whisper each player."], 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    factionBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
 
     local friendsQueued = false
     friends:SetScript("OnEvent", function()
@@ -4083,11 +4755,35 @@ function IL:CreateFrame()
         friendsBtn.selected = nil
         friendsBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         GameTooltip:Hide()
-        if PlacePanels and hist:IsShown() then PlacePanels() end
+        if PlacePanels and (hist:IsShown() or FA.frame:IsShown()) then PlacePanels() end
+    end)
+
+    local factionQueued = false
+    FA.frame:SetScript("OnEvent", function()
+        if factionQueued then return end
+        factionQueued = true
+        C_Timer.After(0.3, function()
+            factionQueued = false
+            if FA.frame:IsShown() then FA.Refresh() end
+        end)
+    end)
+    FA.frame:SetScript("OnShow", function()
+        pcall(FA.frame.RegisterEvent, FA.frame, "GROUP_ROSTER_UPDATE")
+        pcall(FA.frame.RegisterEvent, FA.frame, "PLAYER_REGEN_ENABLED")
+        factionBtn.selected = true
+        factionBtn:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
+    end)
+    FA.frame:SetScript("OnHide", function()
+        FA.frame:UnregisterAllEvents()
+        if FA.editor then FA.editor:Hide() end
+        factionBtn.selected = nil
+        factionBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
+        GameTooltip:Hide()
+        if PlacePanels and (hist:IsShown() or friends:IsShown()) then PlacePanels() end
     end)
 
     -- Runtime settings -------------------------------------------------------
-    -- The standalone cog panel is intentionally not ported. Raid Tools options
+    -- Invite Tools settings are exposed through Raid Tools options
     -- own these settings; this block only applies them to the already-built UI.
     local function ApplyListScale(v)
         listScale = ClampScale(v)
@@ -4184,6 +4880,7 @@ function IL:CreateFrame()
             shareMenu:Hide()
             hist:Hide()
             friends:Hide()
+            if FA and FA.frame then FA.frame:Hide() end
             DisarmHistClear()
             grip:Hide()
             combatBlocker:Show()
@@ -4200,6 +4897,7 @@ function IL:CreateFrame()
     f.scroll = scroll
     f.Layout = Layout
     f.RefreshHistory = RefreshHistory
+    f.RefreshFactions = FA and FA.Refresh or nil
     f.ClearAllFocus = ClearAllFocus
     -- Anything half-typed is saved (focus loss) when the window closes.
     f:SetScript("OnHide", function()
@@ -4207,6 +4905,7 @@ function IL:CreateFrame()
         SavePosition()
         hist:Hide()
         friends:Hide()
+        if FA and FA.frame then FA.frame:Hide() end
         ClearAllFocus()
     end)
     self.frame = f
@@ -4266,10 +4965,7 @@ end
 SLASH_EUIINVITETOOLS1 = "/invlist"
 SLASH_EUIINVITETOOLS2 = "/invitelist"
 SLASH_EUIINVITETOOLS3 = "/invitetools"
-SLASH_EUIINVITETOOLS4 = "/jaca"
-SLASH_EUIINVITETOOLS5 = "/jacatools"
-SLASH_EUIINVITETOOLS6 = "/il"
-SLASH_EUIINVITETOOLS7 = "/jt"
+SLASH_EUIINVITETOOLS4 = "/il"
 SlashCmdList["EUIINVITETOOLS"] = function(msg)
     IL:UpdateDB()
     msg = (msg or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -4288,6 +4984,7 @@ ns.ToggleInviteTools = function() IL:Toggle() end
 ns.InviteToolsSetAccent = function(r, g, b) IL:SetAccent(r, g, b) end
 ns.InviteToolsSetBackground = function(r, g, b, a) IL:SetBackground(r, g, b, a) end
 ns.InviteToolsSetListBackground = function(r, g, b, a) IL:SetListBackground(r, g, b, a) end
+ns.InviteToolsSetSync = function(on) IL:SetSync(on) end
 ns.InviteToolsApplySettings = function()
     IL:UpdateDB()
     if not IL.db then return end
@@ -4310,7 +5007,10 @@ ns.InviteToolsApplySettings = function()
     end
     if f.ApplyListScale then f.ApplyListScale(IL.db.ListScale or 1) end
     if f.ApplyResizable then f.ApplyResizable(IL.db.Unlocked == true) end
+    if f.Layout then f.Layout() end
+    if f.RefreshHistory then f.RefreshHistory() end
     if f.RefreshFriends then f.RefreshFriends() end
+    if f.RefreshFactions then f.RefreshFactions() end
 end
 
 

@@ -1,8 +1,41 @@
-# Rootless SVN for Codex Cloud
+# Cloud preparation and rootless SVN
 
-The canonical EUI Cloud preparation entry point is [Python runtime](python-runtime.md).
-There is no versioned Cloud environment configuration. In the existing environment's
-setup script, resolve Python once, then run:
+Read only for confirmed Cloud setup, not routine Windows maintenance. Reuse the
+frozen [maintenance context](python-runtime.md); setup is separate from addon
+updates and does not change release selection or human checkpoints.
+
+There is no versioned Cloud environment configuration in this repository.
+Do not invent one or install tools from `update`. This local chat cannot verify
+or publish a remote Cloud environment. In Settings > Codex Cloud > Environments,
+edit the project's existing environment and ask setup to verify Python 3 and run
+`python3 .tools/python_runtime.py` (or `python .tools/python_runtime.py`). A
+successful result needs no Python installation, pip dependencies, or republishing
+solely for Python. If missing, request Python 3.12 in the reusable environment
+setup, test the preflight, and save and Publish/Republish before starting a new
+Cloud task. On the current Cloud UI this is the Install script/setup conversation;
+on legacy Cloud environments it is the Setup script/package version setting.
+
+Exact verification-only setup content when `python3` is available:
+
+```sh
+python3 .tools/python_runtime.py
+```
+
+For a Debian/Ubuntu environment verified to lack Python 3, the reusable Install
+script (legacy: Setup script) can prepare the system once:
+
+```sh
+sudo apt-get update -qq
+sudo apt-get install -y python3
+python3 .tools/python_runtime.py
+```
+
+Use environment setup to select Python 3.12 if the system package is incompatible.
+Do not apply this installation to an environment that already passes preflight.
+
+## Rootless SVN
+
+In the existing environment's setup script, reuse the resolved Python and run:
 
 ```sh
 <python_runtime> -B .tools/bootstrap_cloud_svn.py

@@ -56,8 +56,7 @@ end
 -- accessors. On ns for the same upvalue cap.
 if EllesmereUI.IS_FOREVER then
     local HAS_NAME = { name = true, levelname = true, namelevel = true, nametotarget = true, targetname = true }
-    local FORMATS = { first = "First Name", last = "Last Name", full = "First and Last" }
-    local FORMAT_ORDER = { "first", "last", "full" }
+    local FORMATS, FORMAT_ORDER = EllesmereUI.NAME_FORMAT_VALUES, EllesmereUI.NAME_FORMAT_ORDER
     function ns.UF_NameFormatRows(prefix, contentDefault, get, set, rows)
         local contentKey, formatKey = prefix .. "Content", prefix .. "NameFormat"
         table.insert(rows, 1, { type="dropdown", label="Name Format", values=FORMATS, order=FORMAT_ORDER,
@@ -67,6 +66,24 @@ if EllesmereUI.IS_FOREVER then
             disabled=function() return not HAS_NAME[get(contentKey, contentDefault)] end,
             disabledTooltip="This option only applies when the text shows a name." })
         return rows
+    end
+    -- The same slots for the Forever Essentials NAME FORMAT section, which
+    -- reads and sets every name text at once: { unit settings key, content key,
+    -- format key, text bar slot }, keys prebuilt so its reads build no strings.
+    -- Boss frames have no text bar; the other mini frames no extra text either.
+    do
+        local MAIN = { "leftText", "rightText", "centerText", "extraText", "btbLeft", "btbRight", "btbCenter" }
+        local BOSS = { "leftText", "rightText", "centerText", "extraText" }
+        local MINI = { "leftText", "rightText", "centerText" }
+        local slots = {}
+        for _, set in ipairs({ { "player", MAIN }, { "target", MAIN }, { "focus", MAIN }, { "boss", BOSS },
+                { "targettarget", MINI }, { "focustarget", MINI }, { "pet", MINI } }) do
+            for _, pre in ipairs(set[2]) do
+                slots[#slots + 1] = { unit = set[1], content = pre .. "Content", format = pre .. "NameFormat",
+                    btb = pre:sub(1, 3) == "btb" }
+            end
+        end
+        ns.UF_NAME_FORMAT_SLOTS, ns.UF_HAS_NAME = slots, HAS_NAME
     end
 else
     function ns.UF_NameFormatRows(_, _, _, _, rows) return rows end
@@ -641,6 +658,21 @@ function ns.UF_BossFrameBorderRows(W, parent, y, B, onChange)
         end
         EllesmereUI.RegisterWidgetRefresh(UpdateSw)
         UpdateSw()
+        -- Corner Radius (EllesmereUI_RoundedCorners.lua): the boss table's own,
+        -- left of the swatch; while inheriting the main frames' radius applies.
+        EllesmereUI.BuildInlineCog(rgn, {
+            title = "Corner Radius", tip = "Corner Radius",
+            disabled = function() return Inheriting() or not EllesmereUI.RoundedStyleOK(B.borderTexture) end,
+            disabledTooltip = function()
+                if Inheriting() then return NEEDS_STYLE end
+                return "This option requires the Solid, Glow or Shadow border style."
+            end,
+            rows = {
+                { type = "slider", label = "Corner Radius", min = 0, max = EllesmereUI.ROUNDED_MAX_RADIUS, step = 1,
+                  get = function() return Src().cornerRadius or 0 end,
+                  set = function(v) B.cornerRadius = v; onChange() end },
+            },
+        })
     end
     return y0 - y
 end
@@ -824,6 +856,19 @@ local function DebuffModeDropdownCfg(text, unitKey, getS, onChanged, extra)
         for k, val in pairs(extra) do cfg[k] = val end
     end
     return cfg
+end
+-- Hide Exhaustion: the Debuff Filter cog row of target, focus and boss (their
+-- filter is a single-pick mode list; the player's checkbox Debuff Filter has
+-- the same toggle as a row). s.debuffHideExhaustion, nil = on: the Bloodlust
+-- lockouts stay hidden until it is turned off (stored as false).
+local function HideExhaustionRow(getS, onChanged)
+    return { type = "toggle", label = "Hide Exhaustion",
+        tooltip = "Hides Sated, Exhaustion, Temporal Displacement and the other Bloodlust lockout debuffs.",
+        get = function() return getS().debuffHideExhaustion ~= false end,
+        set = function(v)
+            getS().debuffHideExhaustion = (not v) and false or nil
+            onChanged()
+        end }
 end
 -- The standard red empty-selection warning on the mode dropdown built by a
 -- DualRow slot (rgn._control): shown while Only Tracked Auras has no active
@@ -1929,6 +1974,7 @@ initFrame:SetScript("OnEvent", function(self)
         classPowerCustomColor= { player=true },
         classPowerBgColor    = { player=true },
         classPowerEmptyColor = { player=true },
+        foreverComboLocation = { player=true },
         showInRaid           = { player=true, target=true, focus=true },
         showInParty          = { player=true, target=true, focus=true },
         showSolo             = { player=true, target=true, focus=true },
@@ -2944,7 +2990,7 @@ initFrame:SetScript("OnEvent", function(self)
         classPowerStyleValues = classPowerStyleValues, classThemeSubOrder = classThemeSubOrder, classThemeSubValues = classThemeSubValues,
         db = db, DebuffModeDropdownCfg = DebuffModeDropdownCfg, detPortraitShapeOrder = detPortraitShapeOrder,
         detPortraitShapeValues = detPortraitShapeValues, frames = frames, GetUFOptOutline = GetUFOptOutline,
-        GROUP_UNIT_ORDER = GROUP_UNIT_ORDER, healthTextOrder = healthTextOrder, healthTextOrderBoss = healthTextOrderBoss,
+        GROUP_UNIT_ORDER = GROUP_UNIT_ORDER, HideExhaustionRow = HideExhaustionRow, healthTextOrder = healthTextOrder, healthTextOrderBoss = healthTextOrderBoss,
         healthTextOrderPlayer = healthTextOrderPlayer, healthTextOrderTargetFocus = healthTextOrderTargetFocus, healthTextValues = healthTextValues,
         MINI_GROUP_ORDER = MINI_GROUP_ORDER, optState = optState, portraitArtOrder = portraitArtOrder,
         portraitArtValues = portraitArtValues, portraitModeOrder2 = portraitModeOrder2, portraitModeValues2 = portraitModeValues2,

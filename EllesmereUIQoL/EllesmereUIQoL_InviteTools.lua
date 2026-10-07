@@ -1,16 +1,15 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 -- Invite Tools core, embedded in EllesmereUI Raid Tools.
 --
--- Everything the invite window used to borrow from a bigger addon lives here,
--- adapted from the standalone addon for the EUI module:
+-- Invite Tools core services used by the EUI module:
 --   * the look (colours and font) of the window
 --   * Raid Tools profile-backed saved variables
 --   * the themed Accept/Decline prompt used by "Share list"
 --   * a tiny event helper (no Ace libraries needed)
----@class JT
+---@class InviteTools
 local _, ns = ...
-local JT = {}
-ns.InviteTools = JT
+local InviteTools = {}
+ns.InviteTools = InviteTools
 
 local CreateFrame = CreateFrame
 local UIParent = UIParent
@@ -22,7 +21,7 @@ local L = setmetatable({}, {
         return EllesmereUI.L and EllesmereUI.L(key) or key
     end,
 })
-JT.L = L
+InviteTools.L = L
 
 ------------------------------------------------------------------------
 -- Look
@@ -31,7 +30,7 @@ JT.L = L
 -- Use the suite font pipeline so Invite Tools follows EUI typography.
 local FONT = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or STANDARD_TEXT_FONT
 
-JT.Theme = {
+InviteTools.Theme = {
     bgDark        = { 0.06, 0.08, 0.10, 0.95 }, -- EUI-style window background
     bgMedium      = { 0.084, 0.104, 0.124, 1.00 }, -- lifted plates
     border        = { 0, 0, 0, 1 },
@@ -48,7 +47,7 @@ JT.Theme = {
 }
 
 -- size: "small", "normal", "large" or a number.
-function JT:ApplyThemeFont(fontString, size)
+function InviteTools:ApplyThemeFont(fontString, size)
     if not fontString or not fontString.SetFont then return end
     local T = self.Theme
     T.fontFace = (EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("extras")) or T.fontFace or STANDARD_TEXT_FONT
@@ -72,7 +71,7 @@ local function InviteToolsChatLine(msg)
     return "|cff0cd29fEllesmereUI|r |cffffffffInvite Tools:|r " .. tostring(msg)
 end
 
-function JT:Print(msg)
+function InviteTools:Print(msg)
     EllesmereUI.Print(InviteToolsChatLine(msg))
 end
 
@@ -84,8 +83,8 @@ end
 local function InitDB()
     local get = _G._EUI_RaidTools_DB
     local root = get and get()
-    JT.db = root and root.profile and root.profile.raidTools and root.profile.raidTools.inviteTools
-    return JT.db
+    InviteTools.db = root and root.profile and root.profile.raidTools and root.profile.raidTools.inviteTools
+    return InviteTools.db
 end
 
 ------------------------------------------------------------------------
@@ -94,7 +93,7 @@ end
 
 ---@class InviteList
 local IL = {}
-JT.InviteList = IL
+InviteTools.InviteList = IL
 
 local handlers = {}
 local eventFrame = CreateFrame("Frame")
@@ -130,7 +129,7 @@ end)
 ------------------------------------------------------------------------
 -- Themed prompt (used by "Share list" when somebody offers you a list)
 --
---   JT:CreatePrompt({ title, text, acceptText, cancelText,
+--   InviteTools:CreatePrompt({ title, text, acceptText, cancelText,
 --                     acceptColor = {r,g,b}, cancelColor = {r,g,b},
 --                     onAccept = fn, onCancel = fn(reason) })
 ------------------------------------------------------------------------
@@ -152,7 +151,7 @@ local function PromptButton(parent, label, tint, bgMedium, border)
 
     b.label = b:CreateFontString(nil, "OVERLAY")
     b.label:SetPoint("CENTER")
-    JT:ApplyThemeFont(b.label, "normal")
+    InviteTools:ApplyThemeFont(b.label, "normal")
     b.label:SetText(label)
     b.label:SetTextColor(1, 1, 1, 1)
     if type(tint) == "table" then
@@ -173,7 +172,7 @@ local function PromptButton(parent, label, tint, bgMedium, border)
     return b
 end
 
-function JT:CreatePrompt(opts)
+function InviteTools:CreatePrompt(opts)
     opts = opts or {}
     if self.activePrompt then
         self.activePrompt:Hide()
@@ -205,7 +204,7 @@ function JT:CreatePrompt(opts)
 
     local function Dismiss()
         dialog:Hide()
-        if JT.activePrompt == dialog then JT.activePrompt = nil end
+        if InviteTools.activePrompt == dialog then InviteTools.activePrompt = nil end
     end
 
     -- Header: title and close button

@@ -4447,12 +4447,47 @@ local function SkinCharacterSheet()
         GameTooltip:Show()
     end
 
+    local function IsCharacterSlotMouseFocus(slot)
+        if not GetMouseFoci then
+            return slot and slot:IsMouseOver()
+        end
+
+        local foci = GetMouseFoci()
+        local focus = foci and foci[1]
+        if not focus then return false end
+
+        for _, gemFrame in ipairs(GetFFD(slot).charSocketsFrames or {}) do
+            if focus == gemFrame then
+                return true
+            end
+        end
+
+        local node = focus
+        while node and node ~= UIParent and node ~= WorldFrame do
+            if node == slot then
+                return true
+            end
+            if not node.GetParent then break end
+            node = node:GetParent()
+        end
+        return false
+    end
+
     socketHoverWatcher:SetScript("OnUpdate", function(self)
         local slot = socketHoverSlot
         if not slot or not slot:IsShown() or not slot:IsMouseOver() then
             socketHoverSlot = nil
             socketHoverGemFrame = nil
             self:Hide()
+            return
+        end
+
+        -- IsMouseOver() is purely geometric and remains true when another panel
+        -- overlaps the character slot. Only drive GameTooltip while the actual
+        -- topmost mouse focus still belongs to this slot (or one of its gem
+        -- overlays), otherwise leave the other UI's tooltip completely alone.
+        if not IsCharacterSlotMouseFocus(slot) then
+            socketHoverGemFrame = nil
             return
         end
 
