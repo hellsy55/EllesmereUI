@@ -2833,7 +2833,10 @@ initFrame:SetScript("OnEvent", function(self)
         --  CONTENT HEADER  (preview only, no dropdown)
         -------------------------------------------------------------------
         ns._bossHeaderBuilder = function(hdr, hdrW)
-            local fy = -20
+            -- Compact vertical margins; the live-updating preview reserves
+            -- additional space only when auras or castbar offsets need it.
+            local bossPad = 14
+            local fy = -bossPad
             local side = unitSide.boss or "right"
             local preview = ns.UFO_BuildUnitPreview(hdr, "boss", side)
             activePreview = preview
@@ -2844,11 +2847,16 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(preview, "TOP", hdr, "TOP", 0, (fy - initBuffTopPad) / previewScale)
             preview._lastOY = (fy - initBuffTopPad) / previewScale
             preview:Update()
-            local previewH = preview:GetHeight() * preview:GetScale()
-            local buffExtra = preview._buffExtra or 0
-            local detTopExtra = preview._detTopExtra or 0
-            fy = fy - previewH - buffExtra - detTopExtra - 20
-            preview._headerFixedH = 20 + 20
+            -- The Boss preview calculates its full vertical footprint (including
+            -- castbar offsets) and centers it in a minimum-height viewport.
+            -- Use that SAME height at first build and during live updates.
+            local previewH = preview._bossHeaderContentH
+            if not previewH then
+                previewH = preview:GetHeight() * preview:GetScale()
+                    + (preview._buffExtra or 0) + (preview._detTopExtra or 0)
+            end
+            fy = fy - previewH - bossPad
+            preview._headerFixedH = bossPad * 2
             return math.abs(fy)
         end
         EllesmereUI:SetContentHeader(ns._bossHeaderBuilder)

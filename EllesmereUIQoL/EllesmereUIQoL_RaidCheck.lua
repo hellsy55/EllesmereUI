@@ -2378,7 +2378,7 @@ local function Refresh()
             local classMissing = def.class and not on
             for mc = 1, MEMBER_COLS do
                 local h = colHeader[def.key][mc]
-                local baseAlpha = classMissing and 1 or (on and 0.8 or 0.2)
+                local baseAlpha = def.class and 1 or (on and 0.8 or 0.2)
                 h:SetAlpha(baseAlpha)
                 if h.xMark then h.xMark:SetShown(classMissing) end
                 if def.class and h._icon then

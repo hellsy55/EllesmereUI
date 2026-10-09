@@ -119,7 +119,10 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         end
     end
     do
-        local da = settings.debuffAnchor or "none"
+        -- Simple boss debuffs own their side anchor and offsets; the regular
+        -- debuff location is inactive while Simple Debuff Display is enabled.
+        local simpleBossMode = (unitKey == "boss") and ns.GetBossSimpleDebuffMode(settings) or "none"
+        local da = (simpleBossMode ~= "none") and simpleBossMode or (settings.debuffAnchor or "none")
         if da == "topleft" or da == "topright" or da == "bottomleft" or da == "bottomright" then
             local debuffH = (settings.debuffSize or 22) + 1 + 2
             initBuffExtra = initBuffExtra + debuffH
@@ -128,7 +131,13 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             end
         end
         -- Mirror the debuff Y-offset overflow reserved in pf:Update.
-        local doy = math.max(-PREVIEW_Y_CAP, math.min(PREVIEW_Y_CAP, settings.debuffOffsetY or 0))
+        local doy = settings.debuffOffsetY or 0
+        if simpleBossMode ~= "none" then
+            local _, y = ns.GetBossSimpleDebuffOffset(settings)
+            doy = y
+        elseif unitKey ~= "boss" then
+            doy = math.max(-PREVIEW_Y_CAP, math.min(PREVIEW_Y_CAP, doy))
+        end
         if da == "topleft" or da == "topright" then
             if doy > 0 then initBuffTopPad = initBuffTopPad + doy end
         elseif da == "bottomleft" or da == "bottomright" then
@@ -2873,10 +2882,15 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 local pvBtbVisible = (btbFrame and s.bottomTextBar and btbPos == "bottom")
                 local cbAnchorFrame = pvBtbVisible and btbFrame or ((pvPpIsAtt and power and power:IsShown()) and power or health)
                 local cbAnchorOff = pvBtbVisible and 0 or cbOff
+                local cbPreviewOffX = (unitKey ~= "player") and (s.castbarOffsetX or 0) or 0
+                local cbPreviewOffY = (unitKey ~= "player") and (s.castbarOffsetY or 0) or 0
+                -- Non-player live frames apply Cast Bar Offset X/Y after the base
+                -- anchor is chosen; boss frames rely on this to sit above or below
+                -- the unit frame in preview exactly as they do in game.
                 -- Icon-in-width: shift the narrowed bar half an icon width toward
                 -- the icon-free side (left icon -> right, right icon -> left) so the
                 -- footprint stays flush under the frame, as on the real frame.
-                PP.Point(castbar, "TOP", cbAnchorFrame, "BOTTOM", cbAnchorOff + (ciInWidth and (ciOnRight and -(ciIconW / 2) or (ciIconW / 2)) or 0), 0)
+                PP.Point(castbar, "TOP", cbAnchorFrame, "BOTTOM", cbAnchorOff + cbPreviewOffX + (ciInWidth and (ciOnRight and -(ciIconW / 2) or (ciIconW / 2)) or 0), cbPreviewOffY)
             else
                 castbar:Hide()
                 if castIconFrame then castIconFrame:Hide() end
@@ -3421,18 +3435,23 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             local maxDeb = s.maxDebuffs or 10
             local previewDebuffLimit = 5
             local visibleDebuffCount = math.min(#debuffIcons, maxDeb, previewDebuffLimit)
-            -- Boss preview always shows exactly 3 debuffs regardless of Max Count.
-            if unitKey == "boss" then visibleDebuffCount = math.min(#debuffIcons, 3) end
+            -- Three representative boss auras at most, but never more than the
+            -- configured Max Count (the live container honors that cap).
+            if unitKey == "boss" then visibleDebuffCount = math.min(#debuffIcons, maxDeb, 3) end
             if dAnc ~= "none" and visibleDebuffCount > 0 then
                 local debuffSize = effectiveDebuffSize
-                -- Crop never applies in simple boss mode (runtime passes nil crop
-                -- and frame-height-matches those icons).
-                local debuffCrop = (not simpleOn) and (s.debuffCropIcons or false) or false
+                -- The live aura element applies the configured crop even when
+                -- boss simple mode overrides the icon size.
+                local debuffCrop = s.debuffCropIcons or false
                 local debuffH = ns.GetAuraCropHeight(debuffCrop, debuffSize)
                 -- Boss spacing from its slider (simple display has its own key);
                 -- other units keep the 1px schematic gap.
                 local debuffGapX = (unitKey == "boss") and ns.GetBossDebuffSpacing(s, simpleOn) or (s.debuffSpacingX or 1)
                 local debuffGapY = (unitKey == "boss") and ns.GetBossDebuffSpacing(s, simpleOn) or (s.debuffSpacingY or 1)
+                -- Live aura containers always start 1 unit away from the frame;
+                -- inter-icon Spacing applies AFTER the first icon, not to this edge.
+                local frameGapX = (unitKey == "boss") and 1 or debuffGapX
+                local frameGapY = (unitKey == "boss") and 1 or debuffGapY
                 local dOffX = s.debuffOffsetX or 0
                 -- Preview mirrors the real frame's Y offset; the header below
                 -- reserves room so offset auras never overflow.
@@ -3440,10 +3459,12 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 -- Simple mode has its own X/Y offsets (falling back to the regular
                 -- debuff offsets) to match the live column.
                 if simpleOn then dOffX, dOffY = ns.GetBossSimpleDebuffOffset(s) end
-                -- Cap the preview's Y offset so it can't over-expand the preview.
-                dOffY = math.max(-PREVIEW_Y_CAP, math.min(PREVIEW_Y_CAP, dOffY))
+                -- Boss options range up to +/-200. Unlike the other preview
+                -- types, boss debuffs must use that full range to match live.
+                if unitKey ~= "boss" then
+                    dOffY = math.max(-PREVIEW_Y_CAP, math.min(PREVIEW_Y_CAP, dOffY))
+                end
                 local dg = s.debuffGrowth or "auto"
-
                 local autoGrowth = {
                     topleft = "right", topright = "left",
                     bottomleft = "right", bottomright = "left",
@@ -3451,23 +3472,39 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 }
                 local gDir = (dg == "auto") and (autoGrowth[dAnc] or "right") or dg
 
+                -- Mirror AuraContainers.ResolveLayout: horizontal flow and
+                -- vertical wrap direction are independent. Left/Right explicit
+                -- growth wraps UP; automatic side anchors wrap DOWN.
+                local growX = (gDir == "left") and -1 or 1
+                local growY = (dg == "auto" or simpleOn)
+                    and ((dAnc == "topleft" or dAnc == "topright") and 1 or -1)
+                    or ((dg == "down") and -1 or 1)
+                if simpleOn then growX = (simpleMode == "right") and 1 or -1; growY = -1 end
+
+                -- AuraKit's Max Per Row overrides the single-column rule for
+                -- explicit vertical growth. Mirror ResolveColumns's precedence.
+                local maxPerRow = s.debuffMaxPerRow
+                local cols
+                if unitKey == "boss" and maxPerRow and maxPerRow >= 1 and maxPerRow < maxDeb then
+                    cols = math.floor(maxPerRow)
+                elseif not simpleOn and (dg == "up" or dg == "down") then
+                    cols = 1
+                end
+                local shownCols = cols or visibleDebuffCount
+                local shownRows = math.ceil(visibleDebuffCount / shownCols)
+                local dx = growX * (debuffSize + debuffGapX)
+                local dy = growY * (debuffH + debuffGapY)
+
                 local anchorMap = {
-                    topleft     = { pt = "TOPLEFT",     ox = dOffX,                         oy = debuffGapY + dOffY },
-                    topright    = { pt = "TOPRIGHT",    ox = dOffX,                         oy = debuffGapY + dOffY },
-                    bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,                         oy = -(debuffH + debuffGapY) + dOffY },
-                    bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,                         oy = -(debuffH + debuffGapY) + dOffY },
-                    left        = { pt = "LEFT",        ox = -(debuffGapX) + dOffX,         oy = dOffY },
-                    right       = { pt = "RIGHT",       ox = debuffGapX + dOffX,            oy = dOffY },
+                    topleft     = { pt = "TOPLEFT",     ox = dOffX,               oy = frameGapY + dOffY },
+                    topright    = { pt = "TOPRIGHT",    ox = dOffX,               oy = frameGapY + dOffY },
+                    bottomleft  = { pt = "BOTTOMLEFT",  ox = dOffX,               oy = -(debuffH + frameGapY) + dOffY },
+                    bottomright = { pt = "BOTTOMRIGHT", ox = dOffX,               oy = -(debuffH + frameGapY) + dOffY },
+                    left        = { pt = "LEFT",        ox = -frameGapX + dOffX, oy = dOffY },
+                    right       = { pt = "RIGHT",       ox = frameGapX + dOffX,  oy = dOffY },
                 }
                 local am = anchorMap[dAnc] or anchorMap.bottomleft
-                if blizzG then pf._blizzInset(am, dAnc, blizzG, blizzMirror) end
-
-                local dx, dy = 0, 0
-                if gDir == "right" then dx = debuffSize + debuffGapX
-                elseif gDir == "left" then dx = -(debuffSize + debuffGapX)
-                elseif gDir == "up" then dy = debuffH + debuffGapY
-                elseif gDir == "down" then dy = -(debuffH + debuffGapY)
-                else dx = debuffSize + debuffGapX end
+                if blizzG and not simpleOn then pf._blizzInset(am, dAnc, blizzG, blizzMirror) end
 
                 local justH = "BOTTOMLEFT"
                 if dAnc == "topright" or dAnc == "bottomright" then
@@ -3478,17 +3515,13 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                     justH = "LEFT"
                 end
 
-                -- Boss Simple Debuff Display: anchor the stack to the health bar's
-                -- top (not pf, which includes the cast bar) so icons align with the
-                -- bar area, matching the runtime layout.
+                -- Live simple debuffs use the boss FRAME's top edge (not the
+                -- health texture), with the user offset and NO extra edge gap.
                 local useSimpleBossAnchor = simpleOn
-                local bossSimpleAnchorFrame = useSimpleBossAnchor and health or pf
-                -- Simple mode side: Left pins the column to the frame's left edge
-                -- (icons grow left), Right pins to the right edge (icons grow right).
+                local bossSimpleAnchorFrame = pf
                 local simpleIconPt   = (simpleMode == "right") and "TOPLEFT"  or "TOPRIGHT"
                 local simpleParentPt = (simpleMode == "right") and "TOPRIGHT" or "TOPLEFT"
-                local simpleEdgeSign = (simpleMode == "right") and 1 or -1
-                local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. dOffX .. "gx" .. debuffGapX .. "gy" .. debuffGapY .. "z" .. (s.debuffIconZoom or 0.07)
+                local anchorKey = justH .. am.pt .. am.ox .. am.oy .. dx .. dy .. debuffSize .. debuffH .. (useSimpleBossAnchor and "S" or "N") .. simpleMode .. dOffX .. dOffY .. "c" .. shownCols .. "r" .. shownRows .. "gx" .. debuffGapX .. "gy" .. debuffGapY .. "z" .. (s.debuffIconZoom or 0.07)
                 for i, df in ipairs(debuffIcons) do
                     if i <= visibleDebuffCount then
                         if df._anchorKey ~= anchorKey then
@@ -3497,17 +3530,19 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                             df:ClearAllPoints()
                             if i == 1 then
                                 if useSimpleBossAnchor then
-                                    PP.Point(df, simpleIconPt, bossSimpleAnchorFrame, simpleParentPt, simpleEdgeSign * debuffGapX + dOffX, dOffY)
+                                    PP.Point(df, simpleIconPt, bossSimpleAnchorFrame, simpleParentPt, dOffX, dOffY)
                                 else
                                     -- Left/Right center on barArea only, not pf (which
                                     -- includes the cast bar), as on the real frames.
                                     PP.Point(df, justH, (dAnc == "left" or dAnc == "right") and barArea or pf, am.pt, am.ox, am.oy)
                                 end
                             else
+                                local col = (i - 1) % shownCols
+                                local row = math.floor((i - 1) / shownCols)
                                 if useSimpleBossAnchor then
-                                    PP.Point(df, simpleIconPt, debuffIcons[1], simpleIconPt, simpleEdgeSign * (i - 1) * (debuffSize + debuffGapX), 0)
+                                    PP.Point(df, simpleIconPt, debuffIcons[1], simpleIconPt, dx * col, dy * row)
                                 else
-                                    PP.Point(df, justH, debuffIcons[1], justH, dx * (i - 1), dy * (i - 1))
+                                    PP.Point(df, justH, debuffIcons[1], justH, dx * col, dy * row)
                                 end
                             end
                             df._anchorKey = anchorKey
@@ -3518,17 +3553,25 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                     end
                 end
 
-                -- Reserve debuff height only for top/bottom anchors; Left/Right
-                -- columns grow sideways and need no vertical room.
-                local debuffGap2 = 1
+                -- Reserve the actual rows when AuraKit wraps them away from
+                -- the frame; side anchors also need overflow room for wraps.
+                local rowExtension = (shownRows - 1) * (debuffH + debuffGapY)
                 if dAnc == "topleft" or dAnc == "topright" or dAnc == "bottomleft" or dAnc == "bottomright" then
-                    debuffExtra = debuffH + debuffGap2 + 2
+                    debuffExtra = debuffH + 3
+                    if (dAnc == "topleft" or dAnc == "topright") and growY == 1
+                        or (dAnc == "bottomleft" or dAnc == "bottomright") and growY == -1 then
+                        debuffExtra = debuffExtra + rowExtension
+                    end
+                elseif growY == 1 then
+                    auraTopOv = auraTopOv + rowExtension
+                else
+                    auraBotOv = auraBotOv + rowExtension
                 end
                 -- The stack's lowest visible icon edge below the art (a
                 -- downward column adds its rows), for the cast bar under it.
                 if dAnc == "bottomleft" or dAnc == "bottomright" then
-                    debuffDrop = debuffH + debuffGapY - dOffY
-                    if gDir == "down" then debuffDrop = debuffDrop + (visibleDebuffCount - 1) * (debuffH + debuffGapY) end
+                    debuffDrop = debuffH + frameGapY - dOffY
+                    if growY == -1 then debuffDrop = debuffDrop + rowExtension end
                 end
                 -- Reserve Y-offset overflow beyond the footprint (see the buff block).
                 if dAnc == "topleft" or dAnc == "topright" then
@@ -3868,9 +3911,39 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         end
         auraTopPad = auraTopPad + detTopExtra
 
-        -- Reposition pf vertically based on aura padding
+        -- Calculate the vertical footprint before positioning the preview.
+        -- Boss castbar offsets can put the castbar ABOVE the health bar (or far
+        -- below it).  Those parts were never included in the header's bounds.
+        local auraExtra = buffExtra + debuffExtra + auraBotOv
+        if blizzBelow then auraExtra = auraExtra + cbStrip end
+        pf._buffExtra = auraExtra
+        pf._detTopExtra = detTopExtra
+        local parentTH = th * combinedScale
+        local cpBottomScaled = cpBottomH * combinedScale
+        local bodyH = parentTH + auraExtra + auraTopOv + detTopExtra + cpBottomScaled
+        local bossCastTopExtra, bossCastBottomExtra = 0, 0
+        if unitKey == "boss" and ch > 0 then
+            -- The castbar is anchored to the bottom of the body.  Account for
+            -- offsets in PREVIEW pixels, not just the castbar's nominal height.
+            local anchorDepth = bh2 + btbTopOff
+            local castTop = ((s.castbarOffsetY or 0) - anchorDepth) * combinedScale
+            local castBottom = (anchorDepth - (s.castbarOffsetY or 0) + ch) * combinedScale
+            bossCastTopExtra = math.max(0, castTop - auraTopPad)
+            bossCastBottomExtra = math.max(0, castBottom - parentTH - auraExtra)
+            bodyH = bodyH + bossCastTopExtra + bossCastBottomExtra
+        end
+        -- Keep the Boss Frames viewport compact while centering the layout.
+        -- Large aura/castbar offsets still expand it instead of being clipped.
+        local bossContentH
+        local centerPad = 0
+        if unitKey == "boss" then
+            bossContentH = math.max(120, bodyH)
+            centerPad = (bossContentH - bodyH) / 2
+            pf._bossHeaderContentH = bossContentH
+        end
+
         local baseOY = pf._headerDropdownOY or 25
-        local pfOY = -(baseOY + auraTopPad) / combinedScale
+        local pfOY = -(baseOY + auraTopPad + bossCastTopExtra + centerPad) / combinedScale
         if pf._lastOY ~= pfOY then
             pf:ClearAllPoints()
             PP.Point(pf, "TOP", pf:GetParent(), "TOP", 0, pfOY)
@@ -3880,20 +3953,12 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         -- Notify UpdateContentHeaderHeight of the height change; it compensates scroll
         -- position so the widget the user is interacting with stays put as the
         -- preview grows/shrinks. auraBotOv clears auras pushed below their footprint.
-        local auraExtra = buffExtra + debuffExtra + auraBotOv
-        -- Blizzard Style: the cast bar strip under the bottom stacks.
-        if blizzBelow then auraExtra = auraExtra + cbStrip end
-        pf._buffExtra = auraExtra
-        pf._detTopExtra = detTopExtra
-        local parentTH = th * combinedScale
-        local cpBottomScaled = cpBottomH * combinedScale
         local hintH = 0
         if optState._ufPreviewHintFS_display and optState._ufPreviewHintFS_display:IsShown() then hintH = 29 end
         local fixedH = pf._headerFixedH or 0
         if fixedH > 0 then
-            -- The preview slid down by auraTopOv, so the section must grow by it
-            -- too or it overlaps the next section.
-            EllesmereUI:UpdateContentHeaderHeight(fixedH + parentTH + auraExtra + auraTopOv + detTopExtra + cpBottomScaled + hintH)
+            local contentH = bossContentH or bodyH
+            EllesmereUI:UpdateContentHeaderHeight(fixedH + contentH + hintH)
         end
         -- Reposition segmented pill below the preview when height changes
         if pf._segFrame then

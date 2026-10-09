@@ -1305,7 +1305,25 @@ function IL:PLAYER_REGEN_ENABLED()
         local queued = self.pendingSync
         self.pendingSync = {}
         if self:SyncOn() then
-            for _, r in ipairs(queued) do self:ApplySyncDelta(r.kind, r.sender, r.payload) end
+            -- A batch may add and remove the same name while in combat.
+            -- Show the panel only when the final list differs from its starting state.
+            local old = self.names or ParseList(self:GetListText(1))
+            local oldCount, oldSet = #old, {}
+            for _, name in ipairs(old) do oldSet[name:lower()] = true end
+            local changed = false
+            for _, r in ipairs(queued) do
+                if self:ApplySyncDelta(r.kind, r.sender, r.payload) then changed = true end
+            end
+            if changed then
+                local current = self.names or ParseList(self:GetListText(1))
+                local differs = #current ~= oldCount
+                if not differs then
+                    for _, name in ipairs(current) do
+                        if not oldSet[name:lower()] then differs = true break end
+                    end
+                end
+                if differs and not (self.frame and self.frame:IsShown()) then self:Toggle() end
+            end
         end
     end
     self:ScheduleSyncCheck()
@@ -1830,8 +1848,8 @@ end
 function IL:OnSyncEmpty(sender, channel)
     if channel ~= "WHISPER" or not self:SyncOn() or self:HasBase() then return end
     if GetTime() > self.syncWanted or not self:IsLeaderName(sender) then return end
+    -- A leader's empty baseline does not need to open Invite Tools.
     self.syncBase = true
-    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
 end
 
 local function ShortSender(sender)
@@ -1856,7 +1874,7 @@ function IL:ApplyRemoval(sender, name)
             self:RecordJoin(n, "removed", nil, "leader", ShortSender(sender))
             self:SaveNames()
             if self.frame and self.frame.Layout then self.frame.Layout() end
-            return
+            return true
         end
     end
 end
@@ -1868,21 +1886,22 @@ function IL:ApplyAdd(sender, payload)
     end
     if #list == 0 then return end
     local added = self:MergeNames(list)
-    if added <= 0 then return end
+    return added > 0
 end
 
 function IL:ApplyClear(sender)
     if #(self.names or ParseList(self:GetListText(1))) == 0 then return end
     self:ClearList("cleared", ShortSender(sender))
+    return true
 end
 
 function IL:ApplySyncDelta(kind, sender, payload)
     if kind == "X" then
-        self:ApplyRemoval(sender, payload)
+        return self:ApplyRemoval(sender, payload)
     elseif kind == "N" then
-        self:ApplyAdd(sender, payload)
+        return self:ApplyAdd(sender, payload)
     elseif kind == "C" then
-        self:ApplyClear(sender)
+        return self:ApplyClear(sender)
     end
 end
 
@@ -1895,13 +1914,13 @@ function IL:OnSyncDelta(kind, sender, payload, channel)
         return
     end
     if kind ~= "C" and not ValidName(kind == "N" and (payload:match("^[^,]+") or "") or payload) then return end
-    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
     if InCombatLockdown() then
         local q = self.pendingSync
         if #q < 60 then q[#q + 1] = { kind = kind, sender = sender, payload = payload } end
         return
     end
-    self:ApplySyncDelta(kind, sender, payload)
+    if self:ApplySyncDelta(kind, sender, payload)
+        and not (self.frame and self.frame:IsShown()) then self:Toggle() end
 end
 
 -- mode: "GROUP", "GUILD" or "TARGET". Returns true, or false and a reason.
@@ -1998,7 +2017,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
         if type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
         count = tonumber(count)
         if not count or count < 1 or count > SHARE_MAX_NAMES then return end
-        if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+        -- Wait for the complete baseline before deciding whether to show the panel.
         self:AcceptShare({
             sender = sender, id = id, count = count, auto = true, sync = true,
             classFile = ClassOf(sender, classFile),
@@ -2084,11 +2103,8 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
         if ok and ignored then return end
     end
 
-    -- A valid incoming shared-list offer brings Invite Tools to the foreground
-    -- immediately, before the confirmation popup or trusted auto-accept path.
-    if not (self.frame and self.frame:IsShown()) then
-        self:Toggle()
-    end
+    -- Show the confirmation popup without opening the panel. The panel is
+    -- opened only after a received list actually changes our saved names.
 
     -- Auto-accept from trusted group leadership, or from Guild Master / Officer
     -- when the offer itself arrived through the guild channel.
@@ -2253,6 +2269,7 @@ function IL:OnShareData(sender, id, i, n, payload)
     -- the incoming list are recorded in History with the sender as the reason.
     -- If both sets are identical, keep the current statuses/session untouched.
     local replaced
+    local listChanged = false
     do
         local fresh, nFresh = {}, 0
         for _, name in ipairs(names) do
@@ -2270,6 +2287,7 @@ function IL:OnShareData(sender, id, i, n, payload)
             end
         end
         if nFresh > 0 and not same then
+            listChanged = true
             local by = ShortName(a.sender)
             replaced = 0
             for _, name in ipairs(old) do
@@ -2280,6 +2298,7 @@ function IL:OnShareData(sender, id, i, n, payload)
     end
 
     local added, duplicates, mine = self:MergeNames(names)
+    if listChanged and not (self.frame and self.frame:IsShown()) then self:Toggle() end
     -- Tell a current sender exactly what its list did here. Older senders
     -- ignore this packet.
     if not a.sync then SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names) end
