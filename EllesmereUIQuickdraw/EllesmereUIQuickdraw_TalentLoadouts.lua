@@ -303,6 +303,183 @@ local function ResolveActiveLoadoutName()
 end
 ns.GetActiveTalentLoadoutName = ResolveActiveLoadoutName
 
+-------------------------------------------------------------------------------
+-- Optional NSRT shared-note check. Only compare plain SavedVariables names:
+-- no encounter/unit tokens, protected combat data or talent changes involved.
+-- Normalize punctuation so Nek'zali/Nekzali and Kith'ix/Kithix agree.
+-------------------------------------------------------------------------------
+local NSRT_BOSSES = {
+    { name = "Nek'zali",          aliases = { "nekzali" } },
+    { name = "Lost Explorers",    aliases = { "lostexplorers", "explorers" } },
+    { name = "Sszorak",           aliases = { "sszorak" } },
+    { name = "Entombed Sentinels",aliases = { "entombedsentinels", "sentinels" } },
+    { name = "Vashnik",           aliases = { "vashnik" } },
+    { name = "Twin Fangs",        aliases = { "twinfangs" } },
+    { name = "Coiled Altar",      aliases = { "coiledaltar" } },
+    { name = "Ula'tek",           aliases = { "ulatek" } },
+    { name = "Nymrissa",          aliases = { "nymrissa" } },
+    { name = "Kith'ix",           aliases = { "kithix" } },
+}
+
+local function BossesInName(value)
+    local result, seen = {}, {}
+    if type(value) ~= "string" or value == "" then return result end
+    local folded = value:lower():gsub("[^%w]", "")
+    for _, boss in ipairs(NSRT_BOSSES) do
+        for _, alias in ipairs(boss.aliases) do
+            if folded:find(alias, 1, true) then
+                if not seen[boss.name] then
+                    seen[boss.name] = true
+                    result[#result + 1] = boss.name
+                end
+                break
+            end
+        end
+    end
+    return result
+end
+
+local function NSRTCheckEnabled()
+    local p = ns.Profile and ns.Profile()
+    return p and p.nsrtLoadoutCheckEnabled == true
+end
+
+local function NSRTSoundEnabled()
+    local p = ns.Profile and ns.Profile()
+    return p and p.nsrtLoadoutMismatchSoundEnabled == true
+end
+
+-- Use the same curated sound list and LibSharedMedia entries as other EUI
+-- sound selectors. Preview and runtime playback share this resolver.
+local function PlayNSRTCheckSound(key)
+    if not key or key == "none" then return end
+    if not (EllesmereUI and EllesmereUI.BuildAlertSoundTables) then return end
+    local paths, names, order = EllesmereUI.BuildAlertSoundTables()
+    if EllesmereUI.AppendSharedMediaSounds then
+        EllesmereUI.AppendSharedMediaSounds(paths, names, order)
+    end
+    local value = paths[key]
+    if not value or value == 1 then return end
+    if EllesmereUI._PlayLSMSound then
+        EllesmereUI._PlayLSMSound(value)
+    elseif type(value) == "number" then
+        PlaySound(value, "Master")
+    elseif type(value) == "string" then
+        PlaySoundFile(value, "Master")
+    end
+end
+ns.PlayNSRTCheckSound = PlayNSRTCheckSound
+
+-- Third return value: individual status for each active TLEx entry, so the
+-- ready-check atlas is displayed immediately after THAT entry's name.
+-- No icon/sound is emitted for unknown notes, absent TLEx data, or names
+-- without any of the known bosses. An exact boss overlap is required.
+local function GetNSRTLoadoutCheck(active)
+    local nsrt = _G.NSRT
+    if type(nsrt) ~= "table" then
+        return "unknown", "NSRT: addon not loaded"
+    end
+    local note = nsrt.ActiveReminder
+    if type(note) ~= "string" or note == "" then
+        return "unknown", "NSRT: no shared note loaded"
+    end
+    local noteBosses = BossesInName(note)
+    if #noteBosses == 0 then
+        return "unknown", "NSRT: boss not recognized in shared note (" .. note .. ")"
+    end
+
+    -- Multiple TLEx names can resolve to identical active talents. The global
+    -- outcome is MATCH if ANY matching build name mentions the same boss as
+    -- the NSRT note; other named builds retain their individual X icons.
+    if active == nil then active = ResolveActiveLoadoutEntries() end
+    if not active or #active == 0 then
+        return "unknown", "NSRT: no matching active TLEx loadout"
+    end
+    local notes = {}
+    for _, boss in ipairs(noteBosses) do notes[boss] = true end
+    local perEntry, anyMatch, recognized, loadoutSeen, loadoutBosses = {}, false, false, {}, {}
+    for i, entry in ipairs(active) do
+        local entryBosses = BossesInName(entry.name)
+        if #entryBosses > 0 then
+            recognized = true
+            local matchedBoss
+            for _, boss in ipairs(entryBosses) do
+                if not loadoutSeen[boss] then
+                    loadoutSeen[boss] = true
+                    loadoutBosses[#loadoutBosses + 1] = boss
+                end
+                if notes[boss] then matchedBoss = boss end
+            end
+            perEntry[i] = matchedBoss and "match" or "mismatch"
+            if matchedBoss then anyMatch = matchedBoss end
+        end
+    end
+    if not recognized then
+        return "unknown", "NSRT: boss not recognized in active TLEx loadout"
+    end
+    if anyMatch then
+        return "match", "NSRT: MATCH - " .. anyMatch, perEntry
+    end
+    return "mismatch", "NSRT: MISMATCH - note: " .. table.concat(noteBosses, ", ")
+        .. " / loadout: " .. table.concat(loadoutBosses, ", "), perEntry
+end
+ns.GetNSRTLoadoutCheck = GetNSRTLoadoutCheck
+
+-- Dungeons use the saved TLEx loadout NAME, without consulting NSRT or
+-- encounter data.  IsInInstance() reports "party" for dungeon instances of
+-- every difficulty (including normal, heroic, M0 and Mythic+).
+local function InDungeonInstance()
+    local inInstance, instanceType = IsInInstance()
+    return inInstance and instanceType == "party"
+end
+
+local function HasDungeonLoadoutMarker(value)
+    if type(value) ~= "string" then return false end
+    local upper = value:upper()
+    -- Plain string searches: '+' is NOT a Lua-pattern quantifier here.
+    return upper:find("M+", 1, true) ~= nil
+        or upper:find("M0", 1, true) ~= nil
+end
+
+local function GetDungeonLoadoutCheck(active)
+    if active == nil then active = ResolveActiveLoadoutEntries() end
+    if not active or #active == 0 then
+        return "unknown", "Dungeon: no matching active TLEx loadout"
+    end
+
+    -- An applied talent build can match multiple saved names. Keep each
+    -- name's own status, but regard the active build as compatible if ANY
+    -- matching saved name contains M+ or M0.
+    local statuses, names, hasMatch = {}, {}, false
+    for i, entry in ipairs(active) do
+        local name = entry.name
+        if type(name) == "string" and name ~= "" then
+            local matched = HasDungeonLoadoutMarker(name)
+            statuses[i] = matched and "match" or "mismatch"
+            names[#names + 1] = name
+            if matched then hasMatch = true end
+        end
+    end
+    if #names == 0 then
+        return "unknown", "Dungeon: active TLEx loadout has no name"
+    end
+    if hasMatch then
+        return "match", "Dungeon: MATCH - active loadout contains M+ or M0", statuses
+    end
+    return "mismatch", "Dungeon: MISMATCH - active loadout missing M+ or M0 ("
+        .. table.concat(names, ", ") .. ")", statuses
+end
+ns.GetDungeonLoadoutCheck = GetDungeonLoadoutCheck
+
+-- The raid/other-instance behavior remains NSRT-based. Dungeon validation
+-- never reads the NSRT note (it also works without that addon installed).
+local function GetContextLoadoutCheck(active)
+    if InDungeonInstance() then return GetDungeonLoadoutCheck(active) end
+    return GetNSRTLoadoutCheck(active)
+end
+ns.GetContextLoadoutCheck = GetContextLoadoutCheck
+
+
 function ns.IsMacrotextSlotActive(slot)
     local name = slot and slot.talentLoadoutName
     if not name then return false end
@@ -333,11 +510,11 @@ end
 
 -------------------------------------------------------------------------------
 --  On-screen loadout announcement -- a plain, oversized text reminder of
---  which saved TalentLoadoutsEx loadout is active. Shown when a ready check
---  fires (so the reminder lands right when it matters, before a pull) and
---  whenever the player's applied talent/loadout state actually changes, no
---  matter whether that change came from TalentLoadoutsEx or Blizzard's talent
---  UI. The mirrored palette's pips already answer "which loadouts match what I
+--  which saved TalentLoadoutsEx loadout is active. Shown on ready checks,
+--  when the player's applied talent/loadout state changes, and for the first
+--  five seconds of a player pull countdown on a context-specific mismatch.
+--  The display is always hidden on entering combat and can never reopen
+--  until combat ends. The mirrored palette's pips answer "which loadouts match what I
 --  have applied" on demand; this pushes the full resolved set to the player
 --  without them having to open Quickdraw to look.
 --
@@ -345,8 +522,9 @@ end
 --  timer and not a throttle on talent swaps: a ready check fires the
 --  announcement, but if another one lands before the configured number of
 --  minutes has passed since the last ready-check pop, it is silently skipped.
---  An actual talent/loadout change always gets its own pop and uses the same
---  Text Duration setting as ready checks.
+--  An actual talent/loadout change gets its own pop using the same Text
+--  Duration as ready checks. Pull-specific mismatch pops bypass Repeat Every
+--  and use a fixed 5-second duration, subject to the combat hide rule.
 --
 --  Font size, on-screen duration, the cooldown length and the master on/off
 --  all live in the profile (read through ns.Profile(), the same accessor
@@ -449,7 +627,12 @@ local function EnsureAnnounceRow(f, i)
 
     row.text = row:CreateFontString(nil, "OVERLAY")
     row.text:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
-    row.text:SetTextColor(1, 1, 1, 1) -- always white, independent of the pip's color
+    row.text:SetTextColor(1, 1, 1, 1)
+
+    -- Same native green check/red X atlases used by EUI Raid Frames' ready check.
+    row.status = row:CreateTexture(nil, "OVERLAY")
+    row.status:SetPoint("LEFT", row.text, "RIGHT", 5, 0)
+    row.status:Hide()
 
     f.rows[i] = row
     return row
@@ -475,6 +658,18 @@ local function ApplyAnnounceStyle(f, entries)
         ApplyAnnounceIcon(row.icon, entry.icon)
         row.text:SetFont(fontPath, size, "OUTLINE")
         row.text:SetText(entry.name)
+        row.text:SetTextColor(1, 1, 1, 1)
+        local status = entry.nsrtStatus
+        local statusWidth = 0
+        if status == "match" or status == "mismatch" then
+            row.status:SetSize(size, size)
+            row.status:SetAtlas(status == "match" and "UI-LFG-ReadyMark-Raid"
+                or "UI-LFG-DeclineMark-Raid")
+            row.status:Show()
+            statusWidth = size + 5
+        else
+            row.status:Hide()
+        end
 
         row:ClearAllPoints()
         if i == 1 then
@@ -483,7 +678,7 @@ local function ApplyAnnounceStyle(f, entries)
             row:SetPoint("TOP", f.rows[i - 1], "BOTTOM", 0, -rowGap)
         end
 
-        local w = size + 8 + row.text:GetStringWidth()
+        local w = size + 8 + row.text:GetStringWidth() + statusWidth
         row:SetWidth(w)
         if w > maxWidth then maxWidth = w end
         row:Show()
@@ -504,40 +699,98 @@ end
 local lastReadyCheckShownAt
 local lastEntries
 local announceHideTimer
-local function ShowLoadoutAnnouncement(fromTalentChange)
-    if not AnnounceEnabled() then return end -- master switch, off by default
 
-    local now
-    if not fromTalentChange then
-        now = GetTime()
+-- An ordinary, non-secure display. Combat always takes precedence over
+-- ready checks, pull countdowns, talent changes, callbacks and diagnostics.
+local announcementCombat = InCombatLockdown and InCombatLockdown() or false
+local function AnnouncementInCombat()
+    return announcementCombat or (InCombatLockdown and InCombatLockdown())
+end
+local function HideLoadoutAnnouncement()
+    if announceHideTimer then
+        announceHideTimer:Cancel()
+        announceHideTimer = nil
+    end
+    if announceFrame then announceFrame:Hide() end
+end
+
+-- Audio is evaluated ONLY when a ready check or player pull countdown starts.
+-- Refreshes from the CURRENT TLEx talents and NSRT note at trigger time;
+-- talent swaps, note changes, manual diagnostics and text redraws stay silent.
+local function WarnNSRTMismatchOnRaidPrompt()
+    if not NSRTCheckEnabled() or not NSRTSoundEnabled() then return end
+    -- Only sound inside an actual raid instance. A raid group in the open
+    -- world, a dungeon or a PvP instance must never trigger this alert.
+    -- Keep the manual options sound preview independent of this restriction.
+    local inInstance, instanceType = IsInInstance()
+    if not inInstance or instanceType ~= "raid" then return end
+    InvalidateActiveLoadout()
+    if GetNSRTLoadoutCheck() ~= "mismatch" then return end
+    local p = ns.Profile and ns.Profile()
+    PlayNSRTCheckSound((p and p.nsrtLoadoutMismatchSoundKey) or "robotblip")
+end
+
+local function ShowLoadoutAnnouncement(fromTalentChange, forPullCountdown)
+    -- Never expose loadout text in combat, even if a previously scheduled
+    -- callback or option toggle attempts to display it after combat starts.
+    if AnnouncementInCombat() then
+        HideLoadoutAnnouncement()
+        return
+    end
+    if not AnnounceEnabled() then return end
+
+    -- The pull reminder is distinct from the existing ready-check/talent
+    -- reminder: it ignores Repeat Every, requires a mismatch for the current
+    -- instance type (NSRT in raids; M+/M0 in dungeons), and
+    -- lasts exactly five seconds rather than using Text Duration.
+    local now = GetTime()
+    if not fromTalentChange and not forPullCountdown then
         local cooldown = AnnounceCooldownSeconds()
-        if cooldown > 0 and lastReadyCheckShownAt
-           and (now - lastReadyCheckShownAt) < cooldown then
-            -- Too soon since the last READY-CHECK pop: silently skip this one.
-            -- Talent/loadout changes bypass this throttle so the new active
-            -- build is always shown immediately when it settles.
+        if cooldown > 0 and lastReadyCheckShownAt ~= nil
+            and (now - lastReadyCheckShownAt) < cooldown then
             return
         end
     end
 
-    -- Every saved entry the CURRENT talents match: a build shared across two
-    -- differently-named/iconed loadouts announces all of them, one paragraph
-    -- each.  The Quickdraw ring uses the same full set for its pips.
-    local entries = ResolveActiveLoadoutEntries()
-    if not entries then return end -- nothing saved/resolvable to announce
+    local active = ResolveActiveLoadoutEntries()
+    local status, perEntry
+    if NSRTCheckEnabled() then
+        local _, _, statuses
+        status, _, statuses = GetContextLoadoutCheck(active)
+        perEntry = statuses
+    end
+    if forPullCountdown and status ~= "mismatch" then
+        -- A preceding ready-check message must not linger into a pull whose
+        -- current loadout is correct or whose note cannot be verified.
+        HideLoadoutAnnouncement()
+        return
+    end
+    if not active then return end
 
-    if not fromTalentChange then lastReadyCheckShownAt = now end
+    -- Preserve multiple active TLEx entries, with an individual check/X next
+    -- to each name rather than a separate NSRT status line.
+    local entries = {}
+    for i, entry in ipairs(active) do
+        entries[#entries + 1] = {
+            name = entry.name,
+            icon = entry.icon,
+            nsrtStatus = perEntry and perEntry[i] or nil,
+        }
+    end
+    if #entries == 0 then return end
+
+    if not fromTalentChange and not forPullCountdown then
+        lastReadyCheckShownAt = now
+    end
     lastEntries = entries
 
     local f = EnsureAnnounceFrame()
     ApplyAnnounceStyle(f, entries)
+    -- The combat state may have changed while checking the TLEx names.
+    if AnnouncementInCombat() then HideLoadoutAnnouncement(); return end
     f:Show()
 
-    -- One duration source for every on-screen loadout pop. AnnounceDuration()
-    -- reads profile.loadoutTextDuration, i.e. the exact "Text Duration (sec)"
-    -- slider under On-Screen Loadout Text, regardless of whether this show was
-    -- triggered by READY_CHECK or by a talent/loadout change.
-    local duration = AnnounceDuration()
+    local duration = forPullCountdown and 5 or AnnounceDuration()
     if announceHideTimer then announceHideTimer:Cancel() end
     announceHideTimer = C_Timer.NewTimer(duration, function()
         announceHideTimer = nil
@@ -546,6 +799,37 @@ local function ShowLoadoutAnnouncement(fromTalentChange)
 end
 ns.ShowLoadoutAnnouncement = ShowLoadoutAnnouncement
 
+-- A manual diagnostic also works while the on-screen text is disabled.
+-- This is intentionally read-only and safe to invoke in combat.
+SLASH_EUIQUICKDRAWNSRTCHECK1 = "/eui-nsrt-check"
+SlashCmdList["EUIQUICKDRAWNSRTCHECK"] = function()
+    local status, message = GetContextLoadoutCheck()
+    local color = status == "match" and "|cff40ff6b"
+        or status == "mismatch" and "|cffff4d4d" or "|cffffc74d"
+    print("|cff0cd29fEllesmereUI Quickdraw|r: " .. color .. message .. "|r")
+    if NSRTCheckEnabled() and AnnounceEnabled() then
+        ShowLoadoutAnnouncement(true)
+    end
+end
+
+-- Register through NSRT's public CallbackHandler API (dot-call; the first
+-- argument is our unique callback owner). The callback is fired by SetReminder,
+-- including playlist changes and unloading notes.
+local nsrtCallbackRegistered = false
+local function RegisterNSRTNoteCallback()
+    if nsrtCallbackRegistered then return end
+    local api = _G.NSAPI
+    if not api or type(api.RegisterCallback) ~= "function" then return end
+    api.RegisterCallback("EllesmereUIQuickdraw", "NSRT_REMINDER_CHANGED", function()
+        C_Timer.After(0, function()
+            if NSRTCheckEnabled() and AnnounceEnabled() and not InDungeonInstance() then
+                ShowLoadoutAnnouncement(true)
+            end
+        end)
+    end)
+    nsrtCallbackRegistered = true
+end
+
 -- Called by the options page whenever the font size changes, so a slider
 -- takes effect immediately instead of waiting for the next ready check --
 -- re-lays-out the CURRENTLY visible text (if any) with the new size right
@@ -553,6 +837,10 @@ ns.ShowLoadoutAnnouncement = ShowLoadoutAnnouncement
 -- matter (AnnounceDuration inside the hide timer, AnnounceCooldownSeconds
 -- inside the ready-check check above), so neither needs anything here.
 function ns.RefreshLoadoutTextSettings()
+    if AnnouncementInCombat() or not AnnounceEnabled() then
+        HideLoadoutAnnouncement()
+        return
+    end
     if announceFrame and announceFrame:IsShown() and lastEntries then
         ApplyAnnounceStyle(announceFrame, lastEntries)
     end
@@ -634,18 +922,67 @@ end
 local watcher = CreateFrame("Frame")
 watcher:RegisterEvent("ADDON_LOADED")
 watcher:RegisterEvent("PLAYER_ENTERING_WORLD")
+watcher:RegisterEvent("PLAYER_LOGIN")
 watcher:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
 watcher:RegisterEvent("TRAIT_CONFIG_UPDATED")
 watcher:RegisterEvent("PLAYER_TALENT_UPDATE")
 watcher:RegisterEvent("PLAYER_PVP_TALENT_UPDATE")
 watcher:RegisterEvent("PLAYER_REGEN_ENABLED")
+watcher:RegisterEvent("PLAYER_REGEN_DISABLED")
 watcher:RegisterEvent("READY_CHECK")
+-- Blizzard pull countdowns (including /pull from DBM and BigWigs).
+-- START_PLAYER_COUNTDOWN and START_TIMER can both fire for one countdown.
+watcher:RegisterEvent("START_PLAYER_COUNTDOWN")
+watcher:RegisterEvent("START_TIMER")
+local lastPullWarningAt
 local refreshGeneration = 0
 local lastTalentStateKey
 local talentAnnouncementPending = false
 watcher:SetScript("OnEvent", function(_, event, arg1)
-    if event == "ADDON_LOADED" and arg1 ~= "TalentLoadoutsEx" then return end
+    if event == "PLAYER_REGEN_DISABLED" then
+        announcementCombat = true
+        HideLoadoutAnnouncement()
+        return
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        announcementCombat = false
+        -- Do not reshow a dismissed reminder just because combat ended.
+    end
+    if event == "ADDON_LOADED" then
+        if arg1 == "NorthernSkyRaidTools" then
+            -- The NSAPI table may be published after ADDON_LOADED settles.
+            C_Timer.After(0, RegisterNSRTNoteCallback)
+            return
+        end
+        if arg1 ~= "TalentLoadoutsEx" then return end
+    end
+    if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
+        RegisterNSRTNoteCallback()
+    end
     if event == "PLAYER_SPECIALIZATION_CHANGED" and arg1 ~= "player" then return end
+
+    if event == "START_PLAYER_COUNTDOWN" or event == "START_TIMER" then
+        -- START_TIMER also covers PvP and challenge mode countdowns: ignore
+        -- those. START_PLAYER_COUNTDOWN has secret-capable arguments in
+        -- Midnight, so deliberately never inspect its event payload.
+        if event == "START_TIMER" then
+            local playerCountdown = Enum and Enum.StartTimerType
+                and Enum.StartTimerType.PlayerCountdown or 2
+            if arg1 ~= playerCountdown then return end
+        end
+        local now = GetTime()
+        -- The same Blizzard countdown can generate BOTH native events.
+        if not lastPullWarningAt or now - lastPullWarningAt >= 1 then
+            lastPullWarningAt = now
+            WarnNSRTMismatchOnRaidPrompt()
+            -- Show a CURRENT raid/NSRT or dungeon/M+/M0 mismatch for five seconds.
+            -- This is not gated by the ready-check Repeat Every cooldown.
+            if NSRTCheckEnabled() then
+                InvalidateActiveLoadout()
+                ShowLoadoutAnnouncement(true, true)
+            end
+        end
+        return
+    end
 
     if event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_TALENT_UPDATE"
        or event == "PLAYER_PVP_TALENT_UPDATE" then
@@ -656,10 +993,14 @@ watcher:SetScript("OnEvent", function(_, event, arg1)
 
     if event == "READY_CHECK" then
         EnsureTalentSupport()
+        WarnNSRTMismatchOnRaidPrompt()
         ShowLoadoutAnnouncement(false)
         return
     end
     if event == "PLAYER_ENTERING_WORLD" then
+        -- Remove a reminder from the previous zone: the check can change
+        -- when crossing the raid/dungeon boundary even without a talent swap.
+        HideLoadoutAnnouncement()
         RegisterLoadoutTextUnlock()
     end
     if event ~= "PLAYER_REGEN_ENABLED" or pendingTalentSupport then

@@ -5009,24 +5009,71 @@ end
 local _traceSink = nil
 local _traceReal = nil
 
-local function MakeReadProxy(real, folder, prefix)
-    local proxy = {}
-    setmetatable(proxy, {
-        __index = function(_, k)
-            local v = real[k]
-            local path = prefix and (prefix .. PS .. tostring(k)) or tostring(k)
-            if type(v) == "table" then
-                return MakeReadProxy(v, folder, path)
+-- Temporary gold-border read proxies must NEVER become persistent profile
+-- values. Some option getters (notably Quickdraw's EnsurePalette) compact a
+-- slots array while the read trace is active: the array they construct can
+-- contain the transient per-slot proxies returned by __index. Writing that
+-- array through a proxy used to embed those proxies in the real profile, and
+-- each subsequent trace wrapped them again until __index overflowed the stack.
+-- Weak keys prevent this map from holding disposed read proxies alive.
+-- Preserve the original one-local footprint of MakeReadProxy: this file is
+-- close to Lua's per-function local-variable limit, so helper locals belong
+-- to a nested scope instead of the top-level chunk.
+local MakeReadProxy
+do
+    local _readProxySources = setmetatable({}, { __mode = "k" })
+
+    local function ReadProxySource(value)
+        -- Also collapse proxies leaked earlier within this same Lua session.
+        while type(value) == "table" and _readProxySources[value] do
+            value = _readProxySources[value]
+        end
+        return value
+    end
+
+    local function CleanTraceWrite(value, seen)
+        value = ReadProxySource(value)
+        if type(value) ~= "table" then return value end
+        if seen[value] then return value end
+        seen[value] = true
+        -- Do not use a tracing proxy's __pairs: tables constructed by getters may
+        -- contain proxies, but they are plain containers here. Restore the real
+        -- source of each entry before the container enters the stored profile.
+        for k, child in pairs(value) do
+            if type(child) == "table" then
+                local clean = CleanTraceWrite(child, seen)
+                if clean ~= child then rawset(value, k, clean) end
             end
-            if _traceSink then
-                _traceSink[folder .. FS .. path] = true
-            end
-            return v
-        end,
-        __newindex = function(_, k, v) real[k] = v end,
-    })
-    return proxy
-end
+        end
+        return value
+    end
+
+    MakeReadProxy = function(real, folder, prefix)
+        real = ReadProxySource(real)
+        local proxy = {}
+        _readProxySources[proxy] = real
+        setmetatable(proxy, {
+            __index = function(_, k)
+                local raw = real[k]
+                local v = ReadProxySource(raw)
+                -- Heal any previously leaked proxy as it is encountered.
+                if v ~= raw then rawset(real, k, v) end
+                local path = prefix and (prefix .. PS .. tostring(k)) or tostring(k)
+                if type(v) == "table" then
+                    return MakeReadProxy(v, folder, path)
+                end
+                if _traceSink then
+                    _traceSink[folder .. FS .. path] = true
+                end
+                return v
+            end,
+            __newindex = function(_, k, v)
+                real[k] = CleanTraceWrite(v, {})
+            end,
+        })
+        return proxy
+    end
+end -- private read-proxy helpers
 
 local function BeginTrace()
     local reg = EllesmereUI.Lite and EllesmereUI.Lite._dbRegistry

@@ -1666,7 +1666,7 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
-        -- Row 3: Icon Size (+ icon zoom cog) | Max Icons
+        -- Row 3: Icon Size (+ icon zoom cog) | Interrupted Cast Icon Color
         local shSizeRow
         shSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Icon Size",
@@ -1674,12 +1674,45 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconSize or 36 end,
               setValue = function(v) SHDB().iconSize = v; RefreshSH() end },
-            { type = "slider", text = "Max Icons",
-              tooltip = "Maximum number of spell icons to display.",
-              min = 1, max = 10, step = 1,
+            { type = "multiSwatch", text = "Interrupted Cast Icon Color",
+              tooltip = "Tint spell icons for interrupted or failed casts. Does not affect Bar History.",
               disabled = iconOff, disabledTooltip = "Icon History",
-              getValue = function() return SHDB().iconCount or 5 end,
-              setValue = function(v) SHDB().iconCount = v; RefreshSH() end }
+              swatches = {
+                  { tooltip = "Custom Color",
+                    hasAlpha = false,
+                    getValue = function()
+                        local c = SHDB().iconInterruptedColor
+                        if c then return c.r or 0.859, c.g or 0.255, c.b or 0.255 end
+                        return 0.859, 0.255, 0.255
+                    end,
+                    setValue = function(r, g, b)
+                        SHDB().iconInterruptedColor = { r = r, g = g, b = b }
+                        SHDB().iconInterruptedUseAccent = false
+                        RefreshSH(); EllesmereUI:RefreshPage()
+                    end,
+                    onClick = function(self)
+                        if SHDB().iconInterruptedUseAccent then
+                            SHDB().iconInterruptedUseAccent = false
+                            RefreshSH(); EllesmereUI:RefreshPage()
+                            return
+                        end
+                        if self._eabOrigClick then self._eabOrigClick(self) end
+                    end,
+                    refreshAlpha = function()
+                        return SHDB().iconInterruptedUseAccent and 0.3 or 1
+                    end },
+                  { tooltip = "Accent Color",
+                    hasAlpha = false,
+                    getValue = function() return EllesmereUI.ResolveActiveAccent() end,
+                    setValue = function() end,
+                    onClick = function()
+                        SHDB().iconInterruptedUseAccent = true
+                        RefreshSH(); EllesmereUI:RefreshPage()
+                    end,
+                    refreshAlpha = function()
+                        return SHDB().iconInterruptedUseAccent and 1 or 0.3
+                    end },
+              } }
         );  y = y - h
         -- Inline cog on Icon Size: Icon Zoom (shared by the icon strip and the
         -- bar window, so it stays usable whenever either display is on).
@@ -1697,21 +1730,22 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 4: Icon Spacing | Opacity
+        -- Row 4: Max Icons | Icon Spacing (shifted one slot)
         _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Max Icons",
+              tooltip = "Maximum number of spell icons to display.",
+              min = 1, max = 10, step = 1,
+              disabled = iconOff, disabledTooltip = "Icon History",
+              getValue = function() return SHDB().iconCount or 5 end,
+              setValue = function(v) SHDB().iconCount = v; RefreshSH() end },
             { type = "slider", pixel = true, text = "Icon Spacing",
               min = 0, max = 10, step = 1,
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconSpacing or 1 end,
-              setValue = function(v) SHDB().iconSpacing = v; RefreshSH() end },
-            { type = "slider", text = "Opacity",
-              min = 0.1, max = 1, step = 0.01,
-              disabled = iconOff, disabledTooltip = "Icon History",
-              getValue = function() return SHDB().iconOpacity or 1 end,
-              setValue = function(v) SHDB().iconOpacity = v; RefreshSH() end }
+              setValue = function(v) SHDB().iconSpacing = v; RefreshSH() end }
         );  y = y - h
 
-        -- Row 5: Animation Style | Fade-Out Time
+        -- Row 5: Opacity | Animation Style
         local shAnimValues = {
             none  = "None",
             slide = "Slide In",
@@ -1719,20 +1753,52 @@ initFrame:SetScript("OnEvent", function(self)
         }
         local shAnimOrder = { "none", "slide", "fly" }
         _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Opacity",
+              min = 0.1, max = 1, step = 0.01,
+              disabled = iconOff, disabledTooltip = "Icon History",
+              getValue = function() return SHDB().iconOpacity or 1 end,
+              setValue = function(v) SHDB().iconOpacity = v; RefreshSH() end },
             { type = "dropdown", text = "Animation Style",
               disabled = iconOff, disabledTooltip = "Icon History",
               values = shAnimValues, order = shAnimOrder,
               getValue = function() return SHDB().iconAnimation or "slide" end,
-              setValue = function(v) SHDB().iconAnimation = v end },
+              setValue = function(v) SHDB().iconAnimation = v end }
+        );  y = y - h
+
+        -- Row 6: Fade-Out Time | GCD Swipe (+ inline edge cog)
+        local shGCDRow
+        shGCDRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Fade-Out Time",
               tooltip = "Seconds after which history icons fade out. The timer pauses during combat. 0 = never.",
               min = 0, max = 60, step = 1,
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconFadeTime or 0 end,
-              setValue = function(v) SHDB().iconFadeTime = v; RefreshSH() end }
+              setValue = function(v) SHDB().iconFadeTime = v; RefreshSH() end },
+            { type = "toggle", text = "Show GCD Swipe",
+              tooltip = "Display the GCD and spell cast/channel progress over Spell History icons using Midnight's native cooldown widget.",
+              disabled = iconOff, disabledTooltip = "Icon History",
+              getValue = function() return SHDB().iconGCDSwipe or false end,
+              setValue = function(v) SHDB().iconGCDSwipe = v; RefreshSH() end }
         );  y = y - h
+        if not EllesmereUI._prebuilding then
+            EllesmereUI.BuildInlineCog(shGCDRow._rightRegion, {
+                title = "GCD Swipe Settings",
+                rows = {
+                    { type = "toggle", label = "Show Swipe Edge",
+                      tooltip = "Draw a bright edge indicating the current progress of the swipe.",
+                      get = function() return SHDB().iconGCDSwipeEdge == true end,
+                      set = function(v) SHDB().iconGCDSwipeEdge = v; RefreshSH() end },
+                    { type = "toggle", label = "Interruption Freeze",
+                      tooltip = "Keep the swipe frozen at the moment a cast or channel is interrupted, cancelled, or fails. Turn off to stop showing the frozen swipe.",
+                      get = function() return SHDB().iconInterruptionFreeze ~= false end,
+                      set = function(v) SHDB().iconInterruptionFreeze = v; RefreshSH() end },
+                },
+                disabled = function() return iconOff() or not SHDB().iconGCDSwipe end,
+                disabledTooltip = "Show GCD Swipe",
+            })
+        end
 
-        -- Row 6: Frame Strata | (spacer)
+        -- Row 7: Frame Strata | (spacer)
         _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Frame Strata",
               tooltip = "Layering of the icon strip relative to other UI elements. Raise it if other frames are covering it, or lower it to sit behind them.",

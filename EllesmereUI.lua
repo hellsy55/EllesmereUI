@@ -1297,21 +1297,23 @@ EllesmereUI.ALERT_SOUND_FILES = {
     airhorn = "AirHorn.ogg", banana = "BananaPeelSlip.ogg", bikehorn = "BikeHorn.ogg",
     bite = "Bite.ogg", boxing = "BoxingArenaSound.ogg", catmeow = "CatMeow.ogg",
     catmeow2 = "CatMeow2.ogg", gunshot = "FrontalsGunshot.wav", glass = "Glass.mp3",
-    kaching = "Kaching.ogg", phone = "Phone.ogg", robotblip = "RobotBlip.ogg",
-    sonar = "Sonar.ogg", siren = "WarningSiren.ogg", water = "WaterDrop.ogg",
+    kaching = "Kaching.ogg", notifyshort = "NotificationShort.ogg",
+    phone = "Phone.ogg", robotblip = "RobotBlip.ogg", sonar = "Sonar.ogg",
+    siren = "WarningSiren.ogg", water = "WaterDrop.ogg",
     wilhelm = "Wilhelm.ogg",
 }
 EllesmereUI.ALERT_SOUND_NAMES = {
     none = "None", airhorn = "Air Horn", banana = "Banana Peel Slip",
     bikehorn = "Bike Horn", bite = "Bite", boxing = "Boxing Arena",
     catmeow = "Cat Meow", catmeow2 = "Cat Meow 2", gunshot = "Frontals Gunshot",
-    glass = "Glass", kaching = "Kaching", phone = "Phone", robotblip = "Robot Blip",
-    sonar = "Sonar", siren = "Warning Siren", water = "Water Drop", wilhelm = "Wilhelm",
+    glass = "Glass", kaching = "Kaching", notifyshort = "Notification (Short)",
+    phone = "Phone", robotblip = "Robot Blip", sonar = "Sonar",
+    siren = "Warning Siren", water = "Water Drop", wilhelm = "Wilhelm",
 }
 EllesmereUI.ALERT_SOUND_ORDER = {
     "none", "airhorn", "banana", "bikehorn", "bite", "boxing", "catmeow",
-    "catmeow2", "gunshot", "glass", "kaching", "phone", "robotblip", "sonar",
-    "siren", "water", "wilhelm",
+    "catmeow2", "gunshot", "glass", "kaching", "notifyshort", "phone",
+    "robotblip", "sonar", "siren", "water", "wilhelm",
 }
 -- FRESH paths/names/order tables from the catalogue ("none" = name-only, no path). Safe for the SM appenders.
 function EllesmereUI.BuildAlertSoundTables()

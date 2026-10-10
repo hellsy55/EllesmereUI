@@ -5408,6 +5408,9 @@ local function ApplyMinimap()
         diffTextFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
         diffTextFrame:RegisterEvent("PLAYER_DIFFICULTY_CHANGED")
         diffTextFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+        -- Blizzard signals flex-raid instance size changes independently of
+        -- group roster events (players zoning in/out without joining/leaving).
+        diffTextFrame:RegisterEvent("INSTANCE_GROUP_SIZE_CHANGED")
         diffTextFrame:RegisterEvent("CHALLENGE_MODE_START")
         diffTextFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
         diffTextFrame:RegisterEvent("CHALLENGE_MODE_RESET")

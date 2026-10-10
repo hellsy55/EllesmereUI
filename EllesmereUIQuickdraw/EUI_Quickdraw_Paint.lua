@@ -64,12 +64,15 @@ local function HasLiveIcon(slot)
     return slot.kind == "macro" or slot.kind == "dynamicrez"
 end
 
--- Does this cell's tint follow the mount rules (see SlotUsability)? Those are
--- re-read on the game's own events while a live menu is up -- see
--- RefreshMountTints.
-local function HasMountTint(slot)
+-- The icon tint of mounts and markers can change while a latched menu is
+-- open (zone/combat changes, group changes, raid promotions). Track only
+-- these cells for event-driven refreshes; all other usability is painted on
+-- open. The settings preview explicitly disables usability coloring.
+local function HasDynamicTint(slot)
     local k = slot and slot.kind
     return k == "mount" or k == "lastmount" or k == "randommount"
+        or k == "worldmarker" or k == "cycleworldmarker"
+        or k == "raidtarget" or k == "cycleraidtarget" or k == "clearmarkers"
 end
 
 local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLabel,
@@ -79,9 +82,9 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     -- Read once per paint, which is once per open: range and resources do move
     -- while a palette is up, but a hold lasts a fraction of a second and a tint
     -- that changed under a settled hand would read as a flicker rather than as
-    -- information. Mounts are the exception (RefreshMountTints): where you can
-    -- mount changes a handful of times a session, at a doorway, and a menu
-    -- left open should follow it. ApplySlotVisual turns this into a colour.
+    -- information. Mounts and markers are the exceptions: where you can
+    -- mount or mark changes on zone/combat and group/raid role events, and a
+    -- latched menu should follow it. ApplySlotVisual handles the tint.
     w.usability = (showUsability and not placeholder) and SlotUsability(slot) or nil
 
     local icon, name = SlotDisplay(slot)
@@ -298,12 +301,11 @@ function PaletteView:Layout(paletteIndex)
     if not pending then pending = {}; self._pendingCells = pending end
     for k = #pending, 1, -1 do pending[k] = nil end
 
-    -- The mount cells, collected the same way and kept the same way, for the
-    -- tint a live menu re-reads on events (see RefreshMountTints). None while
-    -- the tint is off.
-    local mountCells = self._mountCells
-    if not mountCells then mountCells = {}; self._mountCells = mountCells end
-    for k = #mountCells, 1, -1 do mountCells[k] = nil end
+    -- The mount and marker cells whose availability changes on game events.
+    -- No entries when the tint is switched off for this Action Menu.
+    local dynamicTintCells = self._dynamicTintCells
+    if not dynamicTintCells then dynamicTintCells = {}; self._dynamicTintCells = dynamicTintCells end
+    for k = #dynamicTintCells, 1, -1 do dynamicTintCells[k] = nil end
 
     for i = 1, shown do
         local w = self.widgets[i]
@@ -333,7 +335,7 @@ function PaletteView:Layout(paletteIndex)
         -- company, and testing the stored array would collect the wrong cells.
         if HasLiveIcon(slots[i]) then liveCells[#liveCells + 1] = i end
         if ns.WarmSlot(slots[i]) then pending[#pending + 1] = i end
-        if showUsability and HasMountTint(slots[i]) then mountCells[#mountCells + 1] = i end
+        if showUsability and HasDynamicTint(slots[i]) then dynamicTintCells[#dynamicTintCells + 1] = i end
         w:Show()
     end
 
@@ -370,8 +372,8 @@ function PaletteView:Layout(paletteIndex)
                 if ns.WarmSlot(c.slots[j]) then
                     pending[#pending + 1] = cells
                 end
-                if showUsability and HasMountTint(c.slots[j]) then
-                    mountCells[#mountCells + 1] = cells
+                if showUsability and HasDynamicTint(c.slots[j]) then
+                    dynamicTintCells[#dynamicTintCells + 1] = cells
                 end
                 -- Hidden until its own claim is opened -- see UpdateNestShown.
                 w:Hide()
@@ -717,12 +719,10 @@ function PaletteView:AdvanceLiveIcons()
     end
 end
 
--- The mount cells' tint, re-read when the game says where you can mount may
--- have changed (a doorway, a no-mount area, combat): the mount watch in
--- EUI_Quickdraw_Live.lua calls this while a live menu holding a mount entry is
--- up. Only a cell whose tint changed is repainted.
-function PaletteView:RefreshMountTints()
-    local cells = self._mountCells
+-- Recheck mount and marker usability after game events (group changes, raid
+-- permissions, combat/zone changes). Only repaint entries with a new tint.
+function PaletteView:RefreshDynamicTints()
+    local cells = self._dynamicTintCells
     if not cells or #cells == 0 then return end
     for k = 1, #cells do
         local index = cells[k]
@@ -738,9 +738,9 @@ function PaletteView:RefreshMountTints()
     end
 end
 
--- Whether the last layout drew a mount entry with the tint on.
-function PaletteView:HasMountCells()
-    local cells = self._mountCells
+-- Whether the last live layout needs the event-driven tint watcher.
+function PaletteView:HasDynamicTintCells()
+    local cells = self._dynamicTintCells
     return cells ~= nil and #cells > 0
 end
 

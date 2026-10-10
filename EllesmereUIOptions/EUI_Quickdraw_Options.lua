@@ -3694,7 +3694,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) ASet("showCooldowns", v); Refresh() end },
             { type="toggle", text="Dim Unusable Actions",
               disabled=Disabled, disabledTooltip="the module",
-              tooltip="Dims any actions you can't use right now.",
+              tooltip="Dims actions that can't be used now, including world markers outside a group and marker permissions in raids. Also covers spells, items, outfits, and mounts. This changes appearance only, not secure action bindings.",
               getValue=function() return ACfg("showUsability") ~= false end,
               setValue=function(v) ASet("showUsability", v); Refresh() end })
         y = y - h
@@ -3933,12 +3933,16 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Show On-Screen Loadout Text", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
-              tooltip="Show a large on-screen reminder of the currently active "
-                      .."TalentLoadoutsEx loadout at every ready check and "
-                      .."after an applied talent/loadout change. \"Repeat Every\" "
-                      .."only limits ready-check pops; talent changes always "
-                      .."use the exact \"Text Duration (sec)\" value below. Drag it into "
-                      .."place with Unlock Mode (\"Quickdraw: Loadout Text\").",
+              tooltip="Show the active TalentLoadoutsEx loadout at ready checks "
+                      .."and after talent changes. When a player pull countdown "
+                      .."starts, show it for exactly 5 seconds only on a "
+                      .."loadout mismatch (raid: NSRT note; dungeon: M+/M0 "
+                      .."in the loadout name). Entering "
+                      .."combat immediately hides the text, which is never "
+                      .."shown during combat. Repeat Every limits only "
+                      .."ready-check reminders; Text Duration applies to "
+                      .."ready checks and talent changes. Drag into place "
+                      .."with Unlock Mode (Quickdraw: Loadout Text).",
               getValue=function() return Cfg("loadoutTextEnabled") == true end,
               setValue=function(v)
                   Set("loadoutTextEnabled", v)
@@ -3958,7 +3962,9 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="slider", text="Text Duration (sec)", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
-              tooltip="How long the reminder stays on screen once shown.",
+              tooltip="Duration for ready-check and talent-change reminders. "
+                      .."Pull countdown mismatches always show for 5 seconds "
+                      .."unless combat begins first.",
               min=1, max=60, step=1,
               getValue=function() return Cfg("loadoutTextDuration") or 10 end,
               setValue=function(v)
@@ -3971,8 +3977,9 @@ initFrame:SetScript("OnEvent", function(self)
                       .."A ready check within this many minutes of the last "
                       .."ready-check pop is ignored, so spamming ready checks "
                       .."only pops the text once. Talent/loadout changes are "
-                      .."not throttled by this setting. Set to 0 to show it on "
-                      .."every single ready check.",
+                      .."not throttled by this setting. Pull countdown "
+                      .."mismatch reminders also bypass this setting. "
+                      .."Set to 0 to show it on every single ready check.",
               min=0, max=60, step=1,
               getValue=function() return Cfg("loadoutTextIntervalMin") or 10 end,
               setValue=function(v)
@@ -3992,7 +3999,83 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("loadoutTextRowGap", v)
                   if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
               end },
-            { type="label", text="" })
+            { type="toggle", text="Check Active Loadout (Raid / Dungeon)", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              tooltip="In a raid, compare the active TalentLoadoutsEx loadout "
+                      .."name with the loaded NSRT note (including Nymrissa "
+                      .."and Kith'ix). In a dungeon, ignore NSRT entirely "
+                      .."and require M+ or M0 anywhere in the active loadout "
+                      .."name, regardless of dungeon difficulty or case. "
+                      .."Each matching saved loadout gets its own green "
+                      .."check or red X. A missing/unknown raid note shows "
+                      .."no mark. Requires Show On-Screen Loadout Text to "
+                      .."display indicators. Use /eui-nsrt-check to diagnose.",
+              getValue=function() return Cfg("nsrtLoadoutCheckEnabled") == true end,
+              setValue=function(v)
+                  Set("nsrtLoadoutCheckEnabled", v)
+                  if v and ns.ShowLoadoutAnnouncement then
+                      ns.ShowLoadoutAnnouncement(true)
+                  elseif ns.RefreshLoadoutTextSettings then
+                      ns.RefreshLoadoutTextSettings()
+                  end
+                  Refresh()
+              end })
+        y = y - h
+
+        -- Every options-page build gets its own sound tables; the standard
+        -- preview icons use the same curated + LibSharedMedia catalogue as EUI.
+        local nsrtSoundPaths, nsrtSoundNames, nsrtSoundOrder = EllesmereUI.BuildAlertSoundTables()
+        EllesmereUI.AppendSharedMediaSounds(nsrtSoundPaths, nsrtSoundNames, nsrtSoundOrder)
+        local nsrtSoundValues = {}
+        for key, value in pairs(nsrtSoundNames) do nsrtSoundValues[key] = value end
+        nsrtSoundValues._menuOpts = {
+            itemHeight = 26,
+            maxTextWidthPct = 0.8,
+            searchable = true,
+            iconAtlas = function(key)
+                if key ~= "none" and nsrtSoundPaths[key] then return "common-icon-sound" end
+            end,
+            iconPressedAtlas = function(key)
+                if key ~= "none" and nsrtSoundPaths[key] then return "common-icon-sound-pressed" end
+            end,
+            iconOnClick = function(key)
+                if ns.PlayNSRTCheckSound then ns.PlayNSRTCheckSound(key) end
+            end,
+            iconTooltip = function() return "Preview Sound" end,
+        }
+        local function NSRTSoundDisabled()
+            return LoadoutTextDisabled() or Cfg("nsrtLoadoutCheckEnabled") ~= true
+        end
+        local function NSRTSoundPickerDisabled()
+            return NSRTSoundDisabled() or Cfg("nsrtLoadoutMismatchSoundEnabled") ~= true
+        end
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Play Sound on NSRT Mismatch", noCapture=true,
+              disabled=NSRTSoundDisabled,
+              disabledTooltip="Enable the NSRT loadout check on a Specialization Action Menu first.",
+              tooltip="Inside raid instances ONLY: play the chosen sound when "
+                      .."a ready check or player pull countdown begins and "
+                      .."the active TLEx "
+                      .."loadout still mismatches the loaded NSRT boss note. "
+                      .."Works independently of Show On-Screen Loadout Text "
+                      .."and its Repeat Every cooldown. No automatic sound "
+                      .."on talent changes, note changes, or manual checks. "
+                      .."Dungeons never play this warning; missing or "
+                      .."unrecognized raid notes remain silent.",
+              getValue=function() return Cfg("nsrtLoadoutMismatchSoundEnabled") == true end,
+              setValue=function(v)
+                  Set("nsrtLoadoutMismatchSoundEnabled", v)
+                  Refresh()
+              end },
+            { type="dropdown", text="Mismatch Sound", noCapture=true,
+              values=nsrtSoundValues, order=nsrtSoundOrder,
+              disabled=NSRTSoundPickerDisabled,
+              disabledTooltip="Enable Play Sound on NSRT Mismatch first.",
+              tooltip="Choose a mismatch warning sound. Use the speaker icon "
+                      .."inside this menu to preview each sound.",
+              getValue=function() return Cfg("nsrtLoadoutMismatchSoundKey") or "robotblip" end,
+              setValue=function(v) Set("nsrtLoadoutMismatchSoundKey", v) end })
         y = y - h
 
         return math.abs(y)

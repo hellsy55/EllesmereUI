@@ -1188,15 +1188,11 @@ local function DurabilityReportLine()
     return title .. ": " .. table.concat(parts, ", ")
 end
 
--- Middle-click on the Food button: the same "who is missing it?" question
--- the ordinary Food column answers, but pinned to one exact aura-name
--- prefix ("Hearty") instead of the whole Well Fed family FOOD_ICONS/
--- FOOD_IDS covers -- for a guild/raid that always eats one specific feast
--- and wants to call out anyone who grabbed a different one (or nothing at
--- all). Same restriction and in-combat gating as every other consumable
--- column, since this reads the exact same "another player's aura" surface
--- they do, and for the same reason: an icon/name read is unreliable under
--- aura secrecy or mid-pull, so it sits out rather than risk a false report.
+-- Hearty Food has its own report alongside ordinary Food, including when
+-- the Food button is clicked and in the middle-click report-all sequence.
+-- It checks the aura-name prefix ("Hearty") instead of the whole Well Fed
+-- family. The same aura restrictions and combat gating as ordinary Food
+-- apply, so an unreadable aura cannot be reported as a certain failure.
 local HEARTY_FOOD_PREFIX = "Hearty"
 
 local function HeartyFoodReportLine()
@@ -1249,23 +1245,22 @@ function ns.ReportHeartyFood(toChat)
     SendOrPrint(HeartyFoodReportLine(), toChat)
 end
 
--- Middle-click on any report button EXCEPT Food: every one of the five
--- reports at once (the ordinary Food check, not the Hearty-specific one --
--- that stays behind Food's own middle-click), each exactly as its own
--- single-key report would send it. Staggered rather than fired back to
--- back: five SendChatMessage calls in the same instant risk the server's
--- own chat throttle silently eating one, same reasoning as
--- CHAT_CHUNK_DELAY above. Durability goes last since it already carries its
--- own extra round-trip delay (see ns.ReportConsumable) on top of its slot
--- in this stagger.
-local ALL_CONSUMABLE_KEYS = { "flask", "food", "rune", "vantus", DURABILITY_KEY }
-local ALL_REPORT_STAGGER = 0.4 -- seconds between each of the five reports
+-- Middle-click on any report button sends all six reports: Flask, Food,
+-- Hearty Food, Rune, Vantus and Repair. Staggering avoids flooding guild/
+-- party chat. Durability remains last, since it needs its own delayed scan.
+local HEARTY_REPORT_KEY = "hearty"
+local ALL_CONSUMABLE_KEYS = { "flask", "food", HEARTY_REPORT_KEY, "rune", "vantus", DURABILITY_KEY }
+local ALL_REPORT_STAGGER = 0.4 -- seconds between consecutive reports
 
 function ns.ReportAllConsumables(toChat)
     if not CanSendRaidCheckChatReport(toChat) then return end
     for i, key in ipairs(ALL_CONSUMABLE_KEYS) do
         C_Timer.After((i - 1) * ALL_REPORT_STAGGER, function()
-            ns.ReportConsumable(key, toChat)
+            if key == HEARTY_REPORT_KEY then
+                ns.ReportHeartyFood(toChat)
+            else
+                ns.ReportConsumable(key, toChat)
+            end
         end)
     end
 end
@@ -1284,6 +1279,21 @@ function ns.ReportConsumable(key, toChat)
         return
     end
     SendOrPrint(BooleanReportLine(key), toChat)
+end
+
+-- Food clicks always include both ordinary Food and Hearty Food. Local output
+-- is immediate; guild/party output is spaced to avoid two simultaneous chat
+-- messages being dropped by the server's throttle.
+function ns.ReportFood(toChat)
+    if not CanSendRaidCheckChatReport(toChat) then return end
+    ns.ReportConsumable(FOOD_KEY, toChat)
+    if toChat and ReportChannel() then
+        C_Timer.After(ALL_REPORT_STAGGER, function()
+            ns.ReportHeartyFood(toChat)
+        end)
+    else
+        ns.ReportHeartyFood(toChat)
+    end
 end
 
 -------------------------------------------------------------------------------

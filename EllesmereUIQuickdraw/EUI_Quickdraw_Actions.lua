@@ -749,7 +749,7 @@ local function SlotDisplay(slot)
         if id < 1 or id > 8 then
             return "Interface\\Buttons\\UI-GroupLoot-Pass-Up", "Clear Target Marker"
         end
-        return MarkerIcon(id), "Target Marker: " .. MARKER_NAMES[id]
+        return MarkerIcon(id), "Target: " .. MARKER_NAMES[id]
 
     elseif k == "clearmarkers" then
         return "Interface\\Buttons\\UI-GroupLoot-Pass-Up", "Clear All Target Markers"
@@ -759,7 +759,7 @@ local function SlotDisplay(slot)
         if id < 1 or id > 8 then
             return "Interface\\Buttons\\UI-GroupLoot-Pass-Up", "Clear World Markers"
         end
-        return MarkerIcon(id), "World Marker: " .. MARKER_NAMES[id]
+        return MarkerIcon(id), "World: " .. MARKER_NAMES[id]
 
     elseif k == "cycleraidtarget" or k == "cycleworldmarker" then
         -- Drawn as the marker the next press places, not as a fixed emblem: in
@@ -981,9 +981,12 @@ local USABILITY_TINT = {
 -- cannot reach is the thing to say first, and it is the state a step forward
 -- fixes.
 --
--- Macros, markers and palettes answer nil. A macro's usability is whatever its
+-- Custom macros and palettes answer nil. A macro's usability is whatever its
 -- body resolves to, which is not knowable from here, and tinting one gray on a
--- guess is worse than saying nothing.
+-- guess is worse than saying nothing. Marker entries follow the same group and
+-- raid-permission rules as the EUI Raid Tools panel, without blocking secure
+-- buttons: outside a group world markers are unavailable; within a raid only
+-- the leader or an assistant can use target or world markers.
 --
 -- Toys also answer nil. A toy is not a bag item, so C_Item.IsUsableItem says
 -- unusable for every toy a player owns, and graying the whole Hearthstones
@@ -1018,6 +1021,28 @@ local function SlotUsability(slot)
 
     elseif k == "outfit" then
         return InCombatLockdown() and "UNUSABLE" or nil
+
+    elseif k == "worldmarker" or k == "cycleworldmarker"
+        or k == "raidtarget" or k == "cycleraidtarget" or k == "clearmarkers" then
+        -- Like Raid Tools: any party member can use markers, but a raid
+        -- requires leader/assistant permission. World markers also need a
+        -- group; target markers still work while solo. Do not infer the
+        -- permissions from the presence of a target or a marker's active pip.
+        if (k == "worldmarker" or k == "cycleworldmarker") and not IsInGroup() then
+            return "UNUSABLE"
+        end
+        if IsInRaid() then
+            local leader = UnitIsGroupLeader("player")
+            local assistant = UnitIsGroupAssistant("player")
+            -- On clients with secret unit-identity results, an unknown status
+            -- is not proof of a missing permission. Leave the icon normal,
+            -- instead of branching on a secret value or showing a false dim.
+            if issecretvalue and (issecretvalue(leader) or issecretvalue(assistant)) then
+                return nil
+            end
+            if not (leader or assistant) then return "UNUSABLE" end
+        end
+        return nil
 
     elseif k == "mount" or k == "lastmount" or k == "randommount" then
         -- The Mount Journal's own answer, the one behind its Summon button's
