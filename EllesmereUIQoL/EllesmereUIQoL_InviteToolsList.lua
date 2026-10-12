@@ -3592,6 +3592,11 @@ function IL:CreateFrame()
     StyleFont(histCount, "small")
     histCount:SetTextColor(textSec[1], textSec[2], textSec[3], 1)
 
+    -- Closing via the empty panel surface mirrors the native right-click
+    -- dismissal in the main Invite Tools panel, without affecting row actions.
+    hist:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then hist:Hide() end
+    end)
     local histHolder = CreateFrame("Frame", nil, hist, "BackdropTemplate")
     histHolder:SetPoint("TOPLEFT", hist, "TOPLEFT", 10, -50)
     histHolder:SetPoint("BOTTOMRIGHT", hist, "BOTTOMRIGHT", -10, 10)
@@ -3607,6 +3612,14 @@ function IL:CreateFrame()
     hcontent:SetPoint("TOPLEFT", hscroll, "TOPLEFT", 0, 0)
     hcontent:SetSize(HIST_W - 28, 1)
     hscroll:SetScrollChild(hcontent)
+    local hrows = {}
+    local function CloseHistoryBlank(_, button)
+        if button ~= "RightButton" then return end
+        for _,row in ipairs(hrows) do
+            if row:IsShown() and row:IsMouseOver() then return end
+        end
+        hist:Hide()
+    end
     hscroll:SetScript("OnMouseWheel", function(self, delta)
         local range = self:GetVerticalScrollRange() or 0
         local cur = self:GetVerticalScroll() or 0
@@ -3619,7 +3632,12 @@ function IL:CreateFrame()
     histEmpty:SetTextColor(textSec[1], textSec[2], textSec[3], 0.8)
     histEmpty:SetText(L["Nobody has joined yet."])
 
-    local hrows = {}
+    histHolder:EnableMouse(true)
+    histHolder:SetScript("OnMouseUp", CloseHistoryBlank)
+    hscroll:EnableMouse(true)
+    hscroll:SetScript("OnMouseUp", CloseHistoryBlank)
+    hcontent:EnableMouse(true)
+    hcontent:SetScript("OnMouseUp", CloseHistoryBlank)
     local function MakeHistRow()
         local row = CreateFrame("Frame", nil, hcontent)
         row:SetHeight(HIST_ROW_H)
@@ -3816,6 +3834,9 @@ function IL:CreateFrame()
     BG(friends, "main")
     friends:SetBackdropBorderColor(border[1], border[2], border[3], 1)
     friends:Hide()
+    friends:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then friends:Hide() end
+    end)
 
     local friendsTitle = friends:CreateFontString(nil, "OVERLAY")
     friendsTitle:SetPoint("TOP", friends, "TOP", 0, -8)
@@ -3895,6 +3916,22 @@ function IL:CreateFrame()
         self:SetVerticalScroll(math_max(0, math_min(range, cur - delta * FR_ROW_H * 2)))
     end)
 
+    local frows = {}
+    local function CloseFriendsBlank(_, button)
+        if button ~= "RightButton" then return end
+        for _,row in ipairs(frows) do
+            if row:IsShown() and row:IsMouseOver() then return end
+        end
+        friends:Hide()
+    end
+    friendsHolder:EnableMouse(true)
+    friendsHolder:SetScript("OnMouseUp", CloseFriendsBlank)
+    fscroll:EnableMouse(true)
+    fscroll:SetScript("OnMouseUp", CloseFriendsBlank)
+    -- Mouse-enabled friend rows consume their own right clicks; only the
+    -- exposed scroll background dismisses the panel.
+    fcontent:EnableMouse(true)
+    fcontent:SetScript("OnMouseUp", CloseFriendsBlank)
     local friendsEmpty = friendsHolder:CreateFontString(nil, "OVERLAY")
     friendsEmpty:SetPoint("CENTER", friendsHolder, "CENTER", 0, 0)
     friendsEmpty:SetWidth(FR_W - 50)
@@ -4212,7 +4249,6 @@ function IL:CreateFrame()
         end)
     end
 
-    local frows = {}
     local function MakeFriendRow()
         local row = CreateFrame("Frame", nil, fcontent)
         row:SetHeight(FR_ROW_H)
@@ -4353,6 +4389,9 @@ function IL:CreateFrame()
         BG(faction, "main")
         faction:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         faction:Hide()
+        faction:SetScript("OnMouseUp", function(_, button)
+            if button == "RightButton" then faction:Hide() end
+        end)
 
         local factionTitle = faction:CreateFontString(nil, "OVERLAY")
         factionTitle:SetPoint("TOP", faction, "TOP", 0, -8)
@@ -4492,6 +4531,19 @@ function IL:CreateFrame()
         end
 
         local arows = {}
+        local function CloseFactionsBlank(_, button)
+            if button ~= "RightButton" then return end
+            for _,row in ipairs(arows) do
+                if row:IsShown() and row:IsMouseOver() then return end
+            end
+            faction:Hide()
+        end
+        factionHolder:EnableMouse(true)
+        factionHolder:SetScript("OnMouseUp", CloseFactionsBlank)
+        ascroll:EnableMouse(true)
+        ascroll:SetScript("OnMouseUp", CloseFactionsBlank)
+        acontent:EnableMouse(true)
+        acontent:SetScript("OnMouseUp", CloseFactionsBlank)
         local function MakeFactionRow()
             local row = CreateFrame("Frame", nil, acontent)
             row:SetHeight(FA_ROW_H)

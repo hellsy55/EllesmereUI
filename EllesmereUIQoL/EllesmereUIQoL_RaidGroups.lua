@@ -22,6 +22,7 @@ local function TrackFont(widget, size)
     return widget
 end
 local RGStyle = {fonts={main=10,unlisted=10,current=11,after=11,available=11,nicknameManager=11}, panels={}}
+RGStyle.setupVisibleRows=12
 function RGStyle.PlayerFontSize(key)
     local p=db and db.profile and db.profile.raidGroups
     if p and p.playerNamesFontEnabled==false then return RGStyle.fonts[key] or 11 end
@@ -331,6 +332,29 @@ local function CopyKeys(source)
     for key,value in pairs(source or {}) do if value then result[key]=true end end
     return result
 end
+-- Ignore Arrangement protects the actual character, not the nickname shared
+-- by several characters; no protected operation may select that identity.
+function RGStyle.IsArrangementIgnored(key)
+    return data and data.ignoreArrangement and key and data.ignoreArrangement[key] == true
+end
+function RGStyle.ToggleIgnoreArrangement(name)
+    local key=Canonical(name)
+    if not key or not data then return end
+    if applyState then Notice("Cannot change Ignore Arrangement while applying raid groups.");return end
+    data.ignoreArrangement[key]=not RGStyle.IsArrangementIgnored(key) or nil
+    Notice(LF("Ignore Arrangement %s: %s",data.ignoreArrangement[key] and "enabled" or "disabled",FullName(name)),"success")
+    if Refresh then Refresh() end
+    if previewWindow and previewWindow:IsShown() and previewWindow._render then previewWindow._render() end
+end
+function RGStyle.IgnoreArrangementMenu(choices,name)
+    local key=Canonical(name)
+    if not key then return end
+    local ignored=RGStyle.IsArrangementIgnored(key)
+    choices[#choices+1]={label=ignored and "Enable Arrangement (Character-Realm)" or
+        "Ignore Arrangement (Character-Realm)",action=function()
+        RGStyle.ToggleIgnoreArrangement(name)
+    end}
+end
 local function CopyPinned(from)
     local copy={}
     for i=1,SLOT_COUNT do if from and from[i] then copy[i]=true end end
@@ -366,6 +390,7 @@ local function Defaults()
     data.nicknames = type(data.nicknames) == "table" and data.nicknames or {}
     data.suppressed = type(data.suppressed) == "table" and data.suppressed or {}
     data.nicknameSharing = type(data.nicknameSharing) == "table" and data.nicknameSharing or {}
+    data.ignoreArrangement = type(data.ignoreArrangement) == "table" and data.ignoreArrangement or {}
     data.nicknameGroups = type(data.nicknameGroups) == "table" and data.nicknameGroups or {}
     -- Persist visual expansion between /reload and game sessions. An absent key
     -- keeps the existing default (expanded) for older saved databases.
@@ -714,10 +739,10 @@ function ns.RaidGroupsResolveRosterSource(source,pinnedSeats)
     for i=1,SLOT_COUNT do
         local name=source[i]
         local key=name and name~="GUEST" and name~=RGStyle.SETUP_GUEST and Canonical(name)
-        if key and rosterByKey[key] then used[key]=true end
+        if key and rosterByKey[key] and not RGStyle.IsArrangementIgnored(key) then used[key]=true end
     end
     for _,member in ipairs(rosterSorted) do
-        if not used[member.key] then
+        if not used[member.key] and not RGStyle.IsArrangementIgnored(member.key) then
             local record=data.nicknames[member.key]
             local id=record and record.groupId
             if id and data.nicknameGroups[id] then
@@ -729,7 +754,8 @@ function ns.RaidGroupsResolveRosterSource(source,pinnedSeats)
     for i=1,SLOT_COUNT do
         local name=source[i]
         local key=name and name~="GUEST" and name~=RGStyle.SETUP_GUEST and Canonical(name)
-        if key and not rosterByKey[key] and not (pinnedSeats and pinnedSeats[i]) then
+        if key and (not rosterByKey[key] or RGStyle.IsArrangementIgnored(key)) and
+            not (pinnedSeats and pinnedSeats[i]) then
             local record=data.nicknames[key]
             local id=record and record.groupId
             local candidates=id and data.nicknameGroups[id] and groupMembers[id]
@@ -773,7 +799,7 @@ local function GuestCandidates(source,excluded)
     local selected=selectedSetup and data.setups[selectedSetup]
     local modes=selected and selected.guestModes
     for _,m in ipairs(rosterSorted) do
-        if not used[m.key] and not excluded[m.key] and GuestMode(m.name) then
+        if not used[m.key] and not excluded[m.key] and not RGStyle.IsArrangementIgnored(m.key) and GuestMode(m.name) then
             local mode=modes and modes[m.key]
             if mode==nil then mode=data.guests[m.key] end
             available[#available+1]={member=m,
@@ -826,8 +852,8 @@ local function GuestAssignments(source, fixedGuestNames, excluded)
         if selected and selected.guestModes and selected.guestModes[key]~=nil then
             mode=selected.guestModes[key]
         end
-        if not used[key] and not excluded[key] and not SavedNickname(member.name)
-            and mode~="notguest" and mode~=false then
+        if not used[key] and not excluded[key] and not RGStyle.IsArrangementIgnored(key)
+            and not SavedNickname(member.name) and mode~="notguest" and mode~=false then
             genericEligible[key]=member
         end
     end
@@ -839,7 +865,7 @@ local function GuestAssignments(source, fixedGuestNames, excluded)
         if fixedName and (value=="GUEST" or value==RGStyle.SETUP_GUEST) then
             local member=rosterByKey[Canonical(fixedName)]
             if member and not used[member.key] and not excluded[member.key]
-                and not reserved[member.key] and
+                and not RGStyle.IsArrangementIgnored(member.key) and not reserved[member.key] and
                 (value=="GUEST" or genericEligible[member.key]) then
                 assigned[i]=member
                 reserved[member.key]=true
@@ -1351,13 +1377,17 @@ local function SetChoiceButtonState(button, enabled, redWhenOff, prominent)
         color={r=.82,g=.22,b=.24}
     end
     if color then
-        button._bg:SetColorTexture(color.r,color.g,color.b,prominent and .68 or .40)
+        -- Green action buttons use black labels. An opaque-enough fill keeps
+        -- their contrast readable even over Raid Tools' dark window chrome.
+        button._bg:SetColorTexture(color.r,color.g,color.b,
+            enabled and (prominent and .95 or .90) or (prominent and .68 or .40))
         button._border:SetColor(color.r,color.g,color.b,.9)
     else
         button._bg:SetColorTexture(.08,.08,.08,.92)
         button._border:SetColor(.2,.2,.2,1)
     end
-    button._lbl:SetTextColor(1,1,1)
+    local labelColor=enabled and 0 or 1
+    button._lbl:SetTextColor(labelColor,labelColor,labelColor)
 end
 -- EUI's signature blue is also used by the Nameplates EUI Glow default;
 -- keep Preview Apply visually distinct from destructive/active-state controls.
@@ -1416,7 +1446,9 @@ local function ShowSeatMenu(anchor, choices)
             seatMenuFrame._items[i]=row
         end
         row._choice=choice
-        row._lbl:SetText(L(choice.label))
+        -- Boss portraits use the same reusable context buttons as seat actions.
+        -- Other menus keep their original, text-only appearance.
+        row._lbl:SetText((choice.icon and ("|T"..choice.icon..":16:16|t ") or "")..L(choice.label))
         row:Show()
     end
     for i=#choices+1,#seatMenuFrame._items do
@@ -2050,6 +2082,12 @@ local function ExportBackup(plain)
     end
     ExportMap("SUP",data.suppressed)
     ExportMap("SHARE",data.nicknameSharing)
+    local ignoredKeys={}
+    for key,ignored in pairs(data.ignoreArrangement or {}) do
+        if ignored then ignoredKeys[#ignoredKeys+1]=key end
+    end
+    table.sort(ignoredKeys)
+    for _,key in ipairs(ignoredKeys) do Record("IGNORE",key) end
     ExportMap("GUEST",data.guests)
     for i,setup in ipairs(data.setups) do
         local fields={"SET",i,setup.name or "",setup.updated or 0}
@@ -2058,6 +2096,9 @@ local function ExportBackup(plain)
             fields[#fields+1]=value=="GUEST" and "G" or (value==RGStyle.SETUP_GUEST and "S" or value or "")
         end
         Record(unpack(fields))
+        if type(setup.bossAchievementID)=="number" then
+            Record("SETICON",i,setup.bossAchievementID)
+        end
         local modes=setup.guestModes or {}
         local skeys={}
         for key in pairs(modes) do skeys[#skeys+1]=key end
@@ -2101,7 +2142,7 @@ local function ParseBackup(source)
         source=expanded
     end
     local result={setups={},nicknames={},nicknameGroups={},suppressed={},
-        nicknameSharing={},guests={},split={groups={}},nextNicknameGroupID=0}
+        nicknameSharing={},ignoreArrangement={},guests={},split={groups={}},nextNicknameGroupID=0}
     local head=true
     local seenSetup={}
     local seenMeta, seenSplit = false, false
@@ -2145,6 +2186,11 @@ local function ParseBackup(source)
             elseif kind=="SUP" then
                 if #fields~=2 or fields[2]=="" then return nil,"Invalid suppression record." end
                 result.suppressed[fields[2]]=true
+            elseif kind=="IGNORE" then
+                if #fields~=2 or not Canonical(fields[2]) or
+                    Canonical(fields[2])~=fields[2] or result.ignoreArrangement[fields[2]] then
+                    return nil,"Invalid or duplicate Ignore Arrangement character." end
+                result.ignoreArrangement[fields[2]]=true
             elseif kind=="SHARE" or kind=="GUEST" then
                 if #fields~=3 or fields[2]=="" then return nil,"Invalid player preference." end
                 local dest=kind=="SHARE" and result.nicknameSharing or result.guests
@@ -2170,6 +2216,14 @@ local function ParseBackup(source)
                     end
                 end
                 result.setups[index]=entry
+            elseif kind=="SETICON" then
+                local index=tonumber(fields[2])
+                local id=tonumber(fields[3])
+                if #fields~=3 or not index or not result.setups[index] or
+                    result.setups[index].bossAchievementID~=nil or not id or
+                    id<0 or id>10000000 or id%1~=0 then
+                    return nil,"Invalid or duplicate setup boss icon." end
+                result.setups[index].bossAchievementID=id
             elseif kind=="SETGUEST" then
                 if #fields~=4 or not tonumber(fields[2]) or fields[3]=="" then
                     return nil,"Invalid setup Guest override." end
@@ -2333,6 +2387,7 @@ local function ShowBackupWindow()
                 nickCollapsed=data.nicknameCollapsed
                 data.suppressed=restored.suppressed
                 data.nicknameSharing=restored.nicknameSharing
+                data.ignoreArrangement=restored.ignoreArrangement
                 data.guests=restored.guests
                 data.split=restored.split
                 data.nextNicknameGroupID=restored.nextNicknameGroupID
@@ -2375,8 +2430,14 @@ function ns.ImportRaidGroupsIntoSetups(source, format)
     selectedSetup=nil -- never overwrite a previously selected Keep Changes setup
     RGStyle.setupLoadToggle=nil
     firstDraftLoaded=true
-    SaveEdit()
+    -- SaveSetup performs the final UI refresh; do not redraw the editor twice
+    -- while importing. Still stop an in-progress Apply Groups operation.
+    if applyState then StopApply("Group application stopped: draft changed during Apply Groups.") end
     SaveSetup(name)
+    -- Show the imported composition if the main Raid Groups window is closed.
+    if (not win or not win:IsShown()) and ns.ShowRaidGroupsWindow then
+        ns.ShowRaidGroupsWindow()
+    end
     Notice(LF("Imported setup '%s': %d characters and %d Guest seats.",name,players,guests),"success")
     return true
 end
@@ -2481,7 +2542,17 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
     Roster()
     local wanted, order = {}, {}
     local assignedGuests = GuestAssignments(source, fixedGuestNames, excluded)
-    local seen = {}
+    local seen,groupSeats,ignoredSeats = {},{},{}
+    for _,member in ipairs(rosterSorted) do
+        groupSeats[member.group]=(groupSeats[member.group] or 0)+1
+        if RGStyle.IsArrangementIgnored(member.key) then
+            local seat=groupSeats[member.group]
+            ignoredSeats[(member.group-1)*GROUP_SIZE+seat]=true
+            wanted[member.key]={group=member.group,seat=seat,ignored=true}
+            order[#order+1]=member.key
+            seen[member.key]=true
+        end
+    end
     for i=1,SLOT_COUNT do
         local v = source[i]
         local item = (v=="GUEST" or v==RGStyle.SETUP_GUEST) and assignedGuests[i]
@@ -2512,7 +2583,7 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
                 if source[i] and source[i]~=RGStyle.SETUP_GUEST then
                     return wanted,order,assignedGuests,extras,"Pinned Empty conflicts with an occupied planned slot."
                 end
-            elseif not source[i] then
+            elseif not source[i] and not ignoredSeats[i] then
                 free[g][#free[g]+1]=n
             end
         end
@@ -2559,7 +2630,7 @@ local function AutomaticShiftLeader(wanted, silent, emptyPinned)
     end
     if not leader then return end
     local planned=wanted[leader.key]
-    if not planned or planned.seat==1 or planned.extra then return end
+    if not planned or planned.seat==1 or planned.extra or planned.ignored then return end
     -- A visual Pinned Empty slot must never be repurposed by leader shifting.
     if emptyPinned and emptyPinned[(planned.group-1)*GROUP_SIZE+1] then return end
 
@@ -2590,7 +2661,7 @@ local function AutomaticShiftLeader(wanted, silent, emptyPinned)
     -- A local shift inside the planned group: existing seats 1..N-1 move one
     -- place down; the leader occupies seat 1. No persisted table is touched.
     for key,slot in pairs(wanted) do
-        if key~=leader.key and slot.group==targetGroup and slot.seat<plannedSeat then
+        if key~=leader.key and not slot.ignored and slot.group==targetGroup and slot.seat<plannedSeat then
             slot.seat=slot.seat+1
         end
     end
@@ -2636,10 +2707,25 @@ local function BuildApplyPlan(source,fixedGuestNames,skipAutoEmpty,excluded,empt
     local resolved,links,ambiguous=ns.RaidGroupsResolveRosterSource(source or draft)
     source=skipAutoEmpty and CopyDraft(resolved) or AutoGuestSource(resolved,excluded,emptyPinned)
     local wanted,order,guests,extras,blockedReason=TargetGroups(source,fixedGuestNames,excluded,emptyPinned)
+    if not blockedReason then
+        local groupCounts={}
+        for _,target in pairs(wanted) do
+            groupCounts[target.group]=(groupCounts[target.group] or 0)+1
+            if groupCounts[target.group]>GROUP_SIZE then
+                blockedReason=LF("Ignore Arrangement: Group %d has more than five assigned players. Adjust the setup before applying.",target.group)
+                break
+            end
+        end
+    end
     local lines,missing,used={}, {}, {}
     local unfilledGeneric=0
     for _,link in ipairs(links) do
         lines[#lines+1]=LF("Nickname match: %s -> %s",link.source,link.target)
+    end
+    for _,member in ipairs(rosterSorted) do
+        if RGStyle.IsArrangementIgnored(member.key) then
+            lines[#lines+1]=LF("Ignore Arrangement: %s stays in Group %d (current raid position, best effort).",member.name,member.group)
+        end
     end
     for _,name in ipairs(ambiguous) do
         lines[#lines+1]=LF("Ambiguous nickname match (not assigned): %s",name)
@@ -2963,6 +3049,9 @@ local function PreviewSeatMenu(anchor,i)
     local name=model.seats[i] or model.absentNames[i]
     local isGuest=model.guestSeats[i] or model.pinnedGuests[i] or model.genericPinnedSeats[i]
     local options={}
+    if name and rosterByKey[Canonical(name)] then
+        RGStyle.IgnoreArrangementMenu(options,name)
+    end
     if model.emptyPinned[i] then
         options[#options+1]={label="Unpin Pinned Empty (Make Available)",action=function()
             model.emptyPinned[i]=nil
@@ -3248,7 +3337,14 @@ local function ShowApplyPreview(model)
                     seat._lbl:SetJustifyH("LEFT")
                     if side==1 then
                         currentRows[pos]=seat
-                        seat:Disable()
+                        seat:RegisterForClicks("RightButtonUp")
+                        seat:SetScript("OnClick",function(self,button)
+                            if button=="RightButton" and self._currentName then
+                                local options={}
+                                RGStyle.IgnoreArrangementMenu(options,self._currentName)
+                                ShowSeatMenu(self,options)
+                            end
+                        end)
                     else
                         afterRows[pos]=seat
                         seat:RegisterForClicks("LeftButtonUp","RightButtonUp")
@@ -3324,8 +3420,15 @@ local function ShowApplyPreview(model)
             RGStyle.MarkPlayerFont(row._lbl,"available")
             row._availableName=nil
             row:RegisterForDrag("LeftButton")
-            row:SetScript("OnClick",function(self)
+            row:RegisterForClicks("LeftButtonUp","RightButtonUp")
+            row:SetScript("OnClick",function(self,button)
                 if not previewDraftState or not self._availableName then return end
+                if button=="RightButton" then
+                    local options={}
+                    RGStyle.IgnoreArrangementMenu(options,self._availableName)
+                    ShowSeatMenu(self,options)
+                    return
+                end
                 local selected=Canonical(self._availableName)
                 previewDraftState.selectedAvailableKey=(previewDraftState.selectedAvailableKey==selected) and nil or selected
                 previewWindow._render()
@@ -3484,7 +3587,9 @@ local function ShowApplyPreview(model)
             for i=1,SLOT_COUNT do
                 local left=currentRows[i]
                 local mem=current[i]
-                left._lbl:SetText(mem and (Display(mem.name,mem.unit)..(GuestMode(mem.name) and "*" or "")) or L("Empty"))
+                left._currentName=mem and mem.name or nil
+                left._lbl:SetText(mem and (Display(mem.name,mem.unit)..(GuestMode(mem.name) and "*" or "")..
+                    (RGStyle.IsArrangementIgnored(mem.key) and " [Ignored]" or "")) or L("Empty"))
                 if mem and mem.class then
                     local c=EllesmereUI.GetClassColor(mem.class)
                     if c then left._lbl:SetTextColor(c.r,c.g,c.b) end
@@ -3502,6 +3607,7 @@ local function ShowApplyPreview(model)
                     (absent and (Display(absent)..(isGuest and "*" or "").." ["..L("Missing").."]") or
                         (model.genericPinnedSeats[sourceIndex] and "Pinned Guest (Setup)" or
                             (model.guestSeats[sourceIndex] and L("Guest") or L("Empty")))))
+                if info and RGStyle.IsArrangementIgnored(info.key) then label=label.." [Ignored]" end
                 right._lbl:SetText(label)
                 local leaderIcon=right._previewLeaderIcon
                 local style=ns.RaidGroupsLeaderIconOption("leaderIconStyle")
@@ -3554,7 +3660,7 @@ local function ShowApplyPreview(model)
                     row._maySwap=not not atRisk
                     local label=LF("%s (Group %d%s)",ChatName(member.name)..(GuestMode(member.name) and "*" or ""),member.group,
                         atRisk and "; may swap" or "; unassigned")
-                    row._lbl:SetText(label)
+                    row._lbl:SetText(label..(RGStyle.IsArrangementIgnored(member.key) and " [Ignored]" or ""))
                     row._lbl:SetTextColor(model.selectedAvailableKey==member.key and .22 or 1,
                         model.selectedAvailableKey==member.key and 1 or (atRisk and .7 or .82),
                         atRisk and .34 or .77)
@@ -3780,7 +3886,9 @@ function ProcessApply()
     if state.bridgeCycle then
         local cycle=state.bridgeCycle
         local a,b,c=rosterByKey[cycle.a],rosterByKey[cycle.b],rosterByKey[cycle.c]
-        if not a or not b or not c or a.rank==2 or b.rank==2 or c.rank==2 then
+        if not a or not b or not c or a.rank==2 or b.rank==2 or c.rank==2 or
+            RGStyle.IsArrangementIgnored(a.key) or RGStyle.IsArrangementIgnored(b.key) or
+            RGStyle.IsArrangementIgnored(c.key) then
             StopApply("Exact Positions stopped: bridge member unavailable or raid leader changed.")
             return
         end
@@ -3806,7 +3914,7 @@ function ProcessApply()
     local wrong, needGroup
     for _,k in ipairs(state.order) do
         local m, want = rosterByKey[k], state.wanted[k]
-        if m and want and m.group ~= want.group then wrong=m; needGroup=want.group; break end
+        if m and want and not want.ignored and m.group ~= want.group then wrong=m; needGroup=want.group; break end
     end
     if wrong then
         local partner
@@ -3822,12 +3930,13 @@ function ProcessApply()
         for _,m in ipairs(rosterSorted) do
             if m.group == needGroup and m.key ~= wrong.key then
                 local expected = state.wanted[m.key]
-                if expected and expected.group ~= m.group then partner=m;break end
+                if not RGStyle.IsArrangementIgnored(m.key) and expected and expected.group ~= m.group then partner=m;break end
             end
         end
         if not partner then
             for _,m in ipairs(rosterSorted) do
-                if m.group == needGroup and not state.wanted[m.key] then partner=m;break end
+                if m.group == needGroup and not RGStyle.IsArrangementIgnored(m.key) and
+                    not state.wanted[m.key] then partner=m;break end
             end
         end
         if not partner then
@@ -3849,7 +3958,7 @@ function ProcessApply()
             currentSeat[m.group]=currentSeat[m.group]+1
             local want=state.wanted[m.key]
             local actual=currentSeat[m.group]
-            if want and actual~=want.seat and m.rank~=2 then
+            if want and not want.ignored and actual~=want.seat and m.rank~=2 then
                 local attempt=m.key..":"..want.group..":"..want.seat
                 if not state.attemptedExact[attempt] then
                     state.attemptedExact[attempt]=true
@@ -3861,7 +3970,9 @@ function ProcessApply()
                             if pos==want.seat then occupant=x end
                         elseif not bridge and x.rank~=2 then bridge=x end
                     end
-                    if occupant and bridge and occupant.rank~=2 and occupant.key~=m.key then
+                    if occupant and bridge and occupant.rank~=2 and occupant.key~=m.key and
+                        not RGStyle.IsArrangementIgnored(occupant.key) and
+                        not RGStyle.IsArrangementIgnored(bridge.key) then
                         state.bridgeCycle={a=m.key,b=occupant.key,c=bridge.key,
                             group=m.group,other=bridge.group,stage=1}
                         -- Call the next iteration directly: it will execute
@@ -4060,6 +4171,24 @@ RGStyle.bossAchievementIDs={
     coiledaltar=63529,thecoiledaltar=63529,
     ulatek=63476,
 }
+-- Ordered choices are separate from aliases so the menu has no duplicates.
+RGStyle.bossIconChoices={
+    {name="Nek'zali",id=63523},
+    {name="The Lost Explorers",id=63525},
+    {name="Entombed Sentinels",id=63524},
+    {name="Vash'nik the Malignant",id=63526},
+    {name="Sszorak",id=63527},
+    {name="The Twin Fangs",id=63528},
+    {name="Nymrissa Wavecaller",id=63682},
+    {name="The Coiled Altar",id=63529},
+    {name="Ulatek",id=63476},
+}
+function RGStyle.BossAchievementTexture(id)
+    if type(id)~="number" or id<1 or not GetAchievementInfo then return nil end
+    local ok,_,_,_,_,_,_,_,_,_,icon=pcall(GetAchievementInfo,id)
+    if ok and (type(icon)=="number" or type(icon)=="string") then return icon end
+    return nil
+end
 function RGStyle.SetupBossKey(setupName)
     if type(setupName)~="string" then return nil end
     local name=setupName:lower()
@@ -4072,48 +4201,127 @@ function RGStyle.SetupBossKey(setupName)
     name=name:gsub("[^%w]", "")
     return name~="" and name or nil
 end
-function RGStyle.SetupBossIcon(setupName)
-    local key=RGStyle.SetupBossKey(setupName)
-    if not key then return nil end
-    local knownID=RGStyle.bossAchievementIDs[key]
-    if knownID and GetAchievementInfo then
-        local ok,_,_,_,_,_,_,_,_,_,icon=pcall(GetAchievementInfo,knownID)
-        if ok and icon then return icon end
-    end
-    -- Achievement catalog fallback for bosses introduced in later seasons.
-    if not RGStyle._bossAchievementScanDone and GetCategoryList and
-        GetCategoryNumAchievements and GetAchievementInfo then
-        RGStyle._bossAchievementScanDone=true
-        local found={}
+-- The achievement catalog may contain thousands of entries. Search a small
+-- batch per frame instead of blocking the import/setup-list refresh in one go.
+function RGStyle.BeginBossAchievementScan()
+    if RGStyle._bossAchievementScanDone or RGStyle._bossAchievementScanRunning or
+        not (C_Timer and C_Timer.After and GetCategoryList and
+            GetCategoryNumAchievements and GetAchievementInfo) then return end
+    local ok,categories=pcall(GetCategoryList)
+    if not ok or type(categories)~="table" then return end
+    RGStyle._bossAchievementScanRunning=true
+    local found={}
+    local categoryIndex,achievementIndex=1,1
+    local mythic=(PLAYER_DIFFICULTY6 or "Mythic"):lower()..": "
+    local function Step()
         local ok=pcall(function()
-            local mythic=(PLAYER_DIFFICULTY6 or "Mythic"):lower()..": "
-            for _,categoryID in ipairs(GetCategoryList() or {}) do
-                for index=1,(GetCategoryNumAchievements(categoryID) or 0) do
-                    local _,name,_,_,_,_,_,_,_,icon=GetAchievementInfo(categoryID,index)
+            local budget=40
+            while categoryIndex<=#categories and budget>0 do
+                local categoryID=categories[categoryIndex]
+                local count=GetCategoryNumAchievements(categoryID) or 0
+                if achievementIndex>count then
+                    categoryIndex=categoryIndex+1
+                    achievementIndex=1
+                else
+                    local _,name,_,_,_,_,_,_,_,icon=GetAchievementInfo(categoryID,achievementIndex)
                     if type(name)=="string" and icon then
                         local prefix,boss=name:lower():match("^(.-: )(.+)$")
                         if boss then
-                            local bossKey=boss:gsub("[^%w]", "")
-                            local current=found[bossKey]
-                            if prefix==mythic or not current then
-                                found[bossKey]={icon=icon,mythic=(prefix==mythic)}
+                            local key=boss:gsub("[^%w]", "")
+                            local existing=found[key]
+                            if prefix==mythic or not existing then
+                                found[key]={icon=icon,mythic=(prefix==mythic)}
                             end
                         end
                     end
+                    achievementIndex=achievementIndex+1
+                    budget=budget-1
                 end
             end
         end)
-        if ok then RGStyle._bossAchievementCatalog=found end
+        if not ok then
+            -- A catalog API failure must not strand a running scan or break UI.
+            RGStyle._bossAchievementScanDone=true
+            RGStyle._bossAchievementScanRunning=false
+        elseif categoryIndex<=#categories then
+            C_Timer.After(0,Step)
+        else
+            RGStyle._bossAchievementCatalog=found
+            RGStyle._bossAchievementScanDone=true
+            RGStyle._bossAchievementScanRunning=false
+            if RefreshSetups and setupWindow and setupWindow:IsShown() then RefreshSetups() end
+        end
+    end
+    C_Timer.After(0,Step)
+end
+function RGStyle.SetupBossIcon(setup)
+    -- nil = automatic portrait from name; 0 = explicitly no portrait;
+    -- positive achievement ID = saved manual override.
+    if type(setup)=="table" then
+        if setup.bossAchievementID~=nil then
+            return RGStyle.BossAchievementTexture(setup.bossAchievementID)
+        end
+        setup=setup.name
+    end
+    local key=RGStyle.SetupBossKey(setup)
+    if not key then return nil end
+    local knownID=RGStyle.bossAchievementIDs[key]
+    if knownID then
+        local icon=RGStyle.BossAchievementTexture(knownID)
+        if icon then return icon end
     end
     local record=RGStyle._bossAchievementCatalog and RGStyle._bossAchievementCatalog[key]
-    return record and record.icon or nil
+    if record then return record.icon end
+    RGStyle.BeginBossAchievementScan()
+    return nil
+end
+function RGStyle.ShowSetupBossMenu(anchor,entry)
+    if not entry then return end
+    -- Bind to the entry itself, not its row index: reordering or deleting a
+    -- setup while a prompt is open must never modify the wrong record.
+    local function SetBossID(id)
+        for _,saved in ipairs(data.setups) do
+            if saved==entry then
+                saved.bossAchievementID=id
+                saved.updated=time()
+                if RefreshSetups then RefreshSetups() end
+                return
+            end
+        end
+    end
+    local choices={
+        {label="Automatic Icon (from Name)",action=function() SetBossID(nil) end},
+        {label="No Boss Icon",action=function() SetBossID(0) end},
+    }
+    for _,boss in ipairs(RGStyle.bossIconChoices) do
+        local id=boss.id
+        choices[#choices+1]={label=boss.name,icon=RGStyle.BossAchievementTexture(id),
+            action=function()
+                if RGStyle.BossAchievementTexture(id) then SetBossID(id)
+                else Notice("Boss achievement icon is unavailable on this client.") end
+            end}
+    end
+    choices[#choices+1]={label="Other Achievement ID...",action=function()
+        InputPrompt("Boss achievement ID:",
+            entry.bossAchievementID and entry.bossAchievementID>0 and tostring(entry.bossAchievementID) or "",
+            function(value)
+                local id=tonumber(Trim(value))
+                if not id or id<1 or id>10000000 or id%1~=0 or
+                    not RGStyle.BossAchievementTexture(id) then
+                    Notice("Invalid achievement ID or icon unavailable.")
+                    return
+                end
+                SetBossID(id)
+            end)
+    end}
+    ShowSeatMenu(anchor,choices)
 end
 local function EnsureSetupWindow()
     if setupWindow then return end
     setupWindow=Panel("EllesmereUIRaidGroupSetups",540,495)
     local title=Text(setupWindow,15,"Raid Group Setup")
     title:SetPoint("TOPLEFT",14,-15)
-    local help=Text(setupWindow,10,"Click a setup to load it. Drag a setup to reorder.")
+    local help=Text(setupWindow,10,"Left-click to load, right-click to change boss icon, drag to reorder.")
     help:SetPoint("TOPLEFT",14,-39)
     local make=Button(setupWindow,"Save as New",120,23,function()
         InputPrompt("Save current raid group setup as:","",SaveSetup)
@@ -4149,23 +4357,23 @@ local function EnsureSetupWindow()
         TransferWindow(false)
     end):SetPoint("LEFT",setupImport,"RIGHT",9,0)
     local function SetupWheel(_,delta)
-        setupOffset=math.max(0,math.min(math.max(0,#data.setups-10),setupOffset-(delta>0 and 1 or -1)))
+        setupOffset=math.max(0,math.min(math.max(0,#data.setups-RGStyle.setupVisibleRows),setupOffset-(delta>0 and 1 or -1)))
         RefreshSetups()
     end
     local setupWheel=CreateFrame("Frame",nil,setupWindow)
     setupWheel:SetPoint("TOPLEFT",13,-74)
-    setupWheel:SetSize(494,298)
+    setupWheel:SetSize(494,335)
     setupWheel:EnableMouseWheel(true)
     setupWheel:SetScript("OnMouseWheel",SetupWheel)
     setupWheel:SetFrameLevel(setupWindow:GetFrameLevel()+1)
-    setupWindow._listScrollbar=RGStyle.ListScrollbar(setupWindow,516,-74,298,
+    setupWindow._listScrollbar=RGStyle.ListScrollbar(setupWindow,516,-74,335,
         function() return setupOffset end,
         function(offset) setupOffset=offset;RefreshSetups() end,
-        function() return math.max(0,#data.setups-10) end)
-    for j=1,10 do
+        function() return math.max(0,#data.setups-RGStyle.setupVisibleRows) end)
+    for j=1,RGStyle.setupVisibleRows do
         local row=CreateFrame("Button",nil,setupWindow)
-        row:SetSize(494,28)
-        row:SetPoint("TOPLEFT",13,-74-(j-1)*30)
+        row:SetSize(494,27)
+        row:SetPoint("TOPLEFT",13,-74-(j-1)*28)
         local bg=EllesmereUI.SolidTex(row,"BACKGROUND",.10,.13,.15,.75);bg:SetAllPoints()
         row._bg=bg
         -- Reuse Raid Check's ready-mark atlas for the selected setup, rather
@@ -4218,7 +4426,15 @@ local function EnsureSetupWindow()
         row._label=label;setupRows[j]=row
         row:SetFrameLevel(setupWheel:GetFrameLevel()+1)
         row:RegisterForDrag("LeftButton")
-        row:SetScript("OnClick",function(self) if self._index then LoadSetup(self._index,true) end end)
+        row:RegisterForClicks("LeftButtonUp","RightButtonUp")
+        row:SetScript("OnClick",function(self,button)
+            if not self._index then return end
+            if button=="RightButton" then
+                RGStyle.ShowSetupBossMenu(self,data.setups[self._index])
+            else
+                LoadSetup(self._index,true)
+            end
+        end)
         row:SetScript("OnDragStart",function(self) self._dragEntry=self._index end)
         row:SetScript("OnDragStop",function(self)
             local i=self._dragEntry
@@ -4248,7 +4464,7 @@ function RefreshSetups()
         keepButton._lbl:SetText(L(data.keepChanges and "Keep Changes: ON" or "Keep Changes: OFF"))
         SetChoiceButtonState(keepButton,not not data.keepChanges,true,true)
     end
-    setupOffset=math.max(0,math.min(setupOffset,math.max(0,#data.setups-10)))
+    setupOffset=math.max(0,math.min(setupOffset,math.max(0,#data.setups-RGStyle.setupVisibleRows)))
     if setupWindow._listScrollbar then setupWindow._listScrollbar:Sync() end
     for j,row in ipairs(setupRows) do
         local i=j+setupOffset
@@ -4258,7 +4474,7 @@ function RefreshSetups()
         if entry then
             local selected=i==selectedSetup
             row._selectedCheck:SetShown(selected)
-            local achievementIcon=RGStyle.SetupBossIcon(entry.name)
+            local achievementIcon=RGStyle.SetupBossIcon(entry)
             if achievementIcon then row._bossIcon:SetTexture(achievementIcon) end
             row._bossIcon:SetShown(not not achievementIcon)
             -- Selection uses Raid Check's ready icon plus the EUI accent color.
@@ -4771,6 +4987,11 @@ local function MainSeatMenu(row)
         choices[#choices+1]={label="Mark as Pinned Empty",action=function()
             RGStyle.SetEmptyPinned(i,true) end}
     end
+    if row._member then
+        RGStyle.IgnoreArrangementMenu(choices,row._member.name)
+    elseif v and v~="GUEST" and v~=RGStyle.SETUP_GUEST then
+        RGStyle.IgnoreArrangementMenu(choices,v)
+    end
     if v and v~="GUEST" and v~=RGStyle.SETUP_GUEST then
         if Enabled("guestFeatures") and Enabled("guestRightClick") then
             if not draftGuest[i] then
@@ -5013,7 +5234,8 @@ function RefreshExtras()
             local mode=(setup and setup.guestModes and setup.guestModes[info.key]) or data.guests[info.key]
             local guest=GuestMode(info.name)
             row._lbl:SetText(Display(info.name)..(guest and "*" or (Enabled("unlistedAsterisk") and " *" or ""))..
-                (not guest and mode=="notguest" and (" ["..L("Not Guest").."]") or ""))
+                (not guest and mode=="notguest" and (" ["..L("Not Guest").."]") or "")..
+                (RGStyle.IsArrangementIgnored(info.key) and " [Ignored]" or ""))
             local c=info.class and EllesmereUI.GetClassColor(info.class)
             if c then row._lbl:SetTextColor(c.r,c.g,c.b) else row._lbl:SetTextColor(1,1,1) end
         end
@@ -5036,10 +5258,10 @@ function Refresh()
             s._lbl:SetText("Pinned Empty")
             s._lbl:SetTextColor(.45,.48,.51)
         elseif v=="GUEST" then
-            s._lbl:SetText(player and (Display(player.name,player.unit).."*") or L("Guest"))
+            s._lbl:SetText(player and (Display(player.name,player.unit).."*"..(RGStyle.IsArrangementIgnored(player.key) and " [Ignored]" or "")) or L("Guest"))
             s._lbl:SetTextColor(1,.72,.31)
         elseif v==RGStyle.SETUP_GUEST then
-            s._lbl:SetText(player and (Display(player.name,player.unit).."* [Pinned]") or "Pinned Guest (Setup)")
+            s._lbl:SetText(player and (Display(player.name,player.unit).."* [Pinned]"..(RGStyle.IsArrangementIgnored(player.key) and " [Ignored]" or "")) or "Pinned Guest (Setup)")
             s._lbl:SetTextColor(1,.72,.31)
         elseif v then
             local nick=Display(v,player and player.unit)
@@ -5047,7 +5269,7 @@ function Refresh()
             local setup=selectedSetup and data.setups[selectedSetup]
             local fixedGuest=not not draftPinned[i]
             if fixedGuest or draftGuest[i] or explicitGuest or previewGuestAnnotations[i] then nick=nick.."*" end
-            s._lbl:SetText(nick)
+            s._lbl:SetText(nick..(player and RGStyle.IsArrangementIgnored(player.key) and " [Ignored]" or ""))
             local color=player and player.class and EllesmereUI.GetClassColor(player.class)
             if color then s._lbl:SetTextColor(color.r,color.g,color.b,player.online and 1 or .5)
             else s._lbl:SetTextColor(.82,.82,.82,player and 1 or .48) end
@@ -5216,7 +5438,12 @@ function ns._BuildRaidGroupsMainSlots()
                     GameTooltip:AddLine(RGStyle.emptyPinnedDraft[self._seat] and "Pinned Empty: reserved vacant seat" or
                         (self._value==RGStyle.SETUP_GUEST and "Pinned Guest (Setup)" or
                             (self._value=="GUEST" and L("Guest seat") or (self._value or ""))))
-                    if self._member then GameTooltip:AddLine(LF("Roster: %s",self._member.name), .7,.8,.8) end
+                    if self._member then
+                        GameTooltip:AddLine(LF("Roster: %s",self._member.name), .7,.8,.8)
+                        if RGStyle.IsArrangementIgnored(self._member.key) then
+                            GameTooltip:AddLine(L("Ignore Arrangement: stays in its current raid subgroup during Apply."),.45,.95,.8)
+                        end
+                    end
                     if self._value and self._value~="GUEST" and draftPinned[self._seat] then
                         GameTooltip:AddLine(L("* Pinned Guest: protected from Unlisted assignments"),1,.72,.31)
                     elseif self._value==RGStyle.SETUP_GUEST then
@@ -5295,6 +5522,7 @@ local function EnsureMainWindow()
             if mouseButton=="RightButton" then
                 local playerName=self._member.name
                 local actions=GuestMenuActions(playerName)
+                RGStyle.IgnoreArrangementMenu(actions,playerName)
                 actions[#actions+1]={label="Assign to Next Available Slot",action=function()
                     AssignExtra(playerName) end}
                 if Enabled("guestFeatures") and Enabled("guestRightClick") then
