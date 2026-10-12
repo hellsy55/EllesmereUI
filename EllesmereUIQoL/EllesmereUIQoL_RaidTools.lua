@@ -543,6 +543,10 @@ local DB_DEFAULTS = {
         -- matters while it's on.
         autoMinimize      = false,
         autoMinimizeDelay = 30,
+        -- Logical order from the assistant control toward the marker grid.
+        -- The entire Pull Timer section (including Stop and Break) moves as
+        -- one unit; missing/hidden buttons do not leave empty cells.
+        buttonOrder = { "pings", "difficulty", "convert", "disband", "ready", "role", "pull" },
         -- Invite Tools state. Raid Tools owns the launcher in EUI, so no
         -- separate minimap launcher settings are needed here.
         inviteTools = {
@@ -682,6 +686,32 @@ local function AutoMinimizeDelay()
     return v
 end
 ns.AutoMinimizeDelay = AutoMinimizeDelay
+
+local GROUP_BUTTON_DEFAULT_ORDER = { "pings", "difficulty", "convert", "disband", "ready", "role", "pull" }
+local GROUP_BUTTON_KEYS = {
+    pings = true, difficulty = true, convert = true, disband = true,
+    ready = true, role = true, pull = true,
+}
+-- Normalize on read rather than writing defaults back to the profile. This
+-- also tolerates removed/duplicated keys in imported or older profiles.
+local function GroupButtonOrder()
+    local p = P()
+    local saved = p and p.buttonOrder
+    local ordered, seen = {}, {}
+    if type(saved) == "table" then
+        for _, key in ipairs(saved) do
+            if GROUP_BUTTON_KEYS[key] and not seen[key] then
+                seen[key] = true
+                ordered[#ordered + 1] = key
+            end
+        end
+    end
+    for _, key in ipairs(GROUP_BUTTON_DEFAULT_ORDER) do
+        if not seen[key] then ordered[#ordered + 1] = key end
+    end
+    return ordered
+end
+ns.RaidToolsButtonOrder = GroupButtonOrder
 
 -- Growth direction -> the shell corner that rides the collapsed icon (see
 -- DB_DEFAULTS.openDirection). Anchoring icon and shell at the SAME corner of
@@ -1582,33 +1612,17 @@ local function LayoutGroupContent()
     if not groupHolder then return end
     local f = groupHolder
 
-    local function PackRows(buttons, perRow)
-        local rows, row = {}, {}
-        perRow = perRow or 2
-        for _, b in ipairs(buttons) do
-            if b then
-                row[#row + 1] = b
-                if #row == perRow then rows[#rows + 1] = row; row = {} end
-            end
-        end
-        if #row > 0 then rows[#rows + 1] = row end
-        return rows
-    end
-
-    -- Pings and Difficulty sit directly between Make Everyone Assistant and
-    -- the ordinary action block. Every optional survivor compacts leftward.
-    local pre = {}
-    if ButtonShown("showPings") and C_PartyInfo.GetRestrictPings and C_PartyInfo.SetRestrictPings then
-        pre[#pre + 1] = runtime.pingButton
-    end
-    if ButtonShown("showDifficulty") then pre[#pre + 1] = runtime.difficultyButton end
-    local preRows = PackRows(pre, 2)
-
-    local actions = { readyButton }
-    if ButtonShown("showRoleCheck") then actions[#actions + 1] = roleButton end
-    if ButtonShown("showConvert")   then actions[#actions + 1] = convertButton end
-    if ButtonShown("showDisband")   then actions[#actions + 1] = disbandButton end
-    local actionRows = PackRows(actions, 2)
+    -- All seven kinds share one saved order. Pull/Stop/Break remains a single
+    -- indivisible block, while the other visible buttons pack two per row.
+    local buttonByKey = {
+        pings = ButtonShown("showPings") and C_PartyInfo.GetRestrictPings
+            and C_PartyInfo.SetRestrictPings and runtime.pingButton or nil,
+        difficulty = ButtonShown("showDifficulty") and runtime.difficultyButton or nil,
+        convert = ButtonShown("showConvert") and convertButton or nil,
+        disband = ButtonShown("showDisband") and disbandButton or nil,
+        ready = readyButton,
+        role = ButtonShown("showRoleCheck") and roleButton or nil,
+    }
 
     -- Keep the existing Pull/Stop row exactly as it was. Break is the next
     -- control after Stop: when that row currently has fewer than three buttons
@@ -1669,24 +1683,40 @@ local function LayoutGroupContent()
         end
     end
 
-    -- Restore the pre-feature Raid Tools stack and insert the new controls at
-    -- the requested boundaries. With Grow Direction = UP, physical top->bottom
-    -- is: Assistant -> Pings/Difficulty -> actions -> Pull/Stop -> Break ->
-    -- Roles -> Target -> World -> Raid Groups -> reports. DOWN is its vertical
-    -- mirror. Roles lives in the markers holder, at the edge touching Break.
+    -- The saved order is measured from the assistant control toward the
+    -- marker grid. The physical stack mirrors that order when growth reverses.
+    -- Flush pending singles before inserting the entire timer block so no
+    -- pull duration/Stop/Break can become separated by another button.
+    local orderedRows, pending = {}, {}
+    local function FlushSingles()
+        if #pending > 0 then
+            orderedRows[#orderedRows + 1] = pending
+            pending = {}
+        end
+    end
+    for _, key in ipairs(GroupButtonOrder()) do
+        if key == "pull" then
+            FlushSingles()
+            for _, row in ipairs(timerRows) do orderedRows[#orderedRows + 1] = row end
+        else
+            local b = buttonByKey[key]
+            if b then
+                pending[#pending + 1] = b
+                if #pending == 2 then FlushSingles() end
+            end
+        end
+    end
+    FlushSingles()
+
     if isUp then
         Push("assist", nil, ROW_H)
-        PushRows(preRows, true)
-        PushRows(actionRows, true)
-        PushRows(timerRows, false)
+        PushRows(orderedRows, false)
         if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
         if hasReports then Push("row", reportBtns, ROW_H) end
     else
         if hasReports then Push("row", reportBtns, ROW_H) end
         if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
-        PushRows(timerRows, true)
-        PushRows(actionRows, false)
-        PushRows(preRows, false)
+        PushRows(orderedRows, true)
         Push("assist", nil, ROW_H)
     end
 
@@ -2014,15 +2044,24 @@ local function BuildRaidGroupsCog()
         lbl:SetAlpha(1)
         GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
         GameTooltip:AddLine(EllesmereUI.L("Raid Groups"))
-        GameTooltip:AddLine(EllesmereUI.L("Opens the group composition window to view and rearrange raid subgroups."), 1, 1, 1, true)
+        GameTooltip:AddLine(EllesmereUI.L("Left-click: Raid Groups"), 1, 1, 1)
+        GameTooltip:AddLine(EllesmereUI.L("Right-click: Preview Apply Groups"), 1, 1, 1)
+        GameTooltip:AddLine(EllesmereUI.L("Middle-click: Raid Group Setup"), 1, 1, 1)
         GameTooltip:Show()
     end)
     b:SetScript("OnLeave", function()
         lbl:SetAlpha(0.7)
         GameTooltip:Hide()
     end)
-    b:SetScript("OnClick", function()
-        if ns.ShowRaidGroupsWindow then ns.ShowRaidGroupsWindow() end
+    b:RegisterForClicks("LeftButtonUp","RightButtonUp","MiddleButtonUp")
+    b:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton=="RightButton" then
+            if ns.ShowRaidGroupsPreviewWindow then ns.ShowRaidGroupsPreviewWindow() end
+        elseif mouseButton=="MiddleButton" then
+            if ns.ShowRaidGroupsSetupWindow then ns.ShowRaidGroupsSetupWindow() end
+        elseif ns.ShowRaidGroupsWindow then
+            ns.ShowRaidGroupsWindow()
+        end
     end)
     b._lbl = lbl
     raidGroupsCogBtn = b

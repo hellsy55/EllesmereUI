@@ -171,14 +171,17 @@ local GENERIC_FOOD_DRINK_ICON = 133950
 local GENERIC_FOOD_DRINK_MAX_DURATION = 30
 
 local function IsRealFoodBuffAura(aura)
+    if issecretvalue and issecretvalue(aura) then return nil end
     if not aura then return false end
 
     local icon = aura.icon
-    if not icon or (issecretvalue and issecretvalue(icon)) then return false end
+    if issecretvalue and issecretvalue(icon) then return nil end
+    if not icon then return false end
     if icon == GENERIC_FOOD_DRINK_ICON or not FOOD_ICONS[icon] then return false end
 
     local duration = aura.duration
-    if duration ~= nil and not (issecretvalue and issecretvalue(duration))
+    if issecretvalue and issecretvalue(duration) then return nil end
+    if duration ~= nil
        and duration > 0 and duration <= GENERIC_FOOD_DRINK_MAX_DURATION then
         return false
     end
@@ -203,7 +206,9 @@ local function VantusPrefix()
     vantusTried = true
     local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(VANTUS_SEED)
     local name = info and info.name
-    if name then vantusPrefix = name:match("^(.-)[:%-：]") end
+    if not (issecretvalue and issecretvalue(name)) and name then
+        vantusPrefix = name:match("^(.-)[:%-：]")
+    end
     return vantusPrefix
 end
 
@@ -756,61 +761,74 @@ end
 -- A named function so the pcall wraps the whole unit in one call rather than
 -- allocating a closure per unit -- restriction was already decided by the
 -- caller, so a per-index catch buys nothing here.
+-- Distinguish a complete negative read from a secret field or incomplete scan.
+-- A readable positive remains valid even if unrelated auras are secret.
 local function SweepBody(unit, out)
-    for i = 1, AURA_SCAN_LIMIT do
-        local aura = GetAuraDataByIndex(unit, i, "HELPFUL")
-        if not aura then return end
-        local id = aura.spellId
-        if id and not (issecretvalue and issecretvalue(id)) then
-            local key = ID_TO_KEY[id]
+    local unknownIDs,unknownIcons,unknownNames = false,false,false
+    local complete=false
+    for i=1,AURA_SCAN_LIMIT do
+        local ok,aura=pcall(GetAuraDataByIndex,unit,i,"HELPFUL")
+        if not ok then break end
+        if issecretvalue and issecretvalue(aura) then break end
+        if not aura then complete=true;break end
+        local id,icon,name,expires=aura.spellId,aura.icon,aura.name,aura.expirationTime
+        local idSecret=issecretvalue and issecretvalue(id)
+        local iconSecret=issecretvalue and issecretvalue(icon)
+        local nameSecret=issecretvalue and issecretvalue(name)
+        if idSecret then unknownIDs=true end
+        if iconSecret then unknownIcons=true end
+        if nameSecret then unknownNames=true end
+        if not idSecret and id then
+            local key=ID_TO_KEY[id]
             if key then
-                out[key] = true
-                if aura.name and WANTS_NAME[key] then
-                    out._names = out._names or {}
-                    out._names[key] = out._names[key] or aura.name
-                    -- expirationTime is an absolute GetTime() timestamp, 0 for
-                    -- a buff with no expiry; the tooltip does the subtraction
-                    -- at hover time so the number is never stale by the time
-                    -- it is read.
-                    if aura.expirationTime and aura.expirationTime > 0 then
-                        out._expires = out._expires or {}
-                        out._expires[key] = out._expires[key] or aura.expirationTime
+                out[key]=true
+                if not nameSecret and name and WANTS_NAME[key] then
+                    out._names=out._names or {}
+                    out._names[key]=out._names[key] or name
+                    if not (issecretvalue and issecretvalue(expires)) and expires and expires>0 then
+                        out._expires=out._expires or {}
+                        out._expires[key]=out._expires[key] or expires
                     end
                 end
             end
-            if aura.icon then
-                for j = 1, #ICON_COLS do
-                    local def = ICON_COLS[j]
-                    if def.icons[aura.icon] and (not def.auraFilter or def.auraFilter(aura)) then
-                        out[def.key] = true
-                        if aura.name and def.nameTooltip then
-                            out._names = out._names or {}
-                            out._names[def.key] = out._names[def.key] or aura.name
-                            if aura.expirationTime and aura.expirationTime > 0 then
-                                out._expires = out._expires or {}
-                                out._expires[def.key] = out._expires[def.key] or aura.expirationTime
+        end
+        if not iconSecret and icon then
+            for j=1,#ICON_COLS do
+                local def=ICON_COLS[j]
+                if def.icons[icon] then
+                    local accepted=not def.auraFilter or def.auraFilter(aura)
+                    if accepted==nil then unknownIcons=true end
+                    if accepted then
+                        out[def.key]=true
+                        if not nameSecret and name and def.nameTooltip then
+                            out._names=out._names or {}
+                            out._names[def.key]=out._names[def.key] or name
+                            if not (issecretvalue and issecretvalue(expires)) and expires and expires>0 then
+                                out._expires=out._expires or {}
+                                out._expires[def.key]=out._expires[def.key] or expires
                             end
                         end
                     end
                 end
             end
-            if aura.name then
-                for j = 1, #NAME_COLS do
-                    local def = NAME_COLS[j]
-                    -- Each column resolves its own prefix; the lookup is
-                    -- memoised, so this is a table read per aura.
-                    local p = def.prefix()
-                    if p and aura.name:find(p, 1, true) == 1 then
-                        out[def.key] = true
-                        -- Kept alongside the boolean so the grid can show WHICH
-                        -- Vantus rune (or future prefix column) is active, not just
-                        -- that one is. First match wins; a second application would
-                        -- be a bug elsewhere, not a reason to overwrite a good name.
-                        out._names = out._names or {}
-                        out._names[def.key] = out._names[def.key] or aura.name
-                    end
+        end
+        if not nameSecret and name then
+            for j=1,#NAME_COLS do
+                local def=NAME_COLS[j]
+                local p=def.prefix()
+                if p and name:find(p,1,true)==1 then
+                    out[def.key]=true
+                    out._names=out._names or {}
+                    out._names[def.key]=out._names[def.key] or name
                 end
             end
+        end
+    end
+    for _,def in ipairs(COLUMNS) do
+        if out[def.key]==false and (not complete or
+            (def.ids and unknownIDs) or (def.icons and unknownIcons) or
+            (def.prefix and unknownNames)) then
+            out[def.key]=nil
         end
     end
 end
@@ -827,16 +845,18 @@ local function UnitHasAny(unit, ids, wantName)
         local ok, aura = pcall(GetUnitAuraBySpellID, unit, id)
         if not ok then
             unknown = true
+        elseif issecretvalue and issecretvalue(aura) then
+            unknown = true
         elseif aura ~= nil then
-            if issecretvalue and issecretvalue(aura) then
-                unknown = true
-            else
-                local expires
-                if wantName and aura.expirationTime and aura.expirationTime > 0 then
-                    expires = aura.expirationTime
-                end
-                return true, wantName and aura.name, expires
+            local expires
+            local expiration=aura.expirationTime
+            if wantName and not (issecretvalue and issecretvalue(expiration))
+                and expiration and expiration>0 then
+                expires=expiration
             end
+            local name=aura.name
+            if issecretvalue and issecretvalue(name) then name=nil end
+            return true, wantName and name, expires
         end
     end
     if unknown then return nil end
@@ -868,7 +888,12 @@ local function UnitChecks(unit, answerable, restricted)
                 out[def.key] = false
             end
         end
-        pcall(SweepBody, unit, out)
+        local ok=pcall(SweepBody,unit,out)
+        if not ok then
+            for _,def in ipairs(COLUMNS) do
+                if out[def.key]==false then out[def.key]=nil end
+            end
+        end
     end
     return out
 end
@@ -1121,13 +1146,15 @@ local function BooleanReportLine(key)
     end
 
     local answerable = { [key] = true }
-    local missing = {}
+    local missing,unknown = {},{}
     local now = GetTime()
     local trackDuration = key == "flask" or key == FOOD_KEY
     for _, e in ipairs(roster) do
         local checks = UnitChecks(e.unit, answerable, restricted)
         if checks[key] == false then
             missing[#missing + 1] = e.displayName or e.name
+        elseif checks[key] == nil then
+            unknown[#unknown + 1] = e.displayName or e.name
         elseif trackDuration and checks[key] == true and checks._expires and checks._expires[key] then
             -- Has it, but it is about to run out -- called out the same as
             -- someone missing it entirely, since that is what it will be a
@@ -1142,11 +1169,18 @@ local function BooleanReportLine(key)
         end
     end
 
-    if #missing == 0 then
+    if #missing==0 and #unknown==0 then
         return title .. ": " .. EllesmereUI.L("everyone has it.")
     end
     table.sort(missing)
-    return EllesmereUI.Lf("Missing %s: %s", title, table.concat(missing, ", "))
+    table.sort(unknown)
+    local result=#missing>0 and EllesmereUI.Lf("Missing %s: %s",title,table.concat(missing,", "))
+        or (title..": "..EllesmereUI.L("no data available right now."))
+    if #unknown>0 then
+        if #missing>0 then result=result.." | No data: "..table.concat(unknown,", ")
+        else result=result.." ("..table.concat(unknown,", ")..")" end
+    end
+    return result
 end
 
 -- Repair report only calls out gear that actually needs attention -- anyone
@@ -1195,48 +1229,66 @@ end
 -- apply, so an unreadable aura cannot be reported as a certain failure.
 local HEARTY_FOOD_PREFIX = "Hearty"
 
-local function HeartyFoodReportLine()
-    local title = "Hearty Food"
-    if Restricted() or ConsumablesBlockedByCombat() then
-        return title .. ": " .. EllesmereUI.L("no data available right now.")
-    end
-
-    local roster = ReadMembers()
-    local missing = {}
-    local now = GetTime()
-    for _, e in ipairs(roster) do
-        local has = false
-        local lowRemain
-        for i = 1, AURA_SCAN_LIMIT do
-            local aura = GetAuraDataByIndex(e.unit, i, "HELPFUL")
-            if not aura then break end
-            if aura.name and aura.name:find(HEARTY_FOOD_PREFIX, 1, true) == 1 then
-                has = true
-
-                -- Match the normal Food report: Hearty Food with 5 minutes
-                -- or less remaining is included in chat with its time left.
-                if aura.expirationTime and aura.expirationTime > 0 then
-                    local remain = aura.expirationTime - now
-                    if remain > 0 and remain <= LOW_DURATION_THRESHOLD_MIN * 60 then
-                        lowRemain = remain
-                    end
+local function ScanHeartyFood(unit,now)
+    local unknown=false
+    for i=1,AURA_SCAN_LIMIT do
+        local ok,aura=pcall(GetAuraDataByIndex,unit,i,"HELPFUL")
+        if not ok then return nil end
+        if issecretvalue and issecretvalue(aura) then return nil end
+        if not aura then
+            if unknown then return nil end
+            return false
+        end
+        local name=aura.name
+        if issecretvalue and issecretvalue(name) then
+            unknown=true
+        elseif name and name:find(HEARTY_FOOD_PREFIX,1,true)==1 then
+            local lowRemain
+            local expiration=aura.expirationTime
+            if not (issecretvalue and issecretvalue(expiration)) and expiration and expiration>0 then
+                local remain=expiration-now
+                if remain>0 and remain<=LOW_DURATION_THRESHOLD_MIN*60 then
+                    lowRemain=remain
                 end
-                break
             end
-        end
-        if not has then
-            missing[#missing + 1] = e.displayName or e.name
-        elseif lowRemain then
-            local mins = math.max(0, math.floor(lowRemain / 60))
-            missing[#missing + 1] = (e.displayName or e.name) .. " (" .. mins .. "m)"
+            return true,lowRemain
         end
     end
+    return nil
+end
 
-    if #missing == 0 then
-        return title .. ": " .. EllesmereUI.L("everyone has it.")
+local function HeartyFoodReportLine()
+    local title="Hearty Food"
+    if Restricted() or ConsumablesBlockedByCombat() then
+        return title..": "..EllesmereUI.L("no data available right now.")
+    end
+    local roster=ReadMembers()
+    local missing,unknown={},{}
+    local now=GetTime()
+    for _,e in ipairs(roster) do
+        local ok,has,lowRemain=pcall(ScanHeartyFood,e.unit,now)
+        local label=e.displayName or e.name
+        if not ok or has==nil then
+            unknown[#unknown+1]=label
+        elseif has==false then
+            missing[#missing+1]=label
+        elseif lowRemain then
+            local mins=math.max(0,math.floor(lowRemain/60))
+            missing[#missing+1]=label.." ("..mins.."m)"
+        end
+    end
+    if #missing==0 and #unknown==0 then
+        return title..": "..EllesmereUI.L("everyone has it.")
     end
     table.sort(missing)
-    return EllesmereUI.Lf("Missing %s: %s", title, table.concat(missing, ", "))
+    table.sort(unknown)
+    local result=#missing>0 and EllesmereUI.Lf("Missing %s: %s",title,table.concat(missing,", "))
+        or (title..": "..EllesmereUI.L("no data available right now."))
+    if #unknown>0 then
+        if #missing>0 then result=result.." | No data: "..table.concat(unknown,", ")
+        else result=result.." ("..table.concat(unknown,", ")..")" end
+    end
+    return result
 end
 
 -- toChat: same meaning as ns.ReportConsumable's.

@@ -391,9 +391,15 @@ local function GetNSRTLoadoutCheck(active)
     -- Multiple TLEx names can resolve to identical active talents. The global
     -- outcome is MATCH if ANY matching build name mentions the same boss as
     -- the NSRT note; other named builds retain their individual X icons.
+    if type(_G.TalentLoadoutEx) ~= "table" then
+        return "unknown", "NSRT: TLEx not loaded"
+    end
     if active == nil then active = ResolveActiveLoadoutEntries() end
     if not active or #active == 0 then
-        return "unknown", "NSRT: no matching active TLEx loadout"
+        -- A recognized loaded note plus a talent build not saved in TLEx is
+        -- a mismatch, not an unverifiable status. It needs the same warning
+        -- as a named, incompatible build.
+        return "mismatch", "NSRT: no matching active TLEx loadout"
     end
     local notes = {}
     for _, boss in ipairs(noteBosses) do notes[boss] = true end
@@ -655,7 +661,14 @@ local function ApplyAnnounceStyle(f, entries)
         local row = EnsureAnnounceRow(f, i)
         row:SetSize(1, rowH) -- width corrected below once the text is measured
         row.icon:SetSize(size, size)
-        ApplyAnnounceIcon(row.icon, entry.icon)
+        row.icon:SetShown(not entry.noIcon)
+        row.text:ClearAllPoints()
+        if entry.noIcon then
+            row.text:SetPoint("LEFT", row, "LEFT", 0, 0)
+        else
+            ApplyAnnounceIcon(row.icon, entry.icon)
+            row.text:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        end
         row.text:SetFont(fontPath, size, "OUTLINE")
         row.text:SetText(entry.name)
         row.text:SetTextColor(1, 1, 1, 1)
@@ -678,7 +691,7 @@ local function ApplyAnnounceStyle(f, entries)
             row:SetPoint("TOP", f.rows[i - 1], "BOTTOM", 0, -rowGap)
         end
 
-        local w = size + 8 + row.text:GetStringWidth() + statusWidth
+        local w = (entry.noIcon and 0 or size + 8) + row.text:GetStringWidth() + statusWidth
         row:SetWidth(w)
         if w > maxWidth then maxWidth = w end
         row:Show()
@@ -765,17 +778,24 @@ local function ShowLoadoutAnnouncement(fromTalentChange, forPullCountdown)
         HideLoadoutAnnouncement()
         return
     end
-    if not active then return end
-
-    -- Preserve multiple active TLEx entries, with an individual check/X next
-    -- to each name rather than a separate NSRT status line.
+    -- If a recognized NSRT note is loaded but the active talents are not in
+    -- TLEx, show an explicit red-X warning without inventing a saved build.
+    -- Unknown/missing notes and the independent dungeon check stay unchanged.
     local entries = {}
-    for i, entry in ipairs(active) do
-        entries[#entries + 1] = {
-            name = entry.name,
-            icon = entry.icon,
-            nsrtStatus = perEntry and perEntry[i] or nil,
-        }
+    if not active or #active == 0 then
+        if NSRTCheckEnabled() and not InDungeonInstance() and status == "mismatch" then
+            entries[1] = { name = "No Matching Loadout", noIcon = true, nsrtStatus = "mismatch" }
+        else
+            return
+        end
+    else
+        for i, entry in ipairs(active) do
+            entries[#entries + 1] = {
+                name = entry.name,
+                icon = entry.icon,
+                nsrtStatus = perEntry and perEntry[i] or nil,
+            }
+        end
     end
     if #entries == 0 then return end
 

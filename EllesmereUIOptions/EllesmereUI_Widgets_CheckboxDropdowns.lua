@@ -1198,6 +1198,7 @@ end
 --  getFn(key) -> checked; setFn(key, checked, orderedMovableKeys) fires on row click.
 --  opts = {
 --      setOrder = function(orderedMovableKeys),  -- fired on every drop
+--      reorderOnly = true,                   -- labels/drag only, no checkboxes
 --      onClose  = function(orderChanged),        -- fired once per menu close
 --      hint     = "Drag to Reorder",             -- text above the rows
 --      hint2    = "...",                         -- optional second hint line
@@ -1393,6 +1394,9 @@ function EllesmereUI.BuildReorderCBDropdown(parentFrame, ddW, fLevel, items, get
             local box = CreateFrame("Frame", nil, row)
             box:SetSize(16, 16)
             box:SetPoint("LEFT", row, "LEFT", 10, 0)
+            -- A pure-reorder picker uses the same drag mechanics without
+            -- suggesting that clicking a row can toggle its visibility.
+            box:SetShown(not opts.reorderOnly)
             local boxBg = box:CreateTexture(nil, "BACKGROUND")
             boxBg:SetAllPoints()
             boxBg:SetColorTexture(0.114, 0.106, 0.099, 1)
@@ -1404,7 +1408,11 @@ function EllesmereUI.BuildReorderCBDropdown(parentFrame, ddW, fLevel, items, get
             local lbl = row:CreateFontString(nil, "OVERLAY")
             lbl:SetFont(fontPath, 13, "")
             lbl:SetTextColor(0.75, 0.75, 0.75, 1)
-            lbl:SetPoint("LEFT", box, "RIGHT", 8, 0)
+            if opts.reorderOnly then
+                lbl:SetPoint("LEFT", row, "LEFT", 12, 0)
+            else
+                lbl:SetPoint("LEFT", box, "RIGHT", 8, 0)
+            end
             lbl:SetPoint("RIGHT", row, "RIGHT", -10, 0)
             lbl:SetJustifyH("LEFT")
             lbl:SetWordWrap(false)
@@ -1437,7 +1445,7 @@ function EllesmereUI.BuildReorderCBDropdown(parentFrame, ddW, fLevel, items, get
             end)
             row:SetScript("OnClick", function()
                 if row._suppressClick then row._suppressClick = nil; return end
-                if isDragging then return end
+                if isDragging or opts.reorderOnly then return end
                 setFn(row._item.key, not getFn(row._item.key), MovableKeys())
                 UpdateLabel()
                 for _, r in ipairs(allRows) do
