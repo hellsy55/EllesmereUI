@@ -333,7 +333,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             getValue=function() return math.floor((settingsTable.blizzScale or 1) * 100 + 0.5) end,
             setValue=function(v) settingsTable.blizzScale = v / 100; ReloadAndUpdate() end }
     elseif opts.hideBarWidth then
-        rightSlot = { type="label", text="" }
+        rightSlot = EllesmereUI.BlankRowCfg()
     else
         rightSlot = EllesmereUI.BlizzStyle.Gate("unitframes", { type="slider", text="Bar Width", min=60, max=300, step=1,
             disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
@@ -1161,7 +1161,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
               tooltip="Shows the unit's level in the frame's level circle, as the default UI does.",
               getValue=function() return settingsTable.blizzShowLevel ~= false end,
               setValue=function(v) settingsTable.blizzShowLevel = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(parent._ufLevelRow._leftRegion, {
                 disabled = function() return settingsTable.blizzShowLevel == false end,
@@ -1470,7 +1470,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             { type="slider", text="Border Size", min=0, max=4, step=1, trackWidth=120,
               getValue=function() return MVal("powerBorderSize", 0) end,
               setValue=function(v) MSet("powerBorderSize", v) end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             local rgn = pwrBorderRow._leftRegion
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
@@ -1671,7 +1671,7 @@ function ns.UFO_BuildFoTToTOptions(W, parent, y, settingsTable, unitKey)
                 settingsTable.showPortrait = v
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
-              end }) or { type="label", text="" })
+              end }) or EllesmereUI.BlankRowCfg())
         if isEUI and not EllesmereUI._prebuilding then
             AttachPortraitSideCog(portraitRow._rightRegion, settingsTable, true, unitKey)
         end
@@ -1728,7 +1728,7 @@ function ns.UFO_BuildPetOptions(W, parent, y)
                 db.profile.pet.showPortrait = v
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
-              end }) or { type="label", text="" })
+              end }) or EllesmereUI.BlankRowCfg())
         if isEUI and not EllesmereUI._prebuilding then
             AttachPortraitSideCog(portraitRow._rightRegion, db.profile.pet)
         end
@@ -1908,7 +1908,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 db.profile.boss.showPortrait = v
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
-              end }) or { type="label", text="" })
+              end }) or EllesmereUI.BlankRowCfg())
         if isEUI and not EllesmereUI._prebuilding then
             AttachPortraitSideCog(portraitRow._rightRegion, db.profile.boss, false, "boss")
         end
@@ -2676,7 +2676,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             end
             local function BossS() return db.profile.boss end
             local buffFilterOff
-            local bossFilterRightSlot = { type="label", text="" }
+            local bossFilterRightSlot = EllesmereUI.BlankRowCfg()
                 buffFilterOff = function()
                     local p = db.profile.boss
                     return ns.GetBossSimpleBuffMode(p) == "none" and not p.showBuffs

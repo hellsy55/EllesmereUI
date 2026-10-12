@@ -185,7 +185,7 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
               TeleCfg().showDisable = v
               if _G._EUI_RefreshTeleportPrompt then _G._EUI_RefreshTeleportPrompt() end
           end },
-        { type = "label", text = "" }
+        EllesmereUI.BlankRowCfg()
     ); y = y - h
     end   -- close LFG Reminder hidden-while-disabled gate
 
@@ -266,7 +266,7 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
           setValue = function(v)
               Cfg().delaystop = v
           end },
-        { type = "label", text = "" }
+        EllesmereUI.BlankRowCfg()
     ); y = y - h
     end   -- close Auto Logging hidden-while-disabled gate
 

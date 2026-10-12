@@ -3553,21 +3553,18 @@ local function SkinCharacterSheet()
 
     local newSetBtn = MakeTextLink(linksRow, L("New"), function()
         if InCombatLockdown() then return end
-        StaticPopupDialogs["EUI_NEW_EQUIPMENT_SET"] = {
-            text = L("New equipment set name:"),
-            button1 = L("Create"),
-            button2 = L("Cancel"),
-            OnAccept = function(dialog)
-                local newName = dialog.EditBox:GetText()
-                if newName ~= "" then
+        EllesmereUI:ShowInputPopup({
+            title = L("New Equipment Set"),
+            message = L("New equipment set name:"),
+            confirmText = L("Create"),
+            cancelText = L("Cancel"),
+            onConfirm = function(newName)
+                if newName and newName ~= "" then
                     C_EquipmentSet.CreateEquipmentSet(newName)
                     RefreshEquipmentSets()
                 end
             end,
-            hasEditBox = true, editBoxWidth = 350, timeout = 0,
-            whileDead = false, hideOnEscape = true,
-        }
-        StaticPopup_Show("EUI_NEW_EQUIPMENT_SET")
+        })
     end)
 
     local equipTopBtn, equipTopText
@@ -3759,21 +3756,13 @@ local function SkinCharacterSheet()
                         local pickSid   = tile._setID
                         local pickSname = tile._setName
                         if not (pickSid and pickSname) then return end
-                        StaticPopupDialogs["EUI_EQUIP_SET_NAME"] = {
-                            text = "New name for equipment set:",
-                            button1 = "Rename", button2 = "Cancel",
-                            hasEditBox = true, editBoxWidth = 200,
-                            timeout = 0, whileDead = false, hideOnEscape = true,
-                            OnShow = function(dialog)
-                                local eb = dialog.EditBox or dialog.editBox
-                                if eb then
-                                    eb:SetText(pickSname)
-                                    eb:HighlightText()
-                                end
-                            end,
-                            OnAccept = function(dialog)
-                                local eb = dialog.EditBox or dialog.editBox
-                                local newName = eb and eb:GetText()
+                        EllesmereUI:ShowInputPopup({
+                            title = L("Rename Equipment Set"),
+                            message = "New name for equipment set:",
+                            initialText = pickSname,
+                            confirmText = "Rename",
+                            cancelText = "Cancel",
+                            onConfirm = function(newName)
                                 if newName then newName = newName:trim() end
                                 if newName and newName ~= "" and newName ~= pickSname then
                                     local _, curIcon = C_EquipmentSet.GetEquipmentSetInfo(pickSid)
@@ -3781,40 +3770,34 @@ local function SkinCharacterSheet()
                                     RefreshEquipmentSets()
                                 end
                             end,
-                            EditBoxOnEnterPressed = function(self)
-                                StaticPopup_OnClick(self:GetParent(), 1)
-                            end,
-                        }
-                        StaticPopup_Show("EUI_EQUIP_SET_NAME")
+                        })
+                        if EllesmereUI._inputPopup then
+                            EllesmereUI._inputPopup._editBox:HighlightText()
+                        end
                     end },
                     { text = "Change Icon", onClick = function()
                         if InCombatLockdown() then return end
                         local pickSid   = tile._setID
                         local pickSname = tile._setName
                         if not (pickSid and pickSname) then return end
-                        StaticPopupDialogs["EUI_EQUIP_SET_ICON"] = {
-                            text = "Icon file ID for '" .. pickSname .. "':",
-                            button1 = "Set", button2 = "Cancel",
-                            hasEditBox = true, editBoxWidth = 200,
-                            timeout = 0, whileDead = false, hideOnEscape = true,
-                            OnShow = function(dialog)
-                                local eb = dialog.EditBox or dialog.editBox
-                                if eb then
-                                    local _, curIcon = C_EquipmentSet.GetEquipmentSetInfo(pickSid)
-                                    eb:SetText(tostring(curIcon or ""))
-                                    eb:HighlightText()
-                                end
-                            end,
-                            OnAccept = function(dialog)
-                                local eb = dialog.EditBox or dialog.editBox
-                                local iconID = tonumber(eb and eb:GetText() or "")
+                        local _, curIcon = C_EquipmentSet.GetEquipmentSetInfo(pickSid)
+                        EllesmereUI:ShowInputPopup({
+                            title = L("Change Equipment Set Icon"),
+                            message = "Icon file ID for '" .. pickSname .. "':",
+                            initialText = tostring(curIcon or ""),
+                            confirmText = "Set",
+                            cancelText = "Cancel",
+                            onConfirm = function(text)
+                                local iconID = tonumber(text or "")
                                 if iconID then
                                     C_EquipmentSet.ModifyEquipmentSet(pickSid, pickSname, iconID)
                                     RefreshEquipmentSets()
                                 end
                             end,
-                        }
-                        StaticPopup_Show("EUI_EQUIP_SET_ICON")
+                        })
+                        if EllesmereUI._inputPopup then
+                            EllesmereUI._inputPopup._editBox:HighlightText()
+                        end
                     end },
                     { text = "Unassigned", onClick = function()
                         if InCombatLockdown() then return end
@@ -3855,16 +3838,16 @@ local function SkinCharacterSheet()
             del:SetScript("OnClick", function()
                 local sid, sname = tile._setID, tile._setName
                 if not (sid and sname) then return end
-                StaticPopupDialogs["EUI_DELETE_EQUIPMENT_SET"] = {
-                    text = string.format(L("Delete equipment set '%s'?"), sname),
-                    button1 = L("Delete"), button2 = L("Cancel"),
-                    OnAccept = function()
+                EllesmereUI:ShowConfirmPopup({
+                    title = L("Delete Equipment Set"),
+                    message = string.format(L("Delete equipment set '%s'?"), sname),
+                    confirmText = L("Delete"),
+                    cancelText = L("Cancel"),
+                    onConfirm = function()
                         C_EquipmentSet.DeleteEquipmentSet(sid)
                         RefreshEquipmentSets()
                     end,
-                    timeout = 0, whileDead = false, hideOnEscape = true,
-                }
-                StaticPopup_Show("EUI_DELETE_EQUIPMENT_SET")
+                })
             end)
             tile._del = del
 

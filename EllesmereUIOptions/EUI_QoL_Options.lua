@@ -2286,7 +2286,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
                 EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
         -- Inline color swatch (disabled when toggle is off or crosshair is None)
         if not EllesmereUI._prebuilding then

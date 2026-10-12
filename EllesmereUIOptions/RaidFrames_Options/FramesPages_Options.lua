@@ -693,7 +693,7 @@ local function BuildMainPage(pageName, parent, yOffset)
         else
             -- All tiers added: only Auto Resize Icons remains.
             autoResizeRow, h = W:DualRow(parent, y,  -- eui-style: allow dualrow-left-gap (the checkbox dropdown below overlays the right region)
-                { type="label", text="" },
+                EllesmereUI.BlankRowCfg(),
                 autoResizeSlot);  y = y - h
         end
         -- Overlay the checkbox dropdown onto the right region, mirroring the "Hover Borders" conversion pattern.
@@ -724,7 +724,7 @@ local function BuildMainPage(pageName, parent, yOffset)
           tooltip="Determine the raid-size breakpoint from the number of active subgroups (each active group counts as 5) instead of total headcount. For example, spreading 8 players one per group across all 8 raid groups resolves to a 40-man breakpoint instead of an 8-man one. Off by default: the breakpoint uses raw headcount.",
           getValue=function() return SVal("sizeByActiveGroups", false) end,
           setValue=function(v) SSet("sizeByActiveGroups", v); ReloadAndUpdate() end },
-        { type="label", text="" });  y = y - h
+        EllesmereUI.BlankRowCfg());  y = y - h
 
     -------------------------------------------------------------------
     --  FRAME DISPLAY
@@ -1373,7 +1373,7 @@ local function BuildPartyPage(pageName, parent, yOffset)
                   return k and math.floor(k * 100 + 0.5) or scaleDef
               end,
               setValue=function(v) PSSet("partyKitScale", (v ~= scaleDef) and (v / 100) or nil) end }
-            or { type="label", text="" });  y = y - h
+            or EllesmereUI.BlankRowCfg());  y = y - h
         if kitOn then
             -- Frame Scale cog: the gap between the party frames.
             EllesmereUI.BuildInlineCog(styleRow._rightRegion, { title = "Frame Scale", rows = {

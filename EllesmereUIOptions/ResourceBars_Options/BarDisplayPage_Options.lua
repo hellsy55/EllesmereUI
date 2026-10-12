@@ -726,7 +726,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
                   end
                   EllesmereUI:RefreshPage()
               end },
-            { type = "label", text = "" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
         -- Inline cog on "Border Around All" (stock styles only): the
         -- separator line between the grouped bars. Greyed while the toggle is
@@ -857,7 +857,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
                           end
                           RebuildPower()
                       end },
-                    { type="label", text="" }); y = y - h
+                    EllesmereUI.BlankRowCfg()); y = y - h
 
                 local function UpdatePowerTypeRow()
                     local s = GetSpecialization and GetSpecialization()
@@ -1357,7 +1357,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
                       RefreshAS()
                   end },
               } },
-            { type = "label", text = "" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 16);  y = y - h

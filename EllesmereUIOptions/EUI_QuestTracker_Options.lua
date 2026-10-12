@@ -419,8 +419,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Quest Item Hotkey row
         local kbRow
         kbRow, h = W:DualRow(parent, y,
-            { type="label", text="" },
-            { type="label", text="" })
+            EllesmereUI.BlankRowCfg(),
+            EllesmereUI.BlankRowCfg())
         if not EllesmereUI._prebuilding then
             local rgn = kbRow._leftRegion
             local SIDE_PAD = 20

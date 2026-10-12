@@ -2427,7 +2427,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local bgRow
             local bgRightCfg
-            if isSpacer then bgRightCfg = { type = "label", text = "" } else bgRightCfg = colorCfg end
+            if isSpacer then bgRightCfg = EllesmereUI.BlankRowCfg() else bgRightCfg = colorCfg end
             bgRow, h = W:DualRow(parent, y,
                 { type = "toggle", text = "Block Background",
                   tooltip = "Tints this block's slot with its own color.",
@@ -2622,7 +2622,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 -- Gold / travel: a type row rides the Icon Color row's
                 -- otherwise-empty right slot instead of trailing alone below.
-                local iconRowRight = { type = "label", text = "" }
+                local iconRowRight = EllesmereUI.BlankRowCfg()
                 if b.type == "travel" and not EllesmereUI.IS_FOREVER then
                     -- Default ON (nil = shown), so this can't use MkToggle's
                     -- `== true` read.
@@ -3243,7 +3243,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             for k = 1, #typeRows, 2 do
                 local rightCfg = typeRows[k + 1]
-                if not rightCfg then rightCfg = { type = "label", text = "" } end
+                if not rightCfg then rightCfg = EllesmereUI.BlankRowCfg() end
                 row, h = W:DualRow(parent, y, typeRows[k], rightCfg);  y = y - h
                 if b.type == "supplies" and k == 1 and not EllesmereUI._prebuilding then
                     local region = row._leftRegion

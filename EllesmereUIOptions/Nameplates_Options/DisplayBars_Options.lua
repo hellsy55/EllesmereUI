@@ -620,7 +620,7 @@ local function BuildDisplayBars(parent, y, ctx)
         else
             row3, h = W:DualRow(parent, y,
                 flashCfg,
-                { type = "label", text = "" }
+                EllesmereUI.BlankRowCfg()
             );  y = y - h
             swatchRegion = row3._leftRegion
         end

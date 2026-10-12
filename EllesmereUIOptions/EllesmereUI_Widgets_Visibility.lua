@@ -767,7 +767,7 @@ function EllesmereUI.BuildVisibilityRow(W, parent, y, opts, rightCfg)
         row, h = W:DualRow(parent, y, leftCfg, Slot(opts))
     else
         row, h = W:DualRow(parent, y, Slot(opts),
-            rightVis and Slot(rightVis) or rightCfg or { type = "label", text = "" })
+            rightVis and Slot(rightVis) or rightCfg or EllesmereUI.BlankRowCfg())
     end
 
     -- Search pre-build: the row is an absorber, so the chrome below would throw. The

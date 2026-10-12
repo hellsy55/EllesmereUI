@@ -106,7 +106,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             -- Visibility control answers. It carries the `not visOnly` gate its old row
             -- had, so visibility-only bars still get no toggle keybind.
             (not visOnly) and { type="label", text="Toggle Action Bar" }
-                or { type="label", text="" });  y = y - h
+                or EllesmereUI.BlankRowCfg());  y = y - h
 
         do
             local rgn = visRow1._leftRegion
@@ -1021,7 +1021,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                   SSet("autoCompactSlots", v, function(k) EAB:ApplyIconRowOverrides(k) end)
                   SUpdatePreviewAndResize()
               end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         -- Standard per-bar synchronization for Auto-Compact. Apply All
         -- and Apply to Multiple only offer bars supported by the

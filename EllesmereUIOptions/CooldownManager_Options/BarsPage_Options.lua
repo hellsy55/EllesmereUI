@@ -1023,7 +1023,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                 UpdateCDMPreview()
             end }
     else
-        row3Right = { type="label", text="" }
+        row3Right = EllesmereUI.BlankRowCfg()
     end
     local opacityRow
     opacityRow, h = W:DualRow(parent, y,
@@ -1439,7 +1439,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
               end },
             vertOrientCfg); y = y - h
     else
-        _, h = W:DualRow(parent, y, vertOrientCfg, { type="label", text="" });  y = y - h
+        _, h = W:DualRow(parent, y, vertOrientCfg, EllesmereUI.BlankRowCfg());  y = y - h
     end
 
     end -- not isFocusKick (Bar Layout section)
@@ -1759,7 +1759,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                   if ns.RefreshFocusCastProxyUnit then ns.RefreshFocusCastProxyUnit() end
                   EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         _, h = W:Spacer(parent, y, 8);  y = y - h
     else
@@ -1861,7 +1861,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                     EllesmereUI:RefreshPage()
                 end }
         else
-            row1Left = { type="label", text="" }
+            row1Left = EllesmereUI.BlankRowCfg()
         end
         local icsWDis, icsWTip, icsWRaw = EllesmereUI.MatchGuard("CDM_" .. barKey, "Width")
         local icsHDis, icsHTip = EllesmereUI.MatchGuard("CDM_" .. barKey, "Height")

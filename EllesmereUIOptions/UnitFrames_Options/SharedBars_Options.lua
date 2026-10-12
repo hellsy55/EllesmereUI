@@ -1345,7 +1345,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
               tooltip="Shows the unit's level in the frame's level circle, as the default UI does.",
               getValue=function() return SVal("blizzShowLevel", true) end,
               setValue=function(v) SSet("blizzShowLevel", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(parent._ufLevelRow._leftRegion, {
                 disabled = function() return not SVal("blizzShowLevel", true) end,
@@ -2355,7 +2355,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                       end
                       ReloadAndUpdate()
                   end },
-                { type="label", text="" }); y = y - h
+                EllesmereUI.BlankRowCfg()); y = y - h
 
             local function UpdatePowerTypeRow()
                 local s = GetSpec()

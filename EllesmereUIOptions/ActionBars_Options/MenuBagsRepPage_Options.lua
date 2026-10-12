@@ -887,7 +887,7 @@ local function BuildMenuBagsRepPage(pageName, parent, yOffset)
               EllesmereUI:RefreshPage()
           end,
           tooltip="Hide Blizzard's stock vehicle and override bar." },
-        { type="label", text="" });  y = y - h
+        EllesmereUI.BlankRowCfg());  y = y - h
 
     return math.abs(y)
 end

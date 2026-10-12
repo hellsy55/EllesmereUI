@@ -1137,21 +1137,6 @@ local function BuildBarAppearance(parent, y, ctx)
               SUpdatePreview()
           end }));  y = y - h
     do
-        do
-        local FLYOUT_DIR_VALUES = { auto = "Automatic", UP = "Up", DOWN = "Down", LEFT = "Left", RIGHT = "Right" }
-        local FLYOUT_DIR_ORDER  = { "auto", "UP", "DOWN", "LEFT", "RIGHT" }
-        _, h = W:DualRow(parent, y,
-            { type="dropdown", text="Flyout Direction",
-              tooltip="Which way spell flyouts (e.g. Wild Mushroom, Tiger's Fury) open from this bar. Automatic opens away from the nearest screen edge.",
-              disabled=BlizzStyleOn, disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
-              values=FLYOUT_DIR_VALUES, order=FLYOUT_DIR_ORDER,
-              getValue=function() return SVal("flyoutDirection", "auto") end,
-              setValue=function(v)
-                  SSet("flyoutDirection", v, function(k)
-                      EAB:RecalcFlyoutDirection(k)
-                  end)
-              end });  y = y - h
-    end
 
         local rgn = classColorBorderRow._leftRegion
         EllesmereUI.BuildSyncIcon({
@@ -1418,6 +1403,23 @@ local function BuildBarAppearance(parent, y, ctx)
             sbgUpdateSwatch()
         end)
     end
+    -- Last row of Icon Appearance: keep Flyout Direction in the left slot.
+    do
+        local FLYOUT_DIR_VALUES = { auto = "Automatic", UP = "Up", DOWN = "Down", LEFT = "Left", RIGHT = "Right" }
+        local FLYOUT_DIR_ORDER  = { "auto", "UP", "DOWN", "LEFT", "RIGHT" }
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Flyout Direction",
+              tooltip="Which way spell flyouts (e.g. Wild Mushroom, Tiger's Fury) open from this bar. Automatic opens away from the nearest screen edge.",
+              disabled=BlizzStyleOn, disabledTooltip="Blizzard Style Action Bars", requireState="disabled",
+              values=FLYOUT_DIR_VALUES, order=FLYOUT_DIR_ORDER,
+              getValue=function() return SVal("flyoutDirection", "auto") end,
+              setValue=function(v)
+                  SSet("flyoutDirection", v, function(k)
+                      EAB:RecalcFlyoutDirection(k)
+                  end)
+              end }, EllesmereUI.BlankRowCfg());  y = y - h
+    end
+
     -------------------------------------------------------------------
     --  ICON EFFECTS
     -------------------------------------------------------------------

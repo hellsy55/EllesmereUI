@@ -1405,14 +1405,14 @@ local function ShowSeatMenu(anchor, choices)
                 local choice=self._choice
                 if choice and (choice.label=="Remove Player from Slot" or
                     choice.label=="Remove Player / Clear Slot") then
-                    GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
-                    GameTooltip:AddLine(L("Remove Player"),1,1,1)
-                    GameTooltip:AddLine(L("Removes the character from the planned composition only; never kicks them from the raid."),.8,.85,.85,true)
-                    GameTooltip:AddLine(L("The character remains available for reassignment; the game may swap their subgroup when Apply Groups runs."),.75,.75,.75,true)
-                    GameTooltip:Show()
+                    EllesmereUI.ShowWidgetTooltip(self, table.concat({
+                        L("Remove Player"),
+                        L("Removes the character from the planned composition only; never kicks them from the raid."),
+                        L("The character remains available for reassignment; the game may swap their subgroup when Apply Groups runs."),
+                    }, "\n"), { anchor = "right", force = true })
                 end
             end)
-            row:SetScript("OnLeave",function() GameTooltip:Hide() end)
+            row:SetScript("OnLeave",function() EllesmereUI.HideWidgetTooltip() end)
             seatMenuFrame._items[i]=row
         end
         row._choice=choice
@@ -1693,12 +1693,13 @@ local function InputPrompt(title, initial, onAccept, characterAutocomplete)
     end
 end
 local function Confirm(title, onConfirm)
-    StaticPopupDialogs.EUI_RAIDGROUP_CONFIRM = {
-        text = "%s", button1 = YES, button2 = NO, timeout = 0,
-        whileDead = true, hideOnEscape = true, preferredIndex = 3,
-        OnAccept = function(_, cb) if cb then cb() end end,
-    }
-    StaticPopup_Show("EUI_RAIDGROUP_CONFIRM", L(title), nil, onConfirm)
+    EllesmereUI:ShowConfirmPopup({
+        title = L("Raid Groups"),
+        message = L(title),
+        confirmText = YES,
+        cancelText = NO,
+        onConfirm = onConfirm,
+    })
 end
 -- Reset only Raid Groups presentation. The live profile is authoritative;
 -- removing these optional overrides restores the same defaults used by every

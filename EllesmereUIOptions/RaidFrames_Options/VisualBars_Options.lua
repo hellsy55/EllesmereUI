@@ -1833,7 +1833,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             { type="slider", text="Heal Absorb Text Size", min=6, max=26, step=1,
               getValue=function() return SVal("healAbsorbTextSize", 9) end,
               setValue=function(v) SSet("healAbsorbTextSize", v) end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
     end
     if onSection then onSection("textDisplay", _secY, y) end; _secY = y
     return y, CustomBorderOff, CustomBorderOffTip

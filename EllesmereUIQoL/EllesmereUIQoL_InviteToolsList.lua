@@ -2566,7 +2566,7 @@ function IL:CreateFrame()
     -- scrolling list and other interactive widgets are unaffected.
     f:SetScript("OnMouseUp", function(self, button)
         if button ~= "RightButton" then return end
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         self:Hide()
     end)
     f:SetBackdrop(backdrop)
@@ -2620,7 +2620,7 @@ function IL:CreateFrame()
     -- Right-click is still allowed to close the locked window.
     combatBlocker:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" then
-            GameTooltip:Hide()
+            GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
             f:Hide()
         end
     end)
@@ -3214,14 +3214,13 @@ function IL:CreateFrame()
         IL:InviteFromList(IL.currentList)
     end)
     invite:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Invite"], 1, 1, 1)
+        local tip = L["Invite"]
         if not IsInRaid() then
-            GameTooltip:AddLine(L["Available only while you are in a raid group."], 0.8, 0.8, 0.8, true)
+            tip = tip .. "\n" .. L["Available only while you are in a raid group."]
         end
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, tip, { force = true })
     end)
-    invite:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    invite:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- Auto-invite controls: [x] Auto-invite [30s]            [Stop] ---------
     local bar = CreateFrame("Frame", nil, f)
@@ -3304,26 +3303,20 @@ function IL:CreateFrame()
     end)
     check:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:SetText(L["Auto-invite"], 1, 1, 1)
-        GameTooltip:AddLine(L["Invites again the names that are pending, offline or in another group, until they join or you press Stop."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Auto-invite"] .. "\n" .. L["Invites again the names that are pending, offline or in another group, until they join or you press Stop."], { force = true })
     end)
     check:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
 
     timerBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(string.format(L["Retry every %ds"], IL:GetInterval()), 1, 1, 1)
-        GameTooltip:AddLine(L["Click to change the time."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, string.format(L["Retry every %ds"], IL:GetInterval()) .. "\n" .. L["Click to change the time."], { force = true })
     end)
-    timerBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    timerBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
     timerBtn:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
         timerEdit:SetText(tostring(IL:GetInterval()))
         timerEdit:Show()
         timerEdit:SetFocus()
@@ -3382,14 +3375,11 @@ function IL:CreateFrame()
     end)
     sharedCheck:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:SetText(L["Auto-accept shared lists"], 1, 1, 1)
-        GameTooltip:AddLine(L["Accepts lists sent by your group leader or a raid assistant without asking. Lists shared through the guild are only accepted from the Guild Master and Officers; lists from lower ranks are ignored. Lists from anybody else still show the popup."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Auto-accept shared lists"] .. "\n" .. L["Accepts lists sent by your group leader or a raid assistant without asking. Lists shared through the guild are only accepted from the Guild Master and Officers; lists from lower ranks are ignored. Lists from anybody else still show the popup."], { force = true })
     end)
     sharedCheck:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
 
     -- Clear list -----------------------------------------------------------
@@ -3403,12 +3393,9 @@ function IL:CreateFrame()
         clear.armed = nil
     end
     clear:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Clear list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Removes every name from the list. Click twice to confirm."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Clear list"] .. "\n" .. L["Removes every name from the list. Click twice to confirm."], { force = true })
     end)
-    clear:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    clear:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
     clear:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
         if #(IL.names or {}) == 0 then return end
@@ -3498,7 +3485,7 @@ function IL:CreateFrame()
     end
 
     local function OpenShareMenu()
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
         for _, b in ipairs(shareOptions) do
             b:SetAlpha(ModeAvailable(b.mode) and 1 or 0.4)
         end
@@ -3511,13 +3498,9 @@ function IL:CreateFrame()
     end)
     shareBtn:HookScript("OnEnter", function(self)
         if shareMenu:IsShown() then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Share list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Offers your list to your group, your guild or your target. They get a popup and choose Accept or Decline. Nothing is written in chat."], 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine(L["Only the group leader or a raid assistant can share."], 1, 0.82, 0, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Share list"] .. "\n" .. L["Offers your list to your group, your guild or your target. They get a popup and choose Accept or Decline. Nothing is written in chat."] .. "\n" .. L["Only the group leader or a raid assistant can share."], { force = true })
     end)
-    shareBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    shareBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- The menu closes by itself when the mouse stays away from it.
     do
@@ -3583,12 +3566,9 @@ function IL:CreateFrame()
         histClear.armed = nil
     end
     histClear:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Clear list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Removes every name from the history. Click twice to confirm."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Clear list"] .. "\n" .. L["Removes every name from the history. Click twice to confirm."], { force = true })
     end)
-    histClear:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    histClear:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
     histClear:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
         if #(IL.db.History or {}) == 0 then return end
@@ -3800,7 +3780,7 @@ function IL:CreateFrame()
         historyBtn.selected = nil
         historyBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         DisarmHistClear()
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         if PlacePanels and ((friends and friends:IsShown()) or (FA and FA.frame and FA.frame:IsShown())) then PlacePanels() end
     end)
 
@@ -3816,12 +3796,9 @@ function IL:CreateFrame()
         end
     end)
     historyBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["History"], 1, 1, 1)
-        GameTooltip:AddLine(L["Names that joined your group, declined your invite or were removed from the list, newest first. Re-invite puts a name back on the list."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["History"] .. "\n" .. L["Names that joined your group, declined your invite or were removed from the list, newest first. Re-invite puts a name back on the list."], { force = true })
     end)
-    historyBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    historyBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- Friend List: favourite Battle.net friends, online WoW characters first. ----
     -- Invites go straight to the player; they are never added to the main list.
@@ -3878,12 +3855,9 @@ function IL:CreateFrame()
         InviteAllFriends()
     end)
     inviteAllBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Invite All"], 1, 1, 1)
-        GameTooltip:AddLine(L["Invites every online friend in this list who is not already in the group. One character per Battle.net friend; hidden friends are skipped. Converts to a raid when there is not enough room for everybody."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Invite All"] .. "\n" .. L["Invites every online friend in this list who is not already in the group. One character per Battle.net friend; hidden friends are skipped. Converts to a raid when there is not enough room for everybody."], { force = true })
     end)
-    inviteAllBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    inviteAllBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- Hidden friends are only hidden from Invite Tools; Battle.net itself is untouched.
     local hiddenBtn = MakeButton(friends, "")
@@ -3895,12 +3869,9 @@ function IL:CreateFrame()
         RefreshFriends()
     end)
     hiddenBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Hidden friends"], 1, 1, 1)
-        GameTooltip:AddLine(L["Shows the friends you removed from this list. Right-click one to bring it back."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Hidden friends"] .. "\n" .. L["Shows the friends you removed from this list. Right-click one to bring it back."], { force = true })
     end)
-    hiddenBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    hiddenBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     local friendsHolder = CreateFrame("Frame", nil, friends, "BackdropTemplate")
     friendsHolder:SetPoint("TOPLEFT", friends, "TOPLEFT", 10, -50)
@@ -3962,14 +3933,11 @@ function IL:CreateFrame()
     end)
     friendlyCheck:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:SetText(L["Auto accept friendly invites"], 1, 1, 1)
-        GameTooltip:AddLine(L["Accepts party invites from friends, Battle.net friends and guild members. Ignored while you are in a group or queued."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Auto accept friendly invites"] .. "\n" .. L["Accepts party invites from friends, Battle.net friends and guild members. Ignored while you are in a group or queued."], { force = true })
     end)
     friendlyCheck:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
 
     local classByName
@@ -4478,12 +4446,9 @@ function IL:CreateFrame()
             editor:SetShown(not editor:IsShown())
         end)
         editWhisper:HookScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(L["Edit whisper"], 1, 1, 1)
-            GameTooltip:AddLine(L["Edits the message sent by every Whisper button in this panel."], 0.8, 0.8, 0.8, true)
-            GameTooltip:Show()
+            EllesmereUI.ShowWidgetTooltip(self, L["Edit whisper"] .. "\n" .. L["Edits the message sent by every Whisper button in this panel."], { force = true })
         end)
-        editWhisper:HookScript("OnLeave", function() GameTooltip:Hide() end)
+        editWhisper:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
         local factionHolder = CreateFrame("Frame", nil, faction, "BackdropTemplate")
         factionHolder:SetPoint("TOPLEFT", faction, "TOPLEFT", 10, -50)
@@ -4725,12 +4690,9 @@ function IL:CreateFrame()
         end
     end)
     friendsBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Friend list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Your favourite Battle.net friends, online ones first. Invite goes straight to the player, without using the list. Right-click a friend to remove it from this list."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Friend list"] .. "\n" .. L["Your favourite Battle.net friends, online ones first. Invite goes straight to the player, without using the list. Right-click a friend to remove it from this list."], { force = true })
     end)
-    friendsBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    friendsBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     local factionBtn = MakeButton(f, L["Factions"])
     factionBtn:SetSize(72, 18)
@@ -4747,12 +4709,9 @@ function IL:CreateFrame()
         end
     end)
     factionBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Factions"], 1, 1, 1)
-        GameTooltip:AddLine(L["Shows Alliance/Horde members in your group (raid groups 1 to 4) and lets you whisper each player."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Factions"] .. "\n" .. L["Shows Alliance/Horde members in your group (raid groups 1 to 4) and lets you whisper each player."], { force = true })
     end)
-    factionBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    factionBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     local friendsQueued = false
     friends:SetScript("OnEvent", function()
@@ -4773,7 +4732,7 @@ function IL:CreateFrame()
         friends:UnregisterAllEvents()
         friendsBtn.selected = nil
         friendsBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         if PlacePanels and (hist:IsShown() or FA.frame:IsShown()) then PlacePanels() end
     end)
 
@@ -4797,7 +4756,7 @@ function IL:CreateFrame()
         if FA.editor then FA.editor:Hide() end
         factionBtn.selected = nil
         factionBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         if PlacePanels and (hist:IsShown() or friends:IsShown()) then PlacePanels() end
     end)
 
@@ -4895,7 +4854,7 @@ function IL:CreateFrame()
         if locked then
             f:StopMovingOrSizing() -- combat started mid-drag/resize
             ClearAllFocus()
-            GameTooltip:Hide()
+            GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
             shareMenu:Hide()
             hist:Hide()
             friends:Hide()

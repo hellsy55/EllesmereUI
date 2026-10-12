@@ -641,7 +641,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
           end,
           tooltip="Maximum number of debuff icons shown on enemy nameplates." }
     local debuffRow1
-        debuffRow1, h = W:DualRow(parent, y, maxDbfCfg, { type="label", text="" });  y = y - h
+        debuffRow1, h = W:DualRow(parent, y, maxDbfCfg, EllesmereUI.BlankRowCfg());  y = y - h
 
     -- --- Dispellable Buff Glow ----------------------------------------
     local GO = EllesmereUI.GlowOptions
@@ -927,7 +927,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
             if ns.RangeText_Apply then ns.RangeText_Apply() end
             EllesmereUI:RefreshPage()
           end },
-        { type="label", text="" }
+        EllesmereUI.BlankRowCfg()
     );  y = y - h
     -- Inline color swatch (default light orange), beside the toggle
     if not EllesmereUI._prebuilding then

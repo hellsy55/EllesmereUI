@@ -3338,7 +3338,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- stored while hidden and returns with the row.
         if HasSelectKey() then
             row, h = W:DualRow(parent, y,
-                { type="label", text="Menu Cancel Action" }, { type="label", text="" })
+                { type="label", text="Menu Cancel Action" }, EllesmereUI.BlankRowCfg())
             BuildKeybindButton(row._leftRegion, {
                 intro = "Closes an open menu without using anything. Escape always "
                     .. "does this as well. One key shared by every menu, claimed "

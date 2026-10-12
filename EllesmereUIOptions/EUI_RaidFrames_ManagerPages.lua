@@ -901,7 +901,7 @@ local function BuildBaseDetailDM(frame, fontPath)
           tooltip = "Wraps into a new row (or column for vertical growth) after this many icons; below 2 keeps one continuous run.",
           getValue = function() return p.debuffPerRow or 5 end,
           setValue = function(v) p.debuffPerRow = v; DmApply() end },
-        { type = "label", text = "" }); sy = sy - hh
+        EllesmereUI.BlankRowCfg()); sy = sy - hh
 
     -- Display: the legacy debuff style keys (retired Auras tab), which the
     -- base grid and icon tiles read directly. CC glow settings are
@@ -1171,7 +1171,7 @@ local function BuildTileDetail(frame, fontPath, t)
               tooltip = "Wraps into a new row (or column for vertical growth) after this many icons; below 2 keeps one continuous run.",
               getValue = function() return t.iconsPerRow or 0 end,
               setValue = function(v) TSet("iconsPerRow", v) end },
-            { type = "label", text = "" }); sy = sy - hh
+            EllesmereUI.BlankRowCfg()); sy = sy - hh
 
         _, hh = W:SectionHeader(frame, "DISPLAY", sy); sy = sy - hh
 
@@ -1294,7 +1294,7 @@ local function BuildTileDetail(frame, fontPath, t)
                       t.color = { r = r, g = g, b = b, a = a or 1 }
                       DmApply()
                   end },
-                { type = "label", text = "" }); sy = sy - hh
+                EllesmereUI.BlankRowCfg()); sy = sy - hh
         end
 
         sy = BuildFxEffects(frame, sy, t)
@@ -1383,7 +1383,7 @@ local function BuildTileDetail(frame, fontPath, t)
             { type = "toggle", text = "Reverse Fill",
               getValue = function() return t.reverseFill or false end,
               setValue = function(v) TSet("reverseFill", v and true or false) end },
-            { type = "label", text = "" }); sy = sy - hh
+            EllesmereUI.BlankRowCfg()); sy = sy - hh
 
         _, hh = W:SectionHeader(frame, "DISPLAY", sy); sy = sy - hh
         -- Width | Height: labels flip with orientation so each slot names
@@ -3745,7 +3745,7 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
             })
         end
     else
-        _r, hh = W:DualRow(parent, sy, showInCfg, { type = "label", text = "" }); sy = sy - hh
+        _r, hh = W:DualRow(parent, sy, showInCfg, EllesmereUI.BlankRowCfg()); sy = sy - hh
     end
 
     return sy

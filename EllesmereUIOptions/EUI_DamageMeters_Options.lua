@@ -292,7 +292,7 @@ initFrame:SetScript("OnEvent", function(self)
         local rrRow
         rrRow, h = W:DualRow(parent, y,
             { type="label", text="Reset Data Keybind" },
-            { type="label", text="" })
+            EllesmereUI.BlankRowCfg())
         -- "(seconds)" suffix for Refresh Rate, which lives in the Visibility row's right
         -- slot -- not this row.
         do
@@ -524,7 +524,7 @@ initFrame:SetScript("OnEvent", function(self)
               min = 8, max = 18, step = 1,
               getValue = function() return Cfg("hdrFontSize") or 11 end,
               setValue = function(v) Set("hdrFontSize", v); ApplyHdr() end },
-            { type="label", text="" })
+            EllesmereUI.BlankRowCfg())
         -- Inline dual swatches on Text Size: right = Custom, left = Accent
         if not EllesmereUI._prebuilding then
             local rgn = hdrRow2._leftRegion

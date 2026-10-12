@@ -4305,7 +4305,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                         bd.stackBasedBar = v and true or false; RefreshTBB()
                     end }
             else
-                rightSlot = { type = "label", text = "" }
+                rightSlot = EllesmereUI.BlankRowCfg()
             end
 
             local tbbPanRow

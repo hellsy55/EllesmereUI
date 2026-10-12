@@ -5487,7 +5487,6 @@ L["Portrait Settings"] = "Impostazioni ritratto"
 L["Portrait Zoom"] = "Zoom ritratto"
 L["Portrait on Right"] = "Ritratto a destra"
 L["Portrait"] = "Ritratto"
-L["Portugu\xEAs (BR)"] = true
 L["Position Offset"] = "Offset posizione"
 L["Position Settings"] = "Impostazioni posizione"
 L["Position and size settings are not synced and keep each profile's own values."] = "Le impostazioni di posizione e dimensione non vengono sincronizzate e mantengono i valori propri di ogni profilo."

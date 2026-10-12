@@ -2598,7 +2598,7 @@ initFrame:SetScript("OnEvent", function(self)
                           if _G._ECDM_ScanSwiftmend then _G._ECDM_ScanSwiftmend() end
                       end
                   end },
-                { type="label", text="" }
+                EllesmereUI.BlankRowCfg()
             ); y = y - h
         end
 

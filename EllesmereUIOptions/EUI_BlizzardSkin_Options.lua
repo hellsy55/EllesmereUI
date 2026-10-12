@@ -1696,7 +1696,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.lfgRememberRoles = v
                   if EllesmereUI._GroupFinder_RefreshQoL then EllesmereUI._GroupFinder_RefreshQoL() end
               end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         return y
@@ -1860,7 +1860,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.merchantShowItemLevel = v
                   if EllesmereUI._Merchant_RefreshItemLevels then EllesmereUI._Merchant_RefreshItemLevels() end
               end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         ); y = y - h
 
         return y
@@ -1909,7 +1909,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.lootToastScale = v
                   if EllesmereUI._LootToast_Refresh then EllesmereUI._LootToast_Refresh() end
               end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         ); y = y - h
 
         return y
@@ -3061,7 +3061,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
         local h2
         for i = 1, #items, 2 do
-            _, h2 = W:DualRow(parent, y, items[i], items[i + 1] or { type = "label", text = "" })
+            _, h2 = W:DualRow(parent, y, items[i], items[i + 1] or EllesmereUI.BlankRowCfg())
             y = y - h2
         end
         return y
@@ -3214,7 +3214,7 @@ initFrame:SetScript("OnEvent", function(self)
                         return (c and c.useCustom) and 1 or 0.3
                     end },
               } },
-            { type = "label", text = "" })
+            EllesmereUI.BlankRowCfg())
         y = y - h
 
         -- Breathing room between the global settings and the window cards.
@@ -3411,7 +3411,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return CBVal("hideInInstances") == true end,
               setValue=function(v) CBSet("hideInInstances", v) end,
               disabled = Off, disabledTooltip = GATE_REQ },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         _, h = W:SectionHeader(parent, "APPEARANCE", y);  y = y - h
 
@@ -3562,7 +3562,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return CBVal("background") ~= false end,
               setValue=function(v) CBSetStyle("background", v); EllesmereUI:RefreshPage() end,
               disabled = Off, disabledTooltip = GATE_REQ },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         -- Colour and opacity are one swatch but two stored keys, so the write goes straight
         -- to the DB rather than through CBSetStyle.

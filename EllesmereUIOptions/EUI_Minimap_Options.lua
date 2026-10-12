@@ -755,7 +755,7 @@ initFrame:SetScript("OnEvent", function(self)
                 m.openMicroMenuOnMiddleClick = v
               end }
         if EllesmereUI.IS_FOREVER then
-            _, h = W:DualRow(parent, y, middleClickCfg, { type="label", text="" })
+            _, h = W:DualRow(parent, y, middleClickCfg, EllesmereUI.BlankRowCfg())
         else
             _, h = W:DualRow(parent, y, portalsScaleCfg, middleClickCfg)
         end
@@ -1697,7 +1697,7 @@ initFrame:SetScript("OnEvent", function(self)
               values={ ["_placeholder"]="..." }, order={ "_placeholder" },
               getValue=function() return "_placeholder" end,
               setValue=function() end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
         if not EllesmereUI._prebuilding then
             local rgn = accentRow._leftRegion

@@ -774,7 +774,7 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("idleFadeStrength", v)
                   if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
               end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         end -- isChat
 
@@ -1051,7 +1051,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
                   if ECHAT.ApplySidebarVisibility then ECHAT.ApplySidebarVisibility() end
               end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         end -- isSidebar
 
@@ -1497,7 +1497,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" })
+                EllesmereUI.BlankRowCfg())
             y = y - h
             local syncTabs = function() return Cfg("syncTabBorder") ~= false end
             local tabBordersDisabled = function()
@@ -1643,7 +1643,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ECHAT.ApplyTabBorders then ECHAT.ApplyTabBorders() end
                       EllesmereUI:RefreshPage()
                   end },
-                { type="label", text="" })
+                EllesmereUI.BlankRowCfg())
             if not EllesmereUI._prebuilding then
                 local rgn = activeBorderRow._leftRegion
                 local swatch, refreshSwatch = EllesmereUI.BuildColorSwatch(

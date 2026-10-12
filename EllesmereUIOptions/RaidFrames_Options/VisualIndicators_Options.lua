@@ -1060,7 +1060,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=EllesmereUI.SectionToggleSetValue(function(v)
               SSet("topNameBarEnabled", v)
           end) },
-        TNBOff() and { type="label", text="" } or
+        TNBOff() and EllesmereUI.BlankRowCfg() or
         { type="slider", text="Height", min=8, max=40, step=1,
           getValue=function() return SVal("topNameBarHeight", 20) end,
           setValue=function(v) SSet("topNameBarHeight", v) end });  y = y - h
@@ -1202,7 +1202,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
                   ns.FB_Apply()
                   EllesmereUI:RefreshPage()
               end) },
-            (not FBEnabled()) and { type="label", text="" } or
+            (not FBEnabled()) and EllesmereUI.BlankRowCfg() or
             { type="dropdown", text="Position",
               values = { left="Before First Group", right="After Last Group", free="Free Move" },
               order  = { "left", "right", "free" },

@@ -1050,7 +1050,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                   end
                   ReloadAndUpdate(); UpdatePreview()
               end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
     end
 
     _, h = W:Spacer(parent, y, 20); y = y - h
@@ -3351,7 +3351,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
               tooltip="Fades the frame when the unit is out of range of your spells. Set to 100% to disable the fade.",
               getValue=function() return math.floor(((SValSupported("oorAlpha", 0.4)) * 100) + 0.5) end,
               setValue=function(v) UNIT_DB_MAP[optState.selectedUnit]().oorAlpha = v / 100 end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
     end
 
     return y, sharedAddHeader, sharedAddRow1, sharedAddRow4, sharedAddRow5

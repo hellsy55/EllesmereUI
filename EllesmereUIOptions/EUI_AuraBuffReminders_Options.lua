@@ -697,7 +697,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="dropdown", text="Where to Show", tooltip=cfg.whereTooltip,
               values={ _placeholder="..." }, order={ "_placeholder" },
               getValue=function() return "_placeholder" end, setValue=function() end },
-            rightCfg or { type="label", text="" })
+            rightCfg or EllesmereUI.BlankRowCfg())
         if EllesmereUI._prebuilding then return row, h end
 
         local lrgn = row._leftRegion
@@ -917,7 +917,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
         for i = 1, n, 2 do
             local _, h = W:DualRow(parent, y, Slot(ids[i]),
-                ids[i + 1] and Slot(ids[i + 1]) or { type="label", text="" })
+                ids[i + 1] and Slot(ids[i + 1]) or EllesmereUI.BlankRowCfg())
             y = y - h
         end
         return y
@@ -1663,7 +1663,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if _G._EABR_UpdateGroupAuraRegistration then _G._EABR_UpdateGroupAuraRegistration() end
                   RefreshAll(); RebuildPreviewHeader()
               end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         local wcc = RAID_CLASS_COLORS and RAID_CLASS_COLORS.WARLOCK
@@ -1799,7 +1799,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local c = CDB(); if c and c.enabled then c.enabled.inky_black = v; RefreshAll(); RebuildPreviewHeader() end
                   EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
         row = inkyRow
 

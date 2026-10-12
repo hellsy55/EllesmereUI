@@ -192,7 +192,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                       p.secondary.armsSweepingStrikesBar = v; RebuildClass()
                       EllesmereUI:RefreshPage()
                   end },
-                { type = "label", text = "" }
+                EllesmereUI.BlankRowCfg()
             );  y = y - h
         end
     end
@@ -2772,7 +2772,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                       RebuildPower(); RebuildClass()
                       EllesmereUI:RefreshPage()
                   end },
-                { type = "label", text = "" }); y = y - h
+                EllesmereUI.BlankRowCfg()); y = y - h
         end
         -- Retail only: WoW Forever has no Enhancement spec.
         if playerClass == "SHAMAN" and not EllesmereUI.IS_FOREVER then
@@ -2794,7 +2794,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                       c.enhanceFiveBar = v; RebuildClass()
                       EllesmereUI:RefreshPage()
                   end },
-                { type = "label", text = "" }); y = y - h
+                EllesmereUI.BlankRowCfg()); y = y - h
             -- Overflow color inline swatch
             if not EllesmereUI._prebuilding then
                 local rgn = enhRow._leftRegion
