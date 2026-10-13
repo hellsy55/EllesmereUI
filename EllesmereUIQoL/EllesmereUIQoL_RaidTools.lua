@@ -543,6 +543,10 @@ local DB_DEFAULTS = {
         -- matters while it's on.
         autoMinimize      = false,
         autoMinimizeDelay = 30,
+        -- Logical order from the assistant control toward the marker grid.
+        -- The entire Pull Timer section (including Stop and Break) moves as
+        -- one unit; missing/hidden buttons do not leave empty cells.
+        buttonOrder = { "pings", "difficulty", "convert", "disband", "ready", "role", "pull" },
         -- Invite Tools state. Raid Tools owns the launcher in EUI, so no
         -- separate minimap launcher settings are needed here.
         inviteTools = {
@@ -682,6 +686,32 @@ local function AutoMinimizeDelay()
     return v
 end
 ns.AutoMinimizeDelay = AutoMinimizeDelay
+
+local GROUP_BUTTON_DEFAULT_ORDER = { "pings", "difficulty", "convert", "disband", "ready", "role", "pull" }
+local GROUP_BUTTON_KEYS = {
+    pings = true, difficulty = true, convert = true, disband = true,
+    ready = true, role = true, pull = true,
+}
+-- Normalize on read rather than writing defaults back to the profile. This
+-- also tolerates removed/duplicated keys in imported or older profiles.
+local function GroupButtonOrder()
+    local p = P()
+    local saved = p and p.buttonOrder
+    local ordered, seen = {}, {}
+    if type(saved) == "table" then
+        for _, key in ipairs(saved) do
+            if GROUP_BUTTON_KEYS[key] and not seen[key] then
+                seen[key] = true
+                ordered[#ordered + 1] = key
+            end
+        end
+    end
+    for _, key in ipairs(GROUP_BUTTON_DEFAULT_ORDER) do
+        if not seen[key] then ordered[#ordered + 1] = key end
+    end
+    return ordered
+end
+ns.RaidToolsButtonOrder = GroupButtonOrder
 
 -- Growth direction -> the shell corner that rides the collapsed icon (see
 -- DB_DEFAULTS.openDirection). Anchoring icon and shell at the SAME corner of
@@ -1380,7 +1410,7 @@ local function StartPull(secs)
     local handler = BossModPullHandler()
     if handler then handler(tostring(secs)) end
     if ChatLocked() then
-        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("In-game countdown unavailable in combat; the boss mod pull timer still started."))
+        EllesmereUI.Print(EllesmereUI.COLOR_CODES.BRAND .. "EllesmereUI:|r " .. EllesmereUI.L("In-game countdown unavailable in combat; the boss mod pull timer still started."))
         return
     end
     C_PartyInfo.DoCountdown(secs)
@@ -1554,13 +1584,11 @@ local function MakeShell(key)
     colFs:SetAlpha(0.7)
     col:SetScript("OnEnter", function(self)
         colFs:SetAlpha(1)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine(EllesmereUI.L("Minimize"))
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, EllesmereUI.L("Minimize"), { anchor = "below", force = true })
     end)
     col:SetScript("OnLeave", function()
         colFs:SetAlpha(0.7)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
     col:SetAttribute("_onclick", COLLAPSE_SNIPPET)
     f._collapseBtn = col
@@ -1582,33 +1610,17 @@ local function LayoutGroupContent()
     if not groupHolder then return end
     local f = groupHolder
 
-    local function PackRows(buttons, perRow)
-        local rows, row = {}, {}
-        perRow = perRow or 2
-        for _, b in ipairs(buttons) do
-            if b then
-                row[#row + 1] = b
-                if #row == perRow then rows[#rows + 1] = row; row = {} end
-            end
-        end
-        if #row > 0 then rows[#rows + 1] = row end
-        return rows
-    end
-
-    -- Pings and Difficulty sit directly between Make Everyone Assistant and
-    -- the ordinary action block. Every optional survivor compacts leftward.
-    local pre = {}
-    if ButtonShown("showPings") and C_PartyInfo.GetRestrictPings and C_PartyInfo.SetRestrictPings then
-        pre[#pre + 1] = runtime.pingButton
-    end
-    if ButtonShown("showDifficulty") then pre[#pre + 1] = runtime.difficultyButton end
-    local preRows = PackRows(pre, 2)
-
-    local actions = { readyButton }
-    if ButtonShown("showRoleCheck") then actions[#actions + 1] = roleButton end
-    if ButtonShown("showConvert")   then actions[#actions + 1] = convertButton end
-    if ButtonShown("showDisband")   then actions[#actions + 1] = disbandButton end
-    local actionRows = PackRows(actions, 2)
+    -- All seven kinds share one saved order. Pull/Stop/Break remains a single
+    -- indivisible block, while the other visible buttons pack two per row.
+    local buttonByKey = {
+        pings = ButtonShown("showPings") and C_PartyInfo.GetRestrictPings
+            and C_PartyInfo.SetRestrictPings and runtime.pingButton or nil,
+        difficulty = ButtonShown("showDifficulty") and runtime.difficultyButton or nil,
+        convert = ButtonShown("showConvert") and convertButton or nil,
+        disband = ButtonShown("showDisband") and disbandButton or nil,
+        ready = readyButton,
+        role = ButtonShown("showRoleCheck") and roleButton or nil,
+    }
 
     -- Keep the existing Pull/Stop row exactly as it was. Break is the next
     -- control after Stop: when that row currently has fewer than three buttons
@@ -1669,24 +1681,40 @@ local function LayoutGroupContent()
         end
     end
 
-    -- Restore the pre-feature Raid Tools stack and insert the new controls at
-    -- the requested boundaries. With Grow Direction = UP, physical top->bottom
-    -- is: Assistant -> Pings/Difficulty -> actions -> Pull/Stop -> Break ->
-    -- Roles -> Target -> World -> Raid Groups -> reports. DOWN is its vertical
-    -- mirror. Roles lives in the markers holder, at the edge touching Break.
+    -- The saved order is measured from the assistant control toward the
+    -- marker grid. The physical stack mirrors that order when growth reverses.
+    -- Flush pending singles before inserting the entire timer block so no
+    -- pull duration/Stop/Break can become separated by another button.
+    local orderedRows, pending = {}, {}
+    local function FlushSingles()
+        if #pending > 0 then
+            orderedRows[#orderedRows + 1] = pending
+            pending = {}
+        end
+    end
+    for _, key in ipairs(GroupButtonOrder()) do
+        if key == "pull" then
+            FlushSingles()
+            for _, row in ipairs(timerRows) do orderedRows[#orderedRows + 1] = row end
+        else
+            local b = buttonByKey[key]
+            if b then
+                pending[#pending + 1] = b
+                if #pending == 2 then FlushSingles() end
+            end
+        end
+    end
+    FlushSingles()
+
     if isUp then
         Push("assist", nil, ROW_H)
-        PushRows(preRows, true)
-        PushRows(actionRows, true)
-        PushRows(timerRows, false)
+        PushRows(orderedRows, false)
         if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
         if hasReports then Push("row", reportBtns, ROW_H) end
     else
         if hasReports then Push("row", reportBtns, ROW_H) end
         if ShowAs() == "one" and MARKERS_CONTENT_H then Push("markers", nil, MARKERS_CONTENT_H) end
-        PushRows(timerRows, true)
-        PushRows(actionRows, false)
-        PushRows(preRows, false)
+        PushRows(orderedRows, true)
         Push("assist", nil, ROW_H)
     end
 
@@ -2012,17 +2040,26 @@ local function BuildRaidGroupsCog()
     lbl:SetAlpha(0.7)
     b:SetScript("OnEnter", function(self)
         lbl:SetAlpha(1)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine(EllesmereUI.L("Raid Groups"))
-        GameTooltip:AddLine(EllesmereUI.L("Opens the group composition window to view and rearrange raid subgroups."), 1, 1, 1, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, table.concat({
+            EllesmereUI.L("Raid Groups"),
+            EllesmereUI.L("Left-click: Raid Groups"),
+            EllesmereUI.L("Right-click: Preview Apply Groups"),
+            EllesmereUI.L("Middle-click: Raid Group Setup"),
+        }, "\n"), { anchor = "below", force = true })
     end)
     b:SetScript("OnLeave", function()
         lbl:SetAlpha(0.7)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
-    b:SetScript("OnClick", function()
-        if ns.ShowRaidGroupsWindow then ns.ShowRaidGroupsWindow() end
+    b:RegisterForClicks("LeftButtonUp","RightButtonUp","MiddleButtonUp")
+    b:SetScript("OnClick", function(_, mouseButton)
+        if mouseButton=="RightButton" then
+            if ns.ShowRaidGroupsPreviewWindow then ns.ShowRaidGroupsPreviewWindow() end
+        elseif mouseButton=="MiddleButton" then
+            if ns.ShowRaidGroupsSetupWindow then ns.ShowRaidGroupsSetupWindow() end
+        elseif ns.ShowRaidGroupsWindow then
+            ns.ShowRaidGroupsWindow()
+        end
     end)
     b._lbl = lbl
     raidGroupsCogBtn = b
@@ -2045,14 +2082,13 @@ local function BuildRaidCheckButton()
     lbl:SetAlpha(0.7)
     b:SetScript("OnEnter", function(self)
         lbl:SetAlpha(1)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine(EllesmereUI.L("Raid Check"))
-        GameTooltip:AddLine(EllesmereUI.L("Re-runs the check and opens its window, even without a ready check."), 1, 1, 1, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self,
+            EllesmereUI.L("Raid Check") .. "\n" .. EllesmereUI.L("Re-runs the check and opens its window, even without a ready check."),
+            { anchor = "below", force = true })
     end)
     b:SetScript("OnLeave", function()
         lbl:SetAlpha(0.7)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
     b:SetScript("OnClick", function()
         if ns.ShowRaidCheck then ns.ShowRaidCheck() end
@@ -2077,14 +2113,13 @@ local function BuildInviteToolsButton()
 
     b:SetScript("OnEnter", function(self)
         tex:SetAlpha(1)
-        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-        GameTooltip:AddLine(EllesmereUI.L("Invite Tools"))
-        GameTooltip:AddLine(EllesmereUI.L("Opens Invite Tools for managing and sharing invite lists."), 1, 1, 1, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self,
+            EllesmereUI.L("Invite Tools") .. "\n" .. EllesmereUI.L("Opens Invite Tools for managing and sharing invite lists."),
+            { anchor = "below", force = true })
     end)
     b:SetScript("OnLeave", function()
         tex:SetAlpha(0.7)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
     b:SetScript("OnClick", function()
         if ns.ToggleInviteTools then ns.ToggleInviteTools() end
@@ -2094,15 +2129,12 @@ local function BuildInviteToolsButton()
     inviteToolsBtn = b
 end
 
--- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints who is
--- missing it (or, for Repair, everyone's durability percentage) to this
--- client's own chat frame only; right-click posts the same thing to /guild
--- (in a raid) or /party (in a party) depending on the current group.
--- Middle-click always posts to that same guild/party chat: on every button
--- except Food, it fires all five reports at once (ns.ReportAllConsumables);
--- on Food specifically, it reports who is missing a food buff whose name
--- starts with "Hearty" instead of the ordinary Well Fed check
--- (ns.ReportHeartyFood) -- both defined in EllesmereUIQoL_RaidCheck.lua.
+-- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints locally;
+-- right-click posts to /guild (raid) or /party (party). Food reports both
+-- ordinary Food and Hearty Food on either click (ns.ReportFood). Middle-click
+-- on ANY report button posts all six checks, including Hearty Food, to the
+-- same guild/party destination (ns.ReportAllConsumables). These report
+-- helpers are defined in EllesmereUIQoL_RaidCheck.lua.
 -- Full-row content buttons, deliberately separate from the corner chrome.
 -- They use the same 22px row height and equal-width distribution as the rest
 -- of Group & Pull. Not gated on lead/assist -- reading auras and durability
@@ -2124,36 +2156,31 @@ local function BuildReportButtons()
         -- exactly one panel row with the same spacing as the action rows.
         b:SetScript("OnEnter", function(self)
             lbl:SetAlpha(1)
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            GameTooltip:AddLine(EllesmereUI.L(def.title))
+            local tip = EllesmereUI.L(def.title)
             if def.key == "durability" then
-                GameTooltip:AddLine(EllesmereUI.L("Lists anyone at 90% or below, worst first."), 0.7, 0.7, 0.7, true)
+                tip = tip .. "\n" .. EllesmereUI.L("Lists anyone at 90% or below, worst first.")
+            elseif def.key == "food" then
+                tip = tip .. "\n" .. EllesmereUI.L("Reports normal Food and Hearty Food.")
             else
-                GameTooltip:AddLine(EllesmereUI.L("Lists who is missing it."), 0.7, 0.7, 0.7, true)
+                tip = tip .. "\n" .. EllesmereUI.L("Lists who is missing it.")
             end
-            GameTooltip:AddLine(EllesmereUI.L("Left Click: print to your own chat only."), 1, 1, 1)
-            GameTooltip:AddLine(EllesmereUI.L("Right Click: report to party/guild chat."), 1, 1, 1)
-            if def.key == "food" then
-                GameTooltip:AddLine(EllesmereUI.L("Middle Click: report who is missing a \"Hearty\" food, to party/guild chat."), 1, 1, 1)
-            else
-                GameTooltip:AddLine(EllesmereUI.L("Middle Click: report every consumable check at once, to party/guild chat."), 1, 1, 1)
-            end
-            GameTooltip:Show()
+            tip = tip .. "\n" .. EllesmereUI.L("Left Click: print to your own chat only.")
+                .. "\n" .. EllesmereUI.L("Right Click: report to guild/party chat.")
+                .. "\n" .. EllesmereUI.L("Middle Click: report every consumable check, including Hearty Food, to guild/party chat.")
+            EllesmereUI.ShowWidgetTooltip(self, tip, { anchor = "below", force = true })
         end)
         b:SetScript("OnLeave", function()
             lbl:SetAlpha(0.7)
-            GameTooltip:Hide()
+            EllesmereUI.HideWidgetTooltip()
         end)
         b:SetScript("OnClick", function(_, button)
             if button == "MiddleButton" then
-                if def.key == "food" then
-                    if ns.ReportHeartyFood then ns.ReportHeartyFood(true) end
-                elseif ns.ReportAllConsumables then
-                    ns.ReportAllConsumables(true)
-                end
+                if ns.ReportAllConsumables then ns.ReportAllConsumables(true) end
                 return
             end
-            if ns.ReportConsumable then
+            if def.key == "food" then
+                if ns.ReportFood then ns.ReportFood(button == "RightButton") end
+            elseif ns.ReportConsumable then
                 ns.ReportConsumable(def.key, button == "RightButton")
             end
         end)
@@ -3176,17 +3203,17 @@ end
 SLASH_EUIRAIDTOOLS1 = "/euiraid"
 SlashCmdList["EUIRAIDTOOLS"] = function()
     if Mode() == "never" then
-        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Raid Tools is disabled in the EllesmereUI options."))
+        EllesmereUI.Print(EllesmereUI.COLOR_CODES.BRAND .. "EllesmereUI:|r " .. EllesmereUI.L("Raid Tools is disabled in the EllesmereUI options."))
         return
     end
     if InCombatLockdown() then
-        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Raid Tools cannot be toggled by slash command in combat -- use the keybind."))
+        EllesmereUI.Print(EllesmereUI.COLOR_CODES.BRAND .. "EllesmereUI:|r " .. EllesmereUI.L("Raid Tools cannot be toggled by slash command in combat -- use the keybind."))
         return
     end
     -- The snippet would refuse anyway (enabled is false while the gate is
     -- shut); saying so beats a slash command that looks broken.
     if AssistSuppressed() then
-        EllesmereUI.Print("|cff0cd29fEllesmereUI:|r " .. EllesmereUI.L("Raid Tools is hidden in a raid without leader or assist -- none of its buttons work there."))
+        EllesmereUI.Print(EllesmereUI.COLOR_CODES.BRAND .. "EllesmereUI:|r " .. EllesmereUI.L("Raid Tools is hidden in a raid without leader or assist -- none of its buttons work there."))
         return
     end
     BuildAll()

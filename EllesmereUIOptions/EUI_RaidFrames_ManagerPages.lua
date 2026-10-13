@@ -901,7 +901,7 @@ local function BuildBaseDetailDM(frame, fontPath)
           tooltip = "Wraps into a new row (or column for vertical growth) after this many icons; below 2 keeps one continuous run.",
           getValue = function() return p.debuffPerRow or 5 end,
           setValue = function(v) p.debuffPerRow = v; DmApply() end },
-        { type = "label", text = "" }); sy = sy - hh
+        EllesmereUI.BlankRowCfg()); sy = sy - hh
 
     -- Display: the legacy debuff style keys (retired Auras tab), which the
     -- base grid and icon tiles read directly. CC glow settings are
@@ -1017,18 +1017,6 @@ local function BuildBaseDetailDM(frame, fontPath)
         { type = "toggle", text = "Show Duration Swipe",
           getValue = function() return p.debuffShowSwipe ~= false end,
           setValue = function(v) p.debuffShowSwipe = v; DmApply() end }); sy = sy - hh
-
-    if EllesmereUI.AuraKit.SupportsCasterName() or EllesmereUI.AuraKit.SupportsPandemicPulse() then
-        _, hh = W:DualRow(frame, sy,
-            { type="toggle", text="Pandemic Pulse (PTR)",
-              disabled=function() return not EllesmereUI.AuraKit.SupportsPandemicPulse() end,
-              getValue=function() return p.debuffPandemicGlow == true end,
-              setValue=function(v) p.debuffPandemicGlow = v; DmApply() end },
-            { type="toggle", text="Show Caster's Name (PTR)",
-              disabled=function() return not EllesmereUI.AuraKit.SupportsCasterName() end,
-              getValue=function() return p.debuffShowCasterName == true end,
-              setValue=function(v) p.debuffShowCasterName = v; DmApply() end }); sy = sy - hh
-    end
 
     -- "Use Modifier" cog on Tooltips (left region): picks the key for the
     -- "Shown on Modifier" mode, so it is only available there. While that
@@ -1183,7 +1171,7 @@ local function BuildTileDetail(frame, fontPath, t)
               tooltip = "Wraps into a new row (or column for vertical growth) after this many icons; below 2 keeps one continuous run.",
               getValue = function() return t.iconsPerRow or 0 end,
               setValue = function(v) TSet("iconsPerRow", v) end },
-            { type = "label", text = "" }); sy = sy - hh
+            EllesmereUI.BlankRowCfg()); sy = sy - hh
 
         _, hh = W:SectionHeader(frame, "DISPLAY", sy); sy = sy - hh
 
@@ -1306,7 +1294,7 @@ local function BuildTileDetail(frame, fontPath, t)
                       t.color = { r = r, g = g, b = b, a = a or 1 }
                       DmApply()
                   end },
-                { type = "label", text = "" }); sy = sy - hh
+                EllesmereUI.BlankRowCfg()); sy = sy - hh
         end
 
         sy = BuildFxEffects(frame, sy, t)
@@ -1395,7 +1383,7 @@ local function BuildTileDetail(frame, fontPath, t)
             { type = "toggle", text = "Reverse Fill",
               getValue = function() return t.reverseFill or false end,
               setValue = function(v) TSet("reverseFill", v and true or false) end },
-            { type = "label", text = "" }); sy = sy - hh
+            EllesmereUI.BlankRowCfg()); sy = sy - hh
 
         _, hh = W:SectionHeader(frame, "DISPLAY", sy); sy = sy - hh
         -- Width | Height: labels flip with orientation so each slot names
@@ -2862,10 +2850,19 @@ local fdScrollPos = 0 -- preserved spell-list scroll across editor rebuilds
 -- standard input popup + delete via the standard confirm popup); left =
 -- the selected filter's spells as checkbox rows using the checkbox-
 -- dropdown widget's exact visuals, grouped by class.
-function ns.BMP_ShowFilterEditor()
+-- show / hide: the opening dropdown's Show and Hide picks (id -> true). The
+-- editor opens on the first picked filter in list order; with none picked it
+-- keeps the last one viewed.
+function ns.BMP_ShowFilterEditor(show, hide)
     if ns._bm2FilterEditor then ns._bm2FilterEditor:Hide(); ns._bm2FilterEditor = nil end
     local filters = ns.BM2_Filters and ns.BM2_Filters()
     if not filters then return end
+    if show or hide then
+        for i = 1, #filters do
+            local id = filters[i].id
+            if (show and show[id]) or (hide and hide[id]) then fdSel = id; break end
+        end
+    end
     local fontPath = (EllesmereUI.GetFontPath("options"))
         or (EllesmereUI.GetFontPath("raidFrames"))
         or "Fonts\\FRIZQT__.TTF"
@@ -2926,6 +2923,23 @@ function ns.BMP_ShowFilterEditor()
         close:SetScript("OnClick", function()
             dimmer:Hide()
             ns._bm2FilterEditor = nil
+        end)
+    end
+
+    -- Escape closes the editor alone: the key is swallowed here, so it never
+    -- reaches the Escape proxy that would close the options window too.
+    -- SetPropagateKeyboardInput is protected in combat, so the editor takes
+    -- the keyboard only when built out of combat and stands aside in it.
+    if not InCombatLockdown() then
+        popup:EnableKeyboard(true)
+        popup:SetPropagateKeyboardInput(true)
+        popup:SetScript("OnKeyDown", function(self, key)
+            if InCombatLockdown() then return end
+            self:SetPropagateKeyboardInput(key ~= "ESCAPE")
+            if key == "ESCAPE" then
+                dimmer:Hide()
+                ns._bm2FilterEditor = nil
+            end
         end)
     end
 
@@ -3333,9 +3347,13 @@ function ns.BMP_ShowFilterEditor()
             or (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id))
         local lr, lg2, lb2 = 1, 1, 1
         if classColor then lr, lg2, lb2 = classColor.r, classColor.g, classColor.b end
+        -- A user-added id the preset has since curated keeps its custom mark
+        -- (it stays if the curation is ever dropped) but is a curated row now:
+        -- no remove control.
+        local removable = sel.custom[id] and not (curated and curated[id])
         local lbl = EllesmereUI.MakeFont(srow, 13, nil, lr, lg2, lb2)
         lbl:SetPoint("LEFT", ico, "RIGHT", 6, 0)
-        lbl:SetPoint("RIGHT", srow, "RIGHT", sel.custom[id] and -24 or -6, 0)
+        lbl:SetPoint("RIGHT", srow, "RIGHT", removable and -24 or -6, 0)
         lbl:SetJustifyH("LEFT")
         lbl:SetWordWrap(false)
         lbl:SetText(name or ("Spell " .. tostring(id)))
@@ -3363,7 +3381,7 @@ function ns.BMP_ShowFilterEditor()
             Apply()
             UpdateRow()
         end)
-        if sel.custom[id] then
+        if removable then
             local del = CreateFrame("Button", nil, srow)
             del:SetSize(14, 14)
             del:SetPoint("RIGHT", srow, "RIGHT", -6, 0)
@@ -3469,7 +3487,7 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
             local filters = (ns.BM2_Filters and ns.BM2_Filters()) or {}
             local items = {
                 { isTopAction = true, label = "Edit Filters", onClick = function()
-                    ns.BMP_ShowFilterEditor()
+                    ns.BMP_ShowFilterEditor(ind.filters, ind.negFilters)
                 end },
                 { isHeader = true, label = "Show", rightLabel = "Hide" },
             }
@@ -3503,7 +3521,14 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
                     end
                 end
                 if ns.BM2_Invalidate then ns.BM2_Invalidate() end
-                if ns.ReloadFrames then ns.ReloadFrames() end
+                -- Frames and preview now, then the selected tile's icon and
+                -- spell list (a widget refresh keeps this menu open).
+                if ns._bmReloadAndUpdate then
+                    ns._bmReloadAndUpdate()
+                elseif ns.ReloadFrames then
+                    ns.ReloadFrames()
+                end
+                EllesmereUI:RefreshPage()
             end,
             nil, 12)
         PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
@@ -3757,7 +3782,7 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
             })
         end
     else
-        _r, hh = W:DualRow(parent, sy, showInCfg, { type = "label", text = "" }); sy = sy - hh
+        _r, hh = W:DualRow(parent, sy, showInCfg, EllesmereUI.BlankRowCfg()); sy = sy - hh
     end
 
     return sy

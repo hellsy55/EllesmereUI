@@ -1841,7 +1841,7 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip="Flash the cast bar and show \"Interrupted\" for a moment when the cast is interrupted.",
               getValue=function() local t = TFB(); return not t or t.interruptedFlash ~= false end,
               setValue=function(v) local t = TFB(); if t then t.interruptedFlash = v and true or false; TFBRefresh() end end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(row._leftRegion, { tip = "Interrupted Flash Settings",
                 title = "Interrupted Flash",
@@ -1975,7 +1975,7 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=RSOff, disabledTooltip=REQ,
               getValue=function() return RSGet("textSize", 14) end,
               setValue=function(v) RSSet("textSize", v) end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
 
         row, h = W:SectionHeader(parent, "COLUMNS", y); y = y - h
 

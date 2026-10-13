@@ -36,7 +36,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  directly parents the marker row's SecureActionButtonTemplate buttons,
 --  and that's enough for the client to combat-restrict layout calls
 --  (SetSize/SetScale/Show/Hide) made on the shell itself. Apply() below
---  therefore checks InCombatLockdown() and defers to PLAYER_REGEN_ENABLED
+--  therefore checks InCombatLockdown() and defers through ns.CombatQueue
 --  instead of touching the shell mid-combat. The marker buttons themselves
 --  are built once and never re-parented, resized or individually shown/
 --  hidden. Moving/resizing by hand only happens through Unlock Mode, which
@@ -683,15 +683,13 @@ end
 --  (SetSize/SetScale/Show/Hide) as combat-restricted -- see the
 --  ADDON_ACTION_BLOCKED report on shell.frame:SetSize(). Apply() can be
 --  triggered by GROUP_ROSTER_UPDATE/PLAYER_ENTERING_WORLD, both of which can
---  fire mid-combat, so we defer the whole thing to PLAYER_REGEN_ENABLED when
+--  fire mid-combat, so we defer the whole thing through ns.CombatQueue when
 --  that happens instead of touching the frame while locked down.
 -------------------------------------------------------------------------------
-local pendingApply = false
-
 function Apply()
     if not db then return end
     if InCombatLockdown() then
-        pendingApply = true
+        ns.CombatQueue.Defer("RaidToolsCompactBandApply", Apply)
         return
     end
     if not Enabled() or not InRaidGroup() then
@@ -717,14 +715,6 @@ _G._EUI_RaidToolsCompactBand_Apply = Apply
 -------------------------------------------------------------------------------
 local ev = CreateFrame("Frame")
 ev:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_REGEN_ENABLED" then
-        -- Combat ended -- run any Apply() that got deferred while locked down.
-        if pendingApply then
-            pendingApply = false
-            Apply()
-        end
-        return
-    end
     if not Enabled() then return end
     if event == "RAID_TARGET_UPDATE" then
         RefreshMarkerState()
@@ -740,7 +730,6 @@ ev:RegisterEvent("GROUP_ROSTER_UPDATE")
 ev:RegisterEvent("PARTY_LEADER_CHANGED")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("RAID_TARGET_UPDATE")
-ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 -------------------------------------------------------------------------------
 --  Unlock Mode registration -- lets the band be dragged and resized the same

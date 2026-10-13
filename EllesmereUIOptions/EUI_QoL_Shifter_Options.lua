@@ -147,7 +147,7 @@ _G._EUI_BuildShifterPage = function(pageName, parent, yOffset)
               if not EllesmereUIDB then EllesmereUIDB = {} end
               EllesmereUIDB.shifterNoShift = v
           end },
-        { type = "label", text = "" }
+        EllesmereUI.BlankRowCfg()
     );  y = y - h
 
     ---------------------------------------------------------------------------

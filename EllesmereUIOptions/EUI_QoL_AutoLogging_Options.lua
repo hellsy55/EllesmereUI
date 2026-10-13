@@ -60,6 +60,19 @@ local function TeleCfg()
     return EllesmereUIDB.teleportPrompt
 end
 
+-- Read-only: the /way table appears on the first write, so viewing the page
+-- saves nothing.
+local NO_WAY_CFG = {}
+local function WayCfg()
+    return EllesmereUIDB and EllesmereUIDB.waypointCmd or NO_WAY_CFG
+end
+
+local function SetWay(key, value)
+    if not EllesmereUIDB then return end
+    EllesmereUIDB.waypointCmd = EllesmereUIDB.waypointCmd or {}
+    EllesmereUIDB.waypointCmd[key] = value
+end
+
 -- Built as the tail of the Quality of Life page (chained from BuildQoLPage),
 -- not as its own tab. Lays out from yOffset and returns the height used,
 -- like every other section builder.
@@ -185,12 +198,59 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
               TeleCfg().showDisable = v
               if _G._EUI_RefreshTeleportPrompt then _G._EUI_RefreshTeleportPrompt() end
           end },
-        { type = "label", text = "" }
+        EllesmereUI.BlankRowCfg()
     ); y = y - h
     end   -- close LFG Reminder hidden-while-disabled gate
 
     _, h = W:Spacer(parent, y, 20); y = y - h
     end -- not IS_FOREVER
+
+    ---------------------------------------------------------------------------
+    --  WAYPOINT COMMAND (/way, runtime in EllesmereUIQoL_Waypoint.lua)
+    ---------------------------------------------------------------------------
+    _, h = W:SectionHeader(parent, "WAYPOINT COMMAND", y); y = y - h
+
+    local wayRow
+    wayRow, h = W:DualRow(parent, y,
+        { type    = "toggle",
+          text    = "Enable /way Command",
+          tooltip = "Adds /way, which prints a map pin link.",
+          -- Off by default.
+          getValue = function() return WayCfg().enabled == true end,
+          setValue = function(v)
+              SetWay("enabled", v or nil)
+              EllesmereUI:RefreshPage()
+              EllesmereUI:ShowConfirmPopup({
+                  title = "Reload Required",
+                  message = "Changing the /way command requires a reload to update slash command registration.",
+                  confirmText = "Reload",
+                  cancelText = "Later",
+                  reload    = true,
+              })
+          end },
+        EllesmereUI.BlankRowCfg()
+    ); y = y - h
+
+    -- The arrival message for hand-placed pins (off by default). The runtime
+    -- reads it live and listens for arrivals only while it or a /way list
+    -- needs them, so a change re-syncs that listener.
+    EllesmereUI.BuildInlineCog(wayRow._leftRegion, {
+        title = "/way Command",
+        disabled = function() return WayCfg().enabled ~= true end,
+        disabledTooltip = "Enable /way Command",
+        rows = {
+            { type="toggle", label="Hand-Placed Pin Arrival",
+              tooltip="Also announces arrival at pins you place.",
+              get=function() return WayCfg().manualArrival == true end,
+              set=function(v)
+                  SetWay("manualArrival", v or nil)
+                  local sync = EllesmereUI._ModuleNS["EllesmereUIQoL"].WaypointArrivalSync
+                  if sync then sync() end
+              end },
+        },
+    })
+
+    _, h = W:Spacer(parent, y, 20); y = y - h
 
     ---------------------------------------------------------------------------
     --  AUTO COMBAT LOGGING
@@ -266,11 +326,19 @@ local function BuildAutoLoggingPage(pageName, parent, yOffset)
           setValue = function(v)
               Cfg().delaystop = v
           end },
-        { type = "label", text = "" }
+        EllesmereUI.BlankRowCfg()
     ); y = y - h
     end   -- close Auto Logging hidden-while-disabled gate
 
     _, h = W:Spacer(parent, y, 20); y = y - h
+
+    ---------------------------------------------------------------------------
+    --  ALERTS (Combat Alert, Potion Ready, Unspent Talents; one shared anchor)
+    ---------------------------------------------------------------------------
+    if _G._EUI_BuildAlertsSection then
+        local alertsH = _G._EUI_BuildAlertsSection(parent, y, W, EllesmereUI.PP)
+        y = y - alertsH
+    end
 
     ---------------------------------------------------------------------------
     --  BATTLE RES (no shared battle res charges on WoW Forever: the indicator

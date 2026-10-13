@@ -60,7 +60,7 @@ end
 ------------------------------------------------------------------------
 
 -- Cleans up text that came from chat/Discord before it is split into names:
---   * look-alike apostrophes (` ´ ’ ʼ ...) become a plain ' (Zul`jin -> Zul'jin)
+--   * look-alike apostrophes (` \194\180 \226\128\153 \202\188 ...) become a plain ' (Zul`jin -> Zul'jin)
 --   * fancy dashes become a plain -
 --   * invisible characters (zero-width, non-breaking space, BOM) are removed
 -- Returns the cleaned text and how many fixes were made.
@@ -1305,7 +1305,25 @@ function IL:PLAYER_REGEN_ENABLED()
         local queued = self.pendingSync
         self.pendingSync = {}
         if self:SyncOn() then
-            for _, r in ipairs(queued) do self:ApplySyncDelta(r.kind, r.sender, r.payload) end
+            -- A batch may add and remove the same name while in combat.
+            -- Show the panel only when the final list differs from its starting state.
+            local old = self.names or ParseList(self:GetListText(1))
+            local oldCount, oldSet = #old, {}
+            for _, name in ipairs(old) do oldSet[name:lower()] = true end
+            local changed = false
+            for _, r in ipairs(queued) do
+                if self:ApplySyncDelta(r.kind, r.sender, r.payload) then changed = true end
+            end
+            if changed then
+                local current = self.names or ParseList(self:GetListText(1))
+                local differs = #current ~= oldCount
+                if not differs then
+                    for _, name in ipairs(current) do
+                        if not oldSet[name:lower()] then differs = true break end
+                    end
+                end
+                if differs and not (self.frame and self.frame:IsShown()) then self:Toggle() end
+            end
         end
     end
     self:ScheduleSyncCheck()
@@ -1830,8 +1848,8 @@ end
 function IL:OnSyncEmpty(sender, channel)
     if channel ~= "WHISPER" or not self:SyncOn() or self:HasBase() then return end
     if GetTime() > self.syncWanted or not self:IsLeaderName(sender) then return end
+    -- A leader's empty baseline does not need to open Invite Tools.
     self.syncBase = true
-    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
 end
 
 local function ShortSender(sender)
@@ -1856,7 +1874,7 @@ function IL:ApplyRemoval(sender, name)
             self:RecordJoin(n, "removed", nil, "leader", ShortSender(sender))
             self:SaveNames()
             if self.frame and self.frame.Layout then self.frame.Layout() end
-            return
+            return true
         end
     end
 end
@@ -1868,21 +1886,22 @@ function IL:ApplyAdd(sender, payload)
     end
     if #list == 0 then return end
     local added = self:MergeNames(list)
-    if added <= 0 then return end
+    return added > 0
 end
 
 function IL:ApplyClear(sender)
     if #(self.names or ParseList(self:GetListText(1))) == 0 then return end
     self:ClearList("cleared", ShortSender(sender))
+    return true
 end
 
 function IL:ApplySyncDelta(kind, sender, payload)
     if kind == "X" then
-        self:ApplyRemoval(sender, payload)
+        return self:ApplyRemoval(sender, payload)
     elseif kind == "N" then
-        self:ApplyAdd(sender, payload)
+        return self:ApplyAdd(sender, payload)
     elseif kind == "C" then
-        self:ApplyClear(sender)
+        return self:ApplyClear(sender)
     end
 end
 
@@ -1895,13 +1914,13 @@ function IL:OnSyncDelta(kind, sender, payload, channel)
         return
     end
     if kind ~= "C" and not ValidName(kind == "N" and (payload:match("^[^,]+") or "") or payload) then return end
-    if not (self.frame and self.frame:IsShown()) then self:Toggle() end
     if InCombatLockdown() then
         local q = self.pendingSync
         if #q < 60 then q[#q + 1] = { kind = kind, sender = sender, payload = payload } end
         return
     end
-    self:ApplySyncDelta(kind, sender, payload)
+    if self:ApplySyncDelta(kind, sender, payload)
+        and not (self.frame and self.frame:IsShown()) then self:Toggle() end
 end
 
 -- mode: "GROUP", "GUILD" or "TARGET". Returns true, or false and a reason.
@@ -1998,7 +2017,7 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
         if type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
         count = tonumber(count)
         if not count or count < 1 or count > SHARE_MAX_NAMES then return end
-        if not (self.frame and self.frame:IsShown()) then self:Toggle() end
+        -- Wait for the complete baseline before deciding whether to show the panel.
         self:AcceptShare({
             sender = sender, id = id, count = count, auto = true, sync = true,
             classFile = ClassOf(sender, classFile),
@@ -2084,11 +2103,8 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
         if ok and ignored then return end
     end
 
-    -- A valid incoming shared-list offer brings Invite Tools to the foreground
-    -- immediately, before the confirmation popup or trusted auto-accept path.
-    if not (self.frame and self.frame:IsShown()) then
-        self:Toggle()
-    end
+    -- Show the confirmation popup without opening the panel. The panel is
+    -- opened only after a received list actually changes our saved names.
 
     -- Auto-accept from trusted group leadership, or from Guild Master / Officer
     -- when the offer itself arrived through the guild channel.
@@ -2253,6 +2269,7 @@ function IL:OnShareData(sender, id, i, n, payload)
     -- the incoming list are recorded in History with the sender as the reason.
     -- If both sets are identical, keep the current statuses/session untouched.
     local replaced
+    local listChanged = false
     do
         local fresh, nFresh = {}, 0
         for _, name in ipairs(names) do
@@ -2270,6 +2287,7 @@ function IL:OnShareData(sender, id, i, n, payload)
             end
         end
         if nFresh > 0 and not same then
+            listChanged = true
             local by = ShortName(a.sender)
             replaced = 0
             for _, name in ipairs(old) do
@@ -2280,6 +2298,7 @@ function IL:OnShareData(sender, id, i, n, payload)
     end
 
     local added, duplicates, mine = self:MergeNames(names)
+    if listChanged and not (self.frame and self.frame:IsShown()) then self:Toggle() end
     -- Tell a current sender exactly what its list did here. Older senders
     -- ignore this packet.
     if not a.sync then SendShareReply(a.sender, a.id, "r~" .. added .. "~" .. #names) end
@@ -2547,7 +2566,7 @@ function IL:CreateFrame()
     -- scrolling list and other interactive widgets are unaffected.
     f:SetScript("OnMouseUp", function(self, button)
         if button ~= "RightButton" then return end
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         self:Hide()
     end)
     f:SetBackdrop(backdrop)
@@ -2601,7 +2620,7 @@ function IL:CreateFrame()
     -- Right-click is still allowed to close the locked window.
     combatBlocker:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" then
-            GameTooltip:Hide()
+            GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
             f:Hide()
         end
     end)
@@ -3195,14 +3214,13 @@ function IL:CreateFrame()
         IL:InviteFromList(IL.currentList)
     end)
     invite:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Invite"], 1, 1, 1)
+        local tip = L["Invite"]
         if not IsInRaid() then
-            GameTooltip:AddLine(L["Available only while you are in a raid group."], 0.8, 0.8, 0.8, true)
+            tip = tip .. "\n" .. L["Available only while you are in a raid group."]
         end
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, tip, { force = true })
     end)
-    invite:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    invite:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- Auto-invite controls: [x] Auto-invite [30s]            [Stop] ---------
     local bar = CreateFrame("Frame", nil, f)
@@ -3285,26 +3303,20 @@ function IL:CreateFrame()
     end)
     check:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:SetText(L["Auto-invite"], 1, 1, 1)
-        GameTooltip:AddLine(L["Invites again the names that are pending, offline or in another group, until they join or you press Stop."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Auto-invite"] .. "\n" .. L["Invites again the names that are pending, offline or in another group, until they join or you press Stop."], { force = true })
     end)
     check:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
 
     timerBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(string.format(L["Retry every %ds"], IL:GetInterval()), 1, 1, 1)
-        GameTooltip:AddLine(L["Click to change the time."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, string.format(L["Retry every %ds"], IL:GetInterval()) .. "\n" .. L["Click to change the time."], { force = true })
     end)
-    timerBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    timerBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
     timerBtn:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
         timerEdit:SetText(tostring(IL:GetInterval()))
         timerEdit:Show()
         timerEdit:SetFocus()
@@ -3363,14 +3375,11 @@ function IL:CreateFrame()
     end)
     sharedCheck:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:SetText(L["Auto-accept shared lists"], 1, 1, 1)
-        GameTooltip:AddLine(L["Accepts lists sent by your group leader or a raid assistant without asking. Lists shared through the guild are only accepted from the Guild Master and Officers; lists from lower ranks are ignored. Lists from anybody else still show the popup."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Auto-accept shared lists"] .. "\n" .. L["Accepts lists sent by your group leader or a raid assistant without asking. Lists shared through the guild are only accepted from the Guild Master and Officers; lists from lower ranks are ignored. Lists from anybody else still show the popup."], { force = true })
     end)
     sharedCheck:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
 
     -- Clear list -----------------------------------------------------------
@@ -3384,12 +3393,9 @@ function IL:CreateFrame()
         clear.armed = nil
     end
     clear:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Clear list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Removes every name from the list. Click twice to confirm."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Clear list"] .. "\n" .. L["Removes every name from the list. Click twice to confirm."], { force = true })
     end)
-    clear:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    clear:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
     clear:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
         if #(IL.names or {}) == 0 then return end
@@ -3479,7 +3485,7 @@ function IL:CreateFrame()
     end
 
     local function OpenShareMenu()
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
         for _, b in ipairs(shareOptions) do
             b:SetAlpha(ModeAvailable(b.mode) and 1 or 0.4)
         end
@@ -3492,13 +3498,9 @@ function IL:CreateFrame()
     end)
     shareBtn:HookScript("OnEnter", function(self)
         if shareMenu:IsShown() then return end
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Share list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Offers your list to your group, your guild or your target. They get a popup and choose Accept or Decline. Nothing is written in chat."], 0.8, 0.8, 0.8, true)
-        GameTooltip:AddLine(L["Only the group leader or a raid assistant can share."], 1, 0.82, 0, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Share list"] .. "\n" .. L["Offers your list to your group, your guild or your target. They get a popup and choose Accept or Decline. Nothing is written in chat."] .. "\n" .. L["Only the group leader or a raid assistant can share."], { force = true })
     end)
-    shareBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    shareBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- The menu closes by itself when the mouse stays away from it.
     do
@@ -3564,12 +3566,9 @@ function IL:CreateFrame()
         histClear.armed = nil
     end
     histClear:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Clear list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Removes every name from the history. Click twice to confirm."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Clear list"] .. "\n" .. L["Removes every name from the history. Click twice to confirm."], { force = true })
     end)
-    histClear:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    histClear:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
     histClear:SetScript("OnClick", function()
         if InCombatLockdown() or locked then return end
         if #(IL.db.History or {}) == 0 then return end
@@ -3593,6 +3592,11 @@ function IL:CreateFrame()
     StyleFont(histCount, "small")
     histCount:SetTextColor(textSec[1], textSec[2], textSec[3], 1)
 
+    -- Closing via the empty panel surface mirrors the native right-click
+    -- dismissal in the main Invite Tools panel, without affecting row actions.
+    hist:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then hist:Hide() end
+    end)
     local histHolder = CreateFrame("Frame", nil, hist, "BackdropTemplate")
     histHolder:SetPoint("TOPLEFT", hist, "TOPLEFT", 10, -50)
     histHolder:SetPoint("BOTTOMRIGHT", hist, "BOTTOMRIGHT", -10, 10)
@@ -3608,6 +3612,14 @@ function IL:CreateFrame()
     hcontent:SetPoint("TOPLEFT", hscroll, "TOPLEFT", 0, 0)
     hcontent:SetSize(HIST_W - 28, 1)
     hscroll:SetScrollChild(hcontent)
+    local hrows = {}
+    local function CloseHistoryBlank(_, button)
+        if button ~= "RightButton" then return end
+        for _,row in ipairs(hrows) do
+            if row:IsShown() and row:IsMouseOver() then return end
+        end
+        hist:Hide()
+    end
     hscroll:SetScript("OnMouseWheel", function(self, delta)
         local range = self:GetVerticalScrollRange() or 0
         local cur = self:GetVerticalScroll() or 0
@@ -3620,7 +3632,12 @@ function IL:CreateFrame()
     histEmpty:SetTextColor(textSec[1], textSec[2], textSec[3], 0.8)
     histEmpty:SetText(L["Nobody has joined yet."])
 
-    local hrows = {}
+    histHolder:EnableMouse(true)
+    histHolder:SetScript("OnMouseUp", CloseHistoryBlank)
+    hscroll:EnableMouse(true)
+    hscroll:SetScript("OnMouseUp", CloseHistoryBlank)
+    hcontent:EnableMouse(true)
+    hcontent:SetScript("OnMouseUp", CloseHistoryBlank)
     local function MakeHistRow()
         local row = CreateFrame("Frame", nil, hcontent)
         row:SetHeight(HIST_ROW_H)
@@ -3781,7 +3798,7 @@ function IL:CreateFrame()
         historyBtn.selected = nil
         historyBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         DisarmHistClear()
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         if PlacePanels and ((friends and friends:IsShown()) or (FA and FA.frame and FA.frame:IsShown())) then PlacePanels() end
     end)
 
@@ -3797,12 +3814,9 @@ function IL:CreateFrame()
         end
     end)
     historyBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["History"], 1, 1, 1)
-        GameTooltip:AddLine(L["Names that joined your group, declined your invite or were removed from the list, newest first. Re-invite puts a name back on the list."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["History"] .. "\n" .. L["Names that joined your group, declined your invite or were removed from the list, newest first. Re-invite puts a name back on the list."], { force = true })
     end)
-    historyBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    historyBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- Friend List: favourite Battle.net friends, online WoW characters first. ----
     -- Invites go straight to the player; they are never added to the main list.
@@ -3820,6 +3834,9 @@ function IL:CreateFrame()
     BG(friends, "main")
     friends:SetBackdropBorderColor(border[1], border[2], border[3], 1)
     friends:Hide()
+    friends:SetScript("OnMouseUp", function(_, button)
+        if button == "RightButton" then friends:Hide() end
+    end)
 
     local friendsTitle = friends:CreateFontString(nil, "OVERLAY")
     friendsTitle:SetPoint("TOP", friends, "TOP", 0, -8)
@@ -3859,12 +3876,9 @@ function IL:CreateFrame()
         InviteAllFriends()
     end)
     inviteAllBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Invite All"], 1, 1, 1)
-        GameTooltip:AddLine(L["Invites every online friend in this list who is not already in the group. One character per Battle.net friend; hidden friends are skipped. Converts to a raid when there is not enough room for everybody."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Invite All"] .. "\n" .. L["Invites every online friend in this list who is not already in the group. One character per Battle.net friend; hidden friends are skipped. Converts to a raid when there is not enough room for everybody."], { force = true })
     end)
-    inviteAllBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    inviteAllBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     -- Hidden friends are only hidden from Invite Tools; Battle.net itself is untouched.
     local hiddenBtn = MakeButton(friends, "")
@@ -3876,12 +3890,9 @@ function IL:CreateFrame()
         RefreshFriends()
     end)
     hiddenBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Hidden friends"], 1, 1, 1)
-        GameTooltip:AddLine(L["Shows the friends you removed from this list. Right-click one to bring it back."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Hidden friends"] .. "\n" .. L["Shows the friends you removed from this list. Right-click one to bring it back."], { force = true })
     end)
-    hiddenBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    hiddenBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     local friendsHolder = CreateFrame("Frame", nil, friends, "BackdropTemplate")
     friendsHolder:SetPoint("TOPLEFT", friends, "TOPLEFT", 10, -50)
@@ -3905,6 +3916,22 @@ function IL:CreateFrame()
         self:SetVerticalScroll(math_max(0, math_min(range, cur - delta * FR_ROW_H * 2)))
     end)
 
+    local frows = {}
+    local function CloseFriendsBlank(_, button)
+        if button ~= "RightButton" then return end
+        for _,row in ipairs(frows) do
+            if row:IsShown() and row:IsMouseOver() then return end
+        end
+        friends:Hide()
+    end
+    friendsHolder:EnableMouse(true)
+    friendsHolder:SetScript("OnMouseUp", CloseFriendsBlank)
+    fscroll:EnableMouse(true)
+    fscroll:SetScript("OnMouseUp", CloseFriendsBlank)
+    -- Mouse-enabled friend rows consume their own right clicks; only the
+    -- exposed scroll background dismisses the panel.
+    fcontent:EnableMouse(true)
+    fcontent:SetScript("OnMouseUp", CloseFriendsBlank)
     local friendsEmpty = friendsHolder:CreateFontString(nil, "OVERLAY")
     friendsEmpty:SetPoint("CENTER", friendsHolder, "CENTER", 0, 0)
     friendsEmpty:SetWidth(FR_W - 50)
@@ -3943,14 +3970,11 @@ function IL:CreateFrame()
     end)
     friendlyCheck:SetScript("OnEnter", function(self)
         self:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:SetText(L["Auto accept friendly invites"], 1, 1, 1)
-        GameTooltip:AddLine(L["Accepts party invites from friends, Battle.net friends and guild members. Ignored while you are in a group or queued."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Auto accept friendly invites"] .. "\n" .. L["Accepts party invites from friends, Battle.net friends and guild members. Ignored while you are in a group or queued."], { force = true })
     end)
     friendlyCheck:SetScript("OnLeave", function(self)
         self:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        EllesmereUI.HideWidgetTooltip()
     end)
 
     local classByName
@@ -3978,12 +4002,12 @@ function IL:CreateFrame()
     -- that nickname is therefore the sort key. Case and common accents are
     -- ignored so names sort naturally.
     local FRIEND_SORT_ACCENTS = {
-        ["á"]="a",["à"]="a",["â"]="a",["ã"]="a",["ä"]="a",["é"]="e",["è"]="e",["ê"]="e",["ë"]="e",
-        ["í"]="i",["ì"]="i",["î"]="i",["ï"]="i",["ó"]="o",["ò"]="o",["ô"]="o",["õ"]="o",["ö"]="o",
-        ["ú"]="u",["ù"]="u",["û"]="u",["ü"]="u",["ç"]="c",["ñ"]="n",
-        ["Á"]="a",["À"]="a",["Â"]="a",["Ã"]="a",["Ä"]="a",["É"]="e",["È"]="e",["Ê"]="e",["Ë"]="e",
-        ["Í"]="i",["Ì"]="i",["Î"]="i",["Ï"]="i",["Ó"]="o",["Ò"]="o",["Ô"]="o",["Õ"]="o",["Ö"]="o",
-        ["Ú"]="u",["Ù"]="u",["Û"]="u",["Ü"]="u",["Ç"]="c",["Ñ"]="n",
+        ["\195\161"]="a",["\195\160"]="a",["\195\162"]="a",["\195\163"]="a",["\195\164"]="a",["\195\169"]="e",["\195\168"]="e",["\195\170"]="e",["\195\171"]="e",
+        ["\195\173"]="i",["\195\172"]="i",["\195\174"]="i",["\195\175"]="i",["\195\179"]="o",["\195\178"]="o",["\195\180"]="o",["\195\181"]="o",["\195\182"]="o",
+        ["\195\186"]="u",["\195\185"]="u",["\195\187"]="u",["\195\188"]="u",["\195\167"]="c",["\195\177"]="n",
+        ["\195\129"]="a",["\195\128"]="a",["\195\130"]="a",["\195\131"]="a",["\195\132"]="a",["\195\137"]="e",["\195\136"]="e",["\195\138"]="e",["\195\139"]="e",
+        ["\195\141"]="i",["\195\140"]="i",["\195\142"]="i",["\195\143"]="i",["\195\147"]="o",["\195\146"]="o",["\195\148"]="o",["\195\149"]="o",["\195\150"]="o",
+        ["\195\154"]="u",["\195\153"]="u",["\195\155"]="u",["\195\156"]="u",["\195\135"]="c",["\195\145"]="n",
     }
     local function FriendSortKey(name)
         return (name or ""):lower():gsub("[\195][\128-\191]", function(ch) return FRIEND_SORT_ACCENTS[ch] end)
@@ -4225,7 +4249,6 @@ function IL:CreateFrame()
         end)
     end
 
-    local frows = {}
     local function MakeFriendRow()
         local row = CreateFrame("Frame", nil, fcontent)
         row:SetHeight(FR_ROW_H)
@@ -4366,6 +4389,9 @@ function IL:CreateFrame()
         BG(faction, "main")
         faction:SetBackdropBorderColor(border[1], border[2], border[3], 1)
         faction:Hide()
+        faction:SetScript("OnMouseUp", function(_, button)
+            if button == "RightButton" then faction:Hide() end
+        end)
 
         local factionTitle = faction:CreateFontString(nil, "OVERLAY")
         factionTitle:SetPoint("TOP", faction, "TOP", 0, -8)
@@ -4459,12 +4485,9 @@ function IL:CreateFrame()
             editor:SetShown(not editor:IsShown())
         end)
         editWhisper:HookScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText(L["Edit whisper"], 1, 1, 1)
-            GameTooltip:AddLine(L["Edits the message sent by every Whisper button in this panel."], 0.8, 0.8, 0.8, true)
-            GameTooltip:Show()
+            EllesmereUI.ShowWidgetTooltip(self, L["Edit whisper"] .. "\n" .. L["Edits the message sent by every Whisper button in this panel."], { force = true })
         end)
-        editWhisper:HookScript("OnLeave", function() GameTooltip:Hide() end)
+        editWhisper:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
         local factionHolder = CreateFrame("Frame", nil, faction, "BackdropTemplate")
         factionHolder:SetPoint("TOPLEFT", faction, "TOPLEFT", 10, -50)
@@ -4508,6 +4531,19 @@ function IL:CreateFrame()
         end
 
         local arows = {}
+        local function CloseFactionsBlank(_, button)
+            if button ~= "RightButton" then return end
+            for _,row in ipairs(arows) do
+                if row:IsShown() and row:IsMouseOver() then return end
+            end
+            faction:Hide()
+        end
+        factionHolder:EnableMouse(true)
+        factionHolder:SetScript("OnMouseUp", CloseFactionsBlank)
+        ascroll:EnableMouse(true)
+        ascroll:SetScript("OnMouseUp", CloseFactionsBlank)
+        acontent:EnableMouse(true)
+        acontent:SetScript("OnMouseUp", CloseFactionsBlank)
         local function MakeFactionRow()
             local row = CreateFrame("Frame", nil, acontent)
             row:SetHeight(FA_ROW_H)
@@ -4603,7 +4639,12 @@ function IL:CreateFrame()
         end
 
         local function RefreshFaction()
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                ns.CombatQueue.Defer("InviteToolsFactions", function()
+                    if faction:IsShown() then RefreshFaction() end
+                end)
+                return
+            end
             local list = GroupFactions()
             local nA, nH = 0, 0
             for i = 1, #list do
@@ -4706,12 +4747,9 @@ function IL:CreateFrame()
         end
     end)
     friendsBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Friend list"], 1, 1, 1)
-        GameTooltip:AddLine(L["Your favourite Battle.net friends, online ones first. Invite goes straight to the player, without using the list. Right-click a friend to remove it from this list."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Friend list"] .. "\n" .. L["Your favourite Battle.net friends, online ones first. Invite goes straight to the player, without using the list. Right-click a friend to remove it from this list."], { force = true })
     end)
-    friendsBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    friendsBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     local factionBtn = MakeButton(f, L["Factions"])
     factionBtn:SetSize(72, 18)
@@ -4728,12 +4766,9 @@ function IL:CreateFrame()
         end
     end)
     factionBtn:HookScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(L["Factions"], 1, 1, 1)
-        GameTooltip:AddLine(L["Shows Alliance/Horde members in your group (raid groups 1 to 4) and lets you whisper each player."], 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
+        EllesmereUI.ShowWidgetTooltip(self, L["Factions"] .. "\n" .. L["Shows Alliance/Horde members in your group (raid groups 1 to 4) and lets you whisper each player."], { force = true })
     end)
-    factionBtn:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    factionBtn:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
     local friendsQueued = false
     friends:SetScript("OnEvent", function()
@@ -4754,7 +4789,7 @@ function IL:CreateFrame()
         friends:UnregisterAllEvents()
         friendsBtn.selected = nil
         friendsBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         if PlacePanels and (hist:IsShown() or FA.frame:IsShown()) then PlacePanels() end
     end)
 
@@ -4769,7 +4804,6 @@ function IL:CreateFrame()
     end)
     FA.frame:SetScript("OnShow", function()
         pcall(FA.frame.RegisterEvent, FA.frame, "GROUP_ROSTER_UPDATE")
-        pcall(FA.frame.RegisterEvent, FA.frame, "PLAYER_REGEN_ENABLED")
         factionBtn.selected = true
         factionBtn:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
     end)
@@ -4778,7 +4812,7 @@ function IL:CreateFrame()
         if FA.editor then FA.editor:Hide() end
         factionBtn.selected = nil
         factionBtn:SetBackdropBorderColor(border[1], border[2], border[3], 1)
-        GameTooltip:Hide()
+        GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
         if PlacePanels and (hist:IsShown() or friends:IsShown()) then PlacePanels() end
     end)
 
@@ -4876,7 +4910,7 @@ function IL:CreateFrame()
         if locked then
             f:StopMovingOrSizing() -- combat started mid-drag/resize
             ClearAllFocus()
-            GameTooltip:Hide()
+            GameTooltip:Hide(); EllesmereUI.HideWidgetTooltip()
             shareMenu:Hide()
             hist:Hide()
             friends:Hide()

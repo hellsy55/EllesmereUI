@@ -77,6 +77,15 @@ initFrame:SetScript("OnEvent", function(self)
         return ns.EnsurePalette and ns.EnsurePalette(index or editPalette)
     end
 
+    -- A palette as stored, for getters: nothing created or compacted (getters
+    -- must not write; the panel's read trace runs them).
+    local function PaletteRead(index)
+        local prof = DB()
+        local pals = prof and prof.palettes
+        local pal = type(pals) == "table" and pals[index or editPalette]
+        return type(pal) == "table" and pal or nil
+    end
+
     -- Does ANY menu hold a nested entry? Read-only walk over the stored
     -- tables (never through EnsurePalette, which compacts and allocates):
     -- this runs on every Refresh to notice presence flipping.
@@ -110,7 +119,7 @@ initFrame:SetScript("OnEvent", function(self)
     --  which specs a menu works in is its own Assign to Spec setting instead.
     ---------------------------------------------------------------------------
     local function ACfg(key)
-        local pal = ns.EnsurePalette and ns.EnsurePalette(editPalette)
+        local pal = PaletteRead(editPalette)
         local a = pal and pal.appearance
         local v = a and a[key]
         if v ~= nil then return v end
@@ -153,7 +162,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- A menu's name as the page shows it.
     local function MenuName(index)
-        local pal = Palette(index)
+        local pal = PaletteRead(index)
         return (pal and pal.name) or AutoName(index)
     end
 
@@ -994,10 +1003,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
         AddBlock(1, numAccount)
-        -- The global is nil on this client; 120 is the account block's size,
-        -- the same fallback the ClickCast macro list uses
-        -- (EUI_RaidFrames_ClickCast.lua:36).
-        AddBlock((MAX_ACCOUNT_MACROS or 120) + 1, numChar)
+        AddBlock(Constants.MacroConsts.MAX_ACCOUNT_MACROS + 1, numChar)
         return out
     end
 
@@ -2588,7 +2594,10 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- The anchor button, rebuilt with every page build (the menu above is
     -- not): the Profiles page's Active Profile dropdown look, verbatim.
+    -- Nothing during the search index prebuild: its row is a stand-in with no
+    -- frame to build on, and the row's own label is what the index lists.
     local function BuildMenuSelector(rgn)
+        if EllesmereUI._prebuilding then return end
         local PPQ = EllesmereUI.PanelPP
         local btn = CreateFrame("Button", nil, rgn)
         -- 170x30, the exact face BuildDropdownControl gives every standard
@@ -2600,8 +2609,9 @@ initFrame:SetScript("OnEvent", function(self)
         bg:SetAllPoints()
         bg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
         local brd = EllesmereUI.MakeBorder(btn, 1, 1, 1, EllesmereUI.DD_BRD_A, PPQ)
-        local lbl = EllesmereUI.MakeFont(btn, 13, nil, 1, 1, 1)
-        lbl:SetAlpha(EllesmereUI.DD_TXT_A)
+        -- The resting alpha is the text colour's, the channel the hover
+        -- colours below write, so a hover and leave land back on it.
+        local lbl = EllesmereUI.MakeFont(btn, 13, nil, 1, 1, 1, EllesmereUI.DD_TXT_A)
         lbl:SetJustifyH("LEFT")
         lbl:SetWordWrap(false)
         lbl:SetMaxLines(1)
@@ -2665,6 +2675,8 @@ initFrame:SetScript("OnEvent", function(self)
     -- The wheel stays uncapturable on purpose: a tick cannot be HELD, and hold
     -- is the palette's whole input model -- key down opens, key up fires.
     local function BuildKeybindButton(rgn, spec)
+        -- Nothing during the search index prebuild, as BuildMenuSelector.
+        if EllesmereUI._prebuilding then return end
         local palette = editPalette
         local action = BINDING_PREFIX .. palette
         local plainMouse = spec and spec.plainMouse
@@ -2858,8 +2870,10 @@ initFrame:SetScript("OnEvent", function(self)
         end
     end
 
-    -- yPos is the running page offset; returns the height consumed.
+    -- yPos is the running page offset; returns the height consumed. The
+    -- search index prebuild only takes the height: the preview lists nothing.
     local function BuildPreview(parent, yPos)
+        if EllesmereUI._prebuilding then return PREVIEW_H end
         -- PanelPP, not PP: panel-context geometry snaps to the options window's
         -- own pixel grid, which is what every other options page uses.
         local PP = EllesmereUI.PanelPP
@@ -3122,6 +3136,9 @@ initFrame:SetScript("OnEvent", function(self)
         local curIdx = editPalette
 
         local ROW_H = 50
+        -- Bespoke controls the search index does not list: its prebuild only
+        -- takes the height.
+        if EllesmereUI._prebuilding then return ROW_H end
         local contentPad = EllesmereUI.CONTENT_PAD or 45
         local rowFrame = CreateFrame("Frame", nil, parent)
         PPQ.Size(rowFrame, parent:GetWidth() - contentPad * 2, ROW_H)
@@ -3181,7 +3198,9 @@ initFrame:SetScript("OnEvent", function(self)
     --  Build Page
     ---------------------------------------------------------------------------
     local function BuildPage(pageName, parent, yOffset)
-        EnsureBindWatcher()
+        -- The search index prebuild leaves no page behind for the watcher to
+        -- keep current, so the watcher waits for the first live build.
+        if not EllesmereUI._prebuilding then EnsureBindWatcher() end
 
         local W = EllesmereUI.Widgets
         local y = yOffset
@@ -3338,7 +3357,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- stored while hidden and returns with the row.
         if HasSelectKey() then
             row, h = W:DualRow(parent, y,
-                { type="label", text="Menu Cancel Action" }, { type="label", text="" })
+                { type="label", text="Menu Cancel Action" }, EllesmereUI.BlankRowCfg())
             BuildKeybindButton(row._leftRegion, {
                 intro = "Closes an open menu without using anything. Escape always "
                     .. "does this as well. One key shared by every menu, claimed "
@@ -3694,7 +3713,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v) ASet("showCooldowns", v); Refresh() end },
             { type="toggle", text="Dim Unusable Actions",
               disabled=Disabled, disabledTooltip="the module",
-              tooltip="Dims any actions you can't use right now.",
+              tooltip="Dims actions that can't be used now, including world markers outside a group and marker permissions in raids. Also covers spells, items, outfits, and mounts. This changes appearance only, not secure action bindings.",
               getValue=function() return ACfg("showUsability") ~= false end,
               setValue=function(v) ASet("showUsability", v); Refresh() end })
         y = y - h
@@ -3707,6 +3726,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- is lit, and class outranks custom -- the module's SelectColor
         -- resolves the stored pair the same way.
         -- A label half, not a colorpicker: the custom swatch IS the picker.
+        -- The swatches are left out of the search index prebuild, whose row
+        -- is a stand-in with no frame to build on.
         row, h = W:DualRow(parent, y,
             { type="label", text="Selection Color" },
             { type="toggle", text="Show Action Text Label",
@@ -3714,7 +3735,7 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip="Show the selected action's name next to the selected icon.",
               getValue=function() return ACfg("showActionText") == true end,
               setValue=function(v) ASet("showActionText", v); Refresh() end })
-        do
+        if not EllesmereUI._prebuilding then
             local rgn = row._leftRegion
             local PPQ = EllesmereUI.PanelPP
 
@@ -3933,12 +3954,16 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Show On-Screen Loadout Text", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
-              tooltip="Show a large on-screen reminder of the currently active "
-                      .."TalentLoadoutsEx loadout at every ready check and "
-                      .."after an applied talent/loadout change. \"Repeat Every\" "
-                      .."only limits ready-check pops; talent changes always "
-                      .."use the exact \"Text Duration (sec)\" value below. Drag it into "
-                      .."place with Unlock Mode (\"Quickdraw: Loadout Text\").",
+              tooltip="Show the active TalentLoadoutsEx loadout at ready checks "
+                      .."and after talent changes. When a player pull countdown "
+                      .."starts, show it for exactly 5 seconds only on a "
+                      .."loadout mismatch (raid: NSRT note; dungeon: M+/M0 "
+                      .."in the loadout name). Entering "
+                      .."combat immediately hides the text, which is never "
+                      .."shown during combat. Repeat Every limits only "
+                      .."ready-check reminders; Text Duration applies to "
+                      .."ready checks and talent changes. Drag into place "
+                      .."with Unlock Mode (Quickdraw: Loadout Text).",
               getValue=function() return Cfg("loadoutTextEnabled") == true end,
               setValue=function(v)
                   Set("loadoutTextEnabled", v)
@@ -3958,7 +3983,9 @@ initFrame:SetScript("OnEvent", function(self)
         row, h = W:DualRow(parent, y,
             { type="slider", text="Text Duration (sec)", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
-              tooltip="How long the reminder stays on screen once shown.",
+              tooltip="Duration for ready-check and talent-change reminders. "
+                      .."Pull countdown mismatches always show for 5 seconds "
+                      .."unless combat begins first.",
               min=1, max=60, step=1,
               getValue=function() return Cfg("loadoutTextDuration") or 10 end,
               setValue=function(v)
@@ -3971,8 +3998,9 @@ initFrame:SetScript("OnEvent", function(self)
                       .."A ready check within this many minutes of the last "
                       .."ready-check pop is ignored, so spamming ready checks "
                       .."only pops the text once. Talent/loadout changes are "
-                      .."not throttled by this setting. Set to 0 to show it on "
-                      .."every single ready check.",
+                      .."not throttled by this setting. Pull countdown "
+                      .."mismatch reminders also bypass this setting. "
+                      .."Set to 0 to show it on every single ready check.",
               min=0, max=60, step=1,
               getValue=function() return Cfg("loadoutTextIntervalMin") or 10 end,
               setValue=function(v)
@@ -3992,7 +4020,83 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("loadoutTextRowGap", v)
                   if ns.RefreshLoadoutTextSettings then ns.RefreshLoadoutTextSettings() end
               end },
-            { type="label", text="" })
+            { type="toggle", text="Check Active Loadout (Raid / Dungeon)", noCapture=true,
+              disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
+              tooltip="In a raid, compare the active TalentLoadoutsEx loadout "
+                      .."name with the loaded NSRT note (including Nymrissa "
+                      .."and Kith'ix). In a dungeon, ignore NSRT entirely "
+                      .."and require M+ or M0 anywhere in the active loadout "
+                      .."name, regardless of dungeon difficulty or case. "
+                      .."Each matching saved loadout gets its own green "
+                      .."check or red X. A missing/unknown raid note shows "
+                      .."no mark. Requires Show On-Screen Loadout Text to "
+                      .."display indicators. Use /eui-nsrt-check to diagnose.",
+              getValue=function() return Cfg("nsrtLoadoutCheckEnabled") == true end,
+              setValue=function(v)
+                  Set("nsrtLoadoutCheckEnabled", v)
+                  if v and ns.ShowLoadoutAnnouncement then
+                      ns.ShowLoadoutAnnouncement(true)
+                  elseif ns.RefreshLoadoutTextSettings then
+                      ns.RefreshLoadoutTextSettings()
+                  end
+                  Refresh()
+              end })
+        y = y - h
+
+        -- Every options-page build gets its own sound tables; the standard
+        -- preview icons use the same curated + LibSharedMedia catalogue as EUI.
+        local nsrtSoundPaths, nsrtSoundNames, nsrtSoundOrder = EllesmereUI.BuildAlertSoundTables()
+        EllesmereUI.AppendSharedMediaSounds(nsrtSoundPaths, nsrtSoundNames, nsrtSoundOrder)
+        local nsrtSoundValues = {}
+        for key, value in pairs(nsrtSoundNames) do nsrtSoundValues[key] = value end
+        nsrtSoundValues._menuOpts = {
+            itemHeight = 26,
+            maxTextWidthPct = 0.8,
+            searchable = true,
+            iconAtlas = function(key)
+                if key ~= "none" and nsrtSoundPaths[key] then return "common-icon-sound" end
+            end,
+            iconPressedAtlas = function(key)
+                if key ~= "none" and nsrtSoundPaths[key] then return "common-icon-sound-pressed" end
+            end,
+            iconOnClick = function(key)
+                if ns.PlayNSRTCheckSound then ns.PlayNSRTCheckSound(key) end
+            end,
+            iconTooltip = function() return "Preview Sound" end,
+        }
+        local function NSRTSoundDisabled()
+            return LoadoutTextDisabled() or Cfg("nsrtLoadoutCheckEnabled") ~= true
+        end
+        local function NSRTSoundPickerDisabled()
+            return NSRTSoundDisabled() or Cfg("nsrtLoadoutMismatchSoundEnabled") ~= true
+        end
+
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text="Play Sound on NSRT Mismatch", noCapture=true,
+              disabled=NSRTSoundDisabled,
+              disabledTooltip="Enable the NSRT loadout check on a Specialization Action Menu first.",
+              tooltip="Inside raid instances ONLY: play the chosen sound when "
+                      .."a ready check or player pull countdown begins and "
+                      .."the active TLEx "
+                      .."loadout still mismatches the loaded NSRT boss note. "
+                      .."Works independently of Show On-Screen Loadout Text "
+                      .."and its Repeat Every cooldown. No automatic sound "
+                      .."on talent changes, note changes, or manual checks. "
+                      .."Dungeons never play this warning; missing or "
+                      .."unrecognized raid notes remain silent.",
+              getValue=function() return Cfg("nsrtLoadoutMismatchSoundEnabled") == true end,
+              setValue=function(v)
+                  Set("nsrtLoadoutMismatchSoundEnabled", v)
+                  Refresh()
+              end },
+            { type="dropdown", text="Mismatch Sound", noCapture=true,
+              values=nsrtSoundValues, order=nsrtSoundOrder,
+              disabled=NSRTSoundPickerDisabled,
+              disabledTooltip="Enable Play Sound on NSRT Mismatch first.",
+              tooltip="Choose a mismatch warning sound. Use the speaker icon "
+                      .."inside this menu to preview each sound.",
+              getValue=function() return Cfg("nsrtLoadoutMismatchSoundKey") or "robotblip" end,
+              setValue=function(v) Set("nsrtLoadoutMismatchSoundKey", v) end })
         y = y - h
 
         return math.abs(y)

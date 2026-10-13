@@ -715,7 +715,7 @@ _G._EUI_BuildBloodlustSection = function(parent, yOffset, W, PP)
               min=8, max=30, step=1, isPercent=false,
               getValue=function() return BL_Cfg("readySize") or 12 end,
               setValue=function(v) BL_Set("readySize", v); BL_Refresh() end },
-            { type="label", text="" })
+            EllesmereUI.BlankRowCfg())
         y = y - h
         do
             local leftRgn = row._leftRegion

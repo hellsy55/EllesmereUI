@@ -6,6 +6,12 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 local EllesmereUI = _G.EllesmereUI
 
+-- The options page pool (EllesmereUI_FramePool.lua, the options addon's first
+-- file): the row and the checklist come from the factory builders, which pool
+-- what they make. This file makes no frame of its own today; the line is kept on
+-- purpose, so a frame it makes later goes through the pool like the rest.
+local CreateFrame = EllesmereUI._Pool.CreateFrame
+
 -------------------------------------------------------------------------------
 --  Unified Visibility Row (opts contract for the 10 module callers)
 --  ONE control replacing the "Visibility" + "Visibility Options" pair. Every condition is
@@ -767,7 +773,7 @@ function EllesmereUI.BuildVisibilityRow(W, parent, y, opts, rightCfg)
         row, h = W:DualRow(parent, y, leftCfg, Slot(opts))
     else
         row, h = W:DualRow(parent, y, Slot(opts),
-            rightVis and Slot(rightVis) or rightCfg or { type = "label", text = "" })
+            rightVis and Slot(rightVis) or rightCfg or EllesmereUI.BlankRowCfg())
     end
 
     -- Search pre-build: the row is an absorber, so the chrome below would throw. The

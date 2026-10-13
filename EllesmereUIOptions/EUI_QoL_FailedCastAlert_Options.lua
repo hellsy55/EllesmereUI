@@ -116,7 +116,7 @@ local function BuildFailedCastAlertSection(parent, yOffset, W, PP)
               if not cfg then return end
               cfg.soundKey = v
           end },
-        { type="label", text="" }
+        EllesmereUI.BlankRowCfg()
     );  y = y - h
     return math.abs(y - yOffset)
 end

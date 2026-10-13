@@ -17,7 +17,7 @@ local BAR_TEX           = "Interface\\Buttons\\WHITE8X8"
 local ICON_POOL_SIZE    = 40
 local BAR_POOL_SIZE     = 40
 
--- Interrupted/failed bar color (hardcoded)
+-- Default interrupted/failed color for Spell History bars and icons
 local CLR_STOPPED       = { 0.859, 0.255, 0.255 }  -- #DB4141
 
 local OUTCOME_TEXT = {
@@ -30,6 +30,11 @@ local OUTCOME_TEXT = {
 -------------------------------------------------------------------------------
 local SH_DEFAULTS = {
     iconEnabled     = false,
+    iconGCDSwipe    = false,
+    iconGCDSwipeEdge = false,
+    iconInterruptionFreeze = true,
+    iconInterruptedColor = { r = 0.859, g = 0.255, b = 0.255 },
+    iconInterruptedUseAccent = false,
     barEnabled      = false,
     growDirection   = "LEFT",
     iconSize        = 36,
@@ -235,6 +240,7 @@ end
 -------------------------------------------------------------------------------
 local RefreshBarWindow
 local BuildIconStrip
+local RefreshGCDSwipe
 local StartCastAnim
 
 -------------------------------------------------------------------------------
@@ -256,21 +262,41 @@ local _pendingTargets = {}  -- castGUID -> target name (from UNIT_SPELLCAST_SENT
 local _activeChannelSpell = nil  -- spellID of currently channeling spell (suppress tick SUCCEEDEDs)
 local _knownOverrides = {}  -- spellID -> true for override spells that pass IsSpellKnownOrOverridesKnown
 
+-- Capture the native duration object while the cast is active.  It can safely
+-- carry Midnight secret timing values straight into a Cooldown widget.
+local function ReadSwipeDuration(isChannel, isEmpowered)
+    if isEmpowered and UnitEmpoweredChannelDuration then
+        return UnitEmpoweredChannelDuration("player")
+    end
+    if isChannel and UnitChannelDuration then
+        return UnitChannelDuration("player")
+    end
+    if not isChannel and UnitCastingDuration then
+        return UnitCastingDuration("player")
+    end
+end
+
+
 local function FinishPending(castGUID, status)
     _pendingTargets[castGUID] = nil
     local entry = _pendingCasts[castGUID]
     if not entry then return end
     -- Don't downgrade a success (server accepted) to failed/interrupted (client race)
     if entry.status == "success" then _pendingCasts[castGUID] = nil; return end
-    -- Snapshot fill progress for interrupted/failed casts so the bar freezes
-    if status == "interrupted" or status == "failed" then
+    -- Snapshot the same fraction used by the bar at the instant the stop
+    -- event arrives.  Cooldown:SetPaused freezes the native widget; this
+    -- fraction also lets a previously frozen icon survive a history shift.
+    if (status == "interrupted" or status == "failed")
+       and DB().iconInterruptionFreeze ~= false then
         local now = GetTime()
-        local dur = entry.endTime - entry.startTime
-        if dur > 0 then
-            if entry.isChannel then
-                entry.fillProgress = max(0, min(1, (entry.endTime - now) / dur))
-            else
-                entry.fillProgress = max(0, min(1, (now - entry.startTime) / dur))
+        local startTime, endTime = entry.startTime, entry.endTime
+        if type(startTime) == "number" and type(endTime) == "number"
+           and (not issecretvalue or (not issecretvalue(startTime) and not issecretvalue(endTime))) then
+            local dur = endTime - startTime
+            if dur > 0 then
+                local fraction = max(0, min(1, (now - startTime) / dur))
+                entry.swipeFreezeFraction = fraction
+                entry.fillProgress = entry.isChannel and (1 - fraction) or fraction
             end
         end
     end
@@ -289,6 +315,12 @@ local _eventsActive = false
 local eventFrame = CreateFrame("Frame")
 
 local function OnSpellEvent(_, event, unit, ...)
+    -- Cooldown values may be secret in Midnight. Pass the duration object
+    -- directly to the widget; never inspect startTime or duration in Lua.
+    if event == "SPELL_UPDATE_COOLDOWN" then
+        if RefreshGCDSwipe then RefreshGCDSwipe() end
+        return
+    end
     if event == "BAG_UPDATE_DELAYED" or event == "PLAYER_EQUIPMENT_CHANGED" then
         ScanItemSpells()
         return
@@ -323,14 +355,18 @@ local function OnSpellEvent(_, event, unit, ...)
             status       = "casting",
             isInstant    = false,
             isChannel    = false,
+            swipeDuration = ReadSwipeDuration(false, false),
             timestamp    = GetTime(),
         }
         if castGUID then _pendingCasts[castGUID] = entry end
         PushEntry(entry)
         StartCastAnim()
 
-    elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
-        local name, _, _, startMS, endMS, _, _, chanSpellID = UnitChannelInfo("player")
+    elseif event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_EMPOWER_START" then
+        -- The client may emit CHANNEL_START as well as EMPOWER_START for the
+        -- same empowered spell. Only one history icon is created per GUID.
+        if castGUID and _pendingCasts[castGUID] then return end
+        local name, _, _, startMS, endMS, _, _, chanSpellID, isEmpowered = UnitChannelInfo("player")
         local sid = ResolveOverride(chanSpellID or spellID)
         if not name then return end
         local info = sid and _spellInfoCache[sid]
@@ -346,6 +382,8 @@ local function OnSpellEvent(_, event, unit, ...)
             status       = "channeling",
             isInstant    = false,
             isChannel    = true,
+            isEmpowered  = isEmpowered == true or event == "UNIT_SPELLCAST_EMPOWER_START",
+            swipeDuration = ReadSwipeDuration(true, isEmpowered == true or event == "UNIT_SPELLCAST_EMPOWER_START"),
             timestamp    = GetTime(),
         }
         _activeChannelSpell = sid
@@ -354,11 +392,21 @@ local function OnSpellEvent(_, event, unit, ...)
         StartCastAnim()
 
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        -- Channels can report SUCCEEDED for individual ticks. Their overall
+        -- result belongs to CHANNEL_STOP / EMPOWER_STOP, not a tick.
+        if _activeChannelSpell and spellID == _activeChannelSpell then return end
         if castGUID and _pendingCasts[castGUID] then
             FinishPending(castGUID, "success")
         else
             -- Skip channeled spell ticks (SUCCEEDED fires per tick during a channel)
             if _activeChannelSpell and spellID == _activeChannelSpell then return end
+            for hi = 1, min(#_history, 3) do
+                local he = _history[hi]
+                if he.isEmpowered and he.spellID == spellID
+                   and he.status == "success" and GetTime() - he.timestamp < 5 then
+                    return
+                end
+            end
             -- Skip internal/system spells (LOGINEFFECT, DNT, etc.)
             -- IsPlayerSpell catches most, but override/transform spells (e.g.
             -- Lightsmith armaments) fail it. Fall back to IsSpellKnownOrOverridesKnown
@@ -393,6 +441,7 @@ local function OnSpellEvent(_, event, unit, ...)
                     if he.spellID == spellID and (he.status == "interrupted" or he.status == "failed") then
                         he.status = "success"
                         he.fillProgress = nil
+                        he.swipeFreezeFraction = nil
                         dominated = true
                         RefreshViews()
                         break
@@ -423,6 +472,28 @@ local function OnSpellEvent(_, event, unit, ...)
             end
         end
 
+    elseif event == "UNIT_SPELLCAST_DELAYED"
+        or event == "UNIT_SPELLCAST_CHANNEL_UPDATE"
+        or event == "UNIT_SPELLCAST_EMPOWER_UPDATE" then
+        local entry = castGUID and _pendingCasts[castGUID]
+        if entry then
+            local isChannel = entry.isChannel
+            local newDuration = ReadSwipeDuration(isChannel, entry.isEmpowered)
+            if newDuration then entry.swipeDuration = newDuration end
+            -- Only the icon swipe needs a refresh: rebuilding a history row
+            -- here would re-trigger icon animations during pushback.
+            if RefreshGCDSwipe then RefreshGCDSwipe() end
+        end
+
+    elseif event == "UNIT_SPELLCAST_EMPOWER_STOP" then
+        local entry = castGUID and _pendingCasts[castGUID]
+        if entry then
+            local complete = select(3, ...)
+            local canRead = not issecretvalue or not issecretvalue(complete)
+            FinishPending(castGUID, canRead and complete and "success" or "failed")
+        end
+        _activeChannelSpell = nil
+
     elseif event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_FAILED_QUIET" then
         if castGUID then FinishPending(castGUID, "failed") end
 
@@ -443,15 +514,17 @@ local function OnSpellEvent(_, event, unit, ...)
 
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         _activeChannelSpell = nil
-        if castGUID then
-            _pendingTargets[castGUID] = nil
-            local entry = _pendingCasts[castGUID]
-            if entry then
-                if entry.status == "channeling" then entry.status = "success" end
-                entry.endTime = GetTime()
-                if entry.startTime then entry.castDuration = entry.endTime - entry.startTime end
-                _pendingCasts[castGUID] = nil
+        local entry = castGUID and _pendingCasts[castGUID]
+        if entry then
+            -- A prematurely stopped channel is a cancellation, not a
+            -- completed cast. Empowered releases are handled by EMPOWER_STOP.
+            local endedEarly = false
+            local endTime = entry.endTime
+            if not entry.isEmpowered and type(endTime) == "number"
+               and (not issecretvalue or not issecretvalue(endTime)) then
+                endedEarly = GetTime() + 0.10 < endTime
             end
+            FinishPending(castGUID, endedEarly and "failed" or "success")
         end
     end
 end
@@ -467,8 +540,16 @@ local function RegisterEvents()
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_STOP", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", "player")
     eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_UPDATE", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_DELAYED", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_START", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_UPDATE", "player")
+    eventFrame:RegisterUnitEvent("UNIT_SPELLCAST_EMPOWER_STOP", "player")
     eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
     eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+    if DB().iconEnabled and DB().iconGCDSwipe then
+        eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+    end
     eventFrame:SetScript("OnEvent", OnSpellEvent)
     _eventsActive = true
     ScanItemSpells()
@@ -769,6 +850,106 @@ local function MakeIcon(parent)
     return ic
 end
 
+-- Every visible cast/channel entry owns its own native Cooldown overlay.
+-- Instant spells continue to display the normal GCD on the newest icon.
+-- A stopped cast uses the fraction captured at its stop event, then pauses
+-- the native Cooldown so the swipe remains at the interruption point.
+local function EnsureIconSwipe(ic)
+    if ic.gcd then return ic.gcd end
+    local gcd = CreateFrame("Cooldown", nil, ic.frame, "CooldownFrameTemplate")
+    gcd:SetAllPoints(ic.frame)
+    gcd:SetFrameLevel(ic.frame:GetFrameLevel() + 1)
+    gcd:SetDrawBling(false)
+    gcd:SetHideCountdownNumbers(true)
+    gcd:SetSwipeColor(0, 0, 0, 0.65)
+    gcd:Hide()
+    ic.gcd = gcd
+    return gcd
+end
+
+RefreshGCDSwipe = function()
+    local sh = DB()
+    if not (sh.iconEnabled and sh.iconGCDSwipe) then
+        for _, ic in ipairs(_iconPool) do
+            if ic.gcd then ic.gcd:Hide() end
+            ic._swipeEntry, ic._swipeMode, ic._swipeDuration = nil, nil, nil
+        end
+        return
+    end
+    local shown = min(#_history, sh.iconCount or 5, ICON_POOL_SIZE)
+    for i, ic in ipairs(_iconPool) do
+        local entry = i <= shown and _history[i] or nil
+        if entry and ic.frame:IsShown() then
+            local state = entry.status
+            local active = state == "casting" or state == "channeling"
+            local frozen = sh.iconInterruptionFreeze ~= false
+                           and (state == "failed" or state == "interrupted")
+                           and entry.swipeFreezeFraction ~= nil
+            local duration = active and entry.swipeDuration or nil
+            local mode
+            if active and duration then
+                mode = "cast"
+            elseif frozen then
+                mode = "frozen"
+            elseif i == 1 and C_Spell and C_Spell.GetSpellCooldownDuration then
+                mode = "gcd"
+            end
+            if mode then
+                local gcd = EnsureIconSwipe(ic)
+                gcd:SetDrawEdge(sh.iconGCDSwipeEdge == true)
+                gcd:SetEdgeColor(1, 1, 1, 0.95)
+                if mode == "cast" then
+                    if ic._swipeEntry ~= entry or ic._swipeMode ~= mode
+                       or ic._swipeDuration ~= duration then
+                        gcd:SetPaused(false)
+                        gcd:SetCooldownFromDurationObject(duration)
+                    end
+                    gcd:SetAlpha(1)
+                    gcd:Show()
+                elseif mode == "frozen" then
+                    if ic._swipeEntry ~= entry or ic._swipeMode ~= mode then
+                        -- This synthetic duration contains only user-visible
+                        -- local time arithmetic, not protected cast data.
+                        local f = max(0.001, min(0.999, entry.swipeFreezeFraction))
+                        local now = GetTime()
+                        local snapshot = C_DurationUtil and C_DurationUtil.CreateDuration
+                            and C_DurationUtil.CreateDuration()
+                        if snapshot then
+                            snapshot:SetTimeSpan(now - f * 10, now + (1 - f) * 10)
+                            gcd:SetPaused(false)
+                            gcd:SetCooldownFromDurationObject(snapshot)
+                            gcd:SetPaused(true)
+                        else
+                            gcd:Hide()
+                        end
+                    end
+                    gcd:SetAlpha(1)
+                    if C_DurationUtil then gcd:Show() end
+                else
+                    local gcdDuration = C_Spell.GetSpellCooldownDuration(61304)
+                    if gcdDuration then
+                        gcd:SetPaused(false)
+                        gcd:SetCooldownFromDurationObject(gcdDuration)
+                        gcd:Show()
+                        -- IsZero may be secret: let Blizzard resolve the alpha.
+                        gcd:SetAlphaFromBoolean(gcdDuration:IsZero(), 0, 1)
+                    else
+                        gcd:Hide()
+                    end
+                end
+            elseif ic.gcd then
+                ic.gcd:Hide()
+            end
+            ic._swipeEntry = entry
+            ic._swipeMode = mode
+            ic._swipeDuration = duration
+        else
+            if ic.gcd then ic.gcd:Hide() end
+            ic._swipeEntry, ic._swipeMode, ic._swipeDuration = nil, nil, nil
+        end
+    end
+end
+
 -- Preview icons: random spells from the player's action bars
 local _previewIcons
 local function GetPreviewIcons()
@@ -861,6 +1042,19 @@ BuildIconStrip = function()
     local gap = sh.iconSpacing or 1
     local dir = sh.growDirection or "LEFT"
     local iconZoom = sh.iconZoom or 0.08
+    -- Only Spell History icons use this configurable tint. Bar colours and
+    -- outcome text keep their original red, independent of the icon setting.
+    local stoppedR, stoppedG, stoppedB = CLR_STOPPED[1], CLR_STOPPED[2], CLR_STOPPED[3]
+    if sh.iconInterruptedUseAccent and EUI.ResolveActiveAccent then
+        stoppedR, stoppedG, stoppedB = EUI.ResolveActiveAccent()
+    else
+        local c = sh.iconInterruptedColor
+        if c then
+            stoppedR = c.r or stoppedR
+            stoppedG = c.g or stoppedG
+            stoppedB = c.b or stoppedB
+        end
+    end
 
     local maxIcons = sh.iconCount or 5
     local histCount = min(#_history, maxIcons)
@@ -959,12 +1153,20 @@ BuildIconStrip = function()
                     ic._cachedStatus = nil
                 end
                 local st = entry.status
-                if ic._cachedStatus ~= st then
+                local stopped = st == "failed" or st == "interrupted"
+                -- Changing the selected swatch must immediately update history
+                -- entries even when their spell and outcome have not changed.
+                if ic._cachedStatus ~= st or (stopped and
+                        (ic._cachedStoppedR ~= stoppedR
+                         or ic._cachedStoppedG ~= stoppedG
+                         or ic._cachedStoppedB ~= stoppedB)) then
                     ic._cachedStatus = st
-                    if st == "failed" or st == "interrupted" then
-                        ic.tex:SetVertexColor(CLR_STOPPED[1], CLR_STOPPED[2], CLR_STOPPED[3], 1)
+                    if stopped then
+                        ic.tex:SetVertexColor(stoppedR, stoppedG, stoppedB, 1)
+                        ic._cachedStoppedR, ic._cachedStoppedG, ic._cachedStoppedB = stoppedR, stoppedG, stoppedB
                     else
                         ic.tex:SetVertexColor(1, 1, 1, 1)
+                        ic._cachedStoppedR, ic._cachedStoppedG, ic._cachedStoppedB = nil, nil, nil
                     end
                     ic.tex:SetAlpha(1)
                 end
@@ -1008,6 +1210,7 @@ BuildIconStrip = function()
                 end
             end
         else
+            if ic.gcd then ic.gcd:Hide() end
             ic.frame:SetScript("OnUpdate", nil)
             ic.frame:SetScale(1)
             ic.frame:Hide()
@@ -1020,6 +1223,7 @@ BuildIconStrip = function()
 
     _iconStrip:Show()
     _iconContainer:Show()
+    RefreshGCDSwipe()
 end
 
 -- First-class Unlock Mode element.  The frame spans every configured icon in
@@ -1570,9 +1774,23 @@ function ns.ApplySpellHistory()
 
     -- Dynamic event registration: zero overhead when disabled
     if active then RegisterEvents() else UnregisterEvents(); StopCastAnim() end
+    -- The player-spell event subscriptions are shared with Bar History; only
+    -- keep the additional cooldown listener when the icon swipe needs it.
+    if _eventsActive then
+        if sh.iconEnabled and sh.iconGCDSwipe then
+            eventFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
+        else
+            eventFrame:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
+        end
+    end
 
     if sh.iconEnabled then BuildIconStrip()
-    elseif _iconContainer then _iconContainer:Hide() end
+    elseif _iconContainer then
+        for _, ic in ipairs(_iconPool) do
+            if ic.gcd then ic.gcd:Hide() end
+        end
+        _iconContainer:Hide()
+    end
 
     if sh.barEnabled then BuildBarWindow()
     elseif _barWin then _barWin:Hide() end

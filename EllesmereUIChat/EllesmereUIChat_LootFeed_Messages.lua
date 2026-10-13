@@ -1,3 +1,4 @@
+if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local rootNS = select(2, ...)
 rootNS.LootFeed = rootNS.LootFeed or {}
 local ns = rootNS.LootFeed ---@class LootFeedNS
@@ -1047,19 +1048,19 @@ do
         elseif Locale == "esMX" then
             FollowerExperience = "%s ha obtenido %d puntos de experiencia."
         elseif Locale == "frFR" then
-            FollowerExperience = "%s a obtenu %d points d’expérience."
+            FollowerExperience = "%s a obtenu %d points d\226\128\153exp\195\169rience."
         elseif Locale == "itIT" then
             FollowerExperience = "%s ha ottenuto %d punti esperienza."
         elseif Locale == "koKR" then
-            FollowerExperience = "%s|1이;가; %d 경험을 획득했습니다."
+            FollowerExperience = "%s|1\236\157\180;\234\176\128; %d \234\178\189\237\151\152\236\157\132 \237\154\141\235\147\157\237\150\136\236\138\181\235\139\136\235\139\164."
         elseif Locale == "ptBR" then
-            FollowerExperience = "%s ganhou %d pontos de experiência."
+            FollowerExperience = "%s ganhou %d pontos de experi\195\170ncia."
         elseif Locale == "ruRU" then
-            FollowerExperience = "%s получает %d ед. опыта."
+            FollowerExperience = "%s \208\191\208\190\208\187\209\131\209\135\208\176\208\181\209\130 %d \208\181\208\180. \208\190\208\191\209\139\209\130\208\176."
         elseif Locale == "zhCN" then
-            FollowerExperience = "%s获得了%d点经验值。"
+            FollowerExperience = "%s\232\142\183\229\190\151\228\186\134%d\231\130\185\231\187\143\233\170\140\229\128\188\227\128\130"
         elseif Locale == "zhTW" then
-            FollowerExperience = "%s獲得%d點經驗值。"
+            FollowerExperience = "%s\231\141\178\229\190\151%d\233\187\158\231\182\147\233\169\151\229\128\188\227\128\130"
         end
         _G.LOOTFEED_DELVE_EXPERIENCE_GAIN_POLYFILL = FollowerExperience
 

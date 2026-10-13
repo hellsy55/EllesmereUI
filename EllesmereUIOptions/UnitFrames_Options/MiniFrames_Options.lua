@@ -333,7 +333,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             getValue=function() return math.floor((settingsTable.blizzScale or 1) * 100 + 0.5) end,
             setValue=function(v) settingsTable.blizzScale = v / 100; ReloadAndUpdate() end }
     elseif opts.hideBarWidth then
-        rightSlot = { type="label", text="" }
+        rightSlot = EllesmereUI.BlankRowCfg()
     else
         rightSlot = EllesmereUI.BlizzStyle.Gate("unitframes", { type="slider", text="Bar Width", min=60, max=300, step=1,
             disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
@@ -1161,7 +1161,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
               tooltip="Shows the unit's level in the frame's level circle, as the default UI does.",
               getValue=function() return settingsTable.blizzShowLevel ~= false end,
               setValue=function(v) settingsTable.blizzShowLevel = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(parent._ufLevelRow._leftRegion, {
                 disabled = function() return settingsTable.blizzShowLevel == false end,
@@ -1470,7 +1470,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             { type="slider", text="Border Size", min=0, max=4, step=1, trackWidth=120,
               getValue=function() return MVal("powerBorderSize", 0) end,
               setValue=function(v) MSet("powerBorderSize", v) end },
-            { type="label", text="" });  y = y - h
+            EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             local rgn = pwrBorderRow._leftRegion
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
@@ -1671,7 +1671,7 @@ function ns.UFO_BuildFoTToTOptions(W, parent, y, settingsTable, unitKey)
                 settingsTable.showPortrait = v
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
-              end }) or { type="label", text="" })
+              end }) or EllesmereUI.BlankRowCfg())
         if isEUI and not EllesmereUI._prebuilding then
             AttachPortraitSideCog(portraitRow._rightRegion, settingsTable, true, unitKey)
         end
@@ -1728,7 +1728,7 @@ function ns.UFO_BuildPetOptions(W, parent, y)
                 db.profile.pet.showPortrait = v
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
-              end }) or { type="label", text="" })
+              end }) or EllesmereUI.BlankRowCfg())
         if isEUI and not EllesmereUI._prebuilding then
             AttachPortraitSideCog(portraitRow._rightRegion, db.profile.pet)
         end
@@ -1807,12 +1807,107 @@ function ns.UFO_BuildPetOptions(W, parent, y)
     local displayHeader, sizeRow, textHeader, textRow
     y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.pet, "pet", enableRow, nil, petOpts)
 
+    -- BUFFS AND DEBUFFS, on the EllesmereUI pet frame only (an inactive frame
+    -- shows the notice above instead). Location, size (Cropped Icons
+    -- included), position and layout are the pet's own; the aura look (border,
+    -- duration and stack text, zoom, dispel borders) comes from Copy Auras
+    -- From, a view over that frame's keys (EUI_UnitFrames_AuraContainers.lua).
+    -- Every getter reads db.profile.pet live (Spec Override slot marks trace
+    -- those reads) and writes nothing.
+    local auraHeader, buffRow, debuffRow
+    if ns.GetUnitFrameSource("pet") == "eui" then
+        local SwapAuraSlot = env.SwapAuraSlot
+        local function PGet(key, default)
+            local v = db.profile.pet[key]
+            if v == nil then return default end
+            return v
+        end
+        local function PSet(key, v) db.profile.pet[key] = v; ReloadAndUpdate() end
+        local function buffsOff() return db.profile.pet.showBuffs == false end
+        local function debuffsOff() return (db.profile.pet.debuffAnchor or "none") == "none" end
+        local function anyOn() return not (buffsOff() and debuffsOff()) end
+        -- The two stacks never share a spot (SwapAuraSlot); the reload pass
+        -- builds the containers once one of them is on. Copy Auras From is
+        -- built only while one is on, so turning the first on or the last off
+        -- rebuilds the page.
+        local function PlaceAuras(key)
+            return EllesmereUI.DependentSetValue(anyOn, function(v)
+                SwapAuraSlot(db.profile.pet, key, v)
+                ReloadAndUpdate()
+                EllesmereUI:RefreshPage()
+            end)
+        end
+        auraHeader, h = W:SectionHeader(parent, "BUFFS AND DEBUFFS", y);  y = y - h
+
+        -- Buffs Location | Buff Size, then Debuffs Location | Debuff Size: the
+        -- settings cog on each Location, the position cog on each Size.
+        buffRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Buffs Location",
+              values=env.buffAnchorValues, order=env.buffAnchorOrder,
+              getValue=function()
+                  local pet = db.profile.pet
+                  if pet.showBuffs == false then return "none" end
+                  return pet.buffAnchor or "topleft"
+              end,
+              setValue=PlaceAuras("buffAnchor") },
+            { type="slider", text="Buff Size", min=10, max=70, step=1,
+              disabled=buffsOff, disabledTooltip="Buffs Location",
+              getValue=function() return PGet("buffSize", 22) end,
+              setValue=function(v) PSet("buffSize", v) end });  y = y - h
+        debuffRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Debuffs Location",
+              values=env.buffAnchorValues, order=env.buffAnchorOrder,
+              getValue=function() return PGet("debuffAnchor", "none") end,
+              setValue=PlaceAuras("debuffAnchor") },
+            { type="slider", text="Debuff Size", min=10, max=70, step=1,
+              disabled=debuffsOff, disabledTooltip="Debuffs Location",
+              getValue=function() return PGet("debuffSize", 22) end,
+              setValue=function(v) PSet("debuffSize", v) end });  y = y - h
+
+        -- Copy Auras From | (blank: odd last slot), built while buffs or
+        -- debuffs show. Shows the frame in use: the pick while that frame can
+        -- lend its look, else the pet's Copy Look From frame, which a pet with
+        -- no pick follows. Every pick is stored, so it sticks when Copy Look
+        -- From changes later.
+        if anyOn() then
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Copy Auras From",
+                  tooltip="The frame whose aura look the pet copies.",
+                  values={ target="Target", focus="Focus", player="Player" },
+                  order={ "target", "focus", "player" },
+                  getValue=function() return ns.UF_MiniAuraSourceKey("pet") end,
+                  setValue=function(v)
+                      if v == db.profile.pet.auraSource then return end
+                      db.profile.pet.auraSource = v
+                      ReloadAndUpdate()
+                      EllesmereUI:RefreshPage()
+                  end,
+                  -- Slot marks follow the stored pick alone: the frame shown
+                  -- also reads the other frames' enable and Visibility keys.
+                  accessors={ { getValue=function() return db.profile.pet.auraSource end } } },
+                EllesmereUI.BlankRowCfg());  y = y - h
+        end
+
+        if not EllesmereUI._prebuilding then
+            EllesmereUI.BuildInlineCog(buffRow._leftRegion, { disabled=buffsOff, disabledTooltip="Buffs Location",
+                title="Buff Settings", rows=ns.UFO_AuraSettingsRows("buff", PGet, PSet, 40, 4) })
+            EllesmereUI.BuildInlineCog(buffRow._rightRegion, { icon=EllesmereUI.DIRECTIONS_ICON, disabled=buffsOff,
+                disabledTooltip="Buffs Location", title="Buff Position", rows=ns.UFO_AuraPositionRows("buff", PGet, PSet) })
+            EllesmereUI.BuildInlineCog(debuffRow._leftRegion, { disabled=debuffsOff, disabledTooltip="Debuffs Location",
+                title="Debuff Settings", rows=ns.UFO_AuraSettingsRows("debuff", PGet, PSet, 20, 10) })
+            EllesmereUI.BuildInlineCog(debuffRow._rightRegion, { icon=EllesmereUI.DIRECTIONS_ICON, disabled=debuffsOff,
+                disabledTooltip="Debuffs Location", title="Debuff Position", rows=ns.UFO_AuraPositionRows("debuff", PGet, PSet) })
+        end
+    end
+
     -- Store click targets for hover highlight system
     parent._ufClickTargets = {
         healthBar  = { section = displayHeader,  target = sizeRow },
         portrait   = { section = displayHeader,  target = portraitRow,   slotSide = "right" },
         nameText   = { section = textHeader or displayHeader,  target = textRow or sizeRow },
         healthText = { section = textHeader or displayHeader,  target = textRow or sizeRow },
+        buffIcon   = auraHeader and { section = auraHeader, target = buffRow,   slotSide = "left" } or nil,
+        debuffIcon = auraHeader and { section = auraHeader, target = debuffRow, slotSide = "left" } or nil,
     }
     -- WoW Forever: the preview's power bar, power text and happiness icon
     -- (only once the sections exist: an inactive frame builds none).
@@ -1908,7 +2003,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 db.profile.boss.showPortrait = v
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
-              end }) or { type="label", text="" })
+              end }) or EllesmereUI.BlankRowCfg())
         if isEUI and not EllesmereUI._prebuilding then
             AttachPortraitSideCog(portraitRow._rightRegion, db.profile.boss, false, "boss")
         end
@@ -2178,6 +2273,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return db.profile.boss.maxDebuffs or 10 end,
                       set=function(v) db.profile.boss.maxDebuffs = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                    ns.UFO_MaxImportantRow(function() return db.profile.boss end, ReloadAndUpdate, 20, 10),
                     -- Shares the boss debuffMaxPerRow key with Debuffs Location
                     -- (mutually exclusive modes), like Max Count above.
                     { type="slider", label="Max Per Row", min=1, max=20, step=1,
@@ -2298,9 +2394,6 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               setValue=function(v)
                   local prevState = BossAuraRowsState()
                   SwapAuraSlot(db.profile.boss, "debuffAnchor", v)
-                  if db.profile.boss.buffAnchor == "none" then
-                      db.profile.boss.showBuffs = false
-                  end
                   ReloadAndUpdate()
                   if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end
                   -- Full rebuild when either aura row's visibility flipped;
@@ -2676,7 +2769,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             end
             local function BossS() return db.profile.boss end
             local buffFilterOff
-            local bossFilterRightSlot = { type="label", text="" }
+            local bossFilterRightSlot = EllesmereUI.BlankRowCfg()
                 buffFilterOff = function()
                     local p = db.profile.boss
                     return ns.GetBossSimpleBuffMode(p) == "none" and not p.showBuffs
@@ -2767,7 +2860,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 disabledTooltip = function() return ns.GetBossSimpleBuffMode(db.profile.boss) ~= "none" and EllesmereUI.DisabledTooltip("Simple Buff Display", "disabled") or EllesmereUI.DisabledTooltip("Buffs Location") end,
                 rawTooltip = true,
                 title = "Buff Settings",
-                rows = ns.PtrAuraCogRows({
+                rows = {
                     { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                       get=function() return db.profile.boss.buffGrowth or "auto" end,
                       set=function(v) db.profile.boss.buffGrowth = v; ReloadAndUpdate() end },
@@ -2782,7 +2875,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                       disabledTooltip="This option requires Blizzard Style to be disabled",
                       get=function() return db.profile.boss.buffDispelBorder == true end,
                       set=function(v) db.profile.boss.buffDispelBorder = v; ReloadAndUpdate() end },
-                }, "buff", function(key) return db.profile.boss[key] == true end, function(key, v) db.profile.boss[key] = v; ReloadAndUpdate() end),
+                },
             })
         end
 
@@ -2794,17 +2887,18 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 disabledTooltip = function() return ns.GetBossSimpleDebuffMode(db.profile.boss) ~= "none" and EllesmereUI.DisabledTooltip("Simple Debuff Display", "disabled") or EllesmereUI.DisabledTooltip("Debuffs Location") end,
                 rawTooltip = true,
                 title = "Debuff Settings",
-                rows = ns.PtrAuraCogRows({
+                rows = {
                     { type="dropdown", label="Growth Direction", values=buffGrowthValues, order=buffGrowthOrder,
                       get=function() return db.profile.boss.debuffGrowth or "auto" end,
                       set=function(v) db.profile.boss.debuffGrowth = v; ReloadAndUpdate() end },
                     { type="slider", label="Max Count", min=1, max=20, step=1,
                       get=function() return db.profile.boss.maxDebuffs or 10 end,
                       set=function(v) db.profile.boss.maxDebuffs = v; ReloadAndUpdate() end },
+                    ns.UFO_MaxImportantRow(function() return db.profile.boss end, ReloadAndUpdate, 20, 10),
                     { type="slider", label="Max Per Row", min=1, max=20, step=1,
                       get=function() return db.profile.boss.debuffMaxPerRow or db.profile.boss.maxDebuffs or 10 end,
                       set=function(v) db.profile.boss.debuffMaxPerRow = v; ReloadAndUpdate() end },
-                }, "debuff", function(key) return db.profile.boss[key] == true end, function(key, v) db.profile.boss[key] = v; ReloadAndUpdate() end),
+                },
             })
 
         end

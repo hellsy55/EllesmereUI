@@ -2,7 +2,8 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 --  EUI_DamageMeters_Options.lua
 --  Options page for EllesmereUI Damage Meters.
---  All settings are live (no Edit Mode, no reload required).
+--  All settings are live (no Edit Mode, no reload required), except the WoW
+--  Forever look's Border Style, latched with the look (reload popup).
 -------------------------------------------------------------------------------
 local ns = EllesmereUI._ModuleNS["EllesmereUIDamageMeters"]  -- module namespace (published by the module at its load)
 if not ns then return end  -- module disabled: no options page
@@ -34,7 +35,8 @@ initFrame:SetScript("OnEvent", function(self)
     local function Set(k, v) DB()[k] = v     end
 
     -- All settings are picked up on the next refresh cycle (0.3s combat,
-    -- 2s idle). Just Set() and go.
+    -- 2s idle). Just Set() and go -- except the WoW Forever look's Border
+    -- Style, which asks for a reload.
 
     -- Shared capture button for both damage meter hotkeys (reset data, show/hide
     -- windows). Returns the button so the caller can anchor its cog to it.
@@ -287,12 +289,38 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
-        -- Reset Data Keybind (+ inline cog: hide reset button) | (free). Refresh Rate and
-        -- its "(seconds)" suffix moved up to the Visibility row.
+        -- Reset Data Keybind (+ inline cog: hide reset button) | (free; on the WoW
+        -- Forever look its window Border Style). Refresh Rate and its "(seconds)"
+        -- suffix moved up to the Visibility row. The Border Style is latched with
+        -- the look (the windows are built with its insets), so picking another kind
+        -- than the latched one asks for a reload; Slim Textured (Blizzard's live
+        -- art) is the default and reads for an unset value, each pick is saved,
+        -- and a kind this client has no art for draws Slim
+        -- (EllesmereUI.ForeverBorderKind).
+        local fvBorderCfg = EllesmereUI.BlizzStyle.Forever("damagemeters") and
+            { type="dropdown", text="Border Style",
+              tooltip="WoW Forever's frame round the meter windows, the breakdown, Spell History and the Forever Essentials threat meter. Slim Textured uses Blizzard's current art; a style whose art this client lacks draws Slim. Applies after a UI reload.",
+              values = { slim = "Slim", textured = "Slim Textured", heavy = "Heavy Bronze" },
+              order  = { "slim", "textured", "heavy" },
+              getValue = function()
+                  local v = Cfg("foreverBorder")
+                  return (v == "slim" or v == "heavy") and v or "textured"
+              end,
+              setValue = function(v)
+                  Set("foreverBorder", v)
+                  if EllesmereUI.ForeverBorderKind(v) == ns.DMFvKind() then return end
+                  EllesmereUI:ShowConfirmPopup({
+                      title       = "Reload Required",
+                      message     = "Border Style changed. A UI reload is needed to apply it.",
+                      confirmText = "Reload Now",
+                      cancelText  = "Later",
+                      reload      = true,
+                  })
+              end }
         local rrRow
         rrRow, h = W:DualRow(parent, y,
             { type="label", text="Reset Data Keybind" },
-            { type="label", text="" })
+            fvBorderCfg or EllesmereUI.BlankRowCfg())
         -- "(seconds)" suffix for Refresh Rate, which lives in the Visibility row's right
         -- slot -- not this row.
         do
@@ -524,7 +552,7 @@ initFrame:SetScript("OnEvent", function(self)
               min = 8, max = 18, step = 1,
               getValue = function() return Cfg("hdrFontSize") or 11 end,
               setValue = function(v) Set("hdrFontSize", v); ApplyHdr() end },
-            { type="label", text="" })
+            EllesmereUI.BlankRowCfg())
         -- Inline dual swatches on Text Size: right = Custom, left = Accent
         if not EllesmereUI._prebuilding then
             local rgn = hdrRow2._leftRegion
@@ -1666,7 +1694,7 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
         end
 
-        -- Row 3: Icon Size (+ icon zoom cog) | Max Icons
+        -- Row 3: Icon Size (+ icon zoom cog) | Interrupted Cast Icon Color
         local shSizeRow
         shSizeRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Icon Size",
@@ -1674,12 +1702,45 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconSize or 36 end,
               setValue = function(v) SHDB().iconSize = v; RefreshSH() end },
-            { type = "slider", text = "Max Icons",
-              tooltip = "Maximum number of spell icons to display.",
-              min = 1, max = 10, step = 1,
+            { type = "multiSwatch", text = "Interrupted Cast Icon Color",
+              tooltip = "Tint spell icons for interrupted or failed casts. Does not affect Bar History.",
               disabled = iconOff, disabledTooltip = "Icon History",
-              getValue = function() return SHDB().iconCount or 5 end,
-              setValue = function(v) SHDB().iconCount = v; RefreshSH() end }
+              swatches = {
+                  { tooltip = "Custom Color",
+                    hasAlpha = false,
+                    getValue = function()
+                        local c = SHDB().iconInterruptedColor
+                        if c then return c.r or 0.859, c.g or 0.255, c.b or 0.255 end
+                        return 0.859, 0.255, 0.255
+                    end,
+                    setValue = function(r, g, b)
+                        SHDB().iconInterruptedColor = { r = r, g = g, b = b }
+                        SHDB().iconInterruptedUseAccent = false
+                        RefreshSH(); EllesmereUI:RefreshPage()
+                    end,
+                    onClick = function(self)
+                        if SHDB().iconInterruptedUseAccent then
+                            SHDB().iconInterruptedUseAccent = false
+                            RefreshSH(); EllesmereUI:RefreshPage()
+                            return
+                        end
+                        if self._eabOrigClick then self._eabOrigClick(self) end
+                    end,
+                    refreshAlpha = function()
+                        return SHDB().iconInterruptedUseAccent and 0.3 or 1
+                    end },
+                  { tooltip = "Accent Color",
+                    hasAlpha = false,
+                    getValue = function() return EllesmereUI.ResolveActiveAccent() end,
+                    setValue = function() end,
+                    onClick = function()
+                        SHDB().iconInterruptedUseAccent = true
+                        RefreshSH(); EllesmereUI:RefreshPage()
+                    end,
+                    refreshAlpha = function()
+                        return SHDB().iconInterruptedUseAccent and 1 or 0.3
+                    end },
+              } }
         );  y = y - h
         -- Inline cog on Icon Size: Icon Zoom (shared by the icon strip and the
         -- bar window, so it stays usable whenever either display is on).
@@ -1697,21 +1758,22 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Row 4: Icon Spacing | Opacity
+        -- Row 4: Max Icons | Icon Spacing (shifted one slot)
         _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Max Icons",
+              tooltip = "Maximum number of spell icons to display.",
+              min = 1, max = 10, step = 1,
+              disabled = iconOff, disabledTooltip = "Icon History",
+              getValue = function() return SHDB().iconCount or 5 end,
+              setValue = function(v) SHDB().iconCount = v; RefreshSH() end },
             { type = "slider", pixel = true, text = "Icon Spacing",
               min = 0, max = 10, step = 1,
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconSpacing or 1 end,
-              setValue = function(v) SHDB().iconSpacing = v; RefreshSH() end },
-            { type = "slider", text = "Opacity",
-              min = 0.1, max = 1, step = 0.01,
-              disabled = iconOff, disabledTooltip = "Icon History",
-              getValue = function() return SHDB().iconOpacity or 1 end,
-              setValue = function(v) SHDB().iconOpacity = v; RefreshSH() end }
+              setValue = function(v) SHDB().iconSpacing = v; RefreshSH() end }
         );  y = y - h
 
-        -- Row 5: Animation Style | Fade-Out Time
+        -- Row 5: Opacity | Animation Style
         local shAnimValues = {
             none  = "None",
             slide = "Slide In",
@@ -1719,20 +1781,52 @@ initFrame:SetScript("OnEvent", function(self)
         }
         local shAnimOrder = { "none", "slide", "fly" }
         _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Opacity",
+              min = 0.1, max = 1, step = 0.01,
+              disabled = iconOff, disabledTooltip = "Icon History",
+              getValue = function() return SHDB().iconOpacity or 1 end,
+              setValue = function(v) SHDB().iconOpacity = v; RefreshSH() end },
             { type = "dropdown", text = "Animation Style",
               disabled = iconOff, disabledTooltip = "Icon History",
               values = shAnimValues, order = shAnimOrder,
               getValue = function() return SHDB().iconAnimation or "slide" end,
-              setValue = function(v) SHDB().iconAnimation = v end },
+              setValue = function(v) SHDB().iconAnimation = v end }
+        );  y = y - h
+
+        -- Row 6: Fade-Out Time | GCD Swipe (+ inline edge cog)
+        local shGCDRow
+        shGCDRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Fade-Out Time",
               tooltip = "Seconds after which history icons fade out. The timer pauses during combat. 0 = never.",
               min = 0, max = 60, step = 1,
               disabled = iconOff, disabledTooltip = "Icon History",
               getValue = function() return SHDB().iconFadeTime or 0 end,
-              setValue = function(v) SHDB().iconFadeTime = v; RefreshSH() end }
+              setValue = function(v) SHDB().iconFadeTime = v; RefreshSH() end },
+            { type = "toggle", text = "Show GCD Swipe",
+              tooltip = "Display the GCD and spell cast/channel progress over Spell History icons using Midnight's native cooldown widget.",
+              disabled = iconOff, disabledTooltip = "Icon History",
+              getValue = function() return SHDB().iconGCDSwipe or false end,
+              setValue = function(v) SHDB().iconGCDSwipe = v; RefreshSH() end }
         );  y = y - h
+        if not EllesmereUI._prebuilding then
+            EllesmereUI.BuildInlineCog(shGCDRow._rightRegion, {
+                title = "GCD Swipe Settings",
+                rows = {
+                    { type = "toggle", label = "Show Swipe Edge",
+                      tooltip = "Draw a bright edge indicating the current progress of the swipe.",
+                      get = function() return SHDB().iconGCDSwipeEdge == true end,
+                      set = function(v) SHDB().iconGCDSwipeEdge = v; RefreshSH() end },
+                    { type = "toggle", label = "Interruption Freeze",
+                      tooltip = "Keep the swipe frozen at the moment a cast or channel is interrupted, cancelled, or fails. Turn off to stop showing the frozen swipe.",
+                      get = function() return SHDB().iconInterruptionFreeze ~= false end,
+                      set = function(v) SHDB().iconInterruptionFreeze = v; RefreshSH() end },
+                },
+                disabled = function() return iconOff() or not SHDB().iconGCDSwipe end,
+                disabledTooltip = "Show GCD Swipe",
+            })
+        end
 
-        -- Row 6: Frame Strata | (spacer)
+        -- Row 7: Frame Strata | (spacer)
         _, h = W:DualRow(parent, y,
             { type = "dropdown", text = "Frame Strata",
               tooltip = "Layering of the icon strip relative to other UI elements. Raise it if other frames are covering it, or lower it to sit behind them.",
@@ -1804,7 +1898,9 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return SHDB().hideTopBar end,
               setValue = function(v) SHDB().hideTopBar = v; RefreshSH() end }
         );  y = y - h
-        do
+        -- Background colour swatch on the opacity slider; none in the search
+        -- pre-build (it indexes nothing, and the row is a stand-in there)
+        if not EllesmereUI._prebuilding then
             local rgn = bgRow._leftRegion
             local ctrl = rgn._control
             local swatch, swatchRefresh = EllesmereUI.BuildColorSwatch(

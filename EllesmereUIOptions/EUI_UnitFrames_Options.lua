@@ -8,22 +8,6 @@ local ADDON_NAME = "EllesmereUIUnitFrames"
 local ns = EllesmereUI._ModuleNS[ADDON_NAME]  -- module namespace (published by the module at its load)
 if not ns then return end  -- module disabled: no options page
 
--- Keep the original cog rows and layout on clients without native PTR APIs.
-function ns.PtrAuraCogRows(rows, prefix, get, set)
-    local AK = EllesmereUI.AuraKit
-    if AK.SupportsPandemicPulse() then
-        rows[#rows + 1] = { type="toggle", label="Pandemic Pulse (PTR)",
-            get=function() return get(prefix .. "PandemicGlow") end,
-            set=function(v) set(prefix .. "PandemicGlow", v) end }
-    end
-    if AK.SupportsCasterName() then
-        rows[#rows + 1] = { type="toggle", label="Show Caster's Name (PTR)",
-            get=function() return get(prefix .. "ShowCasterName") end,
-            set=function(v) set(prefix .. "ShowCasterName", v) end }
-    end
-    return rows
-end
-
 local PAGE_DISPLAY   = "Main Frames"
 local PAGE_BOSS      = "Boss Frames"
 local PAGE_MINI      = "Mini Frames"
@@ -667,11 +651,15 @@ function ns.UF_BossFrameBorderRows(W, parent, y, B, onChange)
                 if Inheriting() then return NEEDS_STYLE end
                 return "This option requires the Solid, Glow or Shadow border style."
             end,
-            rows = {
+            rows = EllesmereUI.RoundedJoinRow(EllesmereUI.RoundedCornerRows({
                 { type = "slider", label = "Corner Radius", min = 0, max = EllesmereUI.ROUNDED_MAX_RADIUS, step = 1,
                   get = function() return Src().cornerRadius or 0 end,
                   set = function(v) B.cornerRadius = v; onChange() end },
-            },
+            }, function() return Src().cornerMask end, function(v) B.cornerMask = v; onChange() end),
+                "Join Power Bar", "Rounds a detached power bar right above or below the frame as one shape with it.",
+                function() return B.cornerJoinPower end, function(v) B.cornerJoinPower = v; onChange() end,
+                function() local pos = B.powerPosition or "below"; return pos == "detached_top" or pos == "detached_bottom" end,
+                "Detached Power Bar"),
         })
     end
     return y0 - y
@@ -1338,6 +1326,7 @@ initFrame:SetScript("OnEvent", function(self)
         ["perhp"]        = "Health %",
         ["perhpnosign"]  = "Health % (No Sign)",
         ["curhpshort"]   = "Health #",
+        ["curmaxhp"]     = "Health # / Max #",
         ["perhpnum"]     = "Health % | #",
         ["both"]         = "Health # | %",
         ["bothdash"]     = "Health # - %",
@@ -1350,12 +1339,12 @@ initFrame:SetScript("OnEvent", function(self)
         ["focusindicator"] = "Focus Indicator (F)",
         ["none"]         = "None",
     }
-    local healthTextOrder = { "none", "---", "name", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both" }
+    local healthTextOrder = { "none", "---", "name", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both" }
     -- Boss frames also get "Name > Target" (the boss's target); ToT/FoT/Pet do not.
-    local healthTextOrderBoss = { "none", "---", "name", "nametotarget", "targetname", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "bothdash", "perhpnumdash", "absorb", "absorbshort", "healabsorb", "healabsorbshort", "focusindicator" }
-    local healthTextOrderPlayer = { "none", "---", "name", "nametotarget", "targetname", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "bothdash", "perhpnumdash", "absorb", "absorbshort", "healabsorb", "healabsorbshort", "group" }
+    local healthTextOrderBoss = { "none", "---", "name", "nametotarget", "targetname", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both", "bothdash", "perhpnumdash", "absorb", "absorbshort", "healabsorb", "healabsorbshort", "focusindicator" }
+    local healthTextOrderPlayer = { "none", "---", "name", "nametotarget", "targetname", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both", "bothdash", "perhpnumdash", "absorb", "absorbshort", "healabsorb", "healabsorbshort", "group" }
     -- Target/Focus: player's absorb options minus "group" (raid group number is meaningless off the player).
-    local healthTextOrderTargetFocus = { "none", "---", "name", "nametotarget", "targetname", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "bothdash", "perhpnumdash", "absorb", "absorbshort", "healabsorb", "healabsorbshort" }
+    local healthTextOrderTargetFocus = { "none", "---", "name", "nametotarget", "targetname", "levelname", "namelevel", "level", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both", "bothdash", "perhpnumdash", "absorb", "absorbshort", "healabsorb", "healabsorbshort" }
 
     -- Text bar (BTB) text dropdown values (includes power options)
     local btbTextValues = {
@@ -1363,15 +1352,17 @@ initFrame:SetScript("OnEvent", function(self)
         ["perhp"]        = "Health %",
         ["perhpnosign"]  = "Health % (No Sign)",
         ["curhpshort"]   = "Health #",
+        ["curmaxhp"]     = "Health # / Max #",
         ["perhpnum"]     = "Health % | #",
         ["both"]         = "Health # | %",
         ["perpp"]        = "Power %",
         ["curpp"]        = "Power Value",
+        ["curmaxpp"]     = "Power Value / Max",
         ["curhp_curpp"]  = "Health | Power Value",
         ["perhp_perpp"]  = "Health | Power %",
         ["none"]         = "None",
     }
-    local btbTextOrder = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "perhpnum", "both", "perpp", "curpp", "curhp_curpp", "perhp_perpp" }
+    local btbTextOrder = { "none", "---", "name", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both", "perpp", "curpp", "curmaxpp", "curhp_curpp", "perhp_perpp" }
 
     -- Class theme portrait icons: full-size versions of the sidebar class art.
     local ICONS_PATH = "Interface\\AddOns\\EllesmereUI\\media\\icons\\"
@@ -1396,15 +1387,37 @@ initFrame:SetScript("OnEvent", function(self)
     local classIconLocValues = { ["left"]="Left", ["center"]="Center", ["right"]="Right" }
     local classIconLocOrder = { "left", "center", "right" }
 
-    -- Swap helper for buff/debuff anchors: prevent both from occupying the same slot
-    local function SwapAuraSlot(settingsTable, changedKey, newVal)
-        local otherKey = (changedKey == "buffAnchor") and "debuffAnchor" or "buffAnchor"
-        local otherVal = settingsTable[otherKey] or (otherKey == "buffAnchor" and "topleft" or "bottomleft")
-        if otherVal == newVal then
-            local oldVal = settingsTable[changedKey] or (changedKey == "buffAnchor" and "topleft" or "bottomleft")
-            settingsTable[otherKey] = oldVal
+    -- Buff and debuff stacks never share a spot. Moves one stack (changedKey
+    -- "buffAnchor" or "debuffAnchor") to newVal; the other stack, when its
+    -- stored spot is newVal, takes this stack's previous spot, or the first
+    -- free corner when that spot is None or newVal itself. A hidden buff
+    -- stack's stored corner counts both ways, so buffs turned back on by any
+    -- path (a Spec Override, an import) never land on the debuffs. Buffs turn
+    -- off through showBuffs (their corner is kept, never "none"); None never
+    -- collides.
+    local AURA_FREE_CORNERS = { "topleft", "bottomleft", "topright", "bottomright" }
+    local function SwapAuraSlot(t, changedKey, newVal)
+        local isBuff = (changedKey == "buffAnchor")
+        local prev
+        if isBuff then
+            prev = t.buffAnchor or "topleft"
+            if newVal == "none" then t.showBuffs = false; return end
+            t.showBuffs = true
+        else
+            prev = t.debuffAnchor or "bottomleft"
         end
-        settingsTable[changedKey] = newVal
+        t[changedKey] = newVal
+        if newVal == "none" then return end
+        local other
+        if isBuff then other = t.debuffAnchor or "bottomleft" else other = t.buffAnchor or "topleft" end
+        if other ~= newVal then return end
+        local dest = prev
+        if dest == "none" or dest == newVal then
+            for i = 1, #AURA_FREE_CORNERS do
+                if AURA_FREE_CORNERS[i] ~= newVal then dest = AURA_FREE_CORNERS[i]; break end
+            end
+        end
+        if isBuff then t.debuffAnchor = dest else t.buffAnchor = dest end
     end
 
     ---------------------------------------------------------------------------
@@ -2100,6 +2113,12 @@ initFrame:SetScript("OnEvent", function(self)
         -- WoW Forever: the pet's power bar position has no counterpart on the
         -- other small frames (theirs never shows), so it stays with the pet.
         if key == "powerPosition" and ns.UF_PetHasPower and groupUnits == MINI_GROUP_ORDER then return false end
+        -- The pet's buffs and debuffs stay with the pet: the other small frames
+        -- have none, so a copy either way would only clear or plant aura keys.
+        if groupUnits == MINI_GROUP_ORDER and (key:find("^buff") or key:find("^debuff")
+            or key == "showBuffs" or key == "maxBuffs" or key == "maxDebuffs" or key == "auraSource") then
+            return false
+        end
         local sup = UNIT_SUPPORTS[key]
         if sup then
             for _, u in ipairs(groupUnits) do
@@ -2151,13 +2170,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- re-picking the frame shown stores nothing, and Focus, which behaves
     -- exactly as no choice, is stored as none.
     local function BuildLookSourcePair(row, unitKey, ddW)
-        local function Shown()
-            local p = db.profile
-            local s = ns.GetMiniDonorSettings(unitKey)
-            if s == p.focus then return "focus" end
-            if s == p.target then return "target" end
-            return "player"
-        end
+        local function Shown() return ns.UF_MiniDonorKey(unitKey) end
         local ddBtn = EllesmereUI.BuildDropdownControl(
             row, ddW, row:GetFrameLevel() + 2,
             { target = "Target", focus = "Focus", player = "Player" },
@@ -2827,6 +2840,21 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if pv._nameFS and pv._nameFS:IsShown() then CreateHitOverlay(pv._nameFS, "nameText", true, textLevel) end
             if pv._hpFS and pv._hpFS:IsShown() then CreateHitOverlay(pv._hpFS, "healthText", true, textLevel) end
+            -- The pet's buff/debuff icons -> Buffs / Debuffs Location. Every icon,
+            -- so one shown later stays clickable without a header rebuild (the
+            -- other mini frames show none).
+            if selectedMiniUnit == "pet" then
+                if pv._buffIcons then
+                    for i = 1, #pv._buffIcons do
+                        if pv._buffIcons[i] then CreateHitOverlay(pv._buffIcons[i], "buffIcon", false, baseLevel) end
+                    end
+                end
+                if pv._debuffIcons then
+                    for i = 1, #pv._debuffIcons do
+                        if pv._debuffIcons[i] then CreateHitOverlay(pv._debuffIcons[i], "debuffIcon", false, baseLevel) end
+                    end
+                end
+            end
         end
 
         return abs(y)
@@ -2849,7 +2877,10 @@ initFrame:SetScript("OnEvent", function(self)
         --  CONTENT HEADER  (preview only, no dropdown)
         -------------------------------------------------------------------
         ns._bossHeaderBuilder = function(hdr, hdrW)
-            local fy = -20
+            -- Compact vertical margins; the live-updating preview reserves
+            -- additional space only when auras or castbar offsets need it.
+            local bossPad = 14
+            local fy = -bossPad
             local side = unitSide.boss or "right"
             local preview = ns.UFO_BuildUnitPreview(hdr, "boss", side)
             activePreview = preview
@@ -2860,11 +2891,16 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(preview, "TOP", hdr, "TOP", 0, (fy - initBuffTopPad) / previewScale)
             preview._lastOY = (fy - initBuffTopPad) / previewScale
             preview:Update()
-            local previewH = preview:GetHeight() * preview:GetScale()
-            local buffExtra = preview._buffExtra or 0
-            local detTopExtra = preview._detTopExtra or 0
-            fy = fy - previewH - buffExtra - detTopExtra - 20
-            preview._headerFixedH = 20 + 20
+            -- The Boss preview calculates its full vertical footprint (including
+            -- castbar offsets) and centers it in a minimum-height viewport.
+            -- Use that SAME height at first build and during live updates.
+            local previewH = preview._bossHeaderContentH
+            if not previewH then
+                previewH = preview:GetHeight() * preview:GetScale()
+                    + (preview._buffExtra or 0) + (preview._detTopExtra or 0)
+            end
+            fy = fy - previewH - bossPad
+            preview._headerFixedH = bossPad * 2
             return math.abs(fy)
         end
         EllesmereUI:SetContentHeader(ns._bossHeaderBuilder)
@@ -3111,7 +3147,7 @@ initFrame:SetScript("OnEvent", function(self)
         end,
         onReset     = function()
             db:ResetProfile()
-            -- No reload here: the footer Reset popup (reload = true) reloads after this returns.
+            -- No reload here: Reset EUI Module Settings reloads after this returns.
         end,
         -- Tears down Boss Preview on module switch (RegisterOnHide above
         -- only covers closing the whole options window).

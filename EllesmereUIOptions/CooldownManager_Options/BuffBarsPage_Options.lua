@@ -2728,8 +2728,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             prDDBg:SetAllPoints()
             prDDBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
             local prDDBrd = EllesmereUI.MakeBorder(prDD, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
-            local prDDLbl = EllesmereUI.MakeFont(prDD, 13, nil, 1, 1, 1)
-            prDDLbl:SetAlpha(EllesmereUI.DD_TXT_A)
+            -- Resting alpha on the text colour, the channel PrApplyNormal /
+            -- PrApplyHover write, so a hover and leave land back on it.
+            local prDDLbl = EllesmereUI.MakeFont(prDD, 13, nil, 1, 1, 1, EllesmereUI.DD_TXT_A)
             prDDLbl:SetJustifyH("LEFT")
             prDDLbl:SetWordWrap(false)
             prDDLbl:SetMaxLines(1)
@@ -4305,7 +4306,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                         bd.stackBasedBar = v and true or false; RefreshTBB()
                     end }
             else
-                rightSlot = { type = "label", text = "" }
+                rightSlot = EllesmereUI.BlankRowCfg()
             end
 
             local tbbPanRow

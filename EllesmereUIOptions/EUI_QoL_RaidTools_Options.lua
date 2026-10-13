@@ -267,14 +267,8 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
-        -- Row 5: the two scales. Window Scale is one scale for the whole
-        -- feature -- both shells and the collapsed icon wear it, whichever
-        -- windows the Show as choice puts on screen. Fine step so the value
-        -- can be nudged in small increments (1.185, 1.195, ...) rather than
-        -- jumping by whole ticks. The Raid Groups window keeps its own slice
-        -- and its own scale -- it is a popup opened on purpose, not one of
-        -- the panels, so it is sized for reading rather than for sitting on
-        -- screen.
+        -- Launcher window scaling belongs to Raid Tools. Raid Groups window
+        -- scaling is configured separately inside its own settings cog.
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Window Scale", min = 0.5, max = 2.0, step = 0.001,
               disabled = Disabled,
@@ -283,36 +277,24 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("scale", v)
                   Refresh()
               end },
-            { type = "slider", text = "Raid Groups Window Scale", min = 0.5, max = 2.0, step = 0.05,
-              disabled = Disabled,
-              getValue = ns.RaidGroupsScale,
-              setValue = ns.RaidGroupsScale }
-        );  y = y - h
-
-        -- Row 6: keep the nickname control packed beside the next option instead
-        -- of consuming a half-empty row. Auto-Minimize's delay remains below
-        -- because this section has an odd number of controls.
-        local function AutoMinDisabled()
-            return Disabled() or not (Cfg("autoMinimize") and true)
-        end
-        _, h = W:DualRow(parent, y,
-            { type = "toggle", text = "Show Nicknames in Raid Groups",
-              tooltip = "Show supported player nicknames in Raid Groups. Drag, swap and subgroup actions continue to use the real raid member identity.",
-              disabled = Disabled,
-              getValue = ns.RaidGroupsShowNicknames,
-              setValue = ns.RaidGroupsShowNicknames },
             { type = "toggle", text = "Auto-Minimize",
-              tooltip = "Collapses the windows back to the icon on their own after they've been open (and the cursor hasn't been over them) for the delay below -- the same result as clicking the close button, just on a timer. Moving the cursor over the windows pauses the timer and it starts over once you look away.",
+              tooltip = "Automatically collapse the Raid Tools launcher when not hovered.",
               disabled = Disabled,
               getValue = function() return Cfg("autoMinimize") and true or false end,
               setValue = function(v)
-                  Set("autoMinimize", v)
+                  Set("autoMinimize",v)
                   Refresh()
-                  EllesmereUI:RefreshPage()  -- the delay slider's disabled state follows
+                  EllesmereUI:RefreshPage()
               end }
         );  y = y - h
 
-        _, h = W:DualRow(parent, y,
+        local function AutoMinDisabled()
+            return Disabled() or not (Cfg("autoMinimize") and true)
+        end
+        -- Keep both columns occupied: drag rows in Button Order to change
+        -- their arrangement; existing visibility switches remain authoritative.
+        local reorderRow
+        reorderRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Auto-Minimize Delay (Seconds)", min = 5, max = 120, step = 1,
               tooltip = "How long the windows stay open, cursor off them, before Auto-Minimize collapses them.",
               disabled = AutoMinDisabled,
@@ -321,8 +303,270 @@ initFrame:SetScript("OnEvent", function(self)
                   Set("autoMinimizeDelay", v)
                   Refresh()
               end },
-            EllesmereUI.BlankRowCfg()
-        );  y = y - h
+            { type = "dropdown", text = "Button Order",
+              tooltip = "Drag to reorder Pings, Difficulty, Convert, Disband, Ready Check, Role Check and the entire Pull Timer block (Pull, Stop and Break).",
+              disabled = Disabled,
+              values = { default = "Arrange Buttons" }, order = { "default" },
+              getValue = function() return "default" end, setValue = function() end }
+        )
+        if not EllesmereUI._prebuilding then
+            local region = reorderRow._rightRegion
+            if region._control then region._control:Hide() end
+            local items = {}
+            local labels = {
+                pings = "Pings", difficulty = "Difficulty", convert = "Convert to Raid",
+                disband = "Disband", ready = "Ready Check", role = "Role Check", pull = "Pull Timer",
+            }
+            for _, key in ipairs(ns.RaidToolsButtonOrder()) do
+                items[#items + 1] = { key = key, label = labels[key] }
+            end
+            local dd, ddRefresh = EllesmereUI.BuildReorderCBDropdown(
+                region, 210, region:GetFrameLevel() + 2, items,
+                function() return true end,
+                function() end,
+                {
+                    reorderOnly = true,
+                    hint = "Drag to Reorder",
+                    summaryLabel = function() return "Arrange Buttons" end,
+                    canReorder = function() return not Disabled() end,
+                    setOrder = function(keys)
+                        Set("buttonOrder", keys)
+                        Refresh()
+                    end,
+                    openOrder = function() return ns.RaidToolsButtonOrder() end,
+                })
+            EllesmereUI.PanelPP.Point(dd, "RIGHT", region, "RIGHT", -20, 0)
+            region._control = dd
+            region._lastInline = nil
+            local function RefreshReorderControl()
+                ddRefresh()
+                local disabled = Disabled()
+                dd:SetEnabled(not disabled)
+                dd:SetAlpha(disabled and 0.4 or 1)
+            end
+            RefreshReorderControl()
+            EllesmereUI.RegisterWidgetRefresh(RefreshReorderControl)
+        end
+        y = y - h
+
+        -- RAID GROUPS: grouped per-profile controls. Core planning, applying,
+        -- setups and nickname history remain available even when an optional
+        -- feature is turned off. Existing users keep every feature enabled.
+        _, h = W:SectionHeader(parent, "RAID GROUPS", y); y = y - h
+        local function RGGet(key)
+            if ns.RaidGroupsOption then return ns.RaidGroupsOption(key) end
+            return true
+        end
+        local function RGSet(key, value)
+            if ns.RaidGroupsOption then ns.RaidGroupsOption(key,value) end
+        end
+        local function RGToggle(key, label, tip)
+            return { type="toggle", text=label, tooltip=tip,
+                getValue=function() return RGGet(key) end,
+                setValue=function(v) RGSet(key,v) end }
+        end
+        local function RGCog(region, title, master, items, minWidth)
+            if EllesmereUI._prebuilding then return end
+            local rows={}
+            for _,entry in ipairs(items) do
+                local key,label=entry[1],entry[2]
+                rows[#rows+1]={ type="toggle", label=label,
+                    get=function() return RGGet(key) end,
+                    set=function(v) RGSet(key,v) end }
+            end
+            EllesmereUI.BuildInlineCog(region, { title=title, rows=rows,
+                minWidth=minWidth,
+                disabled=function() return not RGGet(master) end,
+                disabledTooltip=title })
+        end
+        local rgRow1
+        rgRow1, h = W:DualRow(parent,y,
+            RGToggle("editorTools","Raid Group Editor Tools",
+                "Enable optional editing tools. Apply Groups and manual seat editing remain available."),
+            RGToggle("guestFeatures","Guest Management",
+                "Enable Guest seat assignment and automatic Guest recognition. Saved Guest seats and overrides are never deleted."))
+        y=y-h
+        RGCog(rgRow1._leftRegion,"Editor Tools Settings","editorTools",{
+            {"editorDrag","Drag to Reorder Players"},
+            {"editorCurrentRoster","Show Current Roster"},
+            {"editorClearDraft","Show Clear Draft"},
+            {"editorRedoDraft","Show Redo Draft"},
+        })
+        RGCog(rgRow1._rightRegion,"Guest Management Settings","guestFeatures",{
+            {"guestImportSeats","Empty Invitelist Seats Become Guests"},
+            {"guestAutoDetect","Detect Guests Without Nicknames"},
+            {"guestRightClick","Right-Click Guest Overrides"},
+            {"guestFillSeats","Automatically Fill Guest Seats"},
+            {"guestAutoEmptySeats","Automatically Reserve Empty Seats for Guests"},
+        },420)
+        local rgRow2
+        rgRow2, h = W:DualRow(parent,y,
+            RGToggle("unlistedFeatures","Unlisted Players",
+                "Enable the unlisted-player display and its optional markers. Existing raid group setups are unchanged."),
+            RGToggle("nicknameLearning","Learn Player Nicknames",
+                "Learn nicknames from connected addon sources while retaining the permanent nickname history when disabled."))
+        y=y-h
+        RGCog(rgRow2._leftRegion,"Unlisted Player Settings","unlistedFeatures",{
+            {"unlistedAsterisk","Show * for Unlisted Players"},
+            {"unlistedList","Show Unlisted Player List"},
+            {"unlistedGuild","Allow Guild Roster View"},
+        })
+        RGCog(rgRow2._rightRegion,"Nickname Learning Settings","nicknameLearning",{
+            {"nicknameRosterLearn","Learn From Current Roster"},
+            {"nicknameNSRTUpdates","Track NSRT Nickname Updates"},
+        })
+        _, h = W:DualRow(parent,y,
+            RGToggle("splitRaidEnabled","Split Raid",
+                "Show the provisional Split Raid tools. Saved split preferences are retained when disabled."),
+            { type="toggle",text="Exact Positions",
+              tooltip="Also try to reproduce each member's order inside the subgroup when applying. This may require extra protected swaps.",
+              getValue=ns.RaidGroupsExactPositions,
+              setValue=ns.RaidGroupsExactPositions })
+        y=y-h
+        local rgNoticesRow
+        rgNoticesRow, h = W:DualRow(parent,y,
+            RGToggle("chatNotifications","Chat Notifications",
+                "Show optional Raid Groups messages in your local chat. Critical failures still appear."),
+            RGToggle("backupEnabled","Backup / Restore",
+                "Show the Backup button in Raid Groups. Hiding it never removes saved backups, setups or nicknames."))
+        y=y-h
+        RGCog(rgNoticesRow._leftRegion,"Chat Notification Settings","chatNotifications",{
+            {"chatNicknames","Nickname Changes and Sharing"},
+            {"chatCombat","Combat Blockers"},
+            {"chatLeader","Leader Position and Shift"},
+            {"chatMissing","Missing Players"},
+            {"chatSuccess","Apply and Backup Confirmation"},
+        })
+        _, h=W:DualRow(parent,y,
+            {type="dropdown",text="Default Import Format",
+                tooltip="Choose how Import Raid Group Setup reads pasted compositions. Auto detects the format and recognizes an embedded invitelist in encounter notes.",
+                values={auto="Auto",native="EUIRG1",compact="EUIRG2 Compact",invitelist="Invitelist",
+                    pair="2 Columns",eight="8 Columns",vertical="Vertical"},
+                order={"auto","invitelist","native","compact","pair","eight","vertical"},
+                getValue=function() return ns.RaidGroupsDefaultImportFormat and ns.RaidGroupsDefaultImportFormat() or "auto" end,
+                setValue=function(v) if ns.RaidGroupsDefaultImportFormat then ns.RaidGroupsDefaultImportFormat(v) end end},
+            {type="dropdown",text="Default Export Format",
+                tooltip="Choose the format initially selected by the Raid Groups Export button. You can still select a different format in the export window.",
+                values={native="EUIRG1",compact="EUIRG2 Compact",invitelist="Invitelist",
+                    pair="2 Columns",eight="8 Columns",vertical="Vertical"},
+                order={"native","compact","invitelist","pair","eight","vertical"},
+                getValue=function() return ns.RaidGroupsDefaultExportFormat and ns.RaidGroupsDefaultExportFormat() or "native" end,
+                setValue=function(v) if ns.RaidGroupsDefaultExportFormat then ns.RaidGroupsDefaultExportFormat(v) end end})
+        y=y-h
+        -- Fill both columns without a placeholder gap after Show Nicknames.
+        -- The appearance controls retain their native inline cogs.
+        local scalingRow
+        scalingRow,h=W:DualRow(parent,y,
+            {type="toggle",text="Show Nicknames in Raid Groups",
+                tooltip="Show known nicknames without changing the real character identity used by group operations.",
+                getValue=ns.RaidGroupsShowNicknames,
+                setValue=ns.RaidGroupsShowNicknames},
+            RGToggle("windowScalingEnabled","Raid Group Window Scaling",
+                "Enable custom window scales for Raid Groups. The cog contains independent scales for each window."))
+        y=y-h
+        local function RGScaleRow(key,label)
+            return {type="slider",label=label,min=.5,max=2,step=.05,
+                get=function() return ns.RaidGroupsWindowScale and ns.RaidGroupsWindowScale(key) or 1 end,
+                set=function(v) if ns.RaidGroupsWindowScale then ns.RaidGroupsWindowScale(key,v) end end}
+        end
+        local function RGFontRow(key,label)
+            return {type="slider",label=label,min=8,max=18,step=1,
+                get=function() return ns.RaidGroupsPlayerFontSize and ns.RaidGroupsPlayerFontSize(key) or 11 end,
+                set=function(v) if ns.RaidGroupsPlayerFontSize then ns.RaidGroupsPlayerFontSize(key,v) end end}
+        end
+
+        -- Raid Groups uses the same position + size + directions-cog layout
+        -- as the Raid Frames leader icon, but stores its own QoL profile keys.
+        -- This is a purely visual overlay on the provisional editor rows.
+        local leaderStyles={none="None",blizzard="Blizzard Crown",star="Star",diamond="Diamond"}
+        local leaderStyleOrder={"blizzard","star","diamond","none"}
+        local leaderPositions={topleft="Top Left",top="Top",topright="Top Right",
+            left="Left",center="Center",right="Right",bottomleft="Bottom Left",
+            bottom="Bottom",bottomright="Bottom Right"}
+        local leaderPositionOrder={"topleft","top","topright","left","center",
+            "right","bottomleft","bottom","bottomright"}
+        local function LeaderGet(key)
+            return ns.RaidGroupsLeaderIconOption and ns.RaidGroupsLeaderIconOption(key)
+        end
+        local function LeaderSet(key,value)
+            if ns.RaidGroupsLeaderIconOption then ns.RaidGroupsLeaderIconOption(key,value) end
+        end
+        local function LeaderOff() return LeaderGet("leaderIconStyle")=="none" end
+        local fontAndLeaderRow
+        fontAndLeaderRow,h=W:DualRow(parent,y,
+            RGToggle("playerNamesFontEnabled","Raid Groups Player Names Font Size",
+                "Enable custom player name/nickname font sizes. The cog contains a size for each roster area."),
+            {type="dropdown",text="Raid Groups Leader Icon",
+                tooltip="Show the current raid leader in the Raid Groups editor. Choose a crown, star or diamond; None hides it.",
+                values=leaderStyles,order=leaderStyleOrder,
+                getValue=function() return LeaderGet("leaderIconStyle") or "blizzard" end,
+                setValue=function(v) LeaderSet("leaderIconStyle",v);EllesmereUI:RefreshPage() end})
+        y=y-h
+
+        -- Reset remains the final Raid Groups option, now paired with Leader
+        -- Icon Size so neither options column is left with a blank row.
+        _,h=W:DualRow(parent,y,
+            {type="slider",text="Leader Icon Size",min=8,max=30,step=1,
+                disabled=LeaderOff,disabledTooltip="Raid Groups Leader Icon",
+                getValue=function() return LeaderGet("leaderIconSize") or 14 end,
+                setValue=function(v) LeaderSet("leaderIconSize",v) end},
+            {type="button",text="Reset Appearance Settings",width=230,
+                tooltip="Reset Raid Groups window scales and player name sizes only. Saved setups, nicknames and window positions stay unchanged.",
+                onClick=function()
+                    if ns.RaidGroupsRequestAppearanceReset then ns.RaidGroupsRequestAppearanceReset() end
+                end})
+        y=y-h
+
+        if not EllesmereUI._prebuilding then
+            EllesmereUI.BuildInlineCog(scalingRow._rightRegion,{
+                title="Raid Group Window Scaling",minWidth=370,
+                disabled=function() return not RGGet("windowScalingEnabled") end,
+                disabledTooltip="Enable Raid Group Window Scaling to edit custom scales.",
+                rows={
+                    RGScaleRow("main","Raid Groups Window"),
+                    RGScaleRow("preview","Preview Apply Groups"),
+                    RGScaleRow("setups","Raid Group Setup"),
+                    RGScaleRow("nicknames","Nicknames"),
+                    RGScaleRow("import","Import"),
+                    RGScaleRow("export","Export"),
+                    RGScaleRow("split","Split Raid Settings"),
+                    RGScaleRow("backup","Backup / Restore"),
+                    RGScaleRow("prompt","Input Prompt"),
+                },
+            })
+            EllesmereUI.BuildInlineCog(fontAndLeaderRow._leftRegion,{
+                title="Raid Groups Player Names Font Size",minWidth=410,
+                disabled=function() return not RGGet("playerNamesFontEnabled") end,
+                disabledTooltip="Enable Raid Groups Player Names Font Size to edit custom sizes.",
+                rows={
+                    RGFontRow("main","Main Groups"),
+                    RGFontRow("unlisted","Unlisted Players"),
+                    RGFontRow("current","Preview Current Raid"),
+                    RGFontRow("after","Preview After Apply"),
+                    RGFontRow("available","Preview Available Players"),
+                    RGFontRow("nicknameManager","Nicknames Manager"),
+                },
+            })
+            EllesmereUI.BuildInlineCog(fontAndLeaderRow._rightRegion, {
+                icon=EllesmereUI.DIRECTIONS_ICON,
+                title="Raid Groups Leader Icon",
+                disabled=LeaderOff,disabledTooltip="Raid Groups Leader Icon",
+                rows={
+                    {type="dropdown",label="Position",values=leaderPositions,order=leaderPositionOrder,
+                        get=function() return LeaderGet("leaderIconPosition") or "right" end,
+                        set=function(v) LeaderSet("leaderIconPosition",v) end},
+                    {type="toggle",label="Show In Combat",
+                        get=function() return LeaderGet("leaderIconInCombat")~=false end,
+                        set=function(v) LeaderSet("leaderIconInCombat",v) end},
+                    {type="slider",label="Offset X",min=-50,max=50,step=1,
+                        get=function() return LeaderGet("leaderIconOffsetX") or 0 end,
+                        set=function(v) LeaderSet("leaderIconOffsetX",v) end},
+                    {type="slider",label="Offset Y",min=-50,max=50,step=1,
+                        get=function() return LeaderGet("leaderIconOffsetY") or 0 end,
+                        set=function(v) LeaderSet("leaderIconOffsetY",v) end},
+                }
+            })
+        end
 
         -- INVITE TOOLS
         -- Invite Tools settings use the same EUI widgets as the rest of Raid
@@ -362,16 +606,12 @@ initFrame:SetScript("OnEvent", function(self)
                   InviteSet("ShowNicknames", v and true or false)
                   InviteRefresh()
               end },
-            { type = "colorpicker", text = "Window Background", hasAlpha = true,
-              tooltip = "Background color and opacity of the Invite Tools window.",
+            { type = "toggle", text = "Allow Window Resize",
+              tooltip = "Shows a resize handle in the bottom-right corner. The Invite Tools window can always be moved by dragging it.",
               disabled = Disabled,
-              getValue = function()
-                  local c = InviteCfg("BgColor")
-                  if type(c) == "table" and c[1] then return c[1], c[2], c[3], c[4] or 1 end
-                  return 0.06, 0.08, 0.10, 0.95
-              end,
-              setValue = function(r, g, b, a)
-                  InviteSet("BgColor", { r, g, b, a or 1 })
+              getValue = function() return InviteCfg("Unlocked") == true end,
+              setValue = function(v)
+                  InviteSet("Unlocked", v and true or false)
                   InviteRefresh()
               end }
         );  y = y - h
@@ -392,12 +632,16 @@ initFrame:SetScript("OnEvent", function(self)
                   InviteSet("ListBgColor", { r, g, b, a or 1 })
                   InviteRefresh()
               end },
-            { type = "toggle", text = "Allow Window Resize",
-              tooltip = "Shows a resize handle in the bottom-right corner. The Invite Tools window can always be moved by dragging it.",
+            { type = "colorpicker", text = "Window Background", hasAlpha = true,
+              tooltip = "Background color and opacity of the Invite Tools window.",
               disabled = Disabled,
-              getValue = function() return InviteCfg("Unlocked") == true end,
-              setValue = function(v)
-                  InviteSet("Unlocked", v and true or false)
+              getValue = function()
+                  local c = InviteCfg("BgColor")
+                  if type(c) == "table" and c[1] then return c[1], c[2], c[3], c[4] or 1 end
+                  return 0.06, 0.08, 0.10, 0.95
+              end,
+              setValue = function(r, g, b, a)
+                  InviteSet("BgColor", { r, g, b, a or 1 })
                   InviteRefresh()
               end }
         );  y = y - h
@@ -578,11 +822,10 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.RaidCheckEnabled(v)
                   EllesmereUI:RefreshPage()
               end },
-            { type = "toggle", text = "Show Without Lead or Assist",
-              tooltip = "Shows the window even when you can do nothing about what it reports. Every column is read from your own client, so this view is complete rather than degraded.",
+            { type = "slider", text = "Raid Check Window Scale", min = 0.5, max = 2.0, step = 0.05,
               disabled = RCDisabled,
-              getValue = ns.RaidCheckShowWithoutRank,
-              setValue = ns.RaidCheckShowWithoutRank }
+              getValue = ns.RaidCheckScale,
+              setValue = ns.RaidCheckScale }
         );  y = y - h
 
         _, h = W:DualRow(parent, y,
@@ -591,10 +834,11 @@ initFrame:SetScript("OnEvent", function(self)
               disabled = RCDisabled,
               getValue = ns.RaidCheckShowNicknames,
               setValue = ns.RaidCheckShowNicknames },
-            { type = "slider", text = "Raid Check Window Scale", min = 0.5, max = 2.0, step = 0.05,
+            { type = "toggle", text = "Show Without Lead or Assist",
+              tooltip = "Shows the window even when you can do nothing about what it reports. Every column is read from your own client, so this view is complete rather than degraded.",
               disabled = RCDisabled,
-              getValue = ns.RaidCheckScale,
-              setValue = ns.RaidCheckScale }
+              getValue = ns.RaidCheckShowWithoutRank,
+              setValue = ns.RaidCheckShowWithoutRank }
         );  y = y - h
 
         _, h = W:DualRow(parent, y,

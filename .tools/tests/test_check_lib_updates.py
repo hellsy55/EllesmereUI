@@ -393,8 +393,81 @@ class AcceptedDriftTests(unittest.TestCase):
         data = json.loads(checker.DRIFT_BASELINES_PATH.read_text())
         self.assertEqual({record['path'] for record in data['baselines']}, {'Libs/LibStub', 'Libs/LibDurability'})
         for record in data['baselines']:
-            self.assertEqual(record['local_sha256'], checker.payload_fingerprint(checker.relevant_files(ROOT / record['path'])))
+            self.assertEqual(record['local_sha256'], checker.payload_fingerprint(checker.comparison_files(checker.relevant_files(ROOT / record['path']))))
             self.assertTrue(checker.accepted_drift(record))
+
+
+class LibraryComparisonRegressions(unittest.TestCase):
+    def test_crlf_only_is_current_without_rewriting_files(self):
+        local = {'A.lua': b'LibStub:NewLibrary("A", 8)\r\nsame\r\n', 'load.xml': b'<Ui/>\r\n'}
+        remote = {name: data.replace(b'\r\n', b'\n') for name, data in local.items()}
+        before = dict(local)
+        code, output = CheckerTests().content_report(local, remote)
+        self.assertEqual(code, 0)
+        self.assertIn('current=1 | accepted-drift=0', output)
+        self.assertEqual(local, before)
+
+    def test_normalization_preserves_content_spaces_and_bare_cr(self):
+        files = {'A.lua': b'a \r\nb\rc\n'}
+        self.assertEqual(checker.comparison_files(files), {'A.lua': b'a \nb\rc\n'})
+        self.assertEqual(files['A.lua'], b'a \r\nb\rc\n')
+        local = {'A.lua': b'LibStub:NewLibrary("A", 8)\r\nold'}
+        remote = {'A.lua': b'LibStub:NewLibrary("A", 8)\nnew'}
+        code, output = CheckerTests().content_report(local, remote)
+        self.assertEqual(code, 1)
+        self.assertIn('DRIFT=1 | UNKNOWN=0', output)
+
+    def test_fixed_git_pin_does_not_query_development_head(self):
+        entry = {'url': 'repo', 'tag': '1.0.2-release'}
+        with patch.object(checker, 'declared_git_commit', return_value='a' * 40) as pin, patch.object(checker, 'latest_git_commit', side_effect=AssertionError('HEAD queried')):
+            self.assertEqual(checker.resolve_upstream_version(entry), ('git-tag', '1.0.2-release'))
+        pin.assert_called_once_with('repo', '1.0.2-release')
+
+    def test_unresolved_fixed_git_pin_never_falls_back_to_head(self):
+        with patch.object(checker, 'declared_git_commit', return_value=None), patch.object(checker, 'latest_git_commit', side_effect=AssertionError('HEAD queried')):
+            with self.assertRaisesRegex(RuntimeError, 'Could not resolve declared tag'):
+                checker.resolve_upstream_version({'url': 'repo', 'tag': 'missing'})
+
+    def test_tag_lock_and_old_commit_lock_require_payload_proof(self):
+        entry = {'url': 'repo', 'tag': 'v1'}
+        resolved = ('git-tag', 'v1')
+        locked = {'kind': 'git-commit', 'value': 'a' * 40}
+        files = {'A.lua': b'LibStub:NewLibrary("A", 8)\n'}
+        with patch.object(checker, 'relevant_files', return_value=files), patch.object(checker, 'upstream_files', return_value=files):
+            self.assertEqual(checker.baseline_with_lock('Libs/A', entry, resolved, locked), ('v1', 'v1'))
+        with patch.object(checker, 'relevant_files', return_value=files), patch.object(checker, 'upstream_files', return_value={'A.lua': b'LibStub:NewLibrary("A", 8)\nchanged'}):
+            with self.assertRaises(checker.PayloadDrift):
+                checker.baseline_with_lock('Libs/A', entry, resolved, locked)
+
+    def test_stale_lock_cannot_turn_unrelated_payload_into_pending_update(self):
+        local = {'A.lua': b'LibStub:NewLibrary("A", 8)'}
+        remote = {'A.lua': b'LibStub:NewLibrary("A", 9)'}
+        with patch.object(checker, 'relevant_files', return_value=local), patch.object(checker, 'upstream_files', return_value=remote):
+            with self.assertRaisesRegex(RuntimeError, 'do not prove an update'):
+                checker.baseline_with_lock('Libs/A', {'url': 'repo', 'tag': 'v1'}, ('git-tag', 'v1'), {'kind': 'git-commit', 'value': 'a' * 40})
+
+    def test_older_pinned_svn_snapshot_recognizes_existing_audit(self):
+        path, entry, resolved, local, remote = AcceptedDriftTests().fixtures('LibStub')
+        crlf = lambda files: {name: data + b'\r\n' for name, data in files.items()}
+        lf = lambda files: {name: data + b'\n' for name, data in files.items()}
+        record = checker.drift_record(path, entry, resolved, lf(local), lf(remote))
+        with tempfile.TemporaryDirectory() as directory:
+            baseline = Path(directory) / 'baselines.json'
+            baseline.write_text(json.dumps({'schema': 1, 'baselines': [record]}))
+            with patch.object(checker, 'DRIFT_BASELINES_PATH', baseline), patch.object(checker, 'relevant_files', return_value=crlf(local)), patch.object(checker, 'upstream_files', return_value=crlf(remote)):
+                with self.assertRaises(checker.AcceptedDrift):
+                    checker.baseline_with_lock(path, entry, resolved, {'kind': 'svn-rev', 'value': '109'})
+
+    def test_older_pinned_svn_snapshot_without_audit_remains_drift(self):
+        path, entry, resolved, local, remote = AcceptedDriftTests().fixtures('LibStub')
+        with patch.object(checker, 'DRIFT_BASELINES_PATH', Path('missing-baseline.json')), patch.object(checker, 'relevant_files', return_value=local), patch.object(checker, 'upstream_files', return_value=remote):
+            with self.assertRaises(checker.PayloadDrift):
+                checker.baseline_with_lock(path, entry, resolved, {'kind': 'svn-rev', 'value': '109'})
+
+    def test_history_lookup_failure_is_not_reclassified_from_payload(self):
+        with patch.object(checker, 'require_version_advance', side_effect=RuntimeError('network denied')), patch.object(checker, 'baseline_without_lock', side_effect=AssertionError('Unsafe fallback')):
+            with self.assertRaisesRegex(RuntimeError, 'network denied'):
+                checker.baseline_with_lock('Libs/A', {'url': 'repo'}, ('git-commit', 'b' * 40), {'kind': 'git-commit', 'value': 'a' * 40})
 
 
 class ProxyTests(unittest.TestCase):
@@ -405,7 +478,7 @@ class ProxyTests(unittest.TestCase):
             calls = []
 
             def read(path, *args, **kwargs):
-                if str(path) == '/etc/os-release':
+                if path.as_posix() == '/etc/os-release':
                     return 'ID=debian\nVERSION_CODENAME=trixie\n'
                 return original_read(path, *args, **kwargs)
 

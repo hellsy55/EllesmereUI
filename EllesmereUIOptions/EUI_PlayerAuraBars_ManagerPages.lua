@@ -1678,7 +1678,7 @@ local function BuildDispelColorFields(frame, fontPath, sy, cfg, apply)
         local row
         row, hh = W:DualRow(frame, sy,
             { type = "label", text = left.label },
-            right and { type = "label", text = right.label } or { type = "label", text = "" }
+            right and { type = "label", text = right.label } or EllesmereUI.BlankRowCfg()
         ); sy = sy - hh
         AddDispelSwatch(row._leftRegion, left)
         if right then AddDispelSwatch(row._rightRegion, right) end

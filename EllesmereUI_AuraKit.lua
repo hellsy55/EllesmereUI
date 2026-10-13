@@ -8,17 +8,6 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local AK = {}
 EllesmereUI.AuraKit = AK
 
--- Detect the native contracts, not client version numbers. No probe frames.
-function AK.SupportsCasterName()
-    return C_AuraContainerUtil and C_AuraContainerUtil.ProcessCustomAuraButtonCasterNameOptions
-        -- The addon defining button mixins loads lazily during container creation.
-end
-
-function AK.SupportsPandemicPulse()
-    return C_UnitAuras and C_UnitAuras.GetRefreshCarryOverDuration
-        -- Individual button methods are checked before allocating/registering art.
-end
-
 local InCombatLockdown = InCombatLockdown
 local CreateFrame = CreateFrame
 local issecretvalue = issecretvalue or function() return false end
@@ -265,72 +254,25 @@ do
     end
 end
 
--- Optional PTR decorations are registered AFTER the base icon/count/duration.
--- Native callbacks own all aura data and visibility; addon code never reads it.
-function AK.ApplyOptionalAuraStyle(button, d, style)
-    if not d.akBaseReady then return end
-    if d.casterHolder then
-        local want = style.showCasterName and true or false
-        d.casterHolder:SetAlpha(want and not d.casterFailed and 1 or 0)
-        if want ~= (d.akCasterOn or false) and not d.casterFailed then
-            if AK.AurasRestricted() then
-                deferredRestyles[d.styleKey] = true
-            elseif want then
-                -- noDefaultFonts applies to the MODULE's stack/duration text,
-                -- never this AuraKit-owned region. An inherited font is already
-                -- valid before SetFont; a failed custom font retains that fallback.
-                -- A bad custom font path must retain the inherited fallback.
-                local okFont, hasFont = pcall(d.casterName.SetFont, d.casterName, style.casterFont or STANDARD_TEXT_FONT, 9, "OUTLINE")
-                if not okFont or not hasFont then d.casterName:SetFontObject(GameFontNormalSmall) end
-                local font = d.casterName:GetFont()
-                if font then
-                    local ok = pcall(button.SetCasterName, button, d.casterName,
-                        { useClassColors = true, showRealmName = false })
-                    if ok then
-                        d.akCasterOn = true
-                    else
-                        -- A failed native setter may already have stored the region.
-                        -- Clear this OPTIONAL channel so future aura updates stay safe.
-                        pcall(button.ClearCasterName, button)
-                        d.casterFailed = true
-                        d.casterHolder:SetAlpha(0)
-                    end
-                else
-                    d.casterFailed = true
-                    d.casterHolder:SetAlpha(0)
-                end
-            else
-                if pcall(button.ClearCasterName, button) then
-                    d.akCasterOn = false
-                else
-                    d.casterFailed = true
-                end
-                -- Shown is a native secret aspect; hide the plain carrier instead.
-                d.casterHolder:SetAlpha(0)
-            end
-        end
+-- An icon's texcoords under a style. A shaped icon (iconShape with a mask) keeps
+-- its button's rect and takes coordinates past 0-1, as Action Bars' shaped icons
+-- do: the mask's opening is the button's middle visRatio (each shape's art leaves
+-- shapeInsetPx of its 128 clear on every side), and the art's middle (1 - 2 * zoom)
+-- fills it, the crop an unshaped icon takes at the same Icon Zoom. Shared with the
+-- Player Aura Bars options preview.
+function AK.IconTexCoord(style)
+    if style.iconShape and style.iconShape ~= "none" and style.shapeMaskPath then
+        local visRatio = (128 - 2 * (style.shapeInsetPx or 17)) / 128
+        local half = (0.5 - (style.iconZoom or 0.055)) / visRatio
+        return 0.5 - half, 0.5 + half, 0.5 - half, 0.5 + half
     end
-    if d.pandemicHolder then
-        local want = style.pandemicGlow and true or false
-        d.pandemicHolder:SetAlpha(want and not d.pandemicFailed and 1 or 0)
-        if want and not d.akPandemicOn and not d.pandemicFailed then
-            if AK.AurasRestricted() then
-                deferredRestyles[d.styleKey] = true
-            else
-                -- Construct the whole animation before registering it. Once native
-                -- ownership begins, never mutate/read its secret animation aspects.
-                local ok = pcall(function()
-                    button:AddPandemicRegion(d.pandemicTexture)
-                    button:AddPandemicActiveAnimation(d.pandemicAnimation)
-                end)
-                if ok then d.akPandemicOn = true
-                else
-                    d.pandemicFailed = true
-                    d.pandemicHolder:SetAlpha(0)
-                end
-            end
-        end
+    local tc = style.texCoord
+    if tc then return tc[1], tc[2], tc[3], tc[4] end
+    if style.iconCrop then
+        local z = style.iconZoom or 0.07
+        return z, 1 - z, z, 1 - z
     end
+    return 0, 1, 0, 1
 end
 
 local function ApplyStyleToRegions(button, style)
@@ -365,52 +307,24 @@ local function ApplyStyleToRegions(button, style)
     end
 
     if d.icon then
-        if style.texCoord then
-            d.icon:SetTexCoord(style.texCoord[1], style.texCoord[2], style.texCoord[3], style.texCoord[4])
-        elseif style.iconCrop then
-            local z = style.iconZoom or 0.07
-            d.icon:SetTexCoord(z, 1 - z, z, 1 - z)
-        else
-            d.icon:SetTexCoord(0, 1, 0, 1)
-        end
+        d.icon:SetTexCoord(AK.IconTexCoord(style))
 
+        -- AddMaskTexture is change-guarded and deferred like d.borderHost's anchor
+        -- below: denied while auras are secret, retried once the restriction lifts.
         if shapeActive then
-            -- Grows the icon past button's rect to fill the mask's inset opening
-            -- edge-to-edge. SetPoint against button is change-guarded/deferred like
-            -- d.borderHost's anchor below; AddMaskTexture rides the same guard so a
-            -- denial rolls back mask + geometry together.
-            local insetPx = style.shapeInsetPx or 17
-            local visRatio = (128 - 2 * insetPx) / 128
-            local fullExpand = ((1 / visRatio) - 1) * 0.5
-            -- Coupled to Icon Zoom, mirroring Action Bars' shape-fill expansion: below
-            -- the zoom default the forced mask-fill magnification shrinks too (floor 0
-            -- -- button's own rect, no oversizing, at zoom 0), above it it grows past
-            -- fullExpand. 0.055 is PAB's own iconZoom default (BuildStyle), so a bar
-            -- that never touches the zoom slider renders identically to before.
-            local zoom = style.iconZoom or 0.055
-            local expand = math.max(fullExpand * (zoom / 0.055), 0)
-            local iconShapeKey = style.iconShape .. "|" .. w .. "|" .. h .. "|" .. zoom
-            if d.akIconShapeKey ~= iconShapeKey then
+            if d.akIconShapeKey ~= style.iconShape then
                 local ok = pcall(function()
                     pcall(d.icon.RemoveMaskTexture, d.icon, d.shapeMask)
                     d.icon:AddMaskTexture(d.shapeMask)
-                    d.icon:ClearAllPoints()
-                    d.icon:SetPoint("TOPLEFT", button, "TOPLEFT", -expand * w, expand * h)
-                    d.icon:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", expand * w, -expand * h)
                 end)
                 if ok then
-                    d.akIconShapeKey = iconShapeKey
+                    d.akIconShapeKey = style.iconShape
                 elseif d.styleKey and AK.AurasRestricted() then
                     deferredRestyles[d.styleKey] = true
                 end
             end
         elseif d.akIconShapeKey then
-            if d.shapeMask then pcall(d.icon.RemoveMaskTexture, d.icon, d.shapeMask) end
-            local ok = pcall(function()
-                d.icon:ClearAllPoints()
-                d.icon:SetAllPoints(button)
-            end)
-            if ok then
+            if not d.shapeMask or pcall(d.icon.RemoveMaskTexture, d.icon, d.shapeMask) then
                 d.akIconShapeKey = nil
             elseif d.styleKey and AK.AurasRestricted() then
                 deferredRestyles[d.styleKey] = true
@@ -1200,7 +1114,6 @@ local function ApplyStyleToRegions(button, style)
     if style.applyExtra then
         style.applyExtra(button, d, style)
     end
-    if d.akBaseReady then AK.ApplyOptionalAuraStyle(button, d, style) end
 end
 
 -- SetDurationText options, 68914 schema: formatter -> textFormatter,
@@ -1383,44 +1296,6 @@ function AK.MakeInitializer(styleKey, extra)
             d.akCancel = style.cancelButtons
         end
 
-        -- Allocate optional regions only on clients exposing their full contract.
-        -- Base aura regions are already registered. Isolate construction failures
-        -- per decoration; creation still precedes the first aura assignment.
-        if AK.SupportsCasterName() and button.SetCasterName and button.ClearCasterName then
-            local ok = pcall(function()
-                d.casterHolder = CreateFrame("Frame", nil, d.stackCarrier)
-                d.casterHolder:SetAllPoints(d.stackCarrier)
-                d.casterHolder:EnableMouse(false)
-                d.casterHolder:SetAlpha(0)
-                d.casterName = d.casterHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                d.casterName:SetPoint("TOP", d.casterHolder, "BOTTOM", 0, -2)
-            end)
-            if not ok then d.casterFailed = true end
-        end
-        if AK.SupportsPandemicPulse() and button.AddPandemicRegion and button.AddPandemicActiveAnimation then
-            local ok = pcall(function()
-                d.pandemicHolder = CreateFrame("Frame", nil, d.dispelHolder)
-                d.pandemicHolder:SetAllPoints(d.dispelHolder)
-                d.pandemicHolder:EnableMouse(false)
-                d.pandemicHolder:SetAlpha(0)
-                d.pandemicTexture = d.pandemicHolder:CreateTexture(nil, "OVERLAY", nil, 3)
-                d.pandemicTexture:SetAllPoints(d.pandemicHolder)
-                d.pandemicTexture:SetColorTexture(1, 0.15, 0.1, 0.6)
-                d.pandemicTexture:SetBlendMode("ADD")
-                d.pandemicTexture:Hide()
-                d.pandemicAnimation = d.pandemicTexture:CreateAnimationGroup()
-                d.pandemicAnimation:SetLooping("BOUNCE")
-                local alpha = d.pandemicAnimation:CreateAnimation("Alpha")
-                alpha:SetFromAlpha(0.15)
-                alpha:SetToAlpha(1)
-                alpha:SetDuration(0.6)
-                alpha:SetSmoothing("IN_OUT")
-            end)
-            if not ok then d.pandemicFailed = true end
-        end
-
-        d.akBaseReady = d.casterHolder ~= nil or d.pandemicHolder ~= nil
-        if d.akBaseReady then AK.ApplyOptionalAuraStyle(button, d, style) end
         GetStyleSet(styleKey)[button] = true
 
         if extra then extra(button, d, style) end
@@ -1706,6 +1581,23 @@ function AK.AddGroupToContainer(container, g)
     })
 end
 
+-- A declared group's frame cap. Where the client can (12.1.5+), a cap of 0
+-- also switches the group off: a disabled group is neither parsed nor
+-- refreshed, and a container whose groups and slots are all off stops
+-- watching UNIT_AURA. Before that build a cap of 0 only hides its frames.
+-- Every cap write goes through here, so a group switched off always wakes
+-- with its next cap. Both setters return at once on an unchanged value, so
+-- only a real flip costs anything (the container re-parses, once per frame).
+function AK.SetGroupCap(container, key, cap)
+    if container.SetAuraGroupEnabled then
+        if cap > 0 then container:SetAuraGroupEnabled(key, true) end
+        container:SetAuraGroupMaxFrameCount(key, cap)
+        if cap <= 0 then container:SetAuraGroupEnabled(key, false) end
+        return
+    end
+    container:SetAuraGroupMaxFrameCount(key, cap)
+end
+
 function AK.AddSlotToContainer(container, s)
     local f = container:AddAuraSlot(s.key, AK.Filter(unpack(s.filter)), {
         candidateFilters = s.candidateFilters,
@@ -1898,10 +1790,12 @@ function AK.AddItemEnchantmentsToContainer(container, e)
     AK.SetContainerItemEnchantmentSort(container, e.sortMethod, e.sortDirection)
 end
 
--- Unit LAST: unit assignment re-evaluates event registrations, and those
--- are gated on the container having groups/slots. Setting the unit before
--- declaring content leaves UNIT_AURA unregistered (the Blizzard reference
--- consumer follows this same order). Finish with a full refresh request.
+-- Binds the unit, then requests a full refresh. Builders call it once their
+-- content is declared, but the order is free: every group or slot
+-- declaration, every unit change and the container's own show re-run the
+-- engine's event registration (12.1 and WoW Forever), which holds UNIT_AURA
+-- only while the container has content and is visible. Unit Frames binds
+-- every element at build and declares an element's groups only once it is on.
 function AK.FinishContainer(container, unitToken)
     container:SetUnit(unitToken)
     container:UpdateAllAuras()

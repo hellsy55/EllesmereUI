@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Incredibly light performance, modern raid frames with endless flexibility.
 ## Author: Ellesmere
-## Version: 9.4
+## Version: 9.5.3
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIRaidFramesDB
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
@@ -12,6 +12,7 @@
 # Main Luas
 EllesmereUIRaidFrames.lua
 EUI_RaidFrames_Colors.lua
+EUI_RaidFrames_Compact.lua
 EUI_RaidFrames_Absorb.lua
 EUI_RaidFrames_Style.lua
 EUI_RaidFrames_Update.lua
