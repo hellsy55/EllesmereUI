@@ -103,7 +103,7 @@ def local_version(text: str) -> tuple[str, str] | None:
     return ('minor', minor.group(1)) if minor else None
 
 def relevant_files(directory: Path) -> dict[str, bytes]:
-    """Compare all EUI library runtime sources and loading manifests byte for byte."""
+    """Read all EUI library runtime sources and loading manifests without rewriting them."""
     files = {}
     for source in directory.rglob('*'):
         if source.suffix.lower() not in {'.lua', '.xml', '.toc'}:
@@ -115,6 +115,11 @@ def relevant_files(directory: Path) -> dict[str, bytes]:
     if not files:
         raise RuntimeError('No relevant library content to compare')
     return files
+
+def comparison_files(files: dict[str, bytes]) -> dict[str, bytes]:
+    """Canonicalize CRLF only for text-payload comparison; preserve all other bytes."""
+    return {name: content.replace(b"\r\n", b"\n") for name, content in files.items()}
+
 
 class PayloadDrift(RuntimeError):
     """Comparable versions without an advance, but different packaged content."""
@@ -146,8 +151,8 @@ def drift_record(path: str, entry: dict, resolved: tuple[str, str],
         'path': path, 'source': entry['url'], 'tag': entry.get('tag'),
         'kind': resolved[0], 'version': resolved[1],
         'snapshot_source': entry.get('_snapshot_url', entry['url']),
-        'local_sha256': payload_fingerprint(local),
-        'upstream_sha256': payload_fingerprint(upstream),
+        'local_sha256': payload_fingerprint(comparison_files(local)),
+        'upstream_sha256': payload_fingerprint(comparison_files(upstream)),
     }
 
 
@@ -326,8 +331,8 @@ def baseline_without_lock(path: str, entry: dict, resolved: tuple[str, str]):
         if baseline != upstream:
             require_version_advance(kind, baseline, upstream, entry)
             return baseline, upstream
-    local_files = relevant_files(Path(path))
-    remote_files = upstream_files(entry, resolved)
+    local_files = comparison_files(relevant_files(Path(path)))
+    remote_files = comparison_files(upstream_files(entry, resolved))
     if local_files == remote_files:
         return upstream, upstream
     filename = short_name(path) + '.lua'
@@ -371,12 +376,34 @@ def resolve_upstream_version(entry: dict) -> tuple[str, str] | None:
     clean_url = url.split('.git/')[0]
     if not clean_url.endswith('.git'):
         clean_url = clean_url
-    if tag == 'latest':
+    if tag and tag.lower() not in {'latest', 'alpha', 'beta', 'head'}:
+        commit = declared_git_commit(clean_url, tag)
+        if not commit:
+            raise RuntimeError(f'Could not resolve declared tag {tag}')
+        return ('git-tag', tag)
+    if tag and tag.lower() == 'latest':
         t = latest_git_tag(clean_url)
         return ('git-tag', t) if t else None
-    else:
-        c = latest_git_commit(clean_url)
-        return ('git-commit', c) if c else None
+    c = latest_git_commit(clean_url)
+    return ('git-commit', c) if c else None
+
+def baseline_with_lock(path: str, entry: dict, resolved: tuple[str, str], locked: dict):
+    """A stale lock may yield only to equivalent payloads or an exact audited drift."""
+    kind, upstream = resolved
+    old = locked.get('value')
+    if old is None or old == upstream:
+        return baseline_without_lock(path, entry, resolved)
+    fixed_pin = entry.get('tag') and entry['tag'].lower() not in {'latest', 'alpha', 'beta', 'head'}
+    pinned_older_svn = (fixed_pin and kind == locked.get('kind') == 'svn-rev'
+                        and old.isdigit() and upstream.isdigit() and int(upstream) < int(old))
+    if locked.get('kind') != kind or pinned_older_svn:
+        before, after = baseline_without_lock(path, entry, resolved)
+        if before != after:
+            raise RuntimeError('Lock baseline and pinned snapshot do not prove an update')
+        return before, after
+    require_version_advance(kind, old, upstream, entry)
+    return old, upstream
+
 
 def load_lockfile() -> dict:
     if os.path.exists(LOCKFILE_PATH):
@@ -429,15 +456,7 @@ def check_updates():
             if resolved is None:
                 raise RuntimeError('Could not resolve upstream version')
             kind, upstream_version = resolved
-            locked = lock.get(path, {})
-            locked_version = locked.get('value')
-            if locked_version is not None and locked_version != upstream_version:
-                if locked.get('kind') != kind:
-                    raise RuntimeError('Lock baseline and upstream version kinds are not comparable')
-                require_version_advance(kind, locked_version, upstream_version, entry)
-                old, new = locked_version, upstream_version
-            else:
-                old, new = baseline_without_lock(path, entry, resolved)
+            old, new = baseline_with_lock(path, entry, resolved, lock.get(path, {}))
         except AcceptedDrift as error:
             accepted += 1
             print(f'    {name}: accepted-drift; {error}')
