@@ -29,7 +29,7 @@ For `new-features`, first compare the local ref with fetched `origin/new-feature
 
 ## Sync B: PTR from Retail
 
-Compare `12.1.5-PTR-features` with fetched `origin/12.1.5-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip checkout and merge. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`, staged review, and the required English merge subject. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only if its ref changed or its remote is behind. PTR mode never touches the Retail install folder or performs a Retail library check.
+Compare `12.1.7-PTR-features` with fetched `origin/12.1.7-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip checkout and merge. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`, staged review, and the required English merge subject. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only if its ref changed or its remote is behind. PTR mode never touches the Retail install folder or performs a Retail library check.
 
 Always compare and merge the full `new-features` ref into PTR, never the upstream release SHA. In PTR and Both modes, continue to Sync B even when Sync A has no new release or is a Retail no-op: Retail-only features/fixes still propagate normally. The release limit applies only to upstream entering Retail.
 

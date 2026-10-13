@@ -19,7 +19,7 @@ and addon version when safely determinable. Preserve this state as the immutable
 delivery base. Auxiliary or mirror states may be recorded as needed by the
 workflow, but never replace the installable base.
 
-For EUI, Retail is `new-features`; PTR is `12.1.5-PTR-features`. Compare each
+For EUI, Retail is `new-features`; PTR is `12.1.7-PTR-features`. Compare each
 selected branch's initial state with its final state. In Both mode, capture both
 bases before any modification and produce two independent installers, one Retail
 and one PTR. Never mix Retail and PTR in one ZIP.

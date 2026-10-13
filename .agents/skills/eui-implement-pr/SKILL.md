@@ -5,7 +5,7 @@ description: Evaluate or implement a PR from EllesmereGaming/EllesmereUI on a us
 
 # Implement an upstream PR
 
-First validate that the URL identifies a PR on `EllesmereGaming/EllesmereUI`. If it is another repository, stop and ask before doing anything else. Ask which target branch (`new-features` or `12.1.5-PTR-features`) before any analysis; never assume a default.
+First validate that the URL identifies a PR on `EllesmereGaming/EllesmereUI`. If it is another repository, stop and ask before doing anything else. Ask which target branch (`new-features` or `12.1.7-PTR-features`) before any analysis; never assume a default.
 
 After repository and target selection, initialize or reuse the root and environment in the shared [maintenance context](../../references/python-runtime.md). Read-only PR metadata, changed paths, and analysis without Python helpers do not require Python preflight. Resolve and freeze `python_runtime` only before the first mutation/application or Python helper, whichever comes first; discover optional capabilities only when needed and cache them. Reuse all resolved values across skills and branches through application and publication.
 

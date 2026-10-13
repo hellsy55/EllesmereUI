@@ -18,7 +18,7 @@ This repository is a fork of https://github.com/EllesmereGaming/EllesmereUI.
 
 - `main` mirrors `upstream/main` on the fork and receives no direct feature commits.
 - `new-features` is Retail and syncs only through the most recent commit in `upstream/main` whose SUBJECT starts with `release`, case-insensitive. Exclude all later upstream commits. If that release commit cannot be identified, stop the workflow; never fall back to `upstream/main` HEAD or a tag.
-- `12.1.5-PTR-features` is PTR and receives Retail changes by merging `new-features`, after Retail is synced.
+- `12.1.7-PTR-features` is PTR and receives Retail changes by merging `new-features`, after Retail is synced.
 - For `update`, `atualizar`, `update retail`, `atualizar retail`, `atualizar o retail`, and close case-insensitive variants, use [eui-update](.agents/skills/eui-update/SKILL.md) in Retail mode.
 - For `update PTR`, `atualizar PTR`, and close case-insensitive variants, use [eui-update](.agents/skills/eui-update/SKILL.md) in PTR mode.
 - For `update both`, `atualizar ambos`, and close case-insensitive variants, use [eui-update](.agents/skills/eui-update/SKILL.md) in Both mode.
