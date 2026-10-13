@@ -26,6 +26,7 @@ def load(name):
 
 
 runtime = load('python_runtime')
+lua = load('lua_runtime')
 release = load('release_target')
 classifier = load('classify_library_range')
 libraries = load('check_lib_updates')
@@ -96,13 +97,112 @@ class RuntimeTests(unittest.TestCase):
 
     def test_preflight_order_and_helper_references(self):
         skill = (ROOT / '.agents/skills/eui-update/SKILL.md').read_text(encoding='utf-8')
-        self.assertLess(skill.index('Python preflight'), skill.index('## Sync A'))
+        self.assertLess(skill.index('resolve and freeze `lua_runtime`'), skill.index('## Sync A'))
         self.assertIn('before any branch changes', skill)
         self.assertNotIn('py -3 .tools/release_target.py', skill)
         self.assertNotIn('py -3 .tools/classify_library_range.py', skill)
         libs = (ROOT / '.agents/skills/eui-libs/SKILL.md').read_text(encoding='utf-8')
         self.assertNotIn('scripts/check_lib_updates.py', libs)
-        self.assertIn('Reuse `python_runtime`', libs)
+        self.assertIn('Run `<python_runtime> .tools/check_lib_updates.py`', libs)
+        self.assertIn('before any `--apply`', libs)
+        shared = (ROOT / '.agents/references/python-runtime.md').read_text(encoding='utf-8')
+        self.assertIn('.tools/lua_runtime.py --resolve', shared)
+        self.assertIn('no-op/fast-forward-only updates', shared)
+        self.assertIn('installation from already validated, committed files', shared)
+        pr = (ROOT / '.agents/skills/eui-implement-pr/SKILL.md').read_text(encoding='utf-8')
+        self.assertLess(pr.index('resolve or reuse the frozen `lua_runtime`'),
+                        pr.index('After an approved application, stage'))
+        ci = (ROOT / '.github/workflows/guardrails.yml').read_text(encoding='utf-8')
+        self.assertIn("- '.tools/lua_runtime.py'", ci)
+        self.assertIn('python3 .tools/tests/test_maintenance.py', ci)
+
+
+class LuaRuntimeTests(unittest.TestCase):
+    def compiler_runner(self, version=b'Lua 5.1.5', accepts_everything=False):
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            if command[-1] == '-v':
+                return subprocess.CompletedProcess(command, 0, version, b'')
+            valid = accepts_everything or kwargs['input'] == lua.PROBES[0][0]
+            return subprocess.CompletedProcess(command, 0 if valid else 1, b'', b'syntax error')
+        return run, calls
+
+    def test_native_compiler_proves_syntax_and_limits(self):
+        run, calls = self.compiler_runner()
+        executable = str(ROOT / 'compiler with spaces' / 'luac')
+        result = lua.resolve({}, 'linux', lambda name: executable, run)
+        self.assertEqual(result['command'], [executable])
+        self.assertEqual(result['mode'], 'native')
+        self.assertEqual(len(calls), 1 + len(lua.PROBES))
+        self.assertTrue(all(command[-2:] == ['-p', '-'] for command, _ in calls[1:]))
+
+    def test_version_string_alone_does_not_prove_a_compiler(self):
+        run, _ = self.compiler_runner(accepts_everything=True)
+        with self.assertRaisesRegex(RuntimeError, 'invalid syntax'):
+            lua.resolve({'LUAC': 'configured'}, 'linux', lambda name: 'configured', run)
+
+    def test_other_lua_versions_are_rejected(self):
+        for version in [b'Lua 5.4.6', b'Lua 5.10.0']:
+            run, calls = self.compiler_runner(version)
+            with self.assertRaisesRegex(RuntimeError, 'not a Lua 5.1 compiler'):
+                lua.resolve({'LUAC': 'configured'}, 'linux', lambda name: 'configured', run)
+            self.assertEqual(len(calls), 1)
+
+    def test_invalid_explicit_compiler_never_falls_back(self):
+        for failure in [RuntimeError('bad compiler'), OSError('denied'), subprocess.TimeoutExpired('luac', 10)]:
+            with patch.object(lua, 'native_compiler', side_effect=failure), patch.object(lua, 'dll_candidates', side_effect=AssertionError('fallback')):
+                with self.assertRaises((RuntimeError, OSError, subprocess.SubprocessError)):
+                    lua.resolve({'LUAC': 'configured'}, 'win32', lambda name: 'configured')
+        with self.assertRaisesRegex(RuntimeError, 'no Lua 5.1 compiler'):
+            lua.resolve({'LUAC': 'missing'}, 'win32', lambda name: None)
+
+    def test_unavailable_compiler_does_not_run_installation_commands(self):
+        with patch.object(lua.subprocess, 'run', side_effect=AssertionError('unexpected command')):
+            with self.assertRaisesRegex(RuntimeError, 'No compatible Lua 5.1 compiler'):
+                lua.resolve({}, 'linux', lambda name: None)
+
+    def test_dll_fallback_uses_the_pinned_python_and_maintained_adapter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            library = Path(directory) / 'lua51.dll'
+            library.write_bytes(b'fixture')
+            with patch.object(lua, 'LuaDLL') as compiler, patch.object(lua, 'dll_candidates', return_value=[library]):
+                compiler.return_value.version.return_value = 'Lua 5.1'
+                compiler.return_value.compile.side_effect = lambda src: (0 if src == lua.PROBES[0][0] else 1, '')
+                result = lua.resolve({}, 'win32', lambda name: None)
+            self.assertEqual(result['mode'], 'dll')
+            self.assertEqual(result['compiler'], str(library.resolve()))
+            self.assertEqual(result['command'], [sys.executable, '-B', str(ROOT / '.tools/lua_runtime.py'), '--dll', str(library.resolve())])
+
+    def test_invalid_or_missing_pinned_dll_fails_without_discovery(self):
+        with patch.object(lua, 'dll_candidates', side_effect=AssertionError('rediscovery')):
+            with self.assertRaisesRegex(RuntimeError, 'does not exist'):
+                lua.resolve({'LUA51_DLL': str(ROOT / 'missing.dll')}, 'win32', lambda name: None)
+            with self.assertRaisesRegex(RuntimeError, 'requires Windows'):
+                lua.resolve({'LUA51_DLL': 'configured'}, 'linux', lambda name: None)
+
+    def test_trusted_windows_discovery_does_not_use_sandbox_localappdata(self):
+        paths = lua.dll_candidates({'USERPROFILE': str(ROOT / 'profile'), 'LOCALAPPDATA': 'sandbox'})
+        self.assertTrue(paths)
+        self.assertTrue(all(str(ROOT / 'profile') in str(path) for path in paths))
+        self.assertTrue(all('sandbox' not in str(path) for path in paths))
+
+    def test_help_does_not_discover_a_compiler(self):
+        with patch.object(sys, 'argv', ['lua_runtime', '--help']), patch.object(lua, 'resolve', side_effect=AssertionError('discovery')), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as result:
+                lua.main()
+            self.assertEqual(result.exception.code, 0)
+
+    def test_real_compiler_compiles_without_executing_addon_code(self):
+        try:
+            compiler = lua.resolve()
+        except RuntimeError as error:
+            self.skipTest(str(error))
+        command = compiler['command'] + ['-p', '-']
+        for source, code in [(b"error('addon code must not execute')", 0), (b'local x = = 1', 1)]:
+            checked = subprocess.run(command, input=source, capture_output=True)
+            self.assertEqual(checked.returncode == 0, code == 0, checked.stderr)
 
 
 class GitContractTests(unittest.TestCase):

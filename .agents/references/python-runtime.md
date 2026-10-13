@@ -1,4 +1,4 @@
-# Shared maintenance context and Python preflight
+# Shared maintenance context and runtime preflight
 
 Initialize root and environment once at maintenance entry. Reuse the context
 when entering another skill or branch; runtime and optional capabilities remain
@@ -14,6 +14,10 @@ unresolved until their first required use.
 - Resolve and freeze `python_runtime` below only before the first mutation or
   first helper requiring Python, whichever comes first. PR metadata, changed
   paths, and read-only analysis without Python helpers must not wait for it.
+- Resolve and freeze `lua_runtime` only for work that will create a commit,
+  before its first mutation. Read-only checks, no-op updates, fast-forward-only
+  syncs and installation without a new commit skip compiler discovery.
+  Reuse the descriptor across skills and branches; see Lua compiler resolution.
 - Determine and cache `physical_install` only at the install stage when needed:
   unavailable in Cloud or other nonlocal execution.
   In local Windows, establish access to the existing operational script directory
@@ -66,6 +70,35 @@ selecting another. `<python_runtime>` denotes this path, not a literal command.
 For spaces, use `& '<python_runtime>' .tools/release_target.py` in PowerShell or
 `'<python_runtime>' .tools/release_target.py` in Bash. Shell variables may not
 survive tool calls; retain the path in agent context and pass it explicitly.
+
+## Lua compiler resolution
+
+Run `<python_runtime> -B .tools/lua_runtime.py --resolve` after read-only scope
+and ancestry checks show that work needs a new commit, before its first mutation.
+This includes an approved PR application, a merge that needs a commit, direct
+maintenance/code changes and approved library vendoring before `--apply`.
+Skip this for read-only work, no-op/fast-forward-only updates and
+installation from already validated, committed files.
+
+Freeze the JSON descriptor as `lua_runtime` (`mode`, absolute `compiler`,
+`version`, `command`) and reuse it across skills and branches. Set `LUAC` to
+the frozen native compiler, or `LUA51_DLL` to the frozen DLL with `LUAC` unset,
+for the current process/invocation only. Run guardrails with the frozen Python.
+Revalidate that exact capability; do not repeat discovery or change compilers.
+
+The resolver honors explicit `LUAC`/`LUA51_DLL` first, then checks existing
+`luac5.1`/`luac` commands. On Windows it may use an existing Lua 5.1 DLL from
+known Warcraft Recorder installation locations. It validates version, valid
+and invalid syntax, and the 200-local/60-upvalue limits. The maintained
+`.tools/lua_runtime.py` DLL adapter compiles without executing addon sources.
+It does not need a temporary launcher, download tools, change PATH or write
+machine settings. Invalid explicit configuration fails without a fallback.
+
+If resolution or the pinned capability fails, explain the missing/incompatible
+Lua 5.1 compiler in Portuguese and stop before modifying the work that needs it.
+Preserve files and do not install tooling automatically. Missing executables,
+DLLs or adapters are failures, not permission to rediscover another compiler.
+All conflict choices, complete staged reviews and commit approvals still apply.
 
 ## Dependencies on demand
 

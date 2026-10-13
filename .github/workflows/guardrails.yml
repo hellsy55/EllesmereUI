@@ -9,7 +9,10 @@ on:
     paths:
       - '**/*.lua'
       - '.tools/guardrails.py'
+      - '.tools/lua_runtime.py'
+      - '.tools/python_runtime.py'
       - '.tools/tests/test_guardrails.py'
+      - '.tools/tests/test_maintenance.py'
       - '.github/workflows/guardrails.yml'
   push:
     branches: [main]
@@ -31,6 +34,9 @@ jobs:
 
       - name: Test the guardrails
         run: python3 .tools/tests/test_guardrails.py
+
+      - name: Test the maintenance preflight
+        run: python3 .tools/tests/test_maintenance.py
 
       - name: Run guardrails
         env:

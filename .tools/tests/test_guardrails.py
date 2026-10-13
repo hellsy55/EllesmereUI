@@ -1,8 +1,8 @@
 """Tests for .tools/guardrails.py: each check against small Lua sources, the
 repository-level ones in a scratch git repository.
 
-Run: python .tools/tests/test_guardrails.py  (needs git; the compile tests also need
-a Lua 5.1 luac -- luac5.1 on PATH, or LUAC=/path/to/luac -- and are skipped without one)
+Run: python .tools/tests/test_guardrails.py  (needs git; compile tests also need
+a compatible compiler discovered by lua_runtime.py, and are skipped without one)
 """
 import datetime
 import importlib.util
@@ -22,7 +22,6 @@ g = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(g)
 
 GATE = "if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)\n"
-LUAC = os.environ.get("LUAC", "luac5.1")
 
 
 def uses(src):
@@ -420,7 +419,10 @@ class ChangeRange(RepoCase):
         self.assertTrue(errors[0].startswith("Base.lua:2: bare GetSpecialization"))
 
 
-@unittest.skipUnless(shutil.which(LUAC), f"no Lua 5.1 compiler ({LUAC})")
+COMPILER_AVAILABLE = bool(g.find_luac()[0])
+
+
+@unittest.skipUnless(COMPILER_AVAILABLE, "no compatible Lua 5.1 compiler")
 class Compile(RepoCase):
     def test_syntax_error(self):
         errors = self.errors_for("A.lua", "local x = = 1\n", [g.check_compile])
@@ -885,6 +887,7 @@ class GitRound2(RepoCase):
         tools = os.path.join(self.repo.dir, ".tools")
         os.makedirs(tools)
         shutil.copy(ROOT / ".tools" / "guardrails.py", tools)
+        shutil.copy(ROOT / ".tools" / "lua_runtime.py", tools)
         self.repo.write("M\u00e9dias/A.lua", GATE + "-- caf\u00e9\n")
         head = self.repo.commit()
         env = dict(os.environ, PYTHONIOENCODING="ascii", PYTHONDONTWRITEBYTECODE="1")
@@ -1039,7 +1042,7 @@ class SpansAndFailures(RepoCase):
         self.assertEqual(errors, ["A.lua: could not be analysed (RuntimeError: boom); fix its "
                                   "syntax first, or report this"])
 
-    @unittest.skipUnless(shutil.which(LUAC), f"no Lua 5.1 compiler ({LUAC})")
+    @unittest.skipUnless(COMPILER_AVAILABLE, "no compatible Lua 5.1 compiler")
     def test_a_stray_else_still_reports_the_compile_error(self):
         errors = self.errors_for("Items.lua", "local function Label(id)\n"
                                               "    local name = C_Item.GetItemInfo(id)\n"

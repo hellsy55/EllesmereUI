@@ -13,7 +13,7 @@ import sys
 ERROR = "Maintenance tools require a working Python 3 runtime; stop before modifying branches."
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HELPERS = (".tools/release_target.py", ".tools/classify_library_range.py",
-           ".tools/check_lib_updates.py")
+           ".tools/check_lib_updates.py", ".tools/lua_runtime.py")
 PROBE = "import json,sys; print(json.dumps([sys.executable,list(sys.version_info[:3])]))"
 
 

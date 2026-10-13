@@ -9,7 +9,8 @@ untracked Lua files included), so a branch that is behind main is judged on its 
 changes only. BASE defaults to origin/main, or on a fork with an upstream remote to
 whichever of upstream/main and origin/main the branch left more recently. CI runs the
 same checks (.github/workflows/guardrails.yml); .tools/tests/test_guardrails.py tests
-them. Needs a Lua 5.1 compiler: luac5.1 on PATH, or LUAC=/path/to/luac.
+them. Resolve Lua 5.1 with lua_runtime.py: an existing native compiler (LUAC)
+or an existing Windows Lua 5.1 DLL (LUA51_DLL), with no tool installation.
 
 Line exceptions go in a comment on the offending statement, naming the approving human
 and a reason:
@@ -20,6 +21,7 @@ The first form is permanent. A dated one fails every run once its date (UTC) has
 import argparse
 import atexit
 import datetime
+import importlib.util
 import itertools
 import os
 import re
@@ -508,22 +510,15 @@ def sym(t):
 # Compile and line-1 gate
 # ---------------------------------------------------------------------------
 def find_luac():
-    """(the Lua 5.1 compiler to use, None) or (None, why there is none)."""
-    name = os.environ.get("LUAC", "luac5.1")
-    exe = shutil.which(name)
-    if not exe:
-        return None, (f"no Lua 5.1 compiler '{name}': install lua5.1 (luac5.1 on PATH) "
-                      f"or set LUAC=/path/to/luac")
+    """A validated compiler command, or a clear preflight error."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lua_runtime.py")
     try:
-        res = subprocess.run([exe, "-v"], capture_output=True, stdin=subprocess.DEVNULL,
-                             timeout=60)
-        version = (res.stdout + res.stderr).decode("utf-8", "replace").strip()
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, f"cannot run Lua compiler '{name}': {e}"
-    if "Lua 5.1" not in version:
-        first = version.splitlines()[0] if version else "no version"
-        return None, f"'{name}' is not a Lua 5.1 compiler ({first}); set LUAC to a luac 5.1"
-    return exe, None
+        spec = importlib.util.spec_from_file_location("eui_lua_runtime", path)
+        runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime)
+        return runtime.resolve()["command"], None
+    except (OSError, AttributeError, RuntimeError, subprocess.SubprocessError) as error:
+        return None, str(error)
 
 
 def check_compile(change, errors):
@@ -538,7 +533,8 @@ def check_compile(change, errors):
         src = change.read(path)
         if src.startswith(BOM):
             src = src[3:]
-        res = subprocess.run([exe, "-p", "-"], input=src, capture_output=True)
+        command = [exe] if isinstance(exe, str) else exe
+        res = subprocess.run(command + ["-p", "-"], input=src, capture_output=True)
         if res.returncode != 0:
             msg = res.stderr.decode("utf-8", "backslashreplace").strip()
             m = re.search(r"stdin:(\d+):\s*(.*)", msg, re.S)

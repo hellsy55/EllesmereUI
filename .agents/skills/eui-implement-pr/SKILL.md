@@ -15,6 +15,8 @@ Analyze a small, clear PR in the main chat. For a large or ambiguous PR, changes
 
 Before applying anything, stop and report in Portuguese and practical terms: what the user gains, what behavior or fork customization is lost or overwritten, and what stays the same. For a real Git conflict, read [merge conflicts](../../references/merge-conflicts.md) and present its functional explanation and four choices without code by default. For a large change without a technical conflict, still offer: apply as-is, apply with adaptation, skip that part, or apply nothing. Wait for the user's explicit choice; never apply a PR before this report and approval.
 
+After the human application choice and before modifying the branch, resolve or reuse the frozen `lua_runtime` through the shared maintenance context. Stop before application if Lua 5.1 validation is unavailable; read-only PR evaluation does not require it. Run guardrails with the pinned Python/compiler before the staged review.
+
 After an approved application, stage only intended changes, show the root staged review, and commit using the required English imperative subject and body without AI signatures. Include the PR number and upstream source in the commit body for traceability.
 
 ## Optional incremental installer and Drive delivery
