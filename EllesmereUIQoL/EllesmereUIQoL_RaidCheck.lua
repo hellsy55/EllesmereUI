@@ -207,7 +207,7 @@ local function VantusPrefix()
     local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(VANTUS_SEED)
     local name = info and info.name
     if not (issecretvalue and issecretvalue(name)) and name then
-        vantusPrefix = name:match("^(.-)[:%-：]")
+        vantusPrefix = name:match("^(.-)[:%-\239\188\154]")
     end
     return vantusPrefix
 end

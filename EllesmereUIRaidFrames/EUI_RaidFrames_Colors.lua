@@ -526,7 +526,7 @@ end
 -- flush at the top (same height), and the power bar and the uniform anchor region (health +
 -- power) end on the bar. Those two, and the bar's own edge, are re-anchored only while the option
 -- is or just was on, so the top layout never touches them.
-local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText, powerBar)
+local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText, powerBar, preview)
     local enabled = s.topNameBarEnabled
     local topBarH = enabled and PixelSnap(s.topNameBarHeight or 20) or 0
     local bottomY = (enabled and s.topNameBarBottom == true) and topBarH or 0
@@ -561,6 +561,7 @@ local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText
     end
     if not tnb then return topBarH end
     if not enabled then
+        if tnb._divider then ns.RF_ApplyTopNameDivider(tnb, s, preview) end
         tnb:Hide()
         return topBarH
     end
@@ -599,6 +600,7 @@ local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText
         if cur then tnbText:SetText(""); tnbText:SetText(cur) end
     end
     tnb:Show()
+    if s.topNameBarDivider == true or tnb._divider then ns.RF_ApplyTopNameDivider(tnb, s, preview) end
     return topBarH
 end
 

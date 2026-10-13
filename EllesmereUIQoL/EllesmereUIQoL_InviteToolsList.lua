@@ -60,7 +60,7 @@ end
 ------------------------------------------------------------------------
 
 -- Cleans up text that came from chat/Discord before it is split into names:
---   * look-alike apostrophes (` ´ ’ ʼ ...) become a plain ' (Zul`jin -> Zul'jin)
+--   * look-alike apostrophes (` \194\180 \226\128\153 \202\188 ...) become a plain ' (Zul`jin -> Zul'jin)
 --   * fancy dashes become a plain -
 --   * invisible characters (zero-width, non-breaking space, BOM) are removed
 -- Returns the cleaned text and how many fixes were made.
@@ -4002,12 +4002,12 @@ function IL:CreateFrame()
     -- that nickname is therefore the sort key. Case and common accents are
     -- ignored so names sort naturally.
     local FRIEND_SORT_ACCENTS = {
-        ["á"]="a",["à"]="a",["â"]="a",["ã"]="a",["ä"]="a",["é"]="e",["è"]="e",["ê"]="e",["ë"]="e",
-        ["í"]="i",["ì"]="i",["î"]="i",["ï"]="i",["ó"]="o",["ò"]="o",["ô"]="o",["õ"]="o",["ö"]="o",
-        ["ú"]="u",["ù"]="u",["û"]="u",["ü"]="u",["ç"]="c",["ñ"]="n",
-        ["Á"]="a",["À"]="a",["Â"]="a",["Ã"]="a",["Ä"]="a",["É"]="e",["È"]="e",["Ê"]="e",["Ë"]="e",
-        ["Í"]="i",["Ì"]="i",["Î"]="i",["Ï"]="i",["Ó"]="o",["Ò"]="o",["Ô"]="o",["Õ"]="o",["Ö"]="o",
-        ["Ú"]="u",["Ù"]="u",["Û"]="u",["Ü"]="u",["Ç"]="c",["Ñ"]="n",
+        ["\195\161"]="a",["\195\160"]="a",["\195\162"]="a",["\195\163"]="a",["\195\164"]="a",["\195\169"]="e",["\195\168"]="e",["\195\170"]="e",["\195\171"]="e",
+        ["\195\173"]="i",["\195\172"]="i",["\195\174"]="i",["\195\175"]="i",["\195\179"]="o",["\195\178"]="o",["\195\180"]="o",["\195\181"]="o",["\195\182"]="o",
+        ["\195\186"]="u",["\195\185"]="u",["\195\187"]="u",["\195\188"]="u",["\195\167"]="c",["\195\177"]="n",
+        ["\195\129"]="a",["\195\128"]="a",["\195\130"]="a",["\195\131"]="a",["\195\132"]="a",["\195\137"]="e",["\195\136"]="e",["\195\138"]="e",["\195\139"]="e",
+        ["\195\141"]="i",["\195\140"]="i",["\195\142"]="i",["\195\143"]="i",["\195\147"]="o",["\195\146"]="o",["\195\148"]="o",["\195\149"]="o",["\195\150"]="o",
+        ["\195\154"]="u",["\195\153"]="u",["\195\155"]="u",["\195\156"]="u",["\195\135"]="c",["\195\145"]="n",
     }
     local function FriendSortKey(name)
         return (name or ""):lower():gsub("[\195][\128-\191]", function(ch) return FRIEND_SORT_ACCENTS[ch] end)
@@ -4639,7 +4639,12 @@ function IL:CreateFrame()
         end
 
         local function RefreshFaction()
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                ns.CombatQueue.Defer("InviteToolsFactions", function()
+                    if faction:IsShown() then RefreshFaction() end
+                end)
+                return
+            end
             local list = GroupFactions()
             local nA, nH = 0, 0
             for i = 1, #list do
@@ -4799,7 +4804,6 @@ function IL:CreateFrame()
     end)
     FA.frame:SetScript("OnShow", function()
         pcall(FA.frame.RegisterEvent, FA.frame, "GROUP_ROSTER_UPDATE")
-        pcall(FA.frame.RegisterEvent, FA.frame, "PLAYER_REGEN_ENABLED")
         factionBtn.selected = true
         factionBtn:SetBackdropBorderColor(accent[1], accent[2], accent[3], 1)
     end)

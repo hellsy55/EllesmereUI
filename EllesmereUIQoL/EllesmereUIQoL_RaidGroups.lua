@@ -3128,7 +3128,7 @@ local function PreviewSeatMenu(anchor,i)
         end
         if not name then
             options[#options+1]={label="Add Pinned Guest...",action=function()
-                InputPrompt("Pinned Guest — Character-Realm (or setup):","",function(value)
+                InputPrompt("Pinned Guest \226\128\148 Character-Realm (or setup):","",function(value)
                     value=Trim(value)
                     if value:lower()=="setup" then
                         model.seats[i]=nil
@@ -3643,7 +3643,7 @@ local function ShowApplyPreview(model)
             local available=PreviewAvailableMembers(model)
             local maxOffset=math.max(0,#available-10)
             model.availableOffset=math.min(model.availableOffset or 0,maxOffset)
-            previewWindow._availableTitle:SetText(LF("Available Players (%d) — select or drag into After Apply",#available))
+            previewWindow._availableTitle:SetText(LF("Available Players (%d) \226\128\148 select or drag into After Apply",#available))
             local groupCounts,neededIncoming={},{}
             for _,m in ipairs(rosterSorted) do groupCounts[m.group]=(groupCounts[m.group] or 0)+1 end
             for key,w in pairs(plan.wanted) do
@@ -4865,7 +4865,7 @@ function RefreshNicknames()
             row._label:SetText(rec.type=="nickname" and
                 ((nickCollapsed[rec.id] and "+ " or "- ")..
                     "|cff0cd29f"..rec.nickname.."|r "..LF("(%d characters)",#rec.children)..
-                    (rec.locked and (" — "..L("Locked")) or "").." — "..L(rec.source or "Saved"))
+                    (rec.locked and (" \226\128\148 "..L("Locked")) or "").." \226\128\148 "..L(rec.source or "Saved"))
                 or rec.name)
             row._lock:SetShown(rec.type=="nickname")
             if rec.type=="nickname" then
@@ -5040,7 +5040,7 @@ local function MainSeatMenu(row)
     if not RGStyle.emptyPinnedDraft[i] and (not v or v=="GUEST" or v==RGStyle.SETUP_GUEST) and
         Enabled("guestFeatures") and Enabled("guestRightClick") then
         choices[#choices+1]={label="Add Pinned Guest...",action=function()
-            InputPrompt("Pinned Guest — Character-Realm (or setup):","",function(value)
+            InputPrompt("Pinned Guest \226\128\148 Character-Realm (or setup):","",function(value)
                 value=Trim(value)
                 if value:lower()=="setup" then
                     SetDraft(i,RGStyle.SETUP_GUEST)
@@ -5222,7 +5222,7 @@ function RefreshExtras()
     local list=UnlistedPlayers()
     extraOffset=math.max(0,math.min(extraOffset,math.max(0,#list-10)))
     if win._unlistedScrollbar then win._unlistedScrollbar:Sync() end
-    if extrasLabel then extrasLabel:SetText(LF("%s — Unlisted (%d)",L(listGuild and "Guild" or "Raid"),#list)) end
+    if extrasLabel then extrasLabel:SetText(LF("%s \226\128\148 Unlisted (%d)",L(listGuild and "Guild" or "Raid"),#list)) end
     if listModeButton then listModeButton._lbl:SetText(L(listGuild and "Guild / Raid" or "Raid / Guild")) end
     for j,row in ipairs(extras) do
         local info=list[extraOffset+j]
@@ -5279,8 +5279,8 @@ function Refresh()
     end
     if mainHelp then
         local text="Shift+click to edit"
-        text=text.." • Right-click: slot menu"
-        if Enabled("editorTools") and Enabled("editorDrag") then text=text.." • Drag seats or group titles to swap (also in combat)" end
+        text=text.." \226\128\162 Right-click: slot menu"
+        if Enabled("editorTools") and Enabled("editorDrag") then text=text.." \226\128\162 Drag seats or group titles to swap (also in combat)" end
         mainHelp:SetText(L(text))
     end
     if dirtyLabel then
@@ -5505,7 +5505,7 @@ local function EnsureMainWindow()
     mainHelp:SetTextColor(.72,.75,.78)
     ns._BuildRaidGroupsMainSlots()
     local left=703
-    extrasLabel=Text(win,11,"Raid — Unlisted")
+    extrasLabel=Text(win,11,"Raid \226\128\148 Unlisted")
     extrasLabel:SetPoint("TOPLEFT",left,-60)
     for i=1,10 do
         local r=CreateFrame("Button",nil,win)
@@ -5537,7 +5537,7 @@ local function EnsureMainWindow()
                 GameTooltip:SetOwner(self,"ANCHOR_RIGHT")
                 GameTooltip:AddLine(LF("%s (not in setup)",self._member.name))
                 if Enabled("guestFeatures") and Enabled("guestRightClick") then
-                    GameTooltip:AddLine(L("Left: assign • Right: player actions"),.8,.8,.8)
+                    GameTooltip:AddLine(L("Left: assign \226\128\162 Right: player actions"),.8,.8,.8)
                 else
                     GameTooltip:AddLine(L("Left: assign"),.8,.8,.8)
                 end
@@ -5774,18 +5774,18 @@ end)
 -- Only cosmetic punctuation/spacing and common Latin accents are folded; this
 -- deliberately does not perform fuzzy or partial matches.
 local SETUP_FOLD = {
-    ["á"]="a",["à"]="a",["â"]="a",["ã"]="a",["ä"]="a",["å"]="a",
-    ["Á"]="a",["À"]="a",["Â"]="a",["Ã"]="a",["Ä"]="a",["Å"]="a",
-    ["é"]="e",["è"]="e",["ê"]="e",["ë"]="e",
-    ["É"]="e",["È"]="e",["Ê"]="e",["Ë"]="e",
-    ["í"]="i",["ì"]="i",["î"]="i",["ï"]="i",
-    ["Í"]="i",["Ì"]="i",["Î"]="i",["Ï"]="i",
-    ["ó"]="o",["ò"]="o",["ô"]="o",["õ"]="o",["ö"]="o",
-    ["Ó"]="o",["Ò"]="o",["Ô"]="o",["Õ"]="o",["Ö"]="o",
-    ["ú"]="u",["ù"]="u",["û"]="u",["ü"]="u",
-    ["Ú"]="u",["Ù"]="u",["Û"]="u",["Ü"]="u",
-    ["ç"]="c",["Ç"]="c",["ñ"]="n",["Ñ"]="n",["ý"]="y",["Ý"]="y",
-    ["’"]="",["‘"]="",["´"]="",["`"]="",[" "]="",
+    ["\195\161"]="a",["\195\160"]="a",["\195\162"]="a",["\195\163"]="a",["\195\164"]="a",["\195\165"]="a",
+    ["\195\129"]="a",["\195\128"]="a",["\195\130"]="a",["\195\131"]="a",["\195\132"]="a",["\195\133"]="a",
+    ["\195\169"]="e",["\195\168"]="e",["\195\170"]="e",["\195\171"]="e",
+    ["\195\137"]="e",["\195\136"]="e",["\195\138"]="e",["\195\139"]="e",
+    ["\195\173"]="i",["\195\172"]="i",["\195\174"]="i",["\195\175"]="i",
+    ["\195\141"]="i",["\195\140"]="i",["\195\142"]="i",["\195\143"]="i",
+    ["\195\179"]="o",["\195\178"]="o",["\195\180"]="o",["\195\181"]="o",["\195\182"]="o",
+    ["\195\147"]="o",["\195\146"]="o",["\195\148"]="o",["\195\149"]="o",["\195\150"]="o",
+    ["\195\186"]="u",["\195\185"]="u",["\195\187"]="u",["\195\188"]="u",
+    ["\195\154"]="u",["\195\153"]="u",["\195\155"]="u",["\195\156"]="u",
+    ["\195\167"]="c",["\195\135"]="c",["\195\177"]="n",["\195\145"]="n",["\195\189"]="y",["\195\157"]="y",
+    ["\226\128\153"]="",["\226\128\152"]="",["\194\180"]="",["`"]="",["\194\160"]="",
 }
 local function SetupAliasKey(value)
     value=Trim(value or "")
