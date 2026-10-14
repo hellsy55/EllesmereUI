@@ -970,6 +970,7 @@ function ns.RefreshAllSettings()
     -- Re-read the profile reference: RepointAllDBs may have swapped the profile table
     -- (spec-linked profiles). All color lookups via _C() read this local.
     SetProfile(ENP.db.profile)
+    if ns.ApplyScreenInsets then ns.ApplyScreenInsets() end
     -- Before any plate repaints: the Text Coloring slot flags the health pass reads
     -- and the name text's combo formats.
     ns.NP_RefreshSlotClassFlags()

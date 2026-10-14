@@ -245,6 +245,8 @@ factionFrame:SetScript("OnEvent", function(_, event, unit)
             C_Timer.After(0.6, function()
                 RefreshThreatContextAndPlateColors()
                 UpdateFactionFrameForZone()
+                -- Restore saved insets after Blizzard's world-entry CVar setup.
+                if ns.ApplyScreenInsets then ns.ApplyScreenInsets() end
             end)
         end
         return
@@ -538,6 +540,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
             if ns.NPC_ReanchorArrows then ns.NPC_ReanchorArrows(plate) end
         end
     elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+        if event == "PLAYER_REGEN_ENABLED" and ns.ApplyScreenInsets then ns.ApplyScreenInsets() end
         for _, plate in pairs(ns.plates) do
             plate:UpdateHealthColor()
         end
