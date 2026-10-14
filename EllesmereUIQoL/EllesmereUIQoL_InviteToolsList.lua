@@ -1127,6 +1127,30 @@ function IL:GetListText(index)
     return self.db["List" .. index] or ""
 end
 
+-- A row action sends only the selected character, without restarting or
+-- replacing an existing list-wide invitation session.
+function IL:InviteOne(name)
+    if InCombatLockdown() or type(name) ~= "string" or name == "" then return end
+    if InGroup(name) or IsMe(name) then
+        InviteTools:Print(string.format("%s is already in your group.", name))
+        return
+    end
+    if not self.session then self:StartSession({ name }) end
+    -- Preserve a pending list-wide raid conversion when this row is retried.
+    -- Otherwise use the ordinary single-name capacity/convert path.
+    if self.pendingList then
+        local known=false
+        for _,pending in ipairs(self.pendingList) do
+            if pending:lower()==name:lower() then known=true;break end
+        end
+        if not known then self.pendingList[#self.pendingList+1]=name end
+        self:InviteNames({ name }, true)
+    else
+        self:InviteNames({ name }, false)
+    end
+    self:UpdateUI()
+end
+
 function IL:InviteFromList(index)
     if InCombatLockdown() then
         InviteTools:Print(L["Invite List is disabled in combat."])
@@ -2354,6 +2378,8 @@ local ROW_H = 24
 local ROW_GAP = 2
 local STATUS_W = 96 -- width of the status column
 local CLASS_W = 16  -- class icon next to the number
+local REFRESH_W = 18 -- individual invite button, immediately left of row number
+local REFRESH_GAP = 3
 local HEADER_H = 18 -- column header strip at the top of the list
 
 -- List size: one factor scales everything in the list (row height, number,
@@ -2712,7 +2738,7 @@ function IL:CreateFrame()
 
     -- Column headers at the top: Class, Name and Status. Nothing above the
     -- number column.
-    local function NameX() return 4 + 2 + M(22) + 4 + M(CLASS_W) + 4 + 6 end -- scroll inset, number, icon, edit text inset
+    local function NameX() return 4 + 2 + M(REFRESH_W) + M(REFRESH_GAP) + M(22) + 4 + M(CLASS_W) + 4 + 6 end -- scroll inset, refresh, number, icon, edit text inset
     local headName = holder:CreateFontString(nil, "OVERLAY")
     headName:SetPoint("TOPLEFT", holder, "TOPLEFT", NameX(), -5)
     headName:SetJustifyH("LEFT")
@@ -2722,7 +2748,7 @@ function IL:CreateFrame()
     headName:SetText(L["Name"])
 
     -- "Class" is centred over the class icon column.
-    local function ClassX() return 4 + 2 + M(22) + 4 + math.floor(M(CLASS_W) / 2) end
+    local function ClassX() return 4 + 2 + M(REFRESH_W) + M(REFRESH_GAP) + M(22) + 4 + math.floor(M(CLASS_W) / 2) end
     local headClass = holder:CreateFontString(nil, "OVERLAY")
     headClass:SetPoint("TOP", holder, "TOPLEFT", ClassX(), -5)
     StyleFont(headClass, "small")
@@ -2932,8 +2958,36 @@ function IL:CreateFrame()
         local row = CreateFrame("Frame", nil, content)
         row:SetHeight(RowH())
 
+        local refresh = CreateFrame("Button", nil, row)
+        refresh:SetSize(M(REFRESH_W), M(REFRESH_W))
+        refresh:SetPoint("LEFT", row, "LEFT", 2, 0)
+        local refreshIcon = refresh:CreateTexture(nil, "ARTWORK")
+        refreshIcon:SetSize(M(15), M(15))
+        refreshIcon:SetPoint("CENTER")
+        refreshIcon:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\icons\\sync.png")
+        refreshIcon:SetVertexColor(textSec[1], textSec[2], textSec[3], 1)
+        refresh:SetScript("OnEnter", function(self)
+            refreshIcon:SetVertexColor(accent[1], accent[2], accent[3], 1)
+            EllesmereUI.ShowWidgetTooltip(self, "Invite " .. (row.name or "") .. " manually", { force = true })
+        end)
+        refresh:SetScript("OnLeave", function()
+            refreshIcon:SetVertexColor(textSec[1], textSec[2], textSec[3], 1)
+            EllesmereUI.HideWidgetTooltip()
+        end)
+        refresh:SetScript("OnClick", function()
+            if InCombatLockdown() or locked then return end
+            local index, name = row.index, row.name
+            if not (index and name and IL.names and IL.names[index] == name) then return end
+            -- Discard half-edited names before sending anything.
+            if row.edit:HasFocus() then row.edit.revert = true end
+            ClearAllFocus()
+            IL:InviteOne(name)
+        end)
+        row.refresh = refresh
+        row.refreshIcon = refreshIcon
+
         row.num = row:CreateFontString(nil, "OVERLAY")
-        row.num:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.num:SetPoint("LEFT", refresh, "RIGHT", M(REFRESH_GAP), 0)
         row.num:SetWidth(M(22))
         row.num:SetJustifyH("RIGHT")
         StyleFont(row.num, "small")
@@ -3030,6 +3084,7 @@ function IL:CreateFrame()
         if locked then
             SetWidgetEnabled(e, false)
             SetWidgetEnabled(del, false)
+            SetWidgetEnabled(refresh, false)
         end
         return row
     end
@@ -4825,6 +4880,10 @@ function IL:CreateFrame()
         ApplyFontScale()
         for i = 1, #rows do
             local row = rows[i]
+            row.refresh:SetSize(M(REFRESH_W), M(REFRESH_W))
+            row.refreshIcon:SetSize(M(15), M(15))
+            row.num:ClearAllPoints()
+            row.num:SetPoint("LEFT", row.refresh, "RIGHT", M(REFRESH_GAP), 0)
             row.num:SetWidth(M(22))
             row.class:SetSize(M(CLASS_W), M(CLASS_W))
             row.del:SetSize(M(20), RowH())

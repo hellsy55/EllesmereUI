@@ -2867,6 +2867,36 @@ local function RosterMembersSignature()
     table.sort(keys)
     return table.concat(keys,";")
 end
+-- Stable identity snapshot for diagnosing who joined, left or took over
+-- leadership. Raid indices and subgroup positions are deliberately excluded.
+function RGStyle.RosterMemberSnapshot()
+    local members={}
+    for _,member in ipairs(rosterSorted) do
+        members[member.key]={name=member.name,leader=member.rank==2}
+    end
+    return members
+end
+function RGStyle.DescribeRosterChange(before,after)
+    local departed,joined,oldLeader,newLeader={}, {},nil,nil
+    for key,member in pairs(before) do
+        if not after[key] then departed[#departed+1]=member.name end
+        if member.leader then oldLeader=member.name end
+    end
+    for key,member in pairs(after) do
+        if not before[key] then joined[#joined+1]=member.name end
+        if member.leader then newLeader=member.name end
+    end
+    table.sort(departed)
+    table.sort(joined)
+    local details={}
+    if #departed>0 then details[#details+1]="left: "..table.concat(departed,", ") end
+    if #joined>0 then details[#details+1]="joined: "..table.concat(joined,", ") end
+    if oldLeader~=newLeader then
+        details[#details+1]="raid leader: "..(oldLeader or "unknown").." -> "..(newLeader or "unknown")
+    end
+    return #details>0 and table.concat(details,"; ") or "raid membership or leadership changed"
+end
+
 local function PreviewFingerprint(guests, source)
     local t={RosterMembersSignature()}
     for i=1,SLOT_COUNT do
@@ -3935,6 +3965,8 @@ BeginConfirmedApply=function(plan)
         Notice(now.shift.guidance,"leader")
     end
     applyState={wanted=now.wanted,order=now.order,members=now.members,
+        originalMembers=RGStyle.RosterMemberSnapshot(),rosterChangeSignature=nil,
+        rosterChangeChecks=0,rosterIncompleteChecks=0,
         steps=0,unchanged=0,phase="groups",attemptedExact={},lastOperation=nil,
         previewDraft=plan.fromPreview and CopyDraft(plan.previewSource) or nil,
         previewExcludedGuests=plan.fromPreview and CopyKeys(plan.excludedGuests) or nil,
@@ -4008,7 +4040,13 @@ function ProcessApply()
         return
     end
     if not ns.RaidGroupsPermitted() then
-        StopApply("Group application interrupted: raid leader or assistant permission required.")
+        Roster()
+        local currentLeader
+        for _,member in ipairs(rosterSorted) do
+            if member.rank==2 then currentLeader=member.name;break end
+        end
+        StopApply("Group application stopped: raid leader or assistant permission lost"..
+            (currentLeader and " (current raid leader: "..currentLeader..")" or "")..".")
         return
     end
     if InGroupCombat() then
@@ -4017,10 +4055,42 @@ function ProcessApply()
         return
     end
     Roster()
-    if state.members~=RosterMembersSignature() then
-        StopApply("Group application stopped: raid membership or leadership changed. Review Apply Groups preview again.")
+    -- GROUP_ROSTER_UPDATE can briefly expose fewer readable entries than
+    -- GetNumGroupMembers. Never treat that intermediate read as a departure,
+    -- and never issue a protected operation against such an incomplete roster.
+    local rosterSize=GetNumGroupMembers() or 0
+    if #rosterSorted~=rosterSize then
+        state.rosterIncompleteChecks=state.rosterIncompleteChecks+1
+        if state.rosterIncompleteChecks>=6 then
+            StopApply("Group application stopped: raid roster data remained incomplete ("..
+                #rosterSorted.." of "..rosterSize.." players readable). No subgroup changes were attempted during the incomplete roster reads.")
+        else
+            QueueApply()
+        end
         return
     end
+    state.rosterIncompleteChecks=0
+    local members=RosterMembersSignature()
+    if state.members~=members then
+        -- Confirm an unexpected change twice against a complete roster. A
+        -- transient update must not cancel the entire Exact Positions cycle.
+        if state.rosterChangeSignature==members then
+            state.rosterChangeChecks=state.rosterChangeChecks+1
+        else
+            state.rosterChangeSignature=members
+            state.rosterChangeChecks=1
+        end
+        if state.rosterChangeChecks>=2 then
+            StopApply("Group application stopped: "..
+                RGStyle.DescribeRosterChange(state.originalMembers,RGStyle.RosterMemberSnapshot())..
+                ". Review Apply Groups preview again.")
+        else
+            QueueApply()
+        end
+        return
+    end
+    state.rosterChangeSignature=nil
+    state.rosterChangeChecks=0
     local signature = RosterSignature()
     if state.lastOperation then
         if signature == state.lastOperation then
@@ -4031,7 +4101,9 @@ function ProcessApply()
         state.lastOperation=nil
     end
     if state.unchanged >= 4 or state.steps >= 90 then
-        StopApply("Stopped: raid roster is not accepting group changes.")
+        StopApply("Group application stopped: raid roster is not accepting group changes"..
+            (state.lastActors and " for "..state.lastActors or "")..
+            (state.steps>=90 and " (90-operation safety limit)." or " (repeated unchanged roster)."))
         return
     end
     local counts={}
@@ -4044,11 +4116,24 @@ function ProcessApply()
         local cycle=state.bridgeCycle
         local a,b,c=rosterByKey[cycle.a],rosterByKey[cycle.b],rosterByKey[cycle.c]
         if not a or not b or not c or a.rank==2 or b.rank==2 or c.rank==2 or
-            RGStyle.IsArrangementIgnored(a.key) or RGStyle.IsArrangementIgnored(b.key) or
-            RGStyle.IsArrangementIgnored(c.key) then
-            StopApply("Exact Positions stopped: bridge member unavailable or raid leader changed.")
+            RGStyle.IsArrangementIgnored(cycle.a) or RGStyle.IsArrangementIgnored(cycle.b) or
+            RGStyle.IsArrangementIgnored(cycle.c) then
+            local issues={}
+            for _,entry in ipairs({{cycle.a,cycle.aName},{cycle.b,cycle.bName},{cycle.c,cycle.cName}}) do
+                local member=rosterByKey[entry[1]]
+                if not member then
+                    issues[#issues+1]=entry[2].." (unavailable)"
+                elseif member.rank==2 then
+                    issues[#issues+1]=entry[2].." (now raid leader)"
+                elseif RGStyle.IsArrangementIgnored(entry[1]) then
+                    issues[#issues+1]=entry[2].." (Ignore Arrangement)"
+                end
+            end
+            StopApply("Exact Positions stopped: bridge player(s): "..table.concat(issues,", ")..".")
             return
         end
+        -- Verify the previous protected swap before starting another. Delayed
+        -- server roster updates must not be mistaken for a failed bridge.
         local left,right
         if cycle.stage==1 and a.group==cycle.group and b.group==cycle.group and c.group==cycle.other then
             left,right=a,c
@@ -4056,17 +4141,30 @@ function ProcessApply()
             left,right=a,b
         elseif cycle.stage==3 and a.group==cycle.group and b.group==cycle.other and c.group==cycle.group then
             left,right=b,c
+        elseif cycle.stage==4 and a.group==cycle.group and b.group==cycle.group and c.group==cycle.other then
+            state.bridgeCycle=nil -- all three swaps reached the client roster
         else
-            StopApply("Exact Positions stopped: raid roster changed during a bridge swap.")
+            cycle.waits=(cycle.waits or 0)+1
+            if cycle.waits>=4 then
+                StopApply("Exact Positions stopped: bridge swap not confirmed for "..
+                    cycle.aName.." (Group "..a.group.."), "..
+                    cycle.bName.." (Group "..b.group.."), "..
+                    cycle.cName.." (Group "..c.group..").")
+            else
+                QueueApply()
+            end
             return
         end
-        state.steps=state.steps+1
-        state.lastOperation=signature
-        SwapRaidSubgroup(left.index,right.index)
-        cycle.stage=cycle.stage+1
-        if cycle.stage>3 then state.bridgeCycle=nil end
-        QueueApply()
-        return
+        if left and right then
+            state.steps=state.steps+1
+            state.lastOperation=signature
+            state.lastActors=left.name.." and "..right.name
+            SwapRaidSubgroup(left.index,right.index)
+            cycle.stage=cycle.stage+1
+            cycle.waits=0
+            QueueApply()
+            return
+        end
     end
     local wrong, needGroup
     for _,k in ipairs(state.order) do
@@ -4077,6 +4175,7 @@ function ProcessApply()
         local partner
         if counts[needGroup] < GROUP_SIZE then
             state.lastOperation=signature
+            state.lastActors=wrong.name.." (Group "..wrong.group.." -> "..needGroup..")"
             state.steps=state.steps+1
             SetRaidSubgroup(wrong.index,needGroup)
             QueueApply()
@@ -4097,10 +4196,16 @@ function ProcessApply()
             end
         end
         if not partner then
-            StopApply(LF("Unable to place %s: no movable destination member.",wrong.name))
+            local occupants={}
+            for _,member in ipairs(rosterSorted) do
+                if member.group==needGroup then occupants[#occupants+1]=member.name end
+            end
+            StopApply("Unable to place "..wrong.name.." into Group "..needGroup..
+                ": no movable destination member (occupants: "..table.concat(occupants,", ")..").")
             return
         end
         state.lastOperation=signature
+        state.lastActors=wrong.name.." and "..partner.name
         state.steps=state.steps+1
         SwapRaidSubgroup(wrong.index,partner.index)
         QueueApply()
@@ -4118,20 +4223,23 @@ function ProcessApply()
             if want and not want.ignored and actual~=want.seat and m.rank~=2 then
                 local attempt=m.key..":"..want.group..":"..want.seat
                 if not state.attemptedExact[attempt] then
-                    state.attemptedExact[attempt]=true
                     local occupant,bridge
                     local pos=0
                     for _,x in ipairs(rosterSorted) do
                         if x.group==m.group then
                             pos=pos+1
                             if pos==want.seat then occupant=x end
-                        elseif not bridge and x.rank~=2 then bridge=x end
+                        elseif not bridge and x.rank~=2 and
+                            not RGStyle.IsArrangementIgnored(x.key) then
+                            bridge=x
+                        end
                     end
                     if occupant and bridge and occupant.rank~=2 and occupant.key~=m.key and
-                        not RGStyle.IsArrangementIgnored(occupant.key) and
-                        not RGStyle.IsArrangementIgnored(bridge.key) then
+                        not RGStyle.IsArrangementIgnored(occupant.key) then
+                        state.attemptedExact[attempt]=true
                         state.bridgeCycle={a=m.key,b=occupant.key,c=bridge.key,
-                            group=m.group,other=bridge.group,stage=1}
+                            aName=m.name,bName=occupant.name,cName=bridge.name,
+                            group=m.group,other=bridge.group,stage=1,waits=0}
                         -- Call the next iteration directly: it will execute
                         -- only stage one using the current roster, then wait.
                         ProcessApply()
@@ -4144,14 +4252,18 @@ function ProcessApply()
         -- ordering: WoW controls raid indices, and leaders may sort first.
         Roster()
         local seen={}
-        local unsatisfied=0
+        local unsatisfied={}
         for _,m in ipairs(rosterSorted) do
             seen[m.group]=(seen[m.group] or 0)+1
             local want=state.wanted[m.key]
-            if want and seen[m.group]~=want.seat then unsatisfied=unsatisfied+1 end
+            if want and not want.ignored and (m.group~=want.group or seen[m.group]~=want.seat) then
+                unsatisfied[#unsatisfied+1]=m.name.." (G"..m.group.."/"..seen[m.group]..
+                    " instead of G"..want.group.."/"..want.seat..")"
+            end
         end
-        if unsatisfied>0 then
-            Notice(LF("Exact Positions: %d player positions could not be confirmed in the desired order.",unsatisfied))
+        if #unsatisfied>0 then
+            Notice("Exact Positions: unable to confirm the desired positions for "..
+                table.concat(unsatisfied,", ")..".")
         end
     end
     -- Group membership is authoritative; internal ordering is not guaranteed
@@ -4164,7 +4276,7 @@ function ProcessApply()
         for _,m in ipairs(rosterSorted) do
             seen[m.group]=(seen[m.group] or 0)+1
             local wanted=state.wanted[m.key]
-            if wanted and (wanted.group~=m.group or wanted.seat~=seen[m.group]) then
+            if wanted and not wanted.ignored and (wanted.group~=m.group or wanted.seat~=seen[m.group]) then
                 unsatisfied=unsatisfied+1
             end
         end
