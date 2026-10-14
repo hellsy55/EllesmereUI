@@ -240,6 +240,23 @@ function ns.FriendlyNameClassCVar(db)
     return on and 1 or 0
 end
 
+-- Screen-inset CVars may revert to Blizzard defaults across sessions. Only
+-- re-apply values the user explicitly chose in the EUI nameplates profile.
+local function ApplySavedScreenInset(name)
+    local value = p and p[name]
+    if type(value) ~= "number" or not C_CVar.GetCVarInfo(name) then return end
+    local current = tonumber(GetCVar(name))
+    if not current or math.abs(current - value) > 0.0001 then
+        EllesmereUI.SetCVar(name, value, "EllesmereUINameplates")
+    end
+end
+
+function ns.ApplyScreenInsets()
+    if InCombatLockdown() or not (C_CVar and C_CVar.GetCVarInfo) then return end
+    ApplySavedScreenInset("nameplateTopInset")
+    ApplySavedScreenInset("nameplateBottomInset")
+end
+
 local function SetupAuraCVars()
     if NamePlateConstants and Enum then
         local npcCVar = NamePlateConstants.ENEMY_NPC_AURA_DISPLAY_CVAR
@@ -316,6 +333,7 @@ local function SetupAuraCVars()
             TextureLoadingGroupMixin.RemoveTexture(wrapper, "updateNameUsesGetUnitName")
         end
     end
+    ns.ApplyScreenInsets()
     -- Apply stacking state via the Midnight bitfield CVar.
     ns.RefreshStackingMotion()
     local function ApplyNamePlateClickArea()

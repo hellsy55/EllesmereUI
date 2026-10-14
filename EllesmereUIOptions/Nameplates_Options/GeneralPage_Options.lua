@@ -605,9 +605,10 @@ local function BuildGeneralPage(pageName, parent, yOffset)
     end
 
     -- Stacking Speed | Top/Bottom Screen Insets: CVars Blizzard restored in 12.1.5,
-    -- so each slider exists only on a client that has its CVar. Pure CVar
-    -- passthrough like Line of Sight Opacity: nothing stored, nothing written
-    -- until a slider moves. Speed reads as a percent of the client's own
+    -- so each slider exists only on a client that has its CVar. Stacking Speed
+    -- remains a pure CVar passthrough; screen insets save to the nameplates
+    -- profile when changed so they survive sessions. Unset insets leave the
+    -- client's CVar untouched. Speed reads as a percent of the client's own
     -- default; the insets as a percent of the screen's height (raw values if
     -- the client's default is not a fraction).
     do
@@ -641,7 +642,10 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                 end,
                 setValue=function(v)
                     if InCombatLockdown() then return end
-                    EllesmereUI.SetCVar("nameplateTopInset", frac and v / 100 or v, "EllesmereUINameplates")
+                    local value = frac and v / 100 or v
+                    if EllesmereUI.SetCVar("nameplateTopInset", value, "EllesmereUINameplates") then
+                        DB()["nameplateTopInset"] = value
+                    end
                 end,
                 tooltip="How far from the top of the screen nameplates stop. 0 lets them reach the edge." }
         end
@@ -657,7 +661,10 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                 end,
                 setValue=function(v)
                     if InCombatLockdown() then return end
-                    EllesmereUI.SetCVar("nameplateBottomInset", frac and v / 100 or v, "EllesmereUINameplates")
+                    local value = frac and v / 100 or v
+                    if EllesmereUI.SetCVar("nameplateBottomInset", value, "EllesmereUINameplates") then
+                        DB()["nameplateBottomInset"] = value
+                    end
                 end,
                 tooltip="How far from the bottom of the screen nameplates stop. 0 lets them reach the edge." }
         end
