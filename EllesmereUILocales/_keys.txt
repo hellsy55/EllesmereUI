@@ -1302,7 +1302,7 @@ this ability
 this spec
 unknown
 |cff0cd29dLeft-click:|r |cffE0E0E0Toggle EllesmereUI|r
-|cff0cd29dMiddle-click:|r |cffE0E0E0Hide Minimap Button|r
+|cff0cd29dMiddle-click:|r |cffE0E0E0Open Raid Group Setup|r
 |cff0cd29dRight-click:|r |cffE0E0E0Enter Unlock Mode|r
 |cff888888Click to create. Right-click to configure.|r
 |cff888888Click to create|r

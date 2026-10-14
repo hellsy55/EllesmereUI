@@ -1180,6 +1180,48 @@ function AK.SetDurationTextSafe(button, fontString, durationOpts)
     return false, false
 end
 
+-- 12.1.5 native caster-name text. AuraButton:SetCasterName populates the
+-- FontString in the engine, including secret caster identities. No Lua aura
+-- data is read, and no nickname/UnitName lookup is performed by addons.
+-- The FontString is precreated and bound ONCE per button so enabling this
+-- display during restricted combat never needs to create/rebind a secure aura.
+local CASTER_POINTS = {
+    top = { "BOTTOM", "TOP", 0, 2 },
+    bottom = { "TOP", "BOTTOM", 0, -2 },
+    left = { "RIGHT", "LEFT", -2, 0 },
+    right = { "LEFT", "RIGHT", 2, 0 },
+    topleft = { "BOTTOMRIGHT", "TOPLEFT", -2, 2 },
+    topright = { "BOTTOMLEFT", "TOPRIGHT", 2, 2 },
+    bottomleft = { "TOPRIGHT", "BOTTOMLEFT", -2, -2 },
+    bottomright = { "TOPLEFT", "BOTTOMRIGHT", 2, -2 },
+    center = { "CENTER", "CENTER", 0, 0 },
+}
+function AK.PositionCasterName(button, d, style)
+    local fs = d and d.casterName
+    if not fs then return end
+    local anchor = CASTER_POINTS[style.casterPosition] or CASTER_POINTS.bottom
+    local ox, oy = style.casterOffsetX or 0, style.casterOffsetY or 0
+    local key = (style.casterPosition or "bottom") .. ":" .. ox .. ":" .. oy
+    if d.akCasterPoint ~= key then
+        -- Anchor to our own non-interactive carrier rather than reading
+        -- the secure aura button in combat. Retry if a protected ancestor
+        -- still rejects the layout update.
+        local ok = pcall(function()
+            fs:ClearAllPoints()
+            fs:SetPoint(anchor[1], d.stackCarrier, anchor[2], anchor[3] + ox, anchor[4] + oy)
+        end)
+        if ok then d.akCasterPoint = key end
+    end
+    local shown = style.showCasterName == true
+    if d.akCasterShown ~= shown then
+        fs:SetShown(shown)
+        -- The engine may reshow a text region when reassigning an aura;
+        -- alpha keeps a disabled caster name invisible across updates.
+        fs:SetAlpha(shown and 1 or 0)
+        d.akCasterShown = shown
+    end
+end
+
 -- Returns the initializeFrame callback for a style. It runs ONCE per created
 -- button (buttons are pre-created in engine batches of 10, so it fires at
 -- group-declare time, not per shown aura), and it receives the PUBLIC button
@@ -1255,6 +1297,12 @@ function AK.MakeInitializer(styleKey, extra)
         d.stackCarrier:EnableMouse(false)
         d.stack = d.stackCarrier:CreateFontString(nil, "OVERLAY")
         d.duration = d.stackCarrier:CreateFontString(nil, "OVERLAY")
+        -- Only modules opting in to source labels allocate/register this
+        -- region (PAB and nameplate debuffs). An off-by-default setting
+        -- still binds once, enabling future live toggles safely.
+        if style.casterNameSupported and button.SetCasterName then
+            d.casterName = d.stackCarrier:CreateFontString(nil, "OVERLAY")
+        end
 
         -- Engine aura buttons come CLICK-enabled. On nameplates a click-alive
         -- icon sits between the cursor and the plate's click region, eating
@@ -1276,6 +1324,11 @@ function AK.MakeInitializer(styleKey, extra)
         button:SetIcon(d.icon)
         button:SetDurationCooldown(d.cooldown)
         button:SetApplicationCount(d.stack, {})
+        if d.casterName then
+            -- ApplyStyleToRegions has already supplied font/anchor and hidden
+            -- the label when disabled; Blizzard owns the text and class color.
+            button:SetCasterName(d.casterName, { useClassColors = true })
+        end
 
         -- style.durationFormatter: a module whose countdown must agree with a
         -- neighboring non-AuraKit display supplies its own rule formatter.

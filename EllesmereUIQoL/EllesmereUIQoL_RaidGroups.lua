@@ -55,7 +55,7 @@ local data, win, setupWindow, nickWindow, transferWindow, splitWindow, promptWin
 local slots, extras, setupRows, nickRows = {}, {}, {}, {}
 local draft = {}                     -- nil (empty), "GUEST", or Character-Realm
 local dirty, selectedSetup, chosenExtra, dragFrom, dragGhost, dragTarget = false, nil, nil, nil, nil, nil
-local statusLabel, dirtyLabel, extrasLabel, applyButton, keepButton, listModeButton, exactButton, mainHelp
+local dirtyLabel, extrasLabel, applyButton, keepButton, listModeButton, exactButton, mainHelp
 local editorButtons, unlistedButtons, splitButtons = {}, {}, {}
 local rosterByKey, rosterSorted = {}, {}
 local applyState, updatePending, lastRosterSignature = nil, false, nil
@@ -84,13 +84,14 @@ local Refresh, RefreshSetups, RefreshNicknames, RefreshExtras, ProcessApply, Sto
 
 -- Per-profile presentation and automation switches. Nil means enabled so
 -- existing profiles retain all the behavior introduced by earlier versions.
-local DEFAULTS = { profile = { raidGroups = { scale = 1, showNicknames = true, pos = {},
+local DEFAULTS = { profile = { raidGroups = { scale = 1, showNicknames = true, pos = {}, windowPositions = {},
     editorTools = true, editorDrag = true, editorCurrentRoster = true, editorClearDraft = true,
     editorRedoDraft = true,
     guestFeatures = true, guestImportSeats = true, guestAutoDetect = true,
     guestRightClick = true, guestFillSeats = true, guestAutoEmptySeats = true,
     unlistedFeatures = true, unlistedAsterisk = true, unlistedList = true, unlistedGuild = true,
     nicknameLearning = true, nicknameRosterLearn = true, nicknameNSRTUpdates = true,
+    nsrtAutoImport = true, nsrtAutoImportDifficulty = "both",
     splitRaidEnabled = true,
     chatNotifications = true, chatNicknames = true, chatCombat = true,
     chatLeader = true, chatMissing = true, chatSuccess = true,
@@ -115,6 +116,31 @@ function ns.RaidGroupsOption(key, value)
         elseif key=="playerNamesFontEnabled" then ApplyFonts() end
         if Refresh then Refresh() end
     end
+end
+-- The dropdown is independent of the enabling toggle. Nil in older profiles
+-- means Both, and reads must not write into Spec Overrides proxies.
+function ns.RaidGroupsNSRTDifficulty(value)
+    local p=P()
+    if value==nil then
+        local stored=p and p.nsrtAutoImportDifficulty
+        return (stored=="heroic" or stored=="mythic") and stored or "both"
+    end
+    if p and (value=="heroic" or value=="mythic" or value=="both") then
+        p.nsrtAutoImportDifficulty=value
+    end
+end
+-- NSRT puts Difficulty in its first metadata line, not the invitelist footer.
+-- Ignore unsupported/missing headers rather than applying another boss plan.
+function RGStyle.NSRTNoteDifficulty(noteText)
+    if type(noteText)~="string" then return nil end
+    local header=noteText:match("^%s*([^\r\n]+)")
+    if not header or not header:lower():match("^encounterid%s*:") then return nil end
+    for field in (header..";"):gmatch("(.-);") do
+        local difficulty=field:lower():match("^%s*difficulty%s*:%s*(.-)%s*$")
+        if difficulty=="heroic" or difficulty=="15" then return "heroic" end
+        if difficulty=="mythic" or difficulty=="16" then return "mythic" end
+    end
+    return nil
 end
 function ns.RaidGroupsExactPositions(value)
     if value==nil then return not not (data and data.exactPositions) end
@@ -739,7 +765,7 @@ function ns.RaidGroupsResolveRosterSource(source,pinnedSeats)
     for i=1,SLOT_COUNT do
         local name=source[i]
         local key=name and name~="GUEST" and name~=RGStyle.SETUP_GUEST and Canonical(name)
-        if key and rosterByKey[key] and not RGStyle.IsArrangementIgnored(key) then used[key]=true end
+        if key and rosterByKey[key] then used[key]=true end
     end
     for _,member in ipairs(rosterSorted) do
         if not used[member.key] and not RGStyle.IsArrangementIgnored(member.key) then
@@ -754,7 +780,7 @@ function ns.RaidGroupsResolveRosterSource(source,pinnedSeats)
     for i=1,SLOT_COUNT do
         local name=source[i]
         local key=name and name~="GUEST" and name~=RGStyle.SETUP_GUEST and Canonical(name)
-        if key and (not rosterByKey[key] or RGStyle.IsArrangementIgnored(key)) and
+        if key and not rosterByKey[key] and not RGStyle.IsArrangementIgnored(key) and
             not (pinnedSeats and pinnedSeats[i]) then
             local record=data.nicknames[key]
             local id=record and record.groupId
@@ -788,6 +814,38 @@ local function Membership(source)
         if key then names[key] = true end
     end
     return names
+end
+-- Remember explicitly pinned Character-Realm identities before replacing a
+-- composition. Preferences affect only runtime Guest matching; imported setup
+-- contents and persistent nickname/guest records are never rewritten.
+function RGStyle.CapturePinnedGuestPreferences()
+    local pins,seen={},{}
+    for i=1,SLOT_COUNT do
+        local name=draftPinned[i] and draft[i]
+        local key=name and name~="GUEST" and name~=RGStyle.SETUP_GUEST and Canonical(name)
+        if key and not seen[key] then
+            pins[#pins+1]=key
+            seen[key]=true
+        end
+    end
+    -- Explicit pins added in an open Apply Preview are not yet in the editor.
+    -- Carry those identities into the next imported composition as well.
+    if previewDraftState and previewWindow and previewWindow:IsShown() then
+        for i=1,SLOT_COUNT do
+            local name=previewDraftState.pinnedGuests[i] and previewDraftState.seats[i]
+            local key=name and Canonical(name)
+            if key and not seen[key] then pins[#pins+1]=key;seen[key]=true end
+        end
+    end
+    for _,key in ipairs(RGStyle.importPinnedGuestPreferences or {}) do
+        if not seen[key] then pins[#pins+1]=key;seen[key]=true end
+    end
+    RGStyle.importPinnedGuestPreferences=pins
+end
+function RGStyle.CopyPinnedPreferences(from)
+    local result={}
+    for _,key in ipairs(from or {}) do result[#result+1]=key end
+    return result
 end
 -- Return eligible unlisted guests in a deterministic order, putting explicit
 -- Guest assignments before nickname-less automatically recognized players.
@@ -857,7 +915,11 @@ local function GuestAssignments(source, fixedGuestNames, excluded)
             genericEligible[key]=member
         end
     end
-    -- Preview choices are retained only if they still satisfy the generic
+    -- Explicit previously pinned identities are eligible for generic pinned
+    -- seats even when the nickname database knows their character.
+    local preferred={}
+    for _,key in ipairs(RGStyle.importPinnedGuestPreferences or {}) do preferred[key]=true end
+    -- Preview choices are retained only if they still satisfy the seat's
     -- eligibility rule. One character can never satisfy two Guest seats.
     for i=1,SLOT_COUNT do
         local value=source[i]
@@ -866,26 +928,41 @@ local function GuestAssignments(source, fixedGuestNames, excluded)
             local member=rosterByKey[Canonical(fixedName)]
             if member and not used[member.key] and not excluded[member.key]
                 and not RGStyle.IsArrangementIgnored(member.key) and not reserved[member.key] and
-                (value=="GUEST" or genericEligible[member.key]) then
+                (value=="GUEST" or genericEligible[member.key] or preferred[member.key]) then
                 assigned[i]=member
                 reserved[member.key]=true
             end
         end
     end
-    -- Reserve generic pinned seats *before* ordinary replaceable Guests.
-    local candidatePos=1
+    -- Explicitly pinned characters from the previous draft take precedence
+    -- in imported Pinned Guest (Setup) seats, even with a known nickname.
+    -- All other generic seats retain nickname-free matching.
+    local preferencePos,candidatePos=1,1
+    local preferences=RGStyle.importPinnedGuestPreferences or {}
     for i=1,SLOT_COUNT do
         if source[i]==RGStyle.SETUP_GUEST and not assigned[i] then
-            while rosterSorted[candidatePos] and
-                (not genericEligible[rosterSorted[candidatePos].key] or
-                 reserved[rosterSorted[candidatePos].key]) do
-                candidatePos=candidatePos+1
+            local member
+            while preferences[preferencePos] and not member do
+                local key=preferences[preferencePos]
+                preferencePos=preferencePos+1
+                local candidate=rosterByKey[key]
+                if candidate and not used[key] and not reserved[key] and
+                    not excluded[key] and not RGStyle.IsArrangementIgnored(key) then
+                    member=candidate
+                end
             end
-            local member=rosterSorted[candidatePos]
+            if not member then
+                while rosterSorted[candidatePos] and
+                    (not genericEligible[rosterSorted[candidatePos].key] or
+                     reserved[rosterSorted[candidatePos].key]) do
+                    candidatePos=candidatePos+1
+                end
+                member=rosterSorted[candidatePos]
+                if member then candidatePos=candidatePos+1 end
+            end
             if member then
                 assigned[i]=member
                 reserved[member.key]=true
-                candidatePos=candidatePos+1
             end
         end
     end
@@ -908,10 +985,21 @@ local function GuestAssignments(source, fixedGuestNames, excluded)
     return assigned
 end
 
+-- Unlisted/Available lists must include resolved anonymous Guest reservations.
+-- Keep Membership() named-only because GuestAssignments() calls it to choose
+-- non-conflicting candidates; calling this helper there would recurse.
+function RGStyle.PlannedMembership(source)
+    source=source or draft
+    local used=Membership(source)
+    for _,member in pairs(GuestAssignments(source)) do
+        if member and member.key then used[member.key]=true end
+    end
+    return used
+end
 local function IsUnlisted(name)
     local k = Canonical(name)
     if not k then return false end
-    return not Membership()[k]
+    return not RGStyle.PlannedMembership()[k]
 end
 -- The two history stacks hold complete snapshots, including selected setup
 -- persistence when Keep Changes is enabled. Avoid a module-level local here:
@@ -919,6 +1007,8 @@ end
 function RGStyle.CaptureDraftSnapshot()
     local selected=selectedSetup and data.setups[selectedSetup]
     return {draft=CopyDraft(draft),pinned=CopyPinned(draftPinned),
+        nsrtDraftName=RGStyle.nsrtDraftName,
+        importedPinned=RGStyle.CopyPinnedPreferences(RGStyle.importPinnedGuestPreferences),
         normalGuests=CopyPinned(draftGuest),
         emptyPinned=CopyPinned(RGStyle.emptyPinnedDraft),selected=selected,
         exclusions=CopyKeys(removedGuestKeys),
@@ -931,6 +1021,7 @@ end
 function RGStyle.RestoreDraftSnapshot(snapshot)
     draft=CopyDraft(snapshot.draft)
     draftPinned=CopyPinned(snapshot.pinned)
+    RGStyle.importPinnedGuestPreferences=RGStyle.CopyPinnedPreferences(snapshot.importedPinned)
     draftGuest=CopyPinned(snapshot.normalGuests)
     RGStyle.emptyPinnedDraft=CopyPinned(snapshot.emptyPinned)
     removedGuestKeys=CopyKeys(snapshot.exclusions)
@@ -949,6 +1040,7 @@ function RGStyle.RestoreDraftSnapshot(snapshot)
         end
     end
     dirty=snapshot.dirty
+    RGStyle.nsrtDraftName=snapshot.nsrtDraftName
     if Refresh then Refresh() end
     if RefreshSetups then RefreshSetups() end
 end
@@ -1076,6 +1168,7 @@ local function FromRoster(skipUndo)
     draftGuest={}
     RGStyle.emptyPinnedDraft={}
     removedGuestKeys={}
+    RGStyle.importPinnedGuestPreferences=nil
     selectedSetup = nil
     RGStyle.setupLoadToggle=nil
     SaveEdit()
@@ -1107,6 +1200,7 @@ local function LoadSetup(i, toggleOnClick)
     local before=RGStyle.CaptureDraftSnapshot()
     local beforePreview=RGStyle.CapturePreviewSnapshot and RGStyle.CapturePreviewSnapshot()
     PushUndo()
+    RGStyle.CapturePinnedGuestPreferences()
     RGStyle.setupLoadToggle={entry=entry,draft=before,preview=beforePreview}
     draft = CopyDraft(entry.slots)
     draftPinned=CopyPinned(entry.pinnedSeats)
@@ -1115,6 +1209,7 @@ local function LoadSetup(i, toggleOnClick)
     removedGuestKeys={}
     firstDraftLoaded=true
     selectedSetup = i
+    RGStyle.nsrtDraftName=nil
     dirty = false
     if Refresh then Refresh() end
     if RefreshSetups then RefreshSetups() end
@@ -1142,6 +1237,7 @@ local function SaveSetup(name)
         emptyPinnedSeats=CopyPinned(RGStyle.emptyPinnedDraft),
         guestModes={},updated=time()})
     selectedSetup = #data.setups
+    RGStyle.nsrtDraftName=nil
     RGStyle.setupLoadToggle=nil
     dirty = false
     if Refresh then Refresh() end
@@ -1290,25 +1386,69 @@ end
 function RGStyle.ResetPanelPosition(frame)
     frame:ClearAllPoints()
     frame:SetPoint("CENTER",UIParent,"CENTER",0,0)
-    -- The main window alone persists its position between openings/reloads.
-    -- An offscreen coordinate must not be restored on the next opening.
-    if frame._raidGroupsScaleKey=="main" then
-        local profile=P()
-        if profile then profile.pos={} end
+    -- Clear only the offscreen window's saved location. Other windows and
+    -- their per-profile positions remain unchanged.
+    local profile=P()
+    if not profile then return end
+    local key=frame._raidGroupsScaleKey
+    if key=="main" then
+        profile.pos={}
+    elseif key and type(profile.windowPositions)=="table" then
+        profile.windowPositions[key]=nil
     end
+end
+-- Keep panel anchors in the existing raidGroups profile, never in global
+-- nickname/setup data. Save scalar coordinates only (not frame references).
+function RGStyle.SavePanelPosition(frame)
+    local key=frame._raidGroupsScaleKey
+    if not key or key=="main" then return end
+    local profile=P()
+    if not profile then return end
+    local point,_,relPoint,x,y=frame:GetPoint()
+    if not (point and relPoint and type(x)=="number" and type(y)=="number") then return end
+    profile.windowPositions=type(profile.windowPositions)=="table" and profile.windowPositions or {}
+    profile.windowPositions[key]={point=point,relPoint=relPoint,x=x,y=y}
+end
+function RGStyle.RestorePanelPosition(frame)
+    local key=frame._raidGroupsScaleKey
+    if not key or key=="main" then return end
+    local profile=P()
+    local positions=profile and profile.windowPositions
+    local pos=type(positions)=="table" and positions[key]
+    if type(pos)~="table" then return end
+    local valid={CENTER=true,TOP=true,BOTTOM=true,LEFT=true,RIGHT=true,
+        TOPLEFT=true,TOPRIGHT=true,BOTTOMLEFT=true,BOTTOMRIGHT=true}
+    if not (valid[pos.point] and valid[pos.relPoint] and
+        type(pos.x)=="number" and pos.x==pos.x and math.abs(pos.x)<100000 and
+        type(pos.y)=="number" and pos.y==pos.y and math.abs(pos.y)<100000) then
+        positions[key]=nil
+        return
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint(pos.point,UIParent,pos.relPoint,pos.x,pos.y)
 end
 local function Panel(name, width, height)
     local f = CreateFrame("Frame", name, UIParent)
     f:SetFrameStrata("DIALOG")
     f:SetFrameLevel(200)
+    -- Other panels also live in DIALOG; top-level raising keeps a window's
+    -- children above other windows rather than allowing controls to interleave.
+    -- The panel backdrop is already fully opaque (alpha=1).
+    if f.SetToplevel then f:SetToplevel(true) end
     f:SetSize(width, height)
     f:SetPoint("CENTER")
     f:EnableMouse(true)
     f:SetMovable(true)
     f:SetClampedToScreen(false)
     f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function(self) self:StartMoving() end)
-    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:SetScript("OnDragStart", function(self)
+        if self.Raise then self:Raise() end
+        self:StartMoving()
+    end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        RGStyle.SavePanelPosition(self)
+    end)
     -- OnMouseUp here belongs to the panel background; interactive children
     -- (seats, dropdown choices, inputs, buttons) handle their own mouse clicks.
     -- Left-click and dragging retain their original behavior.
@@ -1325,12 +1465,17 @@ local function Panel(name, width, height)
     f:Hide()
     EllesmereUI.RegisterEscapeClose(f)
     f._raidGroupsScaleKey=RGStyle.windowNames[name]
-    -- The window may remain offscreen until it is closed. Only a later
-    -- opening resets it to the original centered position.
+    -- Restore each movable panel's last position when opened, including after
+    -- reload. Reset to center only if the restored/current panel is offscreen.
+    -- Do not clamp while dragging: the next opening handles invalid positions.
     f:HookScript("OnHide",function(self)
+        -- Save even if combat interrupts a drag before its OnDragStop fires.
+        RGStyle.SavePanelPosition(self)
         if RGStyle.PanelOutsideScreen(self) then self._resetPositionOnNextOpen=true end
     end)
     f:HookScript("OnShow",function(self)
+        if self.Raise then self:Raise() end
+        RGStyle.RestorePanelPosition(self)
         if self._resetPositionOnNextOpen or RGStyle.PanelOutsideScreen(self) then
             RGStyle.ResetPanelPosition(self)
         end
@@ -1389,14 +1534,15 @@ local function SetChoiceButtonState(button, enabled, redWhenOff, prominent)
     local labelColor=enabled and 0 or 1
     button._lbl:SetTextColor(labelColor,labelColor,labelColor)
 end
--- EUI's signature blue is also used by the Nameplates EUI Glow default;
--- keep Preview Apply visually distinct from destructive/active-state controls.
-local function ColorPreviewButton(button)
+-- EUI's signature blue is also used by the Nameplates EUI Glow default.
+-- The main Apply action uses a stronger fill than the adjacent Preview button.
+local function ColorBlueButton(button, prominent)
     if not button then return end
     local r,g,b=.4117,.6667,1.0
-    button._bg:SetColorTexture(r,g,b,.32)
+    button._bg:SetColorTexture(r,g,b,prominent and .90 or .32)
     button._border:SetColor(r,g,b,.95)
-    button._lbl:SetTextColor(1,1,1)
+    local labelColor=prominent and 0 or 1
+    button._lbl:SetTextColor(labelColor,labelColor,labelColor)
 end
 -- One compact, EUI-styled context dropdown serves the main editor, unlisted
 -- roster, and the independent Preview. Right-click never edits a seat until
@@ -1750,10 +1896,6 @@ function ns.RaidGroupsRequestAppearanceReset()
         if EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
     end)
 end
-local function SetStatus(message)
-    if statusLabel then statusLabel:SetText(L(message or "")) end
-end
-
 -------------------------------------------------------------------------------
 -- Import and export. Text format EUIRG1 is lossless (40 seats + GUEST markers).
 -- Use printable delimiters in the editor; legacy tab-prefixed records still import.
@@ -2394,6 +2536,7 @@ local function ShowBackupWindow()
                 data.exactPositions=restored.exactPositions
                 data.keepChanges=restored.keepChanges
                 selectedSetup=nil;draft={};draftPinned={};draftGuest={};RGStyle.emptyPinnedDraft={};removedGuestKeys={};dirty=false;undoStack={}
+                RGStyle.importPinnedGuestPreferences=nil
                 RGStyle.setupLoadToggle=nil
                 if previewWindow then previewWindow:Hide() end
                 if applyState then StopApply("Group application cancelled: data restored.") end
@@ -2422,12 +2565,14 @@ function ns.ImportRaidGroupsIntoSetups(source, format)
         suffix=suffix+1
     end
     PushUndo()
+    RGStyle.CapturePinnedGuestPreferences()
     draft=parsed
     draftPinned=CopyPinned(pinnedGuests)
     draftGuest=CopyPinned(normalGuests)
     RGStyle.emptyPinnedDraft=CopyPinned(emptyPins)
     removedGuestKeys={}
     selectedSetup=nil -- never overwrite a previously selected Keep Changes setup
+    RGStyle.nsrtDraftName=nil
     RGStyle.setupLoadToggle=nil
     firstDraftLoaded=true
     -- SaveSetup performs the final UI refresh; do not redraw the editor twice
@@ -2439,6 +2584,41 @@ function ns.ImportRaidGroupsIntoSetups(source, format)
         ns.ShowRaidGroupsWindow()
     end
     Notice(LF("Imported setup '%s': %d characters and %d Guest seats.",name,players,guests),"success")
+    return true
+end
+-- An NSRT load is an ephemeral editor composition, not a saved setup.
+-- Once Refresh consumes these parsed fields, there is no import object to
+-- delete from SavedVariables. The resulting draft remains available to Apply.
+function RGStyle.LoadNSRTInvitelist(noteName, noteText)
+    if not data or not Enabled("nsrtAutoImport") or applyState then return false end
+    local noteDifficulty=RGStyle.NSRTNoteDifficulty(noteText)
+    local selectedDifficulty=ns.RaidGroupsNSRTDifficulty()
+    if not noteDifficulty or (selectedDifficulty~="both" and selectedDifficulty~=noteDifficulty) then
+        return false
+    end
+    if not noteText:lower():find("invitelist%s*:") then return false end
+    local parsed,err,_,_,_,emptyPins,normalGuests,pinnedGuests=ImportText(noteText,"invitelist")
+    if not parsed then
+        Notice(LF("NSRT invitelist was not loaded: %s",err or "Invalid note."))
+        return false
+    end
+    PushUndo()
+    RGStyle.CapturePinnedGuestPreferences()
+    draft=parsed
+    draftPinned=CopyPinned(pinnedGuests)
+    draftGuest=CopyPinned(normalGuests)
+    RGStyle.emptyPinnedDraft=CopyPinned(emptyPins)
+    removedGuestKeys={}
+    selectedSetup=nil
+    RGStyle.setupLoadToggle=nil
+    RGStyle.nsrtDraftName=noteName
+    firstDraftLoaded=true
+    dirty=false
+    if Refresh then Refresh() end
+    if RefreshSetups then RefreshSetups() end
+    if not win or not win:IsShown() then ns.ShowRaidGroupsWindow() end
+    if RGStyle.RefreshPreviewFromSetup then RGStyle.RefreshPreviewFromSetup() end
+    Notice(LF("NSRT raid groups loaded temporarily: %s. Use Apply Groups to apply manually.",noteName),"success")
     return true
 end
 local function TransferWindow(isImport)
@@ -2532,9 +2712,9 @@ StopApply=function(reason)
     applyState = nil
     if applyButton then
         applyButton._lbl:SetText(L("Apply Groups"))
-        SetChoiceButtonState(applyButton,false,false)
+        ColorBlueButton(applyButton,true)
     end
-    if reason then Notice(reason); SetStatus(reason) end
+    if reason then Notice(reason) end
     if Refresh then Refresh() end
 end
 local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
@@ -3270,7 +3450,7 @@ local function ShowApplyPreview(model)
     model=model or NewPreviewModel()
     previewDraftState=model
     if not previewWindow then
-        previewWindow=Panel("EllesmereUIRaidGroupVisualPreview",1420,700)
+        previewWindow=Panel("EllesmereUIRaidGroupVisualPreview",1420,630)
         Text(previewWindow,16,"Preview Apply Groups"):SetPoint("TOPLEFT",15,-13)
         local subtitle=Text(previewWindow,11)
         subtitle:SetPoint("TOPLEFT",15,-42)
@@ -3490,25 +3670,6 @@ local function ShowApplyPreview(model)
                 if previewDraftState then previewDraftState.availableOffset=offset;previewWindow._render() end
             end,
             function() return previewDraftState and math.max(0,#PreviewAvailableMembers(previewDraftState)-10) or 0 end)
-        local status=Text(previewWindow,11)
-        status:SetPoint("TOPLEFT",16,-420)
-        status:SetWidth(675)
-        previewWindow._status=status
-        local missing=Text(previewWindow,11)
-        missing:SetPoint("TOPLEFT",16,-475)
-        missing:SetWidth(675)
-        missing:SetJustifyH("LEFT")
-        previewWindow._missing=missing
-        local leadership=Text(previewWindow,11)
-        leadership:SetPoint("TOPLEFT",16,-515)
-        leadership:SetWidth(675)
-        leadership:SetJustifyH("LEFT")
-        previewWindow._leadership=leadership
-        local guide=Text(previewWindow,10,
-            "Right-click to manage Pinned Empty and add/remove Pinned Guest or replaceable Guest. Reserved empty seats remain vacant during Apply.")
-        guide:SetPoint("TOPLEFT",16,-590)
-        guide:SetWidth(675)
-        guide:SetJustifyH("LEFT")
         Button(previewWindow,"Reset Preview",123,26,function()
             if not previewDraftState then return end
             previewDraftState.seats=CopyDraft(previewDraftState.initialSeats)
@@ -3667,23 +3828,6 @@ local function ShowApplyPreview(model)
                 end
             end
             if previewWindow._availableScrollbar then previewWindow._availableScrollbar:Sync() end
-            previewWindow._status:SetText(LF("Guest seats: %d | Exact Positions: %s | Pinned Empty reserves vacant seats; Pinned Guest (Setup) reserves a different nickname-free player for each slot",(function()
-                local n=0;for i=1,SLOT_COUNT do
-                    if model.guestSeats[i] or model.normalGuests[i] or model.pinnedGuests[i] or model.genericPinnedSeats[i] then n=n+1 end
-                end;return n
-            end)(),data.exactPositions and "ON (best effort)" or "OFF (subgroup order only)"))
-            local missing={}
-            for _,n in ipairs(plan.missing) do missing[#missing+1]=ChatName(n) end
-            local missingNote=#missing>0 and
-                LF("Missing players (not applied): %s",table.concat(missing,", ")) or
-                L("Missing players: none")
-            if plan.unfilledGeneric>0 then
-                missingNote=missingNote..LF(" | Pinned Guest (Setup) without eligible players: %d",plan.unfilledGeneric)
-            end
-            previewWindow._missing:SetText(missingNote)
-            previewWindow._leadership:SetText(plan.shift and
-                (plan.shift.message.." "..plan.shift.guidance) or
-                L("Raid leader: no automatic adjustment needed."))
             local setup=model.originalSetupEntry
             local exists=false
             for _,entry in ipairs(data.setups) do if entry==setup then exists=true;break end end
@@ -3693,11 +3837,12 @@ local function ShowApplyPreview(model)
                 previewConfirmButton:SetEnabled(not stale and not plan.blockedReason)
                 previewConfirmButton:SetAlpha((stale or plan.blockedReason) and .4 or 1)
             end
-            if plan.blockedReason then
-                previewWindow._status:SetText(L(plan.blockedReason))
-            end
+            -- Keep actionable warnings in the top summary after removing the
+            -- four large explanatory blocks under the preview composition.
             if stale then
-                previewWindow._status:SetText(L("Raid changed since this preview opened. Close and reopen to refresh."))
+                previewWindow._subtitle:SetText(L("Raid changed since this preview opened. Close and reopen to refresh."))
+            elseif plan.blockedReason then
+                previewWindow._subtitle:SetText(L(plan.blockedReason))
             end
         end
     end
@@ -3763,6 +3908,7 @@ function RGStyle.RefreshPreviewFromSetup()
 end
 BeginConfirmedApply=function(plan)
     if applyState then return end
+    if not IsInRaid() then Notice("You are not in a raid group.");return end
     if not ns.RaidGroupsPermitted() then Notice("Raid leader or assistant required to apply groups.");return end
     if InGroupCombat() then WarnCombat(false);return end
     -- Revalidate against the actual roster immediately before any protected
@@ -3805,6 +3951,7 @@ BeginConfirmedApply=function(plan)
 end
 local function RequestApply()
     if applyState then StopApply("Group application cancelled.");return end
+    if not IsInRaid() then Notice("You are not in a raid group.");return end
     if not ns.RaidGroupsPermitted() then Notice("Raid leader or assistant required to apply groups.");return end
     if InGroupCombat() then WarnCombat(false);return end
     local plan=BuildApplyPlan()
@@ -3813,6 +3960,12 @@ local function RequestApply()
     BeginConfirmedApply(plan)
 end
 local function RequestPreview()
+    if previewWindow and previewWindow:IsShown() then
+        previewWindow:Hide()
+        previewDraftState=nil
+        RGStyle.previewSuspendedForCombat=false
+        return
+    end
     if applyState then Notice("Cannot open a new preview while applying raid groups.");return end
     -- Closing on entering combat is only a visual dismissal. Reopening the
     -- preview must retain its swaps, Guest seats and pending assignments.
@@ -3850,6 +4003,10 @@ end
 function ProcessApply()
     local state = applyState
     if not state then return end
+    if not IsInRaid() then
+        StopApply("Group application interrupted: you are no longer in a raid group.")
+        return
+    end
     if not ns.RaidGroupsPermitted() then
         StopApply("Group application interrupted: raid leader or assistant permission required.")
         return
@@ -4168,6 +4325,7 @@ RGStyle.bossAchievementIDs={
     vashnik=63526,vashnikthemalignant=63526,
     twinfangs=63528,thetwinfangs=63528,
     nymrissa=63682,nymrissawavecaller=63682,
+    kithix=63692,unbindingofkithix=63692,theunbindingofkithix=63692,
     coiledaltar=63529,thecoiledaltar=63529,
     ulatek=63476,
 }
@@ -4180,6 +4338,7 @@ RGStyle.bossIconChoices={
     {name="Sszorak",id=63527},
     {name="The Twin Fangs",id=63528},
     {name="Nymrissa Wavecaller",id=63682},
+    {name="Kith'ix",id=63692},
     {name="The Coiled Altar",id=63529},
     {name="Ulatek",id=63476},
 }
@@ -4195,7 +4354,7 @@ function RGStyle.SetupBossKey(setupName)
     name=name:gsub("^%s*mythic%s*[:%-]?%s*", "")
         :gsub("^%s*heroic%s*[:%-]?%s*", "")
         :gsub("^%s*normal%s*[:%-]?%s*", "")
-        :gsub("^%s*hc%s+", ""):gsub("^%s*[mn]%s+", "")
+        :gsub("^%s*hc%s+", ""):gsub("^%s*[hmn]%s+", "")
     -- One portrait per setup row; a combined setup uses its first boss.
     name=name:match("^([^/]+)") or name
     name=name:gsub("[^%w]", "")
@@ -4488,6 +4647,10 @@ function RefreshSetups()
     end
 end
 local function ShowSetupWindow()
+    if setupWindow and setupWindow:IsShown() then
+        setupWindow:Hide()
+        return
+    end
     EnsureSetupWindow()
     RefreshSetups()
     setupWindow:Show()
@@ -4722,7 +4885,7 @@ local function DeleteNicknameGroup(name)
 end
 local function EnsureNickWindow()
     if nickWindow then return end
-    nickWindow=Panel("EllesmereUIRaidGroupNicknames",525,495)
+    nickWindow=Panel("EllesmereUIRaidGroupNicknames",525,449)
     nickWindow:RegisterEvent("GROUP_ROSTER_UPDATE")
     nickWindow:RegisterEvent("GUILD_ROSTER_UPDATE")
     nickWindow:SetScript("OnEvent",function(self)
@@ -4748,8 +4911,6 @@ local function EnsureNickWindow()
         RefreshNicknames()
     end)
     Button(nickWindow,"Add Nickname",138,24,AddNickname):SetPoint("TOPRIGHT",-14,-45)
-    local help=Text(nickWindow,10,"Edit: group nickname or character name/realm. Delete requires confirmation.")
-    help:SetPoint("BOTTOMLEFT",14,21)
     local function NickWheel(_,delta)
         nickOffset=math.max(0,math.min(math.max(0,#NickGroups()-#nickRows),nickOffset-(delta>0 and 1 or -1)))
         RefreshNicknames()
@@ -5124,7 +5285,7 @@ local function EndDrag()
 end
 local function UnlistedPlayers()
     if not Enabled("unlistedFeatures") or not Enabled("unlistedList") then return {} end
-    local used=Membership()
+    local used=RGStyle.PlannedMembership()
     local result={}
     if listGuild and Enabled("unlistedGuild") then
         if IsInGuild() and GetNumGuildMembers and GetGuildRosterInfo then
@@ -5285,11 +5446,13 @@ function Refresh()
     end
     if dirtyLabel then
         dirtyLabel:SetText(dirty and ("|cffffb84e"..L("Unsaved changes").."|r") or
-            (selectedSetup and LF("Setup: %s",data.setups[selectedSetup].name) or L("Temporary composition")))
+            (selectedSetup and LF("Setup: %s",data.setups[selectedSetup].name) or
+                (RGStyle.nsrtDraftName and LF("NSRT: %s (temporary)",RGStyle.nsrtDraftName) or L("Temporary composition"))))
     end
     if applyButton then
         applyButton._lbl:SetText(L(applyState and "Cancel Apply" or "Apply Groups"))
-        SetChoiceButtonState(applyButton,false,applyState~=nil,true)
+        if applyState then SetChoiceButtonState(applyButton,false,true,true)
+        else ColorBlueButton(applyButton,true) end
     end
     if exactButton then
         exactButton._lbl:SetText(L(data.exactPositions and "Exact Positions: ON" or "Exact Positions: OFF"))
@@ -5478,7 +5641,7 @@ function ns._BuildRaidGroupsMainSlots()
 end
 local function EnsureMainWindow()
     if win then return end
-    win=Panel("EllesmereUIRaidGroupsWindow",914,465)
+    win=Panel("EllesmereUIRaidGroupsWindow",914,453)
     -- Panel creation registers a movable background; main window remembers
     -- the position in the ordinary QoL profile.
     win:SetScript("OnDragStop",function(self)
@@ -5592,8 +5755,9 @@ local function EnsureMainWindow()
         function() return Enabled("editorTools") and Enabled("editorCurrentRoster") end)
     editorButtons[#editorButtons+1]={button=currentButton,option="editorCurrentRoster"}
     AddFooterButton("Apply Groups",115,RequestApply,nil,"apply")
+    ColorBlueButton(applyButton,true)
     local previewButton=AddFooterButton("Preview Apply Groups",159,RequestPreview)
-    ColorPreviewButton(previewButton)
+    ColorBlueButton(previewButton)
     local setupManagerButton=AddFooterButton("Raid Group Setup",132,ShowSetupWindow)
     SetChoiceButtonState(setupManagerButton,true,false,true)
     AddFooterButton("Nicknames",103,ShowNickWindow)
@@ -5613,18 +5777,13 @@ local function EnsureMainWindow()
     exact._lbl:SetText(L(data.exactPositions and "Exact Positions: ON" or "Exact Positions: OFF"))
     SetChoiceButtonState(exact,false,not data.exactPositions,true)
     local clearButton=AddFooterButton("Clear Draft",101,function()
-        Confirm("Clear all 40 planned raid group seats?",function()
-            PushUndo(); draft={};draftPinned={};draftGuest={};RGStyle.emptyPinnedDraft={};removedGuestKeys={};selectedSetup=nil;RGStyle.setupLoadToggle=nil;SaveEdit()
-        end)
+        PushUndo(); draft={};draftPinned={};draftGuest={};RGStyle.emptyPinnedDraft={};removedGuestKeys={};selectedSetup=nil;RGStyle.setupLoadToggle=nil;RGStyle.importPinnedGuestPreferences=nil;SaveEdit()
     end,function() return Enabled("editorTools") and Enabled("editorClearDraft") end)
     editorButtons[#editorButtons+1]={button=clearButton,option="editorClearDraft"}
     AddFooterButton("Undo Draft",97,UndoDraft)
     AddFooterButton("Redo Draft",97,RGStyle.RedoDraft,
         function() return Enabled("editorTools") and Enabled("editorRedoDraft") end)
     AddFooterButton("Backup",91,ShowBackupWindow,function() return Enabled("backupEnabled") end)
-    statusLabel=Text(win,10,"Changes stay provisional until Apply Groups.")
-    statusLabel:SetPoint("TOPLEFT",14,-452)
-    statusLabel:SetTextColor(.8,.78,.6)
 end
 function ns.ApplyRaidGroupsScale()
     if win then RGStyle.ApplyPanelScale(win,"main") end
@@ -5660,6 +5819,12 @@ function ns.ShowRaidGroupsWindow()
         firstDraftLoaded=true
     end
     Refresh()
+end
+
+-- Called by the shared EllesmereUI minimap button. This opens the saved
+-- Raid Group Setup manager; NSRT's automatic draft opens the main editor.
+function EllesmereUI.OpenRaidGroupsSetupWindow()
+    ns.ShowRaidGroupsSetupWindow()
 end
 
 -------------------------------------------------------------------------------
@@ -5705,6 +5870,51 @@ local function RegisterRaidNicknameUpdates()
         "NSRT_NICKNAME_UPDATED", OnNickname)
     if ok then nsrtRegistered = true end
 end
+-- The shared-text argument of NSRT_REMINDER_CHANGED is authoritative.
+-- Received notes live in NSI.Reminder / NSRT.StoredSharedReminder; unlike
+-- locally selected notes, they need not exist in NSRT.Reminders at all.
+function RGStyle.OnNSRTSharedNote(sharedText)
+    if not data or not SafeText(sharedText) then return end
+    if sharedText=="" then RGStyle.lastNSRTSignature=nil;return end
+    if not Enabled("nsrtAutoImport") then return end
+    local header=sharedText:match("^%s*([^\r\n]+)")
+    if not header or not header:lower():match("^encounterid%s*:") then return end
+    -- De-duplicate Load & Send (callback followed by Broadcast), without
+    -- replacing draft edits on unrelated NSRT personal-note notifications.
+    local signature=sharedText
+    if RGStyle.lastNSRTSignature==signature then return end
+    RGStyle.lastNSRTSignature=signature
+    local nsrt=_G.NSRT
+    local selected=nsrt and nsrt.ActiveReminder
+    local saved=selected and nsrt.Reminders and nsrt.Reminders[selected]
+    local name=saved==sharedText and selected or
+        header:match("[Nn]ame%s*:%s*([^;\r\n]+)") or "Received NSRT Note"
+    RGStyle.LoadNSRTInvitelist(name,sharedText)
+end
+function RGStyle.RegisterRaidNoteUpdates()
+    if not data then return end
+    local api=_G.NSAPI
+    if not RGStyle.nsrtNoteRegistered and api and type(api.RegisterCallback)=="function" then
+        local ok=pcall(api.RegisterCallback,"EllesmereUIRaidGroupsNotes",
+            "NSRT_REMINDER_CHANGED",function(_, _, sharedText)
+                RGStyle.OnNSRTSharedNote(sharedText)
+            end)
+        if ok then RGStyle.nsrtNoteRegistered=true end
+    end
+    -- NSRT's received-note 'Load & Send' path broadcasts the edited active
+    -- shared note without calling SetReminder / NSRT_REMINDER_CHANGED.
+    -- Hook only outgoing shared-note sends; leave NSRT's comms untouched.
+    local engine=_G.NorthernSkyRaidTools
+    if not RGStyle.nsrtBroadcastHooked and engine and type(engine.Broadcast)=="function" and
+        type(hooksecurefunc)=="function" then
+        local ok=pcall(hooksecurefunc,engine,"Broadcast",function(_,event,channel,sharedText)
+            if event=="NSI_REM_SHARE" and channel=="RAID" then
+                RGStyle.OnNSRTSharedNote(sharedText)
+            end
+        end)
+        if ok then RGStyle.nsrtBroadcastHooked=true end
+    end
+end
 local boot=CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent",function(self)
@@ -5717,6 +5927,12 @@ boot:SetScript("OnEvent",function(self)
     EllesmereUI._onScaleChanged[#EllesmereUI._onScaleChanged+1]=ns.ApplyRaidGroupsScale
     -- NSRT may be loaded before or after EUI; both paths are supported.
     RegisterRaidNicknameUpdates()
+    RGStyle.RegisterRaidNoteUpdates()
+    -- NSAPI may be published at the end of NSRT's own login handler.
+    C_Timer.After(0,function()
+        RegisterRaidNicknameUpdates()
+        RGStyle.RegisterRaidNoteUpdates()
+    end)
     -- Current draft is intentionally session-local. Named setups are persisted.
     Roster()
 end)
@@ -5735,7 +5951,10 @@ events:SetScript("OnEvent",function(self,event,addonName)
     if event=="ADDON_LOADED" then
         if addonName=="NorthernSkyRaidTools" then
             RegisterRaidNicknameUpdates()
-            if nsrtRegistered then self:UnregisterEvent("ADDON_LOADED") end
+            RGStyle.RegisterRaidNoteUpdates()
+            if nsrtRegistered and RGStyle.nsrtNoteRegistered then
+                self:UnregisterEvent("ADDON_LOADED")
+            end
         end
         return
     end
