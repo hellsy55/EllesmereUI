@@ -411,6 +411,33 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
+        -- Blizzard 12.1.5 account-wide aura tooltip CVar. Separate from the
+        -- per-icon SetCasterName display in Player Aura Bars and Nameplates.
+        local ttCasterRow
+        ttCasterRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Aura Caster Name on Tooltip",
+              tooltip="Show the aura caster's name in Blizzard unit-aura tooltips. This is an account-wide setting, including Player Aura Bars and Nameplates tooltips. Names are supplied by the game, not EUI nicknames.",
+              getValue=function()
+                  return C_CVar and C_CVar.GetCVar and C_CVar.GetCVar("tooltipShowAuraCasterNames") == "1"
+              end,
+              setValue=function(v)
+                  if C_CVar and C_CVar.SetCVar then
+                      C_CVar.SetCVar("tooltipShowAuraCasterNames", v and "1" or "0")
+                  end
+              end },
+            { type="toggle", text="Show Player Buffs",
+              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
+              getValue=function()
+                  return EllesmereUIDB and EllesmereUIDB.tooltipShowBuffs or false
+              end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.tooltipShowBuffs = v
+                  if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
+                  EllesmereUI:RefreshPage()  -- update the position cog disabled state
+              end }
+        ); y = y - h
+
         -- Tooltip Extras | Spell ID on Tooltip
         -- Tooltip Extras (left): the per-line tooltip content as one checklist,
         -- each entry on the key it has always used. It stays active with the
@@ -523,7 +550,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Show Max Stack for Items | Show Player Buffs
+        -- Show Max Stack for Items is the last basic tooltip-content control.
         local ttStackRow
         ttStackRow, h = W:DualRow(parent, y,
             -- Independent of the reskin, so it is NOT gated by "Reskin
@@ -538,17 +565,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUIDB.showItemMaxStacks = v
                   EllesmereUI:RefreshPage()  -- update the Use Modifier cog disabled state
               end },
-            { type="toggle", text="Show Player Buffs",
-              disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
-              getValue=function()
-                  return EllesmereUIDB and EllesmereUIDB.tooltipShowBuffs or false
-              end,
-              setValue=function(v)
-                  if not EllesmereUIDB then EllesmereUIDB = {} end
-                  EllesmereUIDB.tooltipShowBuffs = v
-                  if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
-                  EllesmereUI:RefreshPage()  -- update the position cog disabled state
-              end }
+            EllesmereUI.BlankRowCfg()
         );  y = y - h
 
         -- "Use Modifier" cog on Show Max Stack for Items (left region): the Max
@@ -577,7 +594,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Tooltip Buffs cog on Show Player Buffs (right region)
+        -- Tooltip Buffs cog follows Show Player Buffs in the caster row (right region).
         if not EllesmereUI._prebuilding then
             local function ttBuffsOff()
                 return ttReskinOff() or not (EllesmereUIDB and EllesmereUIDB.tooltipShowBuffs)
@@ -587,7 +604,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB[key] = v
                 if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
             end
-            EllesmereUI.BuildInlineCog(ttStackRow._rightRegion, {
+            EllesmereUI.BuildInlineCog(ttCasterRow._rightRegion, {
                 icon = EllesmereUI.DIRECTIONS_ICON, gap = 9,
                 disabled = ttBuffsOff,
                 disabledTooltip = function()

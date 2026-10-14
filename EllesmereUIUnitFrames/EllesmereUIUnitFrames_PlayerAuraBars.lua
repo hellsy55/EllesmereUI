@@ -977,6 +977,18 @@ local function PAB_ApplyExtraText(button, d, style)
         d.stack:SetTextColor(c and c.r or 1, c and c.g or 1, c and c.b or 1)
     end
 
+    -- 12.1.5 caster text is populated by AuraButton:SetCasterName in the
+    -- engine, not by reading auraData.sourceUnit (which can be secret).
+    if d.casterName then
+        local fontKey = path .. "|" .. (style.casterFontSize or 11) .. "|" .. flag
+        if d.pabCasterFont ~= fontKey then
+            EllesmereUI.PrimeFontShadow(d.casterName, flag == "")
+            d.casterName:SetFont(path, style.casterFontSize or 11, flag)
+            d.pabCasterFont = fontKey
+        end
+        EllesmereUI.AuraKit.PositionCasterName(button, d, style)
+    end
+
     -- Duration swipe visibility. style.hideSwipe only runs through AK's
     -- ApplyStyleToRegions (SetShown), firing at button CREATION and on explicit
     -- Restyle passes -- NOT on ordinary aura content churn. The engine calls
@@ -1197,6 +1209,15 @@ local function BuildStyle(isBuff, cfg)
         noDefaultFonts = true,
         fontPath = (EllesmereUI.GetFontPath("unitFrames")) or STANDARD_TEXT_FONT,
         fontFlag = ResolveFontFlag(cfg.fontOutline),
+
+        -- Source names are optional per bar, but the engine name region is
+        -- pre-bound for both polarities so settings work without /reload.
+        casterNameSupported = true,
+        showCasterName = cfg.showSourceName == true,
+        casterPosition = cfg.sourceNamePosition or "bottom",
+        casterFontSize = cfg.sourceNameFontSize or 11,
+        casterOffsetX = cfg.sourceNameOffsetX or 0,
+        casterOffsetY = cfg.sourceNameOffsetY or 0,
 
         applyExtra = PAB_ApplyExtraText,
 

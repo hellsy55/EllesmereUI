@@ -212,6 +212,14 @@ local function ApplyNPText(button, d, style)
         end
         d.stack:SetJustifyH(m.justify)
     end
+    if d.casterName then
+        local fontKey = path .. "|" .. (style.casterFontSize or 11)
+        if d.npCasterFont ~= fontKey then
+            EllesmereUI.ApplyIconTextFont(d.casterName, path, style.casterFontSize or 11, "nameplates")
+            d.npCasterFont = fontKey
+        end
+        EllesmereUI.AuraKit.PositionCasterName(button, d, style)
+    end
 end
 
 -- Buffs pass: shared text styling + the purge glow. Dispellability of a SPECIFIC shown buff
@@ -434,6 +442,12 @@ local function BuildNPStyle(kind, variant)
         cooldownReverse = true,
         noDefaultFonts = true,
         noTooltips = PVal("showAuraTooltips") ~= true,
+        casterNameSupported = kind == "debuffs",
+        showCasterName = kind == "debuffs" and PVal("debuffShowSourceName") == true,
+        casterPosition = PVal("debuffSourceNamePosition") or "bottom",
+        casterFontSize = PVal("debuffSourceNameFontSize") or 11,
+        casterOffsetX = PVal("debuffSourceNameOffsetX") or 0,
+        casterOffsetY = PVal("debuffSourceNameOffsetY") or 0,
         applyExtra = ApplyNPText,
         durSize = dur.size,
         durColor = dur.color,
@@ -1737,7 +1751,10 @@ local function StyleFPFor(kind, idx)
         -- `false or true` would pin this fingerprint input to a constant so
         -- the toggle never restyles (the ternary-falsy trap).
         (not ns.GetIconBorderEnabled) or ns.GetIconBorderEnabled(kind), cbFP,
-        PVal("showAuraTooltips") == true)
+        PVal("showAuraTooltips") == true,
+        kind == "debuffs" and PVal("debuffShowSourceName") == true,
+        PVal("debuffSourceNamePosition"), PVal("debuffSourceNameFontSize"),
+        PVal("debuffSourceNameOffsetX"), PVal("debuffSourceNameOffsetY"))
 end
 
 local function GeoFP()

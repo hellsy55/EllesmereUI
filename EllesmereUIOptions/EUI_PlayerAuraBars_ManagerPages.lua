@@ -1591,6 +1591,52 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         ); sy = sy - hh
     end
 
+    -- The source name toggle owns its settings cog. Preserve the per-bar
+    -- values when disabled, and keep the Display subsection to one row.
+    _, hh = W:SectionHeader(frame, "SOURCE NAME SETTINGS", sy); sy = sy - hh
+    do
+        local sourceCogBtn, sourceCogShow
+        local sourceRow
+        sourceRow, hh = W:DualRow(frame, sy,
+            { type = "toggle", text = "Show Source Name",
+              tooltip = "Display the aura caster's name next to each icon using the native aura button API. Names are supplied by the game, not EUI nicknames.",
+              getValue = function() return cfg.showSourceName == true end,
+              setValue = function(v)
+                  cfg.showSourceName = v
+                  apply()
+                  if not v and sourceCogShow and sourceCogShow._popupFrame then
+                      sourceCogShow._popupFrame:Hide()
+                  end
+                  if sourceCogBtn and sourceCogBtn._euiCogState then sourceCogBtn._euiCogState() end
+              end },
+            EllesmereUI.BlankRowCfg()
+        ); sy = sy - hh
+        sourceCogBtn, sourceCogShow = EllesmereUI.BuildInlineCog(sourceRow._leftRegion, {
+            title = "Source Name Settings",
+            disabled = function() return cfg.showSourceName ~= true end,
+            disabledTooltip = "Enable Show Source Name to edit its settings.",
+            rows = {
+                { type = "dropdown", label = "Name Position",
+                  values = { top="Top", bottom="Bottom", left="Left", right="Right",
+                             topleft="Top Left", topright="Top Right", bottomleft="Bottom Left",
+                             bottomright="Bottom Right", center="Center" },
+                  order = { "top", "bottom", "left", "right", "topleft", "topright",
+                            "bottomleft", "bottomright", "center" },
+                  get = function() return cfg.sourceNamePosition or "bottom" end,
+                  set = function(v) cfg.sourceNamePosition = v; apply() end },
+                { type = "slider", label = "Name Font Size", min = 6, max = 30, step = 1,
+                  get = function() return cfg.sourceNameFontSize or 11 end,
+                  set = function(v) cfg.sourceNameFontSize = v; apply() end },
+                { type = "slider", label = "Name X-Offset", min = -100, max = 100, step = 1,
+                  get = function() return cfg.sourceNameOffsetX or 0 end,
+                  set = function(v) cfg.sourceNameOffsetX = v; apply() end },
+                { type = "slider", label = "Name Y-Offset", min = -100, max = 100, step = 1,
+                  get = function() return cfg.sourceNameOffsetY or 0 end,
+                  set = function(v) cfg.sourceNameOffsetY = v; apply() end },
+            },
+        })
+    end
+
     return sy
 end
 

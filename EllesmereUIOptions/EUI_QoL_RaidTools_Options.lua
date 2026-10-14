@@ -359,6 +359,10 @@ initFrame:SetScript("OnEvent", function(self)
         end
         local function RGSet(key, value)
             if ns.RaidGroupsOption then ns.RaidGroupsOption(key,value) end
+            -- Refresh the cog click blocker immediately when its master toggle changes.
+            if key == "nsrtAutoImport" and EllesmereUI.RefreshPage then
+                EllesmereUI:RefreshPage()
+            end
         end
         local function RGToggle(key, label, tip)
             return { type="toggle", text=label, tooltip=tip,
@@ -517,6 +521,24 @@ initFrame:SetScript("OnEvent", function(self)
                 end})
         y=y-h
 
+        local nsrtImportRow
+        nsrtImportRow, h = W:DualRow(parent,y,
+            RGToggle("nsrtAutoImport","Load Raid Groups from NSRT Notes",
+                "When an NSRT shared note has a matching Heroic or Mythic header and an invite list, open Raid Groups with a temporary setup ready for manual Apply Groups. Does not save or apply groups automatically."),
+            EllesmereUI.BlankRowCfg())
+        y=y-h
+        if not EllesmereUI._prebuilding then
+            EllesmereUI.BuildInlineCog(nsrtImportRow._leftRegion,{
+                title="NSRT Note Difficulty",minWidth=300,
+                disabled=function() return not RGGet("nsrtAutoImport") end,
+                disabledTooltip="Enable Load Raid Groups from NSRT Notes to change difficulty.",
+                rows={{type="dropdown",label="Difficulty",
+                    values={heroic="Heroic",mythic="Mythic",both="Both"},
+                    order={"heroic","mythic","both"},
+                    get=function() return ns.RaidGroupsNSRTDifficulty and ns.RaidGroupsNSRTDifficulty() or "both" end,
+                    set=function(v) if ns.RaidGroupsNSRTDifficulty then ns.RaidGroupsNSRTDifficulty(v) end end}},
+            })
+        end
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(scalingRow._rightRegion,{
                 title="Raid Group Window Scaling",minWidth=370,

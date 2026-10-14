@@ -4,7 +4,7 @@ local Private = oUF.Private
 
 local unitExists = Private.unitExists
 
-local function updateArenaPreparationElements(self, event, elementName, specID)
+local function updateArenaPreparationElements(self, event, elementName, specID, arenaIndex)
 	local element = self[elementName]
 	if(element and self:IsElementEnabled(elementName)) then
 		if(element.OverrideArenaPreparation) then
@@ -28,7 +28,7 @@ local function updateArenaPreparationElements(self, event, elementName, specID)
 
 		element:SetMinMaxValues(0, 1)
 		element:SetValue(1)
-		if(element.UpdateColorArenaPreparation) then
+		if(element.UpdateColorArenaPreparation and specID) then
 			--[[ Override: Health:UpdateColor(specID)
 			Used to completely override the internal function for updating the widget's colors
 			during arena preparation.
@@ -49,9 +49,16 @@ local function updateArenaPreparationElements(self, event, elementName, specID)
 			local color
 			-- if(element.colorPower and elementName == 'Power') then
 				-- FIXME: no idea if we can get power type here without the unit
-			if(element.colorClass) then
+			if(element.colorClass and arenaIndex and UnitFrameUtil and UnitFrameUtil.UpdateArenaOpponentSpecDisplay) then
+				-- Delegated Blizzard painting accepts now-secret opponent specs.
+				-- It can set a protected bar texture without exposing the class in Lua.
+				local texture = element.GetStatusBarTexture and element:GetStatusBarTexture()
+				if texture then
+					UnitFrameUtil.UpdateArenaOpponentSpecDisplay({ barTexture = texture }, arenaIndex)
+				end
+			elseif(element.colorClass and specID) then
 				local _, _, _, _, _, class = GetSpecializationInfoByID(specID)
-				color = self.colors.class[class]
+				color = class and self.colors.class[class]
 			elseif(element.colorReaction) then
 				color = self.colors.reaction[2]
 			elseif(element.colorSmooth and self.colors.health:GetCurve()) then
@@ -125,8 +132,13 @@ local function updateArenaPreparation(self, event)
 			self:Hide()
 		end
 
-		local specID = GetArenaOpponentSpec(id)
-		if(specID) then
+		-- The 12.1.5 GetArenaOpponentSpec return may be a secret: neither
+		-- branch on it nor pass it to GetSpecializationInfoByID here.
+		local specID = GetArenaOpponentSpec and GetArenaOpponentSpec(id)
+		if issecretvalue and issecretvalue(specID) then specID = nil end
+		-- The count is a readable UI-preparation signal; the secure delegate
+		-- paints class/spec information that we cannot inspect ourselves.
+		if GetNumArenaOpponentSpecs() >= id then
 			if(self:IsEnabled()) then
 				-- disable the unit watch so we can forcefully show the object ourselves
 				self:Disable()
@@ -134,8 +146,8 @@ local function updateArenaPreparation(self, event)
 			end
 
 			-- update Health and Power (if available) with "fake" data
-			updateArenaPreparationElements(self, event, 'Health', specID)
-			updateArenaPreparationElements(self, event, 'Power', specID)
+			updateArenaPreparationElements(self, event, 'Health', specID, id)
+			updateArenaPreparationElements(self, event, 'Power', specID, id)
 
 			-- hide all other (relevant) elements (they have no effect during arena prep)
 			if(self.Auras) then self.Auras:Hide() end

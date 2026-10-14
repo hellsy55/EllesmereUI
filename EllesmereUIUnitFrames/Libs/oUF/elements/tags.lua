@@ -151,8 +151,13 @@ local tagStrings = {
 	['arenaspec'] = [[function(u)
 		local id = u:match('arena(%d)$')
 		if(id) then
-			local specID = GetArenaOpponentSpec(tonumber(id))
-			if(specID and specID > 0) then
+			local index = tonumber(id)
+			if UnitFrameUtil and UnitFrameUtil.GetArenaOpponentSpecDisplayInfo then
+				local info = UnitFrameUtil.GetArenaOpponentSpecDisplayInfo(index)
+				return info and info.specName -- permitted as a secret FontString value
+			end
+			local specID = GetArenaOpponentSpec and GetArenaOpponentSpec(index)
+			if not (issecretvalue and issecretvalue(specID)) and specID and specID > 0 then
 				local _, specName = GetSpecializationInfoByID(specID)
 				return specName
 			end
@@ -325,15 +330,21 @@ local tagStrings = {
 
 	['raidcolor'] = [[function(u)
 		local _, class = UnitClass(u)
+		if issecretvalue and issecretvalue(class) then return end
 		if(class) then
 			return _COLORS.class[class]:GenerateHexColorMarkup()
 		else
 			local id = u:match('arena(%d)$')
 			if(id) then
-				local specID = GetArenaOpponentSpec(tonumber(id))
-				if(specID and specID > 0) then
+				local index = tonumber(id)
+				local specID = GetArenaOpponentSpec and GetArenaOpponentSpec(index)
+				-- Class IDs are secret in 12.1.5, so a Lua-generated hex color
+				-- cannot be assembled until the spec becomes readable.
+				if not (issecretvalue and issecretvalue(specID)) and specID and specID > 0 then
 					_, _, _, _, _, class = GetSpecializationInfoByID(specID)
-					return _COLORS.class[class]:GenerateHexColorMarkup()
+					if class and _COLORS.class[class] then
+						return _COLORS.class[class]:GenerateHexColorMarkup()
+					end
 				end
 			end
 		end

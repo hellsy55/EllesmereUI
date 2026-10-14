@@ -3743,11 +3743,9 @@ do
                     EllesmereUI._openUnlockMode()
                 end
             elseif button == "MiddleButton" then
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.showMinimapButton = false
-                btn:Hide()
-                local rl = EllesmereUI and EllesmereUI._widgetRefreshList
-                if rl then for i = 1, #rl do rl[i]() end end
+                if EllesmereUI and EllesmereUI.OpenRaidGroupsSetupWindow then
+                    EllesmereUI.OpenRaidGroupsSetupWindow()
+                end
             end
         end)
 
@@ -3776,7 +3774,7 @@ do
             GameTooltip:AddLine("|cff0cd29fEllesmereUI|r")
             GameTooltip:AddLine(EllesmereUI.L("|cff0cd29dLeft-click:|r |cffE0E0E0Toggle EllesmereUI|r"))
             GameTooltip:AddLine(EllesmereUI.L("|cff0cd29dRight-click:|r |cffE0E0E0Enter Unlock Mode|r"))
-            GameTooltip:AddLine(EllesmereUI.L("|cff0cd29dMiddle-click:|r |cffE0E0E0Hide Minimap Button|r"))
+            GameTooltip:AddLine(EllesmereUI.L("|cff0cd29dMiddle-click:|r |cffE0E0E0Open Raid Group Setup|r"))
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)

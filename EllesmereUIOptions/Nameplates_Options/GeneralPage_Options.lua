@@ -604,11 +604,11 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         end
     end
 
-    -- Stacking Speed | Top Screen Inset: CVars Blizzard restored in 12.1.5,
+    -- Stacking Speed | Top/Bottom Screen Insets: CVars Blizzard restored in 12.1.5,
     -- so each slider exists only on a client that has its CVar. Pure CVar
     -- passthrough like Line of Sight Opacity: nothing stored, nothing written
     -- until a slider moves. Speed reads as a percent of the client's own
-    -- default; the inset as a percent of the screen's height (raw values if
+    -- default; the insets as a percent of the screen's height (raw values if
     -- the client's default is not a fraction).
     do
         local function CVarDefault(name) return tonumber(C_CVar.GetCVarDefault(name)) end
@@ -644,6 +644,22 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                     EllesmereUI.SetCVar("nameplateTopInset", frac and v / 100 or v, "EllesmereUINameplates")
                 end,
                 tooltip="How far from the top of the screen nameplates stop. 0 lets them reach the edge." }
+        end
+        if C_CVar.GetCVarInfo("nameplateBottomInset") then
+            local def = CVarDefault("nameplateBottomInset")
+            local frac = not def or def <= 1
+            cvarRows[#cvarRows + 1] = { type="slider", text="Bottom Screen Inset",
+                min=0, max=frac and 50 or math.max(100, math.ceil((def or 0) * 4)), step=1,
+                getValue=function()
+                    local cur = tonumber(GetCVar("nameplateBottomInset")) or 0
+                    if frac then return math.floor(cur * 100 + 0.5) end
+                    return cur
+                end,
+                setValue=function(v)
+                    if InCombatLockdown() then return end
+                    EllesmereUI.SetCVar("nameplateBottomInset", frac and v / 100 or v, "EllesmereUINameplates")
+                end,
+                tooltip="How far from the bottom of the screen nameplates stop. 0 lets them reach the edge." }
         end
         for i = 1, #cvarRows, 2 do
             _, h = W:DualRow(parent, y, cvarRows[i], cvarRows[i + 1] or EllesmereUI.BlankRowCfg());  y = y - h
@@ -696,6 +712,90 @@ local function BuildGeneralPage(pageName, parent, yOffset)
             DB().showAuraTooltips = v
             if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
           end });  y = y - h
+    -- Enemy Buff Filter (replaces the retired Show All Enemy Buffs toggle;
+    -- npEnemyBuffFilter, default "important", "showall" on WoW Forever; the
+    -- old key is an inert orphan). UNION semantics: Important = important OR
+    -- dispellable (two engine groups); Dispellable = dispellable only; Show
+    -- All = every buff; the removed "all" value reads back as important.
+    -- The Dispel Glow never changes the filters -- it is just the style the
+    -- dispellable group wears, so every shown dispellable buff glows when a
+    -- style is set.
+    local buffFilterDropdown = { type="dropdown", text="Enemy Buff Filter",
+        tooltip = "Which enemy buffs show on nameplates. Important shows the buffs Blizzard flags for enemy nameplates plus anything dispellable; Only Dispellable shows just the buffs that can be dispelled, purged or soothed; Show All shows every buff. With a Dispel Glow style set, every dispellable buff shown glows.",
+        values = { important = "Important", dispellable = "Only Dispellable", showall = "Show All" },
+        order = { "important", "dispellable", "showall" },
+        getValue = function()
+            local m = DBVal("npEnemyBuffFilter")
+            if m == "dispellable" or m == "showall" then return m end
+            return "important"
+        end,
+        setValue = function(v)
+            DB().npEnemyBuffFilter = v
+            -- Applies live: RefreshAllAuras drives the container reload;
+            -- its cfg pass re-drives both buff group filter strings and
+            -- parks/unparks the plain remainder group.
+            RefreshAllAuras()
+            UpdatePreview()
+            C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
+        end }
+
+    -- Native 12.1.5 debuff source names sit beside Enemy Buff Filter.
+    -- Keep Pandemic Glow Style and its preview together on the next row.
+    -- The account-wide Blizzard tooltip CVar is configured separately.
+    _, h = W:SectionHeader(parent, "SOURCE NAME SETTINGS", y); y = y - h
+    do
+        local sourceCogBtn, sourceCogShow
+        local sourceRow
+        sourceRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Source Name",
+              tooltip="Show the aura caster's name next to nameplate debuff icons. Names come from the game, not EUI nicknames.",
+              getValue=function() return DBVal("debuffShowSourceName") == true end,
+              setValue=function(v)
+                  DB().debuffShowSourceName = v
+                  if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                  if not v and sourceCogShow and sourceCogShow._popupFrame then
+                      sourceCogShow._popupFrame:Hide()
+                  end
+                  if sourceCogBtn and sourceCogBtn._euiCogState then sourceCogBtn._euiCogState() end
+              end },
+            buffFilterDropdown); y = y - h
+        sourceCogBtn, sourceCogShow = EllesmereUI.BuildInlineCog(sourceRow._leftRegion, {
+            title = "Source Name Settings",
+            disabled = function() return DBVal("debuffShowSourceName") ~= true end,
+            disabledTooltip = "Enable Show Source Name to edit its settings.",
+            rows = {
+                { type="dropdown", label="Name Position",
+                  values={ top="Top", bottom="Bottom", left="Left", right="Right",
+                           topleft="Top Left", topright="Top Right", bottomleft="Bottom Left",
+                           bottomright="Bottom Right", center="Center" },
+                  order={ "top", "bottom", "left", "right", "topleft", "topright",
+                          "bottomleft", "bottomright", "center" },
+                  get=function() return DBVal("debuffSourceNamePosition") or "bottom" end,
+                  set=function(v)
+                      DB().debuffSourceNamePosition = v
+                      if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                  end },
+                { type="slider", label="Name Font Size", min=6, max=30, step=1,
+                  get=function() return DBVal("debuffSourceNameFontSize") or 11 end,
+                  set=function(v)
+                      DB().debuffSourceNameFontSize = v
+                      if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                  end },
+                { type="slider", label="Name X-Offset", min=-100, max=100, step=1,
+                  get=function() return DBVal("debuffSourceNameOffsetX") or 0 end,
+                  set=function(v)
+                      DB().debuffSourceNameOffsetX = v
+                      if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                  end },
+                { type="slider", label="Name Y-Offset", min=-100, max=100, step=1,
+                  get=function() return DBVal("debuffSourceNameOffsetY") or 0 end,
+                  set=function(v)
+                      DB().debuffSourceNameOffsetY = v
+                      if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
+                  end },
+            },
+        })
+    end
 
     local GO = EllesmereUI.GlowOptions
 
@@ -755,36 +855,12 @@ local function BuildGeneralPage(pageName, parent, yOffset)
     -- --- Dispellable Buff Glow ----------------------------------------
     local dispelDesc = npDispelGlowDesc
     local dispelGlowDropdown = GO.DropdownSpec(dispelDesc, "Dispel Glow Style")
-    -- Enemy Buff Filter (replaces the retired Show All Enemy Buffs toggle;
-    -- npEnemyBuffFilter, default "important", "showall" on WoW Forever; the
-    -- old key is an inert orphan). UNION semantics: Important = important OR
-    -- dispellable (two engine groups); Dispellable = dispellable only; Show
-    -- All = every buff; the removed "all" value reads back as important.
-    -- The Dispel Glow never changes the filters -- it is just the style the
-    -- dispellable group wears, so every shown dispellable buff glows when a
-    -- style is set.
-    local buffFilterDropdown = { type="dropdown", text="Enemy Buff Filter",
-        tooltip = "Which enemy buffs show on nameplates. Important shows the buffs Blizzard flags for enemy nameplates plus anything dispellable; Only Dispellable shows just the buffs that can be dispelled, purged or soothed; Show All shows every buff. With a Dispel Glow style set, every dispellable buff shown glows.",
-        values = { important = "Important", dispellable = "Only Dispellable", showall = "Show All" },
-        order = { "important", "dispellable", "showall" },
-        getValue = function()
-            local m = DBVal("npEnemyBuffFilter")
-            if m == "dispellable" or m == "showall" then return m end
-            return "important"
-        end,
-        setValue = function(v)
-            DB().npEnemyBuffFilter = v
-            -- Applies live: RefreshAllAuras drives the container reload;
-            -- its cfg pass re-drives both buff group filter strings and
-            -- parks/unparks the plain remainder group.
-            RefreshAllAuras()
-            UpdatePreview()
-            C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
-        end }
+    -- The last row of Extra Aura Options may leave the right slot empty.
     local dispelGlowRow
-    dispelGlowRow, h = W:DualRow(parent, y, buffFilterDropdown, dispelGlowDropdown);  y = y - h
+    dispelGlowRow, h = W:DualRow(parent, y,
+        dispelGlowDropdown, EllesmereUI.BlankRowCfg());  y = y - h
 
-    GO.AttachInline(dispelGlowRow._rightRegion, dispelDesc)
+    GO.AttachInline(dispelGlowRow._leftRegion, dispelDesc)
 
     _, h = W:Spacer(parent, y, 20);  y = y - h
 
