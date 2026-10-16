@@ -555,6 +555,7 @@ local DB_DEFAULTS = {
             List1              = "",
             AutoInvite         = true,
             AutoInviteInterval = 30,
+            InviteDelay        = 0.4,
             AutoAcceptShared   = false,
             AutoAcceptFriendly = false,
             SyncRaid            = true,
