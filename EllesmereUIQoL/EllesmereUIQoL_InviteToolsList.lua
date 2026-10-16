@@ -428,7 +428,8 @@ end
 -- anything in combat (a round that comes due waits until combat is over).
 ------------------------------------------------------------------------
 
-local INVITE_SPACING = 0.4      -- seconds between invites, so an error can be tied to a name
+local DEFAULT_INVITE_DELAY = 0.4 -- preserve EUI's existing invite cadence for saved profiles
+local MIN_INVITE_DELAY, MAX_INVITE_DELAY = 0.2, 30
 local DEFAULT_INTERVAL = 30     -- default seconds between automatic retries
 local MIN_INTERVAL, MAX_INTERVAL = 5, 600
 local MAX_ATTEMPTS = 4          -- a name is invited at most this many times (the first invite counts), then it is marked "Gave up"
@@ -522,6 +523,25 @@ end
 function IL:SetShared(on)
     if not self.db then return end
     self.db.AutoAcceptShared = on and true or false
+    self:UpdateUI()
+end
+
+-- Per-invite pacing is distinct from the Auto-invite retry interval.
+function IL:GetInviteDelay()
+    local v = tonumber(self.db and self.db.InviteDelay) or DEFAULT_INVITE_DELAY
+    return math_max(MIN_INVITE_DELAY, math_min(MAX_INVITE_DELAY, v))
+end
+
+function IL:SetInviteDelay(v)
+    if not self.db then return end
+    v = math_max(MIN_INVITE_DELAY, math_min(MAX_INVITE_DELAY, tonumber(v) or DEFAULT_INVITE_DELAY))
+    self.db.InviteDelay = math.floor(v * 10 + 0.5) / 10
+    -- Re-evaluate the scheduled wait against the last actual invite.
+    if self.pumping then
+        self.pumpGeneration = (self.pumpGeneration or 0) + 1
+        self.pumping = false
+        if #self.sendQueue > 0 then self:Pump() end
+    end
     self:UpdateUI()
 end
 
@@ -648,6 +668,7 @@ function IL:RecordJoin(name, kind, class, how, by)
         db.History = hist
     end
     local keepName = name
+    local previousStatus
     for i = #hist, 1, -1 do
         local e = hist[i]
         if type(e) ~= "table" or type(e.name) ~= "string" then
@@ -656,15 +677,19 @@ function IL:RecordJoin(name, kind, class, how, by)
             -- Keep the spelling that carries the realm (it re-invites reliably).
             if e.name:find("-", 1, true) and not name:find("-", 1, true) then keepName = e.name end
             class = class or e.class
+            previousStatus = e.status
             table.remove(hist, i)
         end
     end
+    local st = self:FindState(name)
+    local status = (st and st.status) or previousStatus
     table.insert(hist, 1, {
         name = keepName,
         kind = kind or "joined",
         how = how,
         by = by,
         class = class or GroupClass(keepName),
+        status = status,
         t = time(),
     })
     for i = #hist, HISTORY_MAX + 1, -1 do hist[i] = nil end
@@ -839,6 +864,9 @@ end
 -- The Stop button: nothing more is sent, whatever was still open is marked
 -- Stopped, and a half-finished raid conversion is dropped.
 function IL:StopAuto()
+    -- Invalidate delayed invite callbacks so Stop cannot affect a new queue.
+    self.pumpGeneration = (self.pumpGeneration or 0) + 1
+    self.pumping = false
     wipe(self.sendQueue)
     for _, st in pairs(self.state) do
         if IsOpenStatus(st.status) then st.status = "stopped" end
@@ -850,7 +878,7 @@ end
 
 -- Sending -----------------------------------------------------------------
 
-function IL:QueueInvite(name)
+function IL:QueueInvite(name, prioritize)
     local key = name:lower()
     local st = self.state[key]
     if not st then
@@ -858,26 +886,50 @@ function IL:QueueInvite(name)
         st = { name = name, attempts = 0, order = self.orderSeq }
         self.state[key] = st
     end
-    for _, n in ipairs(self.sendQueue) do
-        if n:lower() == key then return end -- already waiting its turn
+    for i = #self.sendQueue, 1, -1 do
+        if self.sendQueue[i]:lower() == key then
+            if not prioritize then return end
+            table.remove(self.sendQueue, i)
+        end
     end
     st.status = "queued"
-    self.sendQueue[#self.sendQueue + 1] = name
-    if not self.pumping then self:Pump() end
+    if prioritize then
+        table.insert(self.sendQueue, 1, name)
+    else
+        self.sendQueue[#self.sendQueue + 1] = name
+    end
+    if not self.pumping then self:Pump() else self:UpdateUI() end
 end
 
--- Sends one invite and schedules the next, so each error that comes back can
--- be tied to the name it belongs to.
+-- All list-wide and manual invites use the same time-gated queue. The last
+-- actual send controls pacing, even when a manual invite jumps to the front.
 function IL:Pump()
-    self.pumping = false
     if InCombatLockdown() then
-        -- Safety guard for a spacing callback that races combat entry. The
-        -- combat event clears the queue/session, so nothing resumes afterward.
+        self.pumping = false
+        self:UpdateUI()
+        return
+    end
+    if #self.sendQueue == 0 then
+        self.pumping = false
+        self:UpdateUI()
+        return
+    end
+    local remaining = (self.lastSendAt or -100) + self:GetInviteDelay() - GetTime()
+    if remaining > 0 then
+        self.pumping = true
+        self.pumpGeneration = (self.pumpGeneration or 0) + 1
+        local generation = self.pumpGeneration
+        C_Timer.After(remaining, function()
+            if IL.pumpGeneration ~= generation then return end
+            IL.pumping = false
+            IL:Pump()
+        end)
         self:UpdateUI()
         return
     end
 
-    -- Next name still waiting; skip any that were removed or stopped meanwhile.
+    self.pumping = false
+    -- Skip queued names that have since been removed, stopped or joined.
     local name, st
     while #self.sendQueue > 0 do
         local candidate = table.remove(self.sendQueue, 1)
@@ -887,25 +939,25 @@ function IL:Pump()
             break
         end
     end
-
     if name then
         if InGroup(name) then
             self:MarkInGroup(st)
         else
-            self.lastInvite = { name = name, t = GetTime() }
+            local now = GetTime()
+            self.lastInvite = { name = name, t = now }
             self:ClearFriendInvited(name)
             InviteUnit(name)
+            self.lastSendAt = now
             st.status = "pending"
             st.attempts = (st.attempts or 0) + 1
-            st.sentAt = GetTime()
+            st.sentAt = now
         end
     end
-
     if #self.sendQueue > 0 then
-        self.pumping = true
-        C_Timer.After(INVITE_SPACING, function() IL:Pump() end)
+        self:Pump()
+    else
+        self:UpdateUI()
     end
-    self:UpdateUI()
 end
 
 -- Re-invites everything that is still worth another try.
@@ -1003,8 +1055,16 @@ function IL:OnSystemMsg(_, msg)
     local who = MatchGlobal(msg, _G.ERR_DECLINE_GROUP_S)
     if who then
         local st = self:FindState(who)
-        if st and not self:IsFriendInvited(st.name) then
-            self:RecordJoin(st.name, "declined", nil, "declined")
+        local name = st and st.name
+        if not name then
+            -- A delayed decline may arrive after the original invite session
+            -- ended. Only accept an untracked name if it is still on our list.
+            for _, candidate in ipairs(self.names or ParseList(self:GetListText(1))) do
+                if SameChar(candidate, who) then name = candidate; break end
+            end
+        end
+        if name and not self:IsFriendInvited(name) then
+            self:RecordJoin(name, "declined", nil, "declined")
         end
     end
     if self.session then self:OnInviteSystemMsg(nil, msg) end
@@ -1060,7 +1120,7 @@ end
 
 -- Invites everyone in `list` who is not already here. Returns how many invites
 -- were sent right now.
-function IL:InviteNames(list, isContinuation)
+function IL:InviteNames(list, isContinuation, prioritize)
     -- Nothing here runs in combat.
     if InCombatLockdown() then return 0 end
     local inRaid = IsInRaid()
@@ -1107,7 +1167,7 @@ function IL:InviteNames(list, isContinuation)
     local sent = 0
     for i = 1, #todo do
         if inRaid or sent < slots then
-            self:QueueInvite(todo[i])
+            self:QueueInvite(todo[i], prioritize)
             sent = sent + 1
         else
             break
@@ -1144,9 +1204,9 @@ function IL:InviteOne(name)
             if pending:lower()==name:lower() then known=true;break end
         end
         if not known then self.pendingList[#self.pendingList+1]=name end
-        self:InviteNames({ name }, true)
+        self:InviteNames({ name }, true, true)
     else
-        self:InviteNames({ name }, false)
+        self:InviteNames({ name }, false, true)
     end
     self:UpdateUI()
 end
@@ -1264,6 +1324,10 @@ function IL:GROUP_ROSTER_UPDATE()
     if InCombatLockdown() then return end
     self:TrackRoster()
     if next(self.state) then self:RefreshMembership() end
+    -- History presence marks track the live roster, even without a new entry.
+    if self.frame and self.frame:IsShown() and self.frame.RefreshHistory then
+        self.frame.RefreshHistory()
+    end
     self:UpdateUI()
     local inRaid = IsInRaid()
 
@@ -1916,6 +1980,9 @@ end
 function IL:ApplyClear(sender)
     if #(self.names or ParseList(self:GetListText(1))) == 0 then return end
     self:ClearList("cleared", ShortSender(sender))
+    -- Live Raid Sync stays silent for adds/removes; only whole-list clears
+    -- are announced, once per actually applied clear (also after combat).
+    InviteTools:Print(string.format(L["%s cleared the invite list."], Who(sender)))
     return true
 end
 
@@ -3748,12 +3815,21 @@ function IL:CreateFrame()
             elseif how == "shared" then
                 local by = e.by or "?"
                 GameTooltip:AddLine(string.format(L["Removed by accepting a shared list from %s"], by), 0.8, 0.8, 0.8)
+            elseif how == "leader" then
+                GameTooltip:AddLine(string.format(L["Removed from the list by %s"], e.by or "?"), 0.8, 0.8, 0.8)
+            elseif how == "cleared" and e.by then
+                GameTooltip:AddLine(string.format(L["List cleared by %s"], e.by), 0.8, 0.8, 0.8)
             else
                 local why = (how == "list" and L["Invited via list"])
                     or (how == "declined" and L["Declined your invite"])
                     or (how == "cleared" and L["Cleared from list"])
                     or L["Removed from list"]
                 GameTooltip:AddLine(why, 0.8, 0.8, 0.8)
+            end
+            if e.kind == "removed" and e.status then
+                local statusInfo = STATUS_INFO[e.status]
+                local statusText = statusInfo and L[statusInfo.text] or tostring(e.status)
+                GameTooltip:AddLine(string.format(L["Status when removed: %s"], statusText), 0.8, 0.8, 0.8)
             end
             if e.t then
                 local fmt = (e.kind == "declined" and L["Declined at %s"])
@@ -3811,12 +3887,12 @@ function IL:CreateFrame()
             row:SetPoint("TOPLEFT", hcontent, "TOPLEFT", 0, -((i - 1) * (HIST_ROW_H + HIST_GAP)))
             row:SetPoint("TOPRIGHT", hcontent, "TOPRIGHT", 0, -((i - 1) * (HIST_ROW_H + HIST_GAP)))
             row.nameText:SetText(e.name)
-            if e.kind == "declined" then
-                row.mark:SetColorTexture(1.00, 0.30, 0.30, 1)
-            elseif e.kind == "removed" then
-                row.mark:SetColorTexture(0.65, 0.65, 0.65, 1)
-            else
+            -- The mark reflects presence in the current group, not why the
+            -- historical entry was created. Tooltip retains the exact reason.
+            if InGroup(e.name) then
                 row.mark:SetColorTexture(0.35, 0.90, 0.35, 1)
+            else
+                row.mark:SetColorTexture(0.65, 0.65, 0.65, 1)
             end
             local c = e.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[e.class]
             if c then
@@ -5078,6 +5154,7 @@ ns.InviteToolsSetAccent = function(r, g, b) IL:SetAccent(r, g, b) end
 ns.InviteToolsSetBackground = function(r, g, b, a) IL:SetBackground(r, g, b, a) end
 ns.InviteToolsSetListBackground = function(r, g, b, a) IL:SetListBackground(r, g, b, a) end
 ns.InviteToolsSetSync = function(on) IL:SetSync(on) end
+ns.InviteToolsSetInviteDelay = function(v) IL:SetInviteDelay(v) end
 ns.InviteToolsApplySettings = function()
     IL:UpdateDB()
     if not IL.db then return end

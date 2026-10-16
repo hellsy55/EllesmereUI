@@ -709,6 +709,21 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        _, h = W:DualRow(parent, y,
+            { type = "slider", text = "Invite Delay (Seconds)", min = 0.2, max = 30, step = 0.1,
+              tooltip = "Time between individual invites, including manual re-invites. Independent from Auto-invite retries.",
+              disabled = Disabled,
+              getValue = function() return math.max(0.2, math.min(30, tonumber(InviteCfg("InviteDelay")) or 0.4)) end,
+              setValue = function(v)
+                  if ns.InviteToolsSetInviteDelay then
+                      ns.InviteToolsSetInviteDelay(v)
+                  else
+                      InviteSet("InviteDelay", math.floor(math.max(0.2, math.min(30, tonumber(v) or 0.4)) * 10 + 0.5) / 10)
+                  end
+              end },
+            EllesmereUI.BlankRowCfg()
+        );  y = y - h
+
         -- QUICK FIRE
         -- An explicitly enabled, empty-by-default set of world-marker binds.
         _, h = W:SectionHeader(parent, "QUICK FIRE", y);  y = y - h

@@ -651,6 +651,15 @@ local function Display(name, unit)
     if p and p.showNicknames == false then return name or "" end
     return (name and SavedNickname(name)) or name or ""
 end
+-- Ignore Arrangement labels identify the character independently of the
+-- nickname (which may be shared by several characters), without its realm.
+function RGStyle.IgnoredListLabel(name)
+    local full = FullName(name) or name or ""
+    local character = full:match("^([^%-]+)") or full
+    local nick = SavedNickname(name)
+    if nick then character = character .. " (" .. nick .. ")" end
+    return character .. " * [Ignored]"
+end
 local function RememberFromUnit(unit, realName)
     if not Enabled("nicknameLearning") or not Enabled("nicknameRosterLearn")
         or not ns.GetNicknameForUnit or not data then return end
@@ -3629,6 +3638,7 @@ local function ShowApplyPreview(model)
             row._bg:SetColorTexture(.12,.15,.17,.85)
             RGStyle.MarkPlayerFont(row._lbl,"available")
             row._availableName=nil
+            row._lbl:SetWordWrap(false)
             row:RegisterForDrag("LeftButton")
             row:RegisterForClicks("LeftButtonUp","RightButtonUp")
             row:SetScript("OnClick",function(self,button)
@@ -3851,7 +3861,8 @@ local function ShowApplyPreview(model)
                     row._maySwap=not not atRisk
                     local label=LF("%s (Group %d%s)",ChatName(member.name)..(GuestMode(member.name) and "*" or ""),member.group,
                         atRisk and "; may swap" or "; unassigned")
-                    row._lbl:SetText(label..(RGStyle.IsArrangementIgnored(member.key) and " [Ignored]" or ""))
+                    row._lbl:SetText(RGStyle.IsArrangementIgnored(member.key)
+                        and RGStyle.IgnoredListLabel(member.name) or label)
                     row._lbl:SetTextColor(model.selectedAvailableKey==member.key and .22 or 1,
                         model.selectedAvailableKey==member.key and 1 or (atRisk and .7 or .82),
                         atRisk and .34 or .77)
@@ -5506,9 +5517,12 @@ function RefreshExtras()
             local setup=selectedSetup and data.setups[selectedSetup]
             local mode=(setup and setup.guestModes and setup.guestModes[info.key]) or data.guests[info.key]
             local guest=GuestMode(info.name)
-            row._lbl:SetText(Display(info.name)..(guest and "*" or (Enabled("unlistedAsterisk") and " *" or ""))..
-                (not guest and mode=="notguest" and (" ["..L("Not Guest").."]") or "")..
-                (RGStyle.IsArrangementIgnored(info.key) and " [Ignored]" or ""))
+            if RGStyle.IsArrangementIgnored(info.key) then
+                row._lbl:SetText(RGStyle.IgnoredListLabel(info.name))
+            else
+                row._lbl:SetText(Display(info.name)..(guest and "*" or (Enabled("unlistedAsterisk") and " *" or ""))..
+                    (not guest and mode=="notguest" and (" ["..L("Not Guest").."]") or ""))
+            end
             local c=info.class and EllesmereUI.GetClassColor(info.class)
             if c then row._lbl:SetTextColor(c.r,c.g,c.b) else row._lbl:SetTextColor(1,1,1) end
         end
@@ -5784,11 +5798,12 @@ local function EnsureMainWindow()
     extrasLabel:SetPoint("TOPLEFT",left,-60)
     for i=1,10 do
         local r=CreateFrame("Button",nil,win)
-        r:SetSize(184,25)
+        r:SetSize(192,25)
         r:SetPoint("TOPLEFT",left,-79-(i-1)*26)
         EllesmereUI.SolidTex(r,"BACKGROUND",.12,.15,.17,.8):SetAllPoints()
         r._lbl=Text(r,10)
         RGStyle.MarkPlayerFont(r._lbl,"unlisted")
+        r._lbl:SetWordWrap(false)
         r._lbl:SetPoint("LEFT",5,0);r._lbl:SetPoint("RIGHT",-4,0)
         AddLeaderIcon(r)
         r:RegisterForClicks("LeftButtonUp","RightButtonUp")
@@ -5829,7 +5844,7 @@ local function EnsureMainWindow()
     end
     local unlistedWheel=CreateFrame("Frame",nil,win)
     unlistedWheel:SetPoint("TOPLEFT",left,-79)
-    unlistedWheel:SetSize(184,259)
+    unlistedWheel:SetSize(192,259)
     unlistedWheel:EnableMouseWheel(true)
     unlistedWheel:SetScript("OnMouseWheel",WheelUnlisted)
     unlistedWheel:SetFrameLevel(win:GetFrameLevel()+1)
@@ -5838,7 +5853,7 @@ local function EnsureMainWindow()
         row:EnableMouseWheel(true)
         row:SetScript("OnMouseWheel",WheelUnlisted)
     end
-    win._unlistedScrollbar=RGStyle.ListScrollbar(win,left+186,-79,259,
+    win._unlistedScrollbar=RGStyle.ListScrollbar(win,left+194,-79,259,
         function() return extraOffset end,
         function(offset) extraOffset=offset;RefreshExtras() end,
         function()
