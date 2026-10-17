@@ -6,7 +6,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  animations, combat fade, low-resource alerts, class-colored bars
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
-if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue and EllesmereUI.SetFrameScale) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Call Totem Bar scales its Edit Mode system through the parent's SetFrameScale)
+if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue and EllesmereUI.SetFrameScale and EllesmereUI._Pool) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Call Totem Bar scales its Edit Mode system through the parent's SetFrameScale)
 EllesmereUI._ModuleNS[ADDON_NAME] = ns  -- LOD options files read this module ns via the registry
 local ERB = EllesmereUI.Lite.NewAddon(ADDON_NAME)
 ns.ERB = ERB
@@ -1416,6 +1416,7 @@ local DEFAULTS = {
             gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
             gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
             texture       = "none",
+            textureBg     = false,  -- Textured Background (Texture Settings cog)
             showSpark     = true,
             borderSize    = 1,
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
@@ -1471,6 +1472,7 @@ local DEFAULTS = {
             gradientR     = 0.20, gradientG = 0.20, gradientB = 0.80, gradientA = 1,
             gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
             texture       = "none",
+            textureBg     = false,  -- Textured Background (Texture Settings cog)
             showSpark     = false,
             depleteFill   = false,  -- start full and deplete instead of filling up
             borderSize    = 1,
@@ -1506,6 +1508,10 @@ local DEFAULTS = {
             gradientDir   = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL"
             texture       = "none",
             showSpark     = false,
+            sparkWidth    = 8,
+            sparkOverhang = 0,      -- how far the spark reaches past the bar's top and bottom
+            -- Spark colours (mhSparkR/G/B/A, ohSpark.., rSpark..) are unset by default:
+            -- white, and a combined off hand's spark its fill colour.
             depleteFill   = true,   -- start full and deplete instead of filling up
             idleShowFill  = nil,    -- true = idle row sits full of its fill colour
             hideWhenIdle  = false,  -- hide the whole bar while no swing is running
@@ -1518,9 +1524,20 @@ local DEFAULTS = {
             textSize      = 11,
             rangeCheck    = true,   -- dim rows whose target is out of auto-attack range
             outOfRangeAlpha = 0.4,
-            queueHighlight = true,  -- melee rows take the queue colour + spell name while an on-next-swing attack is queued
-            queueR = 1, queueG = 0.70, queueB = 0.20, queueA = 1,   -- Heroic Strike / Maul
-            queueCleaveR = 0.95, queueCleaveG = 0.35, queueCleaveB = 0.25, queueCleaveA = 1,   -- Cleave
+            -- Attack State: "off" | "queued" (melee rows take the queued attack's colour + name)
+            -- | "full" (also On while the attack is on, Waiting while it is on with nothing swinging)
+            attackState   = "queued",
+            queueR = 1, queueG = 0.70, queueB = 0.20, queueA = 1,   -- Queued: Heroic Strike / Maul / Raptor Strike
+            queueCleaveR = 0.95, queueCleaveG = 0.35, queueCleaveB = 0.25, queueCleaveA = 1,   -- Queued: Cleave
+            activeR = 0.047, activeG = 0.824, activeB = 0.616, activeA = 1,   -- On: EUI teal #0CD29D
+            pendingR = 0.659, pendingG = 0.502, pendingB = 0.949, pendingA = 1,   -- Waiting: violet #A880F2
+            -- Movement Guide: "off" | "segments" | "windup". GO (the last latency of each swing) on
+            -- every row; STILL (the 0.5s a wand / Auto Shot needs the player still, latency earlier)
+            -- on their Ranged row, as a segment or its own fill. Smooths swing timing while on.
+            moveGuide     = "off",
+            moveCue       = false,  -- the Ranged row's time reads Move x.x / Still / Go
+            latencyR = 0.949, latencyG = 0.957, latencyB = 0.969, latencyA = 0.9,   -- GO: white
+            aimR = 1, aimG = 0.82, aimB = 0.25, aimA = 0.6,   -- STILL: amber, translucent so the fill shows through
             borderSize    = 1,
             borderR       = 0, borderG = 0, borderB = 0, borderA = 1,
             borderTexture = "solid",
@@ -1582,6 +1599,7 @@ local DEFAULTS = {
             anchorY     = -100,
             orientation = "HORIZONTAL",  -- "HORIZONTAL","VERTICAL_UP","VERTICAL_DOWN"
             barTexture  = "none",
+            barTextureBg = false,  -- Textured Background (Texture cog)
             -- Classic WoW UI: one frame round the resource bars as a group,
             -- with a separator line (physical pixels, 0 = none) between bars.
             classicBorderAll = false,
@@ -1919,6 +1937,20 @@ local function ApplyBarTexture(bar, texKey)
     -- Blizzard Style: a path swap can mint a new fill object; re-seat the
     -- bar-shape mask on it (memoized per object, so a no-op otherwise).
     if bar._blizzBarMask then ns.ERB_SeatBlizzMask(bar) end
+end
+
+-- Textured Background: the bar's own texture on a background, tinted by the
+-- background colour. Callers repaint the flat colour around it; nil path clears
+-- the tint a texture left behind (SetColorTexture keeps it).
+function ns.ERB_BgTexture(bg, path, r, g, b, a)
+    if path then
+        bg:SetTexture(path)
+        bg:SetVertexColor(r, g, b, a)
+        bg._erbBgTex = true
+    elseif bg._erbBgTex then
+        bg._erbBgTex = nil
+        bg:SetVertexColor(1, 1, 1, 1)
+    end
 end
 
 
@@ -3593,6 +3625,12 @@ local function BuildBars()
                 ApplyBarFlat(hft, fR, fG, fB, fA)
             end
             healthBar._bg:SetColorTexture(hp.bgR, hp.bgG, hp.bgB, hp.bgA)
+            -- Textured Background: flat while Fill Color is below 100.
+            if g.barTextureBg or healthBar._bg._erbBgTex then
+                ns.ERB_BgTexture(healthBar._bg, g.barTextureBg and (hp.fillOpacity or 100) >= 100
+                    and EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, (p.splitTex == true and hp.barTexture) or g.barTexture, nil),
+                    hp.bgR, hp.bgG, hp.bgB, hp.bgA)
+            end
         end
 
         healthBar._text:ClearAllPoints()
@@ -3784,6 +3822,12 @@ local function BuildBars()
                 ApplyBarFlat(pft, fR, fG, fB, fA)
             end
             primaryBar._bg:SetColorTexture(pp.bgR, pp.bgG, pp.bgB, pp.bgA)
+            -- Textured Background: flat while Fill Color is below 100.
+            if g.barTextureBg or primaryBar._bg._erbBgTex then
+                ns.ERB_BgTexture(primaryBar._bg, g.barTextureBg and (pp.fillOpacity or 100) >= 100
+                    and EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, (p.splitTex == true and pp.barTexture) or g.barTexture, nil),
+                    pp.bgR, pp.bgG, pp.bgB, pp.bgA)
+            end
         end
 
         primaryBar._text:ClearAllPoints()
@@ -4047,6 +4091,17 @@ local function BuildBars()
                 secondaryBar:GetStatusBarTexture():SetVertexColor(sp.fillR, sp.fillG, sp.fillB, 1)
                 secondaryBar._bg:SetColorTexture(sp.bgR, sp.bgG, sp.bgB, sp.bgA)
             end
+            -- Textured Background: the class resource textures its own empty-bar
+            -- background (Empty Bar Overlay; Dark Mode Background in Dark Mode).
+            if g.barTextureBg or secondaryBar._bg._erbBgTex then
+                local br, bgg, bb, ba = sp.bgR, sp.bgG, sp.bgB, sp.bgA
+                if sp.darkTheme then
+                    br, bgg, bb = EllesmereUI.GetDarkModeBg()
+                    ba = DARK_BG_A
+                end
+                ns.ERB_BgTexture(secondaryBar._bg, g.barTextureBg
+                    and (sp.fillOpacity or 100) >= 100 and EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, g.barTexture, nil), br, bgg, bb, ba)
+            end
             -- Blizzard atlas fill swaps in AFTER the tint chain: the art is
             -- pre-colored (every color mode above overridden to white) since
             -- SetStatusBarTexture resets orientation/vertex color. No atlas for
@@ -4160,6 +4215,11 @@ local function BuildBars()
                 end
                 runeFrames[i]:ApplyTexture(g.barTexture or "none")
                 runeFrames[i]._bg:SetColorTexture(ERB.PipBgColor(sp, pipBg))
+                -- Textured Background, as the bar-type branch.
+                if g.barTextureBg or runeFrames[i]._bg._erbBgTex then
+                    ns.ERB_BgTexture(runeFrames[i]._bg, g.barTextureBg and not pipBg
+                        and (sp.fillOpacity or 100) >= 100 and EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, g.barTexture, nil), ERB.PipBgColor(sp, pipBg))
+                end
                 -- Fill Opacity: same stamp as regular pips (consumed by
                 -- SetActive in the rune update). Inert at 100 unless restoring.
                 -- Background on individual pips takes the same path at factor 1:
@@ -4233,6 +4293,11 @@ local function BuildBars()
                 end
                 pips[i]:ApplyTexture(g.barTexture or "none")
                 pips[i]._bg:SetColorTexture(ERB.PipBgColor(sp, pipBg))
+                -- Textured Background, as the bar-type branch.
+                if g.barTextureBg or pips[i]._bg._erbBgTex then
+                    ns.ERB_BgTexture(pips[i]._bg, g.barTextureBg and not pipBg
+                        and (sp.fillOpacity or 100) >= 100 and EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, g.barTexture, nil), ERB.PipBgColor(sp, pipBg))
+                end
                 -- Fill Opacity: stamp the per-pip factor (consumed by SetActive
                 -- and the secret renderer). Inert at 100 unless restoring.
                 -- Background on individual pips takes the same path at factor 1:
@@ -4991,6 +5056,17 @@ local _runeReady = {}       -- [rune index] = true/false
 local _essenceNextTick = nil   -- GetTime() when the next pip will be ready
 local _essenceLastCount = nil  -- last known whole-pip count
 local _essenceTickDur = 0      -- seconds per pip recharge
+-- Seconds per Essence pip from the regen rate; the last known duration (5 before
+-- any) while the rate reads secret, as it does in combat. On ns: the main chunk
+-- sits at its 200-local cap.
+function ns.EssenceTickDuration()
+    if not GetPowerRegenForPowerType then return _essenceTickDur > 0 and _essenceTickDur or 5 end
+    local regen = GetPowerRegenForPowerType(PT.ESSENCE)
+    if not regen or (issecretvalue and issecretvalue(regen)) then
+        return _essenceTickDur > 0 and _essenceTickDur or 5
+    end
+    return regen > 0 and (1 / regen) or 5
+end
 
 -- Cast handler for the Prot Ignore Pain bar's moving hash line: each cast
 -- refreshes the buff, so the line resets to the right edge and slides left.
@@ -5063,24 +5139,75 @@ local function CachedSpellName(spellID)
     end
     return nm or nil
 end
+-- Every item frame each viewer's pool has handed out, in plain arrays refreshed
+-- only after the pool acquired one (a released item is hidden with its cooldown
+-- data cleared, so a shown frame here is exactly a shown active item). The pools
+-- are Blizzard's secure pools: walking one builds an iterator closure and makes a
+-- secure call per step, too costly for a check that runs on every class-resource update.
+-- One table: the main chunk sits at its 200-local cap.
+local BVI = { items = { {}, {} }, seen = { {}, {} }, dirty = { true, true }, hooked = {} }
+function BVI.Items(vi)
+    local vf = _G[_euiBuffViewers[vi]]
+    local pool = vf and vf.itemFramePool
+    if not (pool and pool.EnumerateActive) then return nil end
+    local dirty = BVI.dirty
+    if BVI.hooked[vi] ~= pool then
+        BVI.hooked[vi] = pool
+        dirty[vi] = true
+        hooksecurefunc(pool, "Acquire", function() dirty[vi] = true end)
+    end
+    local list = BVI.items[vi]
+    if dirty[vi] then
+        dirty[vi] = false
+        local seen = BVI.seen[vi]
+        for frame in pool:EnumerateActive() do
+            if not seen[frame] then
+                seen[frame] = true
+                list[#list + 1] = frame
+            end
+        end
+    end
+    return list
+end
+-- True when any ID the viewer scan compares is secret: Blizzard writes secret
+-- values into an item's live cooldownInfo mid-fight (raid encounters), and
+-- comparing one from addon code is a hard error.
+function BVI.Secret(info)
+    if not issecretvalue then return false end
+    if issecretvalue(info.spellID) or issecretvalue(info.overrideSpellID) then return true end
+    local linked = info.linkedSpellIDs
+    if type(linked) == "table" then
+        for i = 1, #linked do
+            if issecretvalue(linked[i]) then return true end
+        end
+    end
+    return false
+end
 local function BuffActiveViaCooldownViewer(spellID, wantName)
     local gci = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
     if not gci then return false end
     for vi = 1, #_euiBuffViewers do
-        local vf = _G[_euiBuffViewers[vi]]
-        local pool = vf and vf.itemFramePool
-        if pool and pool.EnumerateActive then
-            for frame in pool:EnumerateActive() do
+        local list = BVI.Items(vi)
+        if list then
+            for li = 1, #list do
+                local frame = list[li]
                 if frame:IsShown() then    -- shown = the buff is currently up
                     -- The item's own cooldownInfo is the data provider's live
                     -- table (Blizzard updates its override and linked IDs in
                     -- place), so reading it allocates nothing; a
                     -- GetCooldownViewerCooldownInfo call builds a fresh copy per
-                    -- item. Only an item without one asks.
+                    -- item. An item without one, or whose live table holds a
+                    -- secret ID, reads that copy instead: its fields are never
+                    -- secret (no secret returns in the API docs), and a copy that
+                    -- somehow is still secret is skipped rather than compared.
                     local info = frame.cooldownInfo
-                    if not info then
+                    if not info or BVI.Secret(info) then
                         local cdID = frame.cooldownID
-                        info = cdID and gci(cdID)
+                        info = nil
+                        if type(cdID) == "number" and not (issecretvalue and issecretvalue(cdID)) then
+                            info = gci(cdID)
+                            if info and BVI.Secret(info) then info = nil end
+                        end
                     end
                     if info then
                         if info.spellID == spellID or info.overrideSpellID == spellID then return true end
@@ -5089,8 +5216,11 @@ local function BuffActiveViaCooldownViewer(spellID, wantName)
                                 if lid == spellID then return true end
                             end
                         end
-                        if wantName and info.spellID and CachedSpellName(info.spellID) == wantName then
-                            return true
+                        local sid = wantName and info.spellID
+                        if sid then
+                            local nm = _euiSpellNames[sid]
+                            if nm == nil then nm = CachedSpellName(sid) end
+                            if nm == wantName then return true end
                         end
                     end
                 end
@@ -5695,6 +5825,9 @@ local function UpdateSecondaryResource()
     -- shards. Essence is the other fractional resource and can't use this (UnitPower
     -- has no partial for it), hence its timer exemption below; any future fractional
     -- resource belongs HERE.
+    -- The tracked buff this early-out reads is handed to the fill pass below (same
+    -- entry, same call), so a redraw scans the buff viewers once, not twice.
+    local _ebEntry, _ebR, _ebG, _ebB, _ebA
     if cachedSecondary.type == "points" then
         local _evCur
         if cachedSecondary.frac then
@@ -5711,7 +5844,9 @@ local function UpdateSecondaryResource()
             local tb, ts = ns.SecTracks()
             local bw, sw = 0, 0
             if tb then
-                local _, _, _, _, i = ActiveBuffColor(ns.STK.entry)
+                local i
+                _ebEntry = ns.STK.entry
+                _ebR, _ebG, _ebB, _ebA, i = ActiveBuffColor(_ebEntry)
                 bw = i or 0
             end
             if ts then sw = ns.SpenderWinner() end
@@ -5805,7 +5940,12 @@ local function UpdateSecondaryResource()
     -- A tracked buff overrides the fill (buff wins over threshold). With "recolor
     -- text instead" on, the buff colors the count TEXT (done at the end of this
     -- function) and fill/pips stay at their base color.
-    local _bfr, _bfg, _bfb, _bfa = ActiveBuffColor(_buffEntry)
+    local _bfr, _bfg, _bfb, _bfa
+    if _ebEntry ~= nil and _ebEntry == _buffEntry then
+        _bfr, _bfg, _bfb, _bfa = _ebR, _ebG, _ebB, _ebA
+    else
+        _bfr, _bfg, _bfb, _bfa = ActiveBuffColor(_buffEntry)
+    end
     -- No tracked buff active: a castable spender supplies the override color instead.
     if not _bfr then _bfr, _bfg, _bfb, _bfa = ns.ActiveSpenderColor(_buffEntry) end
     local _buffActive = _bfr ~= nil
@@ -6846,21 +6986,11 @@ local function UpdateSecondaryResource()
             local maxE = UnitPowerMax("player", PT.ESSENCE) or maxPts
             if issecretvalue and issecretvalue(maxE) then maxE = maxPts end
 
-            -- Safely query essence regen rate (secret in combat)
-            local function EssenceTickDuration()
-                if not GetPowerRegenForPowerType then return _essenceTickDur > 0 and _essenceTickDur or 5 end
-                local regen = GetPowerRegenForPowerType(PT.ESSENCE)
-                if not regen or (issecretvalue and issecretvalue(regen)) then
-                    return _essenceTickDur > 0 and _essenceTickDur or 5
-                end
-                return regen > 0 and (1 / regen) or 5
-            end
-
             -- Detect pip gain/loss and reset the timer
             if _essenceLastCount == nil then _essenceLastCount = cur end
             if cur ~= _essenceLastCount then
                 if cur < maxE then
-                    _essenceTickDur = EssenceTickDuration()
+                    _essenceTickDur = ns.EssenceTickDuration()
                     _essenceNextTick = now + _essenceTickDur
                 else
                     _essenceNextTick = nil
@@ -6870,7 +7000,7 @@ local function UpdateSecondaryResource()
 
             -- If below max and no timer running, start one
             if cur < maxE and not _essenceNextTick then
-                _essenceTickDur = EssenceTickDuration()
+                _essenceTickDur = ns.EssenceTickDuration()
                 _essenceNextTick = now + _essenceTickDur
             end
 
@@ -7837,6 +7967,11 @@ end
 -- host hides and leaves the UI-scale re-place. Art, size and offsets are
 -- ns.ERB_SeparatorArt's, the colour the bar's border colour and alpha. Build
 -- paths only: nothing here runs per frame or per power tick.
+do
+-- The options page pool's table (EllesmereUI_PixelPerfect.lua makes it; the
+-- options addon fills it in place), read through this block local and never
+-- through the public slot, so a slot written later cannot reach the live bars.
+local POOL = EllesmereUI._Pool
 function ns.ERB_Separators(bar, c, hOn, level, slots, count, isVertical, isReversed)
     local host = bar._erbSep
     local gaps = (slots and count and count > 1) and (count - 1) or 0
@@ -7848,7 +7983,9 @@ function ns.ERB_Separators(bar, c, hOn, level, slots, count, isVertical, isRever
         return
     end
     if not host then
-        host = CreateFrame("Frame", nil, bar)
+        -- On an options preview (an options page pool host) the piece is
+        -- pooled with the preview; on a live bar this is CreateFrame.
+        host = POOL.CreateFrame("Frame", nil, bar)
         host:EnableMouse(false)
         bar._erbSep = host
     end
@@ -7867,6 +8004,7 @@ function ns.ERB_Separators(bar, c, hOn, level, slots, count, isVertical, isRever
     -- (no rebuild) when the pixel grid moves, only while it is.
     EllesmereUI.RegisterPxReapply(host, ns.ERB_SepPlace(host) and ns.ERB_SepPlace or nil)
 end
+end -- POOL block
 -- Places a separator host's pieces from its last build; also the UI-scale
 -- re-place. Returns true while a shown piece is sized from an exact Border Size.
 -- Horizontal line: the strip flipped so its line sits at its bottom, the strip
@@ -8162,12 +8300,16 @@ end
 -- `vertical` is the caller's target orientation (the rect's own may still be
 -- the previous one on the pass that flips it); nil reads it from the host.
 -- `k` is the frame scale (ERB_ClassicFrameK; nil = full size).
+do
+local POOL = EllesmereUI._Pool  -- read as in ns.ERB_Separators' block
 function ns.ERB_ApplyClassicBarChrome(host, rect, fw, fh, vertical, k)
     if not host then return end
     rect = rect or host
     local af = host._classicArt
     if not af then
-        af = CreateFrame("Frame", nil, host)
+        -- On an options preview (an options page pool host) the art frame is
+        -- pooled with the preview; on a live bar this is CreateFrame.
+        af = POOL.CreateFrame("Frame", nil, host)
         af:EnableMouse(false)
         host._classicArt = af
         local tex = af:CreateTexture(nil, "OVERLAY", nil, 2)
@@ -8187,6 +8329,7 @@ function ns.ERB_ApplyClassicBarChrome(host, rect, fw, fh, vertical, k)
     if issecretvalue and (issecretvalue(w) or issecretvalue(h)) then return end
     ns.ERB_SeatClassicChrome(af._tex, rect, vertical and w or h, vertical, k)
 end
+end -- POOL block
 -- The frame around a bar: one texture on the host under everything the bar
 -- draws, anchored round `rect` (the fill area; the host itself when nil)
 -- with the personal resource display's overhang for this atlas (2 left, 3
@@ -9041,7 +9184,7 @@ BuildCastBar = function()
     -- ResourceBars only claims Blizzard's player cast bar while its own
     -- replacement bar is active. The shared helper arbitrates ownership
     -- across EUI modules and releases control cleanly for other addons.
-    EllesmereUI.SetPlayerCastBarSuppressed("ResourceBars", cb.enabled)
+    ns.RB_SyncBlizzCastSuppress()
 
     if not cb.enabled then
         if castBarFrame then EllesmereUI.SetElementVisibility(castBarFrame, false) end
@@ -9324,6 +9467,8 @@ BuildCastBar = function()
 
     local texKey = cb.texture
     local isBlizzard = (texKey == "blizzard")
+    -- Textured Background: back to the plain background before a branch repaints it.
+    if castBarFrame._bg._erbBgTex then ns.ERB_BgTexture(castBarFrame._bg, nil) end
     if blizzKit then
         -- Blizzard Style: the stock fill art follows the cast kind
         -- (ns.ERB_SetBlizzCastFill) and the background hugs the bar the way
@@ -9360,6 +9505,11 @@ BuildCastBar = function()
         bar:SetStatusBarTexture(texPath)
         castBarFrame._bg:SetTexture(nil)
         castBarFrame._bg:SetColorTexture(cb.bgR, cb.bgG, cb.bgB, cb.bgA)
+        -- Textured Background: flat while Fill Color is below 100.
+        if cb.textureBg and (cb.fillOpacity or 100) >= 100 then
+            ns.ERB_BgTexture(castBarFrame._bg, EllesmereUI.ResolveTexturePath(CAST_BAR_TEXTURES, texKey, nil),
+                cb.bgR, cb.bgG, cb.bgB, cb.bgA)
+        end
         ns.ApplyCastBgAnchor()
     end
 
@@ -10658,14 +10808,25 @@ OnCastStop = function()
     ns.ShowIdleCastBar()
 end
 
+-- Blizzard's player cast bar is ours to hide while our cast bar is on, except
+-- while ours stands down for the controller under WoW Forever's Gamepad
+-- interface style: from build 70425 that style draws the cast on Blizzard's
+-- player bar itself.
+function ns.RB_SyncBlizzCastSuppress()
+    local cb = ERB.db and ERB.db.profile and ERB.db.profile.castBar
+    local on = cb and cb.enabled and not (ns._erbCastPadHidden and EllesmereUI.PadGamepadUI())
+    EllesmereUI.SetPlayerCastBarSuppressed("ResourceBars", on and true or false)
+end
+
 -- Hide While Using Gamepad (Global Settings > Gamepad): Blizzard's gamepad UI
 -- draws its own player cast bar, so this one stands down while a controller is
 -- connected. A runtime flag (ns._erbCastPadHidden) gates the cast starts and
 -- the idle pass the way `enabled` does; the saved `enabled` is never written,
--- Blizzard's bar stays suppressed and the frame keeps its layout. The pad
--- edges are watched only while the option and the bar are both on. padOn is
--- the watcher's verdict; ApplyAll and the options page pass nothing and it is
--- read live. On ns: the file is at the 200-local cap.
+-- Blizzard's bar stays suppressed (handed back under WoW Forever's Gamepad
+-- interface style, ns.RB_SyncBlizzCastSuppress) and the frame keeps its
+-- layout. The pad edges are watched only while the option and the bar are
+-- both on. padOn is the watcher's verdict; ApplyAll and the options page pass
+-- nothing and it is read live. On ns: the file is at the 200-local cap.
 function ns.RB_ApplyGamepadCastbar(padOn)
     local cb = ERB.db and ERB.db.profile and ERB.db.profile.castBar
     local want = (cb and cb.enabled and cb.gamepadHide == true) and true or false
@@ -10684,6 +10845,7 @@ function ns.RB_ApplyGamepadCastbar(padOn)
     end
     if hide == (ns._erbCastPadHidden == true) then return end
     ns._erbCastPadHidden = hide
+    ns.RB_SyncBlizzCastSuppress()
     if not castBarFrame then return end
     if hide then
         -- Drop the live cast: the idle pass hides the bar and the cast tick
@@ -11271,6 +11433,11 @@ BuildGCDBar = function()
     bar:SetStatusBarTexture(texPath)
     gcdBarFrame._bg:SetTexture(nil)
     gcdBarFrame._bg:SetColorTexture(g.bgR, g.bgG, g.bgB, g.bgA)
+    -- Textured Background.
+    if g.textureBg or gcdBarFrame._bg._erbBgTex then
+        ns.ERB_BgTexture(gcdBarFrame._bg, g.textureBg and EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, g.texture, nil),
+            g.bgR, g.bgG, g.bgB, g.bgA)
+    end
 
     ApplyBarOrientation(bar, ori)
     -- HORIZONTAL_LEFT = horizontal, but the fill grows right->left (reverse).

@@ -8,6 +8,15 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 local ns = EllesmereUI._ModuleNS["EllesmereUICooldownManager"]
 if not ns then return end  -- module disabled: no options page
 
+-- The options page pool (EllesmereUI_FramePool.lua): a frame made under a pool
+-- host (a kept picker menu) is handed out again reset to fresh; anywhere else
+-- this is the plain CreateFrame. Each picker menu is one kept frame for the
+-- session (PoolKept), dressed again on each open. A picker remembers its
+-- anchor with the anchor's dress generation (PoolGen): an anchor a rebuild
+-- dressed again for a new build is another anchor, as a new frame was.
+local CreateFrame = EllesmereUI._Pool.CreateFrame
+local PoolKept, PoolGen = EllesmereUI._Pool.Kept, EllesmereUI._Pool.Gen
+
 -- Ensure assignedSpells is populated from live icons if nil; shared by spell picker, preview, and all add/remove handlers.
 local function EnsureAssignedSpells(barKeyE)
     local env = ns._CDMO_OptEnv
@@ -929,8 +938,9 @@ local function ShowBuffBarPicker(anchorFrame, targetBarKey, onChanged)
     local env = ns._CDMO_OptEnv
     local FONT_PATH, GetCDMOptOutline, RefreshCDPreview, optState = env.FONT_PATH, env.GetCDMOptOutline, env.RefreshCDPreview, env.optState
     if optState._spellPickerMenu and optState._spellPickerMenu:IsShown() then
-        optState._spellPickerMenu:Hide()
-        if optState._spellPickerMenu._anchorFrame == anchorFrame then return end
+        local open = optState._spellPickerMenu
+        open:Hide()
+        if open._anchorFrame == anchorFrame and open._anchorGen == PoolGen(anchorFrame) then return end
     end
 
     local mBgR  = EllesmereUI.DD_BG_R  or 0.075
@@ -964,8 +974,8 @@ local function ShowBuffBarPicker(anchorFrame, targetBarKey, onChanged)
     -- No early-out on an empty Blizzard buff list: preset buffs (and, later,
     -- a custom spell ID) are always available below.
 
-    -- Build menu
-    local menu = CreateFrame("Frame", nil, UIParent)
+    -- Build menu (one kept frame for the session, dressed again on every open)
+    local menu = PoolKept(optState, "buffBarPicker", "Frame", UIParent)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetFrameLevel(300)
     menu:SetClampedToScreen(true)
@@ -1238,6 +1248,7 @@ local function ShowBuffBarPicker(anchorFrame, targetBarKey, onChanged)
     menu:ClearAllPoints()
     menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -4)
     menu._anchorFrame = anchorFrame
+    menu._anchorGen = PoolGen(anchorFrame)
     optState._spellPickerMenu = menu
 
     menu:SetScript("OnUpdate", function(m)
@@ -1263,8 +1274,9 @@ local function ShowBuffToCDPicker(anchorFrame, targetBarKey, onChanged, onPicked
     local env = ns._CDMO_OptEnv
     local FONT_PATH, GetCDMOptOutline, optState = env.FONT_PATH, env.GetCDMOptOutline, env.optState
     if optState._spellPickerMenu and optState._spellPickerMenu:IsShown() then
-        optState._spellPickerMenu:Hide()
-        if optState._spellPickerMenu._anchorFrame == anchorFrame then return end
+        local open = optState._spellPickerMenu
+        open:Hide()
+        if open._anchorFrame == anchorFrame and open._anchorGen == PoolGen(anchorFrame) then return end
     end
 
     local mBgR  = EllesmereUI.DD_BG_R  or 0.075
@@ -1308,7 +1320,8 @@ local function ShowBuffToCDPicker(anchorFrame, targetBarKey, onChanged, onPicked
         end
     end
 
-    local menu = CreateFrame("Frame", nil, UIParent)
+    -- One kept frame for the session, dressed again on every open.
+    local menu = PoolKept(optState, "buffToCDPicker", "Frame", UIParent)
     menu:SetFrameStrata("FULLSCREEN_DIALOG")
     menu:SetFrameLevel(300)
     menu:SetClampedToScreen(true)
@@ -1480,6 +1493,7 @@ local function ShowBuffToCDPicker(anchorFrame, targetBarKey, onChanged, onPicked
     menu:ClearAllPoints()
     menu:SetPoint("TOP", anchorFrame, "BOTTOM", 0, -4)
     menu._anchorFrame = anchorFrame
+    menu._anchorGen = PoolGen(anchorFrame)
     optState._spellPickerMenu = menu
 
     menu:SetScript("OnUpdate", function(m)
@@ -1702,11 +1716,12 @@ local function ShowAlphaPopup(currentPct, onConfirm, title, hint)
     popup._box:HighlightText()
 end
 
--- Numeric popup for the per-spell "Threshold Seconds" (Threshold Text): the
--- user enters the seconds-remaining boundary below which Threshold Color /
--- Threshold Decimals apply. 0 disarms the feature for the spell. Mirrors
--- ShowAlphaPopup's look; onConfirm receives the integer seconds (0-59).
-local function ShowThresholdSecondsPopup(currentVal, onConfirm)
+-- Numeric popup for a per-spell seconds setting (0-59; 0 turns it off):
+-- titled for Threshold Seconds (the boundary below which Threshold Color /
+-- Threshold Decimals apply) unless the caller passes its own title and hint
+-- (already localized), e.g. Also Show Below. Both texts are set on every
+-- show. Mirrors ShowAlphaPopup; onConfirm receives the integer seconds.
+local function ShowThresholdSecondsPopup(currentVal, onConfirm, title, hint)
     local env = ns._CDMO_OptEnv
     local FONT_PATH, GetCDMOptOutline = env.FONT_PATH, env.GetCDMOptOutline
     local popupName = "EUI_CDM_ThresholdSecondsPopup"
@@ -1736,13 +1751,13 @@ local function ShowThresholdSecondsPopup(currentVal, onConfirm)
         title:SetFont(FONT_PATH, 14, GetCDMOptOutline())
         title:SetPoint("TOP", popup, "TOP", 0, -18)
         title:SetTextColor(1, 1, 1, 1)
-        title:SetText(EllesmereUI.L("Threshold Seconds"))
+        popup._title = title
 
         local hint = popup:CreateFontString(nil, "OVERLAY")
         hint:SetFont(FONT_PATH, 11, GetCDMOptOutline())
         hint:SetPoint("TOP", title, "BOTTOM", 0, -6)
         hint:SetTextColor(0.7, 0.7, 0.7, 0.85)
-        hint:SetText(EllesmereUI.L("Seconds left when threshold text starts (0 = off)"))
+        popup._hint = hint
 
         local box = CreateFrame("EditBox", nil, popup)
         box:SetSize(180, 28)
@@ -1799,6 +1814,8 @@ local function ShowThresholdSecondsPopup(currentVal, onConfirm)
         box:SetScript("OnEscapePressed", function() dimmer:Hide() end)
     end
     popup._onConfirm = onConfirm
+    popup._title:SetText(title or EllesmereUI.L("Threshold Seconds"))
+    popup._hint:SetText(hint or EllesmereUI.L("Seconds left when threshold text starts (0 = off)"))
     popup._box:SetText(currentVal and tostring(currentVal) or "")
     ns.PadPopupOpen(popup._dimmer, popup, popup._cancelBtn)  -- controller cursor
     popup._dimmer:Show()
