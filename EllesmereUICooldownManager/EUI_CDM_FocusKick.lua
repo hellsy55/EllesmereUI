@@ -571,14 +571,9 @@ end
 do
     local registered = {}    -- [spellID] = { id = auraSoundID, path = soundFileName }
     local pending = false
-    local retry = CreateFrame("Frame")
-
-    retry:SetScript("OnEvent", function(self, event)
-        if event == "PLAYER_REGEN_ENABLED" then
-            self:UnregisterEvent("PLAYER_REGEN_ENABLED")
-            if pending and ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
-        end
-    end)
+    local function RefreshPendingStackSounds()
+        if pending and ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
+    end
 
     local function CleanID(v)
         if issecretvalue and issecretvalue(v) then return nil end
@@ -591,7 +586,7 @@ do
         -- including both removals and changes of the selected sound.
         if InCombatLockdown() then
             pending = true
-            retry:RegisterEvent("PLAYER_REGEN_ENABLED")
+            ns.CombatQueue.Defer("CDMBuffStackSounds", RefreshPendingStackSounds)
             return
         end
         local api = C_UnitAuras
@@ -599,7 +594,6 @@ do
             and Enum.UnitAuraSoundTrigger.ApplicationsIncreased
         if not (api and api.AddAuraSound and api.RemoveAuraSound and trigger) then return end
         pending = false
-        retry:UnregisterEvent("PLAYER_REGEN_ENABLED")
 
         local wanted = {}
         local p = ECME.db and ECME.db.profile
