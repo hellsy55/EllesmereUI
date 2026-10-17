@@ -879,6 +879,7 @@ BuildAllCDMBars = function()
     end
 
     if not p.cdmBars.enabled then
+        if ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
         -- Restore Blizzard CDM if we're disabled
         RestoreBlizzardCDM()
         for key, frame in pairs(cdmBarFrames) do
@@ -1000,6 +1001,9 @@ BuildAllCDMBars = function()
 
     -- Apply visibility (hides bars set to "in combat only", "never", etc; handles unlock-mode override and viewer alpha sync). Single authority.
     _CDMApplyVisibility()
+
+    -- Reconcile native buff stack sound registrations for this profile/spec.
+    if ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
 
     -- Every full rebuild re-evaluates the FocusKick demand gate, so assigning the first kick spell (or removing the last) flips the feature family on/off live.
     if ns.RefreshFocusKickProxies then ns.RefreshFocusKickProxies() end

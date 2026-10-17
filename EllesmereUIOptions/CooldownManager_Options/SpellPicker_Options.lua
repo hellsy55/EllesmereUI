@@ -2146,6 +2146,7 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                                             -- mutual exclusion AND toggles), then the collapsed row label.
                                             RefreshFlyoutSelection()
                                             UpdateLabelColor()
+                                            if opts and opts.onApply then opts.onApply() end
                                         end,
                                     })
                                 end
@@ -3144,6 +3145,28 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                                         end } })
                     end
 
+                    -- Blizzard-native ApplicationsIncreased trigger: tracks stack gains
+                    -- without inspecting secret aura counts. Only real auras can stack.
+                    local function AddBuffStackGainRow()
+                        MakeSubnavRow("Audio on Buff Stack Gain", AUDIO_ITEMS,
+                            function() return ss.buffStackGainSoundKey or "none" end,
+                            function(v)
+                                EnsureSS()
+                                SetOwn("buffStackGainSoundKey", (v ~= "none" and v) or nil)
+                                if ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
+                            end,
+                            function() return ss.buffStackGainSoundKey == nil end,
+                            AddSoundPreview,
+                            { searchable = true,
+                              onApply = function()
+                                  if ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
+                              end,
+                              apply = { keys = { "buffStackGainSoundKey" },
+                                        write = function(t, v)
+                                            t.buffStackGainSoundKey = (v ~= "none" and v) or false
+                                        end } })
+                    end
+
                     -- Desaturate Inactive applies only to Blizzard-tracked buffs (inactive
                     -- placeholders); injected custom/preset buffs skip it and get only the gain row.
                     if not isInjectedCustom then
@@ -3168,6 +3191,7 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
 
                         AddBuffGainRow()
                         AddBuffLossRow()
+                        AddBuffStackGainRow()
                     else
                         -- Self-timed preset/custom buffs: both edges driven off the displayed timer in UpdateCustomBuffBars (no real aura event).
                         AddBuffGainRow()
