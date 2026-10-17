@@ -136,6 +136,8 @@ L["Information"]       = "Informazione"
 L["Enter Name"]        = "Inserisci un nome"
 L["Search..."]         = "Cerca..."
 L["Search Module Settings..."] = "Cerca nelle impostazioni..."
+L["Search is not available on this page."] = "La ricerca non è disponibile in questa pagina."
+L["Language"]          = "Lingua"
 
 -- == Format templates (keep %1$s / %2$s) ===================================
 L["This option requires %1$s to be %2$s"] = "Questa opzione richiede che %1$s sia %2$s"
@@ -8615,3 +8617,6 @@ L["简体中文 (Simplified Chinese)"] = true
 L["繁體中文 (Traditional Chinese)"] = true
 L["한국어 (Korean)"] = true
 L["Scenario"] = true
+
+-- Preserved fork and upstream translations.
+L["Enabled"]           = "Attivato"

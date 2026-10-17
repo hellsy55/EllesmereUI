@@ -243,6 +243,26 @@ _G._EUI_BuildAlertsSection = function(parent, yOffset, W, PP)
         EllesmereUI.BuildInlineCog(row2._rightRegion, {
             title = "Group Death Alert Settings",
             rows = {
+                    { type="toggle", label="Show Nicknames",
+                      tooltip="Show supported player nicknames instead of character names in the Group Death Alert when available. This only changes the displayed alert; death detection continues to use the real group unit and GUID.",
+                      get=function()
+                        return not EllesmereUIDB or EllesmereUIDB.groupDeathShowNicknames ~= false
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.groupDeathShowNicknames = v and true or false
+                        if EllesmereUI._groupDeathShowVisual then EllesmereUI._groupDeathShowVisual() end
+                      end },
+                    { type="toggle", label="Role Icon",
+                      tooltip="Shows the dead player's role icon if assigned, instead of the skull icon.",
+                      get=function()
+                        return (EllesmereUIDB and EllesmereUIDB.groupDeathRoleIcon) or false
+                      end,
+                      set=function(v)
+                        if not EllesmereUIDB then EllesmereUIDB = {} end
+                        EllesmereUIDB.groupDeathRoleIcon = v
+                        if EllesmereUI._groupDeathShowVisual then EllesmereUI._groupDeathShowVisual() end
+                      end },
                 { type="slider", label="Text Size",
                   min=14, max=64, step=1,
                   get=function()

@@ -137,6 +137,8 @@ L["Information"]       = "Información"
 L["Enter Name"]        = "Introduce un nombre"
 L["Search..."]         = "Buscar..."
 L["Search Module Settings..."] = "Buscar en los ajustes..."
+L["Search is not available on this page."] = "La búsqueda no está disponible en esta página."
+L["Language"]          = "Idioma"
 
 -- == Format templates (keep %1$s / %2$s) ===================================
 L["This option requires %1$s to be %2$s"] = "Esta opción requiere que %1$s esté %2$s"
@@ -8632,3 +8634,28 @@ L["简体中文 (Simplified Chinese)"] = true
 L["繁體中文 (Traditional Chinese)"] = true
 L["한국어 (Korean)"] = true
 L["Scenario"] = "Gesta"
+
+-- Ore node names (Gathering Skill in Tooltips): the client's own names, needed to recognize the nodes
+L["Copper Vein"] = "Filón de cobre"
+L["Tin Vein"] = "Filón de estaño"
+L["Silver Vein"] = "Filón de plata"
+L["Gold Vein"] = "Filón de oro"
+L["Iron Deposit"] = "Depósito de hierro"
+L["Mithril Deposit"] = "Depósito de mitril"
+L["Truesilver Deposit"] = "Depósito de veraplata"
+L["Incendicite Mineral Vein"] = "Filón de incendicita"
+L["Lesser Bloodstone Deposit"] = "Depósito de sangrita inferior"
+L["Indurium Mineral Vein"] = "Filón de indurio"
+L["Small Thorium Vein"] = "Filón pequeño de torio"
+L["Rich Thorium Vein"] = "Filón de torio enriquecido"
+L["Dark Iron Deposit"] = "Depósito de hierro negro"
+L["Ooze Covered Silver Vein"] = "[Ooze Covered Silver Vein]"
+L["Ooze Covered Gold Vein"] = "[Ooze Covered Gold Vein]"
+L["Ooze Covered Mithril Deposit"] = "Depósito de mitril cubierto de moco"
+L["Ooze Covered Truesilver Deposit"] = "[Ooze Covered Truesilver Deposit]"
+L["Ooze Covered Thorium Vein"] = "Filón de torio cubierto de moco"
+L["Ooze Covered Rich Thorium Vein"] = "Filón de torio enriquecido cubierto de moco"
+L["Hakkari Thorium Vein"] = "[Hakkari Thorium Vein]"
+
+-- Preserved fork and upstream translations.
+L["Enabled"]           = "Activado"
