@@ -23,12 +23,14 @@ local REALMS = {
     "Alonsus",
     "Alexstrasza",
     "Alleria",
+    "Altar of Storms",
     "Alterac Mountains",
     "Aman'Thul",
     "Ambossar",
     "Andorhal",
     "Anetheron",
     "Antonidas",
+    "Anvilmar",
     "Anub'arak",
     "Arak-arahm",
     "Arathi",
@@ -41,6 +43,7 @@ local REALMS = {
     "Aszune",
     "Auchindoun",
     "Azuremyst",
+    "Azgalor",
     "Azjol-Nerub",
     "Azralon",
     "Azshara",
@@ -54,7 +57,9 @@ local REALMS = {
     "Blackwing Lair",
     "Blade's Edge",
     "Bladefist",
+    "Bleeding Hollow",
     "Bloodfeather",
+    "Blood Furnace",
     "Bloodhoof",
     "Bloodscalp",
     "Blutkessel",
@@ -68,6 +73,7 @@ local REALMS = {
     "Burning Steppes",
     "Caelestrasz",
     "Cairne",
+    "Cenarius",
     "Cenarion Circle",
     "Chamber of Aspects",
     "Chants \195\169ternels",
@@ -84,6 +90,8 @@ local REALMS = {
     "Dark Iron",
     "Darkmoon Faire",
     "Darksorrow",
+    "Darrowmere",
+    "Dawnbringer",
     "Darkspear",
     "Deathwing",
     "Demon Soul",
@@ -98,11 +106,13 @@ local REALMS = {
     "Doomhammer",
     "Draka",
     "Drakkari",
+    "Drak'Tharon",
     "Drak'thul",
     "Draenor",
     "Dragonblight",
     "Dragonmaw",
     "Dreadmaul",
+    "Drenden",
     "Drek'Thar",
     "Dun Morogh",
     "Dunemaul",
@@ -141,6 +151,7 @@ local REALMS = {
     "Ghostlands",
     "Gilneas",
     "Gnomeregan",
+    "Goldrinn",
     "Gorefiend",
     "Gorgonnash",
     "Greymane",
@@ -159,6 +170,7 @@ local REALMS = {
     "Illidan",
     "Jaedenar",
     "Jubei'Thos",
+    "Kalecgos",
     "Kael'thas",
     "Kael'Thas",
     "Kargath",
@@ -168,7 +180,11 @@ local REALMS = {
     "Khaz Modan",
     "Khaz'goroth",
     "Kel'Thuzad",
+    "Kil'jaeden",
+    "Kilrogg",
     "Kirin Tor",
+    "Korgath",
+    "Korialstrasz",
     "Korgall",
     "Krasus",
     "Krag'jin",
@@ -189,6 +205,7 @@ local REALMS = {
     "Maelstrom",
     "Magtheridon",
     "Mal'Ganis",
+    "Maiev",
     "Malfurion",
     "Malorne",
     "Malygos",
@@ -197,6 +214,7 @@ local REALMS = {
     "Mazrigos",
     "Medivh",
     "Misha",
+    "Mok'Nathal",
     "Molten Core",
     "Moon Guard",
     "Moonrunner",
@@ -237,11 +255,13 @@ local REALMS = {
     "Scarlet Crusade",
     "Sen'jin",
     "Sentinels",
+    "Shandris",
     "Shadow Council",
     "Shadowmoon",
     "Shadowsong",
     "Shattered Halls",
     "Shattered Hand",
+    "Shu'halo",
     "Silver Hand",
     "Silvermoon",
     "Sinstralis",
@@ -249,10 +269,12 @@ local REALMS = {
     "Skywall",
     "Skullcrusher",
     "Smolderthorn",
+    "Spirestone",
     "Spinebreaker",
     "Sporeggar",
     "Staghelm",
     "Steamwheedle Cartel",
+    "Stonemaul",
     "Stormrage",
     "Stormreaver",
     "Stormscale",
@@ -266,6 +288,7 @@ local REALMS = {
     "Terokkar",
     "Terenas",
     "Terrordar",
+    "The Forgotten Coast",
     "The Maelstrom",
     "The Scryers",
     "The Sha'tar",
@@ -274,12 +297,14 @@ local REALMS = {
     "Theradras",
     "Thorium Brotherhood",
     "Thaurissan",
+    "Thrall",
     "Thunderhorn",
     "Thunderlord",
     "Tichondrius",
     "Tirion",
     "Tol Barad",
     "Tortheldrin",
+    "Trollbane",
     "Turalyon",
     "Twisting Nether",
     "Twilight's Hammer",
@@ -384,8 +409,8 @@ end
 -- Returns the correct spelling for `input` and how it was found:
 --   "exact"  same realm, just written differently (case, apostrophe, spaces)
 --   "fuzzy"  a typo, fixed because exactly one realm is that close
--- Returns nil when the realm is unknown, or when two realms are equally close
--- (it does not guess).
+-- Returns nil for unknown or ambiguous typos. A different realm only one
+-- edit farther away is also ambiguous, even when the nearest realm is unique.
 function RN.Resolve(input)
     if type(input) ~= "string" then return nil end
     Build()
@@ -399,16 +424,19 @@ function RN.Resolve(input)
     local max = (len <= 4) and 0 or ((len <= 7) and 1 or 2)
     if max == 0 then return nil end
 
-    local best, bestCanon, ties = max + 1, nil, 0
+    -- Scan one edit beyond the correction limit: similarly named valid
+    -- realms must not be mistaken for typos of their nearest neighbour.
+    local scanMax = max + 1
+    local best, second, bestCanon = scanMax + 1, scanMax + 1, nil
     for _, e in ipairs(entries) do
-        local d = Distance(k, e.key, max)
+        local d = Distance(k, e.key, scanMax)
         if d < best then
-            best, bestCanon, ties = d, e.canon, 1
-        elseif d == best and e.canon ~= bestCanon then
-            ties = ties + 1
+            second, best, bestCanon = best, d, e.canon
+        elseif d < second then
+            second = d
         end
     end
-    if best <= max and ties == 1 then
+    if best <= max and second > best + 1 then
         return bestCanon, "fuzzy"
     end
     return nil
