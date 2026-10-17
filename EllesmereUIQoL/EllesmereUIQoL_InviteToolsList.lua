@@ -652,9 +652,9 @@ end
 
 -- History ----------------------------------------------------------------
 -- Names that came INTO the group (status "In group") are remembered, newest
--- first, in the saved variables. Only HISTORY_MAX are kept: the 26th pushes
+-- first, in the saved variables. Only HISTORY_MAX are kept: the 51st pushes
 -- the oldest one out, so the file never grows.
-local HISTORY_MAX = 25
+local HISTORY_MAX = 50
 
 -- kind: "joined" (default), "declined" or "removed". `how` records why
 -- the entry exists ("list", "declined", "removed" or "cleared"). Newest goes
@@ -669,6 +669,7 @@ function IL:RecordJoin(name, kind, class, how, by)
     end
     local keepName = name
     local previousStatus
+    local hadJoined = (kind == nil or kind == "joined")
     for i = #hist, 1, -1 do
         local e = hist[i]
         if type(e) ~= "table" or type(e.name) ~= "string" then
@@ -678,6 +679,9 @@ function IL:RecordJoin(name, kind, class, how, by)
             if e.name:find("-", 1, true) and not name:find("-", 1, true) then keepName = e.name end
             class = class or e.class
             previousStatus = e.status
+            -- Preserve membership history when a later decline/removal replaces
+            -- the same character entry. Older saved entries used kind="joined".
+            if e.kind == "joined" or e.hadJoined then hadJoined = true end
             table.remove(hist, i)
         end
     end
@@ -686,6 +690,7 @@ function IL:RecordJoin(name, kind, class, how, by)
     table.insert(hist, 1, {
         name = keepName,
         kind = kind or "joined",
+        hadJoined = hadJoined,
         how = how,
         by = by,
         class = class or GroupClass(keepName),
@@ -3789,7 +3794,7 @@ function IL:CreateFrame()
         row.btn = btn
 
         row.nameText = row:CreateFontString(nil, "OVERLAY")
-        -- Small square: green = joined the group, red = declined the invite, grey = removed from the list.
+        -- Green = in group; red = joined before but now left; grey = never joined.
         row.mark = row:CreateTexture(nil, "ARTWORK")
         row.mark:SetSize(6, 6)
         row.mark:SetPoint("LEFT", row, "LEFT", 4, 0)
@@ -3854,7 +3859,7 @@ function IL:CreateFrame()
             if not e or not IL.names then return end
             ClearAllFocus()
             -- The entry STAYS in the history (it only leaves by its X, by Clear
-            -- list or when the 25 limit pushes it out).
+            -- list or when the 50 limit pushes it out).
             local added = IL:MergeNames({ e.name })
             if added > 0 then IL:AnnounceAdd({ e.name }) end
             local shown = added > 0 and L["Added"] or L["In list"] -- "In list": already there (or it is you)
@@ -3887,10 +3892,13 @@ function IL:CreateFrame()
             row:SetPoint("TOPLEFT", hcontent, "TOPLEFT", 0, -((i - 1) * (HIST_ROW_H + HIST_GAP)))
             row:SetPoint("TOPRIGHT", hcontent, "TOPRIGHT", 0, -((i - 1) * (HIST_ROW_H + HIST_GAP)))
             row.nameText:SetText(e.name)
-            -- The mark reflects presence in the current group, not why the
-            -- historical entry was created. Tooltip retains the exact reason.
+            -- Current membership wins over history. Keep red when someone who
+            -- previously joined is no longer present, even if a newer removal
+            -- or decline replaced their entry. Legacy kind="joined" is enough.
             if InGroup(e.name) then
                 row.mark:SetColorTexture(0.35, 0.90, 0.35, 1)
+            elseif e.kind == "joined" or e.hadJoined then
+                row.mark:SetColorTexture(0.90, 0.30, 0.30, 1)
             else
                 row.mark:SetColorTexture(0.65, 0.65, 0.65, 1)
             end

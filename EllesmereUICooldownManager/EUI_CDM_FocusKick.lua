@@ -563,6 +563,102 @@ do
     end
 end
 
+-- Per-buff "Audio on Buff Stack Gain". Unlike apply/remove edge hooks, the
+-- stack delta is a secret in protected encounters: let Blizzard's native
+-- ApplicationsIncreased trigger detect it. Keep registrations outside the
+-- frames, keyed by a clean canonical spellID, and update only on options edits
+-- and CDM rebuilds (never on UNIT_AURA or a combat-hot icon update).
+do
+    local registered = {}    -- [spellID] = { id = auraSoundID, path = soundFileName }
+    local pending = false
+    local function RefreshPendingStackSounds()
+        if pending and ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
+    end
+
+    local function CleanID(v)
+        if issecretvalue and issecretvalue(v) then return nil end
+        if type(v) ~= "number" or v <= 0 then return nil end
+        return v
+    end
+
+    function ns.RefreshBuffStackSounds()
+        -- The native API restricts changes in combat. Reconcile afterwards,
+        -- including both removals and changes of the selected sound.
+        if InCombatLockdown() then
+            pending = true
+            ns.CombatQueue.Defer("CDMBuffStackSounds", RefreshPendingStackSounds)
+            return
+        end
+        local api = C_UnitAuras
+        local trigger = Enum and Enum.UnitAuraSoundTrigger
+            and Enum.UnitAuraSoundTrigger.ApplicationsIncreased
+        if not (api and api.AddAuraSound and api.RemoveAuraSound and trigger) then return end
+        pending = false
+
+        local wanted = {}
+        local p = ECME.db and ECME.db.profile
+        local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
+        if p and p.cdmBars and p.cdmBars.enabled and specKey and specKey ~= "0" then
+            local profiles = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
+            local prof = profiles and profiles[specKey]
+            local settings = prof and prof.spellSettingsBuff
+            local function AddWanted(sid, key)
+                sid = CleanID(sid)
+                if not sid or not key or key == "none" or key == false then return end
+                local path = FOCUSKICK_SOUND_PATHS[key]
+                if path then wanted[sid] = path end
+            end
+
+            -- Explicit per-spell settings continue to work before the viewer's
+            -- frame has been created. Unknown/custom negative IDs are excluded.
+            if settings then
+                for sid, ss in pairs(settings) do
+                    if type(ss) == "table" then
+                        AddWanted(sid, rawget(ss, "buffStackGainSoundKey"))
+                    end
+                end
+            end
+            -- Include inherited Apply-to-Bar sounds for the live Blizzard
+            -- buff-viewer catalog (the default buffs bar has no assigned list).
+            -- A cooldownID-keyed override can deliberately block that tier.
+            if ns.EnumerateCDMViewerSpells then
+                for _, entry in ipairs(ns.EnumerateCDMViewerSpells(true)) do
+                    local sid = CleanID(entry.sid)
+                    if sid then
+                        local own = settings and entry.cdID and settings["c" .. entry.cdID]
+                        local v = own and rawget(own, "buffStackGainSoundKey")
+                        if v == nil then
+                            v = ns.FindBuffSoundKey and ns.FindBuffSoundKey(sid, "buffStackGainSoundKey")
+                        end
+                        if v == false or v == "none" then
+                            wanted[sid] = nil
+                        else
+                            AddWanted(sid, v)
+                        end
+                    end
+                end
+            end
+        end
+        for sid, old in pairs(registered) do
+            if wanted[sid] ~= old.path then
+                -- Do not drop our handle if Blizzard rejects removal.
+                local ok = pcall(api.RemoveAuraSound, old.id)
+                if ok then registered[sid] = nil end
+            end
+        end
+        for sid, path in pairs(wanted) do
+            if not registered[sid] then
+                local ok, id = pcall(api.AddAuraSound, trigger, {
+                    unitToken = "player", spellID = sid,
+                    soundFileName = path, outputChannel = "Master",
+                    throttleSeconds = 0.3,
+                })
+                if ok and id then registered[sid] = { id = id, path = path } end
+            end
+        end
+    end
+end
+
 -- "FOCUS" reminder text shown on caster/miniboss nameplates when the player
 -- has no focus set. Activated by the FocusKick bar's focusReminderEnabled.
 -- Performance design:
