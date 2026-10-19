@@ -565,6 +565,7 @@ local function OnSpellEvent(_, event, unit, ...)
                         he.status = "success"
                         he.fillProgress = nil
                         he.swipeFreezeFraction = nil
+                        he.swipeNativeFrozen = nil
                         dominated = true
                         RefreshViews()
                         break
@@ -1090,9 +1091,10 @@ RefreshGCDSwipe = function()
                         gcd:SetPaused(true)
                         gcd:SetAlpha(1)
                         gcd:Show()
-                    else
+                    elseif type(entry.swipeFreezeFraction) == "number" then
+                        -- Rebuild only with a valid numerical snapshot.
+                        local canShow = C_DurationUtil and C_DurationUtil.CreateDuration
                         if ic._swipeEntry ~= entry or ic._swipeMode ~= mode then
-                            -- Use numerical timing only when it is available.
                             local f = max(0.001, min(0.999, entry.swipeFreezeFraction))
                             local now = GetTime()
                             local snapshot = C_DurationUtil and C_DurationUtil.CreateDuration
@@ -1102,12 +1104,14 @@ RefreshGCDSwipe = function()
                                 gcd:SetPaused(false)
                                 gcd:SetCooldownFromDurationObject(snapshot)
                                 gcd:SetPaused(true)
-                            else
-                                gcd:Hide()
                             end
+                            canShow = snapshot ~= nil
                         end
                         gcd:SetAlpha(1)
-                        if C_DurationUtil then gcd:Show() end
+                        if canShow then gcd:Show() else gcd:Hide() end
+                    else
+                        -- The native snapshot was lost and has no safe fallback.
+                        gcd:Hide()
                     end
                 else
                     local gcdDuration = C_Spell.GetSpellCooldownDuration(61304)
