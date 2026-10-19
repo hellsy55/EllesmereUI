@@ -24,7 +24,7 @@ local AttachDataBarHoverHooks, dataBarFrames = I.AttachDataBarHoverHooks, I.data
 --  border, text and visibility all three share. The XP bar's own code is
 --  in EUI_ActionBars_XPBar.lua (loaded after this file; called through ns).
 -------------------------------------------------------------------------------
--- dataBarFrames is forward-declared near barFrames at the top of the main file
+-- dataBarFrames is declared in EUI_ActionBars_Secure.lua (imported above).
 ns.dataBarFrames = dataBarFrames
 
 -- Reputation and House Favor bar colors (the XP bar's are in
@@ -45,8 +45,7 @@ local DATA_BAR_COLORS = {
     },
 }
 
--- Data bar textures: the suite's built-in bar texture set + SharedMedia.
--- ns-hosted (no new file-scope locals; the chunk is at the 200-local cap).
+-- Data bar textures: the suite's built-in bar texture set + SharedMedia, on ns.
 do
     local lookup, names, order = EllesmereUI.BuildBarTextureTables()
     EllesmereUI.AppendSharedMediaTextures(names, order, nil, lookup)
@@ -98,7 +97,7 @@ end })
 -- after every ApplyBorderStyle (which resets it to the host's level): holder+2
 -- above the fill, the holder's own level with Show Behind. The text host stays
 -- above it. A child of the holder, so the mouseover fade carries it; the
--- holder's alpha is never read or written. On ns: the chunk is at the local cap.
+-- holder's alpha is never read or written. On ns.
 ns.ApplyDataBarBorder = function(holder, s)
     local host = holder._cbHost
     local line = holder._border and holder._border._frame
@@ -915,20 +914,21 @@ end
 -- here. On: our built data bars hide (each update then runs its hidden
 -- path, so the Favor bar disarms its events) and Blizzard's status tracking
 -- bars return. Off: our built bars show unless set to Never and repaint, and
--- Blizzard's hide. Returns true when a bar this client builds does not exist
--- yet (they are built at login only while the switch is off), so the caller
--- can offer a reload. On ns: the chunk is at the local cap.
+-- Blizzard's hide. Returns true when the switch needs a reload, so the caller
+-- can offer one: a bar of ours this client builds does not exist yet (they are
+-- built at login only while the switch is off), or Blizzard's bars come back
+-- after their events were dropped this session. On ns.
 function ns.SetUseBlizzardDataBars(v)
     local p = EAB.db.profile
     p.useBlizzardDataBars = v
-    local anyMissing = false
+    local needsReload = false
     for _, info in ipairs(EXTRA_BARS) do
         local k = info.key
         -- WoW Forever builds no House Favor bar: never a reload for it there.
         if info.isDataBar and not (k == "FavorBar" and EllesmereUI.IS_FOREVER) then
             local frame = dataBarFrames[k]
             if not frame then
-                if not v then anyMissing = true end
+                if not v then needsReload = true end
             elseif v then
                 frame:Hide()
                 if frame._updateFunc then frame._updateFunc() end
@@ -944,13 +944,17 @@ function ns.SetUseBlizzardDataBars(v)
     if StatusTrackingBarManager then
         if v then
             StatusTrackingBarManager:Show()
-            StatusTrackingBarManager:RegisterAllEvents()
+            -- Dropped events come back only with a reload: a registration made
+            -- from here would run every one of them, and the bottom bar stack
+            -- pass a shown or hidden bar starts, under our taint.
+            if ns._eabBlizzDataBarsDropped then needsReload = true end
         else
             StatusTrackingBarManager:UnregisterAllEvents()
             StatusTrackingBarManager:Hide()
+            ns._eabBlizzDataBarsDropped = true
         end
     end
-    return anyMissing
+    return needsReload
 end
 
 I.SetupDataBars = SetupDataBars -- called by EUI_ActionBars_ExtraBars.lua

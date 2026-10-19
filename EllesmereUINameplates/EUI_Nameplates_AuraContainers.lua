@@ -153,8 +153,8 @@ local function StackCfg()
     }
 end
 
--- Position -> corner/nudge/justify, mirroring the legacy ApplyTimerPosition /
--- ApplyStackPosition mapping exactly (same baked edge nudges, user X/Y on top).
+-- Position -> corner/nudge/justify: a baked edge nudge per corner, the user's
+-- X/Y on top.
 local TEXT_POS = {
     center      = { point = "CENTER",      nx = 0,  ny = 0,  justify = "CENTER" },
     topright    = { point = "TOPRIGHT",    nx = 3,  ny = 4,  justify = "RIGHT" },
@@ -1229,7 +1229,7 @@ local function BindContainer(c, unit, slotVal)
 end
 
 ------------------------------------------------------------------------------
--- Anchoring: mirrors PositionAuraSlot's slot semantics with container flow.
+-- Anchoring: each aura slot's placement, with container flow.
 -- top/bottom center-pin (self-centering rows); left/right chain outward
 -- from the health bar; topleft/topright corner-pin with per-slot growth.
 ------------------------------------------------------------------------------
@@ -1692,9 +1692,8 @@ function NPB.CycleGroup(c, key)
 end
 
 -- A pooled bundle's holder is hidden, and a hidden container runs no aura
--- pass: its unit "none" re-parse waits for the next attach, so every button
--- that showed an aura at detach keeps it, and a bound glow on it keeps
--- playing. Released here instead, after the hide (the group switches then
+-- pass: its next parse waits for the next attach, so every button that
+-- showed an aura at detach keeps it, and a bound glow on it keeps playing. Released here instead, after the hide (the group switches then
 -- register no events), only for the groups whose style draws an animated
 -- glow, and only once a host is bound: default (static) plates pay nothing.
 -- force: the style pass (NPC_ReloadAll), whose restyle may bind the hosts.
@@ -1726,12 +1725,12 @@ function ns.NPC_DetachPlate(plate)
     local b = active[plate]
     if not b then return end
     active[plate] = nil
+    -- Unbound only: the next attach binds its unit afresh (SetUnit +
+    -- UpdateAllAuras). A unit cleared here would change nothing, since the
+    -- holder hides next and a hidden container neither listens nor parses.
     for i = 1, #KINDS do
         local c = b.containers[KINDS[i]]
-        if c and c._npcBoundUnit then
-            c._npcBoundUnit = nil
-            SafeClearUnit(c)
-        end
+        if c then c._npcBoundUnit = nil end
     end
     b.holder:Hide()
     NPB.ReleaseGlowButtons(b)

@@ -638,7 +638,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                     if InCombatLockdown() then return end
                     local def = CVarDefault("nameplateMotionSpeed")
                     if not (def and def > 0) then return end
-                    EllesmereUI.SetCVar("nameplateMotionSpeed", def * v / 100, "EllesmereUINameplates")
+                    ns.KeepNameplateCVar("nameplateMotionSpeed", def * v / 100)
                 end,
                 tooltip="How fast stacked nameplates slide into place. 100% is Blizzard's default." }
         end

@@ -9,7 +9,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -- class is its own group, made mutually exclusive with '!' negation, declared
 -- once up-front (groups are add-only) and enabled by flipping maxFrameCount.
 -- Known behavior deltas vs the old element (documented for patch notes):
---   * icon caps apply per enabled class, not as one total across the union
+--   * icon caps apply per enabled class, except boss debuffs which share Max Count
 --   * sorting applies within each class group, not across all shown icons
 --   * on assistable units the spellID excludes (always-hidden, Hide
 --     Exhaustion) work only for never-secret spells (the engine's identity
@@ -307,11 +307,10 @@ end
 -- matches ANY player's casts, not only yours), and
 -- "Important or Own" partitions with !PLAYER so an aura renders once.
 -- Important covers both importance concepts (see PRIORITY_NONPLAYER_CAND).
--- Every group is capped on its own (the engine has no shared cap, and a
--- group's contents are secret in combat), so Important or Own caps each of
--- its two important-from-others links (important = true) with Max Important
--- (s.maxImportantDebuffs, unset = Max Count; the two together can show twice
--- that) and your own with Max Count.
+-- The engine caps groups individually (group contents are secret in combat).
+-- Important or Own gives the important-from-others links Max Important
+-- (s.maxImportantDebuffs, unset = Max Count) and your own Max Count.
+-- Boss debuffs additionally share Max Count across all active links.
 -- Show All emits no include links: the catch-all already shows the tracked
 -- spells, and ApplyGroupConfig leaves them un-excluded when no link renders
 -- them. Only Tracked Auras with an empty list = an empty chain = nothing.
@@ -2361,6 +2360,38 @@ function PurgeGlow.SetWatch(unit, on)
     IncGate.Sync()
 end
 
+-- Boss debuffs must not exceed Max Count across the whole filter chain.
+-- AuraContainer exposes caps per group but no aggregate cap; with secret auras
+-- we cannot inspect live occupancy and redistribute unused slots in combat.
+-- Reserve a fair, deterministic share of the total for each active link.
+-- Tracked Aura links participate in the same budget as the selected filter.
+local function BossDebuffGroupCaps(chain, total, maxImportant)
+    local groups, caps = {}, {}
+    for i = 1, #chain do
+        local c = chain[i]
+        if not c.hidden then
+            local limit = c.important and (maxImportant or total) or total
+            groups[#groups + 1] = { key = c.key, limit = limit }
+            caps[c.key] = 0
+        end
+    end
+    local remaining = total
+    while remaining > 0 do
+        local assigned = false
+        for i = 1, #groups do
+            local group = groups[i]
+            if caps[group.key] < group.limit then
+                caps[group.key] = caps[group.key] + 1
+                remaining = remaining - 1
+                assigned = true
+                if remaining == 0 then break end
+            end
+        end
+        if not assigned then break end
+    end
+    return caps
+end
+
 local function ApplyGroupConfig(container, unit, base, s, chain, declared)
     local PP = EllesmereUI.PP
     local isBuff = (base == "HELPFUL")
@@ -2399,13 +2430,11 @@ local function ApplyGroupConfig(container, unit, base, s, chain, declared)
     if simpleOn then growth = "auto" end
     if mergedAB and isBuff then growth = s.debuffGrowth end
     local maxPerRow = Pick(isBuff, s.buffMaxPerRow, s.debuffMaxPerRow)
-    -- Max Important lets the important links grow past Max Count, so a Max
-    -- Per Row between the two caps sizes the row from Max Important (an
-    -- unset Per Row, one equal to Max Count or one at or above Max
-    -- Important keeps the Max Count rule).
+    -- Max Important can exceed Max Count on target/focus. Boss debuffs
+    -- share Max Count across their groups, so they keep that row footprint.
     local capMax = num
     local mi = (not isBuff) and s.maxImportantDebuffs or nil
-    if num > 0 and mi and maxPerRow and maxPerRow > num and mi > maxPerRow then
+    if not unit:match("^boss") and num > 0 and mi and maxPerRow and maxPerRow > num and mi > maxPerRow then
         for i = 1, #chain do
             if chain[i].important then capMax = mi break end
         end
@@ -2532,10 +2561,18 @@ local function ApplyGroupConfig(container, unit, base, s, chain, declared)
             end
         end
     end
+    local bossCaps
+    if not isBuff and unit:match("^boss") and num > 0 and #chain > 1 then
+        bossCaps = BossDebuffGroupCaps(chain, num, s.maxImportantDebuffs)
+    end
     for eff, info in pairs(declared) do
         if active[eff] ~= nil then
             local n = num
-            if impKeys and impKeys[eff] then n = s.maxImportantDebuffs or num end
+            if bossCaps then
+                n = bossCaps[eff] or 0
+            elseif impKeys and impKeys[eff] then
+                n = s.maxImportantDebuffs or num
+            end
             if (hiddenKeys and hiddenKeys[eff]) or (incPark and incKeys[eff]) then n = 0 end
             EllesmereUI.AuraKit.SetGroupCap(container, eff, n)
             -- Filter strings follow the CURRENT chain too: a plain key's tokens
