@@ -1979,8 +1979,15 @@ function IL:StartSyncRefresh()
 end
 
 function IL:UNIT_CONNECTION(_, unit, connected)
-    if not self:SyncOn() or not unit or not UnitIsGroupLeader(unit) then return end
+    if not self:SyncOn() then return end
+    if issecretvalue and issecretvalue(unit) then return end
+    -- Ignore non-roster units: their leadership flags can be secret in combat.
+    if type(unit) ~= "string" or (unit ~= "player"
+        and not unit:match("^party%d+$") and not unit:match("^raid%d+$")) then return end
     if issecretvalue and issecretvalue(connected) then return end
+    local isLeader = UnitIsGroupLeader(unit)
+    if issecretvalue and issecretvalue(isLeader) then return end
+    if isLeader ~= true then return end
     if connected == true and self.syncLeaderOnline == false and self.syncBase then
         self:StartSyncRefresh()
     end
