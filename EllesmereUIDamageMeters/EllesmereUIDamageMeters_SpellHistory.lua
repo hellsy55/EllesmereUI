@@ -267,6 +267,23 @@ local _activeChannelKey = nil  -- pending key even when CHANNEL_START has no cas
 local _channelSerial = 0
 local _knownOverrides = {}  -- spellID -> true for override spells that pass IsSpellKnownOrOverridesKnown
 
+-- A spellID can have several consecutive channel casts. Identify each cast
+-- by its GUID or native cast bar ID, not by its spellID. The start timestamp
+-- is a fallback for clients that do not provide either identifier.
+local function SameChannelCast(entry, castGUID, castBarID, startMS)
+    if castGUID and entry.castGUID then
+        return castGUID == entry.castGUID
+    end
+    if castBarID and entry.castBarID then
+        return castBarID == entry.castBarID
+    end
+    if startMS and entry.channelStartMS
+       and (not issecretvalue or (not issecretvalue(startMS) and not issecretvalue(entry.channelStartMS))) then
+        return startMS == entry.channelStartMS
+    end
+    return false
+end
+
 -- Capture the native duration object while the cast is active.  It can safely
 -- carry Midnight secret timing values straight into a Cooldown widget.
 local function ReadSwipeDuration(isChannel, isEmpowered)
@@ -376,15 +393,17 @@ local function OnSpellEvent(_, event, unit, ...)
         StartCastAnim()
 
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_EMPOWER_START" then
-        -- The client may emit CHANNEL_START as well as EMPOWER_START for the
-        -- same empowered spell. Only one history icon is created per GUID.
+        -- CHANNEL_START and EMPOWER_START can describe the same cast. A new
+        -- channel of the same spell, however, must create its own entry.
         if castGUID and _pendingCasts[castGUID] then return end
-        local name, _, _, startMS, endMS, _, _, chanSpellID, isEmpowered = UnitChannelInfo("player")
+        local eventCastBarID = select(3, ...)
+        local name, _, _, startMS, endMS, _, _, chanSpellID, isEmpowered, _, infoCastBarID = UnitChannelInfo("player")
         local sid = ResolveOverride(chanSpellID or spellID)
         if not name then return end
+        local castBarID = eventCastBarID or infoCastBarID
         local activeEntry = _activeChannelKey and _pendingCasts[_activeChannelKey]
         if activeEntry then
-            if activeEntry.spellID == sid then return end
+            if SameChannelCast(activeEntry, castGUID, castBarID, startMS) then return end
             FinishPending(_activeChannelKey, "failed")
         end
         local info = sid and _spellInfoCache[sid]
@@ -400,6 +419,9 @@ local function OnSpellEvent(_, event, unit, ...)
             status       = "channeling",
             isInstant    = false,
             isChannel    = true,
+            castGUID     = castGUID,
+            castBarID    = castBarID,
+            channelStartMS = startMS,
             isEmpowered  = isEmpowered == true or event == "UNIT_SPELLCAST_EMPOWER_START",
             swipeDuration = ReadSwipeDuration(true, isEmpowered == true or event == "UNIT_SPELLCAST_EMPOWER_START"),
             timestamp    = GetTime(),
@@ -550,9 +572,12 @@ local function OnSpellEvent(_, event, unit, ...)
         end
 
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
-        _activeChannelSpell = nil
+        local stopCastBarID = select(4, ...)
         local key = (castGUID and _pendingCasts[castGUID] and castGUID) or _activeChannelKey
         local entry = key and _pendingCasts[key]
+        -- A delayed STOP for the previous channel must not end its successor.
+        if entry and (castGUID or stopCastBarID)
+           and not SameChannelCast(entry, castGUID, stopCastBarID) then return end
         if entry and entry.isChannel and not entry.isEmpowered then
             -- A prematurely stopped channel is a cancellation, not a
             -- completed cast. Empowered releases are handled by EMPOWER_STOP.
@@ -564,7 +589,9 @@ local function OnSpellEvent(_, event, unit, ...)
             end
             FinishPending(key, endedEarly and "failed" or "success")
         end
-        _activeChannelKey = nil
+        if key == _activeChannelKey then
+            _activeChannelSpell, _activeChannelKey = nil, nil
+        end
     end
 end
 

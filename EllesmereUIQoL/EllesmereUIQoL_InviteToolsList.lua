@@ -42,6 +42,9 @@ IL.syncBase = nil        -- true once this list matches the raid leader baseline
 IL.syncTries, IL.syncLast, IL.syncWanted = 0, 0, 0
 IL.syncRequesters = {}   -- leader-side members waiting for a baseline
 IL.syncBcastPending = false
+IL.syncRefreshing = false -- request a fresh baseline after reconnect
+IL.syncLeaderOnline = nil
+IL.syncLeaderKey = nil
 IL.pendingUntil = 0
 IL.convertToRaid = false
 
@@ -337,6 +340,28 @@ end
 
 local function InGroup(name)
     return FindGroupUnit(name) ~= nil
+end
+
+local function ReportRecipientConnected(name)
+    local unit = FindGroupUnit(name)
+    if unit then
+        local online = UnitIsConnected(unit)
+        if issecretvalue and issecretvalue(online) then return false end
+        return online == true
+    end
+    -- Disconnected raid members may have no usable unit token. Consult the
+    -- roster's online flag before treating a target as outside the group.
+    if IsInRaid() and GetRaidRosterInfo then
+        for i = 1, (GetNumGroupMembers() or 0) do
+            local rosterName, _, _, _, _, _, _, online = GetRaidRosterInfo(i)
+            if type(rosterName) == "string" and not (issecretvalue and issecretvalue(rosterName))
+                and SameChar(rosterName, name) then
+                if issecretvalue and issecretvalue(online) then return false end
+                return online == true
+            end
+        end
+    end
+    return true -- sender from outside the raid, e.g. a guild share
 end
 
 -- Display-only nickname resolver used only by Friend List, Factions, and
@@ -1092,7 +1117,10 @@ function IL:PLAYER_ENTERING_WORLD()
     -- Auto-accepting guild shares needs the sender's guild rank. Prime the
     -- roster so Guild Master / Officer checks are normally available at once.
     if IsInGuild() and C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
-    if IsInRaid() then self:ScheduleSyncCheck() end
+    if IsInRaid() then
+        if self.syncBase then self:StartSyncRefresh() end
+        self:ScheduleSyncCheck()
+    end
 end
 
 function IL:OnInviteSystemMsg(_, msg)
@@ -1326,15 +1354,33 @@ end
 
 function IL:GROUP_ROSTER_UPDATE()
     if IsInRaid() then
+        local leader = self:GroupLeaderName()
+        local key = leader and leader:lower()
+        local unit = leader and FindGroupUnit(leader)
+        local online = unit and UnitIsConnected(unit)
+        if issecretvalue and issecretvalue(online) then online = nil end
+        if self.syncBase and not UnitIsGroupLeader("player")
+            and ((key and self.syncLeaderKey and key ~= self.syncLeaderKey)
+                or (online == true and self.syncLeaderOnline == false)) then
+            self:StartSyncRefresh()
+        end
+        self.syncLeaderKey = key
+        if online ~= nil then self.syncLeaderOnline = online and true or false end
         self:ScheduleSyncCheck()
     else
         self.syncBase = nil
+        self.syncRefreshing = false
         self.syncTries = 0
+        self.syncLeaderKey = nil
+        self.syncLeaderOnline = nil
         wipe(self.syncRequesters)
     end
     if not IsInGroup() then
         wipe(self.reportTargets)
         wipe(self.reported)
+        wipe(self.reportPending)
+        wipe(self.reportOnline)
+        wipe(self.reportAckPeers)
         wipe(self.reporters)
         wipe(self.remote)
         if self.reportTicker then
@@ -1380,6 +1426,7 @@ end
 function IL:OnEnable()
     self:UpdateDB()
     self:RegisterEvent("GROUP_ROSTER_UPDATE")
+    self:RegisterEvent("UNIT_CONNECTION")
     self:RegisterEvent("PARTY_INVITE_REQUEST")
     self:RegisterEvent("GROUP_INVITE_CONFIRMATION")
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
@@ -1402,6 +1449,7 @@ function IL:PLAYER_REGEN_DISABLED()
     self:CancelShare()
     -- CancelShare drops queued addon whispers: report changes must be resent.
     wipe(self.reported)
+    wipe(self.reportPending)
     if self.frame then self.frame.SetLocked(true) end
     self:UpdateUI()
 end
@@ -1443,6 +1491,7 @@ function IL:PLAYER_REGEN_ENABLED()
         end
     end
     self:ScheduleSyncCheck()
+    if self.syncRefreshing then self:RequestSync() end
     if self.pendingKillClear then
         local boss = self.pendingKillClear
         self.pendingKillClear = nil
@@ -1650,6 +1699,11 @@ local function PumpOut()
         outBusy = false
         return
     end
+    if item.report and not ReportRecipientConnected(item.target) then
+        table.remove(outQueue, 1)
+        C_Timer.After(SHARE_SEND_GAP, PumpOut)
+        return
+    end
     if not TakeToken() then
         C_Timer.After(0.4, PumpOut)
         return
@@ -1666,8 +1720,8 @@ local function PumpOut()
     table.remove(outQueue, 1)
     C_Timer.After(SHARE_SEND_GAP, PumpOut)
 end
-local function Enqueue(msg, dist, target)
-    outQueue[#outQueue + 1] = { msg = msg, dist = dist, target = target }
+local function Enqueue(msg, dist, target, report)
+    outQueue[#outQueue + 1] = { msg = msg, dist = dist, target = target, report = report }
     if not outBusy then
         outBusy = true
         PumpOut()
@@ -1858,6 +1912,7 @@ function IL:SetSync(on)
         self:ScheduleSyncCheck()
     else
         self.syncBase = nil
+        self.syncRefreshing = false
         self.pendingSync = {}
     end
     self:UpdateUI()
@@ -1908,6 +1963,30 @@ function IL:IsLeaderName(name)
     return false
 end
 
+-- A reconnect may retain syncBase even though raid deltas were missed.
+-- Ask the leader for the current complete list without clearing local data
+-- until a valid baseline actually arrives.
+function IL:StartSyncRefresh()
+    if not self:SyncOn() or UnitIsGroupLeader("player") then return end
+    if self.syncRefreshing then return end
+    local now = GetTime()
+    if self.syncRefreshLast and now - self.syncRefreshLast < 30 then return end
+    self.syncRefreshLast = now
+    self.syncRefreshing = true
+    self.syncTries = 0
+    self.syncLast = now - 15
+    self:ScheduleSyncCheck()
+end
+
+function IL:UNIT_CONNECTION(_, unit, connected)
+    if not self:SyncOn() or not unit or not UnitIsGroupLeader(unit) then return end
+    if issecretvalue and issecretvalue(connected) then return end
+    if connected == true and self.syncLeaderOnline == false and self.syncBase then
+        self:StartSyncRefresh()
+    end
+    self.syncLeaderOnline = connected and true or false
+end
+
 local syncCheckPending = false
 function IL:ScheduleSyncCheck()
     if syncCheckPending then return end
@@ -1919,9 +1998,14 @@ function IL:ScheduleSyncCheck()
 end
 
 function IL:RequestSync()
-    if not self:SyncOn() or self:HasBase() or InCombatLockdown() then return end
+    if not self:SyncOn() or (self:HasBase() and not self.syncRefreshing)
+        or InCombatLockdown() then return end
     local now = GetTime()
-    if self.syncTries >= 4 or now - self.syncLast < 15 then return end
+    if self.syncTries >= 4 then
+        self.syncRefreshing = false
+        return
+    end
+    if now - self.syncLast < 15 then return end
     self.syncTries = self.syncTries + 1
     self.syncLast = now
     self.syncWanted = now + 25
@@ -1978,10 +2062,15 @@ function IL:BroadcastSync()
 end
 
 function IL:OnSyncEmpty(sender, channel)
-    if channel ~= "WHISPER" or not self:SyncOn() or self:HasBase() then return end
+    if channel ~= "WHISPER" or not self:SyncOn() or InCombatLockdown()
+        or (self:HasBase() and not self.syncRefreshing) then return end
     if GetTime() > self.syncWanted or not self:IsLeaderName(sender) then return end
-    -- A leader's empty baseline does not need to open Invite Tools.
+    -- An empty leader baseline must also reconcile a previously nonempty list.
+    if #(self.names or ParseList(self:GetListText(1))) > 0 then
+        self:ClearList("shared", ShortName(sender))
+    end
     self.syncBase = true
+    self.syncRefreshing = false
     self:AddReportTarget(sender)
 end
 
@@ -2151,8 +2240,9 @@ function IL:OnShareOffer(sender, id, count, classFile, channel, retried, sync)
     -- A baseline requested by Live Raid Sync is accepted silently, but only
     -- from the current raid leader, by whisper, while our request is fresh.
     if sync then
-        if not (self:SyncOn() and not self:HasBase() and GetTime() < self.syncWanted
-            and channel == "WHISPER" and self:IsLeaderName(sender)) then return end
+        if not (self:SyncOn() and (not self:HasBase() or self.syncRefreshing)
+            and GetTime() < self.syncWanted and channel == "WHISPER"
+            and self:IsLeaderName(sender)) then return end
         local aw = self.awaiting
         if aw and GetTime() <= aw.untilT then return end
         if type(id) ~= "string" or not id:match("^%x%x%x%x$") then return end
@@ -2404,7 +2494,10 @@ function IL:OnShareData(sender, id, i, n, payload)
             end
         end
     end
-    if a.sync and #names > 0 then self.syncBase = true end
+    if a.sync and #names > 0 then
+        self.syncBase = true
+        self.syncRefreshing = false
+    end
     if #names > 0 then self:AddReportTarget(a.sender) end
     if #names == 0 then
         SendShareReply(a.sender, a.id, "r~0~0")
@@ -2467,9 +2560,25 @@ local REPORT_TICK = 2
 local REPORT_MAX_PER_MSG = 40
 local REPORT_MAX_SENDERS = 60
 local REPORT_MAX_TARGETS = 5
+local REPORT_ACK_DELAY = 12
+local REPORT_LEGACY_TRIES = 3
+
+-- The legacy T~class~statuses payload remains readable by Jaca 1.3.7.
+-- A newer EUI acknowledges its complete contents with TA~hash. The hash
+-- identifies the in-flight packet, without adding fields to the legacy T.
+local function ReportHash(message)
+    local hash = 5381
+    for i = 1, #message do
+        hash = (hash * 33 + message:byte(i)) % 2147483647
+    end
+    return string.format("%08x", hash)
+end
 
 IL.reportTargets = {}  -- normalised recipient -> full character name
-IL.reported = {}       -- recipient -> { lowercase name -> status code sent }
+IL.reported = {}       -- recipient -> { lowercase name -> acknowledged code }
+IL.reportPending = {}  -- recipient -> one message awaiting acknowledgement
+IL.reportOnline = {}   -- recipient -> last known roster connectivity
+IL.reportAckPeers = {} -- recipients known to support acknowledgements
 IL.reporters = {}      -- senders who accepted my shared list
 IL.remote = {}         -- lowercase list name -> { sender key -> report }
 
@@ -2496,11 +2605,15 @@ function IL:AddReportTarget(name)
     if count >= REPORT_MAX_TARGETS then return end
     self.reportTargets[key] = name
     self.reported[key] = {}
+    self.reportOnline[key] = ReportRecipientConnected(name)
     if not self.reportTicker then
         self.reportTicker = C_Timer.NewTicker(REPORT_TICK, function() IL:ReportStatuses() end)
     end
 end
 
+-- One outstanding packet per recipient makes acknowledgement and retry
+-- bounded. Older Jaca clients do not send TA, so after three attempts their
+-- packets are treated as best effort; EUI peers keep retrying until confirmed.
 function IL:ReportStatuses()
     if not next(self.reportTargets) then
         if self.reportTicker then
@@ -2512,6 +2625,9 @@ function IL:ReportStatuses()
     if not IsInGroup() then
         wipe(self.reportTargets)
         wipe(self.reported)
+        wipe(self.reportPending)
+        wipe(self.reportOnline)
+        wipe(self.reportAckPeers)
         if self.reportTicker then
             self.reportTicker:Cancel()
             self.reportTicker = nil
@@ -2519,36 +2635,85 @@ function IL:ReportStatuses()
         return
     end
     if InCombatLockdown() then return end
+    local now = GetTime()
     for key, recipient in pairs(self.reportTargets) do
-        local sent = self.reported[key]
-        if not sent then
-            sent = {}
-            self.reported[key] = sent
-        end
-        for name in pairs(sent) do
-            local state = self.state[name]
-            if not (state and REPORT_CODE[state.status]) then sent[name] = nil end
-        end
-        local changes = {}
-        for name, state in pairs(self.state) do
-            local code = REPORT_CODE[state.status]
-            if code and ValidName(state.name) and sent[name] ~= code then
-                changes[#changes + 1] = { key = name, code = code, name = state.name }
+        local online = ReportRecipientConnected(recipient)
+        local wasOnline = self.reportOnline[key]
+        self.reportOnline[key] = online
+        if online then
+            local sent = self.reported[key]
+            if not sent then
+                sent = {}
+                self.reported[key] = sent
+            end
+            if wasOnline == false then
+                -- Recheck every current status after a recipient reconnects.
+                wipe(sent)
+                self.reportPending[key] = nil
+            end
+            for name in pairs(sent) do
+                local state = self.state[name]
+                if not (state and REPORT_CODE[state.status]) then sent[name] = nil end
+            end
+            local pending = self.reportPending[key]
+            if pending then
+                if now >= pending.nextAt then
+                    if self.reportAckPeers[key] or pending.tries < REPORT_LEGACY_TRIES then
+                        pending.tries = pending.tries + 1
+                        pending.nextAt = now + REPORT_ACK_DELAY
+                        Enqueue(pending.message, "WHISPER", recipient, true)
+                    else
+                        -- No ACK: retain compatibility with older Jaca peers.
+                        for _, change in ipairs(pending.changes) do
+                            sent[change.key] = change.code
+                        end
+                        self.reportPending[key] = nil
+                    end
+                end
+            else
+                local changes = {}
+                for name, state in pairs(self.state) do
+                    local code = REPORT_CODE[state.status]
+                    if code and ValidName(state.name) and sent[name] ~= code then
+                        changes[#changes + 1] = { key = name, code = code, name = state.name }
+                    end
+                end
+                table.sort(changes, function(a, b) return a.key < b.key end)
+                local head, chunk, batch = "T~" .. MyClass() .. "~", "", {}
+                for _, change in ipairs(changes) do
+                    local item = change.code .. ":" .. change.name
+                    if chunk ~= "" and #head + #chunk + 1 + #item > REPORT_CHUNK then break end
+                    chunk = chunk == "" and item or (chunk .. "," .. item)
+                    batch[#batch + 1] = change
+                end
+                if chunk ~= "" then
+                    local message = head .. chunk
+                    self.reportPending[key] = {
+                        message = message, hash = ReportHash(message), changes = batch,
+                        tries = 1, nextAt = now + REPORT_ACK_DELAY,
+                    }
+                    Enqueue(message, "WHISPER", recipient, true)
+                end
             end
         end
-        table.sort(changes, function(a, b) return a.key < b.key end)
-        local head, chunk = "T~" .. MyClass() .. "~", ""
-        for _, change in ipairs(changes) do
-            local item = change.code .. ":" .. change.name
-            if chunk ~= "" and #head + #chunk + 1 + #item > REPORT_CHUNK then
-                Enqueue(head .. chunk, "WHISPER", recipient)
-                chunk = ""
-            end
-            chunk = chunk == "" and item or (chunk .. "," .. item)
-            sent[change.key] = change.code
-        end
-        if chunk ~= "" then Enqueue(head .. chunk, "WHISPER", recipient) end
     end
+end
+
+function IL:OnStatusAck(sender, hash, channel)
+    if channel ~= "WHISPER" or not hash or not hash:match("^%x%x%x%x%x%x%x%x$") then return end
+    local key = NormSender(sender)
+    local pending = self.reportPending[key]
+    if not pending or pending.hash ~= hash then return end
+    self.reportAckPeers[key] = true
+    local sent = self.reported[key]
+    if not sent then
+        sent = {}
+        self.reported[key] = sent
+    end
+    for _, change in ipairs(pending.changes) do
+        sent[change.key] = change.code
+    end
+    self.reportPending[key] = nil
 end
 
 function IL:OnStatusReport(sender, classFile, payload, channel)
@@ -2591,6 +2756,9 @@ function IL:OnStatusReport(sender, classFile, payload, channel)
         end
     end
     if changed then self:UpdateUI() end
+    -- ACK only after the accepted report has been processed. Retried packets
+    -- are acknowledged even when they do not change any statuses.
+    Enqueue("TA~" .. ReportHash("T~" .. classFile .. "~" .. payload), "WHISPER", sender)
 end
 
 function IL:RemoteReports(name)
@@ -2623,6 +2791,8 @@ function IL:CHAT_MSG_ADDON(_, prefix, text, channel, sender)
         self:OnSyncDelta(kind, sender, a, channel)
     elseif kind == "T" and a and b then
         self:OnStatusReport(sender, a, b, channel)
+    elseif kind == "TA" and a then
+        self:OnStatusAck(sender, a, channel)
     elseif kind == "S?" then
         self:OnSyncRequest(sender, channel)
     elseif kind == "S0" then
