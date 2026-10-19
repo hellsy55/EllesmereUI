@@ -1728,10 +1728,14 @@ qolFrame:SetScript("OnEvent", function(self)
     --  and would leave the line half-closed (the close fade never runs on a
     --  hidden frame), so Blizzard showed it again on its next pass. Shown, the
     --  line closes through Blizzard's own fade. Edit Mode still shows the frame.
+    --  The 3D portrait model draws past its parents' alpha, so it is hidden
+    --  itself while suppressed (Blizzard never shows or hides it) and shown
+    --  again only if this block hid it.
     ---------------------------------------------------------------------------
     if not EllesmereUI.IS_FOREVER then
         local hooked, suppressed = false, false
         local frameMouse, closeMouse  -- mouse states found when suppression began
+        local modelHidden = false     -- the portrait model was hidden here
 
         local function Wanted()
             local db = EllesmereUIDB
@@ -1739,7 +1743,7 @@ qolFrame:SetScript("OnEvent", function(self)
         end
 
         local function ApplyTalkingHead(thf)
-            local close = thf.MainFrame.CloseButton
+            local close, model = thf.MainFrame.CloseButton, thf.MainFrame.Model
             if EllesmereUIDB and EllesmereUIDB.hideTalkingHead and not thf.isInEditMode then
                 if not suppressed then
                     suppressed = true
@@ -1748,11 +1752,19 @@ qolFrame:SetScript("OnEvent", function(self)
                     close:EnableMouse(false)
                 end
                 if thf:GetAlpha() ~= 0 then thf:SetAlpha(0) end
+                if model:IsShown() then
+                    model:Hide()
+                    modelHidden = true
+                end
             elseif suppressed then
                 suppressed = false
                 thf:SetAlpha(1)
                 thf:EnableMouse(frameMouse)
                 close:EnableMouse(closeMouse)
+                if modelHidden then
+                    modelHidden = false
+                    model:Show()
+                end
             end
         end
 

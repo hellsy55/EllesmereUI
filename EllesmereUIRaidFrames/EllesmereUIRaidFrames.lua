@@ -776,7 +776,7 @@ local defaults = {
         -- of Range Alpha option; off by default.
         oorDarken        = false,
         oorDarkenColor   = { r = 0.5, g = 0.5, b = 0.5 },
-        -- showTooltip is the on/off fallback the "Show Raid Frames Tooltip"
+        -- showTooltip is the on/off fallback the "Show Raid & Party Frames Tooltip"
         -- dropdown derives from (ns._ResolveTooltipMode); picking an option writes
         -- tooltipMode = always|outOfCombat|outOfBossCombat|never. Raid/party only.
         showTooltip      = true,

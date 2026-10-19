@@ -917,20 +917,106 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Auras, Buffs & Consumables page
     ---------------------------------------------------------------------------
+    -- Adds the spell ID typed into an Add ... Spell input to list: digits only,
+    -- a spell the client knows, no duplicates.
+    local function AddSpellIDToList(list, text)
+        local spellID = tonumber((text or ""):match("^%s*(%d+)%s*$"))
+        if not (spellID and C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellID)) then return end
+        for _, existingSpellID in ipairs(list) do
+            if existingSpellID == spellID then return end
+        end
+        list[#list + 1] = spellID
+        RefreshAll()
+        -- Rebuilds the page once the edit box has finished its commit.
+        C_Timer.After(0, function() EllesmereUI:RefreshPage(true) end)
+    end
+
+    -- Names a new spell group (group nil) or renames group.
+    local function PromptSpellGroupName(group)
+        EllesmereUI:ShowInputPopup({
+            title = group and "Rename Spell Group" or "New Spell Group",
+            message = "Enter a name for the group:",
+            placeholder = "Group name",
+            initialText = group and group.name or "",
+            confirmText = group and "Rename" or "Create",
+            onConfirm = function(text)
+                local name = strtrim(text or "")
+                local f = FDB()
+                if name == "" or not f then return end
+                if group then
+                    group.name = name
+                else
+                    f.customGroups[#f.customGroups + 1] = { name = name, ids = {} }
+                end
+                RefreshAll()
+                C_Timer.After(0, function() EllesmereUI:RefreshPage(true) end)
+            end,
+        })
+    end
+
+    ---------------------------------------------------------------------------
+    --  WoW Forever spell groups: one section per group. Slots, left to right:
+    --  Add Spell ID, Rename, one per spell (Remove), Remove Group last.
+    ---------------------------------------------------------------------------
+    local function BuildForeverGroupSections(parent, y)
+        local f = FDB()
+        local W = EllesmereUI.Widgets
+        for groupIndex, group in ipairs(f.customGroups) do
+            local slots = {
+                { type="input", text="Add Spell ID", inputStyle="popup", placeholder="Spell ID", inputWidth=110,
+                  tooltip="Type a spell ID and press Enter to add it to this group. Unknown IDs are ignored.\nThe reminder shows the icon of the first spell in the list.",
+                  getValue=function() return "" end,
+                  setValue=function(text) AddSpellIDToList(group.ids, text) end },
+                { type="labeledButton", text="Rename Group", buttonText="Rename", width=90,
+                  tooltip="Change this group's name.",
+                  onClick=function() PromptSpellGroupName(group) end },
+            }
+            for spellIndex, spellID in ipairs(group.ids) do
+                slots[#slots + 1] = { type="labeledButton", buttonText="Remove", width=90,
+                    text=_G._EABR_SpellName(spellID, tostring(spellID)) .. " " .. EllesmereUI.COLOR_CODES.DIM .. spellID .. "|r",
+                    tooltip="Remove this spell from the group.",
+                    onClick=function()
+                        table.remove(group.ids, spellIndex)
+                        RefreshAll()
+                        EllesmereUI:RefreshPage(true)
+                    end }
+            end
+            slots[#slots + 1] = { type="labeledButton", text="Remove Group", buttonText="Remove", width=90,
+                tooltip="Deletes this group and its spells.",
+                onClick=function()
+                    table.remove(f.customGroups, groupIndex)
+                    RefreshAll()
+                    EllesmereUI:RefreshPage(true)
+                end }
+            local _, headerHeight = W:SectionHeader(parent, EllesmereUI.Lf("SPELL GROUP: %1$s", group.name), y)
+            y = y - headerHeight
+            for slotIndex = 1, #slots, 2 do
+                local _, rowHeight = W:DualRow(parent, y, slots[slotIndex],
+                    slots[slotIndex + 1] or EllesmereUI.BlankRowCfg())
+                y = y - rowHeight
+            end
+        end
+        return y
+    end
+
     ---------------------------------------------------------------------------
     --  WoW Forever custom spells: the lead slot (the Add Custom Spell entry),
-    --  then one slot per tracked spell (label = name + id, button = Remove),
-    --  filled left to right, a blank label in an odd last slot. The page
-    --  rebuilds on add and remove, so the slots never need in-place updates.
+    --  the New Spell Group slot, then one slot per tracked spell (label = name
+    --  + id, button = Remove), filled left to right, a blank label in an odd
+    --  last slot. The page rebuilds on add and remove, so the slots never need
+    --  in-place updates.
     ---------------------------------------------------------------------------
     local function BuildForeverCustomRows(parent, y, lead)
         local f = FDB()
         local ids = f and f.customIDs
-        local n = 1 + (ids and #ids or 0)
+        local newGroupSlot = { type="labeledButton", text="New Spell Group", buttonText="Create", width=90,
+            tooltip="Creates a group of spells. A reminder shows if none of the auras from the group are active.",
+            onClick=function() PromptSpellGroupName() end }
+        local n = 2 + (ids and #ids or 0)
         local W = EllesmereUI.Widgets
         local function Slot(id)
             return { type="labeledButton", buttonText="Remove", width=90,
-                text=_G._EABR_SpellName(id, tostring(id)) .. " |cff808080" .. id .. "|r",
+                text=_G._EABR_SpellName(id, tostring(id)) .. " " .. EllesmereUI.COLOR_CODES.DIM .. id .. "|r",
                 tooltip="Reminds you whenever this buff is missing. Remove stops tracking it.",
                 onClick=function()
                     local fo = FDB()
@@ -945,7 +1031,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
         local function SlotAt(k)
             if k == 1 then return lead end
-            local id = ids and ids[k - 1]
+            if k == 2 then return newGroupSlot end
+            local id = ids and ids[k - 2]
             return id and Slot(id) or EllesmereUI.BlankRowCfg()
         end
         for k = 1, n, 2 do
@@ -1186,7 +1273,7 @@ initFrame:SetScript("OnEvent", function(self)
                 return { type="toggle", text="Beacon M+ Reminders",
                   tooltip="During Mythic+ boss fights, shows a glowing red Beacon on your tank's raid frame while they have your Beacon of Light or Beacon of Faith.",
                   disabled=function() return not EllesmereUI._ModuleNS["EllesmereUIRaidFrames"] end,
-                  disabledTooltip=EllesmereUI.DisabledTooltip("EllesmereUI Raid Frames"),
+                  disabledTooltip=EllesmereUI.DisabledTooltip("EllesmereUI Raid & Party Frames"),
                   getValue=function() local d = DDB(); return d and d.beaconMPlus == true end,
                   setValue=function(v)
                       local d = DDB(); if not d then return end
@@ -1607,19 +1694,12 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip="Type a spell ID and press Enter to be reminded whenever that buff is missing.\nUnknown IDs are ignored.",
                   getValue=function() return "" end,
                   setValue=function(text)
-                      local id = tonumber((text or ""):match("^%s*(%d+)%s*$"))
                       local f = FDB()
-                      if not (id and f) then return end
-                      if not (C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)) then return end
+                      if not f then return end
                       f.customIDs = f.customIDs or {}
-                      for i = 1, #f.customIDs do
-                          if f.customIDs[i] == id then return end
-                      end
-                      f.customIDs[#f.customIDs + 1] = id
-                      RefreshAll()
-                      -- Rebuilds the page once the edit box has finished its commit.
-                      C_Timer.After(0, function() EllesmereUI:RefreshPage(true) end)
+                      AddSpellIDToList(f.customIDs, text)
                   end })
+            y = BuildForeverGroupSections(parent, y)
 
             -- No preview header here, so no click-to-scroll mappings to wire.
             return math.abs(y)

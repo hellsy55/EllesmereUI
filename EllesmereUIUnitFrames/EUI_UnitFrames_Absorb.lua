@@ -118,6 +118,20 @@ local function ApplyAbsorbStyle(absorbBar, style, settings)
     if absorbBar._glow then ns.UF_AbsorbGlowAnchor(absorbBar) end
 end
 
+-- Read-only stand-ins for unset settings and lookups the absorb painter makes
+-- on every event, so a paint builds no table and runs no pattern match.
+local COLOR_WHITE = { r = 1, g = 1, b = 1 }
+local DEF_HEAL_ABSORB_COLOR = { r = 0.8, g = 0.15, b = 0.15 }
+local DEF_HEAL_ABSORB_BAR_COLOR = { r = 200/255, g = 29/255, b = 29/255 }
+-- Absorb Short text gate zone -> the frame's text field for that zone.
+local GATE_ZONE_TEXT = { left = "LeftText", right = "RightText", center = "CenterText", extra = "ExtraText" }
+-- Unit token -> boss frame unit; each token is matched once.
+local IS_BOSS_UNIT = setmetatable({}, { __index = function(t, unit)
+    local isBoss = unit:match("^boss") ~= nil
+    t[unit] = isBoss
+    return isBoss
+end })
+
 -- Heal absorb styling (mirrors the raid frames Absorbs section). Defaults are
 -- clean white8x8, red, 0.65 alpha.
 local function ApplyHealAbsorbStyle(haBar, style, settings)
@@ -1184,8 +1198,8 @@ local function CreateAbsorbBar(frame, unit, settings)
     healAbsorbBar:Hide()
 
     -- Black backing behind the heal-absorb texture (opacity via healAbsorbBgOpacity),
-    -- drawn UNDER the fill (ARTWORK sublevel 1 < fill's 2), masked + SetAllPoints'd to
-    -- the fill rect each update so it tracks the secret heal-absorb amount.
+    -- drawn UNDER the fill (ARTWORK sublevel 1 < fill's 2), masked and anchored to the
+    -- fill texture by the first paint, so it tracks the secret heal-absorb amount.
     local haBg = healAbsorbBar:CreateTexture(nil, "ARTWORK", nil, 1)
     haBg:SetColorTexture(0, 0, 0, 0.15)
     if absorbMask then haBg:AddMaskTexture(absorbMask) end
@@ -1276,7 +1290,6 @@ local function CreateAbsorbBar(frame, unit, settings)
             local shieldAmt, healAmt
             if self._absGate then
                 local syncText = (event ~= "UNIT_MAXHEALTH")
-                local fsZone
                 for zone, g in pairs(self._absGate) do
                     if g:IsShown() then
                         local amt
@@ -1289,8 +1302,8 @@ local function CreateAbsorbBar(frame, unit, settings)
                         end
                         g:SetValue(amt)
                         if syncText then
-                            fsZone = fsZone or { left = self.LeftText, right = self.RightText, center = self.CenterText, extra = self.ExtraText }
-                            local fs = fsZone[zone]
+                            local field = GATE_ZONE_TEXT[zone]
+                            local fs = field and self[field]
                             if fs then
                                 local cfg = _G._EUI_AbbrevDecimalCfg
                                 fs:SetText(cfg and AbbreviateNumbers(amt, cfg) or AbbreviateNumbers(amt))
@@ -1317,7 +1330,7 @@ local function CreateAbsorbBar(frame, unit, settings)
             -- the frame's real unit to "player" so it has live data to show
             -- (see SetBossPreview), which would otherwise make this resolve to
             -- the Player frame's settings instead of the Boss tab's own.
-            local isBossBar = unit and unit:match("^boss")
+            local isBossBar = unit and IS_BOSS_UNIT[unit]
             local s = isBossBar and db.profile.boss or GetSettingsForUnit(updUnit)
             -- Boss frames render with their own absorb settings (Boss tab).
             -- Absorb Style itself is the shield on/off switch: None disables it,
@@ -1391,7 +1404,7 @@ local function CreateAbsorbBar(frame, unit, settings)
             -- Strip bars (mirrors Raid Frames): independent of the overlay styles.
             if topBar then
                 if barOn then
-                    local bc = (s and s.absorbBarColor) or { r = 1, g = 1, b = 1 }
+                    local bc = (s and s.absorbBarColor) or COLOR_WHITE
                     local bh = (s and s.absorbBarHeight) or 4
                     -- Re-layout only on position/height change (no SetPoint churn).
                     if topBar._lpPos ~= barPos or topBar._lpH ~= bh then
@@ -1408,7 +1421,7 @@ local function CreateAbsorbBar(frame, unit, settings)
             end
             if healTopBar then
                 if healBarOn then
-                    local hbc = (s and s.healAbsorbBarColor) or { r = 200/255, g = 29/255, b = 29/255 }
+                    local hbc = (s and s.healAbsorbBarColor) or DEF_HEAL_ABSORB_BAR_COLOR
                     local hbh = (s and s.healAbsorbBarHeight) or 4
                     local abh = (s and s.absorbBarHeight) or 4
                     -- Re-layout only when its or the Absorb Bar's position/height changes.
@@ -1502,23 +1515,41 @@ local function CreateAbsorbBar(frame, unit, settings)
                 if haStyle == "none" then
                     ha:Hide()
                 else
-                    local hc = (s and s.healAbsorbColor) or { r = 0.8, g = 0.15, b = 0.15 }
+                    -- Re-style only when one of the style's inputs changes
+                    -- (component compares: no key string per paint).
+                    local hc = (s and s.healAbsorbColor) or DEF_HEAL_ABSORB_COLOR
                     local hcR, hcG, hcB = hc.r or 0.8, hc.g or 0.15, hc.b or 0.15
-                    local haKey = haStyle .. ((s and s.healAbsorbOpacity) or 65) .. hcR .. hcG .. hcB
-                    if ha._lastHaKey ~= haKey then
-                        ha._lastHaKey = haKey
-                        ApplyHealAbsorbStyle(ha, haStyle, s)
-                    end
-                    local healAbsorbAmt = UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(updUnit) or 0
-                    ha:SetWidth(hpW); ha:SetHeight(hpH)
-                    ha:SetMinMaxValues(0, maxHealth)
-                    ha:SetValue(healAbsorbAmt)
-                    ha:Show()
-                    -- Black backing tracks the fill rect; opacity from settings.
+                    local haOp = (s and s.healAbsorbOpacity) or 65
                     local hbg = ha._bg
+                    if ha._hsStyle ~= haStyle or ha._hsOp ~= haOp
+                       or ha._hsR ~= hcR or ha._hsG ~= hcG or ha._hsB ~= hcB then
+                        ha._hsStyle, ha._hsOp = haStyle, haOp
+                        ha._hsR, ha._hsG, ha._hsB = hcR, hcG, hcB
+                        ApplyHealAbsorbStyle(ha, haStyle, s)
+                        -- After the retexture, re-seat the backing's fill anchor.
+                        if hbg then hbg._fillAnchored = nil end
+                    end
+                    -- Sized with the health bar, size-gated like the shield bars.
+                    if ha._szW ~= hpW or ha._szH ~= hpH then
+                        ha._szW = hpW; ha._szH = hpH
+                        ha:SetWidth(hpW); ha:SetHeight(hpH)
+                    end
+                    ha:SetMinMaxValues(0, maxHealth)
+                    ha:SetValue(haAmtD)
+                    ha:Show()
+                    -- Black backing under the fill: its opacity is written when it
+                    -- changes, and it anchors to the fill texture once (that region
+                    -- follows the fill through every SetValue).
                     if hbg then
-                        hbg:SetColorTexture(0, 0, 0, ((s and s.healAbsorbBgOpacity) or 15) / 100)
-                        hbg:SetAllPoints(ha:GetStatusBarTexture())
+                        local bgA = ((s and s.healAbsorbBgOpacity) or 15) / 100
+                        if hbg._bgA ~= bgA then
+                            hbg._bgA = bgA
+                            hbg:SetColorTexture(0, 0, 0, bgA)
+                        end
+                        if not hbg._fillAnchored then
+                            hbg._fillAnchored = true
+                            hbg:SetAllPoints(ha:GetStatusBarTexture())
+                        end
                         hbg:Show()
                     end
                 end
