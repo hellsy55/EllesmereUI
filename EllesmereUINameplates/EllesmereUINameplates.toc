@@ -24,6 +24,7 @@ EUI_Nameplates_Name.lua
 EUI_Nameplates_Cast.lua
 EUI_Nameplates_Events.lua
 EUI_Nameplates_Init.lua
+EUI_Nameplates_AutoEnable.lua
 EUI_Nameplates_AuraContainers.lua
 EllesmereUINameplates_DebuffColors.lua
 EllesmereUINameplatesFriendly.lua

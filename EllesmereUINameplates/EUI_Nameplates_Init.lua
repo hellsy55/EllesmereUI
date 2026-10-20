@@ -458,6 +458,12 @@ ns._oocPlatesCtl = CreateFrame("Frame")
 ns.ApplyOOCPlates = function()
     local ctl = ns._oocPlatesCtl
     local on = p and p.hideEnemyPlatesOOC == true
+    if ns.AutoNameplatesOwnsEnemy and ns.AutoNameplatesOwnsEnemy() then
+        ctl:UnregisterEvent("PLAYER_REGEN_DISABLED")
+        ctl:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        ctl:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        return
+    end
     if on then
         ctl:RegisterEvent("PLAYER_REGEN_DISABLED")
         ctl:RegisterEvent("PLAYER_REGEN_ENABLED")

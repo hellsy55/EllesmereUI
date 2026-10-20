@@ -15,6 +15,53 @@ if not ns then return end  -- module disabled: no options page
 -- plain CreateFrame.
 local CreateFrame = EllesmereUI._Pool.CreateFrame
 
+-- The same two-slot glow editor used by Nameplates; its settings live on
+-- each unit's existing profile table. Called by shared Target/Focus and Boss.
+function ns.UFO_BuildPandemicRow(W, parent, y, getS, onChanged)
+    local GO = EllesmereUI.GlowOptions
+    local glow = EllesmereUI.Glows
+    local descriptor = {
+        view = ns.UF_PandemicView, host = "engine",
+        extras = { { value = glow.PANDEMIC_BORDER,
+            label = "Blizzard Pandemic Border", style = glow.PANDEMIC_BORDER, noColor = true } },
+        caps = { mode = true, params = true, bg = true },
+        defaultColor = { r = 1, g = 0.8, b = 0.329 },
+        isOff = function() return getS().debuffPandemicGlow ~= true end,
+        onChange = onChanged,
+        get = function(f)
+            local s = getS()
+            if f == "style" then return s.debuffPandemicGlowPick or glow.PANDEMIC_BORDER end
+            if f == "mode" then return s.debuffPandemicGlowMode or "custom" end
+            return GO.FlatGet(s, "debuffPandemicGlow", f)
+        end,
+        set = function(f, a, b, c)
+            local s = getS()
+            if f == "style" then
+                s.debuffPandemicGlow = a ~= 0
+                if a ~= 0 then s.debuffPandemicGlowPick = a end
+            elseif f == "mode" then s.debuffPandemicGlowMode = a
+            else GO.FlatSet(s, "debuffPandemicGlow", f, a, b, c) end
+        end,
+    }
+    local row, h = W:DualRow(parent, y,
+        GO.DropdownSpec(descriptor, "Pandemic Glow Style",
+            "Highlights your refreshable debuffs during their client-managed pandemic window."),
+        { type = "label", text = "Pandemic Glow Preview" })
+    GO.AttachInline(row._leftRegion, descriptor)
+    if not EllesmereUI._prebuilding then
+        local rgn = row._rightRegion
+        GO.BuildPreview(rgn, descriptor, {
+            anchor = rgn, point = "RIGHT", relPoint = "RIGHT", x = -20, icon = 136197 })
+        local label = rgn._label
+        local function RefreshLabel()
+            if label then label:SetAlpha(GO.Renders(descriptor) and 1 or 0.3) end
+        end
+        EllesmereUI.RegisterWidgetRefresh(RefreshLabel)
+        RefreshLabel()
+    end
+    return y - h
+end
+
 function ns.UFO_BuildCastBarSection(parent, y, ctx)
     local env = ns._UFO_OptEnv
     local BuildCastBarTexDropdown = env.BuildCastBarTexDropdown
@@ -2382,6 +2429,12 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
     end
     end   -- close filter row hidden-while-both-None gate
 
+    -- Target's row follows Target Debuff Filter. Focus's row follows the
+    -- Debuff Size settings and precedes Border Style; both use this seam.
+    if optState.selectedUnit == "target" then
+        y = ns.UFO_BuildPandemicRow(W, parent, y, SDB, ReloadAndUpdate)
+    end
+
     -- Dispel Overlay + Dispel Colors (player frame only; settings keys
     -- mirror the Raid Frames dispel system 1:1)
     if optState.selectedUnit == "player" then
@@ -2568,6 +2621,9 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
         end
     end
 
+    if optState.selectedUnit == "focus" then
+        y = ns.UFO_BuildPandemicRow(W, parent, y, SDB, ReloadAndUpdate)
+    end
     AddAuraBorderSettings()
 
     _, h = W:Spacer(parent, y, 20); y = y - h

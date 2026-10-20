@@ -302,13 +302,18 @@ local function SetupAuraCVars()
         end
         EllesmereUI.SetCVar("nameplateShowFriendlyNPCs", showNPCs and 1 or 0, "EllesmereUINameplates")
         EllesmereUI.SetCVar("nameplateShowFriendlyNpcs", showNPCs and 1 or 0, "EllesmereUINameplates")
-        EllesmereUI.SetCVar("nameplateShowEnemyPets", (db.showEnemyPets == true) and 1 or 0, "EllesmereUINameplates")
+        if not (ns.NP_AutoRaidPetOverride and ns.NP_AutoRaidPetOverride()) then
+            EllesmereUI.SetCVar("nameplateShowEnemyPets", (db.showEnemyPets == true) and 1 or 0, "EllesmereUINameplates")
+        end
         if showPlayers then
             EllesmereUI.SetCVar("ShowClassColorInFriendlyNameplate", (db.classColorFriendly ~= false) and 1 or 0, "EllesmereUINameplates")
         end
         EllesmereUI.SetCVar("ShowClassColorInNameplate", 1, "EllesmereUINameplates")
         EllesmereUI.SetCVar("nameplateSize", 3, "EllesmereUINameplates")
-        EllesmereUI.SetCVar("nameplateShowAll", 1, "EllesmereUINameplates")
+        if not (ns.NP_AutoValue and (ns.NP_AutoValue("always", "enabled")
+            or ns.NP_AutoValue("combat", "enabled"))) then
+            EllesmereUI.SetCVar("nameplateShowAll", 1, "EllesmereUINameplates")
+        end
         EllesmereUI.SetCVar("nameplateMinScale", 1, "EllesmereUINameplates")
         EllesmereUI.SetCVar("nameplateOverlapH", 1, "EllesmereUINameplates")
         -- nameplateOverlapV is deliberately left alone: it's the user's own vertical-spacing

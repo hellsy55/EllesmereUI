@@ -2780,6 +2780,8 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end
             end
             AddBossAuraBorderSettings()
+            yy = ns.UFO_BuildPandemicRow(Ww, pp, yy,
+                function() return db.profile.boss end, ReloadAndUpdate)
             -- Boss Debuff Filter in slot 1: the native mode dropdown, disabled
             -- with the requirement tooltip while no debuffs show at all (Simple
             -- Debuff Display None + Debuffs Location None). The right slot is the

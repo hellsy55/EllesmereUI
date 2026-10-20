@@ -23,6 +23,14 @@ local AK -- EllesmereUI.AuraKit, resolved at first use (parent loads first)
 -- module (AuraKit's shared build scheduler).
 local AKWorker = EllesmereUI.AuraKit.NewBuildWorker()
 
+-- Match the Nameplates pandemic picker without requiring the Nameplates module.
+ns.UF_PandemicView = EllesmereUI.Glows.MakeView({ 1, 2, 3, 5, 6, 7 }, {
+    [2] = { scale = 1.36, previewScale = 1.28 },
+    [4] = { scale = 1.47, previewScale = 1.47 },
+    [5] = { scale = 1.34, previewScale = 1.34 },
+    [6] = { scale = 1.47, previewScale = 1.47 },
+})
+
 local AURA_CROP_HEIGHT = 0.80
 local AURA_ZOOM = 0.07
 local FALLBACK_FONT = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
@@ -1482,6 +1490,62 @@ local function ApplyUFText(button, d, style)
     end
 end
 
+-- The aura button owns the pandemic-window decision. No aura duration or
+-- expiry is read in Lua; that information can be secret in 12.1 content.
+local function ApplyUFPandemic(button, d, style)
+    ApplyUFText(button, d, style)
+    local host = d.ufPandemicHost
+    local glows = EllesmereUI.Glows
+    if style.pandemicSpec and button.AddPandemicRegion then
+        if not host then
+            host = CreateFrame("Frame", nil, button)
+            host:SetAllPoints(button)
+            host:SetFrameLevel(d.stackCarrier and (d.stackCarrier:GetFrameLevel() - 1)
+                or (button:GetFrameLevel() + 1))
+            host:EnableMouse(false)
+            d.ufPandemicHost = host
+            glows.BindEngineHost(host, button, d)
+        end
+        if not d.ufPandemicRegion then
+            button:AddPandemicRegion(host)
+            d.ufPandemicRegion = true
+        end
+        host:SetAlpha(1)
+        if glows.IsEngineHostBound(host) or EllesmereUI.AuraKit.ButtonCanShow(button) then
+            glows.StartSpecGlow(host, style.pandemicSpec, style.width, style.height, "engine")
+        elseif host._euiGlowActive then
+            glows.StopGlow(host)
+        end
+    elseif host then
+        if d.ufPandemicRegion then
+            button:ClearPandemicRegions()
+            d.ufPandemicRegion = nil
+        end
+        if host._euiGlowActive then glows.StopGlow(host) end
+        host:SetAlpha(0)
+    end
+end
+
+local function UFPandemicSpec(s)
+    local glows = EllesmereUI.Glows
+    local pick = s.debuffPandemicGlowPick or glows.PANDEMIC_BORDER
+    local spec = {
+        style = (pick == glows.PANDEMIC_BORDER) and pick
+            or (ns.UF_PandemicView.toShared[pick] or 1),
+        lines = s.debuffPandemicGlowLines or 8,
+        thickness = s.debuffPandemicGlowThickness or 1,
+        speed = s.debuffPandemicGlowSpeed or 4,
+        bg = s.debuffPandemicGlowBackground == true or nil,
+    }
+    if pick ~= glows.PANDEMIC_BORDER then
+        local c = s.debuffPandemicGlowColor or { r = 1, g = 0.8, b = 0.329 }
+        spec.r, spec.g, spec.b = glows.ResolveColor(s.debuffPandemicGlowMode or "custom", c.r, c.g, c.b)
+    end
+    local bg = s.debuffPandemicGlowBackgroundColor
+    spec.bgR, spec.bgG, spec.bgB = bg and bg.r, bg and bg.g, bg and bg.b
+    return spec
+end
+
 local function StyleKey(unit, base)
     return "uf:" .. unit .. ":" .. base
 end
@@ -1525,7 +1589,11 @@ local function StyleTableFP(st, font)
         st.noTooltips, st.blizzBorder, st.dispelBorder,
         -- Textured Dispel Ring (the ring's art key) and Use Dispel Colors (the
         -- palette fingerprint the colour map was built from).
-        st.dispelBorderTexture, st.dispelColorFP)
+        st.dispelBorderTexture, st.dispelColorFP,
+        st.pandemicSpec and FP(st.pandemicSpec.style, st.pandemicSpec.r,
+            st.pandemicSpec.g, st.pandemicSpec.b, st.pandemicSpec.lines,
+            st.pandemicSpec.thickness, st.pandemicSpec.speed, st.pandemicSpec.bg,
+            st.pandemicSpec.bgR, st.pandemicSpec.bgG, st.pandemicSpec.bgB))
 end
 
 -- Declares one chain group and records it in the element's declared-set
@@ -1680,7 +1748,7 @@ local function BuildStyle(unit, base, s, unitFrame)
         end
     end
 
-    return {
+    local style = {
         width = size,
         height = h,
         -- Blizzard Style: zoom 0 -- the stock frames draw the whole icon, and
@@ -1721,6 +1789,15 @@ local function BuildStyle(unit, base, s, unitFrame)
             and ns.UF_BossAuraBorderAboveEffects(s) or nil,
         applyExtra = ApplyUFText,
     }
+    if not isBuff and s.debuffPandemicGlow == true
+        and (unit == "target" or unit == "focus" or unit:match("^boss")) then
+        style.pandemicSpec = UFPandemicSpec(s)
+        style.applyExtra = ApplyUFPandemic
+    elseif not isBuff and (unit == "target" or unit == "focus" or unit:match("^boss")) then
+        -- Keep the extra callback when toggled off so existing hosts are cleared.
+        style.applyExtra = ApplyUFPandemic
+    end
+    return style
 end
 
 -- Purgeable Buff Glow style: the buff element's style plus the glow, on its
