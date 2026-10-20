@@ -482,7 +482,9 @@ local function BuildGeneralPage(pageName, parent, yOffset)
           getValue=function() return DBVal("showEnemyPets") == true end,
           setValue=function(v)
             DB().showEnemyPets = v
-            pcall(EllesmereUI.SetCVar, "nameplateShowEnemyPets", v and 1 or 0, "EllesmereUINameplates")
+            if not (ns.NP_AutoRaidPetOverride and ns.NP_AutoRaidPetOverride()) then
+                pcall(EllesmereUI.SetCVar, "nameplateShowEnemyPets", v and 1 or 0, "EllesmereUINameplates")
+            end
           end,
           tooltip="Toggle visibility of enemy pet nameplates." });  y = y - h
 
@@ -1401,6 +1403,75 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                 if ns.NPC_ReloadAll then ns.NPC_ReloadAll() end
               end },
             EllesmereUI.BlankRowCfg());  y = y - h
+    end
+
+    -----------------------------------------------------------------------
+    -- AUTO-ENABLE: every toggle is opt-in; the cog owns its environment rules.
+    -----------------------------------------------------------------------
+    _, h = W:Spacer(parent, y, 20); y = y - h
+    _, h = W:SectionHeader(parent, "AUTO-ENABLE", y); y = y - h
+    local modes = {
+        { id="combat", label="Combat",
+          tooltip="Automatically controls enemy and friendly nameplates, Blizzard friendly health bars, and Always Show Nameplates separately in and out of combat. Combat settings take priority over location-based rules.", items={
+            { "enemyCombat", "Enemy Nameplates in Combat" },
+            { "enemyOOC", "Enemy Nameplates out of Combat" },
+            { "friendlyCombat", "Friendly Nameplates in Combat" },
+            { "friendlyOOC", "Friendly Nameplates out of Combat" },
+            { "healthCombat", "Hide Blizzard Healthbars in Combat" },
+            { "healthOOC", "Hide Blizzard Healthbars out of Combat" },
+            { "alwaysCombat", "Always Show Nameplates in Combat" },
+            { "alwaysOOC", "Always Show Nameplates out of Combat" },
+        } },
+        { id="raidParty", label="Raid and Party",
+          tooltip="Optionally hide enemy pet and totem nameplates in dungeons and raids. Outside those instances, the normal EUI nameplate preferences apply.", items={
+            { "pets", "Hide Enemy Pets" }, { "totems", "Hide Enemy Totems" },
+        } },
+        { id="friendly", label="Friendly Nameplates",
+          tooltip="Automatically show or hide friendly player nameplates in dungeons, raids, PvP, major cities, and the open world. Combat rules take priority while enabled." },
+        { id="enemy", label="Enemy Nameplates",
+          tooltip="Automatically show or hide enemy nameplates based on your location. Combat rules take priority while enabled." },
+        { id="stacking", label="Stacking Nameplates",
+          tooltip="Automatically enable or disable enemy nameplate stacking for each environment. When disabled, the manual EUI stacking preference is used." },
+        { id="always", label="Always Show Nameplates",
+          tooltip="Automatically change the Always Show Nameplates setting based on your location. Combat rules take priority while enabled." },
+    }
+    local areas = { { "party", "In Dungeons" }, { "raid", "In Raids" },
+        { "arena", "In Arena / Battlegrounds" }, { "cities", "In Major Cities" },
+        { "world", "In Open World" } }
+    for i = 3, 6 do modes[i].items = areas end
+    for i = 1, #modes, 2 do
+        local left, right = modes[i], modes[i + 1]
+        local row
+        row, h = W:DualRow(parent, y,
+            { type="toggle", text=left.label, tooltip=left.tooltip,
+              getValue=function() return ns.NP_AutoValue(left.id, "enabled") end,
+              setValue=function(v)
+                  ns.NP_AutoSet(left.id, "enabled", v)
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="toggle", text=right.label, tooltip=right.tooltip,
+              getValue=function() return ns.NP_AutoValue(right.id, "enabled") end,
+              setValue=function(v)
+                  ns.NP_AutoSet(right.id, "enabled", v)
+                  EllesmereUI:RefreshPage()
+              end }); y = y - h
+        if not EllesmereUI._prebuilding then
+            for _, entry in ipairs({ { left, row._leftRegion }, { right, row._rightRegion } }) do
+                local cat, rgn = entry[1], entry[2]
+                local rows = {}
+                for j = 1, #cat.items do
+                    local key, label = cat.items[j][1], cat.items[j][2]
+                    rows[#rows + 1] = { type="toggle", label=label,
+                        get=function() return ns.NP_AutoValue(cat.id, key) end,
+                        set=function(v) ns.NP_AutoSet(cat.id, key, v) end }
+                end
+                EllesmereUI.BuildInlineCog(rgn, {
+                    title=cat.label, rows=rows,
+                    -- Combat's long labels require extra space beside the toggles.
+                    minWidth=cat.id == "combat" and 355 or nil,
+                })
+            end
+        end
     end
 
     return math.abs(y)

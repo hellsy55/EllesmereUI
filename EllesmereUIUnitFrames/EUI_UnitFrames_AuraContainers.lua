@@ -9,7 +9,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -- class is its own group, made mutually exclusive with '!' negation, declared
 -- once up-front (groups are add-only) and enabled by flipping maxFrameCount.
 -- Known behavior deltas vs the old element (documented for patch notes):
---   * icon caps apply per enabled class, except boss debuffs which share Max Count
+--   * icon caps apply per enabled class; debuffs clip to Max Count
 --   * sorting applies within each class group, not across all shown icons
 --   * on assistable units the spellID excludes (always-hidden, Hide
 --     Exhaustion) work only for never-secret spells (the engine's identity
@@ -22,6 +22,14 @@ local AK -- EllesmereUI.AuraKit, resolved at first use (parent loads first)
 -- Born in this module's main chunk, so the aura containers it builds bill this
 -- module (AuraKit's shared build scheduler).
 local AKWorker = EllesmereUI.AuraKit.NewBuildWorker()
+
+-- Match the Nameplates pandemic picker without requiring the Nameplates module.
+ns.UF_PandemicView = EllesmereUI.Glows.MakeView({ 1, 2, 3, 5, 6, 7 }, {
+    [2] = { scale = 1.36, previewScale = 1.28 },
+    [4] = { scale = 1.47, previewScale = 1.47 },
+    [5] = { scale = 1.34, previewScale = 1.34 },
+    [6] = { scale = 1.47, previewScale = 1.47 },
+})
 
 local AURA_CROP_HEIGHT = 0.80
 local AURA_ZOOM = 0.07
@@ -310,7 +318,7 @@ end
 -- The engine caps groups individually (group contents are secret in combat).
 -- Important or Own gives the important-from-others links Max Important
 -- (s.maxImportantDebuffs, unset = Max Count) and your own Max Count.
--- Boss debuffs additionally share Max Count across all active links.
+-- All unit-frame debuffs keep their group caps, with a shared visible limit.
 -- Show All emits no include links: the catch-all already shows the tracked
 -- spells, and ApplyGroupConfig leaves them un-excluded when no link renders
 -- them. Only Tracked Auras with an empty list = an empty chain = nothing.
@@ -1482,6 +1490,62 @@ local function ApplyUFText(button, d, style)
     end
 end
 
+-- The aura button owns the pandemic-window decision. No aura duration or
+-- expiry is read in Lua; that information can be secret in 12.1 content.
+local function ApplyUFPandemic(button, d, style)
+    ApplyUFText(button, d, style)
+    local host = d.ufPandemicHost
+    local glows = EllesmereUI.Glows
+    if style.pandemicSpec and button.AddPandemicRegion then
+        if not host then
+            host = CreateFrame("Frame", nil, button)
+            host:SetAllPoints(button)
+            host:SetFrameLevel(d.stackCarrier and (d.stackCarrier:GetFrameLevel() - 1)
+                or (button:GetFrameLevel() + 1))
+            host:EnableMouse(false)
+            d.ufPandemicHost = host
+            glows.BindEngineHost(host, button, d)
+        end
+        if not d.ufPandemicRegion then
+            button:AddPandemicRegion(host)
+            d.ufPandemicRegion = true
+        end
+        host:SetAlpha(1)
+        if glows.IsEngineHostBound(host) or EllesmereUI.AuraKit.ButtonCanShow(button) then
+            glows.StartSpecGlow(host, style.pandemicSpec, style.width, style.height, "engine")
+        elseif host._euiGlowActive then
+            glows.StopGlow(host)
+        end
+    elseif host then
+        if d.ufPandemicRegion then
+            button:ClearPandemicRegions()
+            d.ufPandemicRegion = nil
+        end
+        if host._euiGlowActive then glows.StopGlow(host) end
+        host:SetAlpha(0)
+    end
+end
+
+local function UFPandemicSpec(s)
+    local glows = EllesmereUI.Glows
+    local pick = s.debuffPandemicGlowPick or glows.PANDEMIC_BORDER
+    local spec = {
+        style = (pick == glows.PANDEMIC_BORDER) and pick
+            or (ns.UF_PandemicView.toShared[pick] or 1),
+        lines = s.debuffPandemicGlowLines or 8,
+        thickness = s.debuffPandemicGlowThickness or 1,
+        speed = s.debuffPandemicGlowSpeed or 4,
+        bg = s.debuffPandemicGlowBackground == true or nil,
+    }
+    if pick ~= glows.PANDEMIC_BORDER then
+        local c = s.debuffPandemicGlowColor or { r = 1, g = 0.8, b = 0.329 }
+        spec.r, spec.g, spec.b = glows.ResolveColor(s.debuffPandemicGlowMode or "custom", c.r, c.g, c.b)
+    end
+    local bg = s.debuffPandemicGlowBackgroundColor
+    spec.bgR, spec.bgG, spec.bgB = bg and bg.r, bg and bg.g, bg and bg.b
+    return spec
+end
+
 local function StyleKey(unit, base)
     return "uf:" .. unit .. ":" .. base
 end
@@ -1525,7 +1589,11 @@ local function StyleTableFP(st, font)
         st.noTooltips, st.blizzBorder, st.dispelBorder,
         -- Textured Dispel Ring (the ring's art key) and Use Dispel Colors (the
         -- palette fingerprint the colour map was built from).
-        st.dispelBorderTexture, st.dispelColorFP)
+        st.dispelBorderTexture, st.dispelColorFP,
+        st.pandemicSpec and FP(st.pandemicSpec.style, st.pandemicSpec.r,
+            st.pandemicSpec.g, st.pandemicSpec.b, st.pandemicSpec.lines,
+            st.pandemicSpec.thickness, st.pandemicSpec.speed, st.pandemicSpec.bg,
+            st.pandemicSpec.bgR, st.pandemicSpec.bgG, st.pandemicSpec.bgB))
 end
 
 -- Declares one chain group and records it in the element's declared-set
@@ -1680,7 +1748,7 @@ local function BuildStyle(unit, base, s, unitFrame)
         end
     end
 
-    return {
+    local style = {
         width = size,
         height = h,
         -- Blizzard Style: zoom 0 -- the stock frames draw the whole icon, and
@@ -1721,6 +1789,15 @@ local function BuildStyle(unit, base, s, unitFrame)
             and ns.UF_BossAuraBorderAboveEffects(s) or nil,
         applyExtra = ApplyUFText,
     }
+    if not isBuff and s.debuffPandemicGlow == true
+        and (unit == "target" or unit == "focus" or unit:match("^boss")) then
+        style.pandemicSpec = UFPandemicSpec(s)
+        style.applyExtra = ApplyUFPandemic
+    elseif not isBuff and (unit == "target" or unit == "focus" or unit:match("^boss")) then
+        -- Keep the extra callback when toggled off so existing hosts are cleared.
+        style.applyExtra = ApplyUFPandemic
+    end
+    return style
 end
 
 -- Purgeable Buff Glow style: the buff element's style plus the glow, on its
@@ -1968,6 +2045,16 @@ local function PointBlizzAuraBlock(frame, unit, s, isBuff, container, ia, xOff, 
     end
 end
 
+-- Clipping hosts are independent of AuraContainer's engine-sized rectangle.
+-- Anchor them directly to the unit frame to avoid reading protected geometry.
+local debuffClips = setmetatable({}, { __mode = "k" })
+local function AnchorDebuffClip(container, point, frame, relativePoint, x, y)
+    local clip = debuffClips[container]
+    if not clip then return end
+    clip:ClearAllPoints()
+    clip:SetPoint(point, frame, relativePoint, x, y)
+end
+
 -- Container anchoring: mirrors the legacy element's SetPoint(ia, frame, fp,
 -- ox + userX, oy + castbarPush + userY) with gap = 1.
 -- buffContainer (HARMFUL calls only): the unit's buff container, needed by
@@ -1992,6 +2079,7 @@ local function AnchorContainer(container, frame, unit, base, s, buffContainer, r
         end
         container:ClearAllPoints()
         container:SetPoint(ia, frame, fp, offX or 0, offY or 0)
+        AnchorDebuffClip(container, ia, frame, fp, offX or 0, offY or 0)
         AK.SetContainerAnchor(container, ia)
         local gX = "LEFT"
         if simpleMode == "right" then gX = "RIGHT" end
@@ -2101,6 +2189,7 @@ local function AnchorContainer(container, frame, unit, base, s, buffContainer, r
         end
         local gap = PP.FromPixels(s.debuffSpacingY or 1)
         container:SetPoint(vert .. horiz, buffContainer, relVert .. horiz, 0, gap * gapSign)
+        AnchorDebuffClip(container, vert .. horiz, buffContainer, relVert .. horiz, 0, gap * gapSign)
         AK.SetContainerAnchor(container, vert .. horiz)
         PointBlizzAuraBlock(frame, unit, s, isBuff, container, ia, ox + offX, merged, gY)
     else
@@ -2141,6 +2230,7 @@ local function AnchorContainer(container, frame, unit, base, s, buffContainer, r
             end
         end
         container:SetPoint(ia, frame, fp, ox + offX, oy + cbOff + offY)
+        AnchorDebuffClip(container, ia, frame, fp, ox + offX, oy + cbOff + offY)
         AK.SetContainerAnchor(container, ia)
         PointBlizzAuraBlock(frame, unit, s, isBuff, container, ia, ox + offX, merged, gY)
         -- Weapon enchants are not auras: the engine's own item-enchantment
@@ -2360,36 +2450,31 @@ function PurgeGlow.SetWatch(unit, on)
     IncGate.Sync()
 end
 
--- Boss debuffs must not exceed Max Count across the whole filter chain.
--- AuraContainer exposes caps per group but no aggregate cap; with secret auras
--- we cannot inspect live occupancy and redistribute unused slots in combat.
--- Reserve a fair, deterministic share of the total for each active link.
--- Tracked Aura links participate in the same budget as the selected filter.
-local function BossDebuffGroupCaps(chain, total, maxImportant)
-    local groups, caps = {}, {}
-    for i = 1, #chain do
-        local c = chain[i]
-        if not c.hidden then
-            local limit = c.important and (maxImportant or total) or total
-            groups[#groups + 1] = { key = c.key, limit = limit }
-            caps[c.key] = 0
-        end
+-- AuraGroup caps are independent. Keep each debuff group large enough to
+-- fill Max Count when other groups are empty; clip only the overflow instead
+-- of pre-allocating fixed quotas that hide eligible debuffs.
+local function ConfigureDebuffClip(container, num, growth, maxPerRow, size, h, spX, spY)
+    local clip = debuffClips[container]
+    if not clip then return nil end
+    local enabled = num > 0
+    clip:SetClipsChildren(enabled)
+    if not enabled then return nil end
+
+    -- A rectangular clip cannot cut off only the tail of a partial final row.
+    -- Choose the widest divisor of Max Count within Max Per Row so the engine
+    -- and clip agree on complete rows, without hiding usable auras early.
+    local cols = num
+    if growth == "up" or growth == "down" then
+        cols = 1
+    elseif maxPerRow and maxPerRow >= 1 then
+        cols = math.min(num, math.floor(maxPerRow))
     end
-    local remaining = total
-    while remaining > 0 do
-        local assigned = false
-        for i = 1, #groups do
-            local group = groups[i]
-            if caps[group.key] < group.limit then
-                caps[group.key] = caps[group.key] + 1
-                remaining = remaining - 1
-                assigned = true
-                if remaining == 0 then break end
-            end
-        end
-        if not assigned then break end
-    end
-    return caps
+    while num % cols ~= 0 do cols = cols - 1 end
+    local rows = num / cols
+    local width = cols * size + (cols - 1) * spX + 0.4
+    local height = rows * h + (rows - 1) * spY + 0.4
+    clip:SetSize(width, height)
+    return width
 end
 
 local function ApplyGroupConfig(container, unit, base, s, chain, declared)
@@ -2430,19 +2515,17 @@ local function ApplyGroupConfig(container, unit, base, s, chain, declared)
     if simpleOn then growth = "auto" end
     if mergedAB and isBuff then growth = s.debuffGrowth end
     local maxPerRow = Pick(isBuff, s.buffMaxPerRow, s.debuffMaxPerRow)
-    -- Max Important can exceed Max Count on target/focus. Boss debuffs
-    -- share Max Count across their groups, so they keep that row footprint.
-    local capMax = num
-    local mi = (not isBuff) and s.maxImportantDebuffs or nil
-    if not unit:match("^boss") and num > 0 and mi and maxPerRow and maxPerRow > num and mi > maxPerRow then
-        for i = 1, #chain do
-            if chain[i].important then capMax = mi break end
-        end
-    end
-    local cols = ResolveColumns(growth, capMax > 0 and capMax or 1, maxPerRow)
+    -- Max Important keeps its per-group budget, while the visible debuff
+    -- footprint still obeys Max Count on every unit (boss, target, focus,
+    -- player, pet and secondary targets).
+    local cols = ResolveColumns(growth, num > 0 and num or 1, maxPerRow)
     local rowWidth = nil
     if cols then
         rowWidth = cols * size + (cols - 1) * spX + 0.4
+    end
+    if not isBuff then
+        rowWidth = ConfigureDebuffClip(container, num, growth, maxPerRow, size, h, spX, spY)
+            or rowWidth
     end
     AK.SetContainerRowWidth(container, rowWidth)
 
@@ -2561,16 +2644,10 @@ local function ApplyGroupConfig(container, unit, base, s, chain, declared)
             end
         end
     end
-    local bossCaps
-    if not isBuff and unit:match("^boss") and num > 0 and #chain > 1 then
-        bossCaps = BossDebuffGroupCaps(chain, num, s.maxImportantDebuffs)
-    end
     for eff, info in pairs(declared) do
         if active[eff] ~= nil then
             local n = num
-            if bossCaps then
-                n = bossCaps[eff] or 0
-            elseif impKeys and impKeys[eff] then
+            if impKeys and impKeys[eff] and not unit:match("^boss") then
                 n = s.maxImportantDebuffs or num
             end
             if (hiddenKeys and hiddenKeys[eff]) or (incPark and incKeys[eff]) then n = 0 end
@@ -3548,9 +3625,16 @@ end
 
 -- One element shell, born directly on our frame (combat-legal since 68914).
 local function AdoptShell(frame, unit, field)
-    return AK.CreateContainerShell(frame, {
+    local parent = frame
+    if field == "debuffs" then
+        parent = CreateFrame("Frame", nil, frame, "DisableUntrustedLayoutScriptsTemplate")
+        parent:SetSize(1, 1)
+    end
+    local container = AK.CreateContainerShell(parent, {
         point = { "CENTER", frame, "CENTER" }, -- provisional; reload anchors properly
     })
+    if parent ~= frame then debuffClips[container] = parent end
+    return container
 end
 
 local ELEMENT_ORDER = { { "HELPFUL", "buffs" }, { "HARMFUL", "debuffs" } }

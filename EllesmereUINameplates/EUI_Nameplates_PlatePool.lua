@@ -748,7 +748,10 @@ function ns.RefreshStackingMotion()
     local db = p or defaults
     -- Enemy stacking is always EUI-owned; apply every time. Must NOT be gated on friendly
     -- players, or enemy plates stop stacking for anyone who hands friendly plates to Blizzard.
-    EllesmereUI.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Enemy, db.stackingEnabled ~= false, "EllesmereUINameplates")
+    local auto = ns.NP_AutoValue and ns.NP_AutoValue("stacking", "enabled")
+    if not auto then
+        EllesmereUI.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Enemy, db.stackingEnabled ~= false, "EllesmereUINameplates")
+    end
     -- Friendly stacking is only ours to write while we manage friendly players; when
     -- Blizzard-managed, leave the friendly bit untouched so the user's setting survives.
     if (db.showFriendlyPlayers ~= false) then
@@ -869,6 +872,7 @@ function ns.RefreshAllSettings()
     -- (override group, profile switch, import) flipped the checkbox while plates kept
     -- the old behaviour. Self-guarded, so an unchanged key costs nothing.
     if ns.ApplyOOCPlates then ns.ApplyOOCPlates() end
+    if ns.ApplyAutoNameplates then ns.ApplyAutoNameplates() end
     -- Friendly faction badges: redraw for this profile's faction settings.
     ns.NP_RefreshFriendlyFaction()
     -- Friendly Target Border Effects: a profile or override flip reaches the friendly
