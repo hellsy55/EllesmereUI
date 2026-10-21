@@ -487,9 +487,9 @@ initFrame:SetScript("OnEvent", function(self)
                 set=function(v) if ns.RaidGroupsPlayerFontSize then ns.RaidGroupsPlayerFontSize(key,v) end end}
         end
 
-        -- Raid Groups uses the same position + size + directions-cog layout
-        -- as the Raid Frames leader icon, but stores its own QoL profile keys.
-        -- This is a purely visual overlay on the provisional editor rows.
+        -- Raid Groups owns its own leader and role overlays, independent of
+        -- the corresponding Raid / Party Frame options. Both use native EUI
+        -- dropdowns, size sliders, and directions cogs.
         local leaderStyles={none="None",blizzard="Blizzard Crown",star="Star",diamond="Diamond"}
         local leaderStyleOrder={"blizzard","star","diamond","none"}
         local leaderPositions={topleft="Top Left",top="Top",topright="Top Right",
@@ -497,6 +497,11 @@ initFrame:SetScript("OnEvent", function(self)
             bottom="Bottom",bottomright="Bottom Right"}
         local leaderPositionOrder={"topleft","top","topright","left","center",
             "right","bottomleft","bottom","bottomright"}
+        local roleStyles={none="None",modern="Modern",blizzLight="Modern Light",
+            pixels="Pixels",modernCircle="Modern Circle",styled="Styled",
+            classicCircle="Classic Circle",classic="Classic",blizzDefault="Blizz Default"}
+        local roleStyleOrder={"none","modern","blizzLight","pixels","modernCircle",
+            "styled","classicCircle","classic","blizzDefault"}
         local function LeaderGet(key)
             return ns.RaidGroupsLeaderIconOption and ns.RaidGroupsLeaderIconOption(key)
         end
@@ -504,29 +509,74 @@ initFrame:SetScript("OnEvent", function(self)
             if ns.RaidGroupsLeaderIconOption then ns.RaidGroupsLeaderIconOption(key,value) end
         end
         local function LeaderOff() return LeaderGet("leaderIconStyle")=="none" end
-        local fontAndLeaderRow
-        fontAndLeaderRow,h=W:DualRow(parent,y,
+        local function RoleGet(key)
+            return ns.RaidGroupsRoleIconOption and ns.RaidGroupsRoleIconOption(key)
+        end
+        local function RoleSet(key,value)
+            if ns.RaidGroupsRoleIconOption then ns.RaidGroupsRoleIconOption(key,value) end
+        end
+        local function RoleOff() return RoleGet("roleIconStyle")=="none" and not RoleGet("roleText") end
+        local roleChoices=ns.RaidGroupsRoleIconStyles or {}
+        roleStyles._menuOpts={
+            icon=function(key)
+                local role=EllesmereUI.UnitEffectiveRole("player")
+                local style=roleChoices[key]
+                return style and style._isTexture and style[role] or nil
+            end,
+            iconAtlas=function(key)
+                local role=EllesmereUI.UnitEffectiveRole("player")
+                local style=roleChoices[key]
+                return style and not style._isTexture and style[role] or nil
+            end,
+        }
+        local fontAndResetRow
+        fontAndResetRow,h=W:DualRow(parent,y,
             RGToggle("playerNamesFontEnabled","Raid Groups Player Names Font Size",
                 "Enable custom player name/nickname font sizes. The cog contains a size for each roster area."),
-            {type="dropdown",text="Raid Groups Leader Icon",
-                tooltip="Show the current raid leader in the Raid Groups editor. Choose a crown, star or diamond; None hides it.",
-                values=leaderStyles,order=leaderStyleOrder,
-                getValue=function() return LeaderGet("leaderIconStyle") or "blizzard" end,
-                setValue=function(v) LeaderSet("leaderIconStyle",v);EllesmereUI:RefreshPage() end})
+            {type="button",text="Reset Appearance Settings",width=230,
+                tooltip="Reset Raid Groups window scales and player name sizes only. Saved setups, nicknames, indicators and window positions stay unchanged.",
+                onClick=function()
+                    if ns.RaidGroupsRequestAppearanceReset then ns.RaidGroupsRequestAppearanceReset() end
+                end})
         y=y-h
 
-        -- Reset remains the final Raid Groups option, now paired with Leader
-        -- Icon Size so neither options column is left with a blank row.
+        local indicatorRow
+        indicatorRow,h=W:DualRow(parent,y,
+            {type="dropdown",text="Raid Groups Leader Icon",
+                tooltip="Show the current raid leader as a crown, star or diamond in Raid Groups and its preview.",
+                values=leaderStyles,order=leaderStyleOrder,
+                getValue=function() return LeaderGet("leaderIconStyle") or "blizzard" end,
+                setValue=function(v) LeaderSet("leaderIconStyle",v);EllesmereUI:RefreshPage() end},
+            {type="dropdown",text="Raid Groups Role Icons",
+                tooltip="Show raid members' Tank, Healer or DPS role, including the Apply Groups preview.",
+                values=roleStyles,order=roleStyleOrder,
+                disabled=function() return RoleGet("roleText")==true end,
+                disabledTooltip="Role Text",requireState="disabled",
+                getValue=function() return RoleGet("roleIconStyle") or "modern" end,
+                setValue=function(v) RoleSet("roleIconStyle",v);EllesmereUI:RefreshPage() end})
+        y=y-h
+
         _,h=W:DualRow(parent,y,
             {type="slider",text="Leader Icon Size",min=8,max=30,step=1,
                 disabled=LeaderOff,disabledTooltip="Raid Groups Leader Icon",
                 getValue=function() return LeaderGet("leaderIconSize") or 14 end,
                 setValue=function(v) LeaderSet("leaderIconSize",v) end},
-            {type="button",text="Reset Appearance Settings",width=230,
-                tooltip="Reset Raid Groups window scales and player name sizes only. Saved setups, nicknames and window positions stay unchanged.",
-                onClick=function()
-                    if ns.RaidGroupsRequestAppearanceReset then ns.RaidGroupsRequestAppearanceReset() end
-                end})
+            {type="slider",text="Role Icon Size",min=8,max=30,step=1,
+                disabled=RoleOff,disabledTooltip="Raid Groups Role Icons",
+                getValue=function() return RoleGet("roleIconSize") or 13 end,
+                setValue=function(v) RoleSet("roleIconSize",v) end})
+        y=y-h
+
+        local indicatorPositionsRow
+        indicatorPositionsRow,h=W:DualRow(parent,y,
+            {type="dropdown",text="Leader Icon Position",values=leaderPositions,order=leaderPositionOrder,
+                disabled=LeaderOff,disabledTooltip="Raid Groups Leader Icon",
+                getValue=function() return LeaderGet("leaderIconPosition") or "right" end,
+                setValue=function(v) LeaderSet("leaderIconPosition",v) end},
+            {type="dropdown",text="Role Icon Position",values=leaderPositions,order=leaderPositionOrder,
+                disabled=RoleOff,disabledTooltip="Raid Groups Role Icons",
+                getValue=function() return RoleGet("roleIconPosition") or "bottomleft" end,
+                setValue=function(v) RoleSet("roleIconPosition",v) end})
         y=y-h
 
         local nsrtImportRow
@@ -564,7 +614,7 @@ initFrame:SetScript("OnEvent", function(self)
                     RGScaleRow("prompt","Input Prompt"),
                 },
             })
-            EllesmereUI.BuildInlineCog(fontAndLeaderRow._leftRegion,{
+            EllesmereUI.BuildInlineCog(fontAndResetRow._leftRegion,{
                 title="Raid Groups Player Names Font Size",minWidth=410,
                 disabled=function() return not RGGet("playerNamesFontEnabled") end,
                 disabledTooltip="Enable Raid Groups Player Names Font Size to edit custom sizes.",
@@ -577,14 +627,11 @@ initFrame:SetScript("OnEvent", function(self)
                     RGFontRow("nicknameManager","Nicknames Manager"),
                 },
             })
-            EllesmereUI.BuildInlineCog(fontAndLeaderRow._rightRegion, {
+            EllesmereUI.BuildInlineCog(indicatorPositionsRow._leftRegion, {
                 icon=EllesmereUI.DIRECTIONS_ICON,
                 title="Raid Groups Leader Icon",
                 disabled=LeaderOff,disabledTooltip="Raid Groups Leader Icon",
                 rows={
-                    {type="dropdown",label="Position",values=leaderPositions,order=leaderPositionOrder,
-                        get=function() return LeaderGet("leaderIconPosition") or "right" end,
-                        set=function(v) LeaderSet("leaderIconPosition",v) end},
                     {type="toggle",label="Show In Combat",
                         get=function() return LeaderGet("leaderIconInCombat")~=false end,
                         set=function(v) LeaderSet("leaderIconInCombat",v) end},
@@ -594,6 +641,60 @@ initFrame:SetScript("OnEvent", function(self)
                     {type="slider",label="Offset Y",min=-50,max=50,step=1,
                         get=function() return LeaderGet("leaderIconOffsetY") or 0 end,
                         set=function(v) LeaderSet("leaderIconOffsetY",v) end},
+                }
+            })
+            EllesmereUI.BuildInlineCog(indicatorPositionsRow._rightRegion, {
+                icon=EllesmereUI.DIRECTIONS_ICON,
+                title="Raid Groups Role Icons",
+                disabled=RoleOff,disabledTooltip="Raid Groups Role Icons",
+                rows={
+                    {type="slider",label="Offset X",min=-50,max=50,step=1,
+                        get=function() return RoleGet("roleIconOffsetX") or 0 end,
+                        set=function(v) RoleSet("roleIconOffsetX",v) end},
+                    {type="slider",label="Offset Y",min=-50,max=50,step=1,
+                        get=function() return RoleGet("roleIconOffsetY") or 0 end,
+                        set=function(v) RoleSet("roleIconOffsetY",v) end},
+                }
+            })
+            EllesmereUI.BuildInlineCog(indicatorRow._rightRegion, {
+                title="Raid Groups Role Icons",
+                rows={
+                    {type="toggle",label="Role Text",
+                        get=function() return RoleGet("roleText")==true end,
+                        set=function(v) RoleSet("roleText",v);EllesmereUI:RefreshPage() end},
+                    {type="toggle",label="Hide In Combat",
+                        get=function() return RoleGet("roleIconHideInCombat")==true end,
+                        set=function(v) RoleSet("roleIconHideInCombat",v) end},
+                    {type="toggle",label="Show Tank",
+                        get=function() return RoleGet("showRoleForTank")~=false end,
+                        set=function(v) RoleSet("showRoleForTank",v) end},
+                    {type="toggle",label="Show Healer",
+                        get=function() return RoleGet("showRoleForHealer")~=false end,
+                        set=function(v) RoleSet("showRoleForHealer",v) end},
+                    {type="toggle",label="Show DPS",
+                        get=function() return RoleGet("showRoleForDPS")==true end,
+                        set=function(v) RoleSet("showRoleForDPS",v) end},
+                    {type="colorpicker",label="Tank Text Color",hasAlpha=false,
+                        disabled=function() return not RoleGet("roleText") end,
+                        get=function()
+                            local c=RoleGet("roleTextTankColor")
+                            return c.r,c.g,c.b,1
+                        end,
+                        set=function(r,g,b) RoleSet("roleTextTankColor",{r=r,g=g,b=b}) end},
+                    {type="colorpicker",label="Healer Text Color",hasAlpha=false,
+                        disabled=function() return not RoleGet("roleText") end,
+                        get=function()
+                            local c=RoleGet("roleTextHealerColor")
+                            return c.r,c.g,c.b,1
+                        end,
+                        set=function(r,g,b) RoleSet("roleTextHealerColor",{r=r,g=g,b=b}) end},
+                    {type="colorpicker",label="DPS Text Color",hasAlpha=false,
+                        disabled=function() return not RoleGet("roleText") end,
+                        get=function()
+                            local c=RoleGet("roleTextDPSColor")
+                            return c.r,c.g,c.b,1
+                        end,
+                        set=function(r,g,b) RoleSet("roleTextDPSColor",{r=r,g=g,b=b}) end},
                 }
             })
         end
