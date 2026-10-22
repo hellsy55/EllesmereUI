@@ -4,6 +4,7 @@ This repository is a fork of https://github.com/EllesmereGaming/EllesmereUI.
 
 ## Always-on rules
 
+- Do not pin models or reasoning effort in this repository. The main agent and its subagents must respect the session/task selections and inherit them when supported by Codex.
 - Speak to the user in Portuguese, including explanations, summaries, choices, and conflict reports.
 - Write everything stored in files or on GitHub in English, including code comments, documentation, commit subjects and bodies, merge messages, PR descriptions, tags, and Git-generated text.
 - Commit under the user's name, with only the intended message. Never add AI signatures such as `Co-Authored-By: Codex` or `Generated with Codex`.
