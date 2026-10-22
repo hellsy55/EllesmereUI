@@ -1486,7 +1486,7 @@ function IL:PLAYER_REGEN_ENABLED()
                         if not oldSet[name:lower()] then differs = true break end
                     end
                 end
-                if differs and not (self.frame and self.frame:IsShown()) then self:Toggle() end
+                if differs and #current > 0 and not (self.frame and self.frame:IsShown()) then self:Toggle() end
             end
         end
     end
@@ -2157,6 +2157,7 @@ function IL:OnSyncDelta(kind, sender, payload, channel)
         return
     end
     if self:ApplySyncDelta(kind, sender, payload)
+        and #(self.names or ParseList(self:GetListText(1))) > 0
         and not (self.frame and self.frame:IsShown()) then self:Toggle() end
 end
 

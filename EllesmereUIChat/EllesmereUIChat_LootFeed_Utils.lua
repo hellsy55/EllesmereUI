@@ -916,10 +916,12 @@ end
 local function GetLootIcon(link, hyperlink, simple, customColor, mawPowerUnit)
     local color, data, text = link:match(LinkMarkupPattern1) ---@type string?, string?, string?
     if not color then
-        color, data, text = link:match(LinkMarkupPattern2) ---@type string?, string?, string?
-        ---@diagnostic disable-next-line: cast-local-type, param-type-mismatch
-        color = C_ColorOverrides.GetColorForQuality(color) ---@type ColorMixin
-        color = color:GenerateHexColor():sub(3)
+        local quality
+        quality, data, text = link:match(LinkMarkupPattern2)
+        if not quality then return link end
+        local qualityColor = C_ColorOverrides.GetColorForQuality(tonumber(quality))
+        if not qualityColor then return link end
+        color = qualityColor:GenerateHexColor():sub(3)
     end
     local texture = GetLinkTexture(link, data, text, mawPowerUnit)
     if not texture then
