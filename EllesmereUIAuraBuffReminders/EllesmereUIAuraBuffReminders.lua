@@ -6,7 +6,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 
 local ADDON_NAME = ...
-if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI._Pool) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring
+if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewInternals and EllesmereUI._Pool) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring
 EllesmereUI._ModuleNS[ADDON_NAME] = select(2, ...)  -- LOD options files read this module ns via the registry
 
 local EABR = EllesmereUI.Lite.NewAddon("EllesmereUIAuraBuffReminders")
@@ -30,6 +30,14 @@ local _B = {}  -- beacon state table, populated later
 local Known = function(id) return id and (IsPlayerSpell(id) or IsSpellKnown(id)) end
 local _eabrInCombat = false
 local InCombat = function() return _eabrInCombat or (InCombatLockdown and InCombatLockdown()) end
+-- Whether important buffs ride the cursor right now: Attach Important Buffs to
+-- Cursor, and with its Only on Cursor in Combat option only while in combat.
+-- p = the profile's display table. Every combat edge refreshes the reminders,
+-- so their placement follows the moment combat starts or ends.
+local CursorAttachActive = function(p)
+    if not (p and p.cursorAttach) then return false end
+    return not p.cursorAttachCombatOnly or InCombat()
+end
 local isSecret = issecretvalue or function() return false end
 local AURA_SCAN_LIMIT = 255  -- Midnight supports more than the legacy 40 buff limit
 local DEFAULT_GLOW_COLOR = {r=1, g=0.776, b=0.376}
@@ -416,9 +424,9 @@ local NON_SECRET_SPELL_IDS = {
 -- broken: true while an EUI_AuraBuffReminders_*.lua file loads; a file that
 -- fails leaves it set, and the files behind it return at their first lines.
 local ns = select(2, ...)
-ns._abrInternals = {
+EllesmereUI.NewInternals(ns, "_abrInternals", {
     _B = _B, AURA_SCAN_LIMIT = AURA_SCAN_LIMIT, CacheInstanceInfo = CacheInstanceInfo,
-    DEFAULT_TEXT_COLOR = DEFAULT_TEXT_COLOR, EABR = EABR,
+    CursorAttachActive = CursorAttachActive, DEFAULT_TEXT_COLOR = DEFAULT_TEXT_COLOR, EABR = EABR,
     EnsureGlowModeMigrated = EnsureGlowModeMigrated, GetPlayerClass = GetPlayerClass,
     GetSpecID = GetSpecID, GetTextAnchorPoints = GetTextAnchorPoints, InCombat = InCombat,
     InMythicPlusKey = InMythicPlusKey, InPvPInstance = InPvPInstance,
@@ -435,22 +443,9 @@ ns._abrInternals = {
     iconAnchorSetters = {},
     combatAnchorSetters = {},
     cursorAnchorSetters = {},
-    broken = false,
-}
--- Set<Name> hands a new value to every copy registered in <name>Setters.
-for setter, listName in pairs({
+}, {
     SetDB = "dbSetters", SetInCombat = "inCombatSetters", SetCachedOutline = "outlineSetters",
     SetHuntersMarkNeeded = "huntersMarkSetters", SetPanelOpen = "panelOpenSetters",
     SetIconAnchor = "iconAnchorSetters", SetCombatAnchor = "combatAnchorSetters",
     SetCursorAnchor = "cursorAnchorSetters",
-}) do
-    local list = ns._abrInternals[listName]
-    ns._abrInternals[setter] = function(v)
-        for i = 1, #list do list[i](v) end
-    end
-end
--- A re-import of a name this table lacks fails where the part file loads,
--- not later as a nil upvalue inside one of its functions.
-setmetatable(ns._abrInternals, { __index = function(_, k)
-    error("ns._abrInternals has no entry " .. tostring(k), 2)
-end })
+})

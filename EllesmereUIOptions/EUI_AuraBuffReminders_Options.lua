@@ -1235,6 +1235,7 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         local coreSection
         coreSection, h = W:SectionHeader(parent, SECTION_CORE, y);  y = y - h
+        EllesmereUI.BuildSectionUnlockJump(coreSection, { key = "EABR_Reminders" })
 
         -- Row 1: Enable Reminders | Scale
         local row1
@@ -1464,9 +1465,27 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Attach Important Buffs to Cursor",
               tooltip="This option only affects Raid Buffs and Paladin Beacons",
               getValue=function() local d = DDB(); return d and d.cursorAttach end,
-              setValue=function(v) local d = DDB(); if not d then return end; d.cursorAttach = v; RefreshAll() end }
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.cursorAttach = v; RefreshAll()
+                  EllesmereUI:RefreshPage()
+              end }
         );  y = y - h
         if abrDesc then GO.AttachInline(rowGlow._leftRegion, abrDesc) end
+
+        -- Inline cog on Attach Important Buffs to Cursor (right of row 3)
+        if not EllesmereUI._prebuilding then
+            EllesmereUI.BuildInlineCog(rowGlow._rightRegion, {
+                title = "Cursor Settings",
+                disabled = function() local d = DDB(); return not (d and d.cursorAttach) end,
+                disabledTooltip = "Attach Important Buffs to Cursor",
+                rows = {
+                    { type="toggle", label="Only on Cursor in Combat",
+                      tooltip="Out of combat, important buffs show with your other reminders.",
+                      get=function() local d = DDB(); return d and d.cursorAttachCombatOnly == true end,
+                      set=function(v) local d = DDB(); if not d then return end; d.cursorAttachCombatOnly = v; RefreshAll() end },
+                },
+            })
+        end
 
         -- Inline color swatch + cog on Show Name (left of row 2)
         if not EllesmereUI._prebuilding then
@@ -2373,6 +2392,30 @@ initFrame:SetScript("OnEvent", function(self)
             return name
         end
 
+        -- Whether a reminder covers a zone. One saved with the single zone of
+        -- an older version holds it in zoneName while it has no list.
+        local function ReminderHasZone(r, zn)
+            local list = r.zoneNames
+            if list and #list > 0 then
+                for i = 1, #list do
+                    if list[i] == zn then return true end
+                end
+                return false
+            end
+            return r.zoneName == zn
+        end
+        -- A reminder's zone list for an edit; an older version's single zone
+        -- moves into it on the first edit.
+        local function EditableZoneList(r)
+            local list = r.zoneNames
+            if not list then
+                list = {}
+                r.zoneNames = list
+            end
+            if #list == 0 and r.zoneName then list[1] = r.zoneName end
+            return list
+        end
+
         -----------------------------------------------------------------------
         --  Talent enumeration helpers (live from C_Traits)
         -----------------------------------------------------------------------
@@ -2923,7 +2966,6 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         --  Reminder list (dynamic, rebuilt on add/remove)
         -----------------------------------------------------------------------
-        local MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\"
         local listContainer = CreateFrame("Frame", nil, parent)
         listContainer:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
         listContainer:SetSize(parent:GetWidth() or 400, 1)  -- height grows dynamically
@@ -2931,7 +2973,22 @@ initFrame:SetScript("OnEvent", function(self)
         local listRows = {}
         local listRowCount = 0  -- manual alternating row counter
 
+        -- Where a reminder's 'Not Needed' reminder shows (notNeededMode).
+        local NOT_NEEDED_VALUES = {
+            never  = "Never",
+            season = "Current Season Instances",
+            all    = "All Instances",
+        }
+        local NOT_NEEDED_ORDER = { "never", "season", "all" }
+        -- Both dropdowns of a reminder row; wide enough for the longest zone name.
+        local ROW_DD_W = 220
+        -- The zone dropdowns' labels, in the picker's order.
+        local zoneLabels = {}
+        for i = 1, #zones do zoneLabels[i] = GetZoneDisplayName(zones[i].name) end
+
         local function RebuildReminderList()
+            -- The global search's pre-build makes no rows: they hold nothing to index.
+            if EllesmereUI._prebuilding then return 0 end
             -- Clear existing rows. On a page pool host the rows go back to the
             -- container's pool and the list below dresses them again in order.
             Pool.Begin(listContainer)
@@ -3018,158 +3075,122 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Data rows (single row per reminder)
             local Tex = function(id) return _G._EABR_Tex and _G._EABR_Tex(id) or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)) or 134400 end
-            local eg2 = EllesmereUI.ELLESMERE_GREEN or {r=0.047, g=0.824, b=0.624}
-            local ICON_SIZE = 14
             for _, idx in ipairs(visible) do
                 local reminder = reminders[idx]
                 local row = MakeListRow(-totalH)
                 local capturedIdx = idx
-
-                -- === LEFT HALF: delete (x) | zone name | talent name + icon ===
-
-                -- Delete button (far left)
-                local delBtn = CreateFrame("Button", nil, row)
-                delBtn:SetSize(ICON_SIZE + 6, ICON_SIZE + 6)
-                PP.Point(delBtn, "LEFT", row, "LEFT", SIDE_PAD - 6, 0)
-                delBtn:SetFrameLevel(row:GetFrameLevel() + 5)
-                local delIcon = delBtn:CreateTexture(nil, "OVERLAY")
-                PP.Size(delIcon, ICON_SIZE, ICON_SIZE)
-                PP.Point(delIcon, "CENTER", delBtn, "CENTER", 0, 0)
-                if delIcon.SetSnapToPixelGrid then delIcon:SetSnapToPixelGrid(false); delIcon:SetTexelSnappingBias(0) end
-                delIcon:SetTexture(MEDIA .. "icons\\eui-close.png")
-                delBtn:SetAlpha(0.75)
-                delBtn:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
-                delBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.75) end)
-                delBtn:SetScript("OnClick", function()
+                local function ReminderAt()
                     local p2 = DB()
-                    if not p2 then return end
-                    table.remove(p2.talentReminders, capturedIdx)
-                    RebuildReminderList()
-                    RefreshAll()
-                    if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
-                end)
-
-                -- Zone name (after delete icon, truncated to fit left portion)
-                local zoneStr
-                if reminder.zoneNames and #reminder.zoneNames > 0 then
-                    local names = {}
-                    for _, zoneName in ipairs(reminder.zoneNames) do
-                        names[#names + 1] = GetZoneDisplayName(zoneName)
-                    end
-                    zoneStr = table.concat(names, ", ")
-                else
-                    zoneStr = GetZoneDisplayName(reminder.zoneName)
+                    return p2 and p2.talentReminders and p2.talentReminders[capturedIdx]
                 end
-                local zoneFS = row:CreateFontString(nil, "OVERLAY")
-                zoneFS:SetFont(fontPath, 14, GetABROptOutline())
-                zoneFS:SetTextColor(1, 1, 1, 1)
-                zoneFS:SetPoint("LEFT", delBtn, "RIGHT", 6, 0)
-                zoneFS:SetJustifyH("LEFT")
-                zoneFS:SetWordWrap(false)
-                zoneFS:SetMaxLines(1)
 
-                -- Talent name + icon (right portion of left half, anchored to center)
-                local spellName = reminder.spellName or "Unknown"
-                local spellFS = row:CreateFontString(nil, "OVERLAY")
-                spellFS:SetFont(fontPath, 14, GetABROptOutline())
-                spellFS:SetTextColor(1, 1, 1, 1)
-                spellFS:SetJustifyH("RIGHT")
-                spellFS:SetWordWrap(false)
-                spellFS:SetMaxLines(1)
-                spellFS:SetText(spellName)
+                -- === LEFT HALF: talent icon + name | its zones dropdown ===
 
                 local spellIcon = row:CreateTexture(nil, "ARTWORK")
                 spellIcon:SetSize(22, 22)
-                spellIcon:SetPoint("RIGHT", row, "CENTER", -SIDE_PAD, 0)
+                spellIcon:SetPoint("LEFT", row, "LEFT", SIDE_PAD, 0)
                 spellIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
                 spellIcon:SetTexture(Tex(reminder.spellID))
 
-                spellFS:SetPoint("RIGHT", spellIcon, "LEFT", -6, 0)
+                local spellFS = row:CreateFontString(nil, "OVERLAY")
+                spellFS:SetFont(fontPath, 14, GetABROptOutline())
+                spellFS:SetTextColor(1, 1, 1, 1)
+                spellFS:SetJustifyH("LEFT")
+                spellFS:SetWordWrap(false)
+                spellFS:SetMaxLines(1)
+                spellFS:SetPoint("LEFT", spellIcon, "RIGHT", 8, 0)
+                spellFS:SetText(reminder.spellName or EllesmereUI.L("Unknown"))
 
-                -- Constrain zone text: from after delete to before talent name
-                zoneFS:SetPoint("RIGHT", spellFS, "LEFT", -8, 0)
-                zoneFS:SetText(zoneStr)
+                -- The picker's zones for this reminder, with Delete Reminder
+                -- pinned above them. Its last zone stays checked: a reminder
+                -- always has one, and Delete Reminder removes it.
+                local function ZoneCount(r)
+                    local n = 0
+                    for i = 1, #zones do
+                        if ReminderHasZone(r, zones[i].name) then n = n + 1 end
+                    end
+                    return n
+                end
+                local zoneItems = {
+                    { isTopAction = true, label = "Delete Reminder", onClick = function()
+                        local p2 = DB()
+                        if not (p2 and p2.talentReminders and p2.talentReminders[capturedIdx]) then return end
+                        table.remove(p2.talentReminders, capturedIdx)
+                        RebuildReminderList()
+                        if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
+                    end },
+                }
+                for i = 1, #zones do
+                    local zn = zones[i].name
+                    zoneItems[#zoneItems + 1] = { key = zn, label = zoneLabels[i],
+                        lockedFn = function()
+                            local r = ReminderAt()
+                            return (r and ReminderHasZone(r, zn) and ZoneCount(r) <= 1) and true or false
+                        end,
+                        lockedTooltip = "A reminder needs at least one zone." }
+                end
+                local zoneDD = EllesmereUI.BuildVisOptsCBDropdown(row, ROW_DD_W, row:GetFrameLevel() + 3,
+                    zoneItems,
+                    function(zn)
+                        local r = ReminderAt()
+                        return r and ReminderHasZone(r, zn) or false
+                    end,
+                    function(zn, on)
+                        local r = ReminderAt()
+                        if not r then return end
+                        local list = EditableZoneList(r)
+                        if on then
+                            if not ReminderHasZone(r, zn) then
+                                list[#list + 1] = zn
+                                table.sort(list)
+                            end
+                        else
+                            for i = #list, 1, -1 do
+                                if list[i] == zn then table.remove(list, i) end
+                            end
+                        end
+                        if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
+                    end,
+                    nil, 10, true, false, nil, { noAllLabel = true, dimLocked = true })
+                PP.Point(zoneDD, "RIGHT", row, "CENTER", -SIDE_PAD, 0)
+                spellFS:SetPoint("RIGHT", zoneDD, "LEFT", -12, 0)
 
-                -- === RIGHT HALF: "Show 'Not Needed' Reminder" label + checkbox ===
-
-                -- Hit area covers the entire right half of the row
-                local toggleHit = CreateFrame("Button", nil, row)
-                toggleHit:SetPoint("LEFT", row, "CENTER", 0, 0)
-                toggleHit:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, 0)
-                toggleHit:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
-                toggleHit:SetFrameLevel(row:GetFrameLevel() + 3)
+                -- === RIGHT HALF: "Show 'Not Needed' Reminder" label + where-dropdown ===
 
                 local toggleLabel = row:CreateFontString(nil, "OVERLAY")
                 toggleLabel:SetFont(fontPath, 14, GetABROptOutline())
+                toggleLabel:SetJustifyH("LEFT")
+                toggleLabel:SetWordWrap(false)
+                toggleLabel:SetMaxLines(1)
                 toggleLabel:SetPoint("LEFT", row, "CENTER", SIDE_PAD, 0)
                 toggleLabel:SetText(EllesmereUI.L("Show 'Not Needed' Reminder"))
 
-                -- Checkbox (far right of right half)
-                local toggleBox = CreateFrame("Frame", nil, row)
-                toggleBox:SetSize(18, 18)
-                toggleBox:SetPoint("RIGHT", row, "RIGHT", -SIDE_PAD, 0)
-                local toggleBg = toggleBox:CreateTexture(nil, "BACKGROUND")
-                toggleBg:SetAllPoints()
-                toggleBg:SetColorTexture(0.064, 0.052, 0.041, 1)
-                EllesmereUI.MakeBorder(toggleBox, 1, 1, 1, 0.12, EllesmereUI.PanelPP)
-                local toggleCheck = toggleBox:CreateTexture(nil, "OVERLAY")
-                toggleCheck:SetSize(12, 12)
-                toggleCheck:SetPoint("CENTER")
-                toggleCheck:SetColorTexture(eg2.r, eg2.g, eg2.b, 1)
-
-                local isChecked = reminder.showNotNeeded == true
-                toggleCheck:SetShown(isChecked)
-
-                local function ApplyToggleVisual(checked, hovered)
-                    if checked then
-                        toggleLabel:SetTextColor(1, 1, 1, 1)
-                    elseif hovered then
-                        toggleLabel:SetTextColor(1, 1, 1, 0.8)
-                    else
-                        toggleLabel:SetTextColor(1, 1, 1, 0.4)
-                    end
+                -- The runtime's own read of the choice: a reminder saved with the old
+                -- checkbox reads on = Current Season Instances, off = Never.
+                local function NotNeededOf()
+                    local r, read = ReminderAt(), _G._EABR_TR_NotNeededMode
+                    return (r and read) and read(r) or "never"
                 end
-                ApplyToggleVisual(isChecked, false)
-
-                local function DoToggle()
-                    local p2 = DB()
-                    if not p2 or not p2.talentReminders[capturedIdx] then return end
-                    p2.talentReminders[capturedIdx].showNotNeeded = not p2.talentReminders[capturedIdx].showNotNeeded
-                    local nowChecked = p2.talentReminders[capturedIdx].showNotNeeded == true
-                    toggleCheck:SetShown(nowChecked)
-                    ApplyToggleVisual(nowChecked, true)
-                    RefreshAll()
-                    if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
+                -- The label dims while the reminder is off, as it did under the checkbox.
+                local function PaintNotNeededLabel()
+                    toggleLabel:SetTextColor(1, 1, 1, (NotNeededOf() == "never") and 0.4 or 1)
                 end
+                PaintNotNeededLabel()
 
-                toggleHit:SetScript("OnClick", DoToggle)
-                toggleHit:SetScript("OnEnter", function()
-                    local checked = false
-                    local p2 = DB()
-                    if p2 and p2.talentReminders[capturedIdx] then checked = p2.talentReminders[capturedIdx].showNotNeeded == true end
-                    ApplyToggleVisual(checked, true)
-                end)
-                toggleHit:SetScript("OnLeave", function()
-                    local checked = false
-                    local p2 = DB()
-                    if p2 and p2.talentReminders[capturedIdx] then checked = p2.talentReminders[capturedIdx].showNotNeeded == true end
-                    ApplyToggleVisual(checked, false)
-                end)
-
-                -- Tooltip only on the label itself
-                local tooltipHit = CreateFrame("Frame", nil, row)
-                tooltipHit:SetPoint("LEFT", toggleLabel, "LEFT", 0, 0)
-                tooltipHit:SetPoint("RIGHT", toggleLabel, "RIGHT", 0, 0)
-                tooltipHit:SetPoint("TOP", toggleLabel, "TOP", 0, 4)
-                tooltipHit:SetPoint("BOTTOM", toggleLabel, "BOTTOM", 0, -4)
-                tooltipHit:SetFrameLevel(toggleHit:GetFrameLevel() + 1)
-                tooltipHit:EnableMouse(true)
-                tooltipHit:SetScript("OnEnter", function()
-                    EllesmereUI.ShowWidgetTooltip(toggleLabel, "Enable this to display a reminder to untalent\nout of this when it is not needed\n(all other dungeons/raids not selected).")
-                end)
-                tooltipHit:SetScript("OnLeave", function()
-                    EllesmereUI.HideWidgetTooltip()
-                end)
+                local notNeededDD = EllesmereUI.BuildDropdownControl(row, ROW_DD_W, row:GetFrameLevel() + 3,
+                    NOT_NEEDED_VALUES, NOT_NEEDED_ORDER, NotNeededOf,
+                    function(v)
+                        local r = ReminderAt()
+                        if not r then return end
+                        r.notNeededMode = v
+                        -- The old checkbox key follows, for a profile an older version reads.
+                        r.showNotNeeded = (v ~= "never")
+                        PaintNotNeededLabel()
+                        if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
+                    end)
+                PP.Point(notNeededDD, "RIGHT", row, "RIGHT", -SIDE_PAD, 0)
+                notNeededDD._ttText = "Reminds you to remove this talent in instances you did not pick for it."
+                toggleLabel:SetPoint("RIGHT", notNeededDD, "LEFT", -12, 0)
 
                 listRows[#listRows + 1] = row
                 totalH = totalH + ROW_H
@@ -3218,16 +3239,11 @@ initFrame:SetScript("OnEvent", function(self)
             for _, r in ipairs(p.talentReminders) do
                 if r.spellID == selectedTalentSpellID then
                     -- Merge new zones into existing reminder
-                    local existingSet = {}
-                    for _, zn in ipairs(r.zoneNames or {}) do existingSet[zn] = true end
-                    local added = 0
+                    local list = EditableZoneList(r)
                     for _, zn in ipairs(selZoneNames) do
-                        if not existingSet[zn] then
-                            r.zoneNames[#r.zoneNames + 1] = zn
-                            added = added + 1
-                        end
+                        if not ReminderHasZone(r, zn) then list[#list + 1] = zn end
                     end
-                    table.sort(r.zoneNames)
+                    table.sort(list)
                     -- Reset selection
                     wipe(selectedZoneMap)
                     selectedTalentSpellID = nil
@@ -3236,7 +3252,6 @@ initFrame:SetScript("OnEvent", function(self)
                     zoneDDLbl:SetText(EllesmereUI.L("Select Dungeon/Raid/PvP Zone"))
                     if talentDDLbl then talentDDLbl:SetText(EllesmereUI.L("Select a talent...")); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
                     RebuildReminderList()
-                    RefreshAll()
                     if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
                     return
                 end
@@ -3247,6 +3262,7 @@ initFrame:SetScript("OnEvent", function(self)
                 zoneNames = selZoneNames,
                 spellID = selectedTalentSpellID,
                 spellName = selectedTalentName,
+                notNeededMode = "never",
                 showNotNeeded = false,
                 class = playerClass,
             }
@@ -3260,7 +3276,6 @@ initFrame:SetScript("OnEvent", function(self)
             if talentDDLbl then talentDDLbl:SetText(EllesmereUI.L("Select a talent...")); talentDDLbl:SetTextColor(1, 1, 1, 0.50) end
 
             RebuildReminderList()
-            RefreshAll()
             if _G._EABR_TR_RequestRefresh then _G._EABR_TR_RequestRefresh() end
         end)
 

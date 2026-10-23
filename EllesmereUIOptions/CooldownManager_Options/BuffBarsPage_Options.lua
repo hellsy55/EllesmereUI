@@ -491,12 +491,10 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                 if not _tbbPlaceholders[i] then
                     _tbbPlaceholders[i] = EllesmereUI.BuildUnlockPlaceholder({
                         parent = liveBar,
+                        -- The bar's own mover (a grouped bar has none under
+                        -- this key, so nothing is selected there).
                         onClick = function()
-                            if EllesmereUI._openUnlockMode then
-                                EllesmereUI._unlockReturnModule = EllesmereUI:GetActiveModule()
-                                EllesmereUI._unlockReturnPage   = EllesmereUI:GetActivePage()
-                                C_Timer.After(0, EllesmereUI._openUnlockMode)
-                            end
+                            EllesmereUI.OpenUnlockModeAt(ns._tbbUKey[i])
                         end,
                     })
                 else
@@ -1610,7 +1608,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
     local function BuildBuffBarsPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
         local y = yOffset
-        local _, h
+        local _, h, hdr
 
         -- If user chose Blizzard bars, show re-enable button and bail
         local usingBlizz = DB() and DB().cdmBars and DB().cdmBars.useBlizzardBuffBars
@@ -3088,7 +3086,15 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             parent._showRowDivider = true
             parent._tbbClickTargets = nil
 
-            _, h = W:SectionHeader(parent, "GROUP SETTINGS", y);  y = y - h
+            hdr, h = W:SectionHeader(parent, "GROUP SETTINGS", y);  y = y - h
+            -- The group's mover: a global group's TBBG_ element, else its anchor
+            -- bar's (nil while no member is enabled: the click then does nothing).
+            EllesmereUI.BuildSectionUnlockJump(hdr, { key = function()
+                local gk = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
+                if gk then return "TBBG_" .. gk end
+                local ai = ns.TBBGroupAnchorIndex(gid)
+                return ai and ("TBB_" .. ai) or nil
+            end })
 
             -- Grow Direction | Bar Spacing
             _, h = W:DualRow(parent, y,
@@ -3265,6 +3271,20 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         -------------------------------------------------------------------
         local layoutHeader
         layoutHeader, h = W:SectionHeader(parent, "BAR LAYOUT", y);  y = y - h
+        -- The selected bar's mover; a grouped bar's is its group's (a global
+        -- group's TBBG_ element, else the group anchor's), since only the anchor
+        -- keeps a mover.
+        EllesmereUI.BuildSectionUnlockJump(layoutHeader, { key = function()
+            local bd = SelectedTBB()
+            local gid = bd and ns.TBBBarGroupID(bd) or 0
+            if gid ~= 0 then
+                local gk = ns.TBBGroupGlobalKey and ns.TBBGroupGlobalKey(gid)
+                if gk then return "TBBG_" .. gk end
+                local ai = ns.TBBGroupAnchorIndex(gid)
+                if ai then return "TBB_" .. ai end
+            end
+            return "TBB_" .. _tbbSelectedBar
+        end })
 
         -- Height | Width. The whole group shares one width/height, so a grouped member
         -- inherits the group ANCHOR's match-lock: if size-matched, every member's slider

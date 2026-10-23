@@ -99,6 +99,12 @@ local DEFAULTS = { profile = { raidGroups = { scale = 1, showNicknames = true, p
     windowScalingEnabled = true, playerNamesFontEnabled = true,
     leaderIconStyle = "blizzard", leaderIconPosition = "right", leaderIconSize = 14,
     leaderIconOffsetX = 0, leaderIconOffsetY = 0, leaderIconInCombat = true,
+    roleIconStyle = "modern", roleIconPosition = "bottomleft", roleIconSize = 13,
+    roleIconOffsetX = 0, roleIconOffsetY = 0, roleIconHideInCombat = false,
+    roleText = false, showRoleForTank = true, showRoleForHealer = true, showRoleForDPS = false,
+    roleTextTankColor = {r=59/255,g=130/255,b=246/255},
+    roleTextHealerColor = {r=32/255,g=201/255,b=151/255},
+    roleTextDPSColor = {r=240/255,g=100/255,b=54/255},
 } } }
 local function P() return db and db.profile and db.profile.raidGroups end
 local function Enabled(key)
@@ -173,6 +179,29 @@ function ns.RaidGroupsLeaderIconOption(key,value)
     if p and LEADER_ICON_DEFAULTS[key]~=nil then
         p[key]=value
         if Refresh and win and win:IsShown() then Refresh() end
+        if previewWindow and previewWindow:IsShown() and previewWindow._render then previewWindow._render() end
+    end
+end
+-- Separate presentation settings: changing raid/party frame indicators never
+-- silently changes the Raid Groups roster editor, and vice versa.
+RGStyle.roleIconDefaults = {
+    roleIconStyle="modern",roleIconPosition="bottomleft",roleIconSize=13,
+    roleIconOffsetX=0,roleIconOffsetY=0,roleIconHideInCombat=false,
+    roleText=false,showRoleForTank=true,showRoleForHealer=true,showRoleForDPS=false,
+    roleTextTankColor={r=59/255,g=130/255,b=246/255},
+    roleTextHealerColor={r=32/255,g=201/255,b=151/255},
+    roleTextDPSColor={r=240/255,g=100/255,b=54/255},
+}
+function ns.RaidGroupsRoleIconOption(key,value)
+    local p=P()
+    if value==nil then
+        if p and p[key]~=nil then return p[key] end
+        return RGStyle.roleIconDefaults[key]
+    end
+    if p and RGStyle.roleIconDefaults[key]~=nil then
+        p[key]=value
+        if Refresh and win and win:IsShown() then Refresh() end
+        if previewWindow and previewWindow:IsShown() and previewWindow._render then previewWindow._render() end
     end
 end
 -- All Raid Groups messages share one UTF-8-safe, bounded local-chat writer.
@@ -3553,6 +3582,7 @@ local function ShowApplyPreview(model)
                     local icon=seat:CreateTexture(nil,"OVERLAY")
                     icon:Hide()
                     seat._previewLeaderIcon=icon
+                    RGStyle.AddRoleIcon(seat)
                     seat._lbl:SetJustifyH("LEFT")
                     if side==1 then
                         currentRows[pos]=seat
@@ -3636,6 +3666,7 @@ local function ShowApplyPreview(model)
             local row=Button(previewWindow,"",319,23)
             row:SetPoint("TOPLEFT",728+math.floor((n-1)/5)*333,-440-((n-1)%5)*26)
             row._bg:SetColorTexture(.12,.15,.17,.85)
+            RGStyle.AddRoleIcon(row)
             RGStyle.MarkPlayerFont(row._lbl,"available")
             row._availableName=nil
             row._lbl:SetWordWrap(false)
@@ -3789,6 +3820,7 @@ local function ShowApplyPreview(model)
                 local left=currentRows[i]
                 local mem=current[i]
                 left._currentName=mem and mem.name or nil
+                RGStyle.UpdateRoleIcon(left,mem)
                 left._lbl:SetText(mem and (Display(mem.name,mem.unit)..(GuestMode(mem.name) and "*" or "")..
                     (RGStyle.IsArrangementIgnored(mem.key) and " [Ignored]" or "")) or L("Empty"))
                 if mem and mem.class then
@@ -3799,6 +3831,7 @@ local function ShowApplyPreview(model)
                 local sourceIndex=seatMap[i]
                 local name=projected[i]
                 local info=name and rosterByKey[Canonical(name)]
+                RGStyle.UpdateRoleIcon(right,info)
                 local absent=model.absentNames[sourceIndex] and not name and model.absentNames[sourceIndex]
                 local isGuest=model.guestSeats[sourceIndex] or model.pinnedGuests[sourceIndex] or
                     model.genericPinnedSeats[sourceIndex] or model.normalGuests[sourceIndex] or
@@ -3856,6 +3889,7 @@ local function ShowApplyPreview(model)
                 row._availableName=member and member.name or nil
                 row._maySwap=false
                 row:SetShown(member~=nil)
+                RGStyle.UpdateRoleIcon(row,member)
                 if member then
                     local atRisk=groupCounts[member.group]>=GROUP_SIZE and neededIncoming[member.group]
                     row._maySwap=not not atRisk
@@ -5455,6 +5489,115 @@ local function AssignExtra(name,pinGuest)
     if not target then Notice("No free or replaceable Guest slot in the planned groups.");return end
     SetDraft(target,name,pinGuest and "pinned" or nil)
 end
+-- Keep the Raid Groups role presentation aligned with the native EUI Raid
+-- Frames style names and artwork. The art paths also work if Raid Frames is
+-- installed but its module is disabled (QoL has no hard runtime dependency).
+RGStyle.roleIconStyles={
+    modern={_isTexture=true,TANK="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\tank-modern.png",
+        HEALER="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\healer-modern.png",
+        DAMAGER="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\dps-modern.png"},
+    blizzLight={_isTexture=true,TANK="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\tank.png",
+        HEALER="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\healer.png",
+        DAMAGER="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\dps.png"},
+    pixels={_isTexture=true,TANK="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\pixels-tank.tga",
+        HEALER="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\pixels-healer.tga",
+        DAMAGER="Interface\\AddOns\\EllesmereUIRaidFrames\\Media\\pixels-dps.tga"},
+    modernCircle={TANK="UI-LFG-RoleIcon-Tank",HEALER="UI-LFG-RoleIcon-Healer",DAMAGER="UI-LFG-RoleIcon-DPS"},
+    styled={TANK="UI-LFG-RoleIcon-Tank-Background",HEALER="UI-LFG-RoleIcon-Healer-Background",DAMAGER="UI-LFG-RoleIcon-DPS-Background"},
+    classicCircle={TANK="UI-LFG-RoleIcon-Tank-Micro-GroupFinder",HEALER="UI-LFG-RoleIcon-Healer-Micro-GroupFinder",
+        DAMAGER="UI-LFG-RoleIcon-DPS-Micro-GroupFinder"},
+    classic={TANK="roleicon-tiny-tank",HEALER="roleicon-tiny-healer",DAMAGER="roleicon-tiny-dps"},
+    blizzDefault={TANK="GM-icon-role-tank",HEALER="GM-icon-role-healer",DAMAGER="GM-icon-role-dps"},
+}
+ns.RaidGroupsRoleIconStyles=RGStyle.roleIconStyles
+function RGStyle.AddRoleIcon(row)
+    row._roleIcon=row:CreateTexture(nil,"OVERLAY")
+    row._roleIcon:Hide()
+end
+function RGStyle.UpdateRoleIcon(row,member)
+    local icon=row and row._roleIcon
+    if not icon then return end
+    local text=row._roleText
+    if text then text:Hide() end
+    if row._roleSecret then row._roleSecret:Hide() end
+    local get=ns.RaidGroupsRoleIconOption
+    local style=get("roleIconStyle")
+    if not member or not member.unit or (style=="none" and not get("roleText")) or
+        (get("roleIconHideInCombat") and InCombatLockdown()) then
+        icon:Hide()
+        return
+    end
+    local role,secret=EllesmereUI.UnitEffectiveRole(member.unit)
+    local size=math.max(8,math.min(30,tonumber(get("roleIconSize")) or 13))
+    icon:SetSize(size,size)
+    icon:ClearAllPoints()
+    local pos=(get("roleIconPosition") or "bottomleft"):upper()
+    local allowed={TOPLEFT=true,TOP=true,TOPRIGHT=true,LEFT=true,CENTER=true,
+        RIGHT=true,BOTTOMLEFT=true,BOTTOM=true,BOTTOMRIGHT=true}
+    if not allowed[pos] then pos="BOTTOMLEFT" end
+    icon:SetPoint(pos,row,pos,tonumber(get("roleIconOffsetX")) or 0,
+        tonumber(get("roleIconOffsetY")) or 0)
+    local art=RGStyle.roleIconStyles[style]
+    if secret then
+        -- Blizzard's role painter supports protected role tokens in 12.1.5+;
+        -- hide when text is requested, exactly as the Raid Frames renderer.
+        local paint=UnitFrameUtil and UnitFrameUtil.UpdateUnitFrameRoleIcon
+        if paint and art and not get("roleText") then
+            if not row._roleSecret then
+                row._roleSecret=row:CreateTexture(nil,"OVERLAY")
+                row._roleSecret:SetAllPoints(icon)
+                row._roleProxy={roleIcon=row._roleSecret,
+                    optionTable={displayRoleIcon=true,displayRaidRoleIcon=false}}
+            end
+            row._roleProxy.unit=member.unit
+            row._roleProxy.optionTable.textureMap={
+                TANK=get("showRoleForTank") and art.TANK or "",
+                HEALER=get("showRoleForHealer") and art.HEALER or "",
+                DAMAGER=get("showRoleForDPS") and art.DAMAGER or "",
+                VEHICLE="",
+            }
+            row._roleSecret:SetAllPoints(icon)
+            pcall(paint,row._roleProxy)
+        end
+        icon:Hide()
+        return
+    end
+    if not role or role=="NONE" or
+        (role=="TANK" and not get("showRoleForTank")) or
+        (role=="HEALER" and not get("showRoleForHealer")) or
+        (role=="DAMAGER" and not get("showRoleForDPS")) then
+        icon:Hide()
+        return
+    end
+    if get("roleText") then
+        if not text then
+            text=EllesmereUI.MakeFont(row,size,nil,1,1,1)
+            row._roleText=text
+        end
+        local colorKey=role=="TANK" and "roleTextTankColor" or
+            role=="HEALER" and "roleTextHealerColor" or "roleTextDPSColor"
+        local color=get(colorKey)
+        text:SetTextColor(color.r,color.g,color.b)
+        text:SetText(role=="TANK" and L("Tank") or role=="HEALER" and L("Healer") or L("DPS"))
+        local fontPath=EllesmereUI.GetFontPath and EllesmereUI.GetFontPath(FONT_KEY)
+        if fontPath then text:SetFont(fontPath,size,"") end
+        text:ClearAllPoints()
+        text:SetPoint(pos,icon,pos,0,0)
+        text:Show()
+        icon:Hide()
+    elseif art and art[role] then
+        if art._isTexture then
+            icon:SetTexture(art[role])
+            icon:SetTexCoord(0,1,0,1)
+        else
+            icon:SetAtlas(art[role],false)
+            icon:SetSize(size,size)
+        end
+        icon:Show()
+    else
+        icon:Hide()
+    end
+end
 local RAID_LEADER_TEXTURES={
     blizzard="Interface\\GroupFrame\\UI-Group-LeaderIcon",
     star="Interface\\TargetingFrame\\UI-RaidTargetingIcon_1",
@@ -5513,6 +5656,7 @@ function RefreshExtras()
         row._member=info
         row:SetShown(info~=nil)
         UpdateLeaderIcon(row,info)
+        RGStyle.UpdateRoleIcon(row,info)
         if info then
             local setup=selectedSetup and data.setups[selectedSetup]
             local mode=(setup and setup.guestModes and setup.guestModes[info.key]) or data.guests[info.key]
@@ -5541,6 +5685,7 @@ function Refresh()
             or (effective and rosterByKey[Canonical(effective)])
         s._member=player
         UpdateLeaderIcon(s,player)
+        RGStyle.UpdateRoleIcon(s,player)
         if RGStyle.emptyPinnedDraft[i] then
             s._lbl:SetText("Pinned Empty")
             s._lbl:SetTextColor(.45,.48,.51)
@@ -5698,6 +5843,7 @@ function ns._BuildRaidGroupsMainSlots()
             s._lbl:SetJustifyH("LEFT")
             s._seat=index
             AddLeaderIcon(s)
+            RGStyle.AddRoleIcon(s)
             s:RegisterForClicks("LeftButtonUp","RightButtonUp")
             s:RegisterForDrag("LeftButton")
             s:SetScript("OnDragStart",StartDrag)
@@ -5806,6 +5952,7 @@ local function EnsureMainWindow()
         r._lbl:SetWordWrap(false)
         r._lbl:SetPoint("LEFT",5,0);r._lbl:SetPoint("RIGHT",-4,0)
         AddLeaderIcon(r)
+        RGStyle.AddRoleIcon(r)
         r:RegisterForClicks("LeftButtonUp","RightButtonUp")
         r:SetScript("OnClick",function(self,mouseButton)
             if not self._member then return end
@@ -6066,6 +6213,8 @@ end)
 local events=CreateFrame("Frame")
 events:RegisterEvent("GROUP_ROSTER_UPDATE")
 events:RegisterEvent("PARTY_LEADER_CHANGED")
+events:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:RegisterEvent("GUILD_ROSTER_UPDATE")
 events:RegisterEvent("ADDON_LOADED")
@@ -6110,11 +6259,15 @@ events:SetScript("OnEvent",function(self,event,addonName)
         end
         return
     end
-    if event=="GROUP_ROSTER_UPDATE" or event=="PARTY_LEADER_CHANGED" then
+    if event=="GROUP_ROSTER_UPDATE" or event=="PARTY_LEADER_CHANGED" or
+        event=="PLAYER_ROLES_ASSIGNED" then
         Roster()
-        if applyState then QueueApply() end
+        if applyState and event~="PLAYER_ROLES_ASSIGNED" then QueueApply() end
     end
     if win and win:IsShown() then Refresh() end
+    if previewWindow and previewWindow:IsShown() and previewWindow._render then
+        previewWindow._render()
+    end
 end)
 -- A slash alias identifies a saved setup without changing its displayed name.
 -- Only cosmetic punctuation/spacing and common Latin accents are folded; this

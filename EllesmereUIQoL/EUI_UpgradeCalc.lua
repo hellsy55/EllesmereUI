@@ -1781,7 +1781,6 @@ _firstRunEvt:SetScript("OnEvent", function(self)
         -- per-character state moves top-level. The old profile copy is dropped
         -- rather than migrated -- on anyone who imported a profile it holds the
         -- exporter's characters, and this state rebuilds from the next scan.
-        local charKey = UnitName("player") .. " - " .. GetRealmName()
         local store = _euicProfileRef
         store.chars = nil
         -- Throwaway fallback if the parent DB is somehow absent: the session
@@ -1793,6 +1792,7 @@ _firstRunEvt:SetScript("OnEvent", function(self)
             chars = {}
             acct.qolUpgradeCalcChars = chars
         end
+        local charKey = EllesmereUI.CharKey(" - ", chars)
         chars[charKey]          = chars[charKey]        or {}
         local charStore         = chars[charKey]
         charStore.upgradeCalc   = charStore.upgradeCalc or {}

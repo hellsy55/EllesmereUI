@@ -29,8 +29,10 @@ local db
 I.dbSetters[#I.dbSetters + 1] = function(v) db = v end
 
 local function InitializeFrames()
-    -- Sync EUI global power colors into oUF at init
-    EllesmereUI.ApplyColorsToOUF()
+    -- The engine's shared class and power colors from the suite palette, before any
+    -- frame spawns. Only the sync: a full colors pass here would repaint every module
+    -- at login while nothing changed.
+    EllesmereUI.SyncUFColors()
 
     local classPowerStyle = db.profile.player.classPowerStyle or "none"
     -- Forever has no Blizzard class resource bar to adopt (see the ComboFrame

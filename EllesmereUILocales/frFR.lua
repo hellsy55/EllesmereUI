@@ -4458,7 +4458,7 @@ L["|cff888888Click to create. Right-click to configure.|r"] = "|cff888888Cliquer
 L["|cff888888Click to create|r"] = "|cff888888Cliquer pour créer|r"
 L["|cff888888Created. Right-click to configure.|r"] = "|cff888888Créé. Clic droit pour configurer.|r"
 L["|cff888888Created|r"]        = "|cff888888Créé|r"
-L["|cff888888No friends online|r"] = "|cff888888Aucun ami en ligne|r"
+L["No friends online"] = "Aucun ami en ligne"
 L["|cffa335eeChampion|r"]       = "|cffa335eeChampion|r"
 L["|cffff0000Error:|r EllesmereUI not found! Themed Inspect Sheet requires EllesmereUI."] = "|cffff0000Erreur :|r EllesmereUI introuvable ! La fenêtre d'inspection thématisée nécessite EllesmereUI."
 L["|cffff4444Delete Macro|r"]   = "|cffff4444Supprimer la macro|r"
@@ -5063,6 +5063,7 @@ L["Open it anytime from the EUI Options Sidebar."]              = "Ouvrez-le à 
 L["Options Panel"]                                              = "Panneau d'options"
 L["Out of Combat Alpha"]                                        = "Alpha hors combat"
 L["Out of Combat Opacity"]                                      = "Opacité hors combat"
+L["Out of Combat Opacity & Visibility"]                         = "Opacité hors combat et visibilité"
 L["Override Active"]                                            = "Remplacement actif"
 L["Override Active:"]                                           = "Remplacement actif :"
 L["Override Active: %s"]                                        = "Remplacement actif : %s"
@@ -8969,6 +8970,8 @@ L["Among a quest's reward choices, a money bag marks the one that sells for most
 -- Show Zone Levels (EllesmereUIForeverEssentials_ZoneLevels.lua)
 L["Show Zone Levels"] = "Afficher les niveaux des zones"
 L["Shows the level range of the zone you hover on a continent of the world map, under its name, colored by difficulty."] = "Affiche la tranche de niveaux de la zone survolée sur un continent de la carte du monde, sous son nom, colorée selon la difficulté."
+L["Show Fishing Skill"] = "Afficher la compétence de pêche"
+L["Shows the fishing skill a zone needs under its name on the world map: red, too low; yellow, fish still get away; green, none do."] = "Affiche sous son nom, sur la carte du monde, la compétence de pêche qu'une zone demande : rouge, trop basse ; jaune, des poissons s'échappent encore ; vert, plus aucun."
 -- Auto Summon Pet (EllesmereUIForeverEssentials_PetSummon.lua)
 L["COMPANION PETS"] = "MASCOTTES"
 L["Auto Summon Pet"] = "Invocation auto de mascotte"
@@ -9059,3 +9062,20 @@ L["Hakkari Thorium Vein"] = "Filon de thorium Hakkari"
 
 -- Preserved fork and upstream translations.
 L["Drag to Reorder. Click to override display settings and add custom effects per icon"] = "Glisser pour réordonner. Cliquez pour remplacer les réglages d'affichage et ajouter des effets personnalisés par icône"
+L["Nameplate Icon"] = "Icône de barre d'info"
+L["Bars"] = "Barres"
+L["Cast Bars"] = "Barres d'incantation"
+L["Enemy"] = "Ennemi"
+L["Nameplate Kick Icons use this to auto assign kicks when a mob is initially marked"] = "Les icônes d'interruption de barre d'info l'utilisent pour assigner automatiquement les interruptions dès qu'un monstre est marqué"
+L["Dismiss this warning"] = "Ignorer cet avertissement"
+
+-- == Unlock Mode point anchoring / overlap cycling (9.6.2) =============
+L["Point Anchoring"] = "Ancrage par points"
+L["Connector Lines Color"] = "Couleur des lignes de liaison"
+L["Point Color"] = "Couleur du point"
+L["Overlap Cycling"] = "Cycle de superposition"
+L["Scroll"] = "Molette"
+L["Shift + Scroll"] = "Maj + Molette"
+L["Ctrl + Scroll"] = "Ctrl + Molette"
+L["Alt + Scroll"] = "Alt + Molette"
+L["Scroll with the chosen modifier to cycle overlapping frames in Unlock Mode."] = "Faites défiler avec le modificateur choisi pour passer d'un cadre superposé à l'autre en mode Déverrouillage."

@@ -32,11 +32,13 @@ local SHAMAN_SHIELDS, WARLOCK_PETS = I.SHAMAN_SHIELDS, I.WARLOCK_PETS
 local WEAPON_ENCHANT_CHOICES = I.WEAPON_ENCHANT_CHOICES
 local WEAPON_ENCHANT_ITEMS, _dismissedUntilLoad = I.WEAPON_ENCHANT_ITEMS, I._dismissedUntilLoad
 local defaults, GLOW_VIEW, combatIconPool = I.defaults, I.GLOW_VIEW, I.combatIconPool
+local receiverIconPool = I.receiverIconPool
 local GetStrata, HideCombatIcons = I.GetStrata, I.HideCombatIcons
 local HideCursorIcons, ICON_SIZE, iconPool = I.HideCursorIcons, I.ICON_SIZE, I.iconPool
 local HideAllIcons, RequestRefresh = I.HideAllIcons, I.RequestRefresh
 local ApplyUnlockPos, RegisterUnlockElements = I.ApplyUnlockPos, I.RegisterUnlockElements
 local BeaconInit, BeaconRefresh, TrackItemUse = I.BeaconInit, I.BeaconRefresh, I.TrackItemUse
+local BeaconCombatEdge, CursorAttachActive = I.BeaconCombatEdge, I.CursorAttachActive
 local SetDB, SetIconAnchor, SetCombatAnchor = I.SetDB, I.SetIconAnchor, I.SetCombatAnchor
 local SetCursorAnchor, SetPanelOpen = I.SetCursorAnchor, I.SetPanelOpen
 local SetInCombat, SetHuntersMarkNeeded = I.SetInCombat, I.SetHuntersMarkNeeded
@@ -261,6 +263,7 @@ function EABR:OnEnable()
         combatAnchor:SetFrameStrata(strata)
         for _, btn in pairs(iconPool) do btn:SetFrameStrata(strata) end
         for _, f in pairs(combatIconPool) do f:SetFrameStrata(strata) end
+        for _, f in pairs(receiverIconPool) do f:SetFrameStrata(strata) end
         if EABR._providerCastBtn and not InCombatLockdown() then
             EABR._providerCastBtn:SetFrameStrata(strata)
         end
@@ -507,6 +510,14 @@ function EABR:OnEnable()
     _rebuildRangeTracking()
 end
 
+-- Combat start with the buffs on the cursor (Only on Cursor in Combat turns
+-- that on here): the buff you provide moves from its secure button to the
+-- cursor, so the button parks now, while moving it and its mouse is still
+-- allowed. In combat it could only fade, and would stay clickable where it sat.
+local function ParkProviderForCursor()
+    if db and CursorAttachActive(db.profile.display) then EABR.ParkProviderCastButton() end
+end
+
 -------------------------------------------------------------------------------
 --  MAIN EVENT HANDLER (OnEvent script for runtime events)
 -------------------------------------------------------------------------------
@@ -517,6 +528,8 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         _encounterSnapshotTime = GetTime()
         -- Marks combat immediately: ENCOUNTER_START fires before InCombatLockdown() returns true but aura APIs are already restricted; without this, non-whitelisted buffs flash "missing" for ~1s.
         SetInCombat(true)
+        ParkProviderForCursor()
+        BeaconCombatEdge()
         RequestRefresh()
         return
     end
@@ -550,6 +563,8 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         end
         SetInCombat(true)
         _encounterSnapshotTime = nil
+        ParkProviderForCursor()
+        BeaconCombatEdge()
         RequestRefresh()
         return
     end
@@ -564,6 +579,7 @@ mainFrame:SetScript("OnEvent", function(_, e, arg1, arg2, arg3)
         SetHuntersMarkNeeded(false)
         HideCombatIcons()
         HideCursorIcons()
+        BeaconCombatEdge()
         pendingOOCRefresh = false
         EABR.RescanOwnOtherAuras()
         RequestRefresh()

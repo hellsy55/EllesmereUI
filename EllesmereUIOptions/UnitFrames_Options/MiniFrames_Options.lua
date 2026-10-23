@@ -33,6 +33,14 @@ local function GetMiniDonorSettings(unitKey)
     return ns.GetMiniDonorSettings and ns.GetMiniDonorSettings(unitKey) or db.profile.player
 end
 
+-- The label of each mini frame's enable toggle (the row that opens its DISPLAY
+-- section): the requirement its Move in Unlock Mode button names while that
+-- toggle is off.
+local MINI_ENABLE_LABELS = {
+    targettarget = "Enable Target of Target", focustarget = "Enable Focus Target",
+    pet = "Enable Pet Frame", boss = "Enable Boss Frames",
+}
+
 ---------------------------------------------------------------------------
 --  Shared mini frame settings builder
 ---------------------------------------------------------------------------
@@ -59,6 +67,16 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
     -- DISPLAY
     local displayHeader
     displayHeader, h = W:SectionHeader(parent, "DISPLAY", y); y = y - h
+    -- The Move in Unlock Mode button on the frame's first section: its mover
+    -- exists only for the EllesmereUI frame source, so the button explains
+    -- itself while the frame is hidden (its enable toggle) or on Blizzard's frame.
+    EllesmereUI.BuildSectionUnlockJump(displayHeader, {
+        key = unitKey,
+        disabled = function() return ns.GetUnitFrameSource(unitKey) ~= "eui" end,
+        disabledTooltip = function()
+            if ns.VisUnitDisabled(db.profile, unitKey) then return MINI_ENABLE_LABELS[unitKey] end
+            return "This option requires the EllesmereUI Frame Source."
+        end })
     y = EllesmereUI.BlizzStyle.Note(parent, y, "unitframes")
 
     -- Enable row (passed in from each builder)
@@ -220,10 +238,28 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
 
     -- Boss Border Style | Border Size (+ Width Offset | Height Offset for a
     -- textured style): the boss frames' own border, or the main frames'
-    -- while the style reads Inherit. Full pairs, so Strata below stays
-    -- the section's odd last slot.
+    -- while the style reads Inherit. Full pairs, so Strata | Dark Mode below
+    -- stays the section's last row.
     if unitKey == "boss" then
         y = y - ns.UF_BossFrameBorderRows(W, parent, y, settingsTable, ReloadAndUpdate)
+    end
+
+    -- Dark Mode for this frame alone, as on the Main Frames page (unset follows the
+    -- profile's). It feeds the Dark Mode override condition, so it rechecks it and is
+    -- locked while such an override is edited.
+    local darkCfg = { type="toggle", text="Dark Mode",
+        tooltip="Dark Mode for this frame. Global Settings > Colors switches every frame.",
+        getValue=function() return ns.UF_DarkThemeOn(settingsTable) end,
+        setValue=function(v)
+            MSet("darkTheme", v)
+            EllesmereUI.Conditions_Recheck()
+            EllesmereUI:RefreshPage()
+        end }
+    local function LockDark(rgn)
+        if EllesmereUI._prebuilding then return end
+        EllesmereUI.SpecOverrides_AttachEditLock(rgn,
+            "Dark Mode drives a Dark Mode override condition and can't be changed while editing an override",
+            EllesmereUI.SpecOverrides_DarkCondEditActive)
     end
 
     -- DISPLAY bottom row for boss: the mini frames carry their Strata
@@ -309,9 +345,13 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             EllesmereUI.RegisterWidgetRefresh(function() updFillSwatch(); UpdateBossFillSwatchVis() end)
             UpdateBossFillSwatchVis()
         end
+        local darkRow
+        darkRow, h = W:DualRow(parent, y, darkCfg, EllesmereUI.BlankRowCfg())
+        y = y - h
+        LockDark(darkRow._leftRegion)
     end
 
-    -- DISPLAY bottom row: per-frame Border Size override for ToT/Focus Target/Pet.
+    -- DISPLAY: per-frame Border Size override for ToT/Focus Target/Pet.
     -- Size only, no color/texture (those still inherit from main frames);
     -- borderSizeOverride nil = inherit donor size until set. Boss frames use
     -- their own Border Style | Border Size row above instead.
@@ -328,6 +368,9 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
               tooltip="Show the main frames' hover highlight border on this frame. Turn off so this frame never recolors on mouseover. No effect when Highlight is off in the main frames' Hover Borders.",
               getValue=function() return settingsTable.showHighlightBorder ~= false end,
               setValue=function(v) settingsTable.showHighlightBorder = v end });  y = y - h
+        local darkRow
+        darkRow, h = W:DualRow(parent, y, darkCfg, EllesmereUI.BlankRowCfg());  y = y - h
+        LockDark(darkRow._leftRegion)
     end
 
     -- Optional extra rows after enable (e.g. portrait, cast icon, indicators)
@@ -377,7 +420,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             -- Fill Color = the health fill opacity (formerly "Fill Opacity")
             -- with the fill color swatches moved inline below.
             leftSlot2 = { type="slider", text="Fill Color", min=0, max=100, step=1,
-              disabled=function() return db.profile.darkTheme end,
+              disabled=function() return ns.UF_DarkThemeOn(settingsTable) end,
               disabledTooltip="Dark Mode", requireState="disabled",
               getValue=function() return MVal("healthBarOpacity", 90) end,
               setValue=function(v) MSet("healthBarOpacity", v) end }
@@ -433,7 +476,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             }
             leftSlot2 = { type="multiSwatch", text="Fill Color", swatches = fillSwatches }
             rightSlot2 = { type="slider", text="Fill Opacity", min=0, max=100, step=1,
-              disabled=function() return db.profile.darkTheme end,
+              disabled=function() return ns.UF_DarkThemeOn(settingsTable) end,
               disabledTooltip="Dark Mode", requireState="disabled",
               getValue=function() return MVal("healthBarOpacity", 90) end,
               setValue=function(v) MSet("healthBarOpacity", v) end }
@@ -563,8 +606,8 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         -- fill/background colors). Boss also blocks Bar Background so its swatches
         -- gray out like Main Frames; other mini units' Bar Opacity has its own disable handler.
         if not EllesmereUI._prebuilding then
-        AddDarkModeBlock(colorRow._leftRegion)
-        if isBoss then AddDarkModeBlock(colorRow._rightRegion) end
+        AddDarkModeBlock(colorRow._leftRegion, function() return settingsTable end)
+        if isBoss then AddDarkModeBlock(colorRow._rightRegion, function() return settingsTable end) end
         end
     end
 
