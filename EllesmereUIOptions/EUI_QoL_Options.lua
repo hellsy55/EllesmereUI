@@ -276,11 +276,12 @@ local function BuildSelfCombatTextSection(parent, y)
     local W = EllesmereUI.Widgets
     local qns = EllesmereUI._ModuleNS["EllesmereUIQoL"]
     local SCTGet, SCTSet = qns.SCT_Get, qns.SCT_Set
-    local _, h
+    local _, h, hdr
 
-    _, h = W:SectionHeader(parent, "SELF COMBAT TEXT", y);  y = y - h
+    hdr, h = W:SectionHeader(parent, "SELF COMBAT TEXT", y);  y = y - h
 
     local function sctOff() return not SCTGet("enabled") end
+    EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EUI_SelfCombatText", disabled = sctOff, disabledTooltip = "Self Combat Text" })
     local function sctToggle(text, key)
         return { type="toggle", text=text,
           disabled=sctOff, disabledTooltip="Self Combat Text",
@@ -404,6 +405,10 @@ initFrame:SetScript("OnEvent", function(self)
     do
         local origNav = EllesmereUI.NavigateToElementSettings
         function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName, preSelectFn, highlightText)
+            -- The original refuses in combat: no page state changes then.
+            if InCombatLockdown() then
+                return origNav(self, moduleName, pageName, sectionName, preSelectFn, highlightText)
+            end
             if moduleName == "EllesmereUIQoL" and pageName == PAGE_QOL and sectionName ~= nil
                and sectionName == macroFactorySection and not macroFactoryOpen.macroFactory then
                 macroFactoryOpen.macroFactory = true
@@ -416,7 +421,7 @@ initFrame:SetScript("OnEvent", function(self)
     local function BuildQoLPage(pageName, parent, yOffset)
         local W = EllesmereUI.Widgets
         local y = yOffset
-        local _, h
+        local _, h, hdr
         local PP = EllesmereUI.PanelPP
 
         parent._showRowDivider = true
@@ -906,7 +911,12 @@ initFrame:SetScript("OnEvent", function(self)
         ---------------------------------------------------------------------------
         --  EXTRAS
         ---------------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
+        hdr, h = W:SectionHeader(parent, "EXTRAS", y);  y = y - h
+        -- The FPS Counter is the section's first mover, so the header's button
+        -- takes it; the button explains itself while the counter is off.
+        EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EUI_FPS",
+            disabled = function() return not EllesmereUI.QoLExtrasGet("showFPS") end,
+            disabledTooltip = "Show FPS Counter" })
 
         -- Row 1: Show FPS Counter (left, with swatch+cog) | FPS Toggle Keybind (right)
         local fpsRow

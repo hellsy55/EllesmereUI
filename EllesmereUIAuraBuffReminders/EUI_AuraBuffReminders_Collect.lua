@@ -19,6 +19,7 @@ local _B, DEFAULT_TEXT_COLOR, EABR = I._B, I.DEFAULT_TEXT_COLOR, I.EABR
 local GetPlayerClass, GetTextAnchorPoints = I.GetPlayerClass, I.GetTextAnchorPoints
 local InCombat, InPvPInstance, isSecret = I.InCombat, I.InPvPInstance, I.isSecret
 local Known, NON_SECRET_SPELL_IDS = I.Known, I.NON_SECRET_SPELL_IDS
+local CursorAttachActive = I.CursorAttachActive
 local ResolveFontPath, SetABRFont, ShortLabel = I.ResolveFontPath, I.SetABRFont, I.ShortLabel
 local Tex, _preCombatOwnOnRaidCache = I.Tex, I._preCombatOwnOnRaidCache
 local BuffExistsOnAnyGroupMember = I.BuffExistsOnAnyGroupMember
@@ -93,7 +94,7 @@ local function LayoutIcons()
         allIcons[#allIcons+1] = EABR._providerCastBtn
     end
     for _, btn in ipairs(activeIcons) do allIcons[#allIcons+1] = btn end
-    local beaconsOnCursor = db and db.profile.display.cursorAttach and cursorAnchor
+    local beaconsOnCursor = db and CursorAttachActive(db.profile.display) and cursorAnchor
     if _B.icons and not beaconsOnCursor then
         for _, id in ipairs(_B.ALL or {}) do
             if _B.iconState and _B.iconState[id] and _B.icons[id] then
@@ -139,19 +140,27 @@ local function ShowIcon(iconIdx, m)
     btn._petCycleTotal = m.petCycleTotal or nil
     -- Right-click is passed through to whatever's behind (e.g. camera drag)
     -- for every other reminder; only a multi-pet cycle button claims it.
+    -- Left-click is passed through too on a groupmate's raid buff the player
+    -- cannot cast: nothing it could do (the middle-click dismiss stays).
     -- Click-routing changes are combat-protected, same as the attribute
     -- writes below, so this only ever runs OOC.
+    local receiver = EABR.IsReceiverRaidBuff(m)
     if not InCombat() then
-        local wantRightCapture = m.petCycleTotal and true or false
-        if btn._petCycleRightCapture ~= wantRightCapture then
-            btn._petCycleRightCapture = wantRightCapture
-            if wantRightCapture then
-                securecallfunction(btn.SetPassThroughButtons, btn)
-            else
+        local pass = (receiver and 1 or 0) + (m.petCycleTotal and 0 or 2)
+        if btn._passButtons ~= pass then
+            btn._passButtons = pass
+            if pass == 3 then
+                securecallfunction(btn.SetPassThroughButtons, btn, "LeftButton", "RightButton")
+            elseif pass == 2 then
                 securecallfunction(btn.SetPassThroughButtons, btn, "RightButton")
+            elseif pass == 1 then
+                securecallfunction(btn.SetPassThroughButtons, btn, "LeftButton")
+            else
+                securecallfunction(btn.SetPassThroughButtons, btn)
             end
         end
     end
+    EABR.SetIconHighlight(btn, not receiver)
     ApplySetup(btn, m)
     local p = db.profile.display
     local baseScale = p.scale or 1.0

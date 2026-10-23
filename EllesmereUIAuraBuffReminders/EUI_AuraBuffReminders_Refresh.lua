@@ -32,7 +32,7 @@ local ResetEntryPool, ShowCombatIcon = I.ResetEntryPool, I.ShowCombatIcon
 local ShowCursorIcon, CollectAuras = I.ShowCursorIcon, I.CollectAuras
 local CollectConsumables, CollectRaidBuffs = I.CollectConsumables, I.CollectRaidBuffs
 local HideAllIcons, LayoutIcons, ShowIcon = I.HideAllIcons, I.LayoutIcons, I.ShowIcon
-local SetCachedOutline = I.SetCachedOutline
+local SetCachedOutline, CursorAttachActive = I.SetCachedOutline, I.CursorAttachActive
 
 local db
 I.dbSetters[#I.dbSetters + 1] = function(v) db = v end
@@ -681,7 +681,7 @@ local function Refresh()
         HideCursorIcons()
         local providerEntry
         if #missing > 0 then
-            local useCursor = db.profile.display.cursorAttach and cursorAnchor
+            local useCursor = CursorAttachActive(db.profile.display) and cursorAnchor
             local combatIdx, cursorIdx = 0, 0
             for _, m in ipairs(missing) do
                 -- Skip middle-click dismissed reminders. The collectors are
@@ -713,7 +713,7 @@ local function Refresh()
                             f = cursorActiveIcons[#cursorActiveIcons]
                         else
                             combatIdx = combatIdx + 1
-                            ShowCombatIcon(combatIdx, m)
+                            ShowCombatIcon(m)
                             f = combatActiveIcons[#combatActiveIcons]
                         end
                         if f and not m.isEating then
@@ -762,8 +762,9 @@ local function Refresh()
         -- chasing the cursor can never be clicked anyway. With cursor attach
         -- ON the player's own raid buff is the main case: it rides the
         -- cursor and the provider secure button parks; with it OFF the
-        -- provider button keeps sole ownership as before.
-        local useCursor = db.profile.display.cursorAttach and cursorAnchor
+        -- provider button keeps sole ownership as before. Only on Cursor
+        -- in Combat keeps everything at its normal spot out here.
+        local useCursor = CursorAttachActive(db.profile.display) and cursorAnchor
         local iconIdx, cursorIdx = 0, 0
         local providerEntry
         for _, m in ipairs(missing) do

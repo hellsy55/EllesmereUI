@@ -33,24 +33,74 @@ end
 -- fx-forced or claimed categories): anything that still renders must count,
 -- so a surface that displays something never warns. Update registers as a
 -- widget refresh, so every lane click that triggers a non-force RefreshPage
--- re-evaluates live.
-function EllesmereUI.AttachEmptyFilterWarn(rgn, cbDD, warnText, hasContentFn)
+-- re-evaluates live. A long warnText wraps at WARN_WRAP px. opts.onDismiss:
+-- advice the reader may wave off for good (the Kick Tracker's marker
+-- warning): a square button in the bubble's own dress sits beside it, the
+-- pair centred over the control, and a click runs it and re-reads; the
+-- caller's hasContentFn honours the flag it keeps.
+local WARN_WRAP = 300       -- px of text a warning bubble holds on one line
+local WARN_GAP = 4          -- px between the bubble and its dismiss button
+local DISMISS_MAX = 22      -- px the dismiss square grows to beside a wrapped bubble
+
+local function WarnDress(frame)
+    local bg = frame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(0.12, 0.03, 0.03, 0.95)
+    EllesmereUI.PanelPP.CreateBorder(frame, 0.85, 0.2, 0.2, 1, 1)
+end
+
+function EllesmereUI.AttachEmptyFilterWarn(rgn, cbDD, warnText, hasContentFn, opts)
     -- Search prebuild on an absorber row: the warning indexes nothing, so none is built.
     local standIn = StandIn(rgn) or StandIn(cbDD)
     if standIn then return standIn end
     local PP = EllesmereUI.PanelPP
+    local onDismiss = opts and opts.onDismiss
+    local Update
 
     local bubble = CreateFrame("Frame", nil, rgn)
     bubble:SetFrameLevel(cbDD:GetFrameLevel() + 10)
     local fs = EllesmereUI.MakeFont(bubble, 12, nil, 1, 0.4, 0.4)
-    fs:SetPoint("CENTER")
     fs:SetText(warnText)
-    PP.Size(bubble, math.ceil(fs:GetStringWidth()) + 16, math.ceil(fs:GetStringHeight()) + 10)
-    bubble:SetPoint("BOTTOM", cbDD, "TOP", 0, 5)
-    local bg = bubble:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.12, 0.03, 0.03, 0.95)
-    PP.CreateBorder(bubble, 0.85, 0.2, 0.2, 1, 1)
+    fs:SetPoint("CENTER")
+    local tw = math.ceil(fs:GetStringWidth())
+    if tw > WARN_WRAP then
+        tw = WARN_WRAP
+        fs:SetWidth(tw)
+        fs:SetWordWrap(true)
+        fs:SetJustifyH("CENTER")
+    end
+    local bw, bh = tw + 16, math.ceil(fs:GetStringHeight()) + 10
+    PP.Size(bubble, bw, bh)
+    WarnDress(bubble)
+    if onDismiss then
+        local sz = math.min(bh, DISMISS_MAX)
+        local cross = CreateFrame("Button", nil, bubble)
+        PP.Size(cross, sz, sz)
+        cross:SetPoint("LEFT", bubble, "RIGHT", WARN_GAP, 0)
+        cross:SetFrameLevel(bubble:GetFrameLevel())
+        WarnDress(cross)
+        local hl = cross:CreateTexture(nil, "HIGHLIGHT")
+        hl:SetAllPoints()
+        hl:SetColorTexture(0.85, 0.2, 0.2, 0.25)
+        local xfs = EllesmereUI.MakeFont(cross, 12, nil, 1, 0.4, 0.4)
+        xfs:SetPoint("CENTER", cross, "CENTER", 0, 1)
+        xfs:SetText("x")
+        cross:SetScript("OnEnter", function()
+            xfs:SetTextColor(1, 0.75, 0.75)
+            EllesmereUI.ShowWidgetTooltip(cross, EllesmereUI.L("Dismiss this warning"))
+        end)
+        cross:SetScript("OnLeave", function()
+            xfs:SetTextColor(1, 0.4, 0.4)
+            EllesmereUI.HideWidgetTooltip()
+        end)
+        cross:SetScript("OnClick", function()
+            onDismiss()
+            Update()
+        end)
+        bubble:SetPoint("BOTTOM", cbDD, "TOP", -(sz + WARN_GAP) / 2, 5)
+    else
+        bubble:SetPoint("BOTTOM", cbDD, "TOP", 0, 5)
+    end
     bubble:Hide()
 
     local warnBorder = CreateFrame("Frame", nil, cbDD)
@@ -76,7 +126,7 @@ function EllesmereUI.AttachEmptyFilterWarn(rgn, cbDD, warnText, hasContentFn)
         if loops >= 2 then self:Stop() end
     end)
 
-    local function Update()
+    Update = function()
         local empty = not hasContentFn()
         bubble:SetShown(empty)
         warnBorder:SetShown(empty)
@@ -1342,8 +1392,9 @@ end
 --  Checkbox dropdown whose rows can also be drag-reordered vertically. Row visuals match BuildVisOptsCBDropdown;
 --  the drag behavior matches the Macro Factory per-macro menus (3px threshold, floating row, insertion line, contents shuffle on drop).
 --  items: array in initial display order:
---      { key = "...", label = "...", fixed = true|nil }
---  fixed rows are checkbox-only and pinned below the movable rows.
+--      { key = "...", label = "...", fixed = true|nil, tooltip = "..."|nil }
+--  fixed rows are checkbox-only and pinned below the movable rows; a row's
+--  tooltip shows while the cursor is on it.
 --  getFn(key) -> checked; setFn(key, checked, orderedMovableKeys) fires on row click.
 --  opts = {
 --      setOrder = function(orderedMovableKeys),  -- fired on every drop
@@ -1604,11 +1655,15 @@ function EllesmereUI.BuildReorderCBDropdown(parentFrame, ddW, fLevel, items, get
                 if isDragging then return end
                 lbl:SetTextColor(1, 1, 1, 1)
                 hl:SetColorTexture(1, 1, 1, 0.04)
+                -- The row's current item (drops shuffle row contents).
+                local tip = row._item.tooltip
+                if tip then EllesmereUI.ShowWidgetTooltip(row, tip) end
             end)
             row:SetScript("OnLeave", function()
                 if isDragging then return end
                 lbl:SetTextColor(0.75, 0.75, 0.75, 1)
                 hl:SetColorTexture(1, 1, 1, 0)
+                if row._item.tooltip then EllesmereUI.HideWidgetTooltip() end
             end)
             row:SetScript("OnClick", function()
                 if row._suppressClick then row._suppressClick = nil; return end

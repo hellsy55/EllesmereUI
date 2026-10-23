@@ -95,6 +95,8 @@ local defaults = {
             opacity = 1.0,
             frameStrata = "MEDIUM",
             cursorAttach = false,
+            -- Attach Important Buffs to Cursor's cog: on the cursor only in combat.
+            cursorAttachCombatOnly = false,
             -- Preserve the historical reminder look exactly: black, solid,
             -- pixel-perfect 1 px. Extra texture controls remain nil until the
             -- user customizes them.
@@ -175,7 +177,7 @@ local defaults = {
             inkyBlackZones = "",
         },
         unlockPos = nil,
-        talentReminders = {},  -- array of {zoneIDs={}, zoneNames={}, spellID=number, spellName=string, showNotNeeded=bool}
+        talentReminders = {},  -- array of {zoneNames={} (zoneName = an older version's single zone, read while there is no list), spellID=number, spellName=string, notNeededMode="never"|"season"|"all", showNotNeeded=bool (the old checkbox, kept in step)}
         talentReminderYOffset = -50,
     },
 }

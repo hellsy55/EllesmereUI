@@ -1388,7 +1388,7 @@ initFrame:SetScript("OnEvent", function(self)
     local classIconValues = {
         ["none"]="None", ["modern"]="Modern",
         ["arcade"]="Arcade", ["glyph"]="Glyph", ["legend"]="Legend",
-        ["midnight"]="Midnight", ["pixel"]="Pixel", ["pixelsComic"]="Pixels Comic", ["runic"]="Runic",
+        ["midnight"]="Midnight", ["pixel"]="Pixel", ["pixelsComic"]="Comic", ["runic"]="Runic",
         _menuOpts = { itemHeight = 32, icon = function(key)
             if key == "none" then return nil end
             local _, ct = UnitClass("player")
@@ -1653,7 +1653,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- Portrait art style dropdown values
     local classThemeSubValues = {
         ["modern"]="Modern", ["arcade"]="Arcade", ["glyph"]="Glyph",
-        ["legend"]="Legend", ["midnight"]="Midnight", ["pixel"]="Pixel", ["pixelsComic"]="Pixels Comic",
+        ["legend"]="Legend", ["midnight"]="Midnight", ["pixel"]="Pixel", ["pixelsComic"]="Comic",
         ["runic"]="Runic",
     }
     local classThemeSubOrder = { "modern", "arcade", "glyph", "legend", "midnight", "pixel", "pixelsComic", "runic" }
@@ -1885,7 +1885,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- color settings do nothing: grey out and block the whole DualRow region (every
     -- swatch/slider/cog/sync in it). A widget-refresh callback tracks the toggle live
     -- (RefreshPage's fast path re-runs these without a full rebuild).
-    local function AddDarkModeBlock(rgn)
+    local function AddDarkModeBlock(rgn, unitFn)
         if not rgn then return end
         local block = CreateFrame("Frame", nil, rgn)
         block:SetAllPoints()
@@ -1894,7 +1894,7 @@ initFrame:SetScript("OnEvent", function(self)
         block:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(block, "Not available in Dark Mode. Dark Mode colors can be adjusted in Global Settings -> Colors.") end)
         block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         local function Update()
-            if db and db.profile and db.profile.darkTheme then
+            if ns.UF_DarkThemeOn(unitFn()) then
                 rgn:SetAlpha(0.3); block:Show()
             else
                 rgn:SetAlpha(1); block:Hide()
@@ -3052,7 +3052,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if not s then return nil end
                 if Inheriting(s) then return "This option requires a Bar Texture other than Inherit (Main Frames)." end
                 if Tex(s) == "none" then return "This option requires a Bar Texture other than None." end
-                if db.profile.darkTheme then return "This option requires a Dark Mode Fill of 100 (Global Settings > Colors)." end
+                if ns.UF_DarkThemeOn(s) then return "This option requires a Dark Mode Fill of 100 (Global Settings > Colors)." end
                 if mini == "boss" then return "This option requires a health Fill Color of 100." end
                 return "This option requires a health Fill Opacity of 100."
             end,

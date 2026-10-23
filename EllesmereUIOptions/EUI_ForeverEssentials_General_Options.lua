@@ -154,7 +154,7 @@ _G._EUI_BuildForeverGeneralPage = function(pageName, parent, yOffset)
     local MT = EllesmereUI._MapTravel
     local BLANK = EllesmereUI.BlankRowCfg
     local y = yOffset
-    local _, h
+    local _, h, hdr
     parent._showRowDivider = true
 
     _, h = W:SectionHeader(parent, "SPELL RANKS", y);  y = y - h
@@ -174,7 +174,8 @@ _G._EUI_BuildForeverGeneralPage = function(pageName, parent, yOffset)
     --  WORLD MAP (Fade Map While Moving | Show the Game Behind the Map, then
     --  Reveal Unexplored Areas with its color in the cog | Show Zone Levels,
     --  then Show Map Markers with its sets in the cog:
-    --  EllesmereUIForeverEssentials_MapTravel.lua)
+    --  EllesmereUIForeverEssentials_MapTravel.lua | Show Fishing Skill:
+    --  EllesmereUIForeverEssentials_ZoneLevels.lua)
     ---------------------------------------------------------------------------
     local MR = EllesmereUI._MapReveal
     local ZL = EllesmereUI._ZoneLevels
@@ -231,7 +232,13 @@ _G._EUI_BuildForeverGeneralPage = function(pageName, parent, yOffset)
               MT.Apply()
               EllesmereUI:RefreshPage()  -- the cog's disabled state
           end },
-        BLANK()
+        { type = "toggle", text = "Show Fishing Skill",
+          tooltip = "Shows the fishing skill a zone needs under its name on the world map: red, too low; yellow, fish still get away; green, none do.",
+          getValue = function() return ZL.Get("fishing") end,
+          setValue = function(v)
+              ZL.Cfg().fishing = v
+              ZL.Apply()
+          end }
     );  y = y - h
     if not EllesmereUI._prebuilding then
         EllesmereUI.BuildInlineCog(revealRow._leftRegion, {
@@ -425,7 +432,8 @@ _G._EUI_BuildForeverGeneralPage = function(pageName, parent, yOffset)
             or "Show Current Stance / Form"
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
-        _, h = W:SectionHeader(parent, "ACTIVE STANCE, FORM, ASPECT & AURA", y);  y = y - h
+        hdr, h = W:SectionHeader(parent, "ACTIVE STANCE, FORM, ASPECT & AURA", y);  y = y - h
+        EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EUI_ActiveForm", disabled = afOff, disabledTooltip = label })
 
         _, h = EllesmereUI.BuildVisibilityRow(W, parent, y, {
             leftCfg = { type = "toggle", text = label,
@@ -635,7 +643,8 @@ _G._EUI_BuildForeverGeneralPage = function(pageName, parent, yOffset)
     end
 
     _, h = W:Spacer(parent, y, 20);  y = y - h
-    _, h = W:SectionHeader(parent, "JUNK ITEMS", y);  y = y - h
+    hdr, h = W:SectionHeader(parent, "JUNK ITEMS", y);  y = y - h
+    EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EUI_JunkList", disabled = junkOff, disabledTooltip = "Junk Items Window" })
 
     _, h = EllesmereUI.BuildVisibilityRow(W, parent, y, {
         leftCfg = { type = "toggle", text = "Enable Junk Items Window",
@@ -736,7 +745,17 @@ _G._EUI_BuildForeverGeneralPage = function(pageName, parent, yOffset)
     end
 
     _, h = W:Spacer(parent, y, 20);  y = y - h
-    _, h = W:SectionHeader(parent, "FISHING", y);  y = y - h
+    hdr, h = W:SectionHeader(parent, "FISHING", y);  y = y - h
+    -- The Bobber Indicator's mover exists only while the indicator can show:
+    -- the Fishing Key bound with Reel In and Bobber Indicator on (the cog's
+    -- rows), so the button names whichever of the three is missing.
+    EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EUI_FishingBobber",
+        disabled = function() return FI.Get("key") == nil or not FI.Get("reel") or not FI.Get("indicator") end,
+        disabledTooltip = function()
+            if FI.Get("key") == nil then return "Fishing Key" end
+            if not FI.Get("reel") then return "Reel In With the Key" end
+            return "Bobber Indicator"
+        end })
 
     -- Fishing Key (keybind, its options in the cog) | Double-Click to Cast
     local fishKeyRow

@@ -53,6 +53,7 @@ function ns.ERB_BuildSwingTimerPage(pageName, parent, yOffset)
 
     local _sec
     _sec, h = W:SectionHeader(parent, "LAYOUT", y);  y = y - h
+    EllesmereUI.BuildSectionUnlockJump(_sec, { key = "ERB_SwingTimer", disabled = stOff, disabledTooltip = ST_TIP })
 
     local sStrataValues = EllesmereUI.FRAME_STRATA_LABELS
     local sStrataOrder = EllesmereUI.FRAME_STRATA_ORDER_BASE

@@ -1350,6 +1350,18 @@ local function CreateAbsorbBar(frame, unit, settings)
                 if ha then ha:Hide() end
                 if topBar then topBar:Hide() end
                 if healTopBar then healTopBar:Hide() end
+                -- Nothing draws a shield here, but the arm/disarm derivation still
+                -- runs (as below): an absorb event armed this frame above, and a
+                -- frame that never disarms keeps the 0.5s belt repainting it for the
+                -- session, its long-form Absorb text never getting the expiry recompose.
+                self._absPaintAt = GetTime()
+                local a = shieldAmt or (UnitGetTotalAbsorbs and UnitGetTotalAbsorbs(updUnit)) or 0
+                local h = healAmt or (UnitGetTotalHealAbsorbs and UnitGetTotalHealAbsorbs(updUnit)) or 0
+                if (issecretvalue and (issecretvalue(a) or issecretvalue(h))) or (a or 0) > 0 or (h or 0) > 0 then
+                    if not self._absActive then ns.UF_AbArm(self) end
+                else
+                    ns.UF_AbDisarm(self)
+                end
                 return
             end
 
