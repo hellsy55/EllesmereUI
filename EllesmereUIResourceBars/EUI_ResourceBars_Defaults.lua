@@ -429,6 +429,10 @@ local DEFAULTS = {
             showMH        = true,   -- per-row toggles (a row also needs a weapon in the slot)
             showOH        = true,
             showR         = true,
+            alwaysShowRows = false, -- true = every row whose toggle is on shows, with or without a weapon in the slot
+            hideLabelNoWeapon = false, -- true = with Always Show Rows, a row with no weapon in its slot shows no label
+            shieldRow     = false, -- true = an equipped shield shows the Off Hand row, labelled Shield
+            queueMainHandOnly = false, -- true = a queued attack shows on the Main Hand row only
             combineHands  = false,  -- off hand as a spark on the Main Hand bar instead of its own row
             textSize      = 11,
             rangeCheck    = true,   -- dim rows whose target is out of auto-attack range
@@ -436,7 +440,8 @@ local DEFAULTS = {
             -- Attack State: "off" | "queued" (melee rows take the queued attack's colour + name)
             -- | "full" (also On while the attack is on, Waiting while it is on with nothing swinging)
             attackState   = "queued",
-            queueR = 1, queueG = 0.70, queueB = 0.20, queueA = 1,   -- Queued: Heroic Strike / Maul / Raptor Strike
+            queueR = 1, queueG = 0.70, queueB = 0.20, queueA = 1,   -- Queued: shared fallback for Heroic Strike / Maul / Raptor Strike
+            -- Per-attack colours (queueHSR/G/B/A, queueRaptor..., queueMaul...) are unset by default: they inherit the shared Queued colour above.
             queueCleaveR = 0.95, queueCleaveG = 0.35, queueCleaveB = 0.25, queueCleaveA = 1,   -- Queued: Cleave
             activeR = 0.047, activeG = 0.824, activeB = 0.616, activeA = 1,   -- On: EUI teal #0CD29D
             pendingR = 0.659, pendingG = 0.502, pendingB = 0.949, pendingA = 1,   -- Waiting: violet #A880F2

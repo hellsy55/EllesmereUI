@@ -9066,7 +9066,7 @@ L["Nameplate Icon"] = "Icône de barre d'info"
 L["Bars"] = "Barres"
 L["Cast Bars"] = "Barres d'incantation"
 L["Enemy"] = "Ennemi"
-L["Nameplate Kick Icons use this to auto assign kicks when a mob is initially marked"] = "Les icônes d'interruption de barre d'info l'utilisent pour assigner automatiquement les interruptions dès qu'un monstre est marqué"
+L["Nameplate Kick Icons use this to auto-assign kicks when a mob is first marked."] = "Les icônes d'interruption de barre d'info l'utilisent pour assigner automatiquement les interruptions dès qu'un monstre est marqué"
 L["Dismiss this warning"] = "Ignorer cet avertissement"
 
 -- == Unlock Mode point anchoring / overlap cycling (9.6.2) =============
