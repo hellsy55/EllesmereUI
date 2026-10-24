@@ -149,7 +149,7 @@ local ICON_EFFECTS = {
     { key = "swipe", label = "Cooldown Swipe",
       tooltip = "The dark sweep over the icon that clears as the interrupt comes back." },
     { key = "classBorder", label = "Class Color Border",
-      tooltip = "The icon's border in the kicker's class color; black when the kicker is hidden." },
+      tooltip = "The icon's border in the kicker's class color; black when the game hides the kicker's class." },
     { key = "desaturate", label = "Desaturate on Cooldown",
       tooltip = "Grey the icon while the kicker's interrupt is on cooldown." },
 }
@@ -230,11 +230,26 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
     EllesmereUI:SetContentHeader(ns._KT_HeaderBuilder)
     parent._showRowDivider = true
 
+    -- The experimental notice between the header preview and the settings, in
+    -- the empty-selection warning's red. The page wrapper is a pool host, so a
+    -- rebuild hands this font string back instead of making a new one.
+    if not EllesmereUI._prebuilding then
+        local pad = EllesmereUI.CONTENT_PAD
+        local warn = EllesmereUI.MakeFont(parent, 15, nil, 1, 0.4, 0.4)
+        warn:SetJustifyH("CENTER")
+        warn:SetWordWrap(true)
+        warn:SetSpacing(4)
+        warn:SetWidth(parent:GetWidth() - pad * 2)
+        warn:SetText(EllesmereUI.L("Like all current kick trackers, this feature is experimental and may stop working if\nBlizzard decides to hotfix the workaround that makes this possible."))
+        EllesmereUI.PP.Point(warn, "TOPLEFT", parent, "TOPLEFT", pad, y - 10)
+        y = y - 10 - math.ceil(warn:GetStringHeight()) - 2
+    end
+
     _, h = W:SectionHeader(parent, "KICK TRACKER", y); y = y - h
 
     row, h = W:DualRow(parent, y,
         { type="toggle", text="Enable Kick Tracker",
-          tooltip="Who in the group kicked each enemy and when their interrupt comes back, read from Blizzard's own damage meter (which must be on). Others' cooldowns follow their class, spec and talents, read before a key starts, yours your own talents.",
+          tooltip="Who in the group kicked each enemy and when their interrupt comes back, read from Blizzard's own damage meter (which must be on). Others' cooldowns follow their class, spec and talents, read before a key starts; yours follow your own talents.",
           getValue=On,
           setValue=EllesmereUI.SectionToggleSetValue(function(v)
               -- The runtime alone: the section rebuild that follows builds
@@ -245,7 +260,7 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
           end) },
         { type="dropdown", text="Where to Show",
           disabled=Off, disabledTooltip=REQ,
-          tooltip="The tracker runs in Mythic and Mythic+ dungeons and arenas only; untick one to leave it out there.",
+          tooltip="The tracker runs in Mythic and Mythic+ dungeons and arenas only; untick one to turn it off there.",
           values={ __placeholder="..." }, order={ "__placeholder" },
           getValue=function() return "__placeholder" end, setValue=function() end });  y = y - h
     if not EllesmereUI._prebuilding then
@@ -279,7 +294,7 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
         local rgn = row._leftRegion
         if rgn and rgn._control then
             EllesmereUI.AttachEmptyFilterWarn(rgn, rgn._control,
-                EllesmereUI.L("Nameplate Kick Icons use this to auto assign kicks when a mob is initially marked"),
+                EllesmereUI.L("Nameplate Kick Icons use this to auto-assign kicks when a mob is first marked."),
                 function()
                     return not PlatesOn() or (tonumber(Get("focusMarker", 0)) or 0) ~= 0
                         or (EllesmereUIDB and EllesmereUIDB.dismissedKickMarkerWarning) == true
@@ -398,7 +413,7 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
 
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Show Above Overlapping Nameplates",
-              tooltip="The icons draw over every other nameplate, so an overlapping plate never hides one. Off, an icon stays inside its own nameplate, behind any plate that covers it.",
+              tooltip="The icons draw over every other nameplate, so an overlapping plate never hides one. When off, an icon stays inside its own nameplate, behind any plate that covers it.",
               disabled=PlatesOff, disabledTooltip=REQ_PLATES,
               getValue=function() return Get("aboveOverlap", true) ~= false end,
               setValue=function(v) Set("aboveOverlap", v and true or false) end },
@@ -412,7 +427,7 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
 
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Show Bars",
-              tooltip="A row per group member with an interrupt: its icon, their name on a bar in their class color, and the seconds left while it is on cooldown.",
+              tooltip="A row per group member with an interrupt: the interrupt's icon, their name on a bar in their class color, and the seconds left while it is on cooldown.",
               getValue=BarsOn,
               setValue=function(v)
                   Set("showBars", v and true or false)
@@ -502,7 +517,7 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
               values={ __placeholder="..." }, order={ "__placeholder" },
               getValue=function() return "__placeholder" end, setValue=function() end },
             { type="toggle", text="Include Yourself",
-              tooltip="Your own row, its cooldown from your own talents.",
+              tooltip="Adds your own row, with its cooldown read from your talents.",
               disabled=BarsOff, disabledTooltip=REQ_BARS,
               getValue=function() return Get("barIncludeSelf", true) == true end,
               setValue=function(v) Set("barIncludeSelf", v and true or false) end });  y = y - h

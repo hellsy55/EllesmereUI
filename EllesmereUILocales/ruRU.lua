@@ -9060,7 +9060,7 @@ L["Nameplate Icon"] = "Иконка индикатора"
 L["Bars"] = "Полосы"
 L["Cast Bars"] = "Полосы заклинаний"
 L["Enemy"] = "Враг"
-L["Nameplate Kick Icons use this to auto assign kicks when a mob is initially marked"] = "Иконки прерываний на индикаторе используют это, чтобы автоматически привязывать прерывания, как только моб впервые помечен"
+L["Nameplate Kick Icons use this to auto-assign kicks when a mob is first marked."] = "Иконки прерываний на индикаторе используют это, чтобы автоматически привязывать прерывания, как только моб впервые помечен"
 L["Dismiss this warning"] = "Скрыть это предупреждение"
 
 -- == Unlock Mode point anchoring / overlap cycling (9.6.2) =============

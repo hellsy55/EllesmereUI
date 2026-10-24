@@ -267,12 +267,12 @@ end
 local BAND_EPS = 0.0001
 local BAND_MAX = 24
 
-local function GcdBandPoints(prefix, gcd, upTo, firstLabel)
+local function GcdBandPoints(fmt, gcd, upTo, firstLabel)
     local pts = {}
     for n = 1, BAND_MAX do
         local t = (n == 1) and 0 or ((n - 1) * gcd + BAND_EPS)
         if n > 1 and t >= upTo then break end
-        pts[#pts + 1] = { threshold = t, format = (n == 1 and firstLabel) or (prefix .. n) }
+        pts[#pts + 1] = { threshold = t, format = (n == 1 and firstLabel) or string.format(fmt, n) }
     end
     return pts
 end
@@ -292,17 +292,19 @@ local function SurgeFormatter(mode, thr, gcd)
 
     local Up   = Enum and Enum.NumericRuleFormatRounding and Enum.NumericRuleFormatRounding.Up
     local Down = Enum and Enum.NumericRuleFormatRounding and Enum.NumericRuleFormatRounding.Down
+    local soulInCount = EllesmereUI.L("Soul in %d")
+    local soulInTenths = EllesmereUI.L("Soul in %.1f")
     local attempts
     if mode == "gcd" then
         attempts = {
-            GcdBandPoints("Soul in ", gcd, thr, "Soul in 1"),
-            { { threshold = 0, format = "Soul in %d", step = 1, rounding = Up, components = { { div = gcd } } } },
-            { { threshold = 0, format = "Soul in %.1f", step = 0.1, rounding = Down } },
+            GcdBandPoints(soulInCount, gcd, thr, string.format(soulInCount, 1)),
+            { { threshold = 0, format = soulInCount, step = 1, rounding = Up, components = { { div = gcd } } } },
+            { { threshold = 0, format = soulInTenths, step = 0.1, rounding = Down } },
             { { threshold = 0, format = "%.1f", step = 0.1, rounding = Down } },
         }
     else
         attempts = {
-            { { threshold = 0, format = "Soul in %.1f", step = 0.1, rounding = Down } },
+            { { threshold = 0, format = soulInTenths, step = 0.1, rounding = Down } },
             { { threshold = 0, format = "%.1f", step = 0.1, rounding = Down } },
         }
     end
@@ -342,14 +344,15 @@ local function SoulFormatter(mode, gcd)
     local Down = Enum and Enum.NumericRuleFormatRounding and Enum.NumericRuleFormatRounding.Down
     local f
     if mode == "gcd" then
-        f = NewFormatter(GcdBandPoints("", gcd, SOUL_BAND_MAX_S, "LAST"))
+        local lastText = EllesmereUI.L("LAST")
+        f = NewFormatter(GcdBandPoints("%d", gcd, SOUL_BAND_MAX_S, lastText))
         if not f then
             -- Divisor fallback. If the literal-only "LAST" band is what was
             -- refused, the same ceil renders a "1" there instead -- still red,
             -- because the color flip rides the curve, not the text.
             local count = { threshold = gcd + BAND_EPS, format = "%d", step = 1, rounding = Up,
                 components = { { div = gcd } } }
-            f = NewFormatter({ { threshold = 0, format = "LAST" }, count })
+            f = NewFormatter({ { threshold = 0, format = lastText }, count })
                 or NewFormatter({
                     { threshold = 0, format = "%d", step = 1, rounding = Up, components = { { div = gcd } } },
                     count,
@@ -655,7 +658,8 @@ local function StyleSample(fs)
         fs._asStamp = stamp
     end
     fs:SetTextColor(PreColor())
-    fs:SetText(mode == "gcd" and "Soul in 3" or "Soul in 3.2")
+    fs:SetText(mode == "gcd" and string.format(EllesmereUI.L("Soul in %d"), 3)
+        or string.format(EllesmereUI.L("Soul in %.1f"), 3.2))
     return size, changed
 end
 _G._ERB_StyleArcaneSoulSample = StyleSample
@@ -711,9 +715,9 @@ local function DemoText(fs, t, gcd)
         -- The hide rule owns thr itself: the first visible value is below it.
         local left = math.min(thr - t, thr - 0.01)
         if PhaseMode("surge") == "gcd" then
-            fs:SetFormattedText("Soul in %d", DemoGcdCount(left, gcd))
+            fs:SetFormattedText(EllesmereUI.L("Soul in %d"), DemoGcdCount(left, gcd))
         else
-            fs:SetFormattedText("Soul in %.1f", math.floor(left * 10) / 10)
+            fs:SetFormattedText(EllesmereUI.L("Soul in %.1f"), math.floor(left * 10) / 10)
         end
         r, g, b = PreColor()
     else
@@ -724,7 +728,7 @@ local function DemoText(fs, t, gcd)
         else
             local n = DemoGcdCount(left, gcd)
             if n == 1 then
-                fs:SetText("LAST")
+                fs:SetText(EllesmereUI.L("LAST"))
                 r, g, b = LastColor()
             else
                 fs:SetFormattedText("%d", n)

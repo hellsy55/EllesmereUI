@@ -339,7 +339,7 @@ local function ShowKickTrackerPopup()
     footnote:SetJustifyH("CENTER")
     PP.Point(footnote, "BOTTOM", popup, "BOTTOM", 0, 16)
     footnote:SetText(isOn and EllesmereUI.L("The Kick Tracker is under Mythic+ Tools in /eui.")
-        or EllesmereUI.L("Turning it on takes effect at once, no reload. The Kick Tracker is under Mythic+ Tools in /eui."))
+        or EllesmereUI.L("Turning it on takes effect immediately, no reload needed. The Kick Tracker is under Mythic+ Tools in /eui."))
 
     dimmer:Show()
 

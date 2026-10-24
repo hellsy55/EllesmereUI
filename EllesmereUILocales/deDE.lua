@@ -10120,7 +10120,7 @@ L["Cast Bars Timer Size"] = "Zauberleisten Timergröße"
 L["Cast Bars"] = "Zauberleisten"
 L["Adds a copyable Wowhead link to the right-click menu of quests in the quest tracker and quest log."] = "Ergänzt das Rechtsklick-Menü von Quests in der Questverfolgung und im Questlog um einen kopierbaren Wowhead-Link."
 L["Nameplate Icon"] = "Namensplaketten-Symbol"
-L["Nameplate Kick Icons use this to auto assign kicks when a mob is initially marked"] = "Namensplaketten-Kick-Symbole nutzen dies, um Unterbrechungen automatisch zuzuordnen, sobald ein Gegner markiert wird"
+L["Nameplate Kick Icons use this to auto-assign kicks when a mob is first marked."] = "Namensplaketten-Kick-Symbole nutzen dies, um Unterbrechungen automatisch zuzuordnen, sobald ein Gegner markiert wird"
 L["Dismiss this warning"] = "Diese Warnung ausblenden"
 
 -- == Unlock Mode point anchoring / overlap cycling (9.6.2) =============

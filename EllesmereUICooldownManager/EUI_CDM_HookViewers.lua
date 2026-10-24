@@ -754,7 +754,7 @@ function ns.SetupViewerHooks()
                                 -- icon dark for the rest of the session. Re-assert from
                                 -- the same swipe colour the hook reads so both edges
                                 -- self-heal within a tick.
-                                if fd and not fd._isBuffViewerFrame
+                                if fd and not fd.procGlowActive and not fd._isBuffViewerFrame
                                    and (fd._activeGlowOn or ns._cdmAnyActiveGlow) then
                                     local swipeColor = frame.cooldownSwipeColor
                                     local r
