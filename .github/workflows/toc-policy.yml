@@ -1,0 +1,36 @@
+name: TOC compatibility
+
+on:
+  push:
+    branches: [new-features, 12.1.7-PTR-features]
+    paths: &toc_paths
+      - '**.[tT][oO][cC]'
+      - '.tools/normalize_tocs.py'
+      - '.tools/toc_policy.json'
+      - '.tools/release_manifest.py'
+      - '.tools/release.sh'
+      - '.tools/release.bat'
+      - '.tools/check_lib_updates.py'
+      - '.tools/tests/test_toc_policy.py'
+      - '.pkgmeta'
+      - '.agents/skills/eui-update/SKILL.md'
+      - '.github/workflows/toc-policy.yml'
+      - '.github/workflows/release.yml'
+  pull_request:
+    branches: [new-features, 12.1.7-PTR-features]
+    paths: *toc_paths
+
+permissions:
+  contents: read
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test manifest and release policy
+        run: python3 -B .tools/tests/test_toc_policy.py
+      - name: Validate the event destination without modifying files
+        run: python3 -B .tools/normalize_tocs.py check --github-event "$GITHUB_EVENT_PATH"

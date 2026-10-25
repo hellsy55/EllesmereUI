@@ -1,4 +1,4 @@
-## Interface: 120107, 16001
+## Interface: 120107
 ## AllowLoadGameType: standard
 ## Title: |cff0cd29fEllesmereUI|r Mythic+ Tools
 ## Category: |cff0cd29fEllesmere|rUI

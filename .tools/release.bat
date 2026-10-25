@@ -1,5 +1,6 @@
 @echo off
-rem Build a local release zip in .release\ via release.sh (needs Git for Windows plus svn and zip on PATH).
+rem Build a validated local zip. Pass --target BRANCH for detached checkouts.
+rem Set EUI_PYTHON to the validated Python 3 executable; requires Git Bash, svn and zip.
 setlocal
 
 set "BASH=%ProgramFiles%\Git\bin\bash.exe"

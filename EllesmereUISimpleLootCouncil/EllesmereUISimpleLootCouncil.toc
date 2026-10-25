@@ -1,4 +1,5 @@
-## Interface: 120107, 16001
+## AllowLoadGameType: standard
+## Interface: 120107
 ## Title: |cff0cd29fEllesmereUI|r Simple Loot Council
 ## Category: Loot
 ## Group: EllesmereUI
