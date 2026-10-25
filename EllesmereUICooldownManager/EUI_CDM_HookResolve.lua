@@ -400,9 +400,7 @@ function ns.ApplyActiveOverlays(frame, fd, ss, isActive, bd)
 
     -- Active glow (per-spell)
     local hasGlow = ss and ss.activeGlow and ss.activeGlow > 0
-    if fd.procGlowActive then
-        fd._activeGlowOn = false
-    elseif isActive and hasGlow then
+    if isActive and hasGlow then
         if fd.glowOverlay then
             -- Unified glow color takes priority
             local gr, gg, gb = ns.ResolveGlowColor(ss)

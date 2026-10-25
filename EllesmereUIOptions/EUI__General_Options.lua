@@ -123,7 +123,7 @@ EllesmereUI._LEGENDS = {
         "Natasi", "Drekonus", "Quiim", "Keato03",
         "Capa", "e_luvin", "ccpoppin1", "Arjax",
         "Excelvior", "Marple_V", "shy_x00", "Ferniss",
-        "Vall",
+        "Vall", "Collie",
     },
 }
 -- END GENERATED DONORS
@@ -231,6 +231,27 @@ end
 --  deep-links via NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "9.6.8",
+        mini = true,
+        features = {
+            {
+                -- The Mail card of Window Skins (retail only: its ALT LIST section is not built on WoW Forever).
+                module = "Blizzard Skins+",
+                title  = "Mail Alt List",
+                desc   = "Turn on Show Alt List in the Mail card to list your alts beside Send Mail: click one to address the mail, right-click to ignore it",
+                nav    = (not EllesmereUI.IS_FOREVER) and { module = "EllesmereUIBlizzardSkin", page = "Blizzard Window Skins",
+                           section = "ALT LIST", highlight = "Show Alt List" } or nil,
+            },
+        },
+        fixes = {
+            { module = "AuraBuff Reminders", text = "Reminders no longer look up your map on every refresh, which steers clear of a game bug in Murder Row." },
+            { module = "Cooldown Manager", text = "Proc glows work as they did before 9.6.7 again: buff icons no longer light up with proc glows the Buff Glow setting could not turn off, and a proc no longer replaces the Active State Glow." },
+            { module = "Mythic+ Tools", text = "Other Mythic+ timer addons no longer trigger the incompatible addon warning while EllesmereUI's own Mythic+ Timer is turned off, and the warning now says how to turn it off." },
+            { module = "Profiles & Presets", text = "The Window Skins part of an imported profile string now applies only the Window Skins settings it carries." },
+            { module = "Localization", text = "Brazilian Portuguese, German, Korean and Traditional Chinese translations updated for the latest options, and a non-English game client now loads only its own language's translations at login instead of all ten, so EUI Options Language there greys out the ones it no longer loads." },
+        },
+    },
     {
         version = "9.6.7",
         mini = true,
@@ -1670,13 +1691,6 @@ EllesmereUI._WHATSNEW_PATCHES = {
             { module = "Localization", text = "Traditional Chinese translation updated for the latest options, and Unlock Mode's size-match, anchor and override messages can now be translated." },
         },
     },
-    {
-        version = "9.3.6",
-        mini = true,
-        fixes = {
-            { module = "Raid Frames", text = "Click-cast bindings with Enable Dynamic Rez, HoverCast keys holding both a friendly and an enemy spell, and HoverCast Dynamic Rez keys work again." },
-        },
-    },
 }
 
 -------------------------------------------------------------------------------
@@ -2244,9 +2258,21 @@ initFrame:SetScript("OnEvent", function(self)
                 })
             end
 
+            -- A non-English game client reads only its own translation file, its
+            -- pair's and none other: EllesmereUILocales.toc tags each file with
+            -- the client languages that load it (keep LANG_PAIR in step with its
+            -- pairs). English clients read every file.
+            local LANG_PAIR = { esMX = "esES", zhCN = "zhTW", zhTW = "zhCN" }
+            local clientLocale = GetLocale()
+            local function LanguageUnavailable(v)
+                if v == "auto" or v == "enUS" or clientLocale == "enUS" or clientLocale == "enGB" then return false end
+                if v == clientLocale or LANG_PAIR[clientLocale] == v then return false end
+                return "Needs the game client set to English or to this language."
+            end
+
             langCfg = { type="dropdown", text="EUI Options Language",
                 tooltip="The display language for the EllesmereUI options panel. Auto follows your game client. Untranslated text falls back to English.",
-                values=langValues, order=langOrder,
+                values=langValues, order=langOrder, disabledValues=LanguageUnavailable,
                 getValue=function() return (EllesmereUIDB and EllesmereUIDB.displayLocale) or "auto" end,
                 setValue=function(v)
                     if v == "auto" then v = nil end

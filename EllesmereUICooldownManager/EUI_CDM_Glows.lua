@@ -14,6 +14,7 @@ I.broken = true
 
 local CDM_SHAPES, ECME, EffectiveBarAlpha, FC = I.CDM_SHAPES, I.ECME, I.EffectiveBarAlpha, I.FC
 local _ecmeFC, _getFD, BuildAvailableSpellPool = I._ecmeFC, I._getFD, I.BuildAvailableSpellPool
+local ResolveInfoSpellID = I.ResolveInfoSpellID
 
 local StartNativeGlow, StopNativeGlow
 
@@ -610,6 +611,9 @@ local cdmBarIcons = {}
 -- Fast barData lookup by key (rebuilt in BuildAllCDMBars, avoids linear scan per tick)
 local barDataByKey = {}
 
+-- Claim generation: bumped at the end of every CollectAndReanchor pass and at BuildAllCDMBars'
+-- head, i.e. whenever the cdmBarIcons claim set can change. The proc-alert child map below rebuilds lazily against it.
+ns._cdmClaimGen = 0
 -- Resolution generation: bumped whenever spell resolution INPUTS change (SPELLS_CHANGED
 -- talent/spec churn, live SPELL_OVERRIDE_UPDATED flips, rebuilds). cooldownID-keyed resolution memos key their validity on it.
 ns._cdmResGen = 0
@@ -652,8 +656,9 @@ ns.GetCDMBarIcons = function(barKey)
 end
 
 -------------------------------------------------------------------------------
---  Proc glows follow spell activation events, independently of the aura that
---  Blizzard currently displays on the icon. Reanchors seed existing procs.
+--  Proc Glow System: hooks Blizzard's SpellAlertManager to show proc glows
+--  on our CDM icons when Blizzard fires ShowAlert/HideAlert on CDM children.
+--  Custom bars use SPELL_ACTIVATION_OVERLAY_GLOW_SHOW/HIDE events instead.
 -------------------------------------------------------------------------------
 local PROC_GLOW_STYLE = 6  -- "Modern WoW Glow" flipbook
 
@@ -685,87 +690,85 @@ local function GetBarKeyForBlizzChild(frame)
     return nil
 end
 
-local function ContainsProcSpellID(ids, sid)
-    for i = 1, #ids do if ids[i] == sid then return true end end
-    return false
-end
+local ResolveBlizzChildSpellID  -- forward-declare (defined below)
 
-local function AddProcSpellID(ids, sid)
-    if issecretvalue(sid) or type(sid) ~= "number" or sid <= 0 then return end
-    if ContainsProcSpellID(ids, sid) then return end
-    ids[#ids + 1] = sid
-end
-
--- Stable identities only: GetSpellID() can instead name the displayed target
--- aura. Cache successful resolutions until talent, override or rebuild inputs
--- change; unavailable metadata must be retried on the next event or reanchor.
-local function GetProcSpellIDs(icon, fd)
-    local fc = _ecmeFC[icon]
-    local child = (fc and fc.blizzChild) or icon
-    local cdID = child.cooldownID
-    if not cdID and child.cooldownInfo then
-        cdID = child.cooldownInfo.cooldownID
-    end
-    if type(cdID) ~= "number" then return nil end
-    -- Pool reuse must not carry sources from the previous cooldown.
-    if fd.procGlowCooldownID ~= cdID then
-        if fd.procGlowSpellIDs then wipe(fd.procGlowSpellIDs)
-        else fd.procGlowSpellIDs = {} end
-        fd.procGlowCooldownID = cdID
-    end
-    local m = ns._cdidProcMemo
-    if not m or m.gen ~= ns._cdmResGen then
-        m = { gen = ns._cdmResGen }
-        ns._cdidProcMemo = m
-    end
-    local hit = m[cdID]
-    if hit then return hit end
-    local info = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
-        and C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
-    if info then
-        local ids = {}
-        AddProcSpellID(ids, info.spellID)
-        AddProcSpellID(ids, info.overrideSpellID)
-        AddProcSpellID(ids, info.overrideTooltipSpellID)
-        if info.linkedSpellIDs then
-            for i = 1, #info.linkedSpellIDs do AddProcSpellID(ids, info.linkedSpellIDs[i]) end
+-- Find our icon mirroring a given Blizzard CDM child. In hook mode the icon IS the Blizzard
+-- child (identity check); falls back to spellID + override matching for proc glows on transformed spells.
+local function FindOurIconForBlizzChild(barKey, blizzChild)
+    -- O(1) common case: in hook mode our "icon" IS the claimed Blizzard child. Membership map
+    -- (child -> claimed barKey) rebuilt lazily whenever the claim generation moves; between passes
+    -- the claim set is stable. Weak keys so released viewer children never pin. A miss falls through to the scans below, so staleness can only cost the fast path, never invent a claim.
+    local m = ns._cdmChildClaimMap
+    if not m or m.gen ~= ns._cdmClaimGen then
+        m = setmetatable({ gen = ns._cdmClaimGen }, { __mode = "k" })
+        for bk, list in pairs(cdmBarIcons) do
+            for i = 1, #list do m[list[i]] = bk end
         end
-        if #ids > 0 then
-            m[cdID] = ids
-            return ids
+        ns._cdmChildClaimMap = m
+    end
+    if m[blizzChild] == barKey then return blizzChild end
+    local icons = cdmBarIcons[barKey]
+    if not icons then return nil end
+    for _, icon in ipairs(icons) do
+        local iifc = _ecmeFC[icon]
+        local bc = iifc and iifc.blizzChild
+        if icon == blizzChild or bc == blizzChild then return icon end
+    end
+    -- Fallback: match by spellID (covers override spells like HST -> Storm Stream)
+    local alertSid, alertBase = ResolveBlizzChildSpellID(blizzChild)
+    if alertSid then
+        for _, icon in ipairs(icons) do
+            local ifc = _ecmeFC[icon]
+            local isid = ifc and ifc.spellID
+            -- Second compare: the alert child's cooldownInfo carries its BASE id, so an icon
+            -- assigned the base of a transformed spell matches on a plain field compare -- no per-icon API translation.
+            if isid == alertSid or (alertBase and isid == alertBase) then return icon end
+        end
+        -- Override mapping (base <-> override). Last resort: only reachable when the icon's assigned id and the alert's base id differ yet still override-resolve to the alert spell.
+        for _, icon in ipairs(icons) do
+            local ifc = _ecmeFC[icon]
+            local iconSid = ifc and ifc.spellID
+            if iconSid and C_SpellBook and C_SpellBook.FindSpellOverrideByID then
+                local ovr = C_SpellBook.FindSpellOverrideByID(iconSid)
+                if ovr and ovr == alertSid then return icon end
+            end
         end
     end
     return nil
 end
 
-local function ReadProcSpellState(sources, sid)
-    local active = C_SpellActivationOverlay.IsSpellOverlayed(sid)
-    if issecretvalue(active) then return nil end
-    sources[sid] = active and true or nil
-    return active == true
-end
-
-local function ReadProcGlowState(fd, ids, expiredSpellID)
-    local sources = fd.procGlowSpellIDs
-    local isActive, unknown = false, false
-    for i = 1, #ids do
-        if ids[i] ~= expiredSpellID then
-            local active = ReadProcSpellState(sources, ids[i])
-            if active == nil then unknown = true
-            elseif active then isActive = true end
+-- Resolve spellID from a Blizzard CDM child (IsSpellOverlayed guard, proc glow matching).
+-- Returns (resolvedSid, baseSid). cooldownID-keyed memo: the cdID -> spell mapping only moves
+-- on resolution edges (talent churn, live override flips), all of which bump ns._cdmResGen and
+-- drop the memo wholesale, so the per-alert API round-trip collapses to a hash hit. Stored false = resolved to nothing (distinct from never-resolved).
+ResolveBlizzChildSpellID = function(blizzChild)
+    local cdID = blizzChild.cooldownID
+    if not cdID and blizzChild.cooldownInfo then
+        cdID = blizzChild.cooldownInfo.cooldownID
+    end
+    if type(cdID) ~= "number" then return nil end
+    local m = ns._cdidSidMemo
+    if not m or m.gen ~= ns._cdmResGen then
+        m = { gen = ns._cdmResGen }
+        ns._cdidSidMemo = m
+    end
+    local hit = m[cdID]
+    if hit ~= nil then
+        if hit == false then return nil end
+        return hit[1], hit[2]
+    end
+    local info = C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo
+        and C_CooldownViewer.GetCooldownViewerCooldownInfo(cdID)
+    if info then
+        local sid = ResolveInfoSpellID(info)
+        if sid then
+            local entry = { sid, info.spellID }
+            m[cdID] = entry
+            return sid, info.spellID
         end
     end
-    -- Retired override identities remain relevant while their procs are up.
-    for sid in pairs(sources) do
-        if not ContainsProcSpellID(ids, sid) then
-            local active = ReadProcSpellState(sources, sid)
-            if active == nil then unknown = true
-            elseif active then isActive = true end
-        end
-    end
-    if isActive then return true end
-    if unknown then return nil end
-    return false
+    m[cdID] = false
+    return nil
 end
 
 -- Unified glow color for a spell: r,g,b or nil for default. ss.glowColor "class" -> class color, "custom" -> ss.glowColorR/G/B.
@@ -855,7 +858,6 @@ local function ShowProcGlow(icon, cr, cg, cb)
     -- ends, proc or not.
     if glow._glowActive then StopNativeGlow(glow) end
     if fd then
-        fd._activeGlowOn = false
         local bo = fd.blackoutOverlay
         if not (bo and bo._glowActive) then
             if fd._cdStateGlowOn or fd._presetCdGlowOn then fd._cdGlowOwed = true end
@@ -871,7 +873,7 @@ local function StopProcGlow(icon)
     if not icon or not (fd and fd.procGlowActive) then return end
     local glow = fd and fd.glowOverlay or icon._glowOverlay
     StopNativeGlow(glow)
-    fd.procGlowActive = false
+    if fd then fd.procGlowActive = false end
     -- The proc stomped any CD-state glow on this shared overlay; re-evaluate on the next frame
     -- so the glow comes straight back instead of waiting for the next cooldown/power edge:
     -- this icon alone when a CD-state glow is owed to it (replaced or held back by the proc),
@@ -882,15 +884,6 @@ local function StopProcGlow(icon)
         ns.CdGlowKick(icon)
     elseif fd._cdGlowBoundSid and ns.QueueCDGlowResourceCheck then
         ns.QueueCDGlowResourceCheck()
-    end
-end
-
-local function SetProcGlowState(icon, isActive)
-    local fd = _getFD(icon)
-    if not fd then return end
-    if fd.procGlowActive ~= isActive then
-        if isActive then ShowProcGlow(icon) else StopProcGlow(icon) end
-        FC(icon).lastTex = nil
     end
 end
 
@@ -910,54 +903,41 @@ local function InstallProcGlowHooks()
             cdmChild.SpellActivationAlert:SetAlpha(0)
             cdmChild.SpellActivationAlert:Hide()
         end
+
+        -- Apply immediately: no defer needed, icon mapping is current from the last reanchor.
+        local ourIcon = FindOurIconForBlizzChild(barKey, cdmChild)
+        if not ourIcon then return end
+        ShowProcGlow(ourIcon)
+        -- Force texture re-evaluation so override textures apply immediately
+        FC(ourIcon).lastTex = nil
+    end)
+
+    hooksecurefunc(ActionButtonSpellAlertManager, "HideAlert", function(_, frame)
+        if not frame then return end
+        local barKey, cdmChild = GetBarKeyForBlizzChild(frame)
+        if not barKey or not cdmChild then return end
+        local ourIcon = FindOurIconForBlizzChild(barKey, cdmChild)
+        local fd = ourIcon and _getFD(ourIcon)
+        if not ourIcon or not (fd and fd.procGlowActive) then return end
+
+        -- Trust Blizzard's HideAlert: stop immediately. A re-fired ShowAlert during an internal refresh restarts the glow next frame.
+        StopProcGlow(ourIcon)
+        -- Force texture re-evaluation so the original texture restores
+        FC(ourIcon).lastTex = nil
     end)
 
     _procGlowHooksInstalled = true
 end
 
--- Ordinary reanchors use overlay events; seed only new or changed identities.
--- Login has no stamps, and BuildAllCDMBars invalidates them via _cdmResGen.
+-- No-ops kept so existing call sites don't error: proc glows are fully hook-driven for every bar, and the ShowAlert hooks installed at file load catch Blizzard's login re-fire.
 local function ScanExistingProcGlows()
-    local gen = ns._cdmResGen
-    for _, icons in pairs(cdmBarIcons) do
-        for _, icon in ipairs(icons) do
-            local fd = _getFD(icon)
-            local ids = fd and GetProcSpellIDs(icon, fd)
-            if ids and (fd.procGlowReconcileCooldownID ~= fd.procGlowCooldownID
-                or fd.procGlowReconcileGen ~= gen) then
-                local isActive = ReadProcGlowState(fd, ids)
-                if isActive ~= nil then
-                    SetProcGlowState(icon, isActive)
-                    fd.procGlowReconcileCooldownID = fd.procGlowCooldownID
-                    fd.procGlowReconcileGen = gen
-                end
-            end
-        end
-    end
 end
 ns.ScanExistingProcGlows = ScanExistingProcGlows
 
-local function OnProcGlowEvent(event, spellID)
-    if issecretvalue(spellID) or type(spellID) ~= "number" then return end
-    local isActive = event == "SPELL_ACTIVATION_OVERLAY_GLOW_SHOW"
-    for _, icons in pairs(cdmBarIcons) do
-        for _, icon in ipairs(icons) do
-            local fd = _getFD(icon)
-            local ids = fd and GetProcSpellIDs(icon, fd)
-            local sources = fd and fd.procGlowSpellIDs
-            if (sources and sources[spellID]) or (ids and ContainsProcSpellID(ids, spellID)) then
-                sources[spellID] = isActive or nil
-                -- A hide ends this spell's proc, not another linked spell's.
-                local state = isActive or next(sources) ~= nil
-                if not state and ids then state = ReadProcGlowState(fd, ids, spellID) end
-                if state ~= nil then SetProcGlowState(icon, state) end
-            end
-        end
-    end
-end
+local function OnProcGlowEvent() end
 ns.OnProcGlowEvent = OnProcGlowEvent
 
--- Suppress native alerts before Blizzard's login replay; EUI owns its glow.
+-- Install at file-load time: Blizzard re-fires ShowAlert during PLAYER_LOGIN for active procs, and the hooks MUST precede that.
 InstallProcGlowHooks()
 
 

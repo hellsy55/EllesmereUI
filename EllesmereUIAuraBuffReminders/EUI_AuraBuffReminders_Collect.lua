@@ -464,6 +464,47 @@ function EABR.EmitWeaponEnchantReminders(missing, co)
     end
 end
 
+-- The Inky Black Potion reminder's zone test reads the player's map from
+-- PLAYER_MAP_CHANGED, so a refresh never asks the game for it (the game's
+-- own map lookup misbehaves in places, Murder Row on 12.1.5). The watch runs
+-- only while that reminder has zones listed and can show; it reads the map
+-- once when it starts and after each loading screen, and a map change that
+-- moves the player into or out of the listed zones asks for one refresh.
+local inkyMap = { on = false, key = "0", inZone = false }
+
+local function InkyMapRead(mapID)
+    inkyMap.key = tostring(mapID or 0)
+    local nowIn = (inkyMap.set and inkyMap.set[inkyMap.key]) and true or false
+    if nowIn ~= inkyMap.inZone then
+        inkyMap.inZone = nowIn
+        I.RequestRefresh()
+    end
+end
+
+local function InkyMapWatch(want)
+    if want == inkyMap.on then return end
+    inkyMap.on = want
+    local f = inkyMap.frame
+    if not want then
+        f:UnregisterAllEvents()
+        return
+    end
+    if not f then
+        f = CreateFrame("Frame")
+        f:SetScript("OnEvent", function(_, event, _, newMapID)
+            if event == "PLAYER_MAP_CHANGED" then
+                InkyMapRead(newMapID)
+            else
+                InkyMapRead(C_Map.GetBestMapForUnit("player"))
+            end
+        end)
+        inkyMap.frame = f
+    end
+    f:RegisterEvent("PLAYER_MAP_CHANGED")
+    f:RegisterEvent("PLAYER_ENTERING_WORLD")
+    inkyMap.key = tostring(C_Map.GetBestMapForUnit("player") or 0)
+end
+
 local function CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
 local co = db.profile.consumables
 -- Class specials (poisons/rites/imbues/shields) share one "Where to Show"
@@ -695,9 +736,11 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
         end
 
         -- Inky Black Potion (zone-specific)
+        local inkyWatch = false
         if co.enabled.inky_black and EABR.ConsumableShows(co, "inky_black", inInstance) then
             local zones = co.inkyBlackZones or ""
             if zones ~= "" then
+                inkyWatch = true
                 -- Cache parsed zone set on the string itself
                 if not co._inkyZoneSet or co._inkyZoneSrc ~= zones then
                     local s = {}
@@ -705,8 +748,10 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                     co._inkyZoneSet = s
                     co._inkyZoneSrc = zones
                 end
-                local currentZone = tostring(C_Map.GetBestMapForUnit("player") or 0)
-                if co._inkyZoneSet[currentZone] then
+                InkyMapWatch(true)
+                inkyMap.set = co._inkyZoneSet
+                inkyMap.inZone = co._inkyZoneSet[inkyMap.key] or false
+                if inkyMap.inZone then
                     local hasPotion = EABR._resolved.inky.hasPotion
                     if not PlayerHasInkyBlackness() and hasPotion then
                         local e = AcquireEntry()
@@ -722,6 +767,7 @@ local specialsActive = EABR.SectionShows(co.specialsWhereToShow, inInstance)
                 end
             end
         end
+        if not inkyWatch then InkyMapWatch(false) end
     end -- consumables block
 
     -- Earth Shield self-buff (383648), only with Elemental Orbit. NOT
@@ -857,6 +903,7 @@ end
 -- CollectTalentReminders moved to EllesmereUIABR_TalentReminders.lua
 
 I.CollectAuras, I.CollectConsumables = CollectAuras, CollectConsumables
-I.CollectRaidBuffs, I.HideAllIcons, I.LayoutIcons = CollectRaidBuffs, HideAllIcons, LayoutIcons
+I.CollectRaidBuffs, I.HideAllIcons, I.InkyMapWatch = CollectRaidBuffs, HideAllIcons, InkyMapWatch
+I.LayoutIcons = LayoutIcons
 I.ResizeAnchorCentered, I.ShowIcon = ResizeAnchorCentered, ShowIcon
 I.broken = false

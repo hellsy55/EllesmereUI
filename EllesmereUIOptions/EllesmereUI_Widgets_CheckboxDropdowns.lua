@@ -150,6 +150,9 @@ end
 --  opts.dimLocked: locked rows dim their checkbox too, not only the label.
 --  opts.noAllLabel: the summary names every checked row even when all are
 --  checked (a selection, not a filter: never "All").
+--  opts.countLabel: a partly checked list reads "3 of 5" instead of naming its
+--  checked rows (a long list of names, such as characters); "All" and the
+--  empty label stay.
 --  opts.disabled (fn) + disabledTooltip/rawTooltip/requireState (as
 --  ResolveDisabledTip): greyed and click-blocked while it answers true, the
 --  reason on hover, re-checked with the page's widgets.
@@ -226,6 +229,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
         local sep = opts.separatorFn and opts.separatorFn() or ", "
         if #names == 0 then base = opts.emptyLabel and EllesmereUI.L(opts.emptyLabel) or EllesmereUI.L("None")
         elseif #names == total and not opts.noAllLabel then base = EllesmereUI.L("All")
+        elseif opts.countLabel then base = EllesmereUI.Lf("%1$d of %2$d", #names, total)
         else base = table.concat(names, sep) end
         if hiddenCount > 0 then base = base .. " (-" .. hiddenCount .. ")" end
         return base

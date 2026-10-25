@@ -1342,6 +1342,13 @@ _G._EMT_Apply = function()
     if ns.KT_Refresh then ns.KT_Refresh() end
 end
 
+-- Whether the Mythic+ timer window itself is on. The parent's incompatible
+-- addon check asks this before naming another Mythic+ timer addon: those only
+-- clash with the timer window, not with the rest of Mythic+ Tools.
+_G._EMT_IsTimerEnabled = function()
+    return (db and db.profile and db.profile.enabled) and true or false
+end
+
 -- Preset system removed. Users tweak settings directly.
 
 -- Reset the current profile back to defaults.
