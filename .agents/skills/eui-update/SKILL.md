@@ -15,9 +15,9 @@ At workflow entry, initialize or reuse the root and environment in the shared [m
 
 Use `git status --porcelain=v1 -uall` once before mutations, `git branch --show-current`, and `git rev-parse` for relevant refs. Preserve preexisting changes. Fetch upstream once per execution, quietly; fetch origin in the same invocation when possible (`git fetch --quiet --multiple upstream origin`). Reuse fetched refs. Do not print fetch progress or raw command output unless an error needs explanation. Refresh status only after an operation that could change the working tree. Use `git merge-base --is-ancestor`, `git rev-list --count`, and `git diff --name-only` or `--name-status` rather than a full log or diff for initial decisions.
 
-Before any checkout or merge, compare ancestry. If the planned sync needs a new merge commit, resolve and freeze `lua_runtime` through the shared maintenance context before the first branch mutation of that execution. Read-only checks establish this need; no-op and fast-forward-only syncs skip compiler discovery. Reuse the pinned compiler for guardrails before each approved commit. If the source is already an ancestor of the destination, skip that checkout and merge. Do not run a merge merely to get `Already up to date`. If refs diverge unexpectedly, stop for the applicable human conflict/branch decision; never overwrite commits. Report `main` before Retail, even for a no-op.
+Before any checkout or merge, compare ancestry. If the planned sync needs a new merge commit or manifest correction commit, resolve and freeze `lua_runtime` through the shared maintenance context before the first branch mutation of that execution. Read-only checks establish this need; inspect incoming manifests in an isolated copy with the explicit destination when a fast-forward is possible. A clean fast-forward skips compiler discovery only if destination manifest validation also passes. Reuse the pinned compiler for guardrails before each approved commit. If the source is already an ancestor of the destination, skip the merge, but still perform the manifest checkpoint below. Do not run a merge merely to get `Already up to date`. If refs diverge unexpectedly, stop for the applicable human conflict/branch decision; never overwrite commits. Report `main` before Retail, even for a no-op.
 
-After the single successful fetch, retain a compact per-sync record: source/destination refs and SHAs, ancestry, and incoming count. Only if incoming exists, add the merge base, changed paths/name-status, and overlap yes/no. `merge-base --is-ancestor` exit 0 proves ancestry, exit 1 means non-ancestry, and any other exit is an error; missing refs, failed fetches, and failed comparisons must never become no-op results. A no-op skips full diffs, semantic review, checkout, merge, and commits, but still checks whether publication is needed and proceeds to the mode's remaining stages and checkpoints. Refresh only facts affected by an actual mutation; do not fetch again without a specific reason that invalidates the snapshot.
+After the single successful fetch, retain a compact per-sync record: source/destination refs and SHAs, ancestry, and incoming count. Only if incoming exists, add the merge base, changed paths/name-status, and overlap yes/no. `merge-base --is-ancestor` exit 0 proves ancestry, exit 1 means non-ancestry, and any other exit is an error; missing refs, failed fetches, and failed comparisons must never become no-op results. A no-op skips full integration diffs, semantic review, merge, and sync commits, but still validates manifests before publication and proceeds to the mode's remaining stages and checkpoints. A manifest repair follows the controlled correction path below. Refresh only facts affected by an actual mutation; do not fetch again without a specific reason that invalidates the snapshot.
 
 ## Sync A: Retail from upstream
 
@@ -27,13 +27,50 @@ Report the latest release subject and short SHA, and the helper's count of post-
 
 `main` mirrors `upstream/main`; never use `main` as a bridge to Retail. If `main` is behind `upstream/main`, check out `main`, fast-forward only, and push `origin main` only when the remote needs it. Check `origin/main` ancestry before pushing and stop on unexpected remote divergence. If local `main` diverges from upstream, stop and read [merge conflicts](../../references/merge-conflicts.md) before any resolution.
 
-For `new-features`, first compare the local ref with fetched `origin/new-features`. Before fast-forwarding from origin, check whether `git rev-list new-features..origin/new-features` contains any SHA from `git rev-list <release_target>..upstream/main`; if so, stop for a human branch decision rather than automatically importing excluded upstream commits through origin. Fast-forward a behind local ref otherwise; stop on divergence for a human choice. Preserve existing Retail commits, including fork features/fixes after the release; do not reset or rewrite the branch to the release SHA. Before merging, record `base = git merge-base new-features <release_target>` and the exact incoming upstream range `base..<release_target>`. Count incoming commits with `git rev-list --count new-features..<release_target>`. Use `git merge-base --is-ancestor <release_target> new-features` for already-current status. If the release is already an ancestor of Retail, skip the upstream checkout and merge, create no upstream sync commit, and report that Retail is already current with the latest upstream release. Otherwise check out Retail, fast-forward to the release SHA if possible, or use `git merge --no-commit <release_target>` when a merge commit is required. Review staged changes and commit using the required English merge subject before pushing. Stop on a real conflict and read [merge conflicts](../../references/merge-conflicts.md); never resolve before the user's choice. Push Retail only if its ref changed or its remote is behind. Never merge `upstream/main` HEAD into Retail or use its ahead/behind counts to declare a Retail update available.
+For `new-features`, first compare the local ref with fetched `origin/new-features`. Before fast-forwarding from origin, check whether `git rev-list new-features..origin/new-features` contains any SHA from `git rev-list <release_target>..upstream/main`; if so, stop for a human branch decision rather than automatically importing excluded upstream commits through origin. Fast-forward a behind local ref otherwise; stop on divergence for a human choice. Preserve existing Retail commits, including fork features/fixes after the release; do not reset or rewrite the branch to the release SHA. Before merging, record `base = git merge-base new-features <release_target>` and the exact incoming upstream range `base..<release_target>`. Count incoming commits with `git rev-list --count new-features..<release_target>`. Use `git merge-base --is-ancestor <release_target> new-features` for already-current status. If the release is already an ancestor of Retail, skip the upstream merge, create no upstream sync commit, and report that Retail is already current with the latest upstream release; still run the manifest checkpoint. Otherwise check out Retail, fast-forward to the release SHA if possible, or use `git merge --no-commit <release_target>` when a merge commit is required. Run the manifest checkpoint before staged review and the approved commit. Stop on a real conflict and read [merge conflicts](../../references/merge-conflicts.md); never resolve before the user's choice. Push Retail only after the checkpoint, and only if its ref changed or its remote is behind. Never merge `upstream/main` HEAD into Retail or use its ahead/behind counts to declare a Retail update available.
 
 ## Sync B: PTR from Retail
 
-Compare `12.1.7-PTR-features` with fetched `origin/12.1.7-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip checkout and merge. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`, staged review, and the required English merge subject. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only if its ref changed or its remote is behind. PTR mode never touches the Retail install folder or performs a Retail library check.
+Compare `12.1.7-PTR-features` with fetched `origin/12.1.7-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip the merge but still run the manifest checkpoint. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`. Run the manifest checkpoint for PTR on the integrated tree before staged review and the approved commit; Retail Interface values must not survive this checkpoint. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only after the checkpoint, and only if its ref changed or its remote is behind. PTR mode never touches the Retail install folder or performs a Retail library check.
 
 Always compare and merge the full `new-features` ref into PTR, never the upstream release SHA. In PTR and Both modes, continue to Sync B even when Sync A has no new release or is a Retail no-op: Retail-only features/fixes still propagate normally. The release limit applies only to upstream entering Retail.
+
+## Manifest checkpoint (Retail and PTR, including no-op)
+
+Use the single policy in `.tools/toc_policy.json` and the commands documented in
+[TOC compatibility](../../references/toc-compatibility.md). Never apply this fork
+policy to `main`, change release selection, or normalize an unresolved index.
+After a successful integration (including a fast-forward from origin), or after
+the user's approved conflict resolution leaves no unmerged paths, run:
+
+```text
+<python_runtime> -B .tools/normalize_tocs.py fix --target <destination-branch>
+<python_runtime> -B .tools/normalize_tocs.py check --target <destination-branch>
+<python_runtime> -B .tools/tests/test_toc_policy.py
+<python_runtime> -B .tools/guardrails.py
+git diff --check
+```
+
+Use `new-features` for Sync A and `12.1.7-PTR-features` for Sync B. Do not infer
+the target from Interface values. Classify unknown manifests explicitly after
+examining their loading behavior; duplicated headers, conflicting client metadata,
+or unknown manifests stop the checkpoint without automatic repair.
+
+On a source-ancestry no-op, first run `check` against the destination tree, using
+an isolated copy and `--root` if it is not checked out. No drift means no edits or
+commit. With drift, report the correction, resolve the compiler before mutation,
+then check out that destination safely and follow `fix`, `check`, tests and
+guardrails above. For PTR-only requests this does not grant permission to repair
+Retail: retain the existing Sync A authorization check.
+
+Stage only intended integrated/corrected files. Show all four required staged
+views, including the complete native diff, and wait for explicit approval
+immediately before every commit. Include normalization in an already pending
+merge commit; a fast-forward or no-op needing repair requires one approved
+correction commit. Do not publish, install, or begin the dependent Sync B while
+the correction is uncommitted or validation fails. After any accepted library
+stage, recheck manifests before its final review and publication. Finish with a
+second `fix` that reports zero changes and a successful `check`.
 
 ## Upstream Feature Impact Review
 

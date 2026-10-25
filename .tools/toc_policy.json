@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "targets": {
+    "new-features": "120105",
+    "12.1.7-PTR-features": "120107"
+  },
+  "camelot_interface": "16001",
+  "classes": {
+    "retail": {
+      "reason": "Client-restricted addons, including the held-back standard edition of Simple Loot Council.",
+      "paths": [
+        "EllesmereUIFriends/EllesmereUIFriends.toc",
+        "EllesmereUIGroupFinder/EllesmereUIGroupFinder.toc",
+        "EllesmereUILoadoutManager/EllesmereUILoadoutManager.toc",
+        "EllesmereUIMythicTimer/EllesmereUIMythicTimer.toc",
+        "EllesmereUISimpleLootCouncil/EllesmereUISimpleLootCouncil.toc"
+      ]
+    },
+    "camelot": {
+      "reason": "Client-specific Camelot manifests take precedence over the generic manifest on Forever; held-back state is independent.",
+      "paths": [
+        "EllesmereUIForeverEssentials/EllesmereUIForeverEssentials_Camelot.toc",
+        "EllesmereUISimpleLootCouncil/EllesmereUISimpleLootCouncil_Camelot.toc"
+      ]
+    },
+    "shared": {
+      "reason": "Unrestricted suite manifests load on both clients; runtime guards and per-file client restrictions remain intact.",
+      "paths": [
+        "EllesmereUI.toc",
+        "EllesmereUIActionBars/EllesmereUIActionBars.toc",
+        "EllesmereUIAuraBuffReminders/EllesmereUIAuraBuffReminders.toc",
+        "EllesmereUIBags/EllesmereUIBags.toc",
+        "EllesmereUIBlizzardSkin/EllesmereUIBlizzardSkin.toc",
+        "EllesmereUIChat/EllesmereUIChat.toc",
+        "EllesmereUICooldownManager/EllesmereUICooldownManager.toc",
+        "EllesmereUIDamageMeters/EllesmereUIDamageMeters.toc",
+        "EllesmereUIDataBars/EllesmereUIDataBars.toc",
+        "EllesmereUILocales/EllesmereUILocales.toc",
+        "EllesmereUIMinimap/EllesmereUIMinimap.toc",
+        "EllesmereUINameplates/EllesmereUINameplates.toc",
+        "EllesmereUIOptions/EllesmereUIOptions.toc",
+        "EllesmereUIQoL/EllesmereUIQoL.toc",
+        "EllesmereUIQuestTracker/EllesmereUIQuestTracker.toc",
+        "EllesmereUIQuickdraw/EllesmereUIQuickdraw.toc",
+        "EllesmereUIRaidFrames/EllesmereUIRaidFrames.toc",
+        "EllesmereUIResourceBars/EllesmereUIResourceBars.toc",
+        "EllesmereUIUnitFrames/EllesmereUIUnitFrames.toc"
+      ]
+    },
+    "embedded": {
+      "reason": "LibStub and LibDeflate load through explicit Lua entries in EllesmereUI.toc and may be replaced by .pkgmeta externals. The nested oUF manifest is not referenced by the current UnitFrames manifest. These are not installed as top-level addons; preserve vendor Interface values without claiming standalone Forever support.",
+      "paths": [
+        "Libs/LibStub/LibStub.toc",
+        "Libs/LibDeflate/LibDeflate.toc",
+        "EllesmereUIUnitFrames/Libs/oUF/oUF.toc"
+      ]
+    }
+  }
+}
