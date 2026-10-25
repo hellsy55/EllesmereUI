@@ -173,7 +173,7 @@ end
 -------------------------------------------------------------------------------
 --  Instance / Difficulty helpers: cached per-frame, call CacheInstanceInfo() at the start of Refresh().
 -------------------------------------------------------------------------------
-local _cachedIType, _cachedDiffID, _cachedMapID
+local _cachedIType, _cachedDiffID, _cachedInstanceID
 
 -- "Pre-pull" state for the elevated Mythic-0 / keystone-lobby threshold
 -- (EABR.GetShowUnderMinutes' showUnderMPlus). True from the moment you zone
@@ -181,24 +181,28 @@ local _cachedIType, _cachedDiffID, _cachedMapID
 -- that dungeon visit so the wide top-up window doesn't keep re-triggering
 -- between pulls (it would otherwise use the pre-key threshold, up to 40 min
 -- by default, for the entire run instead of just the lobby). Reset whenever
--- the map changes (new dungeon / left the instance). Covers both real
--- Mythic 0 (diff 23) and the pre-key Mythic Keystone lobby (diff 8, before
--- the timer starts) -- see InPreKeyDungeon() below.
+-- the instance changes (new dungeon / left the instance; a floor change
+-- inside one dungeon keeps it). Covers both real Mythic 0 (diff 23) and the
+-- pre-key Mythic Keystone lobby (diff 8, before the timer starts) -- see
+-- InPreKeyDungeon() below.
 local _dungeonPrePull = true
 
 local function CacheInstanceInfo()
-    -- The eleventh return flags World Tier scaled content (Lairs, every tier).
-    local _, iType, diffID, _, _, _, _, _, _, _, hasWorldTier = GetInstanceInfo()
+    -- The eighth return is the instance's ID, the eleventh flags World Tier
+    -- scaled content (Lairs, every tier).
+    local _, iType, diffID, _, _, _, _, instanceID, _, _, hasWorldTier = GetInstanceInfo()
     _cachedIType = iType
     _cachedDiffID = tonumber(diffID) or 0
     EABR._cachedDiffID = _cachedDiffID
     EABR._cachedWorldTier = hasWorldTier == true
-    if EABR.FOREVER then return end  -- the map lookup only serves the pre-key threshold window
-    local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") or nil
-    if mapID ~= _cachedMapID then
+    if EABR.FOREVER then return end  -- the instance check only serves the pre-key threshold window
+    -- The instance ID, never a map lookup: this runs on every refresh, and the
+    -- game client itself crashes inside C_Map.GetBestMapForUnit in places
+    -- (Murder Row on 12.1.5, whatever addon or Blizzard frame asks).
+    if instanceID ~= _cachedInstanceID then
         _dungeonPrePull = true
     end
-    _cachedMapID = mapID
+    _cachedInstanceID = instanceID
 end
 
 -- Called from PLAYER_REGEN_DISABLED: once you've actually pulled, the

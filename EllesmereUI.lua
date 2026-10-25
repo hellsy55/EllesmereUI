@@ -3238,7 +3238,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "9.6.7"
+EllesmereUI.VERSION = "9.6.8"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -3327,6 +3327,15 @@ EllesmereUI._RunConflictCheck = function()
             if not EllesmereUIDB then return true end
             return EllesmereUIDB[key] ~= false
         end
+        -- Another Mythic+ timer addon only clashes with the Mythic+ Timer window,
+        -- so it is named only while that window is on, and the message points at
+        -- its switch (the rest of Mythic+ Tools keeps running beside it).
+        local function MPlusTimerOn()
+            return _G._EMT_IsTimerEnabled and _G._EMT_IsTimerEnabled()
+        end
+        local function MPlusTimerMsg(label)
+            return EllesmereUI.Lf("%1$s conflicts with EllesmereUI's Mythic+ Timer. Turn off Enable Mythic+ Timer on the Mythic+ Timer tab of Mythic+ Tools, or disable %1$s.", label)
+        end
         local conflicts = {
             { addon = "ElvUI",                    label = "ElvUI",                      targets = "all",                              message = "Many of ElvUI's modules are incompatible with EllesmereUI. Make sure to disable any conflicting modules." },
             { addon = "DandersFrames",            label = "Danders Frames",             targets = { "EllesmereUIRaidFrames" } },
@@ -3373,9 +3382,12 @@ EllesmereUI._RunConflictCheck = function()
             { addon = "SkironCooldownManager",    label = "Skiron Cooldown Manager",    targets = { "EllesmereUICooldownManager" } },
             { addon = "ArcUI",                    label = "ArcUI",                      targets = { "EllesmereUICooldownManager", } },
             { addon = "Ayije_CDM",                label = "Ayije CDM",                  targets = { "EllesmereUICooldownManager", "EllesmereUIResourceBars" } },
-            { addon = "MythicPlusTimer",          label = "Mythic Plus Timer",          targets = { "EllesmereUIMythicTimer" } },
-            { addon = "WarpDeplete",              label = "WarpDeplete",                targets = { "EllesmereUIMythicTimer" } },
-            { addon = "MPlusTimer",               label = "MPlusTimer",                 targets = { "EllesmereUIMythicTimer" } },
+            { addon = "MythicPlusTimer",          label = "Mythic Plus Timer",          targets = { "EllesmereUIMythicTimer" },
+              moduleCheck = MPlusTimerOn, message = MPlusTimerMsg("Mythic Plus Timer") },
+            { addon = "WarpDeplete",              label = "WarpDeplete",                targets = { "EllesmereUIMythicTimer" },
+              moduleCheck = MPlusTimerOn, message = MPlusTimerMsg("WarpDeplete") },
+            { addon = "MPlusTimer",               label = "MPlusTimer",                 targets = { "EllesmereUIMythicTimer" },
+              moduleCheck = MPlusTimerOn, message = MPlusTimerMsg("MPlusTimer") },
             { addon = "ChonkyCharacterSheet",     label = "Chonky Character Sheet",     targets = { "EllesmereUIBlizzardSkin" },
               moduleCheck = function() return BlizzardSkinSubEnabled("themedCharacterSheet") end,
               message = "Chonky Character Sheet conflicts with the EllesmereUI's Character Sheet. Disable either Chonky or the Character Sheet skin in Blizzard UI Enhanced settings." },

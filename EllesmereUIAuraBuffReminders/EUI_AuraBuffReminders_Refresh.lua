@@ -31,6 +31,7 @@ local LayoutCombatIcons, LayoutCursorIcons = I.LayoutCombatIcons, I.LayoutCursor
 local ResetEntryPool, ShowCombatIcon = I.ResetEntryPool, I.ShowCombatIcon
 local ShowCursorIcon, CollectAuras = I.ShowCursorIcon, I.CollectAuras
 local CollectConsumables, CollectRaidBuffs = I.CollectConsumables, I.CollectRaidBuffs
+local InkyMapWatch = I.InkyMapWatch
 local HideAllIcons, LayoutIcons, ShowIcon = I.HideAllIcons, I.LayoutIcons, I.ShowIcon
 local SetCachedOutline, CursorAttachActive = I.SetCachedOutline, I.CursorAttachActive
 
@@ -562,6 +563,9 @@ local function Refresh()
     ---------------------------------------------------------------------------
     if remindersOn and not inPvP and not EABR.FOREVER then
         CollectConsumables(missing, playerClass, specID, inInstance, inKeystone, inCombat)
+    else
+        -- The Inky Black Potion map watch follows the collector that reads it
+        InkyMapWatch(false)
     end
 
     ---------------------------------------------------------------------------
