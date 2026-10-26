@@ -1,6 +1,6 @@
 # Integration tests run exclusively inside a new temporary fixture directory.
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '../install/eui-install-safety.ps1')
+. (Join-Path $PSScriptRoot '../install/eui-package.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('eui-policy-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $testRoot
 $script:passed = 0
@@ -268,7 +268,11 @@ try {
         }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archiveRoot = Join-Path $testRoot ('archive-' + [guid]::NewGuid().ToString('N'))
-        Put (Join-Path $archiveRoot 'EllesmereUI-test/EllesmereUI.toc') "main.lua`n"
+        Put (Join-Path $archiveRoot 'EllesmereUI-test/EllesmereUI.toc') "## Interface: 120105, 16001`nmain.lua`n"
+        Put (Join-Path $archiveRoot 'EllesmereUI-test/.pkgmeta') "package-as: EllesmereUI`n"
+        Put (Join-Path $archiveRoot 'EllesmereUI-test/.tools/toc_policy.json') @'
+{"schema":1,"targets":{"new-features":"120105","12.1.7-PTR-features":"120105"},"camelot_interface":"16001","classes":{"retail":{"reason":"Fixture","paths":[]},"camelot":{"reason":"Fixture","paths":[]},"shared":{"reason":"Fixture","paths":["EllesmereUI.toc"]},"embedded":{"reason":"Fixture","paths":[]}}}
+'@
         Put (Join-Path $archiveRoot 'EllesmereUI-test/main.lua') "new`n"
         Put (Join-Path $archiveRoot 'EllesmereUI-test/AGENTS.md') 'excluded'
         Put (Join-Path $archiveRoot 'EllesmereUI-test/.agents/secret') 'excluded'

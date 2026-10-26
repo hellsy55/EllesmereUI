@@ -44,7 +44,7 @@ $ErrorActionPreference = "Stop"
 # get MUCH faster without it (sometimes 10x+).
 $ProgressPreference = "SilentlyContinue"
 
-. (Join-Path $PSScriptRoot "eui-install-safety.ps1")
+. (Join-Path $PSScriptRoot "eui-package.ps1")
 
 $RepoOwner = "hellsy55"
 $RepoName  = "EllesmereUI"
@@ -103,25 +103,6 @@ $null = Assert-EuiPath $WorkFolder
 if (-not (Test-Path -LiteralPath $WorkFolder)) {
     New-Item -ItemType Directory -Path $WorkFolder -Force | Out-Null
 }
-
-# Repository meta/config files and folders the game does not read
-# (formatted for robocopy's /XF and /XD filters)
-$ignoredFiles = @(
-    "pkgmeta",
-    ".pkgmeta",
-    "pkgmeta.txt",
-    ".gitattributes",
-    ".gitignore",
-    "AGENTS.md",
-    "CONTRIBUTING_TRANSLATIONS",
-    "CONTRIBUTING_TRANSLATIONS.md",
-    "extract-locale-keys",
-    "extract-locale-keys.lua",
-    "extract-locale-keys.py",
-    "_keys",
-    "_keys.txt"
-)
-$ignoredFolders = @(".git", ".github", ".tools", ".agents", ".codex")
 
 function Invoke-Robocopy {
     param(
@@ -268,34 +249,7 @@ function Install-EUI {
     $null = Assert-EuiPath $staging
     New-Item -ItemType Directory -Path $staging -ErrorAction Stop | Out-Null
     $stagingOwned = $true
-    $corePath = Join-Path $staging "EllesmereUI"
-    New-Item -ItemType Directory -Path $corePath -ErrorAction Stop | Out-Null
-
-    # robocopy exclusion filters
-    $xf = @()
-    foreach ($f in $ignoredFiles) { $xf += "/XF"; $xf += $f }
-    $xd = @()
-    foreach ($d in $ignoredFolders) { $xd += "/XD"; $xd += $d }
-
-    # Copy the loose files and folders (the ones not starting with
-    # EllesmereUI) straight into EllesmereUI\, already excluding repo junk
-    Invoke-Robocopy -Source $ExtractedFolder -Destination $corePath -ExtraArgs ($xf + $xd + @("/XD", "EllesmereUI*"))
-
-    # Copy the subfolders that already start with EllesmereUI (e.g.
-    # EllesmereUIRaidFrames) to the staging root, each in its own folder.
-    # A folder named EXACTLY "EllesmereUI" is excluded here on purpose: that
-    # name collides with $corePath (the loose-files destination above), so
-    # copying it here would silently overwrite the already-correct core
-    # files with whatever stray "EllesmereUI/" folder happens to exist in
-    # the repo (this happened for real: a leftover EllesmereUI/EllesmereUI.lua
-    # + EllesmereUI/EUI_UnlockMode.lua duplicate pair, tracked by git since
-    # commit 62ff1fb2, silently clobbered every install with stale content).
-    Get-ChildItem -LiteralPath $ExtractedFolder -Directory | Where-Object {
-        $ignoredFolders -notcontains $_.Name -and $_.Name -like "EllesmereUI*" -and $_.Name -ne "EllesmereUI"
-    } | ForEach-Object {
-        $subDestination = Join-Path $staging $_.Name
-        Invoke-Robocopy -Source $_.FullName -Destination $subDestination -ExtraArgs ($xf + $xd)
-    }
+    $null = New-EuiPackage -Source $ExtractedFolder -Staging $staging -Target $Branch
 
     $preparedFolders = @(Get-EuiPreparedFolders $staging)
     $preparedNames = @($preparedFolders | ForEach-Object { $_.Name })
