@@ -312,6 +312,42 @@ class GitContractTests(unittest.TestCase):
         self.assertEqual(classifier.classify(old, new)['changes'], [{'library': 'Libs/Example', 'status': 'M', 'files': 0}])
 
 
+class ClassifierTests(unittest.TestCase):
+    def test_path_and_metadata_cases(self):
+        unchanged = {'Vendor/Lib': {'tag': 'v1'}, 'Vendor/Lib/Sub': {'tag': 'v1'},
+                     'Vendor/One': {}, 'Vendor/Two': {}}
+        cases = [
+            ('overlapping and equal-length prefixes', unchanged, unchanged,
+             [('M', 'Vendor/Lib'), ('M', 'Vendor/Lib/Sub/file.lua'),
+              ('M', 'Vendor/Lib/other.lua'), ('M', 'Vendor/One/a.lua'),
+              ('M', 'Vendor/Two/b.lua'), ('M', 'unrelated/file.lua')],
+             [{'library': name, 'status': 'M', 'files': count} for name, count in
+              [('Vendor/Lib', 2), ('Vendor/Lib/Sub', 1), ('Vendor/One', 1), ('Vendor/Two', 1)]]),
+            ('external metadata additions removals and modifications',
+             {'Vendor/Old': {}, 'Vendor/Changed': {'tag': 'v1'}},
+             {'Vendor/New': {}, 'Vendor/Changed': {'tag': 'v2'}}, [('M', '.pkgmeta')],
+             [{'library': 'Vendor/Changed', 'status': 'M', 'files': 0},
+              {'library': 'Vendor/New', 'status': 'A', 'files': 0},
+              {'library': 'Vendor/Old', 'status': 'D', 'files': 0}]),
+            ('fallback and lockfile without externals', {}, {},
+             [('A', 'Addon/Libs/New/a.lua'), ('D', 'Libs/Old/a.lua'),
+              ('M', 'unrelated.lua'), ('M', '.pkgmeta-lock.json')],
+             [{'library': 'Addon/Libs/New', 'status': 'A', 'files': 1},
+              {'library': 'Libs/Old', 'status': 'D', 'files': 1},
+              {'library': 'metadata', 'status': 'M', 'files': 1}]),
+            ('no paths with externals', unchanged, unchanged, [], []),
+            ('no paths or externals', {}, {}, [], []),
+        ]
+        for name, old, new, paths, expected in cases:
+            with self.subTest(name=name):
+                raw = b''.join(status.encode() + b'\0' + path.encode() + b'\0'
+                               for status, path in paths)
+                with patch.object(classifier, 'tree_at', side_effect=['old', 'new']), \
+                        patch.object(classifier, 'externals_at', side_effect=[old, new]), \
+                        patch.object(classifier, 'git', return_value=raw):
+                    self.assertEqual(classifier.classify('base', 'head'), {'changes': expected})
+
+
 class LibraryTests(unittest.TestCase):
     def test_existing_parser_equivalence(self):
         text = (ROOT / '.pkgmeta').read_text(encoding='utf-8')

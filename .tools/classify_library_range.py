@@ -67,6 +67,7 @@ def classify(base, head):
     groups = {}
     metadata_status = None
 
+    ordered_externals = sorted(externals, key=len, reverse=True)
     for status, raw_path in zip(fields[0::2], fields[1::2]):
         path = raw_path.decode("utf-8", errors="surrogateescape")
         if path == ".pkgmeta":
@@ -74,7 +75,7 @@ def classify(base, head):
         if path == ".pkgmeta-lock.json":
             metadata_status = status.decode("ascii")
             continue
-        library = next((item for item in sorted(externals, key=len, reverse=True)
+        library = next((item for item in ordered_externals
                         if path == item or path.startswith(item + "/")), None)
         if library is None:
             parts = path.split("/")
