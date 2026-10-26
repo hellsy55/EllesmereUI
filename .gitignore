@@ -38,3 +38,6 @@ __pycache__/
 # Maintained installer sources and integration tests
 !.tools/install/*.ps1
 !.tools/tests/test_install_policy.ps1
+!.tools/tests/test_package_policy.ps1
+!.tools/tests/test_portable_packages.ps1
+!.tools/tests/test_portable_edges.ps1

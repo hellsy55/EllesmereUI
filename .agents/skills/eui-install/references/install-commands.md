@@ -2,7 +2,7 @@
 
 The maintained installer sources live in `.tools/install/`. Manual scripts in `C:\Users\jonat\Desktop\EUI` are deployed copies: update the installer, shared safety helper and line-ending fixer together. Codex runs the maintained sources directly. Both entry points retain records in `C:\Users\jonat\Desktop\EUI` to preserve legacy records. Run commands directly in the current Codex session, which normally has administrator rights. Do not use `start`, `Start-Process`, or any separate window; the direct process naturally waits for completion, so no extra detection, file checking, or window-closing handling is needed.
 
-Repository/Codex metadata such as `AGENTS.md`, `.agents/`, and `.codex/` must not be copied into the installed addon. The operational installer excludes `AGENTS.md` through robocopy's `/XF` filter and `.agents` and `.codex` through `/XD` when copying both the core and `EllesmereUI*` modules into staging, preserving the existing exclusions.
+Repository/Codex metadata such as `AGENTS.md`, `.agents/`, and `.codex/` must not be copied into the installed addon. The operational installer uses `eui-package.ps1` beside the safety helper. Deploy all three with the line-ending fixer. The shared preparation reads `.pkgmeta` and `.tools/toc_policy.json` from the downloaded snapshot, validates manifests without rewriting them, applies literal ignore paths and folder moves, and retains vendored runtime libraries without downloading externals. Unsupported packaging syntax stops before installation. See [.tools/install/README.md](../../../../.tools/install/README.md) for supported syntax and portable packaging.
 
 | Mode | Install | Line-ending fix after successful install |
 | --- | --- | --- |

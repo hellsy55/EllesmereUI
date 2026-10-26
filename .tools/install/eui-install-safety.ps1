@@ -64,7 +64,8 @@ function Assert-EuiTree {
 }
 
 function Assert-EuiArchive {
-    param([string]$ZipPath)
+    param([string]$ZipPath, [string]$ExpectedRoot)
+    if ($ExpectedRoot) { Assert-EuiName $ExpectedRoot }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
@@ -92,7 +93,11 @@ function Assert-EuiArchive {
                 $paths[$prefix] = $isDirectory
             }
         }
-        if ($roots.Count -ne 1 -or @($roots)[0] -notlike 'EllesmereUI-*') { throw 'ZIP must contain exactly one EllesmereUI repository root.' }
+        if ($roots.Count -ne 1) { throw 'ZIP must contain exactly one EllesmereUI repository root.' }
+        $root = @($roots)[0]
+        if ($ExpectedRoot) {
+            if ($root -cne $ExpectedRoot) { throw 'ZIP root differs from the approved snapshot root.' }
+        } elseif ($root -notlike 'EllesmereUI-*') { throw 'ZIP must contain exactly one EllesmereUI repository root.' }
     } finally { $archive.Dispose() }
 }
 
