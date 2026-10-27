@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1831,6 +1832,78 @@ class GitRound5(RepoCase):
         self.repo.write("Mod/Bar.LUA", GATE + "local id = GetSpecialization()\n")
         errors = self.repo.check(self.base, self.repo.commit())
         self.assertEqual(sorted(e.split(": ")[0] for e in errors), ["Mod/Bar.LUA:2", "Mod/Foo.Lua:1", "Mod/Foo.Lua:2"])
+
+
+class RevisionFailures(RepoCase):
+    def change(self, base, head=None):
+        with patch.object(g, 'ROOT', self.repo.dir):
+            return g.Change(base, head)
+
+    def test_missing_base_and_head(self):
+        for base, head in [('0' * 40, None), ('missing-ref', None), (self.base, 'missing-head')]:
+            with self.subTest(base=base, head=head), self.assertRaisesRegex(g.GitError, 'not a commit'):
+                self.change(base, head)
+
+    def test_root_commit_is_a_valid_explicit_baseline(self):
+        self.assertEqual(self.change(self.base).base, self.base)
+
+    def test_push_multiple_commits_keeps_earlier_changes(self):
+        self.repo.write('Earlier.lua', 'local x = 1\n')
+        self.repo.commit()
+        self.repo.write('Later.lua', GATE + 'local y = 1\n')
+        head = self.repo.commit()
+        change = self.change(self.base, head)
+        self.assertEqual(change.base, self.base)
+        self.assertEqual(set(change.lua_files), {'Earlier.lua', 'Later.lua'})
+
+    def test_force_push_with_common_ancestor_checks_rewritten_history(self):
+        self.repo.write('Old.lua', GATE + 'local old = 1\n')
+        previous = self.repo.commit()
+        self.repo.git('checkout', '-qb', 'rewritten', self.base)
+        self.repo.write('New.LUA', 'local x = 1\n')
+        head = self.repo.commit()
+        change = self.change(previous, head)
+        self.assertEqual(change.base, self.base)
+        self.assertEqual(change.lua_files, ['New.LUA'])
+
+    def test_unrelated_history_fails_without_tree_comparison(self):
+        self.repo.git('checkout', '--orphan', 'unrelated')
+        self.repo.git('rm', '-rf', '.')
+        self.repo.write('Other.lua', GATE)
+        head = self.repo.commit()
+        with self.assertRaisesRegex(g.GitError, 'no common ancestor'):
+            self.change(self.base, head)
+
+    def test_git_operational_errors_are_not_missing_commits(self):
+        failure = g.GitError('repository is unavailable', 128)
+        for operation, args in [(g.is_commit, ('base',)), (g.is_ancestor, ('base', 'head')),
+                                (g.merge_base, ('base', 'head'))]:
+            with self.subTest(operation=operation.__name__), patch.object(g, 'git', side_effect=failure):
+                with self.assertRaisesRegex(g.GitError, 'repository is unavailable'):
+                    operation(*args)
+
+    def test_empty_successful_merge_base_is_inconclusive(self):
+        with patch.object(g, 'git', return_value=''), self.assertRaisesRegex(g.GitError, 'no revision'):
+            g.merge_base('base', 'head')
+
+    def test_unavailable_git_executable_has_clear_error(self):
+        with patch.object(g.subprocess, 'run', side_effect=FileNotFoundError('missing git')):
+            with self.assertRaisesRegex(g.GitError, 'could not execute Git'):
+                g.git('merge-base', self.base, 'HEAD')
+
+    def test_final_working_tree_includes_staged_unstaged_and_new_files(self):
+        self.repo.write('Base.lua', GATE + 'local staged = 2\n')
+        self.repo.git('add', 'Base.lua')
+        self.repo.write('Base.lua', GATE + 'local final = 3\n')
+        self.repo.write('New.Lua', GATE + 'local new = 4\n')
+        index = Path(self.repo.dir, '.git', 'index')
+        before = index.read_bytes()
+        change = self.change(self.base)
+        self.assertEqual(set(change.lua_files), {'Base.lua', 'New.Lua'})
+        with patch.object(g, 'ROOT', self.repo.dir):
+            self.assertIn(b'final = 3', change.read('Base.lua'))
+        self.assertEqual(index.read_bytes(), before)
+        self.assertEqual(self.change(self.base, 'HEAD').lua_files, [])
 
 
 class Annotations(unittest.TestCase):

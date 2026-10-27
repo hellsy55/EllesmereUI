@@ -60,17 +60,23 @@ LUA_SPEC = ":(icase)*.lua"
 
 
 class GitError(Exception):
-    pass
+    def __init__(self, message, returncode=None):
+        super().__init__(message)
+        self.returncode = returncode
 
 
 def git(*args, raw=False, ok=(0,), env=None, data=None):
     env = dict(os.environ if env is None else env)
     for key in GIT_ENV_DROP:
         env.pop(key, None)
-    res = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, env=env, input=data)
+    try:
+        res = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, env=env, input=data)
+    except OSError as exc:
+        raise GitError(f"could not execute Git: {exc}") from exc
     if res.returncode not in ok:
         err = res.stderr.decode("utf-8", "replace").strip()
-        raise GitError(f"git {' '.join(args)} failed: {err}")
+        raise GitError(f"git {' '.join(args)} failed (exit {res.returncode}): {err}",
+                       res.returncode)
     return res.stdout if raw else res.stdout.decode("utf-8", "replace")
 
 
@@ -78,23 +84,34 @@ def is_commit(ref):
     try:
         git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}")
         return True
-    except GitError:
-        return False
+    except GitError as exc:
+        if exc.returncode == 1:
+            return False
+        raise
 
 
 def is_ancestor(a, b):
     try:
         git("merge-base", "--is-ancestor", a, b)
         return True
-    except GitError:
-        return False
+    except GitError as exc:
+        if exc.returncode == 1:
+            return False
+        raise
 
 
 def merge_base(base, head):
+    head = head or "HEAD"
     try:
-        return git("merge-base", base, head or "HEAD").strip() or base
-    except GitError:
-        return base
+        result = git("merge-base", base, head).strip()
+    except GitError as exc:
+        if exc.returncode == 1:
+            raise GitError(f"no common ancestor between '{base}' and '{head}'; "
+                           "unrelated histories require an explicit review", 1) from exc
+        raise
+    if not result:
+        raise GitError("git merge-base returned no revision; validation is inconclusive")
+    return result
 
 
 def base_candidates():
@@ -107,8 +124,10 @@ def base_candidates():
         if is_commit(ref):
             try:
                 found.append((ref, git("merge-base", ref, "HEAD").strip()))
-            except GitError:
-                pass                    # unrelated to this branch: never the base
+            except GitError as exc:
+                if exc.returncode != 1:
+                    raise
+                # Unrelated to this branch: never the default base.
     return found
 
 
@@ -2254,6 +2273,9 @@ def main():
         if note:
             print(f"guardrails: {note}", file=sys.stderr)
         change = Change(base, args.head)
+        print(f"guardrails revisions: base={base}; "
+              f"head={args.head or 'working tree at ' + git('rev-parse', 'HEAD').strip()}; "
+              f"merge-base={change.base}")
         for check in CHECKS:
             check(change, errors)
     except GitError as e:

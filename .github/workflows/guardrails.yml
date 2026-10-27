@@ -7,15 +7,17 @@ name: Guardrails
 on:
   pull_request:
     paths:
-      - '**/*.lua'
+      - '**.[lL][uU][aA]'
+      - '**.[tT][oO][cC]'
       - '.tools/guardrails.py'
       - '.tools/lua_runtime.py'
       - '.tools/python_runtime.py'
       - '.tools/tests/test_guardrails.py'
       - '.tools/tests/test_maintenance.py'
+      - '.tools/tests/test_validation_workflows.py'
       - '.github/workflows/guardrails.yml'
   push:
-    branches: [main]
+    branches: [main, new-features, 12.1.7-PTR-features]
 
 permissions:
   contents: read
@@ -33,15 +35,36 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
 
       - name: Test the guardrails
-        run: python3 .tools/tests/test_guardrails.py
+        run: python3 -B .tools/tests/test_guardrails.py
 
       - name: Test the maintenance preflight
-        run: python3 .tools/tests/test_maintenance.py
+        run: python3 -B .tools/tests/test_maintenance.py
+
+      - name: Test validation workflow contracts
+        run: python3 -B .tools/tests/test_validation_workflows.py
 
       - name: Run guardrails
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EXPECTED_HEAD: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          FORCED: ${{ github.event.forced }}
         run: |
-          # A new branch has no "before"; after a force-push it may not exist here.
-          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then BASE=HEAD~1; fi
-          python3 .tools/guardrails.py --base "$BASE" --head HEAD
+          set -euo pipefail
+          actual_head=$(git rev-parse --verify HEAD)
+          printf 'Event: %s; forced: %s\nPrevious/base revision: %s\nExpected revision: %s\nChecked out revision: %s\n' \
+            "$EVENT_NAME" "$FORCED" "$BASE" "$EXPECTED_HEAD" "$actual_head"
+          if [ "$actual_head" != "$EXPECTED_HEAD" ]; then
+            echo '::error::Checkout differs from the event revision; validation is inconclusive.'
+            exit 2
+          fi
+          if [ -z "$BASE" ] || [[ "$BASE" =~ ^0+$ ]]; then
+            echo '::error::No previous/base revision (initial push); no baseline can be proved. No fallback is allowed.'
+            exit 2
+          fi
+          if ! git rev-parse --verify "$BASE^{commit}"; then
+            echo '::error::Previous/base commit is unavailable or Git failed; validation is inconclusive. Restore the required history.'
+            exit 2
+          fi
+          # guardrails resolves and logs the common ancestor, failing on unrelated history.
+          python3 -B .tools/guardrails.py --base "$BASE" --head "$actual_head"
