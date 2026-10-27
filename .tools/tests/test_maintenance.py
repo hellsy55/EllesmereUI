@@ -208,18 +208,24 @@ class LuaRuntimeTests(unittest.TestCase):
 class GitContractTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='eui-maintenance-')
+        self.addCleanup(self.temporary.cleanup)
         self.previous = os.getcwd()
+        count = int(os.environ.get('GIT_CONFIG_COUNT', '0'))
+        config = patch.dict(os.environ, {
+            'GIT_CONFIG_COUNT': str(count + 1),
+            f'GIT_CONFIG_KEY_{count}': 'safe.directory',
+            f'GIT_CONFIG_VALUE_{count}': os.path.abspath(self.temporary.name),
+        })
+        config.start()
+        self.addCleanup(config.stop)
         os.chdir(self.temporary.name)
+        self.addCleanup(os.chdir, self.previous)
         self.git('init', '-q')
         self.git('config', 'user.name', 'Maintenance Tests')
         self.git('config', 'user.email', 'maintenance@example.invalid')
         self.git('config', 'commit.gpgsign', 'false')
         self.git('config', 'core.autocrlf', 'false')
         self.commit('initial', 'initial.txt')
-
-    def tearDown(self):
-        os.chdir(self.previous)
-        self.temporary.cleanup()
 
     def git(self, *args):
         result = subprocess.run(['git', *args], capture_output=True, encoding='utf-8', errors='replace')
