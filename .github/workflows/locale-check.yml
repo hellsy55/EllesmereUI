@@ -10,13 +10,19 @@ on:
       - '**/*.lua'
       - 'EllesmereUILocales/_keys.txt'
       - '.tools/extract-locale-keys.sh'
-  # Direct pushes and release commits skip the PR trigger; check main too.
+      - '.tools/tests/test_locale_keys.py'
+      - '.tools/tests/test_validation_workflows.py'
+      - '.github/workflows/locale-check.yml'
+  # Direct pushes also need verification on the maintained fork branches.
   push:
-    branches: [main]
+    branches: [main, new-features, 12.1.7-PTR-features]
     paths:
       - '**/*.lua'
       - 'EllesmereUILocales/_keys.txt'
       - '.tools/extract-locale-keys.sh'
+      - '.tools/tests/test_locale_keys.py'
+      - '.tools/tests/test_validation_workflows.py'
+      - '.github/workflows/locale-check.yml'
 
 permissions:
   contents: read
@@ -29,14 +35,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Regenerate the locale key list
-        run: bash .tools/extract-locale-keys.sh
+      - name: Test locale extraction
+        run: python3 -B .tools/tests/test_locale_keys.py
 
-      - name: Fail if EllesmereUILocales/_keys.txt is out of date
-        run: |
-          if ! git diff --quiet -- EllesmereUILocales/_keys.txt; then
-            echo "::error::EllesmereUILocales/_keys.txt is out of date. Run .tools/extract-locale-keys.sh and commit the result."
-            git --no-pager diff -- EllesmereUILocales/_keys.txt
-            exit 1
-          fi
-          echo "EllesmereUILocales/_keys.txt is current ($(grep -cvE '^#' EllesmereUILocales/_keys.txt) keys)."
+      - name: Verify locale keys without modifying files
+        run: bash .tools/extract-locale-keys.sh --check

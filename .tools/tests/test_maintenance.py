@@ -114,7 +114,7 @@ class RuntimeTests(unittest.TestCase):
                         pr.index('After an approved application, stage'))
         ci = (ROOT / '.github/workflows/guardrails.yml').read_text(encoding='utf-8')
         self.assertIn("- '.tools/lua_runtime.py'", ci)
-        self.assertIn('python3 .tools/tests/test_maintenance.py', ci)
+        self.assertIn('python3 -B .tools/tests/test_maintenance.py', ci)
 
 
 class LuaRuntimeTests(unittest.TestCase):
