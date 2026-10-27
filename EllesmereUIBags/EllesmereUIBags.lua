@@ -182,6 +182,16 @@ function EUI_Bags:ApplyWindowLayering()
     end
     local bank = _G.EUI_BankFrame
     if bank and bank.ApplyWindowLayering then bank:ApplyWindowLayering() end
+    self:RepinIconLevels()
+end
+
+-- Item buttons hold fixed levels (ns.PinItemButton): re-pin them after anything that
+-- can move a window's level, the layering above and every Raise
+function EUI_Bags:RepinIconLevels()
+    local I = ns._bagsInternals
+    ns.PinItemPool(I.itemSlots, self, "_slotPinLevel")
+    ns.PinItemPool(I.reagentSlots, EUI_BagsReagent, "_slotPinLevel")
+    ns.ResyncListRowLevels()
 end
 layerUpdateFrame:SetScript("OnEvent", function() EUI_Bags:ApplyWindowLayering() end)
 

@@ -190,9 +190,7 @@ local UpdateSidebarHighlight, ClearContent
 -------------------------------------------------------------------------------
 --  Build Main Frame
 -------------------------------------------------------------------------------
-local function CreateMainFrame()
-    if mainFrame then return mainFrame end
-
+local function BuildFrame()
     -----------------------------------------------------------------------
     --  Root frame + scaling
     -----------------------------------------------------------------------
@@ -889,7 +887,9 @@ local function CreateMainFrame()
             mainFrame:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", ml + dx, mb + dy)
         end
     end
+end
 
+local function BuildSidebar()
     -----------------------------------------------------------------------
     --  Sidebar
     -----------------------------------------------------------------------
@@ -2006,7 +2006,7 @@ local function CreateMainFrame()
 
     -- Build the sidebar in group order; positions are assigned once and re-stacked by
     -- RefreshSidebarStates. Group/roster references go through
-    -- the private EUI_NS model (one upvalue, CreateMainFrame is at the 60-upvalue cap);
+    -- the private EUI_NS model (one upvalue instead of one per name, keeps BuildSidebar well under the 60-upvalue cap);
     -- cumulative `_y` walks each row so group and child heights can differ.
     -- Outside addons' own groups and pages join the model first (see the Plugin API).
     EUI_NS.SyncExternal()
@@ -2327,7 +2327,12 @@ local function CreateMainFrame()
     resUpdateFrame:SetScript("OnHide", function()
         if resTicker then resTicker:Cancel(); resTicker = nil end
     end)
+end
 
+-- The public header API below iterates private tables; a local pairs means setfenv on it
+-- cannot swap in one that is handed those tables.
+local function BuildContent()
+    local pairs = pairs
     -----------------------------------------------------------------------
     --  Right-side content region
     -----------------------------------------------------------------------
@@ -2932,6 +2937,10 @@ local function CreateMainFrame()
         InvalidateContentHeaderCache()
     end
 
+    return rightW, rightX
+end
+
+local function BuildFooter(rightW, rightX)
     -----------------------------------------------------------------------
     --  Footer  (Reset to Defaults + Reload UI | Done)
     -----------------------------------------------------------------------
@@ -3216,6 +3225,15 @@ local function CreateMainFrame()
             brd:SetColor(r, g, b, lerp(0.7, 1, progress))
         end })
     end
+end
+
+local function CreateMainFrame()
+    if mainFrame then return mainFrame end
+
+    BuildFrame()
+    BuildSidebar()
+    local rightW, rightX = BuildContent()
+    BuildFooter(rightW, rightX)
 
     return mainFrame
 end
@@ -4369,8 +4387,9 @@ end
 -------------------------------------------------------------------------------
 -- From here on the public functions iterate private tables (page cache, a
 -- module's page list): local iterators mean setfenv cannot swap in one that
--- is handed those tables. (Declared after CreateMainFrame, which is at the
--- upvalue cap.)
+-- is handed those tables. (Declared after CreateMainFrame and its Build*
+-- functions; BuildSidebar and BuildContent declare their own pairs, the others
+-- use none.)
 local pairs, ipairs = pairs, ipairs
 -- Page cache: maps "moduleName::pageName" -> { wrapper, totalH, headerBuilder }
 -- On revisit, we show the cached wrapper and refresh widget values instead of rebuilding.

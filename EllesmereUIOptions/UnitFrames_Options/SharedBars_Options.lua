@@ -590,7 +590,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
           getValue=function() return SVal("leftTextContent", "name") end,
           setValue=function(v)
               SSet("leftTextContent", v)
-              if v ~= "none" then
+              if ns.UF_IsUniqueContent(v) then
                   if SGet("rightTextContent") == v then SSet("rightTextContent", "none") end
                   if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
               end
@@ -612,6 +612,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             d.leftTextSize = src.leftTextSize
                             d.leftTextX, d.leftTextY = src.leftTextX, src.leftTextY
                             d.leftTextWidthPct = src.leftTextWidthPct
+                            if v == "custom" then d.leftTextCustomFormat = src.leftTextCustomFormat end
                         end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
@@ -635,6 +636,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             if (d.leftTextX or 0) ~= (src.leftTextX or 0) then return false end
                             if (d.leftTextY or 0) ~= (src.leftTextY or 0) then return false end
                             if (d.leftTextWidthPct or 100) ~= (src.leftTextWidthPct or 100) then return false end
+                            if v == "custom" and (d.leftTextCustomFormat or "") ~= (src.leftTextCustomFormat or "") then return false end
                         end
                         return true
                     end,
@@ -794,7 +796,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
           getValue=function() return SVal("rightTextContent", "both") end,
           setValue=function(v)
               SSet("rightTextContent", v)
-              if v ~= "none" then
+              if ns.UF_IsUniqueContent(v) then
                   if SGet("leftTextContent") == v then SSet("leftTextContent", "none") end
                   if SGet("centerTextContent") == v then SSet("centerTextContent", "none") end
               end
@@ -816,6 +818,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             d.rightTextSize = src.rightTextSize
                             d.rightTextX, d.rightTextY = src.rightTextX, src.rightTextY
                             d.rightTextWidthPct = src.rightTextWidthPct
+                            if v == "custom" then d.rightTextCustomFormat = src.rightTextCustomFormat end
                         end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
@@ -839,6 +842,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             if (d.rightTextX or 0) ~= (src.rightTextX or 0) then return false end
                             if (d.rightTextY or 0) ~= (src.rightTextY or 0) then return false end
                             if (d.rightTextWidthPct or 100) ~= (src.rightTextWidthPct or 100) then return false end
+                            if v == "custom" and (d.rightTextCustomFormat or "") ~= (src.rightTextCustomFormat or "") then return false end
                         end
                         return true
                     end,
@@ -1011,6 +1015,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             d.centerTextSize = src.centerTextSize
                             d.centerTextX, d.centerTextY = src.centerTextX, src.centerTextY
                             d.centerTextWidthPct = src.centerTextWidthPct
+                            if v == "custom" then d.centerTextCustomFormat = src.centerTextCustomFormat end
                         end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
@@ -1034,6 +1039,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             if (d.centerTextX or 0) ~= (src.centerTextX or 0) then return false end
                             if (d.centerTextY or 0) ~= (src.centerTextY or 0) then return false end
                             if (d.centerTextWidthPct or 100) ~= (src.centerTextWidthPct or 100) then return false end
+                            if v == "custom" and (d.centerTextCustomFormat or "") ~= (src.centerTextCustomFormat or "") then return false end
                         end
                         return true
                     end,
@@ -1190,6 +1196,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             d.extraTextX, d.extraTextY = src.extraTextX, src.extraTextY
                             d.extraTextAlign = src.extraTextAlign
                             d.extraTextWidthPct = src.extraTextWidthPct
+                            if v == "custom" then d.extraTextCustomFormat = src.extraTextCustomFormat end
                         end
                     end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
@@ -1214,6 +1221,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                             if (d.extraTextY or 0) ~= (src.extraTextY or 0) then return false end
                             if (d.extraTextAlign or "left") ~= (src.extraTextAlign or "left") then return false end
                             if (d.extraTextWidthPct or 100) ~= (src.extraTextWidthPct or 100) then return false end
+                            if v == "custom" and (d.extraTextCustomFormat or "") ~= (src.extraTextCustomFormat or "") then return false end
                         end
                         return true
                     end,
@@ -1383,6 +1391,8 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     local ppTextOrder = { "none", "---", "left", "right", "center" }
     local ppFmtValues = { ["none"]="None", ["smart"]="Smart Text", ["curpp"]="Power Value", ["curmaxpp"]="Power Value / Max", ["perpp"]="Power %", ["both"]="Value | %" }
     local ppFmtOrder = { "none", "smart", "curpp", "curmaxpp", "perpp", "both" }
+    -- Power Text alone offers Custom; Form Power Text keeps the lists above.
+    local ppTextFmtOrder = { "none", "---", "custom", "---", "smart", "curpp", "curmaxpp", "perpp", "both" }
 
     -- Row 1: Bar Height + Bar Position. Under a stock style the track fixes
     -- the bar's height and place: the height slot is Hide Power Bar instead
@@ -1550,42 +1560,45 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
 
     -- Row 2: Power Text (format) + Fill Opacity
     local sharedPowerRow2
+    local function SetPowerTextFormat(v)
+        SSet("powerTextFormat", v)
+        -- Auto-set position to center if user picks a format while position is "none"
+        if v ~= "none" and SVal("powerPercentText", "none") == "none" then
+            SSet("powerPercentText", "center")
+        end
+        -- If format is "none", clear position too
+        if v == "none" then SSet("powerPercentText", "none") end
+        ReloadAndUpdate(); UpdatePreview()
+        EllesmereUI:RefreshPage()
+        -- The page stays, so the menu is rebuilt for Custom's pencil.
+        ns.UFO_RefreshMenus(sharedPowerRow2 and sharedPowerRow2._leftRegion)
+    end
+    local ppTextFmtValues = ns.UFO_CustomTextValues(ppFmtValues,
+        function() return SVal("powerTextFormat", "perpp") end,
+        function()
+            ns.UFO_EditCustomText("powerText", SDB(), optState.selectedUnit,
+                function() SetPowerTextFormat("custom") end)
+        end)
     sharedPowerRow2, h = W:DualRow(parent, y,
-        { type="dropdown", text="Power Text", values=ppFmtValues, order=ppFmtOrder,
+        { type="dropdown", text="Power Text", values=ppTextFmtValues, order=ppTextFmtOrder,
           getValue=function() return SVal("powerTextFormat", "perpp") end,
-          setValue=function(v)
-              SSet("powerTextFormat", v)
-              -- Auto-set position to center if user picks a format while position is "none"
-              if v ~= "none" and SVal("powerPercentText", "none") == "none" then
-                  SSet("powerPercentText", "center")
-              end
-              -- If format is "none", clear position too
-              if v == "none" then SSet("powerPercentText", "none") end
-              ReloadAndUpdate(); UpdatePreview()
-              EllesmereUI:RefreshPage()
-          end },
+          setValue=SetPowerTextFormat },
         { type="slider", text="Fill Opacity", min=0, max=100, step=1,
           getValue=function() return SVal("powerBarOpacity", 100) end,
           setValue=function(v)
               SSet("powerBarOpacity", v)
               UpdatePreview()
           end });  y = y - h
+    if not EllesmereUI._prebuilding then
+        ns.UFO_AddCustomFormatAccessor(sharedPowerRow2._leftRegion, "Power Text", "powerText",
+            SVal("powerTextFormat", "perpp"), SDB, function() ReloadAndUpdate(); UpdatePreview() end)
+    end
     -- Cogwheel on Power Text for Show % toggle
     if not EllesmereUI._prebuilding then
         local fmtRgn = sharedPowerRow2._leftRegion
-        EllesmereUI.BuildInlineCog(fmtRgn, {
-            disabled = function() local fmt = SVal("powerTextFormat", "perpp"); return fmt == "none" or fmt == "curpp" or fmt == "curmaxpp" end,
-            disabledTooltip = "This option is only available for formats that display a percentage.",
-            title = "Power Text",
-            rows = {
-                { type="toggle", label="Show %",
-                  get=function() return SVal("powerShowPercent", true) ~= false end,
-                  set=function(v)
-                      SSet("powerShowPercent", v)
-                      UpdatePreview()
-                  end },
-            },
-        })
+        EllesmereUI.BuildInlineCog(fmtRgn, ns.UFO_PowerTextCog(SVal, SSet,
+            { none = true, curpp = true, curmaxpp = true },
+            function(v) SSet("powerShowPercent", v); UpdatePreview() end))
     end
     -- Sync icon: Power Text Format (left of row 2)
     if not EllesmereUI._prebuilding then
@@ -1594,14 +1607,22 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Power Text Format to all Frames",
             onClick = function()
-                local v = UNIT_DB_MAP[optState.selectedUnit]().powerTextFormat or "perpp"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerTextFormat = v end
+                local src = UNIT_DB_MAP[optState.selectedUnit]()
+                local v, fmt = src.powerTextFormat or "perpp", src.powerTextCustomFormat
+                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                    local d = UNIT_DB_MAP[key]()
+                    d.powerTextFormat = v
+                    if v == "custom" then d.powerTextCustomFormat = fmt end
+                end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
             isSynced = function()
-                local v = UNIT_DB_MAP[optState.selectedUnit]().powerTextFormat or "perpp"
+                local src = UNIT_DB_MAP[optState.selectedUnit]()
+                local v, fmt = src.powerTextFormat or "perpp", src.powerTextCustomFormat or ""
                 for _, key in ipairs(GROUP_UNIT_ORDER) do
-                    if (UNIT_DB_MAP[key]().powerTextFormat or "perpp") ~= v then return false end
+                    local d = UNIT_DB_MAP[key]()
+                    if (d.powerTextFormat or "perpp") ~= v then return false end
+                    if v == "custom" and (d.powerTextCustomFormat or "") ~= fmt then return false end
                 end
                 return true
             end,
@@ -1611,8 +1632,13 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
                 onApply       = function(checkedKeys)
-                    local v = UNIT_DB_MAP[optState.selectedUnit]().powerTextFormat or "perpp"
-                    for _, key in ipairs(checkedKeys) do UNIT_DB_MAP[key]().powerTextFormat = v end
+                    local src = UNIT_DB_MAP[optState.selectedUnit]()
+                    local v, fmt = src.powerTextFormat or "perpp", src.powerTextCustomFormat
+                    for _, key in ipairs(checkedKeys) do
+                        local d = UNIT_DB_MAP[key]()
+                        d.powerTextFormat = v
+                        if v == "custom" then d.powerTextCustomFormat = fmt end
+                    end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
             },
@@ -2340,7 +2366,11 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 local formTextRow
                 formTextRow, h = W:DualRow(parent, y,
                     { type="dropdown", text="Form Power Text", values=ppFmtValues, order=ppFmtOrder,
-                      getValue=function() return FormVal("foreverFormTextFormat", "powerTextFormat", "perpp") end,
+                      getValue=function()
+                          -- An inherited Custom draws Power % on the form bar.
+                          local v = FormVal("foreverFormTextFormat", "powerTextFormat", "perpp")
+                          return v == "custom" and "perpp" or v
+                      end,
                       setValue=function(v)
                           local pos = FormVal("foreverFormTextPos", "powerPercentText", "none")
                           if v ~= "none" and pos == "none" then SDB().foreverFormTextPos = "center" end

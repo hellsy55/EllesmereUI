@@ -730,7 +730,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
           getValue=function() return MVal("leftTextContent", "name") end,
           setValue=function(v)
             settingsTable.leftTextContent = v
-            if v ~= "none" then
+            if ns.UF_IsUniqueContent(v) then
                 if settingsTable.rightTextContent == v then settingsTable.rightTextContent = "none" end
                 if settingsTable.centerTextContent == v then settingsTable.centerTextContent = "none" end
             end
@@ -857,7 +857,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
           getValue=function() return MVal("rightTextContent", "none") end,
           setValue=function(v)
             settingsTable.rightTextContent = v
-            if v ~= "none" then
+            if ns.UF_IsUniqueContent(v) then
                 if settingsTable.leftTextContent == v then settingsTable.leftTextContent = "none" end
                 if settingsTable.centerTextContent == v then settingsTable.centerTextContent = "none" end
             end
@@ -1400,19 +1400,28 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         -- Reads/writes the same per-unit keys; MSet -> ReloadAndUpdate live-updates
         -- the real boss frames AND the preview (runtime already supports boss).
         local pwrTextRow
+        local function SetPowerTextFormat(v)
+            settingsTable.powerTextFormat = v
+            if v ~= "none" and MVal("powerPercentText", "none") == "none" then
+                settingsTable.powerPercentText = "center"
+            end
+            if v == "none" then settingsTable.powerPercentText = "none" end
+            ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            -- The page stays, so the menu is rebuilt for Custom's pencil.
+            ns.UFO_RefreshMenus(pwrTextRow and pwrTextRow._leftRegion)
+        end
         pwrTextRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Power Text",
-              values = { ["none"]="None", ["smart"]="Smart Text", ["curpp"]="Power Value", ["perpp"]="Power %", ["both"]="Value | %" },
-              order  = { "none", "smart", "curpp", "perpp", "both" },
+              values = ns.UFO_CustomTextValues(
+                  { ["none"]="None", ["smart"]="Smart Text", ["curpp"]="Power Value", ["perpp"]="Power %", ["both"]="Value | %" },
+                  function() return MVal("powerTextFormat", "perpp") end,
+                  function()
+                      ns.UFO_EditCustomText("powerText", settingsTable, unitKey,
+                          function() SetPowerTextFormat("custom") end)
+                  end),
+              order  = { "none", "---", "custom", "---", "smart", "curpp", "perpp", "both" },
               getValue=function() return MVal("powerTextFormat", "perpp") end,
-              setValue=function(v)
-                  settingsTable.powerTextFormat = v
-                  if v ~= "none" and MVal("powerPercentText", "none") == "none" then
-                      settingsTable.powerPercentText = "center"
-                  end
-                  if v == "none" then settingsTable.powerPercentText = "none" end
-                  ReloadAndUpdate(); EllesmereUI:RefreshPage()
-              end },
+              setValue=SetPowerTextFormat },
             { type="dropdown", text="Text Position",
               values = { ["none"]="None", ["left"]="Left", ["right"]="Right", ["center"]="Center" },
               order  = { "none", "---", "left", "right", "center" },
@@ -1421,6 +1430,10 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         -- Expose the power-text row so the preview's power-text click overlay
         -- can scroll here (mirrors parent._powerHeightRow / _powerHeaderFrame).
         parent._powerTextRow = pwrTextRow
+        if not EllesmereUI._prebuilding then
+            ns.UFO_AddCustomFormatAccessor(pwrTextRow._leftRegion, "Power Text", "powerText",
+                MVal("powerTextFormat", "perpp"), function() return settingsTable end, ReloadAndUpdate)
+        end
         -- Inline Text Color swatches on Power Text (left): Custom + Power Colored,
         -- mutually exclusive (mirrors Main Frames' Text Color multiSwatch). Custom
         -- click: first clears power-colored (selecting custom), second opens the
@@ -1477,16 +1490,9 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         -- Show % cog on Power Text (left)
         if not EllesmereUI._prebuilding then
             local rgn = pwrTextRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
-                disabled = function() local fmt = MVal("powerTextFormat", "perpp"); return fmt == "none" or fmt == "curpp" end,
-                disabledTooltip = "This option is only available for formats that display a percentage.",
-                title = "Power Text",
-                rows = {
-                    { type="toggle", label="Show %",
-                      get=function() return MVal("powerShowPercent", true) ~= false end,
-                      set=function(v) MSet("powerShowPercent", v) end },
-                },
-            })
+            EllesmereUI.BuildInlineCog(rgn, ns.UFO_PowerTextCog(MVal, MSet,
+                { none = true, curpp = true },
+                function(v) MSet("powerShowPercent", v) end))
         end
         -- Size + X/Y offsets cog on Text Position (right)
         if not EllesmereUI._prebuilding then

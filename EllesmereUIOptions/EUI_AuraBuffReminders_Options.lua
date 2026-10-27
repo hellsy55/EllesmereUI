@@ -252,6 +252,8 @@ initFrame:SetScript("OnEvent", function(self)
         return -(totalW / 2) + (sz / 2)
     end
 
+    local _eabrHeaderBaseH = 0
+
     local function UpdatePreviewHeader()
         if not _previewIcons or #_previewIcons == 0 then return end
         local d = DDB()
@@ -342,7 +344,6 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Preview click-to-scroll infrastructure
     ---------------------------------------------------------------------------
-    local _eabrHeaderBaseH = 0
 
     --- Rebuild the preview header with scroll compensation.
     --- SetContentHeader tears down and rebuilds, which can cause scroll jumps.
@@ -1673,9 +1674,9 @@ initFrame:SetScript("OnEvent", function(self)
 
         -----------------------------------------------------------------------
         --  WOW FOREVER section: on that client the rest of the page.
-        --  Camp Benefits | Well Fed, then the spell-ID entry that adds a custom
-        --  reminder followed by one slot per tracked spell; the retail sections
-        --  below never build.
+        --  Camp Benefits | Well Fed, Gathering Tracking | Find Treasure, then
+        --  the spell-ID entry that adds a custom reminder followed by one slot
+        --  per tracked spell; the retail sections below never build.
         -----------------------------------------------------------------------
         if FOREVER then
             _, h = W:SectionHeader(parent, SECTION_FOREVER, y);  y = y - h
@@ -1706,6 +1707,39 @@ initFrame:SetScript("OnEvent", function(self)
                       RefreshAll()
                   end }
             );  y = y - h
+
+            -- Gathering Tracking (+ class tracking cog) | Find Treasure
+            local gatherRow
+            gatherRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Gathering Tracking",
+                  tooltip="Reminds you when no gathering tracking is on.",
+                  getValue=function() local f = FDB(); return f and f.gather == true end,
+                  setValue=function(v)
+                      local f = FDB(); if not f then return end; f.gather = v
+                      RefreshAll()
+                      EllesmereUI:RefreshPage()
+                  end },
+                { type="toggle", text=_G._EABR_SpellName(2481, "Find Treasure"),
+                  tooltip="Reminds Dwarves when Find Treasure is off.",
+                  getValue=function() local f = FDB(); return f and f.treasure == true end,
+                  setValue=function(v)
+                      local f = FDB(); if not f then return end; f.treasure = v
+                      RefreshAll()
+                  end }
+            );  y = y - h
+
+            if not EllesmereUI._prebuilding then
+                EllesmereUI.BuildInlineCog(gatherRow._leftRegion, {
+                    title = "Gathering Tracking",
+                    disabled = function() local f = FDB(); return not (f and f.gather == true) end,
+                    disabledTooltip = "Gathering Tracking",
+                    rows = {
+                        { type="toggle", label="Ignore If Class Tracking Is Active",
+                          get=function() local f = FDB(); return not f or f.gatherClassTrack ~= false end,
+                          set=function(v) local f = FDB(); if f then f.gatherClassTrack = v; RefreshAll() end end },
+                    },
+                })
+            end
 
             -- Add Custom Spell, paired with the tracked spells
             y = BuildForeverCustomRows(parent, y,
@@ -2641,8 +2675,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
             child:SetHeight(math.max(1, visIdx * ITEM_H))
-            scrollOffset = 0
-            sf:SetVerticalScroll(0)
+            zScrollTo(0)
         end)
 
         zonePopup:SetScript("OnShow", function()
@@ -2808,7 +2841,8 @@ initFrame:SetScript("OnEvent", function(self)
             end
             child:SetHeight(math.max(1, #allTalents * T_ITEM_H))
 
-            -- Search filter
+            -- Search filter (tScrollTo is set by the scrollbar attached below)
+            local tScrollTo
             search:SetScript("OnTextChanged", function(self)
                 local t = strlower(strtrim(self:GetText()))
                 sPh:SetShown(t == "")
@@ -2825,15 +2859,12 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
                 child:SetHeight(math.max(1, visIdx * T_ITEM_H))
-                tScrollTarget = 0
-                tSmoothing = false
-                if tSmoothFrame then tSmoothFrame:Hide() end
-                sf:SetVerticalScroll(0)
-                if UpdateTThumb then UpdateTThumb() end
+                tScrollTo(0)
             end)
 
             -- Scrollbar + smooth scroll
-            local _, tScrollTo = EllesmereUI.AttachSmoothScrollbar(sf, {
+            local _
+            _, tScrollTo = EllesmereUI.AttachSmoothScrollbar(sf, {
                 step = 40, thumbMin = 20, rightInset = 4, child = child })
             popup:SetScript("OnMouseWheel", function(_, delta)
                 sf:GetScript("OnMouseWheel")(sf, delta)
@@ -3214,8 +3245,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Validate: must have a talent selected
             if not selectedTalentSpellID or selectedTalentSpellID == 0 then
-                PulseRedBorder(classDDBtn)
-                PulseRedBorder(specDDBtn)
+                PulseRedBorder(talentDDBtn)
                 return
             end
 
