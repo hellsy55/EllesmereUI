@@ -60,3 +60,4 @@ ignore:
   - AGENTS.md
   - EllesmereUILoadoutManager
   - EllesmereUISimpleLootCouncil
+  - EllesmereUISimpleLootCouncil/LocaleKeys.txt

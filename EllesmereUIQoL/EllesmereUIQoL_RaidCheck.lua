@@ -793,6 +793,7 @@ local function SweepBody(unit, out)
             end
         end
         if not iconSecret and icon then
+            if icon == GENERIC_FOOD_DRINK_ICON then out._eating = true end
             for j=1,#ICON_COLS do
                 local def=ICON_COLS[j]
                 if def.icons[icon] then
@@ -2336,7 +2337,13 @@ local function Refresh()
                     end
                     local hit = r._cellHit and r._cellHit[ci]
                     local durFS = r._cellDur and r._cellDur[ci]
-                    if v == true then
+                    if def.key == FOOD_KEY and v == false and e.checks._eating then
+                        cell:SetTexture(GENERIC_FOOD_DRINK_ICON)
+                        cell:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                        cell:Show()
+                        if hit then hit:Hide() end
+                        if durFS then durFS:Hide() end
+                    elseif v == true then
                         cell:SetAtlas(ATLAS_OK)
                         cell:Show()
                         if def.class then

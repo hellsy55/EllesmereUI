@@ -4,7 +4,7 @@
 ## Group: EllesmereUI
 ## Notes: Lightweight quality of life tools and enhancements.
 ## Author: Ellesmere
-## Version: 9.6.9
+## Version: 9.7
 ## Dependencies: EllesmereUI
 ## SavedVariables: EllesmereUIQoLDB, EllesmereUIRaidGroupsData
 ## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
@@ -30,6 +30,7 @@ EllesmereUIQoL_RaidToolsCompactBand.lua
 EllesmereUIQoL_RaidCheck.lua
 EllesmereUIQoL_FailedCastAlert.lua
 EllesmereUIQoL_PreyBar.lua
+EllesmereUIQoL_RaidBuffCheck.lua
 EllesmereUIQoL_SelfCombatText.lua
 EllesmereUIQoL_Alerts.lua
 EllesmereUIQoL_UpgradeTooltip.lua

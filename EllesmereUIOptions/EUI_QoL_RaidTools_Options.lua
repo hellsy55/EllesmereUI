@@ -82,6 +82,10 @@ initFrame:SetScript("OnEvent", function(self)
         return Cfg("showAs") or "one"
     end
 
+    local function BuffCheckOff()
+        return Cfg("buffCheck") ~= true
+    end
+
     -- Pull durations live in a fixed 3-slot array; each slider owns one slot.
     local function PullGet(i)
         local t = Cfg("pullTimes")
@@ -323,7 +327,7 @@ initFrame:SetScript("OnEvent", function(self)
                   Refresh()
               end },
             { type = "dropdown", text = "Button Order",
-              tooltip = "Drag to reorder Pings, Difficulty, Convert, Disband, Ready Check, Role Check and the entire Pull Timer block (Pull, Stop and Break).",
+              tooltip = "Drag to reorder Pings, Difficulty, Convert, Disband, Ready Check, Role Check, Buff Check and the entire Pull Timer block (Pull, Stop and Break).",
               disabled = Disabled,
               values = { default = "Arrange Buttons" }, order = { "default" },
               getValue = function() return "default" end, setValue = function() end }
@@ -334,7 +338,7 @@ initFrame:SetScript("OnEvent", function(self)
             local items = {}
             local labels = {
                 pings = "Pings", difficulty = "Difficulty", convert = "Convert to Raid",
-                disband = "Disband", ready = "Ready Check", role = "Role Check", pull = "Pull Timer",
+                disband = "Disband", ready = "Ready Check", role = "Role Check", buff = "Buff Check", pull = "Pull Timer",
             }
             for _, key in ipairs(ns.RaidToolsButtonOrder()) do
                 items[#items + 1] = { key = key, label = labels[key] }
@@ -938,6 +942,41 @@ initFrame:SetScript("OnEvent", function(self)
             ButtonToggle("showRoles", "Show Raid Role Counts",
                 "Shows Tank, Heal and DPS counts next to the Target Markers boundary. The row only appears while you are actually in a raid group and mirrors with Grow Direction.")
         );  y = y - h
+
+        -- RAID BUFF CHECK (retail only)
+        if not EllesmereUI.IS_FOREVER then
+        _, h = W:SectionHeader(parent, "RAID BUFF CHECK", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Raid Buff Check",
+              tooltip = "A window of each group member's flask, food, augment and vantus runes and missing raid buffs.",
+              getValue = function() return Cfg("buffCheck") == true end,
+              setValue = function(v)
+                  Set("buffCheck", v)
+                  Refresh()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "toggle", text = "Open on Ready Check",
+              tooltip = "Opens the window on ready checks while you lead the group or assist.",
+              disabled = BuffCheckOff, disabledTooltip = "Raid Buff Check",
+              getValue = function() return Cfg("buffCheckOnReady") ~= false end,
+              setValue = function(v)
+                  Set("buffCheckOnReady", v)
+                  Refresh()
+              end }
+        );  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Show Buff Check",
+              tooltip = "Shows the separate Buff Check button on the Raid Tools panel.",
+              disabled = function() return Disabled() or BuffCheckOff() end,
+              disabledTooltip = function()
+                  return BuffCheckOff() and "Raid Buff Check" or "Show Raid Tools"
+              end,
+              getValue = function() return Cfg("showBuffCheck") == true end,
+              setValue = function(v) Set("showBuffCheck", v); Refresh() end },
+            EllesmereUI.BlankRowCfg()
+        );  y = y - h
+        end -- not IS_FOREVER
 
         -- PULL TIMER
         _, h = W:SectionHeader(parent, "PULL TIMER", y);  y = y - h

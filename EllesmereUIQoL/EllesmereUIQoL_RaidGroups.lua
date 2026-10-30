@@ -4010,8 +4010,13 @@ BeginConfirmedApply=function(plan)
         Notice(now.shift.guidance,"leader")
     end
     applyState={wanted=now.wanted,order=now.order,members=now.members,
-        originalMembers=RGStyle.RosterMemberSnapshot(),rosterChangeSignature=nil,
-        rosterChangeChecks=0,rosterIncompleteChecks=0,
+        rosterIncompleteChecks=0,
+        -- Keep the confirmed intent independent of the changing live roster.
+        -- Guests may be reassigned only through the existing planning rules.
+        confirmedSource=CopyDraft(plan.source),
+        confirmedFixedGuests=plan.fixedGuestNames and CopyDraft(plan.fixedGuestNames) or nil,
+        confirmedExcludedGuests=CopyKeys(plan.excludedGuests),
+        confirmedEmptyPinned=CopyPinned(plan.emptyPinned),
         steps=0,unchanged=0,phase="groups",attemptedExact={},lastOperation=nil,
         previewDraft=plan.fromPreview and CopyDraft(plan.previewSource) or nil,
         previewExcludedGuests=plan.fromPreview and CopyKeys(plan.excludedGuests) or nil,
@@ -4101,12 +4106,11 @@ function ProcessApply()
     end
     Roster()
     -- GROUP_ROSTER_UPDATE can briefly expose fewer readable entries than
-    -- GetNumGroupMembers. Never treat that intermediate read as a departure,
-    -- and never issue a protected operation against such an incomplete roster.
+    -- GetNumGroupMembers. Never act on an incomplete roster or stale indices.
     local rosterSize=GetNumGroupMembers() or 0
     if #rosterSorted~=rosterSize then
         state.rosterIncompleteChecks=state.rosterIncompleteChecks+1
-        if state.rosterIncompleteChecks>=6 then
+        if state.rosterIncompleteChecks>=20 then
             StopApply("Group application stopped: raid roster data remained incomplete ("..
                 #rosterSorted.." of "..rosterSize.." players readable). No subgroup changes were attempted during the incomplete roster reads.")
         else
@@ -4116,26 +4120,60 @@ function ProcessApply()
     end
     state.rosterIncompleteChecks=0
     local members=RosterMembersSignature()
-    if state.members~=members then
-        -- Confirm an unexpected change twice against a complete roster. A
-        -- transient update must not cancel the entire Exact Positions cycle.
-        if state.rosterChangeSignature==members then
-            state.rosterChangeChecks=state.rosterChangeChecks+1
-        else
-            state.rosterChangeSignature=members
-            state.rosterChangeChecks=1
+    if state.members~=members or state.rosterPauseSince then
+        -- A confirmed Apply survives joins, departures and leadership changes.
+        -- Wait for a stable membership signature before rebuilding its targets;
+        -- protected moves, including an in-flight Exact Positions bridge,
+        -- must not continue against the old roster.
+        if not state.rosterPauseSince then
+            Notice("Raid composition changed. Apply Groups is paused until the roster settles.")
         end
-        if state.rosterChangeChecks>=2 then
-            StopApply("Group application stopped: "..
-                RGStyle.DescribeRosterChange(state.originalMembers,RGStyle.RosterMemberSnapshot())..
-                ". Review Apply Groups preview again.")
-        else
+        if state.rosterPauseSignature~=members then
+            state.rosterPauseSignature=members
+            state.rosterPauseSince=GetTime()
+        end
+        if GetTime()-state.rosterPauseSince<1.8 then
             QueueApply()
+            return
         end
-        return
+        local refreshed=BuildApplyPlan(state.confirmedSource,state.confirmedFixedGuests,
+            true,state.confirmedExcludedGuests,state.confirmedEmptyPinned)
+        -- Recheck after planning, because roster reads are not atomic.
+        if #rosterSorted~=(GetNumGroupMembers() or 0) or refreshed.members~=members then
+            state.rosterPauseSignature=nil
+            state.rosterPauseSince=GetTime()
+            QueueApply()
+            return
+        end
+        if refreshed.blockedReason then
+            StopApply("Apply Groups could not resume after the roster changed: "..refreshed.blockedReason)
+            return
+        end
+        state.wanted=refreshed.wanted
+        state.order=refreshed.order
+        state.members=refreshed.members
+        state.bridgeCycle=nil
+        state.attemptedExact={}
+        state.lastOperation=nil
+        state.lastActors=nil
+        state.unchanged=0
+        state.steps=0
+        state.rosterPauseSignature=nil
+        state.rosterPauseSince=nil
+        local actionable=false
+        for _,target in pairs(state.wanted) do
+            if not target.ignored then actionable=true;break end
+        end
+        state.waitingForPlannedMember=not actionable
+        if not actionable then
+            -- Keep the confirmed Apply alive without polling until a planned
+            -- player is available again; ignored members alone are not targets.
+            Notice("Apply Groups is waiting for a planned raid member to join.")
+            return
+        end
+        Notice("Raid roster settled. Resuming the confirmed Apply Groups arrangement.","success")
     end
-    state.rosterChangeSignature=nil
-    state.rosterChangeChecks=0
+    if state.waitingForPlannedMember then return end
     local signature = RosterSignature()
     if state.lastOperation then
         if signature == state.lastOperation then
@@ -6262,7 +6300,15 @@ events:SetScript("OnEvent",function(self,event,addonName)
     if event=="GROUP_ROSTER_UPDATE" or event=="PARTY_LEADER_CHANGED" or
         event=="PLAYER_ROLES_ASSIGNED" then
         Roster()
-        if applyState and event~="PLAYER_ROLES_ASSIGNED" then QueueApply() end
+        if applyState and event~="PLAYER_ROLES_ASSIGNED" then
+            -- An active stream of roster changes may keep snapshots incomplete;
+            -- only stop on prolonged incompleteness without fresh events.
+            applyState.rosterIncompleteChecks=0
+            -- While paused, every roster/leader event restarts the quiet
+            -- interval; planned subgroup swaps are not paused in normal mode.
+            if applyState.rosterPauseSince then applyState.rosterPauseSince=GetTime() end
+            QueueApply()
+        end
     end
     if win and win:IsShown() then Refresh() end
     if previewWindow and previewWindow:IsShown() and previewWindow._render then

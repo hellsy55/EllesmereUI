@@ -22,7 +22,8 @@ local PoolGen = EllesmereUI._Pool.Gen
 -- leaves the position free.
 local KNOWN = { enemyName = true, levelName = true, nameLevel = true, level = true, targetOfTarget = true,
     healthPercent = true, healthPercentNoSign = true, healthNumber = true, healthPctNum = true,
-    healthNumPct = true, healthPctNumDash = true, healthNumPctDash = true, healthNumMax = true }
+    healthNumPct = true, healthPctNumDash = true, healthNumPctDash = true, healthNumMax = true,
+    custom = true }
 -- Add Text Slot's text: the first of these whose font string no shown text
 -- uses (one per font string: name, health %, level, health #, Target of
 -- Target).
@@ -31,7 +32,7 @@ local ADD_ORDER = { "enemyName", "healthPercent", "level", "healthNumber", "targ
 -- from each position's default (MOVE_OFFSETS). Its Size and colour mode go
 -- along through MoveText too.
 local MOVE_RAW = { "Strata", "Color", "NameColorOn", "NameColor", "LevelColorOn", "LevelColor", "LevelDiffOn",
-                   "WidthPct", "Wrap", "PctDecimal", "NameFormat" }
+                   "WidthPct", "Wrap", "PctDecimal", "NameFormat", "CustomFormat" }
 local MOVE_OFFSETS = { "XOffset", "YOffset" }
 
 -- The six text positions in ns.textSlotKeys order: the order of the Core Text
@@ -50,6 +51,30 @@ for i = 1, #ns.NPO_TEXT_SLOTS do
     local s = ns.NPO_TEXT_SLOTS[i]
     POS_ORDER[i] = s.key
     POS_VALUES[s.key] = s.menu
+end
+
+-- Custom text popup for a text position: the template is stored in
+-- <slot>CustomFormat, then onSave selects Custom for the position.
+function ns.NPO_EditCustomText(slotKey, onSave)
+    local env = ns._NPO_OptEnv
+    local key = slotKey .. "CustomFormat"
+    -- The slot's colour as the nameplate preview paints it (Text Coloring mode),
+    -- copied: the level colour is a reused table.
+    local c = ns.NPO_PreviewSlotColor(slotKey)
+    EllesmereUI.TextTags.EditPopup({
+        cat = ns.NP_TextTags, color = c and { r = c.r, g = c.g, b = c.b }, onSave = onSave,
+        tagNotes = { hp = EllesmereUI.L("shows DEAD") },
+        get = function() return env.DB()[key] end,
+        set = function(txt) env.DB()[key] = txt end,
+    })
+end
+
+-- A copy of the text dropdown's values whose Custom entry is an action that opens
+-- the popup (edit), its pencil at full alpha while getValue() is "custom" (the menu
+-- reads it when built; a selection rebuilds the page); Remove in the house red.
+function ns.NPO_CustomTextValues(values, getValue, edit)
+    return EllesmereUI.TextTags.MenuValues(values, edit,
+        { removeKey = "none", selected = function() return getValue() == "custom" end })
 end
 
 -- A position shows a text while its element is a KNOWN one.
@@ -1328,6 +1353,26 @@ local function BuildDisplayLayout(parent, y, ctx)
                 end
                 return dd
             end
+            -- The Name Format list: one control per row kind for every text slot,
+            -- built on first need. Its Character Count entry saves through the
+            -- per-show setter, as a pick does. Enemy names show here, so retail
+            -- warns that the game keeps them whole in restricted content.
+            local nameFormatDDs = {}
+            pf._NameFormatDD = function(kind)
+                local dd = nameFormatDDs[kind]
+                if not dd then
+                    local values, order, getValue, setValue = EllesmereUI.NameFormatMenu(listGet[kind], listSet[kind], {
+                        onSaved = function() nameFormatDDs[kind]._refreshLabel() end,
+                        enemies = true,
+                    })
+                    dd = EllesmereUI.BuildDropdownControl(pf, EllesmereUI.NAME_FORMAT_MENU_W, pf:GetFrameLevel() + 6,
+                        values, order, getValue, setValue)
+                    dd:SetScale(GROW_DD_SCALE)
+                    dd:Hide()
+                    nameFormatDDs[kind] = dd
+                end
+                return dd
+            end
 
             -- Optional toggle row, anchored at layout time: takes the 4th-row slot (G_ROW_Y) with no Grow row, stacks BELOW Grow when both present (e.g. Rare/Quest Indicator on topleft/topright: Grow + Show In Instances). Wired via pf._toggleGet/Set.
             local tLabel = MakeFont(pf, 12, nil, 1, 1, 1)
@@ -1845,11 +1890,13 @@ local function BuildDisplayLayout(parent, y, ctx)
             cogPopup._t3Toggle:Hide()
         end
 
-        -- Show/hide the second dropdown row ({ { value, label }, ... } like Grow)
+        -- Show/hide the second dropdown row ({ { value, label }, ... } like Grow,
+        -- or the Name Format list with dropdown2NameFormat)
         if hasDropdown2 then
             cogPopup._dd2Get = opts.dropdown2Get
             cogPopup._dd2Set = opts.dropdown2Set
-            local d2DD = cogPopup._ListDD("dd2", opts.dropdown2Values or {})
+            local d2DD = opts.dropdown2NameFormat and cogPopup._NameFormatDD("dd2")
+                or cogPopup._ListDD("dd2", opts.dropdown2Values or {})
             if cogPopup._d2DD and cogPopup._d2DD ~= d2DD then cogPopup._d2DD:Hide() end
             cogPopup._d2DD = d2DD
             d2DD._refreshLabel()
@@ -2776,9 +2823,10 @@ local function BuildDisplayLayout(parent, y, ctx)
         healthPctNumDash     = "Health % - #",
         healthNumPctDash     = "Health # - %",
         healthNumMax         = "Health # / Max #",
+        custom               = "Custom",
         none                 = "Remove",
     }
-    local textElementOrder = { "none", "---", "enemyName", "levelName", "nameLevel", "level", "targetOfTarget", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash", "healthNumMax" }
+    local textElementOrder = { "none", "---", "custom", "---", "enemyName", "levelName", "nameLevel", "level", "targetOfTarget", "healthPercent", "healthPercentNoSign", "healthNumber", "healthPctNum", "healthNumPct", "healthPctNumDash", "healthNumPctDash", "healthNumMax" }
 
     local function TextSlotSetValue(slotKey, v)
         -- Target of Target starts in Class mode whenever a slot newly takes it;
@@ -2886,21 +2934,21 @@ local function BuildDisplayLayout(parent, y, ctx)
                     UpdatePreview()
                 end
             end
-            -- Target of Target and the standalone level have no use for "Show % Decimal".
+            -- Target of Target, the standalone level and Custom (its template writes the
+            -- percent) have no use for "Show % Decimal".
             local slotEl = DBVal(slotKey)
-            if slotEl == "targetOfTarget" or slotEl == "level" then
+            if slotEl == "targetOfTarget" or slotEl == "level" or slotEl == "custom" then
                 cogOpts.toggleLabel, cogOpts.toggleGet, cogOpts.toggleSet = nil, nil, nil
             end
-            -- WoW Forever: the name's format, while this slot shows a name or the
-            -- Target of Target name. First and Last is stored as nil (the
-            -- runtime's full-name path).
-            if EllesmereUI.IS_FOREVER and (ns.IsNameElement(slotEl) or slotEl == "targetOfTarget") then
+            -- Name Format, while this slot shows a name, the Target of Target
+            -- name, or a custom template that reads one. Full name is stored as
+            -- nil (the runtime's unchanged path).
+            local parsed = slotEl == "custom" and ns.NP_CustomParse(slotKey, DB())
+            if ns.IsNameElement(slotEl) or slotEl == "targetOfTarget"
+                or (parsed and (parsed.has.name or parsed.has.target)) then
                 local nfKey = slotKey .. "NameFormat"
                 cogOpts.dropdown2Label = "Name Format"
-                cogOpts.dropdown2Values = {}
-                for _, k in ipairs(EllesmereUI.NAME_FORMAT_ORDER) do
-                    cogOpts.dropdown2Values[#cogOpts.dropdown2Values + 1] = { value = k, label = EllesmereUI.NAME_FORMAT_VALUES[k] }
-                end
+                cogOpts.dropdown2NameFormat = true
                 cogOpts.dropdown2Get = function() return DBVal(nfKey) or "full" end
                 cogOpts.dropdown2Set = function(v)
                     DB()[nfKey] = (v ~= "full") and v or nil
@@ -2995,9 +3043,12 @@ local function BuildDisplayLayout(parent, y, ctx)
         end
         for i = 1, #MOVE_RAW do
             local suf = MOVE_RAW[i]
-            local v = db[S .. suf]
-            if type(v) == "table" then v = CopyTable(v) end
-            db[T .. suf] = v
+            -- The template moves only with Custom; otherwise T keeps its own.
+            if suf ~= "CustomFormat" or el == "custom" then
+                local v = db[S .. suf]
+                if type(v) == "table" then v = CopyTable(v) end
+                db[T .. suf] = v
+            end
         end
         if size ~= tSize then db[T .. "Size"] = size end
         db[T] = el
@@ -3029,8 +3080,18 @@ local function BuildDisplayLayout(parent, y, ctx)
     end
 
     local function TextCellCfg(s)
-        return { type="dropdown", text=s.label, values=textElementValues, order=textElementOrder,
-          getValue=function() return DBVal(s.key) end,
+        local function get() return DBVal(s.key) end
+        -- Custom opens its popup; a saved template selects it (the new cell reports
+        -- the write to Spec Overrides, as Add Text Slot does).
+        local values = ns.NPO_CustomTextValues(textElementValues, get, function()
+            ns.NPO_EditCustomText(s.key, function()
+                optState._npNotifySlot = s.key
+                TextSlotSetValue(s.key, "custom")
+                optState._npNotifySlot = nil
+            end)
+        end)
+        return { type="dropdown", text=s.label, values=values, order=textElementOrder,
+          getValue=get,
           setValue=function(v) TextSlotSetValue(s.key, v) end,
           disabledValues = (s.key == "textSlotLeft" or s.key == "textSlotRight") and COMBO_VS_CENTER_NAME or nil }
     end
@@ -3076,6 +3137,15 @@ local function BuildDisplayLayout(parent, y, ctx)
             itemDisabled = MoveDisabled(c.key),
             tooltip = "Choose this text's slot position." })
         MakeTextCogIcon(row, side, c.key, c.label)
+        -- The popup writes the template directly: Spec Overrides reads it through
+        -- an accessor, on a Custom text or one holding a template an override may
+        -- switch back to.
+        local fk = c.key .. "CustomFormat"
+        if DBVal(c.key) == "custom" or type(DBVal(fk)) == "string" then
+            EllesmereUI.TextTags.AddFormatAccessor(rgn, c.label,
+                function() return DBVal(fk) end,
+                function(v) DB()[fk] = v; ns.RefreshAllSettings(); UpdatePreview() end)
+        end
         if optState._npNotifySlot == c.key then
             optState._npNotifySlot = nil
             -- The slot read now, while this build's cell is its dress.
