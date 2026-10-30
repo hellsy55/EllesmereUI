@@ -82,6 +82,18 @@ local function HistorySize()
     return n
 end
 
+-- The run history other modules read (the data bar's M+ Summary block): Get,
+-- Clear, and OnChanged, which a reader sets to hear of a stored or cleared
+-- run. Internal, not a public API.
+EllesmereUI._MythicRuns = {}
+
+-- A reader's error is reported, never passed on: StoreRun's caller still sets
+-- up the meter retries after it.
+local function NotifyRunsChanged()
+    local fn = EllesmereUI._MythicRuns.OnChanged
+    if fn then xpcall(fn, geterrorhandler()) end
+end
+
 local function StoreRun(record)
     if type(record) ~= "table" then return end
     local sv = GetSV()
@@ -90,17 +102,27 @@ local function StoreRun(record)
     for i = #sv.runs, cap + 1, -1 do
         sv.runs[i] = nil
     end
+    NotifyRunsChanged()
 end
 
 function ns.RS_GetRuns()
     return GetSV().runs
 end
 
+-- Stored runs, newest first, or nil. Read only: never creates the SavedVariable.
+function EllesmereUI._MythicRuns.Get()
+    local sv = _G[SV_NAME]
+    local runs = type(sv) == "table" and sv.runs
+    return type(runs) == "table" and runs or nil
+end
+
 function ns.RS_ClearHistory()
     local sv = GetSV()
     wipe(sv.runs)
     if RefreshWindowIfOpen then RefreshWindowIfOpen() end
+    NotifyRunsChanged()
 end
+EllesmereUI._MythicRuns.Clear = ns.RS_ClearHistory
 
 -- Season purge: drop records for dungeons that are no longer in the pool, the
 -- same shape EMT:OnInitialize already uses for bestObjectiveSplits.

@@ -476,8 +476,8 @@ end
 ns.RF_NAME_WIDTH_FRACTION = 1.0
 
 -- Display name for a unit. Nickname sources in order: Northern Sky Raid Tools (NSAPI), MethodInternal
--- (EasyNicknameAPI), TimelineReminders, the Liquid addon (LiquidAPI), then RakGaming Aliases
--- (RG_UnitName); falls back to the short character name. NSAPI
+-- (EasyNicknameAPI), TimelineReminders, the Liquid addon (LiquidAPI), RakGaming Aliases
+-- (RG_UnitName), then CustomNames; falls back to the short character name. NSAPI
 -- gets our addon key "EUI" (it has a dedicated per-addon setting + EUI_NICKNAME_TOGGLE callback):
 -- NSAPI:GetName self-gates on its global nicknames toggle AND that checkbox and returns the short
 -- name when unset, falling through to the next source. Every source gates itself entirely (no
@@ -545,12 +545,22 @@ local function ResolveDisplayName(unit, applyCap, s, fmt)
             display = dn
         end
     end
-    -- Final alias source, RakGaming Aliases (RGA), gated on ns._rgaNick (maintained by
+    -- RakGaming Aliases (RGA), gated on ns._rgaNick (maintained by
     -- RegisterRGALIASNicknames + RGA's module callbacks: true only while RGA is present AND its
     -- "ellesmereui" module is enabled), so this hot path costs one flag read and never dereferences
     -- RGA's settings shape. dn ~= name keeps the Ambiguate path for unaliased units.
     if not display and ns._rgaNick then
         local ok, dn = pcall(RG_UnitName, unit)
+        if ok and type(dn) == "string"
+           and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
+            display = dn
+        end
+    end
+    -- CustomNames (LibStub library), set by RegisterCustomNames once it has loaded.
+    -- UnitName returns the raw name when none is set, so dn ~= name keeps the
+    -- Ambiguate path; a secret name is never compared.
+    if not display and ns._customNames and not (issecretvalue and issecretvalue(name)) then
+        local ok, dn = pcall(ns._customNames.UnitName, unit)
         if ok and type(dn) == "string"
            and not (issecretvalue and issecretvalue(dn)) and dn ~= "" and dn ~= name then
             display = dn
