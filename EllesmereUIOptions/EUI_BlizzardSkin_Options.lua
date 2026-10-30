@@ -2052,12 +2052,12 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Mail card content (retail): the Alt List beside Send Mail
+    --  Mail card, ALT LIST section (retail): the Alt List beside Send Mail
     --  (EllesmereUIBlizzardSkin_MailAlts.lua, ns.MailAlts), whatever the card's
     --  style. Sort, cap and minimum level ride the toggle's cog; Shown
     --  Characters lists every recorded character under its realm.
     ---------------------------------------------------------------------------
-    local function BuildMailContent(parent, y)
+    local function BuildMailAltList(parent, y)
         local MA = ns.MailAlts
         if not MA then return y end
         local W = EllesmereUI.Widgets
@@ -2141,6 +2141,34 @@ initFrame:SetScript("OnEvent", function(self)
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(refresh)
         end
+
+        return y
+    end
+
+    ---------------------------------------------------------------------------
+    --  Mail card content: the Alt List (retail), then GENERAL (both clients).
+    --  Close Bags on Mail Close (EllesmereUIDB.mailCloseBags, on unless set
+    --  false) is read by Bags, which closes its window as the mailbox closes.
+    ---------------------------------------------------------------------------
+    local function BuildMailContent(parent, y)
+        y = BuildMailAltList(parent, y)
+        local W = EllesmereUI.Widgets
+        local _, h
+
+        _, h = WSCardSection(parent, "GENERAL", y);  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Close Bags on Mail Close",
+              tooltip="Closes your bags when you close the mailbox.",
+              disabled=function() return not EllesmereUI._ModuleNS["EllesmereUIBags"] end,
+              disabledTooltip="Bags",
+              getValue=function() return not (EllesmereUIDB and EllesmereUIDB.mailCloseBags == false) end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB = {} end
+                  EllesmereUIDB.mailCloseBags = v
+              end },
+            EllesmereUI.BlankRowCfg()
+        ); y = y - h
 
         return y
     end
@@ -2463,8 +2491,9 @@ initFrame:SetScript("OnEvent", function(self)
                 if not EllesmereUIDB then EllesmereUIDB = {} end
                 EllesmereUIDB.reskinMail = v
             end,
-            buildContent = not EllesmereUI.IS_FOREVER and BuildMailContent or nil,
-            searchText = not EllesmereUI.IS_FOREVER and { "Show Alt List", "Shown Characters" } or nil,
+            buildContent = BuildMailContent,
+            searchText = not EllesmereUI.IS_FOREVER and { "Show Alt List", "Shown Characters", "Close Bags on Mail Close" }
+                or { "Close Bags on Mail Close" },
         },
         {
             key   = "catalyst",
@@ -4398,6 +4427,7 @@ initFrame:SetScript("OnEvent", function(self)
                     "tooltipBgOpacity", "showSpellID", "spellIDModifier", "showIconID",
                     "showItemID", "friendsListCard",
                     "mailAltList", "mailAltListMax", "mailAltListMinLevel", "mailAltListSort",
+                    "mailCloseBags",
                     -- Shown Characters (the roster itself is recorded data, not a setting)
                     "mailAltHidden",
                 }) do EllesmereUIDB[k] = nil end

@@ -63,6 +63,33 @@ function Check($Name, [scriptblock]$Action) {
     Fixture; & $Action; $script:passed++; Write-Host "PASS: $Name"
 }
 try {
+    Check 'Manual changelog metadata preserves installed payload bytes and paths' {
+        Put (Join-Path $source 'CHANGELOG.md') '# Release notes'
+        Prepare
+        $before = @(Get-ChildItem $stage -File -Recurse | ForEach-Object {
+            $_.FullName.Substring($stage.Length) + ':' + (Get-FileHash $_.FullName).Hash
+        } | Sort-Object)
+        $script:stage = Join-Path $testRoot ([guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $stage
+        Put (Join-Path $source '.pkgmeta') ($meta + "`nmanual-changelog:`n  filename: CHANGELOG.md`n  markup-type: markdown`n")
+        $parsed = ConvertFrom-EuiPkgmeta ([IO.File]::ReadAllText((Join-Path $source '.pkgmeta')))
+        Assert ($parsed['manual-changelog'].filename -ceq 'CHANGELOG.md')
+        Assert ($parsed['manual-changelog']['markup-type'] -ceq 'markdown')
+        Prepare
+        $after = @(Get-ChildItem $stage -File -Recurse | ForEach-Object {
+            $_.FullName.Substring($stage.Length) + ':' + (Get-FileHash $_.FullName).Hash
+        } | Sort-Object)
+        Assert (($before -join "`n") -ceq ($after -join "`n")) 'Changelog metadata changed the payload'
+    }
+    foreach ($block in @('manual-changelog: yes', 'manual-changelog:',
+        "manual-changelog:`n  filename: ../escape`n  markup-type: markdown",
+        "manual-changelog:`n  filename: CHANGELOG.md",
+        "manual-changelog:`n  markup-type: markdown",
+        "manual-changelog:`n  filename: CHANGELOG.md`n  markup-type: html",
+        "manual-changelog:`n  filename: CHANGELOG.md`n  filename: other.md`n  markup-type: markdown",
+        "manual-changelog:`n  filename: CHANGELOG.md`n  markup-type: markdown`n  unknown: yes")) {
+        Check "Malformed changelog rejected: $block" { Reject { ConvertFrom-EuiPkgmeta ($meta + "`n" + $block) } }
+    }
     Check 'Literal files/directories ignored; held modules excluded; dynamic move; core and libraries preserved' {
         Prepare
         foreach ($name in 'EllesmereUILoadoutManager','EllesmereUISimpleLootCouncil','EllesmereUI/docs','EllesmereUI/unused.txt','.tools','EllesmereUI/.pkgmeta') { Assert (-not (Test-Path (Join-Path $stage $name))) $name }

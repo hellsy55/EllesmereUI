@@ -60,9 +60,19 @@ function ConvertFrom-EuiPkgmeta([string]$Text) {
                     if ($value -cne 'no') { throw 'Only enable-nolib-creation: no is supported.' }
                     $result[$section] = $value
                 }
+                'manual-changelog' {
+                    if ($value) { throw 'Expected block: manual-changelog' }
+                    $result[$section] = @{}
+                }
                 { $_ -in 'ignore','move-folders','externals' } { if ($value) { throw "Expected block: $section" } }
                 default { throw "Unsupported packaging directive: $section" }
             }
+        } elseif ($section -eq 'manual-changelog' -and $line -match '^  (filename|markup-type): (.+)$') {
+            $key = $Matches[1]; $value = $Matches[2]
+            if ($result[$section].ContainsKey($key)) { throw "Duplicate changelog field: $key" }
+            if ($key -eq 'filename') { $value = ConvertTo-EuiPackagePath $value }
+            elseif ($value -cne 'markdown') { throw 'Only markdown changelogs are supported.' }
+            $result[$section][$key] = $value
         } elseif ($section -eq 'ignore' -and $line -match '^  - (.+)$') {
             $value = ConvertTo-EuiPackagePath $Matches[1]
             if ($result.ignore -contains $value) { throw "Duplicate ignore: $value" }
@@ -82,6 +92,9 @@ function ConvertFrom-EuiPkgmeta([string]$Text) {
         } else { throw "Unsupported pkgmeta syntax: $line" }
     }
     if (-not $result.ContainsKey('package-as')) { throw 'Missing package-as.' }
+    if ($result.ContainsKey('manual-changelog') -and
+        (-not $result['manual-changelog'].ContainsKey('filename') -or
+         -not $result['manual-changelog'].ContainsKey('markup-type'))) { throw 'Manual changelog requires filename and markup-type.' }
     foreach ($entry in $result.externals.Values) { if (-not $entry.ContainsKey('url')) { throw 'External requires url.' } }
     return $result
 }
