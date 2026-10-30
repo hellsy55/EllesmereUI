@@ -93,6 +93,16 @@ class Semantics(unittest.TestCase):
         self.v['fork']['ignore'] = []
         self.assertTrue(self.report()['risks'])
 
+    def test_merge_tree_error_is_not_a_candidate(self):
+        result = subprocess.CompletedProcess([], 128, b'f' * 40 + b'\0')
+        with self.assertRaisesRegex(ValueError, 'failed'):
+            audit.merge_candidate(result)
+
+    def test_conflict_paths_must_be_complete(self):
+        for data in (b'f' * 40 + b'\0', b'f' * 40 + b'\0\0'):
+            with self.assertRaises(ValueError):
+                audit.merge_candidate(subprocess.CompletedProcess([], 1, data))
+
 
 @unittest.skipUnless(GIT and PS, 'Native Git and Windows PowerShell are required')
 class GitPreview(unittest.TestCase):
@@ -188,6 +198,35 @@ class GitPreview(unittest.TestCase):
         self.incoming(self.meta + '  - Other\n')
         with self.assertRaisesRegex(ValueError, 'conflict'):
             self.invoke()
+
+    def test_runtime_conflict_does_not_block_clean_packaging_audit(self):
+        self.write('Existing/main.lua', '-- base\n')
+        self.git('add', 'Existing/main.lua')
+        self.commit('Shared runtime base')
+        self.git('branch', '-f', 'incoming', 'HEAD')
+        self.write('Existing/main.lua', '-- fork\n')
+        self.git('add', 'Existing/main.lua')
+        self.commit('Fork runtime')
+        self.git('switch', 'incoming')
+        self.write('Existing/main.lua', '-- incoming\n')
+        self.write('.pkgmeta', self.meta + '  - Other\n')
+        self.git('add', 'Existing/main.lua')
+        self.commit('Incoming runtime and packaging')
+        self.git('switch', 'retail')
+        result = self.invoke()
+        self.assertEqual(result['status'], 'safe')
+        self.assertEqual(result['pending_conflicts'], ['Existing/main.lua'])
+        self.assertIn('/Other', result['sections']['ignore']['incoming_added'])
+
+    def test_runtime_conflict_does_not_bypass_distribution_risk(self):
+        self.test_runtime_conflict_does_not_block_clean_packaging_audit()
+        self.git('switch', 'incoming')
+        self.write('.pkgmeta', self.meta + '  - Existing\n')
+        self.commit('Exclude customized module')
+        self.git('switch', 'retail')
+        result = self.invoke()
+        self.assertEqual(result['status'], 'decision-required')
+        self.assertEqual(result['pending_conflicts'], ['Existing/main.lua'])
 
     def test_inherited_module_with_lua_customization_blocks_ignore(self):
         self.write('Existing/main.lua', '-- fork customization\n')

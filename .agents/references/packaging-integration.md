@@ -18,6 +18,10 @@ index or checkout. It does not replace or perform the existing git merge.
 Exit 0 permits the existing integration; exit 3 requires a human distribution
 decision before mutation; any other nonzero exit blocks integration. A textual
 conflict retains the existing conflict checkpoint. Never resolve it in this gate.
+Conflicts outside `.pkgmeta` are recorded as `pending_conflicts` and do not
+prevent auditing the clean candidate `.pkgmeta`. Packaging approval does not
+authorize resolving those conflicts. A conflict in `.pkgmeta` still blocks the
+audit before parsing; no packaging candidate is accepted from conflict markers.
 Freeze both input SHAs with the report; rerun if either changes. Do not add merge
 commits to safe fast-forwards. Unsupported .pkgmeta syntax fails closed.
 

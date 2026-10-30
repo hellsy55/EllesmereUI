@@ -140,6 +140,26 @@ def compare(versions, paths, retained=(), touched=(), fork_changes=()):
     return report
 
 
+def merge_candidate(result):
+    if result.returncode not in (0, 1):
+        raise ValueError('Git merge-tree failed')
+    fields = result.stdout.split(b'\0')
+    if not re.fullmatch(rb'[0-9a-f]{40,64}', fields[0]):
+        raise ValueError('Unexpected merge-tree output')
+    conflicts = []
+    if result.returncode == 1:
+        try:
+            end = fields.index(b'', 1)
+            conflicts = [path.decode('utf-8') for path in fields[1:end]]
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ValueError('Unexpected merge-tree conflict paths') from exc
+        if not conflicts:
+            raise ValueError('Git reported conflicts without paths')
+        if any(path.casefold() == '.pkgmeta' for path in conflicts):
+            raise ValueError('Git reports a .pkgmeta conflict; human choice required')
+    return fields[0].decode('ascii'), sorted(set(conflicts))
+
+
 def audit(root, git, powershell, destination, source, retained=()):
     def run(*args, env=None, allowed=(0,)):
         return command([git, '-C', str(root), *args], root, env, allowed)
@@ -166,17 +186,13 @@ def audit(root, git, powershell, destination, source, retained=()):
         env['GIT_OBJECT_DIRECTORY'] = str(objects)
         env['GIT_ALTERNATE_OBJECT_DIRECTORIES'] = str(original.resolve())
         ff = run('merge-base', '--is-ancestor', fork, incoming, allowed=(0, 1)).returncode == 0
+        conflicts = []
         if ff:
             proposed = incoming
         else:
-            candidate = run('-c', 'merge.autoStash=false', 'merge-tree', '--write-tree', fork, incoming,
+            candidate = run('-c', 'merge.autoStash=false', 'merge-tree', '--write-tree', '--name-only', '-z', fork, incoming,
                             env=env, allowed=(0, 1))
-            if candidate.returncode:
-                raise ValueError('Git reports a conflict in the proposed integration; human choice required.\n' +
-                                 candidate.stdout.decode('utf-8', 'replace'))
-            proposed = candidate.stdout.decode('ascii').splitlines()[0]
-            if not re.fullmatch(r'[0-9a-f]{40,64}', proposed):
-                raise ValueError('Unexpected merge-tree output')
+            proposed, conflicts = merge_candidate(candidate)
         refs = {'base': base, 'fork': fork, 'incoming': incoming, 'proposed': proposed}
         texts = {key: run('show', ref + ':.pkgmeta', env=env).stdout.decode('utf-8') for key, ref in refs.items()}
         bundle = temp / 'versions.json'
@@ -213,6 +229,7 @@ def audit(root, git, powershell, destination, source, retained=()):
         fork_changes = output('diff', '--name-only', base, fork, '--').splitlines()
         report = compare(versions, paths, retained, touched, fork_changes)
         report.update(status='decision-required' if report['risks'] else 'safe', refs=refs, fast_forward=ff)
+        report['pending_conflicts'] = conflicts
         report['policy_sources'] = policy_sources
         report['textual_diffs'] = {
             label: ''.join(difflib.unified_diff(texts[left].splitlines(keepends=True),
