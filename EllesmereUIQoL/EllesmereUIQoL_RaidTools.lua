@@ -467,7 +467,7 @@ local COMBINED_MARKERS_TOP = 0 -- y-offset of the marker block inside combined G
 -- kept for the lifetime of the session; the layout pass decides which of them
 -- reach the screen. Ready Check is the one action button with no switch -- a
 -- raid panel without it has no reason to exist.
-local readyButton, roleButton, convertButton, disbandButton, stopButton
+local readyButton, roleButton, convertButton, disbandButton, stopButton, buffButton
 
 -- Both marker rows draw Blizzard's own raid target sheet -- the texture the
 -- rest of the suite already uses for markers, in nameplates and raid frames.
@@ -546,7 +546,7 @@ local DB_DEFAULTS = {
         -- Logical order from the assistant control toward the marker grid.
         -- The entire Pull Timer section (including Stop and Break) moves as
         -- one unit; missing/hidden buttons do not leave empty cells.
-        buttonOrder = { "pings", "difficulty", "convert", "disband", "ready", "role", "pull" },
+        buttonOrder = { "pings", "difficulty", "convert", "disband", "ready", "role", "buff", "pull" },
         -- Invite Tools state. Raid Tools owns the launcher in EUI, so no
         -- separate minimap launcher settings are needed here.
         inviteTools = {
@@ -593,6 +593,15 @@ local DB_DEFAULTS = {
         showConvert   = true,
         showDisband   = true,
         showRoles     = true,
+        -- Raid Buff Check (EllesmereUIQoL_RaidBuffCheck.lua): the feature, its
+        -- ready check trigger and window state. Off by default.
+        buffCheck            = false,
+        buffCheckOnReady     = true,
+        buffCheckOnlyMissing = true,
+        buffCheckRuneRequired = true,
+        buffCheckVantusRequired = false,
+        -- Opt-in Buff Check group button (needs buffCheck).
+        showBuffCheck = false,
         -- Per-section: pos[key] = { point, relPoint, x, y }
         pos           = {},
     },
@@ -615,6 +624,7 @@ local DB_DEFAULTS = {
 local function P()
     return db and db.profile and db.profile.raidTools
 end
+ns.RaidToolsProfile = P
 
 local function Mode()
     local p = P()
@@ -688,10 +698,10 @@ local function AutoMinimizeDelay()
 end
 ns.AutoMinimizeDelay = AutoMinimizeDelay
 
-local GROUP_BUTTON_DEFAULT_ORDER = { "pings", "difficulty", "convert", "disband", "ready", "role", "pull" }
+local GROUP_BUTTON_DEFAULT_ORDER = { "pings", "difficulty", "convert", "disband", "ready", "role", "buff", "pull" }
 local GROUP_BUTTON_KEYS = {
     pings = true, difficulty = true, convert = true, disband = true,
-    ready = true, role = true, pull = true,
+    ready = true, role = true, buff = true, pull = true,
 }
 -- Normalize on read rather than writing defaults back to the profile. This
 -- also tolerates removed/duplicated keys in imported or older profiles.
@@ -884,6 +894,27 @@ local function IsLeader()
     return UnitIsGroupLeader("player")
 end
 
+-- The Raid Buff Check window (EllesmereUIQoL_RaidBuffCheck.lua) wears these panels'
+-- dress and font. Text: a font string on parent in the QoL font, kept current by
+-- ApplyFonts through owner (registered with AddFontOwner).
+ns.RT = {
+    TOPBAR_H = TOPBAR_H,
+    SkinPanelBg = SkinPanelBg,
+    SkinPanelBorder = SkinPanelBorder,
+    SkinButtonChrome = SkinButtonChrome,
+    HasAssist = HasAssist,
+    AddFontOwner = function(owner) fontOwners[#fontOwners + 1] = owner end,
+    Text = function(owner, parent, size, r, g, b)
+        local fs = TrackFont(owner, EllesmereUI.MakeFont(parent, size, nil, r, g, b), size)
+        local path = EllesmereUI.GetFontPath(FONT_KEY)
+        if path then
+            local _, _, flags = fs:GetFont()
+            fs:SetFont(path, size, flags or "")
+        end
+        return fs
+    end,
+}
+
 -- In a RAID, every control on the panel needs leader or assist: ready check,
 -- role check, the countdown, convert, disband and the marker buttons are all
 -- refused by the server without it. That USED to take the whole feature off
@@ -901,6 +932,17 @@ end
 local function ButtonShown(key)
     local p = P()
     return not p or p[key] ~= false
+end
+
+-- The Buff Check button needs Raid Buff Check on (and a retail client: the
+-- feature file publishes ns.ToggleBuffCheck only there).
+local function BuffCheckShown()
+    local p = P()
+    return p and p.showBuffCheck == true and p.buffCheck == true and ns.ToggleBuffCheck ~= nil
+end
+
+local function ToggleBuffCheck()
+    if ns.ToggleBuffCheck then ns.ToggleBuffCheck() end
 end
 
 -- The pull durations worth a button, in slot order. 0 (and anything below it)
@@ -1321,7 +1363,7 @@ local function RefreshPermissions(force)
     -- they gate on `grouped` FIRST: assist/leader only count once there is
     -- an actual group to be assist or leader of.
     for _, b in ipairs(groupButtons) do
-        local on = grouped and (b.needsLeader and leader or assist)
+        local on = b.ungated or (grouped and (b.needsLeader and leader or assist))
 
         -- Pings is raid-leader-only. Difficulty remains usable while solo,
         -- and once grouped it requires the group leader. Both use the exact
@@ -1621,6 +1663,7 @@ local function LayoutGroupContent()
         disband = ButtonShown("showDisband") and disbandButton or nil,
         ready = readyButton,
         role = ButtonShown("showRoleCheck") and roleButton or nil,
+        buff = BuffCheckShown() and buffButton or nil,
     }
 
     -- Keep the existing Pull/Stop row exactly as it was. Break is the next
@@ -1805,6 +1848,8 @@ local function BuildGroupContent()
     -- unplaced at full-row width; LayoutGroupContent re-flows the survivors.
     readyButton = MakeGroupButton(f, "Ready Check", full, function() DoReadyCheck() end)
     roleButton  = MakeGroupButton(f, "Role Check", full, function() InitiateRolePoll() end)
+    buffButton  = MakeGroupButton(f, "Buff Check", full, ToggleBuffCheck)
+    buffButton.ungated = true   -- only reads auras: needs no leader or assist
 
     convertButton = MakeGroupButton(f, "Convert to Raid", full, function()
         if IsInRaid() then C_PartyInfo.ConvertToParty() else C_PartyInfo.ConvertToRaid() end
@@ -3113,6 +3158,9 @@ end
 -- whole request is parked behind applyPending, with the REGEN listener
 -- guaranteed alive to finish it.
 function Apply()
+    -- Raid Buff Check registers plain events only, so it follows the settings
+    -- even in combat and with the panels on Never.
+    if ns.BuffCheckSync then ns.BuffCheckSync() end
     if InCombatLockdown() then
         applyPending = true
         EnsureEvents()
