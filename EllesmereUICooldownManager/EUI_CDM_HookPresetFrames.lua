@@ -819,9 +819,11 @@ end
 -- drive a "running low" warning by itself -- a full stack of the other rank
 -- would silently glow as if the player were empty. This sums the primary
 -- item id and every altItemIDs rank/variant instead.
-local function LowGlowItemTotal(f)
-    local total = C_Item.GetItemCount(f._presetItemID, false, true) or 0
-    local alts = f._presetData and f._presetData.altItemIDs
+local function LowGlowItemTotal(f, itemID, preset)
+    itemID = itemID or f._presetItemID
+    preset = preset or (f and f._presetData)
+    local total = C_Item.GetItemCount(itemID, false, true) or 0
+    local alts = preset and preset.altItemIDs
     if alts then
         for i = 1, #alts do
             total = total + (C_Item.GetItemCount(alts[i], false, true) or 0)
@@ -845,8 +847,9 @@ local function ApplyItemQualityPip(f, itemID, on, offsetX, offsetY, sizePct)
     -- pip even though the item id (and therefore the atlas) hasn't changed.
     if f._qualityItemID == itemID and f._qualityAtlas ~= nil
        and f._qualityOffX == offsetX and f._qualityOffY == offsetY
-       and f._qualitySizePct == sizePct then return end
+       and f._qualitySizePct == sizePct and f._qualityWidth == f:GetWidth() then return end
     f._qualityOffX, f._qualityOffY, f._qualitySizePct = offsetX, offsetY, sizePct
+    f._qualityWidth = f:GetWidth()
 
     local atlas
     local ts = C_TradeSkillUI

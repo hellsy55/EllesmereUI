@@ -25,31 +25,63 @@ local IsAtCurrentMaxLevel, IsInRaidInstance, LowGlowItemTotal = I.IsAtCurrentMax
 
 -- ---------------------------------------------------------------------------
 -- Dynamic potion display for every pot preset carrying a displayOrder (Light's
--- Potential, Potion of Recklessness, health). The preset icon resolves to the best
--- variant actually in bags (preset.displayOrder, best first) and shows THAT variant's
--- icon, exact bag count, and tooltip -- 2 Fleeting pots show "2" even with 50 regular
--- ones in the bank of another rank. With the profile-level "Swap Combat Potions
--- When Missing" toggle on, a preset whose own family is fully out of bags resolves the
--- partner families' chains instead. Identity is untouched (frame key, assigned-spell key,
--- saved settings and active states all stay on the preset's primary item; only the
--- DISPLAY resolves, so a running swipe survives the icon swapping variants).
--- Re-resolution is generation-gated: bag events, the options toggle, and profile
--- changes bump/miss the gate; steady-state 10Hz ticks cost one compare.
+-- Potential, Potion of Recklessness, Liquid Luster, health). The preset icon resolves
+-- to the best variant actually in bags (preset.displayOrder, best first) and shows
+-- THAT variant's icon, exact bag count, and tooltip -- 2 Fleeting pots show "2" even
+-- with 50 regular ones in the bank of another rank. A combat potion icon walks its
+-- families in the order its Combat Potion Icon menu saved (customActiveStates[key]
+-- .potOrder, nil = the preset's own order) and, while its Swap Combat Pots When
+-- Missing is on (potSwap; nil reads the old profile-wide switch), a family fully out
+-- of bags falls through to the next. Identity is untouched (frame key, assigned-spell
+-- key, saved settings and active states all stay on the entry's primary item; only
+-- the DISPLAY resolves, so a running swipe survives the icon swapping variants).
+-- Re-resolution is generation-gated: bag events, the menu's writes, and profile
+-- changes bump/miss the gate; steady-state 10Hz ticks cost a few compares.
 local PotSwap = {}
 do
-    local byKey, byPrimary, chains
+    local byPrimary, chains, chainByItem
+    local famByKey = {}
+    for _, fam in ipairs(ns.COMBAT_POTION_FAMILIES or {}) do famByKey[fam.key] = fam end
 
-    function PotSwap.Enabled()
+    -- The profile-wide switch the Extras section used to hold: the default of an
+    -- icon whose own Swap Combat Pots When Missing was never set.
+    function PotSwap.LegacySwap()
         local p = ECME and ECME.db and ECME.db.profile
         return (p and p.cdmBars and p.cdmBars.swapPotionsWhenMissing) == true
     end
 
-    local function PresetByKey(key)
-        if not byKey then
-            byKey = {}
-            for _, pr in ipairs(ns.CDM_ITEM_PRESETS or {}) do byKey[pr.key] = pr end
+    -- An icon's two Combat Potion Icon settings, from its customActiveStates entry
+    -- (the per-icon menu's store, keyed by the entry key): swap on or off, and the
+    -- family order as saved ("light,reck,luster") or nil. Plain reads, no allocation.
+    function PotSwap.Settings(itemID)
+        local cas = ns.GetCustomActiveState(-itemID)
+        local swap = cas and cas.potSwap
+        if swap == nil then swap = PotSwap.LegacySwap() end
+        local order = cas and cas.potOrder
+        if type(order) ~= "string" then order = nil end
+        return swap == true, order
+    end
+
+    -- The family keys in the order an icon walks them: the saved order's valid keys,
+    -- then every family it leaves out, in the preset's own order. Allocates: the
+    -- chain memo below and the options menu are its callers.
+    function PotSwap.Order(preset, orderStr)
+        local out, seen = {}, {}
+        if orderStr then
+            for k in string.gmatch(orderStr, "[^,]+") do
+                if famByKey[k] and not seen[k] then
+                    seen[k] = true
+                    out[#out + 1] = k
+                end
+            end
         end
-        return byKey[key]
+        for _, k in ipairs(preset.potDefaultOrder or {}) do
+            if famByKey[k] and not seen[k] then
+                seen[k] = true
+                out[#out + 1] = k
+            end
+        end
+        return out
     end
 
     -- Preset for a pot's PRIMARY item id (nil for every non-pot preset).
@@ -63,38 +95,41 @@ do
         return byPrimary[itemID]
     end
 
-    -- Ordered id list to walk for a preset: own displayOrder, with the partner
-    -- families' appended IN swapWith ORDER while the swap toggle is on (list of
-    -- keys; a plain string still works). Static data, built once per preset;
-    -- the live toggle read just picks which cached list to return.
-    function PotSwap.Chain(preset)
-        if not chains then chains = {} end
-        local c = chains[preset]
-        if not c then
-            c = { own = preset.displayOrder }
-            local sw = preset.swapWith
-            if sw then
-                local keys = (type(sw) == "table") and sw or { sw }
-                local both
-                for k = 1, #keys do
-                    local partner = PresetByKey(keys[k])
-                    if partner and partner.displayOrder then
-                        if not both then
-                            both = {}
-                            for i = 1, #preset.displayOrder do both[#both + 1] = preset.displayOrder[i] end
-                        end
-                        for i = 1, #partner.displayOrder do both[#both + 1] = partner.displayOrder[i] end
-                    end
-                end
-                c.both = both
-            end
-            chains[preset] = c
-        end
-        return (c.both and PotSwap.Enabled()) and c.both or c.own
-    end
-
     PotSwap.gen = 1
     function PotSwap.Bump() PotSwap.gen = PotSwap.gen + 1 end
+
+    -- Ordered item ids an icon walks: for a combat potion, the first family's
+    -- displayOrder with every later family's appended while the icon swaps; for
+    -- any other pot preset its own displayOrder. One table per distinct answer,
+    -- shared by every icon that resolves to it, memoized per item key against the
+    -- generation and the two settings, so the polls (FakeActive) never rebuild it.
+    function PotSwap.Chain(preset, itemID)
+        if not preset.potFamily then return preset.displayOrder end
+        local swap, orderStr = PotSwap.Settings(itemID)
+        if not chainByItem then chainByItem = {} end
+        local m = chainByItem[itemID]
+        if m and m.gen == PotSwap.gen and m.swap == swap and m.order == orderStr then
+            return m.chain
+        end
+        local keys = PotSwap.Order(preset, orderStr)
+        local sig = (swap and "1" or "0") .. table.concat(keys, ",")
+        if not chains then chains = {} end
+        local chain = chains[sig]
+        if not chain then
+            chain = {}
+            for i = 1, (swap and #keys or math.min(1, #keys)) do
+                local fam = famByKey[keys[i]]
+                local list = fam and fam.preset.displayOrder
+                if list then
+                    for j = 1, #list do chain[#chain + 1] = list[j] end
+                end
+            end
+            chains[sig] = chain
+        end
+        if not m then m = {}; chainByItem[itemID] = m end
+        m.gen, m.swap, m.order, m.chain = PotSwap.gen, swap, orderStr, chain
+        return chain
+    end
 
     -- Resolve + stamp a pot-preset frame's display variant. Returns the display
     -- item id, or nil when the frame is not a resolving pot preset (every other
@@ -106,12 +141,13 @@ do
     function PotSwap.Ensure(f)
         local preset = f._presetData
         if not (preset and preset.displayOrder and f._presetItemID == preset.itemID) then return nil end
-        local en = PotSwap.Enabled()
-        if f._potResolveGen == PotSwap.gen and f._potResolveSwap == en then
+        local swap, orderStr = PotSwap.Settings(f._presetItemID)
+        if f._potResolveGen == PotSwap.gen and f._potResolveSwap == swap
+           and f._potResolveOrder == orderStr then
             return f._displayItemID
         end
-        f._potResolveGen, f._potResolveSwap = PotSwap.gen, en
-        local chain = PotSwap.Chain(preset)
+        f._potResolveGen, f._potResolveSwap, f._potResolveOrder = PotSwap.gen, swap, orderStr
+        local chain = PotSwap.Chain(preset, f._presetItemID)
         local id, count
         for i = 1, #chain do
             local c = C_Item.GetItemCount(chain[i], false, true) or 0
@@ -131,14 +167,52 @@ do
         return id
     end
 end
--- FakeActive (cooldown-state poll + cast-trigger mapping) reads the swap-aware
--- chain for a pot preset's primary item id; nil for anything else.
+-- FakeActive (cooldown-state poll + cast-trigger mapping) reads the chain for a
+-- pot preset's primary item id; nil for anything else.
 ns.GetPresetPotChain = function(itemID)
     local pr = PotSwap.ByPrimary(itemID)
-    return pr and PotSwap.Chain(pr) or nil
+    return pr and PotSwap.Chain(pr, itemID) or nil
 end
--- Options toggle: force every pot frame to re-resolve on the next pass.
+-- The per-icon menu: a Combat Potion Icon write forces every pot frame to
+-- re-resolve on the next pass.
 ns._BumpPotResolveGen = PotSwap.Bump
+-- The per-icon menu's reads: the old profile-wide swap switch (the default of an
+-- icon whose own is unset) and an icon's family order from its saved string.
+ns.PotSwapLegacyDefault = PotSwap.LegacySwap
+ns.PotOrderFor = PotSwap.Order
+
+-- The options preview: the art an item entry's icon shows in game and the item
+-- its tooltip names, so the preview slot matches the live bar. A frame under the
+-- key on that bar answers first (the preset's own frame with its resolved
+-- variant painted, or Blizzard's own row with Blizzard's art); with none up, the
+-- variant PotSwap would resolve from the bags; else the primary item.
+-- Options-time only.
+function ns.ItemEntryPreview(barKey, key)
+    local itemID = -key
+    local icons = barKey and ns.cdmBarIcons and ns.cdmBarIcons[barKey]
+    if icons then
+        for i = 1, #icons do
+            local f = icons[i]
+            local fc = f and _ecmeFC[f]
+            if fc and fc.spellID == key then
+                local tex = f._tex or f.Icon
+                local art = tex and tex.GetTexture and tex:GetTexture()
+                if art then return art, f._displayItemID or itemID end
+                break
+            end
+        end
+    end
+    local pr = PotSwap.ByPrimary(itemID)
+    if pr then
+        local chain = PotSwap.Chain(pr, itemID)
+        for i = 1, #chain do
+            if (C_Item.GetItemCount(chain[i], false, true) or 0) > 0 then
+                return C_Item.GetItemIconByID(chain[i]) or C_Item.GetItemIconByID(itemID), chain[i]
+            end
+        end
+    end
+    return C_Item.GetItemIconByID(itemID), itemID
+end
 
 -- True when this frame IS the preset rather than one specific variant of it.
 -- The picker only ever stores -(preset.itemID), so a frame sitting on an ALT id
@@ -282,6 +356,161 @@ local function ApplyPresetGCDSwipe(f, sid, cdInfo, barKey)
     end
 end
 ns.ApplyPresetGCDSwipe = ApplyPresetGCDSwipe
+
+-- Shared warning; cooldown-state glows retain ownership of the overlay.
+local function ApplyLowItemGlow(f, itemID, preset)
+    local fdLic = hookFrameData[f]
+    local casKeyLic = -itemID
+    local casLic = casKeyLic and ns.GetEffectiveCustomActiveState
+        and ns.GetEffectiveCustomActiveState(casKeyLic)
+    local styleLic = casLic and casLic.lowItemCountGlow
+    if styleLic == false then styleLic = nil end
+    if fdLic then
+        local wantGlow = false
+        if styleLic and IsInRaidInstance() and IsAtCurrentMaxLevel() then
+            local itemTotal = LowGlowItemTotal(nil, itemID, preset)
+            local inCombat = ns.CDMInCombat and ns.CDMInCombat()
+            wantGlow = (inCombat and itemTotal == 0) or (not inCombat and itemTotal <= 2)
+        end
+        -- Cooldown State Effect owns the overlay while its own ready
+        -- glow is lit; never steal it out from under that effect.
+        if wantGlow and not fdLic._presetCdGlowOn then
+            local glow = fdLic.glowOverlay
+            if glow then
+                local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(casLic or {})
+                gr, gg, gb = gr or 1, gg or 1, gb or 1
+                -- Signature covers style + color: a live style/color change in the
+                -- options menu must take effect on this icon's own next pass, not
+                -- only on the next reload. StartNativeGlow stops the running glow
+                -- itself before starting the new one, so this is safe to call
+                -- whenever the signature changes, not just on a cold start. Also
+                -- re-asserts against the overlay's REAL state (glow._glowActive),
+                -- not the flag alone: an unrelated appearance refresh
+                -- (RefreshCDMIconAppearance) stops any glow it doesn't itself own
+                -- on every restyle pass, with no way to tell this engine -- the
+                -- same reason ApplyCdState re-checks _glowActive above.
+                local sig = styleLic .. "|" .. gr .. "|" .. gg .. "|" .. gb
+                if not fdLic._lowItemGlowOn or not glow._glowActive
+                   or fdLic._lowItemGlowSig ~= sig then
+                    ns.StartNativeGlow(glow, styleLic, gr, gg, gb)
+                    fdLic._lowItemGlowOn = true
+                    fdLic._lowItemGlowSig = sig
+                end
+            end
+        elseif fdLic._lowItemGlowOn then
+            -- Ownership handoff: if Cooldown State Effect has since
+            -- claimed the overlay (_presetCdGlowOn true), it is no
+            -- longer ours to stop -- doing so would kill the glow
+            -- ApplyCdState (EllesmereUICdmFakeActive.lua) just started
+            -- on the exact same overlay. Only physically stop it when
+            -- we still own it; either way, drop our own bookkeeping so
+            -- we cleanly restart later if conditions make it ours again.
+            if not fdLic._presetCdGlowOn and fdLic.glowOverlay then
+                ns.StopNativeGlow(fdLic.glowOverlay)
+            end
+            fdLic._lowItemGlowOn = false
+            fdLic._lowItemGlowSig = nil
+        end
+    end
+end
+
+-- Native rows keep Blizzard's cooldown and nonzero counter. Only our zero
+-- label, quality pip and low-supply warning are added to the current item key.
+local nativeItemExtras = setmetatable({}, { __mode = "k" })
+
+function ns.NativeItemCount(key)
+    if not ns.IsItemPresetKey(key) then return nil end
+    return LowGlowItemTotal(nil, -key, ns.ItemPresetForKey(key))
+end
+
+local function ClearNativeItemExtras(f)
+    if f._nativeItemZeroText then f._nativeItemZeroText:Hide() end
+    ApplyItemQualityPip(f, nil, false)
+    local fd = hookFrameData[f]
+    if fd and fd._lowItemGlowOn then
+        if not fd._presetCdGlowOn and fd.glowOverlay then ns.StopNativeGlow(fd.glowOverlay) end
+        fd._lowItemGlowOn, fd._lowItemGlowSig = nil, nil
+    end
+    nativeItemExtras[f] = nil
+    f._nativeItemTotal = nil
+end
+
+-- A native category can retain the last-used rank's art. Paint a quality pip
+-- only when the accessible texture identifies exactly one item in the family.
+local function NativeDisplayedItem(f, itemID, preset)
+    local tex = f.Icon or f._tex
+    local art = tex and tex.GetTexture and tex:GetTexture()
+    if (issecretvalue and issecretvalue(art)) or art == nil then return nil end
+    local found, ambiguous
+    local function Match(id)
+        local icon = C_Item.GetItemIconByID and C_Item.GetItemIconByID(id)
+        if icon and icon == art then
+            if found and found ~= id then ambiguous = true end
+            found = id
+        end
+    end
+    Match(itemID)
+    for _, id in ipairs((preset and (preset.displayOrder or preset.altItemIDs)) or {}) do Match(id) end
+    if not ambiguous then return found end
+end
+
+function ns.RefreshNativeItemExtras(f, fc)
+    fc = fc or _ecmeFC[f]
+    local key = fc and fc.spellID
+    if f._isItemPresetFrame or not ns.IsItemPresetKey(key) then
+        if nativeItemExtras[f] then ClearNativeItemExtras(f) end
+        return
+    end
+    local bd = fc.barKey and barDataByKey[fc.barKey]
+    if not bd then
+        if nativeItemExtras[f] then ClearNativeItemExtras(f) end
+        return
+    end
+    local cas = ns.GetEffectiveCustomActiveState and ns.GetEffectiveCustomActiveState(key)
+    if not (bd.showZeroItemCount or bd.showItemQuality or (cas and cas.lowItemCountGlow)) then
+        if nativeItemExtras[f] then ClearNativeItemExtras(f) end
+        return
+    end
+    local itemID, preset = -key, ns.ItemPresetForKey(key)
+    local total = ns.NativeItemCount(key)
+    nativeItemExtras[f] = key
+    f._nativeItemTotal = total
+    local ss = ns.ResolveSpellSettings and ns.ResolveSpellSettings(f, key, false, fc.barKey)
+    local showCount = bd.showItemCount ~= false
+    if ss and ss.showItemCount ~= nil then showCount = ss.showItemCount end
+    local zero = bd.showZeroItemCount and showCount and total == 0
+        and not (bd.itemCountOOC and InCombatLockdown())
+    if zero then
+        if not f._nativeItemZeroText then
+            f._nativeItemZeroText = f:CreateFontString(nil, "OVERLAY")
+            if ns.StyleNativeItemZeroText then ns.StyleNativeItemZeroText(f, fc.barKey) end
+        end
+        f._nativeItemZeroText:SetText("0")
+        f._nativeItemZeroText:Show()
+    elseif f._nativeItemZeroText then
+        f._nativeItemZeroText:Hide()
+    end
+    local displayed = bd.showItemQuality and total > 0 and NativeDisplayedItem(f, itemID, preset)
+    ApplyItemQualityPip(f, displayed, displayed and true or false,
+        bd.itemQualityX, bd.itemQualityY, bd.itemQualitySize)
+    ApplyLowItemGlow(f, itemID, preset)
+end
+
+function ns.RefreshAllNativeItemExtras()
+    for f in pairs(nativeItemExtras) do f._nativeItemSeen = nil end
+    for _, icons in pairs(ns.cdmBarIcons or {}) do
+        for i = 1, #icons do
+            local f = icons[i]
+            if not f._isItemPresetFrame then
+                f._nativeItemSeen = true
+                ns.RefreshNativeItemExtras(f)
+            end
+        end
+    end
+    for f in pairs(nativeItemExtras) do
+        if not f._nativeItemSeen then ClearNativeItemExtras(f) end
+    end
+end
 
 -- Dirty flag: high-frequency events (SPELL_UPDATE_COOLDOWN, BAG_UPDATE_COOLDOWN)
 -- just set this flag; the BuffTicker (10Hz) processes it, coalescing dozens of
@@ -484,7 +713,7 @@ local function ProcessPresetCooldowns()
                     if not f._cdSeeded then
                         f._cdSeeded = true
                         if not (start and dur and dur > 1.5) then
-                            local list = dispID and PotSwap.Chain(f._presetData)
+                            local list = dispID and PotSwap.Chain(f._presetData, f._presetItemID)
                                 or (f._presetData and f._presetData.altItemIDs)
                             if list then
                                 for i = 1, #list do
@@ -586,76 +815,7 @@ local function ProcessPresetCooldowns()
                         bd2 and bd2.itemQualitySize)
                 end
 
-                -- Low Item Count Glow (potions/healthstone/demonic healthstone):
-                -- glows the icon when the SUM across both ranks/variants of this
-                -- preset drops to 2 or fewer out of combat, and keeps the same
-                -- warning in combat only when the family is completely empty.
-                -- (LowGlowItemTotal -- the per-icon `total` above is deliberately
-                -- the current variant only and would false-glow while the other
-                -- rank still has a full stack.) Raid-only and max-level-only: a
-                -- low-supply nudge is a raid consumables thing, not something
-                -- leveling alts need. The combat-zero exception is deliberately
-                -- narrow because the same icon may also carry a Cooldown State
-                -- Effect "CD Ready" glow (ApplyCdState, EllesmereUICdmFakeActive.lua);
-                -- its ownership flag below still wins if that effect is lit. Item
-                -- counts are plain Lua numbers (never secret), so this can drive
-                -- the overlay directly instead of going through the secret-safe
-                -- StackGlow_Configure gate system built for aura stacks.
-                do
-                    local fdLic = hookFrameData[f]
-                    local casKeyLic = f._presetItemID and -(f._presetItemID)
-                    local casLic = casKeyLic and ns.GetEffectiveCustomActiveState
-                        and ns.GetEffectiveCustomActiveState(casKeyLic)
-                    local styleLic = casLic and casLic.lowItemCountGlow
-                    if styleLic == false then styleLic = nil end
-                    if fdLic then
-                        local wantGlow = false
-                        if styleLic and IsInRaidInstance() and IsAtCurrentMaxLevel() then
-                            local itemTotal = LowGlowItemTotal(f)
-                            local inCombat = ns.CDMInCombat and ns.CDMInCombat()
-                            wantGlow = (inCombat and itemTotal == 0) or (not inCombat and itemTotal <= 2)
-                        end
-                        -- Cooldown State Effect owns the overlay while its own ready
-                        -- glow is lit; never steal it out from under that effect.
-                        if wantGlow and not fdLic._presetCdGlowOn then
-                            local glow = fdLic.glowOverlay
-                            if glow then
-                                local gr, gg, gb = ns.ResolveGlowColor and ns.ResolveGlowColor(casLic or {})
-                                gr, gg, gb = gr or 1, gg or 1, gb or 1
-                                -- Signature covers style + color: a live style/color change in the
-                                -- options menu must take effect on this icon's own next pass, not
-                                -- only on the next reload. StartNativeGlow stops the running glow
-                                -- itself before starting the new one, so this is safe to call
-                                -- whenever the signature changes, not just on a cold start. Also
-                                -- re-asserts against the overlay's REAL state (glow._glowActive),
-                                -- not the flag alone: an unrelated appearance refresh
-                                -- (RefreshCDMIconAppearance) stops any glow it doesn't itself own
-                                -- on every restyle pass, with no way to tell this engine -- the
-                                -- same reason ApplyCdState re-checks _glowActive above.
-                                local sig = styleLic .. "|" .. gr .. "|" .. gg .. "|" .. gb
-                                if not fdLic._lowItemGlowOn or not glow._glowActive
-                                   or fdLic._lowItemGlowSig ~= sig then
-                                    ns.StartNativeGlow(glow, styleLic, gr, gg, gb)
-                                    fdLic._lowItemGlowOn = true
-                                    fdLic._lowItemGlowSig = sig
-                                end
-                            end
-                        elseif fdLic._lowItemGlowOn then
-                            -- Ownership handoff: if Cooldown State Effect has since
-                            -- claimed the overlay (_presetCdGlowOn true), it is no
-                            -- longer ours to stop -- doing so would kill the glow
-                            -- ApplyCdState (EllesmereUICdmFakeActive.lua) just started
-                            -- on the exact same overlay. Only physically stop it when
-                            -- we still own it; either way, drop our own bookkeeping so
-                            -- we cleanly restart later if conditions make it ours again.
-                            if not fdLic._presetCdGlowOn and fdLic.glowOverlay then
-                                ns.StopNativeGlow(fdLic.glowOverlay)
-                            end
-                            fdLic._lowItemGlowOn = false
-                            fdLic._lowItemGlowSig = nil
-                        end
-                    end
-                end
+                ApplyLowItemGlow(f, f._presetItemID, f._presetData)
                 local shouldDesat = (total == 0 or itemOnCD or f._inCombatLockout) and true or false
                 if shouldDesat ~= f._lastDesat then
                     f._lastDesat = shouldDesat
@@ -664,6 +824,7 @@ local function ProcessPresetCooldowns()
             end
         end
     end
+    ns.RefreshAllNativeItemExtras()
     _pcAllSettled = not anyUnsettled
 end
 ns._ProcessPresetCooldowns = ProcessPresetCooldowns
@@ -790,6 +951,13 @@ _racialCdListener:SetScript("OnEvent", function(_, event, a1, a2, a3, a4)
         -- edge), and this event fires on nearly every ability press, where an
         -- unheld family preset would count every one of its ranks.
         local hit, crossed
+        for f, key in pairs(nativeItemExtras) do
+            local fc = _ecmeFC[f]
+            if fc and fc.spellID == key then
+                local total = ns.NativeItemCount(key)
+                if total ~= f._nativeItemTotal then hit = true end
+            end
+        end
         for f in pairs(_pcActive) do
             if f._isItemPresetFrame and f._presetItemID and not f._displayItemID
                and f._cachedTotal and f._cachedTotal > 0 and f._countArm == false then
