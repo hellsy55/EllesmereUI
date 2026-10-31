@@ -3957,7 +3957,7 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 10); y = y - h
 
         -----------------------------------------------------------------------
-        --  ON-SCREEN LOADOUT TEXT
+        --  ON-SCREEN LOADOUT DISPLAY
         --
         --  A large on-screen reminder of the active TalentLoadoutsEx loadout,
         --  shown at ready checks and whenever the applied talent/loadout state
@@ -3969,13 +3969,21 @@ initFrame:SetScript("OnEvent", function(self)
         --  your specs, so these four controls are read-only (LoadoutText-
         --  Disabled, defined above) everywhere else. Its screen POSITION is
         --  deliberately not a slider here: drag it into place with Unlock
-        --  Mode instead ("Quickdraw: Loadout Text").
+        --  Mode instead ("Quickdraw: Loadout Display").
         -----------------------------------------------------------------------
         local LOADOUT_TEXT_TIP = "This option only applies to an Action Menu with Specialization entries."
-        _, h = W:SectionHeader(parent, "ON-SCREEN LOADOUT TEXT", y); y = y - h
+        local loadoutDisplayHeader
+        loadoutDisplayHeader, h = W:SectionHeader(parent, "ON-SCREEN LOADOUT DISPLAY", y); y = y - h
+        EllesmereUI.BuildSectionUnlockJump(loadoutDisplayHeader, {
+            key = "EUI_QuickdrawLoadoutText",
+            disabled = function()
+                return LoadoutTextDisabled() or Cfg("loadoutTextEnabled") ~= true
+            end,
+            disabledTooltip = "Enable Show On-Screen Loadout Display on an Action Menu with Specialization entries.",
+        })
 
         row, h = W:DualRow(parent, y,
-            { type="toggle", text="Show On-Screen Loadout Text", noCapture=true,
+            { type="toggle", text="Show On-Screen Loadout Display", noCapture=true,
               disabled=LoadoutTextDisabled, disabledTooltip=LOADOUT_TEXT_TIP,
               tooltip="Show the active TalentLoadoutsEx loadout at ready checks "
                       .."and after talent changes. When a player pull countdown "
@@ -3986,7 +3994,7 @@ initFrame:SetScript("OnEvent", function(self)
                       .."shown during combat. Repeat Every limits only "
                       .."ready-check reminders; Text Duration applies to "
                       .."ready checks and talent changes. Drag into place "
-                      .."with Unlock Mode (Quickdraw: Loadout Text).",
+                      .."with Unlock Mode (Quickdraw: Loadout Display).",
               getValue=function() return Cfg("loadoutTextEnabled") == true end,
               setValue=function(v)
                   Set("loadoutTextEnabled", v)
@@ -4052,7 +4060,7 @@ initFrame:SetScript("OnEvent", function(self)
                       .."name, regardless of dungeon difficulty or case. "
                       .."Each matching saved loadout gets its own green "
                       .."check or red X. A missing/unknown raid note shows "
-                      .."no mark. Requires Show On-Screen Loadout Text to "
+                      .."no mark. Requires Show On-Screen Loadout Display to "
                       .."display indicators. Use /eui-nsrt-check to diagnose.",
               getValue=function() return Cfg("nsrtLoadoutCheckEnabled") == true end,
               setValue=function(v)
@@ -4102,7 +4110,7 @@ initFrame:SetScript("OnEvent", function(self)
                       .."a ready check or player pull countdown begins and "
                       .."the active TLEx "
                       .."loadout still mismatches the loaded NSRT boss note. "
-                      .."Works independently of Show On-Screen Loadout Text "
+                      .."Works independently of Show On-Screen Loadout Display "
                       .."and its Repeat Every cooldown. No automatic sound "
                       .."on talent changes, note changes, or manual checks. "
                       .."Dungeons never play this warning; missing or "

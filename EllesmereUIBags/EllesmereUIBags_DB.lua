@@ -53,6 +53,7 @@ local BAGS_DEFAULTS = {
         bankHideEmptyWhenNested = false,
         bankListView          = false,  -- reload to apply
         bankCompactView       = false,  -- reload to apply; bankListView wins when both are set
+        bankDefaultBankType    = "bank", -- "bank" | "warbank"; selected on each bank open
         bagArmoryGroupBySlot  = false,
         bagCompactArmorySlotGroups = false,
         bagHideAddCategory    = false,

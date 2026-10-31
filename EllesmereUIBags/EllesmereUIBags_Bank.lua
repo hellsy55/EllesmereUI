@@ -3513,10 +3513,13 @@ eventFrame:SetScript("OnEvent", function(_, event)
         _warbandOnly = C_PlayerInteractionManager
             and C_PlayerInteractionManager.IsInteractingWithNpcOfType(Enum.PlayerInteractionType.AccountBanker)
             or false
-        if _warbandOnly then
-            local defaultOneBag = BankDefaultsToOne()
-            _selectedView = defaultOneBag and -3 or -2
-        end
+        -- Choose the default on every open, not just on the first login.
+        -- Portable Warbank access cannot show the character bank.
+        local defaultOneBag = BankDefaultsToOne()
+        local selectWarbank = _warbandOnly or BP().bankDefaultBankType == "warbank"
+        _selectedView = selectWarbank and (defaultOneBag and -3 or -2)
+            or (defaultOneBag and -1 or 0)
+        _catSel = nil
         -- Position
         EUI_Bank:ClearAllPoints()
         if BP().bankPosition then
@@ -3569,6 +3572,16 @@ eventFrame:SetScript("OnEvent", function(_, event)
             self:SetScript("OnUpdate", nil)
             if not EUI_Bank:IsVisible() then return end
             DiscoverBankTabs()
+            -- Fall back when a regular banker has no accessible Warbank tabs.
+            -- Portable Warbank access has no character-bank alternative.
+            if not _warbandOnly and (_selectedView == -2 or _selectedView == -3) then
+                local hasWarbank = false
+                for _, tab in ipairs(_allTabs) do
+                    if tab.isWarband then hasWarbank = true; break end
+                end
+                if not hasWarbank then _selectedView = BankDefaultsToOne() and -1 or 0 end
+            end
+            if EUI_Bank._scrollFrame then EUI_Bank._scrollFrame:SetVerticalScroll(0) end
             EUI_Bank:RefreshBank()
             if RefreshBankBags then RefreshBankBags() end
             EUI_Bank:UpdateFooterGold()

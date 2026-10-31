@@ -878,7 +878,7 @@ local function RegisterLoadoutTextUnlock()
     EllesmereUI:RegisterUnlockElements({
         MK({
             key      = "EUI_QuickdrawLoadoutText",
-            label    = "Quickdraw: Loadout Text",
+            label    = "Quickdraw: Loadout Display",
             group    = "Quickdraw",
             order    = 100,
             -- Off the mover list entirely while the feature itself is off

@@ -90,7 +90,16 @@ initFrame:SetScript("OnEvent", function(self)
                               reload      = true,
                           })
                       end },
-                    EllesmereUI.BlankRowCfg()
+                    { type="dropdown", text="Default Selected Bank",
+                      tooltip="Which bank opens by default at a regular banker. Portable Warbank access always opens the Warbank.",
+                      values = { bank="Normal Bank", warbank="Warbank" },
+                      order  = { "bank", "warbank" },
+                      getValue=function()
+                          return db.profile.bankDefaultBankType == "warbank" and "warbank" or "bank"
+                      end,
+                      setValue=function(v)
+                          db.profile.bankDefaultBankType = (v == "warbank") and "warbank" or "bank"
+                      end }
                 ); y = y - h
 
                 _, h = W:SectionHeader(parent, "GROUPING", y); y = y - h
