@@ -520,34 +520,36 @@ end
 -- Styles the custom-spell "Show Charges" count text (created lazily by the CdmHooks ticker) to
 -- match the bar's native stack/charge text: font, size, color, anchor position and X/Y offset.
 -- Called at creation and from every RefreshCDMIconAppearance pass so option changes apply live. With no bar data the defaults resolve to size 11, bottom-right, +2 nudge.
-function ns.StyleCustomChargeText(icon, barKey)
-    local fs = icon and icon._castCountText
+local function StyleOwnedCountText(icon, barKey, fs, ss)
     if not fs then return end
     local barData = (barKey and barDataByKey[barKey]) or {}
     -- Fonts render at the frame's native scale; compensate like the main pass.
     local iconScale = icon:GetScale() or 1
     if iconScale < 0.01 then iconScale = 1 end
-    local scSize = (barData.stackCountSize or 11) / iconScale
-    local scX = (barData.stackCountX or 0) / iconScale
-    local scY = (barData.stackCountY or 0) / iconScale
-    local scPoint = barData.stackCountPosition or "bottomright"
-    if scPoint == "bottomleft" then scPoint = "BOTTOMLEFT"; scY = scY + 2
-    elseif scPoint == "bottom" then scPoint = "BOTTOM"; scY = scY + 2
-    elseif scPoint == "topright" then scPoint = "TOPRIGHT"
-    elseif scPoint == "top" then scPoint = "TOP"
-    elseif scPoint == "topleft" then scPoint = "TOPLEFT"
-    elseif scPoint == "center" then scPoint = "CENTER"
-    elseif scPoint == "left" then scPoint = "LEFT"
-    elseif scPoint == "right" then scPoint = "RIGHT"
-    else scPoint = "BOTTOMRIGHT"; scY = scY + 2 end
+    local scSize = ((ss and ss.stackCountSize) or barData.stackCountSize or 11) / iconScale
+    local scX = ((ss and ss.stackCountX) or barData.stackCountX or 0) / iconScale
+    local scY = ((ss and ss.stackCountY) or barData.stackCountY or 0) / iconScale
+    local scPoint
+    scPoint, scY = ns.CdmStackAnchorPoint(
+        (ss and ss.stackCountPosition) or barData.stackCountPosition or "bottomright", scY)
     SetBlizzCDMFont(fs, GetCDMFont(), scSize,
-        barData.stackCountR or 1, barData.stackCountG or 1, barData.stackCountB or 1)
+        (ss and ss.stackCountR) or barData.stackCountR or 1, (ss and ss.stackCountG) or barData.stackCountG or 1, (ss and ss.stackCountB) or barData.stackCountB or 1)
     -- Parent onto the text overlay so it renders above the border.
     local fd = _getFD(icon)
     local txOverlay = (fd and fd.textOverlay) or icon._textOverlay
     if txOverlay then fs:SetParent(txOverlay) end
     fs:ClearAllPoints()
     fs:SetPoint(scPoint, txOverlay or icon, scPoint, scX, scY)
+end
+
+function ns.StyleCustomChargeText(icon, barKey)
+    StyleOwnedCountText(icon, barKey, icon and icon._castCountText)
+end
+
+function ns.StyleNativeItemZeroText(icon, barKey)
+    local fc = icon and _ecmeFC[icon]
+    local ss = fc and ns.ResolveSpellSettings and ns.ResolveSpellSettings(icon, fc.spellID, false, barKey)
+    StyleOwnedCountText(icon, barKey, icon and icon._nativeItemZeroText, ss)
 end
 
 -- Refresh visual properties of existing icons (called when settings change)
@@ -855,6 +857,10 @@ local function RefreshCDMIconAppearance(barKey)
         end
         -- Style Blizzard's native stack/charge text elements: raise their sub-frames above our
         -- border frame by bumping frame level (safe -- they are Blizzard's own children of the icon and follow frame reuse). Per-icon Charge/Stack override (ssb) falls back to the bar's values.
+        local itemFC = _ecmeFC[icon]
+        if not ssb and itemFC and ns.IsItemPresetKey(itemFC.spellID) then
+            ssb = ns.ResolveSpellSettings and ns.ResolveSpellSettings(icon, itemFC.spellID, false, barKey)
+        end
         local scFont = GetCDMFont()
         local scSize = ((ssb and ssb.stackCountSize) or barData.stackCountSize or 11) * fontScale
         local scR = (ssb and ssb.stackCountR) or barData.stackCountR or 1
@@ -1188,6 +1194,8 @@ local function RefreshCDMIconAppearance(barKey)
         -- Re-fetched (never the wrapped block's `fd`): always nil for an Empty Slot, and cheap
         -- either way, so both kinds share this one line without widening the skip above.
         if ns.ApplyOnlyNumbers then ns.ApplyOnlyNumbers(icon, _getFD(icon), barData) end
+        if icon._nativeItemZeroText then ns.StyleNativeItemZeroText(icon, barKey) end
+        if ns.RefreshNativeItemExtras then ns.RefreshNativeItemExtras(icon) end
     end
 end
 ns.RefreshCDMIconAppearance = RefreshCDMIconAppearance

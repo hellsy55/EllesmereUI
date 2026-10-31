@@ -2721,9 +2721,16 @@ EllesmereUI._IS_STANDALONE  = IS_STANDALONE
 --               nudge. Runs before the anchor chain reads the frame's rect.
 --    ownsPosition (boolean) the module alone places the frame from its saved
 --               position (main chat, whose spot Blizzard's Edit Mode also
---               applies): anchor links never move it and it offers no link or
---               screen-edge menu, so no link becomes a third owner of the frame.
---               Mover drags and nudges still move it and save through savePos
+--               applies): anchor links never move it and it offers no link,
+--               so no link becomes a third owner of the frame (one stored on
+--               it is deleted when Unlock Mode opens). Mover drags and nudges
+--               still move it and save through savePos
+--    getScreenPoint / setScreenPoint (function(key) -> point,
+--               function(key, point))  an ownsPosition element that keeps its
+--               own screen relation: the cog's Relative to Screen menu reads
+--               and picks one of UIParent's nine points through these (CENTER
+--               = centered) instead of a screen-edge link. Without them an
+--               ownsPosition element offers no Relative to Screen
 --    isPositionHeld (function(key)) -> bool  true while something else places
 --               the frame (the quest tracker inside Blizzard's managed frame
 --               container): outside an unlock session, saved positions and
@@ -2774,6 +2781,8 @@ function EllesmereUI.MakeUnlockElement(opts)
         isAnchored    = opts.isAnchored,
         onLiveMove    = opts.onLiveMove,
         ownsPosition  = opts.ownsPosition,
+        getScreenPoint = opts.getScreenPoint,
+        setScreenPoint = opts.setScreenPoint,
         isPositionHeld = opts.isPositionHeld,
         noSpecLayout  = opts.noSpecLayout,
         linkedKeys    = opts.linkedKeys,
@@ -3259,7 +3268,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "9.7.1"
+EllesmereUI.VERSION = "9.7.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
