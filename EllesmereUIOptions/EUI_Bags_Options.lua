@@ -248,7 +248,8 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Bag Style | Default Selected Bag | Window Scale | Frame Strata |
             -- Slot Size | Slot Spacing | Auto-Size to Fit (not in List) |
-            -- Background Color | Background Opacity | Slot Background, two per row
+            -- Background Texture | Background Color | Background Opacity |
+            -- Slot Background, two per row
             local layoutSlots = {
                 { type="dropdown", text="Bag Style",
                   values = { grid="Grid", list="List", compact="Compact" },
@@ -335,12 +336,34 @@ initFrame:SetScript("OnEvent", function(self)
                       ResetAndRefreshBagLayout()
                   end }
             end
-            -- background color/opacity and slot background, same for bags and bank
+            -- Texture, tint, opacity and slot background are shared by bags,
+            -- the character bank and warbank. Reuse the module's live catalogue.
+            EllesmereUI.AppendSharedMediaTextures(
+                BagsNS.bagBgTextureNames, BagsNS.bagBgTextureOrder, nil, BagsNS.bagBgTextures)
+            local bgTexValues, bgTexOrder = {}, {}
+            for _, key in ipairs(BagsNS.bagBgTextureOrder) do
+                bgTexOrder[#bgTexOrder + 1] = key
+                if key ~= "---" then
+                    bgTexValues[key] = BagsNS.bagBgTextureNames[key] or key
+                end
+            end
+            bgTexValues._menuOpts = {
+                itemHeight = 28,
+                background = function(key) return BagsNS.bagBgTextures[key] end,
+            }
             local function ApplyBackgrounds()
                 local bags, bank = _G.EUI_Bags, _G.EUI_BankFrame
                 if bags then BagsNS.ApplyWindowBackground(bags.bg, bags.bgOverlay) end
                 if bank then BagsNS.ApplyWindowBackground(bank._bg, bank._bgOverlay) end
             end
+            layoutSlots[#layoutSlots + 1] = { type="dropdown", text="Background Texture",
+                tooltip="Background texture shared by bags, the character bank and warbank. Original keeps the existing look; None uses a solid background.",
+                values=bgTexValues, order=bgTexOrder,
+                getValue=function() return db.profile.bagBgTexture or "original" end,
+                setValue=function(v)
+                    db.profile.bagBgTexture = v
+                    ApplyBackgrounds()
+                end }
             layoutSlots[#layoutSlots + 1] = { type="colorpicker", text="Background Color", hasAlpha=true,
                 tooltip="The tint over the bag and bank window backgrounds. Its opacity sets how strong the tint is.",
                 getValue=function()

@@ -87,11 +87,34 @@ local function PinItemButtonLevel(btn, level)
     if btn._warbankDim then btn._warbankDim:SetFrameLevel(level + 6) end
 end
 
--- background color/opacity for bags and bank: the texture fades with the
--- opacity, the tint on top takes the color
+-- The same texture catalogue as other EUI backgrounds, with the existing
+-- bags atlas kept as the default. SharedMedia is registered once per table.
+local ORIGINAL_BG = "Interface\\AddOns\\EllesmereUI\\media\\modern_blizz.png"
+ns.bagBgTextures, ns.bagBgTextureNames, ns.bagBgTextureOrder = EUI.BuildBarTextureTables(true)
+ns.bagBgTextures.original = ORIGINAL_BG
+ns.bagBgTextureNames.original = "Original"
+table.insert(ns.bagBgTextureOrder, 1, "original")
+EUI.AppendSharedMediaTextures(ns.bagBgTextureNames, ns.bagBgTextureOrder, nil, ns.bagBgTextures)
+
+-- Background appearance is shared by bags, the character bank and warbank.
+-- Only replace the underlying texture when its resolved path changes; a new
+-- SharedMedia registration can become available on the next window refresh.
 function ns.ApplyWindowBackground(bg, overlay)
     if not (bg and overlay) then return end
     local p = BP()
+    local key = p.bagBgTexture or "original"
+    local path = key == "none" and "none"
+        or EUI.ResolveTexturePath(ns.bagBgTextures, key, ORIGINAL_BG)
+    if bg._euiBagBgPath ~= path then
+        if path == "none" then
+            bg:SetColorTexture(0, 0, 0, 1)
+        else
+            bg:SetTexture(path)
+            bg:SetTexCoord(0, 1, 0, 1)
+            bg:SetVertexColor(1, 1, 1, 1)
+        end
+        bg._euiBagBgPath = path
+    end
     local o = (p.bagBgOpacity or 100) / 100
     local c = p.bagBgColor
     bg:SetAlpha(o)

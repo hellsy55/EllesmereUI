@@ -58,6 +58,7 @@ local BAGS_DEFAULTS = {
         bagCompactArmorySlotGroups = false,
         bagHideAddCategory    = false,
         bagBgOpacity          = 100,     -- background opacity for bags and bank (bagBgColor / bagSlotBgColor: nil = default)
+        bagBgTexture          = "original", -- shared bags / bank / warbank background texture
         bagWindowLocked       = false,   -- footer lock icon: no resizing or moving
         bankWindowLocked      = false,
         bagOpenWithCharacter  = false,
