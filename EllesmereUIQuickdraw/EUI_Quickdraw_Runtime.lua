@@ -664,6 +664,9 @@ end
 -- that finally lands. PLAYER_REGEN_ENABLED reads it rather than pushing
 -- unconditionally, the same bargain bindingsDirty makes below.
 local pushDirty = false
+-- TalentLoadoutsEx changes the slots of a nested palette while the live ring
+-- may still be open. Repaint only after its secure actions have been pushed.
+local liveTalentRefreshPending = false
 
 -- Bound palettes only: nested ones have no button of their own, and their
 -- entries are pushed as part of whichever palette nests them.
@@ -678,6 +681,21 @@ local function PushAllPalettes()
     -- Same lifecycle, same reason -- see the Dynamic Profession section.
     if ns.WipeProfessionCache then ns.WipeProfessionCache() end
     for i = 1, PaletteCount() do PushPalette(i) end
+    if liveTalentRefreshPending then
+        liveTalentRefreshPending = false
+        if liveView and liveView:GetFrame():IsShown() then
+            local index = liveView:GetPaletteIndex()
+            local btn = secureButtons[index]
+            -- Reposition the mouse-motion gates as well as the secure cells:
+            -- the original press's gates otherwise stay over the previous
+            -- spec icon even after ChildIndex selects the new spec correctly.
+            if btn then I.RefreshOpenGates(index, btn) end
+            -- A previous spec's child selection is no longer a valid action.
+            -- The live steering pass will reselect from the new geometry.
+            liveView:SetSelection(nil)
+            liveView:Layout(index)
+        end
+    end
 end
 
 -- A push is on the order of a thousand attribute writes per bound palette, and
@@ -712,6 +730,20 @@ local function RequestPush()
     end)
 end
 ns.RequestPush = RequestPush
+
+-- Keep an already-open ring in sync with TalentLoadoutsEx without restarting
+-- its hold or latch. The talent watcher already debounces its updates, so an
+-- open ring pushes secure actions immediately before repainting; combat
+-- deferral and PLAYER_REGEN_ENABLED keep the same pending flag.
+function ns.RequestTalentLoadoutViewRefresh()
+    if liveView and liveView:GetFrame():IsShown() then
+        liveTalentRefreshPending = true
+        pushQueued = false -- any earlier coalescer timer will become a no-op
+        PushAllPalettes()
+    else
+        RequestPush()
+    end
+end
 
 -- Land a pending push NOW rather than at the end of its window. Called by the
 -- press, so a key can never fire geometry the palette has stopped drawing --

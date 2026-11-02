@@ -878,7 +878,7 @@ local function RegisterLoadoutTextUnlock()
     EllesmereUI:RegisterUnlockElements({
         MK({
             key      = "EUI_QuickdrawLoadoutText",
-            label    = "Quickdraw: Loadout Text",
+            label    = "Quickdraw: Loadout Display",
             group    = "Quickdraw",
             order    = 100,
             -- Off the mover list entirely while the feature itself is off
@@ -1035,7 +1035,13 @@ watcher:SetScript("OnEvent", function(_, event, arg1)
         if generation ~= refreshGeneration then return end
         InvalidateActiveLoadout()
         RefreshTalentLoadoutPalette(false)
-        if ns.RequestPush then ns.RequestPush() end
+        -- Refresh any ring left open across the spec change only after the
+        -- secure actions have caught up with the new spec's loadout list.
+        if ns.RequestTalentLoadoutViewRefresh then
+            ns.RequestTalentLoadoutViewRefresh()
+        elseif ns.RequestPush then
+            ns.RequestPush()
+        end
 
         local stateKey = CurrentTalentStateKey()
         if stateKey then

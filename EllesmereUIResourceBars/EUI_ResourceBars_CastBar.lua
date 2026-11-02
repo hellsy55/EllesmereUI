@@ -965,6 +965,10 @@ end
 -- the displayed tenth actually changes. On ns, not a file local.
 function ns.SetCastTimerText(f, now, totalDurMode, totalSuffix, latSuffix)
     local remaining = f._endTime - now
+    if f._craftExtra then
+        EllesmereUI.SetCraftTimerText(f, f._timerText, remaining, totalDurMode)
+        return
+    end
     if remaining > 0 then
         local shown = totalDurMode and (now - f._startTime) or remaining
         local tenths = floor(shown * 10)
@@ -1372,8 +1376,10 @@ OnCastStart = function()
     local cb = ERB.db.profile.castBar
     if not cb.enabled or ns._erbCastPadHidden then return end
 
-    local name, _, _, startTimeMS, endTimeMS, _, _, notInterruptible, spellID, barID = UnitCastingInfo("player")
+    local name, _, _, startTimeMS, endTimeMS, isTradeSkill, _, notInterruptible, spellID, barID = UnitCastingInfo("player")
     if not name then return end
+    EllesmereUI.SetCraftBatch(castBarFrame, cb.fullCraftTime and cb.showTimer and isTradeSkill,
+        spellID, barID, (endTimeMS - startTimeMS) / 1000)
 
     -- A new cast immediately replaces a pending cancelled-cast message. Only
     -- rebuild (restoring the user's normal fill/gradient/text) when a cancel
@@ -1393,7 +1399,8 @@ OnCastStart = function()
     castBarFrame._spellName = name
     castBarFrame._spellID = spellID
     castBarFrame._totalDurSuffix = " / " .. format("%.1f", (endTimeMS - startTimeMS) / 1000)
-    castBarFrame._nameText:SetText(ns.CastDisplayName(cb, name, spellID))
+    castBarFrame._nameText:SetText(ns.CastDisplayName(cb, name, spellID)
+        .. (castBarFrame._craftExtra and castBarFrame._craftCountSuffix or ""))
     ns.ERB_SetBlizzCastFill("cast")
     ns.ERB_CastOverrideStart(cb, notInterruptible)
     if not ns.ApplyCastTimer("cast") then
@@ -1456,6 +1463,7 @@ OnChannelStart = function()
     castBarFrame._casting = false
     castBarFrame._channeling = true
     castBarFrame._empowering = false
+    castBarFrame._craftExtra = nil
     castBarFrame._castID = channelCastID
     castBarFrame._startTime = startTimeMS / 1000
     castBarFrame._endTime = endTimeMS / 1000
@@ -1764,6 +1772,7 @@ OnCastStop = function()
     castBarFrame._channeling = false
     castBarFrame._empowering = false
     castBarFrame._castID = nil
+    castBarFrame._craftExtra = nil
     -- The overrun safety path forces a stop here on a missed EMPOWER_STOP, and
     -- clearing _empowering above is exactly what makes OnEmpowerStop early-return
     -- later, so this is the only chance to undo the stage tint.
@@ -1860,6 +1869,7 @@ OnEmpowerStart = function()
     castBarFrame._casting = false
     castBarFrame._channeling = false
     castBarFrame._empowering = true
+    castBarFrame._craftExtra = nil
     castBarFrame._castID = empowerCastID
     castBarFrame._startTime = startTimeMS / 1000
     castBarFrame._endTime = endTimeMS / 1000

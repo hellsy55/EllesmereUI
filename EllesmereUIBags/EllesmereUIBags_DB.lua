@@ -53,10 +53,12 @@ local BAGS_DEFAULTS = {
         bankHideEmptyWhenNested = false,
         bankListView          = false,  -- reload to apply
         bankCompactView       = false,  -- reload to apply; bankListView wins when both are set
+        bankDefaultBankType    = "bank", -- "bank" | "warbank"; selected on each bank open
         bagArmoryGroupBySlot  = false,
         bagCompactArmorySlotGroups = false,
         bagHideAddCategory    = false,
         bagBgOpacity          = 100,     -- background opacity for bags and bank (bagBgColor / bagSlotBgColor: nil = default)
+        bagBgTexture          = "original", -- shared bags / bank / warbank background texture
         bagWindowLocked       = false,   -- footer lock icon: no resizing or moving
         bankWindowLocked      = false,
         bagOpenWithCharacter  = false,

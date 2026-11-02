@@ -702,5 +702,111 @@ function EnsureLatticeGates(index, btn)
 end
 end
 
+-- A specialization change can replace one nesting spec slot with another
+-- while the ring stays open. PushPalette updates the button's geometry, but
+-- the secure press that originally positioned these mouse-motion gates does
+-- not run again. Reposition the existing gates against the newly pushed
+-- boxes, keeping the original press origin and latch/hold state intact.
+-- This is the gate-placement part of SNIPPET_PRE, out of combat only.
+function I.RefreshOpenGates(index, btn)
+    if InCombatLockdown() then return end
+    local pool = gatePools[index]
+    if not pool or not btn then return end
+
+    local ui = UIParent
+    local scale = tonumber(btn:GetAttribute("eqdScale")) or 1
+    if scale <= 0 then scale = 1 end
+    local ox, oy
+    if btn:GetAttribute("eqdFixed") then
+        ox = ui:GetWidth() * 0.5 + (tonumber(btn:GetAttribute("eqdPosX")) or 0)
+        oy = ui:GetHeight() * 0.5 + (tonumber(btn:GetAttribute("eqdPosY")) or 0)
+    else
+        ox = tonumber(btn:GetAttribute("eqdGX"))
+        oy = tonumber(btn:GetAttribute("eqdGY"))
+    end
+    if not ox then return end
+
+    -- Clear old ownership and old hit regions before exposing the new ones.
+    -- The ring's release must never fire a child through the previous spec's
+    -- parent gate merely because the pointer had not moved since the swap.
+    btn:SetAttribute("eqdArmed", nil)
+    if pool.fgate then pool.fgate:Hide() end
+    for k = 1, pool.built do
+        local parent = pool.pgate[k]
+        if parent then parent:Hide() end
+        for r = 1, REGION_MAX do
+            local region = pool.rgate[k] and pool.rgate[k][r]
+            if region then region:Hide() end
+        end
+    end
+
+    local mode = btn:GetAttribute("eqdMode")
+    local count = tonumber(btn:GetAttribute("eqdGateMax")) or 0
+    for k = 1, pool.built do
+        local parent = pool.pgate[k]
+        local hw = k <= count and tonumber(btn:GetAttribute("eqdPOHW" .. k))
+        if parent then
+            parent:ClearAllPoints()
+            if hw then
+                local x = tonumber(btn:GetAttribute("eqdPOX" .. k)) or 0
+                local y = tonumber(btn:GetAttribute("eqdPOY" .. k)) or 0
+                local hh = tonumber(btn:GetAttribute("eqdPOHH" .. k)) or 0
+                parent:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT",
+                    ox + (x - hw) * scale, oy + (y - hh) * scale)
+                parent:SetWidth(hw * 2 * scale)
+                parent:SetHeight(hh * 2 * scale)
+                parent:Show()
+            end
+        end
+        for r = 1, REGION_MAX do
+            local region = pool.rgate[k] and pool.rgate[k][r]
+            if region then
+                region:ClearAllPoints()
+                local rhw = hw and tonumber(btn:GetAttribute("eqdROHW" .. k .. "_" .. r))
+                if rhw then
+                    local tag = k .. "_" .. r
+                    local x = tonumber(btn:GetAttribute("eqdROX" .. tag)) or 0
+                    local y = tonumber(btn:GetAttribute("eqdROY" .. tag)) or 0
+                    local hh = tonumber(btn:GetAttribute("eqdROHH" .. tag)) or 0
+                    region:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT",
+                        ox + (x - rhw) * scale, oy + (y - hh) * scale)
+                    region:SetWidth(rhw * 2 * scale)
+                    region:SetHeight(hh * 2 * scale)
+                    if mode == "ANGULAR" then region:Show() end
+                end
+            end
+        end
+    end
+
+    -- A SCROLL menu uses position gates, not claim gates, for mouse hover.
+    -- Their geometry is normally seeded only on press as well.
+    if pool.lattice then
+        local mouse = mode == "SCROLL" and btn:GetAttribute("eqdFanMouse")
+        local pitch = tonumber(btn:GetAttribute("eqdPitch")) or 0
+        local band = tonumber(btn:GetAttribute("eqdFanBand")) or 0
+        local window = tonumber(btn:GetAttribute("eqdFanWin")) or 0
+        local horizontal = btn:GetAttribute("eqdFanHoriz")
+        local shown = tonumber(btn:GetAttribute("eqdShown")) or 0
+        for d = -MAX_LATTICE, MAX_LATTICE do
+            local gate = pool.lattice[d]
+            if gate then
+                gate:Hide()
+                gate:ClearAllPoints()
+                if mouse and pitch > 0 and shown > 0
+                   and math.abs(d) <= window + 0.5
+                   and d * 2 <= shown and -d * 2 < shown then
+                    local x, y = d * pitch, 0
+                    if not horizontal then x, y = 0, -(d * pitch) end
+                    gate:SetPoint("BOTTOMLEFT", ui, "BOTTOMLEFT",
+                        ox + (x - band) * scale, oy + (y - band) * scale)
+                    gate:SetWidth(band * 2 * scale)
+                    gate:SetHeight(band * 2 * scale)
+                    gate:Show()
+                end
+            end
+        end
+    end
+end
+
 I.EnsureGates, I.EnsureLatticeGates, I.gatePools = EnsureGates, EnsureLatticeGates, gatePools
 I.broken = false
