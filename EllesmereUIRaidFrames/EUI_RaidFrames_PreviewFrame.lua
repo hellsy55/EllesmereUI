@@ -282,6 +282,21 @@ local function CreatePreviewFrame(index, party)
         absorbBar._healTopBar = thb
     end
 
+    -- Max Health Bar: independent reduced-max-health strip.
+    do
+        local mb = CreateFrame("StatusBar", nil, f)
+        mb:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        mb:SetStatusBarColor(0.7, 0.1, 0.1, 1)
+        mb:SetReverseFill(true)
+        mb:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 0)
+        mb:SetPoint("BOTTOMRIGHT", f, "TOPRIGHT", 0, 0)
+        mb:SetHeight(4)
+        mb:SetFrameLevel(health:GetFrameLevel() + 3)
+        mb:SetMinMaxValues(0, 1)
+        mb:Hide()
+        absorbBar._maxTopBar = mb
+    end
+
     -- Power bar (anchored to frame bottom for pixel alignment). Always built:
     -- frames are reused for the session and the party preview reads its own
     -- role flags, so ApplyPreviewData shows or hides it per unit.

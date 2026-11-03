@@ -123,6 +123,7 @@ end
 local COLOR_WHITE = { r = 1, g = 1, b = 1 }
 local DEF_HEAL_ABSORB_COLOR = { r = 0.8, g = 0.15, b = 0.15 }
 local DEF_HEAL_ABSORB_BAR_COLOR = { r = 200/255, g = 29/255, b = 29/255 }
+local DEF_MAX_COLOR = { r = 0.7, g = 0.1, b = 0.1 }
 -- Absorb Short text gate zone -> the frame's text field for that zone.
 local GATE_ZONE_TEXT = { left = "LeftText", right = "RightText", center = "CenterText", extra = "ExtraText" }
 -- Unit token -> boss frame unit; each token is matched once.
@@ -154,6 +155,27 @@ local function ApplyHealAbsorbStyle(haBar, style, settings)
         if mask then fill:AddMaskTexture(mask) end
     end
     ns.ApplyFillRotation(haBar)
+end
+
+-- Max-health reduction uses a dedicated overlay, independent of both absorb styles.
+local function ApplyMaxHealthStyle(bar, style, s)
+    local tex = style == "maxHealthStripes"
+        and "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png"
+        or ns.ResolveAbsorbStyleTex(style, "Interface\\Buttons\\WHITE8X8")
+    local c = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
+    if style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then
+        c = COLOR_WHITE
+    end
+    bar:SetStatusBarTexture(tex)
+    bar:SetStatusBarColor(c.r or 0.7, c.g or 0.1, c.b or 0.1, (s.maxHealthOpacity or 100) / 100)
+    local fill = bar:GetStatusBarTexture()
+    if fill then
+        local tiled = style == "maxHealthStripes" or ns.ABSORB_TILED_STYLES[style] == true
+        fill:SetDrawLayer("ARTWORK", 3)
+        fill:SetHorizTile(tiled); fill:SetVertTile(tiled)
+        ns.UF_ApplyAbsorbTextureTintMode(fill, style)
+    end
+    ns.ApplyFillRotation(bar)
 end
 
 -- Two-segment absorb rendering via dynamic clip frames, works with secret-valued
@@ -189,6 +211,10 @@ local function UpdateAbsorbBarReverseFill(frame, isReversed, settingsOverride)
     if not (fw and curClip and missClip and hpBar) then return end
     local hpTex = hpBar:GetStatusBarTexture()
     if not hpTex then return end
+    if ab._maxHealth then
+        ab._maxHealth:SetOrientation((settingsOverride or GetSettingsForUnit(frame._euiUnit)).healthVerticalFill and "VERTICAL" or "HORIZONTAL")
+        ns.ApplyFillRotation(ab._maxHealth)
+    end
 
     ab._isReversed = isReversed and true or false
 
@@ -877,6 +903,7 @@ end
 -- Frames). On ns so the options-panel preview can reuse the layout.
 ns.UF_GetAbsorbBarPos     = function(s) return (s and s.absorbBarPosition)     or "none" end
 ns.UF_GetHealAbsorbBarPos = function(s) return (s and s.healAbsorbBarPosition) or "none" end
+ns.UF_GetMaxHealthBarPos = function(s) return (s and s.maxHealthBarPosition) or "none" end
 
 -- Anchor/orient a strip bar (Absorb Bar or Heal Absorb Bar). "above*" sit on top
 -- of the health bar; "top*"/"bottom*" sit inside at the matching edge, drawn just
@@ -884,12 +911,18 @@ ns.UF_GetHealAbsorbBarPos = function(s) return (s and s.healAbsorbBarPosition) o
 -- against the Absorb Bar, derived from its POSITION (not its live visibility, so
 -- they never shift). "*Right" fills from the right edge. `absorbLevel` is the
 -- absorb-overlay frame level (inside strips render at +1).
-ns.UF_ApplyStripBarLayout = function(stripBar, hp, position, height, absorbLevel, absorbPos, absorbHeight)
+ns.UF_ApplyStripBarLayout = function(stripBar, hp, position, height, absorbLevel, absorbPos, absorbHeight, healBar)
     if not stripBar or not hp then return end
     stripBar:ClearAllPoints()
+    if position == "belowHealAbsorb" and not healBar then position = "belowAbsorb" end
     stripBar:SetHeight(PP.Scale(height or 4))
     local insideLevel = (absorbLevel or (hp:GetFrameLevel() + 1)) + 1
-    if position == "aboveAbsorb" then
+    if position == "belowHealAbsorb" and healBar then
+        stripBar:SetReverseFill(healBar:GetReverseFill())
+        stripBar:SetPoint("TOPLEFT", healBar, "BOTTOMLEFT", 0, 0)
+        stripBar:SetPoint("TOPRIGHT", healBar, "BOTTOMRIGHT", 0, 0)
+        stripBar:SetFrameLevel(insideLevel + 1)
+    elseif position == "aboveAbsorb" then
         absorbPos = absorbPos or "none"
         local leftPoint, rightPoint, yOff = "TOPLEFT", "TOPRIGHT", 0
         if absorbPos == "aboveRight" or absorbPos == "aboveLeft" then
@@ -1118,12 +1151,37 @@ local function CreateAbsorbBar(frame, unit, settings)
     healAbsorbTopBar:SetFrameLevel(hpBar:GetFrameLevel() + 3)
     healAbsorbTopBar:Hide()
 
+    local maxOverlay = CreateFrame("StatusBar", nil, hpBar)
+    maxOverlay:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    maxOverlay:SetStatusBarColor(0.7, 0.1, 0.1, 1)
+    maxOverlay:SetReverseFill(true)
+    maxOverlay:SetAllPoints(hpBar)
+    maxOverlay:SetFrameLevel(hpBar:GetFrameLevel() + 2)
+    maxOverlay:SetMinMaxValues(0, 1)
+    maxOverlay:Hide()
+    local maxBg = maxOverlay:CreateTexture(nil, "ARTWORK", nil, 2)
+    maxBg:SetColorTexture(0, 0, 0, 1)
+    maxBg:SetAllPoints(maxOverlay:GetStatusBarTexture())
+    local maxTopBar = CreateFrame("StatusBar", nil, frame)
+    maxTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    maxTopBar:SetStatusBarColor(0.7, 0.1, 0.1, 1)
+    maxTopBar:SetReverseFill(true)
+    maxTopBar:SetPoint("BOTTOMLEFT", hpBar, "TOPLEFT", 0, 0)
+    maxTopBar:SetPoint("BOTTOMRIGHT", hpBar, "TOPRIGHT", 0, 0)
+    maxTopBar:SetHeight(4)
+    maxTopBar:SetMinMaxValues(0, 1)
+    maxTopBar:SetFrameLevel(hpBar:GetFrameLevel() + 3)
+    maxTopBar:Hide()
+
     -- Attach extras to the backfill (main) bar so anything referencing
     -- HealthPrediction.damageAbsorb can hide/show both segments together.
     backfillBar._forward      = forwardBar
     backfillBar._healAbsorb   = healAbsorbBar
     backfillBar._topBar       = absorbTopBar
     backfillBar._healTopBar   = healAbsorbTopBar
+    backfillBar._maxHealth = maxOverlay
+    backfillBar._maxHealthBg = maxBg
+    backfillBar._maxTopBar = maxTopBar
     backfillBar._hpBar        = hpBar
     backfillBar._curClip      = curClip
     backfillBar._healClip     = healClip
@@ -1158,7 +1216,8 @@ local function CreateAbsorbBar(frame, unit, settings)
             if event == "UNIT_ABSORB_AMOUNT_CHANGED" or event == "UNIT_HEAL_ABSORB_AMOUNT_CHANGED" then
                 ns.UF_AbArm(self)
             elseif event == "UNIT_MAXHEALTH" and not self._absActive then
-                return
+                local s = (unit and IS_BOSS_UNIT[unit]) and db.profile.boss or GetSettingsForUnit(updUnit)
+                if (not s or s.maxHealthStyle == "none") and (not s or s.maxHealthBarPosition == "none" or s.maxHealthBarPosition == nil) then return end
             end
 
             -- Drive the "Absorb Short" health-text gate(s): feed the raw absorb so the
@@ -1230,14 +1289,20 @@ local function CreateAbsorbBar(frame, unit, settings)
             local barOn = topBar and barPos ~= "none"
             local healBarPos = ns.UF_GetHealAbsorbBarPos(s)
             local healBarOn = healTopBar and healBarPos ~= "none"
+            local maxBar = ab._maxTopBar
+            local maxBarPos = ns.UF_GetMaxHealthBarPos(s)
+            local maxBarOn = maxBar and maxBarPos ~= "none"
+            local maxStyleOn = ((s and s.maxHealthStyle) or "none") ~= "none"
             local shieldOff = s and (not s.showPlayerAbsorb or s.showPlayerAbsorb == "none")
             local healOff = (((s and s.healAbsorbStyle) or "clean") == "none")
-            if shieldOff and healOff and not barOn and not healBarOn then
+            if shieldOff and healOff and not barOn and not healBarOn and not maxBarOn and not maxStyleOn then
                 ab:Hide()
                 if fw then fw:Hide() end
                 if ha then ha:Hide() end
                 if topBar then topBar:Hide() end
                 if healTopBar then healTopBar:Hide() end
+                if maxBar then maxBar:Hide() end
+                if ab._maxHealth then ab._maxHealth:Hide() end
                 -- Nothing draws a shield here, but the arm/disarm derivation still
                 -- runs (as below): an absorb event armed this frame above, and a
                 -- frame that never disarms keeps the 0.5s belt repainting it for the
@@ -1286,7 +1351,7 @@ local function CreateAbsorbBar(frame, unit, settings)
             -- pass over unchanged plain values has nothing left to move.
             if isSecD and (isSecD(absorbAmt) or isSecD(maxHealth) or isSecD(haAmtD)) then
                 ab._mAbs = nil
-            elseif event ~= "ForceUpdate" and event ~= "Resettle"
+            elseif event ~= "ForceUpdate" and event ~= "Resettle" and event ~= "UNIT_MAX_HEALTH_MODIFIERS_CHANGED"
                and ab._mAbs == absorbAmt and ab._mHeal == haAmtD
                and ab._mMax == maxHealth and ab._mW == hpW and ab._mH == hpH then
                 return
@@ -1359,7 +1424,7 @@ local function CreateAbsorbBar(frame, unit, settings)
                or ab._ekVert ~= vertFill or ab._ekOs ~= osMode then
                 ab._ekAbs, ab._ekHeal = absorbMode, healEdgeMode
                 ab._ekVert, ab._ekOs = vertFill, osMode
-                UpdateAbsorbBarReverseFill(self, ab._isReversed)
+                UpdateAbsorbBarReverseFill(self, ab._isReversed, s)
             end
 
             -- Shield (damage) absorb segments render only when enabled; style
@@ -1453,6 +1518,56 @@ local function CreateAbsorbBar(frame, unit, settings)
                         hbg:Show()
                     end
                 end
+            end
+            -- Reduced max-health: the API returns a plain fraction, as in Raid Frames.
+            if maxStyleOn or maxBarOn then
+                local loss = GetUnitTotalModifiedMaxHealthPercent and GetUnitTotalModifiedMaxHealthPercent(updUnit) or 0
+                local rmh = ab._maxHealth
+                if rmh then
+                    if maxStyleOn and loss > 0 then
+                        local style = s.maxHealthStyle
+                        local mc = s.maxHealthColor or DEF_MAX_COLOR
+                        if rmh._style ~= style or rmh._opacity ~= s.maxHealthOpacity
+                           or rmh._color ~= mc or rmh._bgAlpha ~= s.maxHealthBgOpacity then
+                            rmh._style = style; rmh._opacity = s.maxHealthOpacity
+                            rmh._color = mc; rmh._bgAlpha = s.maxHealthBgOpacity
+                            ApplyMaxHealthStyle(rmh, style, s)
+                            local bg = ab._maxHealthBg
+                            if bg then
+                                bg:SetColorTexture(0, 0, 0, (s.maxHealthBgOpacity or 100) / 100)
+                                bg:SetAllPoints(rmh:GetStatusBarTexture())
+                            end
+                        end
+                        rmh:SetValue(loss)
+                        rmh:Show()
+                    else
+                        rmh:Hide()
+                    end
+                end
+                if maxBar then
+                    if maxBarOn and loss > 0 then
+                        local bh = s.maxHealthBarHeight or 4
+                        local hbh = s.healAbsorbBarHeight or 4
+                        local hc = s.maxHealthBarColor or DEF_MAX_COLOR
+                        if maxBar._lpPos ~= maxBarPos or maxBar._lpH ~= bh
+                           or maxBar._lpHP ~= healBarPos or maxBar._lpHH ~= hbh
+                           or maxBar._lpAP ~= barPos or maxBar._lpAH ~= (s.absorbBarHeight or 4) then
+                            maxBar._lpPos = maxBarPos; maxBar._lpH = bh
+                            maxBar._lpHP = healBarPos; maxBar._lpHH = hbh
+                            maxBar._lpAP = barPos; maxBar._lpAH = s.absorbBarHeight or 4
+                            ns.UF_ApplyStripBarLayout(maxBar, hp, maxBarPos, bh, ab:GetFrameLevel(),
+                                barPos, s.absorbBarHeight or 4, healBarOn and healTopBar or nil)
+                        end
+                        maxBar:SetStatusBarColor(hc.r or 0.7, hc.g or 0.1, hc.b or 0.1, hc.a or 1)
+                        maxBar:SetValue(loss)
+                        maxBar:Show()
+                    else
+                        maxBar:Hide()
+                    end
+                end
+            else
+                if ab._maxHealth then ab._maxHealth:Hide() end
+                if maxBar then maxBar:Hide() end
             end
     end
     frame.HealthPrediction = {

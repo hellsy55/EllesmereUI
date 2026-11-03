@@ -100,6 +100,7 @@ do
             "healAbsorbStyle", "healAbsorbOpacity", "healAbsorbColor", "healAbsorbEdgeMode",
             "healAbsorbBgOpacity",
             "maxHealthStyle", "maxHealthOpacity", "maxHealthColor", "maxHealthBgOpacity",
+            "maxHealthBarPosition", "maxHealthBarHeight", "maxHealthBarColor", "maxHealthBarGrowDir",
         },
         powerBar = {
             "showPowerBar", "powerHeight", "powerBgDarkness", "powerBgColor", "powerBgPowerColored",

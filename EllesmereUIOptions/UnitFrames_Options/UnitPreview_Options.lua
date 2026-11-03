@@ -1354,7 +1354,7 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
     --   absorbBar     = shield (damage) absorb, white/shield, drawn below
     --   healAbsorbBar = heal absorb, red, one sublevel above; shown only while
     --                   the Heal Absorb Style eyeball is on
-    local absorbBar, healAbsorbBar, absorbTopBar, healAbsorbTopBar
+    local absorbBar, healAbsorbBar, absorbTopBar, healAbsorbTopBar, maxOverlay, maxTopBar
     if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
         local PREV_ABS_TEX = {
             striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
@@ -1432,6 +1432,19 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         haBgPv:SetAllPoints(healAbsorbBar:GetStatusBarTexture())
         healAbsorbBar._bg = haBgPv
 
+        -- Max Health Style preview, with a 20% reduction sample.
+        maxOverlay = CreateFrame("StatusBar", nil, health)
+        maxOverlay:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        maxOverlay:SetReverseFill(true)
+        maxOverlay:SetAllPoints(health)
+        maxOverlay:SetFrameLevel(health:GetFrameLevel() + 2)
+        maxOverlay:SetMinMaxValues(0, 1)
+        maxOverlay:SetValue(0.20)
+        maxOverlay:Hide()
+        maxOverlay._bg = maxOverlay:CreateTexture(nil, "ARTWORK", nil, 2)
+        maxOverlay._bg:SetColorTexture(0, 0, 0, 1)
+        maxOverlay._bg:SetAllPoints(maxOverlay:GetStatusBarTexture())
+
         -- Heal prediction preview (Heal Prediction eyeball): others' heals at the
         -- full incoming total underneath, yours on top, from the HP edge. The
         -- holder clips at the bar's end unless Overheal lets them run past it.
@@ -1460,11 +1473,18 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         healAbsorbTopBar:SetMinMaxValues(0, 1)
         healAbsorbTopBar:SetValue(0.45)
         healAbsorbTopBar:Hide()
+        maxTopBar = CreateFrame("StatusBar", nil, pf)
+        maxTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        maxTopBar:SetMinMaxValues(0, 1)
+        maxTopBar:SetValue(0.20)
+        maxTopBar:Hide()
     end
     pf._absorbBar = absorbBar
     pf._healAbsorbBar = healAbsorbBar
     pf._absorbTopBar = absorbTopBar
     pf._healAbsorbTopBar = healAbsorbTopBar
+    pf._maxHealthOverlay = maxOverlay
+    pf._maxHealthTopBar = maxTopBar
 
     -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
     local buffIcons = {}
@@ -3276,6 +3296,39 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             end
         end
 
+        -- Max-health reduction is independent of both shield styles.
+        if maxOverlay then
+            local mhStyle = s.maxHealthStyle or "none"
+            if mhStyle ~= "none" then
+                local tex = mhStyle == "maxHealthStripes"
+                    and "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png"
+                    or ns.ResolveAbsorbStyleTex(mhStyle, "Interface\\Buttons\\WHITE8X8")
+                local mc = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
+                if mhStyle == "largeOutlinedStripes" or mhStyle == "largeOutlinedStripesR" then
+                    mc = { r = 1, g = 1, b = 1 }
+                end
+                maxOverlay:SetStatusBarTexture(tex)
+                local fill = maxOverlay:GetStatusBarTexture()
+                if fill then
+                    local tiled = mhStyle == "maxHealthStripes" or ns.ABSORB_TILED_STYLES[mhStyle] == true
+                    fill:SetDrawLayer("ARTWORK", 3)
+                    fill:SetHorizTile(tiled); fill:SetVertTile(tiled)
+                    if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(fill, mhStyle) end
+                end
+                maxOverlay:SetStatusBarColor(mc.r or 0.7, mc.g or 0.1, mc.b or 0.1, (s.maxHealthOpacity or 100) / 100)
+                maxOverlay:SetOrientation(s.healthVerticalFill and "VERTICAL" or "HORIZONTAL")
+                if ns.ApplyFillRotation then ns.ApplyFillRotation(maxOverlay) end
+                maxOverlay:SetValue(0.20)
+                if maxOverlay._bg then
+                    maxOverlay._bg:SetColorTexture(0, 0, 0, (s.maxHealthBgOpacity or 100) / 100)
+                    maxOverlay._bg:SetAllPoints(maxOverlay:GetStatusBarTexture())
+                end
+                maxOverlay:Show()
+            else
+                maxOverlay:Hide()
+            end
+        end
+
         -- Heal prediction eyeball: shows the two segments (and hides the shield
         -- absorb, like the heal absorb eyeball). The incoming total fills most
         -- of the missing health, or runs past the bar's end by the full
@@ -3336,6 +3389,21 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 healAbsorbTopBar:Show()
             else
                 healAbsorbTopBar:Hide()
+            end
+        end
+
+        if maxTopBar and _absStripHp then
+            local pos = s.maxHealthBarPosition or "none"
+            if pos ~= "none" then
+                local c = s.maxHealthBarColor or { r = 0.7, g = 0.1, b = 0.1 }
+                ns.UF_ApplyStripBarLayout(maxTopBar, _absStripHp, pos,
+                    s.maxHealthBarHeight or 4, _absStripHp:GetFrameLevel() + 1,
+                    s.absorbBarPosition or "none", s.absorbBarHeight or 4,
+                    (s.healAbsorbBarPosition or "none") ~= "none" and healAbsorbTopBar or nil)
+                maxTopBar:SetStatusBarColor(c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1)
+                maxTopBar:Show()
+            else
+                maxTopBar:Hide()
             end
         end
 

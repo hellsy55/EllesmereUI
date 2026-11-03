@@ -3142,6 +3142,9 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     local absorbStyleValues = CopyTable(ns.ABSORB_STYLE_NAMES)
     local absorbStyleOrder = CopyTable(ns.ABSORB_STYLE_ORDER)
     local healAbsorbStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
+    local maxHealthStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
+    table.insert(maxHealthStyleOrder, 2, "maxHealthStripes")
+    absorbStyleValues.maxHealthStripes = "Max Health Stripes"
     -- Append SharedMedia statusbar textures after a divider, mirroring the Bar
     -- Texture dropdown. SM keys ("sm:" prefixed) come from AppendSharedMediaTextures
     -- into the shared health-bar tables; render resolves via ns.ResolveAbsorbStyleTex
@@ -3160,9 +3163,11 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         if #smKeys > 0 then
             absorbStyleOrder[#absorbStyleOrder + 1] = "---"
             healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = "---"
+            maxHealthStyleOrder[#maxHealthStyleOrder + 1] = "---"
             for _, k in ipairs(smKeys) do
                 absorbStyleOrder[#absorbStyleOrder + 1] = k
                 healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = k
+                maxHealthStyleOrder[#maxHealthStyleOrder + 1] = k
             end
         end
         -- Preview swatch behind each menu row, resolved exactly like render.
@@ -3170,6 +3175,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             itemHeight = 28,
             background = function(key)
                 if not key or key == "---" or key == "none" then return nil end
+                if key == "maxHealthStripes" then return "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png" end
                 return ns.ResolveAbsorbStyleTex and ns.ResolveAbsorbStyleTex(key) or nil
             end,
         }
@@ -3568,6 +3574,56 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         })
     end
 
+    -- Max Health Style: same texture palette as Heal Absorb, including the RF stripes.
+    local maxHealthRow
+    maxHealthRow, h = W:DualRow(parent, y,
+        { type="dropdown", text="Max Health Style", values=absorbStyleValues,
+          order=maxHealthStyleOrder,
+          getValue=function() return SValSupported("maxHealthStyle", "none") end,
+          setValue=function(v) SSetSupported("maxHealthStyle", v); EllesmereUI:RefreshPage() end },
+        { type="slider", text="Max Health Opacity", min=5, max=100, step=1,
+          disabled=function() return SValSupported("maxHealthStyle", "none") == "none" end,
+          disabledTooltip="Max Health Style",
+          getValue=function() return SValSupported("maxHealthOpacity", 100) end,
+          setValue=function(v) SSetSupported("maxHealthOpacity", v) end });  y = y - h
+    SApplySupport(maxHealthRow._leftRegion, "maxHealthStyle")
+    SApplySupport(maxHealthRow._rightRegion, "maxHealthOpacity")
+    if not EllesmereUI._prebuilding then
+        local rgn = maxHealthRow._leftRegion
+        local swatch = EllesmereUI.BuildColorSwatch(
+            rgn, maxHealthRow:GetFrameLevel() + 3,
+            function()
+                local c = SGetSupported("maxHealthColor")
+                if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, 1 end
+                return 0.7, 0.1, 0.1, 1
+            end,
+            function(r, g, b)
+                UNIT_DB_MAP[optState.selectedUnit]().maxHealthColor = { r=r, g=g, b=b }
+                ReloadAndUpdate(); UpdatePreview()
+            end, false, 20)
+        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = swatch
+        local block = CreateFrame("Frame", nil, swatch)
+        block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10)
+        block:EnableMouse(true)
+        local function RefreshColor()
+            local style = SValSupported("maxHealthStyle", "none")
+            local off = style == "none" or style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR"
+            swatch:SetAlpha(off and 0.3 or 1)
+            if off then block:Show() else block:Hide() end
+        end
+        RegisterWidgetRefresh(RefreshColor)
+        RefreshColor()
+    end
+    EllesmereUI.BuildInlineCog(maxHealthRow._leftRegion, {
+        title = "Max Health Rendering",
+        rows = {
+            { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+              get=function() return SValSupported("maxHealthBgOpacity", 100) end,
+              set=function(v) SSetSupported("maxHealthBgOpacity", v) end },
+        },
+    })
+
     -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ alpha swatch)
     local absorbBarRow
     absorbBarRow, h = W:DualRow(parent, y,
@@ -3640,6 +3696,41 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         end
         RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
         UpdateHealAbsorbBarSwatchVis()
+    end
+
+    -- Max Health Bar: same positions as Heal Absorb Bar, plus a chained slot.
+    local maxBarRow
+    maxBarRow, h = W:DualRow(parent, y,
+        { type="dropdown", text="Max Health Bar",
+          values={ none="None", aboveAbsorb="Above Absorb Bar", belowAbsorb="Below Absorb Bar", belowHealAbsorb="Below Heal Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+          order={ "none", "aboveAbsorb", "belowAbsorb", "belowHealAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
+          getValue=function() return SValSupported("maxHealthBarPosition", "none") end,
+          setValue=function(v) SSetSupported("maxHealthBarPosition", v); EllesmereUI:RefreshPage() end },
+        { type="slider", text="Bar Height", min=1, max=20, step=1,
+          disabled=function() return SValSupported("maxHealthBarPosition", "none") == "none" end,
+          disabledTooltip="Max Health Bar",
+          getValue=function() return SValSupported("maxHealthBarHeight", 4) end,
+          setValue=function(v) SSetSupported("maxHealthBarHeight", v) end });  y = y - h
+    SApplySupport(maxBarRow._leftRegion, "maxHealthBarPosition")
+    SApplySupport(maxBarRow._rightRegion, "maxHealthBarHeight")
+    if not EllesmereUI._prebuilding then
+        local rgn = maxBarRow._rightRegion
+        local swatch = EllesmereUI.BuildColorSwatch(rgn, maxBarRow:GetFrameLevel() + 3,
+            function()
+                local c = SGetSupported("maxHealthBarColor")
+                if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1 end
+                return 0.7, 0.1, 0.1, 1
+            end,
+            function(r, g, b, a)
+                UNIT_DB_MAP[optState.selectedUnit]().maxHealthBarColor = { r=r, g=g, b=b, a=a }
+                ReloadAndUpdate(); UpdatePreview()
+            end, true, 20)
+        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = swatch
+        local function RefreshColor()
+            swatch:SetAlpha(SValSupported("maxHealthBarPosition", "none") == "none" and 0.3 or 1)
+        end
+        RegisterWidgetRefresh(RefreshColor); RefreshColor()
     end
 
     -- Row 5: Heal Prediction (+ your / others' color swatches) | Prediction Opacity

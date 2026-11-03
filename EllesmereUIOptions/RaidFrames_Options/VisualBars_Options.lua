@@ -1070,6 +1070,59 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
         end
     end
 
+    -- Reduced max-health strip: independent of the overlay style.
+    do
+        local function MaxBarPos() return SGet("maxHealthBarPosition") or "none" end
+        local maxBarRow
+        maxBarRow, h = W:DualRow(parent, y,
+            { type="dropdown", text="Max Health Bar",
+              values={ none="None", belowAbsorb="Below Absorb Bar", belowHealAbsorb="Below Heal Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", rightVertical="Right Edge (Vertical)", leftVertical="Left Edge (Vertical)" },
+              order={ "none", "belowAbsorb", "belowHealAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "rightVertical", "leftVertical" },
+              getValue=MaxBarPos,
+              setValue=function(v) SSet("maxHealthBarPosition", v); EllesmereUI:RefreshPage() end },
+            { type="slider", text="Bar Height", min=1, max=20, step=1,
+              disabled=function() return MaxBarPos() == "none" end,
+              disabledTooltip="Max Health Bar",
+              getValue=function() return SVal("maxHealthBarHeight", 4) end,
+              setValue=function(v) SSet("maxHealthBarHeight", v) end }); y = y - h
+        if not EllesmereUI._prebuilding then
+            local rgn = maxBarRow._rightRegion
+            local swatch = EllesmereUI.BuildColorSwatch(rgn, maxBarRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGet("maxHealthBarColor")
+                    if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1 end
+                    return 0.7, 0.1, 0.1, 1
+                end,
+                function(r, g, b, a)
+                    SWrite("maxHealthBarColor", { r=r, g=g, b=b, a=a })
+                    ReloadAndUpdate()
+                end, true, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function RefreshColor() swatch:SetAlpha(MaxBarPos() == "none" and 0.3 or 1) end
+            EllesmereUI.RegisterWidgetRefresh(RefreshColor); RefreshColor()
+        end
+        if not EllesmereUI._prebuilding then
+            local rgn = maxBarRow._leftRegion
+            EllesmereUI.BuildInlineCog(rgn, {
+                title="Max Health Bar Rendering",
+                disabled=function() return MaxBarPos() ~= "rightVertical" and MaxBarPos() ~= "leftVertical" end,
+                disabledTooltip="Only affects the vertical (Right/Left Edge) positions",
+                rawTooltip=true,
+                rows={ { type="dropdown", label="Vertical Grow",
+                    values={ up="Up", down="Down" }, order={ "up", "down" },
+                    get=function() return SVal("maxHealthBarGrowDir", "up") end,
+                    set=function(v) SSet("maxHealthBarGrowDir", v) end } },
+            })
+            local lbl = maxBarRow._rightRegion._label
+            local function RefreshSizeLabel()
+                local p = MaxBarPos()
+                lbl:SetText(EllesmereUI.L((p == "rightVertical" or p == "leftVertical") and "Bar Width" or "Bar Height"))
+            end
+            EllesmereUI.RegisterWidgetRefresh(RefreshSizeLabel); RefreshSizeLabel()
+        end
+    end
+
     -------------------------------------------------------------------
     --  POWER BAR
     -------------------------------------------------------------------
