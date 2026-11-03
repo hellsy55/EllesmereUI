@@ -34,9 +34,11 @@ local BAGS_DEFAULTS = {
         bagShowPinnedItems    = true,
         bagShowRecentItems    = true,
         bagPinnedInOneBag     = true,
+        bagShowPinnedEmptyCount = false,
         bagHidePinnedInCategories = false,
         bagRecentInOneBag     = false,
         bagShowRecentClear    = false,
+        bagHideRecentInCategories = false, -- opt-in: recent items only in Recent Items, not regular categories
         -- Bag Top Bar Icons: the header's Show Bags, Junk Marker, Quick Actions and Sort icons
         bagShowBagsIcon       = true,
         bagShowJunkIcon       = true,    -- the Junk Marker: header coin, Junk category, Sell Junk at merchants

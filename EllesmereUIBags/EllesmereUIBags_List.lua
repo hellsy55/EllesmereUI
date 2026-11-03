@@ -954,7 +954,7 @@ function ns.RenderListView(items, opts)
                 Add("recent", "", d)
             elseif slotView then
                 Add(BagKey(d.bag), "", d)
-            elseif cat and not (opts.allItems and d._pinnedOnly)
+            elseif cat and not (opts.allItems and (d._pinnedOnly or d._recentOnly))
                 and not hidden[cat._defaultName] and not (cat.groupName and hidden[cat.groupName]) then
                 local key = (junkOn and cat.isJunk or (not junkOn and d._lvQuality == 0)) and "junk" or ci
                 if key == "junk" then

@@ -678,6 +678,7 @@ end
 --      fonts  = <snapshot of EllesmereUIDB.fonts>,
 --      customColors = <snapshot of EllesmereUIDB.customColors>,
 --      darkMode = <per-profile Dark Mode palette + class/power/resource darken>,
+--      numberFormat = <per-profile Number Format, EllesmereUI_NumberFormat.lua>,
 --  }
 --  EllesmereUIDB.activeProfile = "Default"  (name of active profile)
 --  EllesmereUIDB.profileOrder  = { "Default", ... }
@@ -930,6 +931,8 @@ local function RepointAllDBs(profileName)
     -- RefreshDarkMode() also runs ApplyColorsToOUF, so the (possibly different)
     -- darken propagates to class/power colours even in global colour mode.
     EllesmereUI.RefreshDarkMode()
+    -- Number Format is per-profile too: drop the resolved configs and redraw.
+    if EllesmereUI.RefreshNumberFormat then EllesmereUI.RefreshNumberFormat() end
     -- Sidebar sync icons key off the ACTIVE profile's group membership;
     -- re-evaluate them on every repoint (switch/create/delete/rename/import)
     if EllesmereUI._syncRefreshFns then
@@ -1065,6 +1068,7 @@ function EllesmereUI.SnapshotAllAddons()
     data.customColors = DeepCopy(cc)
     -- Dark Mode palette + darken amounts (always the active profile's own).
     data.darkMode = DeepCopy(EllesmereUI.GetDarkModeDB())
+    data.numberFormat = DeepCopy(EllesmereUI.GetNumberFormatDB())
     -- Spec Overrides ride with the profile (freshen the current spec's stored
     -- values from live first so exports never lag recent edits).
     if EllesmereUI.SpecOverrides_HarvestCurrent then
@@ -1384,9 +1388,9 @@ local REFRESH_ADDON_STEPS = {
             if _G._ECME_Apply then _G._ECME_Apply() end
         end
     end,
-    -- Cursor (style + position), Crosshair, Self Combat Text, and the QoL
-    -- extras (FPS counter + Secondary Stats -- one call for both: the FPS
-    -- readout may be drawn by the Secondary Stats block, so the two owners
+    -- Cursor (style + position), Crosshair, Self Combat Text, Item Icons, and
+    -- the QoL extras (FPS counter + Secondary Stats -- one call for both: the
+    -- FPS readout may be drawn by the Secondary Stats block, so the two owners
     -- re-evaluate together).
     function()
         if _G._ECL_Apply then _G._ECL_Apply() end
@@ -1396,6 +1400,7 @@ local REFRESH_ADDON_STEPS = {
         if EllesmereUI._applyCrosshair then EllesmereUI._applyCrosshair() end
         if EllesmereUI._applySelfCombatText then EllesmereUI._applySelfCombatText() end
         if EllesmereUI._applyUpgradeTooltips then EllesmereUI._applyUpgradeTooltips() end
+        if EllesmereUI._applyItemIcons then EllesmereUI._applyItemIcons() end
         if EllesmereUI._applyFPSDisplay then
             EllesmereUI._applyFPSDisplay()
         elseif EllesmereUI._applySecondaryStats then
@@ -2277,8 +2282,8 @@ function EllesmereUI.ExportProfile(profileName, includedFolders, includeLayout, 
     -- fonts/customColors/darkMode/euiAccent are profile-GLOBAL appearance and are
     -- not separable per-addon, so a subset export must not carry them (they'd
     -- clobber the recipient's). Only a full-profile export carries them.
-    -- Profile-global appearance (fonts, custom colours, dark mode, accent)
-    -- and the account UI scale ride only when "Global Settings" is included
+    -- Profile-global appearance (fonts, custom colours, dark mode, accent,
+    -- number format) and the account UI scale ride only when "Global Settings" is included
     -- (default ON) -- full and subset exports alike, since the unified export
     -- flow offers the toggle for both (2026-07-20 redesign; the old subset
     -- path dropped uiScale unconditionally, which would have regressed scale
@@ -2288,6 +2293,7 @@ function EllesmereUI.ExportProfile(profileName, includedFolders, includeLayout, 
         exportData.fonts        = nil
         exportData.customColors = nil
         exportData.darkMode     = nil
+        exportData.numberFormat = nil
         exportData.euiAccent    = nil
         exportData.uiScale      = nil
     end
@@ -3453,6 +3459,23 @@ function EllesmereUI.ImportProfile(importStr, profileName)
         if imported.fonts then merged.fonts = DeepCopy(imported.fonts) end
         if imported.customColors then merged.customColors = DeepCopy(imported.customColors) end
         if imported.darkMode then merged.darkMode = DeepCopy(imported.darkMode) end
+        -- numberFormat only exists once its owner changed something, so a string
+        -- with the other global settings but none comes from the defaults.
+        if imported.numberFormat then
+            merged.numberFormat = DeepCopy(imported.numberFormat)
+        elseif imported.fonts then
+            merged.numberFormat = nil
+        end
+        -- An older string still carries the Damage Meters' Force English Units and Unit
+        -- Frames' value decimals, which number_format_force_english_units_v1 and
+        -- number_format_uf_value_decimals_v1 would fold into this profile's Number
+        -- Format at the next load. Without the exporter's global settings the
+        -- recipient's Number Format stands, so both migrations count as done.
+        if not (imported.fonts or imported.numberFormat) then
+            merged._migrations = merged._migrations or {}
+            merged._migrations.number_format_force_english_units_v1 = true
+            merged._migrations.number_format_uf_value_decimals_v1 = true
+        end
         -- Override stores: ALL-OR-NOTHING (2026-07-20 redesign; the old per-folder
         -- value merge in SpecOverrides_MergeImportedStores is retired and must not be
         -- re-wired). Taking -> the exporter's complete override system (values + groups
