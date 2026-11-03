@@ -427,7 +427,9 @@ local function SyncBagFrameToFooter()
     if footerH == prev then return end
     if not EUI_Bags:IsVisible() then return end
     local delta = footerH - prev
-    if EUI_Bags.AutoSizeOn() or (EUI.IS_FOREVER and not BP().bagHeight) then
+    if EUI_Bags.ExpandHeightOn() then
+        EUI_Bags:RefreshInventory()
+    elseif EUI_Bags.AutoSizeOn() or (EUI.IS_FOREVER and not BP().bagHeight) then
         EUI_Bags._asMaxH = math.max(EUI_Bags._asMaxH or EUI_Bags:GetHeight() or 0, EUI_Bags:GetHeight() + delta)
         EUI_Bags:SetHeight(EUI_Bags._asMaxH)
     elseif BP().bagHeight then

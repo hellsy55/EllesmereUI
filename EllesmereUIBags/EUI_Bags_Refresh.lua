@@ -61,10 +61,45 @@ local _linkFacts, _linkFactsN = {}, 0
 -------------------------------------------------------------------------------
 local _catHeaders = {}  -- pool of header frames
 
+-- Shared across Grid, Compact and List. Keys use category identifiers rather
+-- than runtime indices, so category reordering does not change collapsed state.
+function ns.IsBagCategoryCollapsed(key)
+    if BP().bagCollapsibleCategories ~= true or not key then return false end
+    local state = BP().bagCollapsedCategories
+    return state and state[key] == true or false
+end
+
+function ns.ToggleBagCategoryCollapsed(key)
+    if BP().bagCollapsibleCategories ~= true or not key then return end
+    local p = BP()
+    if not p.bagCollapsedCategories then p.bagCollapsedCategories = {} end
+    local state = p.bagCollapsedCategories
+    state[key] = not state[key] or nil
+    if EUI_Bags and EUI_Bags.RefreshInventory then EUI_Bags:RefreshInventory() end
+end
+
+local function OnCategoryHeaderMouseUp(self, button)
+    if button ~= "LeftButton" or not self._collapseKey or GetCursorInfo() then return end
+    ns.ToggleBagCategoryCollapsed(self._collapseKey)
+end
+
+-- Grid header frames are passive when OFF; no extra hit targets or refresh work.
+-- Called only for actual item categories, not OneBag/MultiBag slot groups.
+function ns.SetBagCategoryHeader(hdr, key)
+    local on = BP().bagCollapsibleCategories == true and key ~= nil
+    hdr._collapseKey = on and key or nil
+    hdr:EnableMouse(on)
+    if not on then return false end
+    local collapsed = ns.IsBagCategoryCollapsed(key)
+    hdr._label:SetText(hdr._label:GetText() .. (collapsed and " +" or " -"))
+    return collapsed
+end
+
 local function GetOrCreateCatHeader(idx)
     if _catHeaders[idx] then return _catHeaders[idx] end
     local f = CreateFrame("Frame", nil, EUI_Bags)
     f:SetHeight(20)
+    f:SetScript("OnMouseUp", OnCategoryHeaderMouseUp)
     f._label = f:CreateFontString(nil, "OVERLAY")
     SetBagFont(f._label, 11)
     f._label:SetPoint("LEFT", f, "LEFT", 0, 0)
@@ -426,7 +461,7 @@ local _bagGripCfg = {
     isLocked = function() return BP().bagWindowLocked == true end,
     setLocked = function(v) BP().bagWindowLocked = v and true or false end,
     -- Auto-Size owns the window size
-    hidden = function() return EUI_Bags.AutoSizeOn() end,
+    hidden = function() return EUI_Bags.AutoSizeOn() or EUI_Bags.ExpandHeightOn() end,
 }
 
 -- List display: free width (rows have no cell grid), saved in pixels. It keeps
@@ -482,19 +517,41 @@ local function FinishRefresh(curY, gridContentW, sidebarW, totalCount, numEmpty,
     local userH = BP().bagHeight
     local totalW = sidebarW + gridContentW
     local autoSize = EUI_Bags.AutoSizeOn()
+    local expandHeight = EUI_Bags.ExpandHeightOn()
     if autoSize then
         EUI_Bags._asMaxGridW = math.max(EUI_Bags._asMaxGridW or 0, gridContentW)
+        local right = EUI_Bags:GetRight()
+        if right then
+            -- Re-cap the running maximum if the user moved the bags to a
+            -- narrower location while they were already open.
+            EUI_Bags._asMaxGridW = math.min(EUI_Bags._asMaxGridW, math.max(gridContentW, right - sidebarW - 8))
+        end
         totalW = sidebarW + EUI_Bags._asMaxGridW
     end
     local currencyFooterH = UpdateCurrencyDisplays(totalW) or FOOTER_H
 
     -- A grip-set height overrides WoW Forever's grow-only content fit (Auto-Size hides the grip)
-    if autoSize or (EUI.IS_FOREVER and not userH) then
+    if autoSize or expandHeight or (EUI.IS_FOREVER and not userH) then
         local sc = EUI_Bags:GetScale(); if not sc or sc <= 0 then sc = 1 end
         local maxH = (UIParent:GetHeight() / sc) * 0.95
+        if autoSize or expandHeight then
+            -- Leave a small top margin and keep BOTTOMRIGHT fixed. Content
+            -- beyond this budget continues to use the existing scroll frame.
+            local bottom = EUI_Bags:GetBottom()
+            if bottom then
+                local top = UIParent:GetTop() * UIParent:GetEffectiveScale() / EUI_Bags:GetEffectiveScale()
+                maxH = math.max(1, math.min(maxH, top - bottom - 8))
+            end
+        end
         local fitH = contentH + HEADER_H + currencyFooterH + 2
         local neededH
-        if EUI.IS_FOREVER or EUI_Bags.IsCompactMode() then
+        if expandHeight then
+            -- Preserve the current user/base height as a minimum, but grow to
+            -- show every rendered row. Shrink to that minimum as items leave
+            -- or categories collapse; cap at the usable screen height.
+            local baseH = userH or (FIXED_H + currencyFooterH - FOOTER_H)
+            neededH = math.min(maxH, math.max(baseH, fitH))
+        elseif EUI.IS_FOREVER or EUI_Bags.IsCompactMode() then
             -- Fit the content instead of flooring at FIXED_H (WoW Forever bags hold far fewer slots, and the Compact
             -- display packs them tight), never shorter than the category list; on WoW Forever without Auto-Size the
             -- normal height stays the cap (taller content scrolls).
@@ -508,9 +565,11 @@ local function FinishRefresh(curY, gridContentW, sidebarW, totalCount, numEmpty,
             -- Cap at the screen first, then floor at FIXED_H so the window is never smaller than normal (even on short screens).
             neededH = math.max(FIXED_H, math.min(fitH, maxH))
         end
-        EUI_Bags._asMaxH = math.max(EUI_Bags._asMaxH or 0, neededH)
+        if not expandHeight then
+            EUI_Bags._asMaxH = math.min(maxH, math.max(EUI_Bags._asMaxH or 0, neededH))
+        end
         EUI_Bags:SetWidth(totalW)
-        EUI_Bags:SetHeight(EUI_Bags._asMaxH)
+        EUI_Bags:SetHeight(expandHeight and neededH or EUI_Bags._asMaxH)
     else
         EUI_Bags:SetWidth(totalW)
         EUI_Bags:SetHeight(userH or (FIXED_H + currencyFooterH - FOOTER_H))
@@ -538,6 +597,9 @@ end
 
 function EUI_Bags:RefreshInventory()
     if not EUI_Bags:IsVisible() then return end
+    -- Re-anchor before calculating columns: both automatic width and height
+    -- must grow toward the upper-left, not move the saved lock corner.
+    EUI_Bags:AnchorAutoResizeToBottomRight()
     ns.ApplySlotMetrics()
 
     -- A select mode's hover box sits on a button this refresh may refill: put
@@ -923,10 +985,14 @@ function EUI_Bags:RefreshInventory()
         local sbW = GetSidebarWidth()
         local sc = EUI_Bags:GetScale(); if not sc or sc <= 0 then sc = 1 end
         local maxGridW = (UIParent:GetWidth() / sc) * 0.95 - sbW - 30
-        local maxCols = math.max(baseCols, math.floor(maxGridW / (SLOT_SIZE + SPACING)))
+        -- With BOTTOMRIGHT anchored, usable width ends at the saved right edge.
+        -- Cap new columns there instead of letting screen clamping shift the lock.
+        local right = EUI_Bags:GetRight()
+        if right then maxGridW = math.min(maxGridW, right - sbW - 30 - 8) end
+        local maxCols = math.max(4, math.floor(maxGridW / (SLOT_SIZE + SPACING)))
         if ideal < baseCols then ideal = baseCols end
         if ideal > maxCols then ideal = maxCols end
-        EUI_Bags._asCols = math.max(EUI_Bags._asCols or baseCols, ideal)
+        EUI_Bags._asCols = math.min(maxCols, math.max(EUI_Bags._asCols or baseCols, ideal))
     end
 
     local columns = GetColumns()

@@ -400,6 +400,13 @@ initFrame:SetScript("OnEvent", function(self)
                       ResetAndRefreshBagLayout()
                   end }
             end
+            layoutSlots[#layoutSlots + 1] = { type="toggle", text="Auto-Expand Height",
+                tooltip="Automatically grow the bag window upwards from its fixed bottom-right corner to fit visible content. Works with Grid, Compact and List. Screen limits retain scrolling if needed; Auto-Size to Fit can also grow the window leftwards.",
+                getValue=function() return db.profile.bagAutoExpandHeight == true end,
+                setValue=function(v)
+                    db.profile.bagAutoExpandHeight = v
+                    ResetAndRefreshBagLayout()
+                end }
             -- Texture, tint, opacity and slot background are shared by bags,
             -- the character bank and warbank. Reuse the module's live catalogue.
             EllesmereUI.AppendSharedMediaTextures(
@@ -535,6 +542,17 @@ initFrame:SetScript("OnEvent", function(self)
                               db.profile.bagRecentInOneBag = v
                               if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                           end },
+                        { type="toggle", label="Flash Newly Added Items",
+                          tooltip="Flash newly acquired items with two golden pulses when they first appear in Recent Items, even if the bags were closed when looted.",
+                          get=function() return db.profile.bagRecentFlash == true end,
+                          set=function(v)
+                              db.profile.bagRecentFlash = v
+                              if not v and _G.EUI_Bags then
+                                  if _G.EUI_Bags._recentFlashUntil then wipe(_G.EUI_Bags._recentFlashUntil) end
+                                  if _G.EUI_Bags._recentFlashPending then wipe(_G.EUI_Bags._recentFlashPending) end
+                              end
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                          end },
                         { type="toggle", label="Show Clear Button",
                           get=function() return db.profile.bagShowRecentClear == true end,
                           set=function(v)
@@ -638,7 +656,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Category Title Size (also on the Fonts page) | Hide Sidebar Icons When Collapsed
+            -- Category Title Size | Collapsible Categories
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Category Title Size", min=8, max=16, step=1,
                   tooltip="Font size for the category titles above your items.",
@@ -647,13 +665,25 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagCatTitleSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
+                { type="toggle", text="Collapsible Categories",
+                  tooltip="Click a category header to collapse or expand its items. A + or - appears after its item count in Grid, Compact, and List displays.",
+                  getValue=function() return db.profile.bagCollapsibleCategories == true end,
+                  setValue=function(v)
+                      db.profile.bagCollapsibleCategories = v and true or false
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end }
+            ); y = y - h
+
+            -- Hide Sidebar Icons When Collapsed
+            _, h = W:DualRow(parent, y,
                 { type="toggle", text="Hide Sidebar Icons When Collapsed",
                   tooltip="Hides a collapsed sidebar; its expand arrow sits by the Inventory title.",
                   getValue=function() return db.profile.bagHideSidebarIconsCollapsed == true end,
                   setValue=function(v)
                       db.profile.bagHideSidebarIconsCollapsed = v and true or false
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end }
+                  end },
+                EllesmereUI.BlankRowCfg()
             ); y = y - h
 
             if anyGrid then

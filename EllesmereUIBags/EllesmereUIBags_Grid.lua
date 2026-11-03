@@ -62,6 +62,8 @@ local IsGearOnlyGroup = ns.IsGearOnlyGroup
 local GetOrCreateCatHeader = ns.GetOrCreateCatHeader
 local GetOrCreateExpSubHeader = ns.GetOrCreateExpSubHeader
 local ShowRecentClearButton = ns.ShowRecentClearButton
+local SetBagCategoryHeader = ns.SetBagCategoryHeader
+local IsBagCategoryCollapsed = ns.IsBagCategoryCollapsed
 local GetOrCreatePinOverlay = ns.GetOrCreatePinOverlay
 local GetOrCreateAssignOverlay = ns.GetOrCreateAssignOverlay
 local ResetAssignOverlays = ns.ResetAssignOverlays
@@ -197,7 +199,7 @@ end
 -------------------------------------------------------------------------------
 --  RenderButton
 -------------------------------------------------------------------------------
-local function RenderButton(btn, data, _, col, row, startX, currentY, _, interactiveEmpties)
+local function RenderButton(btn, data, _, col, row, startX, currentY, _, interactiveEmpties, inRecent)
     local parent = btn:GetParent()
     parent:ClearAllPoints()
     parent:SetPoint("TOPLEFT", startX + (col * (SLOT_SIZE + SPACING)), currentY - (row * (SLOT_SIZE + SPACING)))
@@ -455,6 +457,7 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
     UpdatePawnArrow(btn, not iiOn and data.itemLink or nil)
     if iiOn then PaintItemIcons(btn, data, markerJunk) end
     EUI_Bags.RunItemOverlays(btn, data)
+    ns.PaintRecentItemFlash(btn, data, inRecent)
 
     -- Same requery the native container update does after re-assigning a slot: the
     -- cursor can be resting on this button while the repaint moves another item under
@@ -518,6 +521,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
     local catTitleSize = GetCatTitleSize()
     for _, hdr in pairs(_catHeaders) do
         hdr:Hide(); hdr._hint:SetText("")
+        hdr._collapseKey = nil
+        hdr:EnableMouse(false)
         if hdr._hintText then ns.SetHeaderHint(hdr, nil) end
         if hdr._hideBtn then hdr._hideBtn:Hide() end
         if hdr._clearBtn then hdr._clearBtn:Hide() end
@@ -961,7 +966,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     btn:GetParent():SetParent(child)
                     local col = (j - 1) % columns
                     local row = math.floor((j - 1) / columns)
-                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, nil, true)
                 end
             end
             local recItemCount = #recentItems
@@ -1118,7 +1123,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
         local headerIdx = 0
         local expSubIdx = 0
 
-        local function RenderSection(sectionName, sectionItems, isUserCreated, showPinAdd, alwaysShow, assignCatIdx, nestByExpansion)
+        local function RenderSection(sectionName, sectionItems, isUserCreated, showPinAdd, alwaysShow, assignCatIdx, nestByExpansion, collapseKey)
             local itemCount = #sectionItems
             if itemCount == 0 and not isUserCreated and not showPinAdd and not alwaysShow then return end
 
@@ -1144,7 +1149,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 end
                 local kind = (showPinAdd and "pinned") or (alwaysShow and "recent")
                     or (useSlotNest and "slot") or (useExpNest and "exp") or "flat"
-                ns.CompactBagsSection(sectionName, sectionItems, kind, assignKey)
+                ns.CompactBagsSection(sectionName, sectionItems, kind, assignKey, nil, nil, collapseKey)
                 return
             end
 
@@ -1155,6 +1160,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             hdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
             hdr:SetWidth(gridW)
             hdr._label:SetText(sectionName .. " (" .. itemCount .. ")")
+            local collapsed = SetBagCategoryHeader(hdr, collapseKey)
             -- Pinned / Recent: their hint shows while the label is hovered
             if showPinAdd then
                 ns.SetHeaderHint(hdr, EllesmereUI.L("Middle Click to Add or Remove"))
@@ -1183,6 +1189,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             end
             hdr:Show()
             curY = curY - 22
+            if collapsed then curY = curY - 6; return end
 
             if useSlotNest then
                 local buckets = BuildSlotBuckets(sectionItems)
@@ -1262,7 +1269,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     btn:GetParent():SetParent(child)
                     local col = (j - 1) % columns
                     local row = math.floor((j - 1) / columns)
-                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, nil, alwaysShow and not showPinAdd)
                 end
             end
 
@@ -1347,7 +1354,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                         end
                     end
                     if #pinItems > 0 then pinItems = MergeDuplicates(pinItems) end
-                    RenderSection(cat.name, pinItems, false, true)
+                    RenderSection(cat.name, pinItems, false, true, nil, nil, nil, "cat:" .. cat._defaultName)
                 end
             elseif cat.isRecent then
                 -- Recent Items: display-only duplicate (items also appear in their normal category)
@@ -1363,7 +1370,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                         recentItems = MergeDuplicates(recentItems)
                         table.sort(recentItems, RecentCompare)
                     end
-                    RenderSection(EllesmereUI.L("Recent Items"), recentItems, false, false, true)
+                    RenderSection(EllesmereUI.L("Recent Items"), recentItems, false, false, true, nil, nil, "cat:" .. cat._defaultName)
                 end
             elseif cat.groupName then
                 if not renderedGroups[cat.groupName] then
@@ -1391,7 +1398,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                         if #merged > 0 then
                             ApplySavedOrder(cat.groupName, merged)
                         end
-                        RenderSection(cat.groupName, merged, false, nil, nil, members[1], true)
+                        RenderSection(cat.groupName, merged, false, nil, nil, members[1], true, "group:" .. cat.groupName)
                     end
                 end
             elseif cat.isEquipSet then
@@ -1414,7 +1421,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                         catItems = folded or catItems
                     end
                     local isUserCreated = cat.isUserCreated
-                    RenderSection(cat.name, catItems, isUserCreated, cat.isPinned, cat.isRecent, ci, true)
+                    RenderSection(cat.name, catItems, isUserCreated, cat.isPinned, cat.isRecent, ci, true, "cat:" .. cat._defaultName)
                 end
             end
         end
@@ -1464,7 +1471,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 if compactOn then
                     local aKey = EUI_CategoryManager:CanAssignToCategory(mi) and memberCat and memberCat._defaultName or nil
                     ns.CompactBagsSection(memberCat and memberCat.name or "?", memberItems,
-                        useSlotNest and "slot" or "flat", aKey)
+                        useSlotNest and "slot" or "flat", aKey, nil, nil,
+                        memberCat and ("cat:" .. memberCat._defaultName))
                 else
                 headerIdx = headerIdx + 1
                 local hdr = GetOrCreateCatHeader(headerIdx)
@@ -1473,9 +1481,11 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 hdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
                 hdr:SetWidth(gridW)
                 hdr._label:SetText((memberCat and memberCat.name or "?") .. " (" .. #memberItems .. ")")
+                local collapsed = SetBagCategoryHeader(hdr, memberCat and ("cat:" .. memberCat._defaultName))
                 hdr:Show()
                 curY = curY - 22
 
+                if not collapsed then
                 if useSlotNest and #memberItems > 0 then
                     local buckets = BuildSlotBuckets(memberItems)
                     local showAssign = EUI_CategoryManager and EUI_CategoryManager:CanAssignToCategory(mi)
@@ -1529,6 +1539,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 curY = curY - (sectionRows * (SLOT_SIZE + SPACING)) - 6
 
                 end -- slot nest vs flat grid
+                end -- not collapsed
 
                 end -- compact vs grid
 
@@ -1651,6 +1662,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 hdr:SetPoint("TOPLEFT", child, "TOPLEFT", startX, curY)
                 hdr:SetWidth(gridW)
                 hdr._label:SetText(headerName .. " (" .. #displayItems .. ")")
+                SetBagCategoryHeader(hdr, selCat and ("cat:" .. selCat._defaultName))
                 -- Pinned / Recent: their hint shows while the label is hovered
                 if selCat and selCat.isPinned then
                     ns.SetHeaderHint(hdr, EllesmereUI.L("Middle Click to Add or Remove"))
@@ -1680,7 +1692,10 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 elseif selCat and selCat.isRecent then
                     hint = BP().bagHideRecentInCategories ~= true and EllesmereUI.L("Extra quickview display, your items are also in their category") or nil
                 end
-                ns.CompactBagsSection(headerName or "", displayItems, useSlotNest and "slot" or "flat", aKey, true, hint)
+                ns.CompactBagsSection(headerName or "", displayItems, useSlotNest and "slot" or "flat", aKey, true, hint,
+                    selCat and ("cat:" .. selCat._defaultName), selCat and selCat.isRecent)
+            elseif IsBagCategoryCollapsed(selCat and ("cat:" .. selCat._defaultName)) then
+                -- The single-category view retains its title, but hides its items.
             elseif useSlotNest then
                 local expSubIdx = 0
                 local buckets = BuildSlotBuckets(displayItems)
@@ -1697,7 +1712,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     btn:GetParent():SetParent(child)
                     local col = (i - 1) % columns
                     local row = math.floor((i - 1) / columns)
-                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
+                    RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, nil, selCat and selCat.isRecent)
                 end
             end
             if selCat and selCat.isPinned and RenderPinnedEmptyCount and RenderPinnedEmptyCount(itemCount + 1) then

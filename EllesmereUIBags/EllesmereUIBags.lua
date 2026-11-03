@@ -18,6 +18,8 @@ EUI_Bags:HookScript("OnHide", function(self)
     self._asCols  = nil
     self._asMaxGridW = nil
     self._asMaxH  = nil
+    -- Do not replay a pickup effect after closing the window.
+    if self._recentFlashUntil then wipe(self._recentFlashUntil) end
     -- The Compact display's grow-only width (RefreshInventory)
     self._compactCols, self._compactW = nil, nil
 end)
@@ -272,6 +274,26 @@ end
 -- grip-set width), so a value saved under another display stays off there
 function EUI_Bags.AutoSizeOn()
     return BP().bagAutoSize == true and not EUI_Bags.IsListMode()
+end
+
+-- Unlike Auto-Size, this only changes the height and also works in List.
+function EUI_Bags.ExpandHeightOn()
+    return BP().bagAutoExpandHeight == true
+end
+
+-- Size automation must preserve the window's bottom-right (the lock corner),
+-- including positions saved by older versions as TOPLEFT. Convert only when
+-- automated sizing is enabled, before changing width or height. The new
+-- anchor is persisted so reloads and subsequent refreshes cannot drift.
+function EUI_Bags:AnchorAutoResizeToBottomRight()
+    if not (self.AutoSizeOn() or self.ExpandHeightOn()) then return end
+    local point = self:GetPoint(1)
+    if point == "BOTTOMRIGHT" then return end
+    local right, bottom = self:GetRight(), self:GetBottom()
+    if not right or not bottom then return end
+    self:ClearAllPoints()
+    self:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMLEFT", right, bottom)
+    BP().bagsPosition = { point = "BOTTOMRIGHT", relativePoint = "BOTTOMLEFT", x = right, y = bottom }
 end
 
 local function ApplyBagScale()
