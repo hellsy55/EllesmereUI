@@ -463,12 +463,12 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
 
     -- Resolve preview text for a content key
     local function PreviewTextForContent(content, s, prefix)
-        -- Mirror "Show Decimal on Text": one decimal on abbrevs/percents when the
-        -- global flag is on, integer otherwise.
-        local function _pvAbbrev(v)
-            local cfg = _G._EUI_AbbrevDecimalCfg
-            -- The live tags' function (WoW Forever: none under 10,000 abbreviates).
-            return cfg and ns.AbbreviateNumbers(v, cfg) or ns.AbbreviateNumbers(v)
+        -- Values as the live tags format them (the Number Format per value type;
+        -- boss frames read "bossHealth" for health). Percents mirror "Show
+        -- Decimal on Health Percent": one decimal when the global flag is on.
+        local function _pvAbbrev(v, valueType)
+            if valueType ~= "absorb" and unitKey:match("^boss") then valueType = "bossHealth" end
+            return ns.AbbreviateValue(v, valueType)
         end
         local function _pvPct(p01)
             if not _G._EUI_TextDecimals then return tostring(math.floor(p01 * 100)) end
@@ -545,14 +545,14 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             local pct = optState._previewHealthPct or 0.70
             local curHP = math.floor(maxHP * pct)
             if content == "healthshort" then return ns.AbbreviateShortHealth(curHP)
-            elseif content == "curhpshort" then return _pvAbbrev(curHP)
-            elseif content == "curmaxhp" then return _pvAbbrev(curHP) .. " / " .. _pvAbbrev(maxHP)
+            elseif content == "curhpshort" then return _pvAbbrev(curHP, "health")
+            elseif content == "curmaxhp" then return _pvAbbrev(curHP, "health") .. " / " .. _pvAbbrev(maxHP, "maxHealth")
             elseif content == "perhp" then return _pvPct(pct) .. "%"
             elseif content == "perhpnosign" then return _pvPct(pct)
-            elseif content == "perhpnum" then return _pvPct(pct) .. "% | " .. _pvAbbrev(curHP)
-            elseif content == "perhpnumdash" then return _pvPct(pct) .. "% - " .. _pvAbbrev(curHP)
-            elseif content == "bothdash" then return _pvAbbrev(curHP) .. " - " .. _pvPct(pct) .. "%"
-            else return _pvAbbrev(curHP) .. " | " .. _pvPct(pct) .. "%" end
+            elseif content == "perhpnum" then return _pvPct(pct) .. "% | " .. _pvAbbrev(curHP, "health")
+            elseif content == "perhpnumdash" then return _pvPct(pct) .. "% - " .. _pvAbbrev(curHP, "health")
+            elseif content == "bothdash" then return _pvAbbrev(curHP, "health") .. " - " .. _pvPct(pct) .. "%"
+            else return _pvAbbrev(curHP, "health") .. " | " .. _pvPct(pct) .. "%" end
         elseif content == "perpp" then
             local ppPct = optState._previewPowerPct or 0.85
             return math.floor(ppPct * 100) .. "%"
@@ -570,7 +570,7 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             local curHP = math.floor(maxHP * pct)
             local maxPP = UnitPowerMax("player") or 100
             local ppPct2 = optState._previewPowerPct or 0.85
-            return _pvAbbrev(curHP) .. " | " .. ns.AbbreviateNumbers(math.floor(maxPP * ppPct2))
+            return _pvAbbrev(curHP, "health") .. " | " .. ns.AbbreviateNumbers(math.floor(maxPP * ppPct2))
         elseif content == "perhp_perpp" then
             local pct = optState._previewHealthPct or 0.70
             local ppPct3 = optState._previewPowerPct or 0.85
@@ -580,13 +580,13 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             return string.format("%d", math.floor(maxHP * 0.14))
         elseif content == "absorbshort" then
             local maxHP = UnitHealthMax("player") or 1
-            return _pvAbbrev(math.floor(maxHP * 0.14))
+            return _pvAbbrev(math.floor(maxHP * 0.14), "absorb")
         elseif content == "healabsorb" then
             local maxHP = UnitHealthMax("player") or 1
             return string.format("%d", math.floor(maxHP * 0.08))
         elseif content == "healabsorbshort" then
             local maxHP = UnitHealthMax("player") or 1
-            return _pvAbbrev(math.floor(maxHP * 0.08))
+            return _pvAbbrev(math.floor(maxHP * 0.08), "absorb")
         elseif content == "group" then
             return "3"
         elseif content == "custom" then
@@ -608,9 +608,9 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 elseif key == "group" then v = "3"
                 elseif key == "level" then v = PreviewTextForContent("level", s, prefix)
                 elseif key == "hp" then v = tostring(curHP)
-                elseif key == "hp:abr" then v = _pvAbbrev(curHP)
+                elseif key == "hp:abr" then v = _pvAbbrev(curHP, "health")
                 elseif key == "hp:max" then v = tostring(maxHP)
-                elseif key == "hp:max:abr" then v = _pvAbbrev(maxHP)
+                elseif key == "hp:max:abr" then v = _pvAbbrev(maxHP, "maxHealth")
                 elseif key == "hp:pct" then v = _pvPct(optState._previewHealthPct or 0.70)
                 elseif key == "pp" then v = tostring(curPP)
                 elseif key == "pp:abr" then v = ns.AbbreviateNumbers(curPP)
@@ -770,6 +770,13 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         powerFill:SetPoint("BOTTOMLEFT", power, "BOTTOMLEFT", 0, 0)
         powerFill:SetWidth(math.floor(frameW * (optState._previewPowerPct or 0.85) + 0.5))
         pf._powerFill = powerFill
+
+        -- Boss Health Marker spark preview
+        local bossSpark = power:CreateTexture(nil, "OVERLAY", nil, 7)
+        bossSpark:SetColorTexture(1, 0.25, 0.25, 0.95)
+        bossSpark:SetSize(2, powerH > 0 and powerH or 6)
+        bossSpark:Hide()
+        pf._bossSpark = bossSpark
 
         local isPowerColored = settings.powerPercentPowerColor ~= false
         local customPFill = settings.customPowerFillColor
@@ -1347,7 +1354,7 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
     --   absorbBar     = shield (damage) absorb, white/shield, drawn below
     --   healAbsorbBar = heal absorb, red, one sublevel above; shown only while
     --                   the Heal Absorb Style eyeball is on
-    local absorbBar, healAbsorbBar, absorbTopBar, healAbsorbTopBar
+    local absorbBar, healAbsorbBar, absorbTopBar, healAbsorbTopBar, maxOverlay, maxTopBar
     if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
         local PREV_ABS_TEX = {
             striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
@@ -1425,6 +1432,19 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         haBgPv:SetAllPoints(healAbsorbBar:GetStatusBarTexture())
         healAbsorbBar._bg = haBgPv
 
+        -- Max Health Style preview, with a 20% reduction sample.
+        maxOverlay = CreateFrame("StatusBar", nil, health)
+        maxOverlay:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        maxOverlay:SetReverseFill(true)
+        maxOverlay:SetAllPoints(health)
+        maxOverlay:SetFrameLevel(health:GetFrameLevel() + 2)
+        maxOverlay:SetMinMaxValues(0, 1)
+        maxOverlay:SetValue(0.20)
+        maxOverlay:Hide()
+        maxOverlay._bg = maxOverlay:CreateTexture(nil, "ARTWORK", nil, 2)
+        maxOverlay._bg:SetColorTexture(0, 0, 0, 1)
+        maxOverlay._bg:SetAllPoints(maxOverlay:GetStatusBarTexture())
+
         -- Heal prediction preview (Heal Prediction eyeball): others' heals at the
         -- full incoming total underneath, yours on top, from the HP edge. The
         -- holder clips at the bar's end unless Overheal lets them run past it.
@@ -1453,11 +1473,18 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         healAbsorbTopBar:SetMinMaxValues(0, 1)
         healAbsorbTopBar:SetValue(0.45)
         healAbsorbTopBar:Hide()
+        maxTopBar = CreateFrame("StatusBar", nil, pf)
+        maxTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        maxTopBar:SetMinMaxValues(0, 1)
+        maxTopBar:SetValue(0.20)
+        maxTopBar:Hide()
     end
     pf._absorbBar = absorbBar
     pf._healAbsorbBar = healAbsorbBar
     pf._absorbTopBar = absorbTopBar
     pf._healAbsorbTopBar = healAbsorbTopBar
+    pf._maxHealthOverlay = maxOverlay
+    pf._maxHealthTopBar = maxTopBar
 
     -- Fake buff icons (all units, shown when showBuffs is on and anchor is not "none")
     local buffIcons = {}
@@ -2608,6 +2635,24 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 PP.Width(pf._powerFill, math.floor(pvPw * (optState._previewPowerPct or 0.85) + 0.5))
             end
 
+            if pf._bossSpark then
+                local showSpark = (unitKey == "player") and (s.bossPacingEnabled == true) and (pvPpPos ~= "none") and (ph > 0)
+                if showSpark then
+                    local sparkPct = 0.65
+                    local sparkX = math.floor(pvPw * sparkPct + 0.5)
+                    pf._bossSpark:SetSize(2, ph)
+                    pf._bossSpark:ClearAllPoints()
+                    if s.powerReverseFill then
+                        pf._bossSpark:SetPoint("CENTER", power, "RIGHT", -sparkX, 0)
+                    else
+                        pf._bossSpark:SetPoint("CENTER", power, "LEFT", sparkX, 0)
+                    end
+                    pf._bossSpark:Show()
+                else
+                    pf._bossSpark:Hide()
+                end
+            end
+
             -- Power bar opacity: the fill's region alpha is set AFTER PV_FillColor
             -- below, which would otherwise leave it at full opacity (mirrors
             -- ApplyPowerBarAlpha on the real frame).
@@ -3251,6 +3296,39 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             end
         end
 
+        -- Max-health reduction is independent of both shield styles.
+        if maxOverlay then
+            local mhStyle = s.maxHealthStyle or "none"
+            if mhStyle ~= "none" then
+                local tex = mhStyle == "maxHealthStripes"
+                    and "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png"
+                    or ns.ResolveAbsorbStyleTex(mhStyle, "Interface\\Buttons\\WHITE8X8")
+                local mc = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
+                if mhStyle == "largeOutlinedStripes" or mhStyle == "largeOutlinedStripesR" then
+                    mc = { r = 1, g = 1, b = 1 }
+                end
+                maxOverlay:SetStatusBarTexture(tex)
+                local fill = maxOverlay:GetStatusBarTexture()
+                if fill then
+                    local tiled = mhStyle == "maxHealthStripes" or ns.ABSORB_TILED_STYLES[mhStyle] == true
+                    fill:SetDrawLayer("ARTWORK", 3)
+                    fill:SetHorizTile(tiled); fill:SetVertTile(tiled)
+                    if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(fill, mhStyle) end
+                end
+                maxOverlay:SetStatusBarColor(mc.r or 0.7, mc.g or 0.1, mc.b or 0.1, (s.maxHealthOpacity or 100) / 100)
+                maxOverlay:SetOrientation(s.healthVerticalFill and "VERTICAL" or "HORIZONTAL")
+                if ns.ApplyFillRotation then ns.ApplyFillRotation(maxOverlay) end
+                maxOverlay:SetValue(0.20)
+                if maxOverlay._bg then
+                    maxOverlay._bg:SetColorTexture(0, 0, 0, (s.maxHealthBgOpacity or 100) / 100)
+                    maxOverlay._bg:SetAllPoints(maxOverlay:GetStatusBarTexture())
+                end
+                maxOverlay:Show()
+            else
+                maxOverlay:Hide()
+            end
+        end
+
         -- Heal prediction eyeball: shows the two segments (and hides the shield
         -- absorb, like the heal absorb eyeball). The incoming total fills most
         -- of the missing health, or runs past the bar's end by the full
@@ -3311,6 +3389,21 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 healAbsorbTopBar:Show()
             else
                 healAbsorbTopBar:Hide()
+            end
+        end
+
+        if maxTopBar and _absStripHp then
+            local pos = s.maxHealthBarPosition or "none"
+            if pos ~= "none" then
+                local c = s.maxHealthBarColor or { r = 0.7, g = 0.1, b = 0.1 }
+                ns.UF_ApplyStripBarLayout(maxTopBar, _absStripHp, pos,
+                    s.maxHealthBarHeight or 4, _absStripHp:GetFrameLevel() + 1,
+                    s.absorbBarPosition or "none", s.absorbBarHeight or 4,
+                    (s.healAbsorbBarPosition or "none") ~= "none" and healAbsorbTopBar or nil)
+                maxTopBar:SetStatusBarColor(c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1)
+                maxTopBar:Show()
+            else
+                maxTopBar:Hide()
             end
         end
 

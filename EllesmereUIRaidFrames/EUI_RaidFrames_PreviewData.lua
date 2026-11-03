@@ -756,6 +756,29 @@ local function ApplyPreviewData(f, index, roles, classTokens)
         end
     end
 
+    -- Reduced-max-health strip mirrors the live status bar and is shown in
+    -- the max-health preview even if Max Health Style is switched off.
+    if f._absorbBar and f._absorbBar._maxTopBar then
+        local maxBar = f._absorbBar._maxTopBar
+        local pos = ns.GetMaxHealthBarPosition(s)
+        local loss = ns.previewReducedMaxHealth and ns.previewReducedMaxHealth[index] or 0
+        local visible = ns._testReducedMaxHealth
+            or (not ns._testMode and not ns._indicatorsVisible and ns._absorbsPreviewVisible)
+        if visible and pos ~= "none" and loss > 0 then
+            local c = s.maxHealthBarColor or { r = 0.7, g = 0.1, b = 0.1 }
+            ns.ApplyStripBarLayout(maxBar, f._absorbBar,
+                ((f.kit or f._health._euiBarArea) and f._health) or f,
+                pos, s.maxHealthBarHeight or 4, ns.GetAbsorbBarPosition(s),
+                s.absorbBarHeight or 4, s.maxHealthBarGrowDir or "up",
+                ns.GetHealAbsorbBarPosition(s) ~= "none" and f._absorbBar._healTopBar or nil)
+            maxBar:SetStatusBarColor(c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1)
+            maxBar:SetValue(loss)
+            maxBar:Show()
+        else
+            maxBar:Hide()
+        end
+    end
+
     -- Power (filtered by role, hidden if class has no power)
     local role = previewRoles[index] or "DAMAGER"
     local showForRole = (role == "HEALER" and s.powerShowForHealer)
@@ -1295,6 +1318,7 @@ local function ApplyPreviewData(f, index, roles, classTokens)
             f._absorbBar:Hide()
             if f._absorbBar._forward then f._absorbBar._forward:Hide() end
             if f._absorbBar._topBar then f._absorbBar._topBar:Hide() end
+            if f._absorbBar._maxTopBar then f._absorbBar._maxTopBar:Hide() end
         end
     elseif isOffline then
         if f._health then

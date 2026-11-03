@@ -637,7 +637,18 @@ local function CreateAbsorbBar(button, healthBar)
     -- Store references in FFD (never on the Blizzard-owned button)
     backfillBar._forward      = forwardBar
     backfillBar._topBar       = topBar
+    local maxTopBar = CreateFrame("StatusBar", nil, button)
+    maxTopBar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    maxTopBar:SetStatusBarColor(0.7, 0.1, 0.1, 1)
+    maxTopBar:SetReverseFill(true)
+    maxTopBar:SetHeight(4)
+    maxTopBar:SetPoint("BOTTOMLEFT", healthBar, "TOPLEFT", 0, 0)
+    maxTopBar:SetPoint("BOTTOMRIGHT", healthBar, "TOPRIGHT", 0, 0)
+    maxTopBar:SetFrameLevel(healthBar:GetFrameLevel() + 3)
+    maxTopBar:SetMinMaxValues(0, 1)
+    maxTopBar:Hide()
     backfillBar._healTopBar   = healTopBar
+    backfillBar._maxTopBar = maxTopBar
     backfillBar._healAbsorb   = healAbsorbBar
     backfillBar._healPred     = healPredBar
     backfillBar._reducedMax   = reducedBar
@@ -680,6 +691,9 @@ end
 ns.GetHealAbsorbBarPosition = function(s)
     return (s and s.healAbsorbBarPosition) or "none"
 end
+ns.GetMaxHealthBarPosition = function(s)
+    return (s and s.maxHealthBarPosition) or "none"
+end
 
 -- Anchor/orient a strip bar (Absorb or Heal Absorb) for a position. "above*" sit on top of the
 -- frame; "top*" inside at the top of the health bar, just above the absorb-style texture.
@@ -687,7 +701,7 @@ end
 -- POSITION not live visibility, so it never shifts up. "*Right" fills from the right edge.
 -- "*Vertical" hugs the health bar's left/right edge: "height" acts as width and vertGrowDir
 -- ("up" default / "down") picks the fill direction.
-ns.ApplyStripBarLayout = function(stripBar, ab, button, position, height, absorbPos, absorbHeight, vertGrowDir)
+ns.ApplyStripBarLayout = function(stripBar, ab, button, position, height, absorbPos, absorbHeight, vertGrowDir, healBar)
     if not stripBar then return end
     local hp = ab._hpBar or button
     -- Party Frames kit: the strips that hang off the frame edge use the
@@ -695,6 +709,16 @@ ns.ApplyStripBarLayout = function(stripBar, ab, button, position, height, absorb
     -- frame, the bars beside it.
     button = hp._euiKitRef or hp._euiBarArea or button
     stripBar:ClearAllPoints()
+    if position == "belowHealAbsorb" and not healBar then position = "belowAbsorb" end
+    if position == "belowHealAbsorb" and healBar then
+        stripBar:SetOrientation("HORIZONTAL")
+        stripBar:SetReverseFill(healBar:GetReverseFill())
+        stripBar:SetHeight(PixelSnap(height or 4))
+        stripBar:SetPoint("TOPLEFT", healBar, "BOTTOMLEFT", 0, 0)
+        stripBar:SetPoint("TOPRIGHT", healBar, "BOTTOMRIGHT", 0, 0)
+        stripBar:SetFrameLevel(ab:GetFrameLevel() + 2)
+        return
+    end
     if position == "rightVertical" or position == "leftVertical" then
         stripBar:SetOrientation("VERTICAL")
         stripBar:SetReverseFill(vertGrowDir == "down")
@@ -777,6 +801,7 @@ local function UpdateAbsorb(button, unit, now)
         ab._pGen, ab._pS = ns._absorbGen, s
         ab._pBarPos = ns.GetAbsorbBarPosition(s)
         ab._pHealBarPos = ns.GetHealAbsorbBarPosition(s)
+        ab._pMaxBarPos = ns.GetMaxHealthBarPosition(s)
         local st = s.absorbStyle
         ab._pStyleOn = (st and st ~= "none") and true or false
         ab._pModern = st == "blizzardModern"
@@ -790,6 +815,9 @@ local function UpdateAbsorb(button, unit, now)
     local healTopBar = ab._healTopBar
     local healBarPos = ab._pHealBarPos
     local healBarOn = healTopBar and healBarPos ~= "none"
+    local maxTopBar = ab._maxTopBar
+    local maxBarPos = ab._pMaxBarPos
+    local maxBarOn = maxTopBar and maxBarPos ~= "none"
     local styleOn = ab._pStyleOn
     local modern = ab._pModern
     -- Blizzard Glow Line, settings-derived and gen-gated (an unset key would otherwise fall
@@ -836,7 +864,7 @@ local function UpdateAbsorb(button, unit, now)
     -- shield absorbs) -- without this the whole overlay frame bails out below whenever
     -- Absorb Style is "none", even with Max Health Style on, so it never gets to paint.
     local maxHealthOn = ab._pMaxHealthOn
-    if not styleOn and not barOn and not healOn and not healBarOn and not predOn and not maxHealthOn then
+    if not styleOn and not barOn and not healOn and not healBarOn and not predOn and not maxHealthOn and not maxBarOn then
         RFHide(ab)
         if fw then RFHide(fw) end
         if fw and fw._edgeSpark then RFHide(fw._edgeSpark) end
@@ -844,6 +872,7 @@ local function UpdateAbsorb(button, unit, now)
         if ha then RFHide(ha) end
         if topBar then RFHide(topBar) end
         if healTopBar then RFHide(healTopBar) end
+        if maxTopBar then RFHide(maxTopBar) end
         -- Nothing here paints absorbs: release a button an absorb event armed,
         -- or the belt keeps re-marking it for the session.
         if d._absActive then
@@ -1264,6 +1293,33 @@ local function UpdateAbsorb(button, unit, now)
             RFHide(rmh)
         end
     end
+    if maxTopBar then
+        if maxBarOn then
+            if maxTopBar._sGen ~= ns._absorbGen then
+                maxTopBar._sGen = ns._absorbGen
+                local bc = s.maxHealthBarColor or { r = 0.7, g = 0.1, b = 0.1 }
+                local bh = s.maxHealthBarHeight or 4
+                local gd = s.maxHealthBarGrowDir or "up"
+                ns.ApplyStripBarLayout(maxTopBar, ab, button, maxBarPos, bh, barPos,
+                    s.absorbBarHeight or 4, gd, healBarOn and healTopBar or nil)
+                maxTopBar:SetStatusBarColor(bc.r or 0.7, bc.g or 0.1, bc.b or 0.1, bc.a or 1)
+            end
+            local pct = d._rmhPct
+            if pct == nil then
+                pct = GetUnitTotalModifiedMaxHealthPercent and GetUnitTotalModifiedMaxHealthPercent(unit) or 0
+                d._rmhPct = pct
+            end
+            if pct > 0 then
+                if maxTopBar._rv ~= pct then maxTopBar._rv = pct; maxTopBar:SetValue(pct) end
+                RFShow(maxTopBar)
+            else
+                RFHide(maxTopBar)
+            end
+        else
+            RFHide(maxTopBar)
+        end
+    end
+
 end
 
 I.CreateAbsorbBar, I.UpdateAbsorb = CreateAbsorbBar, UpdateAbsorb

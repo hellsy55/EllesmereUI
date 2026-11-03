@@ -717,7 +717,7 @@ function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint)
     hint = hint or false
     if pin or kind == "recent" then
         hint = pin and EllesmereUI.L("Middle Click to Add or Remove")
-            or EllesmereUI.L("Extra quickview display, your items are also in their category")
+            or (BP().bagHideRecentInCategories ~= true and EllesmereUI.L("Extra quickview display, your items are also in their category"))
         local recent = EUI_Bags._recentItems
         clear = not pin and BP().bagShowRecentClear == true and recent ~= nil and next(recent) ~= nil
     end

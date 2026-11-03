@@ -2513,85 +2513,94 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             },
         }
         local classAlts = SPEC_POWER_ALTS[playerClass]
-        -- Retail only: these alternatives are retail spec resources, and the
-        -- WoW Forever classes have no specs to key them on.
-        if classAlts and not EllesmereUI.IS_FOREVER then
-            local GetSpec = C_SpecializationInfo.GetSpecialization
-            -- Labels follow the CURRENT spec: the page is built once and
-            -- cached, so they are refilled on every spec change (see
-            -- UpdatePowerTypeRow), never only at build time.
-            local ptValues = {}
-            local ptOrder  = { "default", "alt" }
-            local function FillPowerTypeValues(s)
-                local data = s and classAlts[s]
-                ptValues["default"] = data and data[1] or nil
-                ptValues["alt"]     = data and data[2] or nil
-                ptValues["astral"]  = data and data.astral or nil
-                if ptValues["astral"] then
-                    ptOrder[2], ptOrder[3] = "astral", "alt"
-                else
-                    ptOrder[2], ptOrder[3] = "alt", nil
-                end
+        local GetSpec = C_SpecializationInfo and C_SpecializationInfo.GetSpecialization
+        local ptValues = {}
+        local ptOrder  = { "default", "alt" }
+        local function FillPowerTypeValues(s)
+            local data = s and classAlts and classAlts[s]
+            ptValues["default"] = data and data[1] or nil
+            ptValues["alt"]     = data and data[2] or nil
+            ptValues["astral"]  = data and data.astral or nil
+            if ptValues["astral"] then
+                ptOrder[2], ptOrder[3] = "astral", "alt"
+            else
+                ptOrder[2], ptOrder[3] = "alt", nil
             end
-            local labelSpec = GetSpec()
-            FillPowerTypeValues(labelSpec)
+        end
+        local labelSpec = GetSpec and GetSpec()
+        FillPowerTypeValues(labelSpec)
 
-            local sharedPowerRow5
-            sharedPowerRow5, h = W:DualRow(parent, y,
-                { type="dropdown", text="Power Type", tooltip = classAlts.tip,
-                  values = ptValues, order = ptOrder,
-                  -- Stored by SPEC ID, not the GetSpecialization() index: one
-                  -- profile holds one set, so an index key collides across
-                  -- classes (slot 3 is Guardian, Shadow AND Augmentation).
-                  -- classAlts stays index-keyed, it is already per class.
-                  getValue = function()
-                      local s = GetSpec()
-                      if not s or not classAlts[s] then return "default" end
-                      local sid = C_SpecializationInfo
-                          and C_SpecializationInfo.GetSpecializationInfo(s)
-                      if not sid then return "default" end
-                      local ov = UNIT_DB_MAP["player"]().powerTypeOverride
-                      if ov and ov[sid] == "astral" then return "astral" end
-                      if ov and ov[sid] then return "alt" end
-                      return "default"
-                  end,
-                  setValue = function(v)
-                      local s = GetSpec()
-                      if not s then return end
-                      local sid = C_SpecializationInfo
-                          and C_SpecializationInfo.GetSpecializationInfo(s)
-                      if not sid then return end
-                      local pdb = UNIT_DB_MAP["player"]()
-                      if v == "alt" then
-                          if not pdb.powerTypeOverride then pdb.powerTypeOverride = {} end
-                          pdb.powerTypeOverride[sid] = true
-                      elseif v == "astral" then
-                          if not pdb.powerTypeOverride then pdb.powerTypeOverride = {} end
-                          pdb.powerTypeOverride[sid] = "astral"
-                      else
-                          if pdb.powerTypeOverride then pdb.powerTypeOverride[sid] = nil end
-                      end
-                      ReloadAndUpdate()
-                  end },
-                EllesmereUI.BlankRowCfg()); y = y - h
+        local sharedPowerRow5
+        sharedPowerRow5, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Boss Health Marker",
+              tooltip = "Shows a vertical marker on your power bar indicating the primary boss's health percentage.",
+              getValue = function() return SVal("bossPacingEnabled", false) end,
+              setValue = function(v)
+                  SSet("bossPacingEnabled", v)
+                  ReloadAndUpdate()
+              end },
+            { type = "dropdown", text = "Power Type", tooltip = classAlts and classAlts.tip,
+              values = ptValues, order = ptOrder,
+              disabled = function()
+                  local s = GetSpec and GetSpec()
+                  return not (classAlts and not EllesmereUI.IS_FOREVER and s and classAlts[s])
+              end,
+              disabledTooltip = function()
+                  return "No alternate power type for the current specialization."
+              end,
+              getValue = function()
+                  local s = GetSpec and GetSpec()
+                  if not s or not classAlts or not classAlts[s] then return "default" end
+                  local sid = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(s)
+                  if not sid then return "default" end
+                  local ov = UNIT_DB_MAP["player"]().powerTypeOverride
+                  if ov and ov[sid] == "astral" then return "astral" end
+                  if ov and ov[sid] then return "alt" end
+                  return "default"
+              end,
+              setValue = function(v)
+                  local s = GetSpec and GetSpec()
+                  if not s then return end
+                  local sid = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo(s)
+                  if not sid then return end
+                  local pdb = UNIT_DB_MAP["player"]()
+                  if v == "alt" then
+                      if not pdb.powerTypeOverride then pdb.powerTypeOverride = {} end
+                      pdb.powerTypeOverride[sid] = true
+                  elseif v == "astral" then
+                      if not pdb.powerTypeOverride then pdb.powerTypeOverride = {} end
+                      pdb.powerTypeOverride[sid] = "astral"
+                  else
+                      if pdb.powerTypeOverride then pdb.powerTypeOverride[sid] = nil end
+                  end
+                  ReloadAndUpdate()
+              end }
+        ); y = y - h
 
-            local function UpdatePowerTypeRow()
-                local s = GetSpec()
+        local function UpdatePowerRow5()
+            if optState.selectedUnit == "player" then
+                sharedPowerRow5:Show()
+                local s = GetSpec and GetSpec()
                 if s ~= labelSpec then
                     labelSpec = s
                     FillPowerTypeValues(s)
-                    local dd = sharedPowerRow5._leftRegion and sharedPowerRow5._leftRegion._control
+                    local dd = sharedPowerRow5._rightRegion and sharedPowerRow5._rightRegion._control
                     if dd and dd._invalidateMenu then dd._invalidateMenu() end
                 end
-                if optState.selectedUnit == "player" and s and classAlts[s] then
-                    sharedPowerRow5:Show()
-                else
-                    sharedPowerRow5:Hide()
+                local hasAlts = classAlts and not EllesmereUI.IS_FOREVER and s and classAlts[s]
+                if sharedPowerRow5._rightRegion then
+                    if hasAlts then
+                        sharedPowerRow5._rightRegion:Show()
+                    else
+                        sharedPowerRow5._rightRegion:Hide()
+                    end
                 end
+            else
+                sharedPowerRow5:Hide()
             end
-            RegisterWidgetRefresh(UpdatePowerTypeRow)
-            UpdatePowerTypeRow()
         end
+        RegisterWidgetRefresh(UpdatePowerRow5)
+        UpdatePowerRow5()
     end
 
     _, h = W:Spacer(parent, y, 20); y = y - h
@@ -3133,6 +3142,9 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     local absorbStyleValues = CopyTable(ns.ABSORB_STYLE_NAMES)
     local absorbStyleOrder = CopyTable(ns.ABSORB_STYLE_ORDER)
     local healAbsorbStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
+    local maxHealthStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
+    table.insert(maxHealthStyleOrder, 2, "maxHealthStripes")
+    absorbStyleValues.maxHealthStripes = "Max Health Stripes"
     -- Append SharedMedia statusbar textures after a divider, mirroring the Bar
     -- Texture dropdown. SM keys ("sm:" prefixed) come from AppendSharedMediaTextures
     -- into the shared health-bar tables; render resolves via ns.ResolveAbsorbStyleTex
@@ -3151,9 +3163,11 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         if #smKeys > 0 then
             absorbStyleOrder[#absorbStyleOrder + 1] = "---"
             healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = "---"
+            maxHealthStyleOrder[#maxHealthStyleOrder + 1] = "---"
             for _, k in ipairs(smKeys) do
                 absorbStyleOrder[#absorbStyleOrder + 1] = k
                 healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = k
+                maxHealthStyleOrder[#maxHealthStyleOrder + 1] = k
             end
         end
         -- Preview swatch behind each menu row, resolved exactly like render.
@@ -3161,6 +3175,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             itemHeight = 28,
             background = function(key)
                 if not key or key == "---" or key == "none" then return nil end
+                if key == "maxHealthStripes" then return "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png" end
                 return ns.ResolveAbsorbStyleTex and ns.ResolveAbsorbStyleTex(key) or nil
             end,
         }
@@ -3559,6 +3574,56 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         })
     end
 
+    -- Max Health Style: same texture palette as Heal Absorb, including the RF stripes.
+    local maxHealthRow
+    maxHealthRow, h = W:DualRow(parent, y,
+        { type="dropdown", text="Max Health Style", values=absorbStyleValues,
+          order=maxHealthStyleOrder,
+          getValue=function() return SValSupported("maxHealthStyle", "none") end,
+          setValue=function(v) SSetSupported("maxHealthStyle", v); EllesmereUI:RefreshPage() end },
+        { type="slider", text="Max Health Opacity", min=5, max=100, step=1,
+          disabled=function() return SValSupported("maxHealthStyle", "none") == "none" end,
+          disabledTooltip="Max Health Style",
+          getValue=function() return SValSupported("maxHealthOpacity", 100) end,
+          setValue=function(v) SSetSupported("maxHealthOpacity", v) end });  y = y - h
+    SApplySupport(maxHealthRow._leftRegion, "maxHealthStyle")
+    SApplySupport(maxHealthRow._rightRegion, "maxHealthOpacity")
+    if not EllesmereUI._prebuilding then
+        local rgn = maxHealthRow._leftRegion
+        local swatch = EllesmereUI.BuildColorSwatch(
+            rgn, maxHealthRow:GetFrameLevel() + 3,
+            function()
+                local c = SGetSupported("maxHealthColor")
+                if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, 1 end
+                return 0.7, 0.1, 0.1, 1
+            end,
+            function(r, g, b)
+                UNIT_DB_MAP[optState.selectedUnit]().maxHealthColor = { r=r, g=g, b=b }
+                ReloadAndUpdate(); UpdatePreview()
+            end, false, 20)
+        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = swatch
+        local block = CreateFrame("Frame", nil, swatch)
+        block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10)
+        block:EnableMouse(true)
+        local function RefreshColor()
+            local style = SValSupported("maxHealthStyle", "none")
+            local off = style == "none" or style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR"
+            swatch:SetAlpha(off and 0.3 or 1)
+            if off then block:Show() else block:Hide() end
+        end
+        RegisterWidgetRefresh(RefreshColor)
+        RefreshColor()
+    end
+    EllesmereUI.BuildInlineCog(maxHealthRow._leftRegion, {
+        title = "Max Health Rendering",
+        rows = {
+            { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+              get=function() return SValSupported("maxHealthBgOpacity", 100) end,
+              set=function(v) SSetSupported("maxHealthBgOpacity", v) end },
+        },
+    })
+
     -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ alpha swatch)
     local absorbBarRow
     absorbBarRow, h = W:DualRow(parent, y,
@@ -3631,6 +3696,41 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         end
         RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
         UpdateHealAbsorbBarSwatchVis()
+    end
+
+    -- Max Health Bar: same positions as Heal Absorb Bar, plus a chained slot.
+    local maxBarRow
+    maxBarRow, h = W:DualRow(parent, y,
+        { type="dropdown", text="Max Health Bar",
+          values={ none="None", aboveAbsorb="Above Absorb Bar", belowAbsorb="Below Absorb Bar", belowHealAbsorb="Below Heal Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+          order={ "none", "aboveAbsorb", "belowAbsorb", "belowHealAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
+          getValue=function() return SValSupported("maxHealthBarPosition", "none") end,
+          setValue=function(v) SSetSupported("maxHealthBarPosition", v); EllesmereUI:RefreshPage() end },
+        { type="slider", text="Bar Height", min=1, max=20, step=1,
+          disabled=function() return SValSupported("maxHealthBarPosition", "none") == "none" end,
+          disabledTooltip="Max Health Bar",
+          getValue=function() return SValSupported("maxHealthBarHeight", 4) end,
+          setValue=function(v) SSetSupported("maxHealthBarHeight", v) end });  y = y - h
+    SApplySupport(maxBarRow._leftRegion, "maxHealthBarPosition")
+    SApplySupport(maxBarRow._rightRegion, "maxHealthBarHeight")
+    if not EllesmereUI._prebuilding then
+        local rgn = maxBarRow._rightRegion
+        local swatch = EllesmereUI.BuildColorSwatch(rgn, maxBarRow:GetFrameLevel() + 3,
+            function()
+                local c = SGetSupported("maxHealthBarColor")
+                if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1 end
+                return 0.7, 0.1, 0.1, 1
+            end,
+            function(r, g, b, a)
+                UNIT_DB_MAP[optState.selectedUnit]().maxHealthBarColor = { r=r, g=g, b=b, a=a }
+                ReloadAndUpdate(); UpdatePreview()
+            end, true, 20)
+        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = swatch
+        local function RefreshColor()
+            swatch:SetAlpha(SValSupported("maxHealthBarPosition", "none") == "none" and 0.3 or 1)
+        end
+        RegisterWidgetRefresh(RefreshColor); RefreshColor()
     end
 
     -- Row 5: Heal Prediction (+ your / others' color swatches) | Prediction Opacity

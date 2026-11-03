@@ -562,6 +562,10 @@ local defaults = {
         healAbsorbBarHeight   = 4,
         healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
         healAbsorbBarGrowDir  = "up",
+        maxHealthBarPosition = "none",
+        maxHealthBarHeight = 4,
+        maxHealthBarColor = { r = 0.7, g = 0.1, b = 0.1 },
+        maxHealthBarGrowDir = "up",
 
         -- Indicators
         roleIconStyle    = "modern",  -- none/modern/modernCircle/styled/classicCircle/classic/blizzDefault/blizzLight/pixels

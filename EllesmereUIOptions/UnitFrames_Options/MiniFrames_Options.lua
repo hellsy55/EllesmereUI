@@ -3680,6 +3680,9 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         local absorbStyleValues = CopyTable(ns.ABSORB_STYLE_NAMES)
         local absorbStyleOrder = CopyTable(ns.ABSORB_STYLE_ORDER)
         local healAbsorbStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
+        local maxHealthStyleOrder = CopyTable(ns.HEAL_ABSORB_STYLE_ORDER)
+        table.insert(maxHealthStyleOrder, 2, "maxHealthStripes")
+        absorbStyleValues.maxHealthStripes = "Max Health Stripes"
         do
             if EllesmereUI.AppendSharedMediaTextures then
                 EllesmereUI.AppendSharedMediaTextures(
@@ -3696,15 +3699,18 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             if #smKeys > 0 then
                 absorbStyleOrder[#absorbStyleOrder + 1] = "---"
                 healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = "---"
+                maxHealthStyleOrder[#maxHealthStyleOrder + 1] = "---"
                 for _, k in ipairs(smKeys) do
                     absorbStyleOrder[#absorbStyleOrder + 1] = k
                     healAbsorbStyleOrder[#healAbsorbStyleOrder + 1] = k
+                    maxHealthStyleOrder[#maxHealthStyleOrder + 1] = k
                 end
             end
             absorbStyleValues._menuOpts = {
                 itemHeight = 28,
                 background = function(key)
                     if not key or key == "---" or key == "none" then return nil end
+                    if key == "maxHealthStripes" then return "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png" end
                     return ns.ResolveAbsorbStyleTex and ns.ResolveAbsorbStyleTex(key) or nil
                 end,
             }
@@ -3917,6 +3923,48 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             ACogBtn(rgn, cogShow)
         end
 
+        -- Max Health Style below Heal Absorb Style.
+        local maxHealthRow
+        maxHealthRow, hh = Ww:DualRow(pp, yy,
+            { type="dropdown", text="Max Health Style", values=absorbStyleValues, order=maxHealthStyleOrder,
+              getValue=function() return BVal("maxHealthStyle", "none") end,
+              setValue=function(v) BSet("maxHealthStyle", v); EllesmereUI:RefreshPage() end },
+            { type="slider", text="Max Health Opacity", min=5, max=100, step=1,
+              disabled=function() return BVal("maxHealthStyle", "none") == "none" end,
+              disabledTooltip="Max Health Style",
+              getValue=function() return BVal("maxHealthOpacity", 100) end,
+              setValue=function(v) BSet("maxHealthOpacity", v) end }); yy = yy - hh
+        if not EllesmereUI._prebuilding then
+            local rgn = maxHealthRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(rgn, maxHealthRow:GetFrameLevel() + 3,
+                function()
+                    local c = B.maxHealthColor
+                    if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, 1 end
+                    return 0.7, 0.1, 0.1, 1
+                end,
+                function(r, g, b)
+                    B.maxHealthColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function RefreshColor()
+                local style = BVal("maxHealthStyle", "none")
+                swatch:SetAlpha((style == "none" or style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR") and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(RefreshColor); RefreshColor()
+        end
+        do
+            local rgn = maxHealthRow._leftRegion
+            local _, show = EllesmereUI.BuildCogPopup({
+                title="Max Health Rendering",
+                rows={ { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+                    get=function() return BVal("maxHealthBgOpacity", 100) end,
+                    set=function(v) BSet("maxHealthBgOpacity", v) end } },
+            })
+            ACogBtn(rgn, show)
+        end
+
         -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ color swatch)
         local absorbBarRow
         absorbBarRow, hh = Ww:DualRow(pp, yy,
@@ -3985,6 +4033,39 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             end
             RegisterWidgetRefresh(UpdateHealAbsorbBarSwatchVis)
             UpdateHealAbsorbBarSwatchVis()
+        end
+
+        -- Max Health Bar with a position below the Heal Absorb Bar.
+        local maxBarRow
+        maxBarRow, hh = Ww:DualRow(pp, yy,
+            { type="dropdown", text="Max Health Bar",
+              values={ none="None", aboveAbsorb="Above Absorb Bar", belowAbsorb="Below Absorb Bar", belowHealAbsorb="Below Heal Absorb Bar", aboveRight="Above Frame Right", aboveLeft="Above Frame Left", topRight="Top Right", topLeft="Top Left", bottomRight="Bottom Right", bottomLeft="Bottom Left" },
+              order={ "none", "aboveAbsorb", "belowAbsorb", "belowHealAbsorb", "aboveRight", "aboveLeft", "topRight", "topLeft", "bottomRight", "bottomLeft" },
+              getValue=function() return BVal("maxHealthBarPosition", "none") end,
+              setValue=function(v) BSet("maxHealthBarPosition", v); EllesmereUI:RefreshPage() end },
+            { type="slider", text="Bar Height", min=1, max=20, step=1,
+              disabled=function() return BVal("maxHealthBarPosition", "none") == "none" end,
+              disabledTooltip="Max Health Bar",
+              getValue=function() return BVal("maxHealthBarHeight", 4) end,
+              setValue=function(v) BSet("maxHealthBarHeight", v) end }); yy = yy - hh
+        if not EllesmereUI._prebuilding then
+            local rgn = maxBarRow._rightRegion
+            local swatch = EllesmereUI.BuildColorSwatch(rgn, maxBarRow:GetFrameLevel() + 3,
+                function()
+                    local c = B.maxHealthBarColor
+                    if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, c.a or 1 end
+                    return 0.7, 0.1, 0.1, 1
+                end,
+                function(r, g, b, a)
+                    B.maxHealthBarColor = { r=r, g=g, b=b, a=a }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, true, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function RefreshColor()
+                swatch:SetAlpha(BVal("maxHealthBarPosition", "none") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(RefreshColor); RefreshColor()
         end
 
         return yy

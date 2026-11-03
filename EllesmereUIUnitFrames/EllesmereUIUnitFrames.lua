@@ -1,7 +1,7 @@
 if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_ClientGate.lua)
 local GetSpecialization = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
 local addonName, ns = ...
-if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewInternals and EllesmereUI.NewCombatQueue and EllesmereUI.HideFrame and EllesmereUI._Pool and EllesmereUI.AbsorbGlow and EllesmereUI.SetCraftBatch) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Blizzard frame suppression hides through the parent's HideFrame, the player absorb glow line is the parent's AbsorbGlow, and the player cast bar's Full Craft Time is the parent's SetCraftBatch)
+if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewInternals and EllesmereUI.NewCombatQueue and EllesmereUI.HideFrame and EllesmereUI._Pool and EllesmereUI.AbsorbGlow and EllesmereUI.SetCraftBatch and EllesmereUI.FitCastName) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Blizzard frame suppression hides through the parent's HideFrame, the player absorb glow line is the parent's AbsorbGlow, and the player cast bar's Full Craft Time is the parent's SetCraftBatch, and Show Full Spell Name is the parent's FitCastName)
 EllesmereUI._ModuleNS[addonName] = ns  -- LOD options files read this module ns via the registry
 
 local math_floor, math_ceil, math_max, math_min, math_abs =
@@ -203,12 +203,10 @@ local defaults = {
         castBarTexture = "inherit",
         darkTheme = false,
         showNicknames = true,
-        -- One decimal on abbreviated values (240.5k) and percents (77.3%); global, read by text tags via _G flags.
-        showDecimalOnText = false,
-        -- With decimals on, boss frames use two (240.55k / 77.30%); inline cog on "Show Decimal on Health Text".
+        -- One decimal on health percents (77.3%); values follow global Number Format.
+        showDecimalOnPercent = false,
+        -- With decimals on, boss frames use two (77.30%).
         showDecimalBoss2 = true,
-        -- With decimals on, "Only Show for % Health" keeps the decimal on PERCENT (77.3%) but leaves VALUES whole (240k); same inline cog.
-        showDecimalPercentOnly = false,
         -- With decimals on, "Hide Trailing Zeros" drops a zero decimal from the PERCENT (100.0% -> 100%, 99.5% unchanged); same inline cog.
         showDecimalTrimZeros = false,
         -- Player Threat (Non-Tank): additive "Shadow" border on the PLAYER frame while
@@ -247,6 +245,7 @@ local defaults = {
             powerBgPowerColored = false,
             powerPercentTextPowerColor = false,
             manaRegenSpark = false,  -- WoW Forever: mana regen spark while the bar shows mana; manaRegenSparkMode "ticks" = Regen Ticks, nil = 5-Second Rule
+            bossPacingEnabled = false,
             healthClassColored = true,
             customBgColor = { r = 0.067, g = 0.067, b = 0.067 },
             bgClassColored = false,
@@ -370,6 +369,13 @@ local defaults = {
             healAbsorbBarPosition = "none",
             healAbsorbBarHeight   = 4,
             healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
+            maxHealthStyle = "none",
+            maxHealthOpacity = 100,
+            maxHealthColor = { r = 0.7, g = 0.1, b = 0.1 },
+            maxHealthBgOpacity = 100,
+            maxHealthBarPosition = "none",
+            maxHealthBarHeight = 4,
+            maxHealthBarColor = { r = 0.7, g = 0.1, b = 0.1 },
             -- Blizzard Glow Line (opt-in) and its art: "blizzard" | "pixelsGlow" | "pixelsOvershield".
             absorbGlowLine = false,
             absorbGlowLineTexture = "blizzard",
@@ -789,6 +795,13 @@ local defaults = {
             healAbsorbBarPosition = "none",
             healAbsorbBarHeight   = 4,
             healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
+            maxHealthStyle = "none",
+            maxHealthOpacity = 100,
+            maxHealthColor = { r = 0.7, g = 0.1, b = 0.1 },
+            maxHealthBgOpacity = 100,
+            maxHealthBarPosition = "none",
+            maxHealthBarHeight = 4,
+            maxHealthBarColor = { r = 0.7, g = 0.1, b = 0.1 },
             -- Blizzard Glow Line (opt-in) and its art: "blizzard" | "pixelsGlow" | "pixelsOvershield".
             absorbGlowLine = false,
             absorbGlowLineTexture = "blizzard",
@@ -1139,6 +1152,13 @@ local defaults = {
             healAbsorbBarPosition = "none",
             healAbsorbBarHeight   = 4,
             healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
+            maxHealthStyle = "none",
+            maxHealthOpacity = 100,
+            maxHealthColor = { r = 0.7, g = 0.1, b = 0.1 },
+            maxHealthBgOpacity = 100,
+            maxHealthBarPosition = "none",
+            maxHealthBarHeight = 4,
+            maxHealthBarColor = { r = 0.7, g = 0.1, b = 0.1 },
             -- Blizzard Glow Line (opt-in) and its art: "blizzard" | "pixelsGlow" | "pixelsOvershield".
             absorbGlowLine = false,
             absorbGlowLineTexture = "blizzard",
@@ -1302,6 +1322,13 @@ local defaults = {
             healAbsorbBarPosition = "none",
             healAbsorbBarHeight   = 4,
             healAbsorbBarColor    = { r = 200/255, g = 29/255, b = 29/255 },
+            maxHealthStyle = "none",
+            maxHealthOpacity = 100,
+            maxHealthColor = { r = 0.7, g = 0.1, b = 0.1 },
+            maxHealthBgOpacity = 100,
+            maxHealthBarPosition = "none",
+            maxHealthBarHeight = 4,
+            maxHealthBarColor = { r = 0.7, g = 0.1, b = 0.1 },
             onlyPlayerDebuffs = true,
             debuffAnchor = "bottomleft",
             debuffGrowth = "auto",
