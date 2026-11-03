@@ -550,47 +550,79 @@ local function BuildButtons()
     EUI_Bags._sellJunkBtn = sell
 end
 
--- The header's icons (Bag Top Bar Icons), right to left from the search box:
--- Sort, Show Bags, Quick Actions and the Junk Marker's coin, each shown one left of the next
--- shown one; Sell Junk sits left of the coin while a merchant is open, and
--- mark mode ends when the Junk Marker goes off. Hidden icons keep a point (the
--- bags overview window hangs from Show Bags). Run at header build, by the
--- options dropdown, on profile changes and on merchant open / close.
+-- The header's icons (Bag Top Bar Icons), right to left from the search box.
+-- Saved order is opt-in: an unset key preserves the original header layout.
+-- Hidden icons keep their relative positions in the saved order; Sell Junk
+-- stays immediately left of the coin, even when it is not the last icon.
+local DEFAULT_HEADER_ICON_ORDER = {
+    "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon",
+}
 function EUI_Bags:SyncHeaderIcons()
     local bags = self._bagsBtn
     if not bags then return end
     local p = BP()
-    local prev, gap = self._searchBox, 13
+    local sort = self._sortBtn
     local sortOn = p.bagShowSortIcon ~= false
-    self._sortBtn:SetShown(sortOn)
-    if sortOn then prev, gap = self._sortBtn, 6 end
     local bagsOn = p.bagShowBagsIcon ~= false
-    bags:ClearAllPoints()
-    bags:SetPoint("RIGHT", prev, "LEFT", -gap, 0)
-    bags:SetShown(bagsOn)
-    if bagsOn then
-        prev, gap = bags, 6
-    else
-        EUI_BagsWindow:Hide()  -- opened only from Show Bags
-    end
-    -- Quick Actions (EllesmereUIBags_QuickActions.lua), off by default
-    local quick = ns.SyncQuickActionsIcon(prev, gap)
-    if quick then prev, gap = quick, 6 end
     local junkOn = EUI_CategoryManager:IsJunkMarkerEnabled()
+    sort:SetShown(sortOn)
+    bags:SetShown(bagsOn)
+    if not bagsOn then EUI_BagsWindow:Hide() end  -- opened only from Show Bags
+
+    -- Keep Quick Actions' existing enable/disable lifecycle. This call also
+    -- creates its button on demand; placement below overrides its first anchor.
+    local quick = ns.SyncQuickActionsIcon(self._searchBox, 13)
     if junkOn and not self._junkBtn then BuildButtons() end
-    if self._junkBtn then
-        self._junkBtn:ClearAllPoints()
-        self._junkBtn:SetPoint("RIGHT", prev, "LEFT", -gap, 0)
-        self._junkBtn:SetShown(junkOn)
-        self._sellJunkBtn:SetShown(junkOn and _openItemPanels.merchant == true)
+    local junk = self._junkBtn
+    local sell = self._sellJunkBtn
+    if junk then
+        junk:SetShown(junkOn)
+        sell:SetShown(junkOn and _openItemPanels.merchant == true)
     end
     if not junkOn and self._junkMode then ExitAssignSelectMode() end
-    -- The leftmost shown icon bounds the title and item count (FitHeaderText)
-    local edge = prev
-    if junkOn and self._junkBtn then
-        edge = self._sellJunkBtn:IsShown() and self._sellJunkBtn or self._junkBtn
+
+    local buttons = {
+        bagShowSortIcon = sort,
+        bagShowBagsIcon = bags,
+        bagShowQuickIcon = self._quickBtn,
+        bagShowJunkIcon = junk,
+    }
+    local visible = {
+        bagShowSortIcon = sortOn,
+        bagShowBagsIcon = bagsOn,
+        bagShowQuickIcon = quick ~= nil,
+        bagShowJunkIcon = junkOn,
+    }
+    local prev, gap = self._searchBox, 13
+    local used = {}
+    local function Place(key)
+        if type(key) ~= "string" or used[key] then return end
+        used[key] = true
+        local btn = buttons[key]
+        if not btn then return end
+        -- Even hidden buttons retain an anchor (Show Bags owns a popup).
+        btn:ClearAllPoints()
+        btn:SetPoint("RIGHT", prev, "LEFT", -gap, 0)
+        if not visible[key] then return end
+        prev, gap = btn, 6
+        -- Sell Junk is attached to the coin. Reserve its full width before
+        -- placing more icons to its left, or the buttons would overlap.
+        if key == "bagShowJunkIcon" and sell and sell:IsShown() then
+            prev = sell
+        end
     end
-    self._hdrEdge = edge
+    local savedOrder = p.bagTopBarIconOrder
+    if type(savedOrder) == "table" then
+        for i = 1, #savedOrder do
+            Place(savedOrder[i])
+        end
+    end
+    -- Also place any missing keys (including old or malformed saved profiles).
+    for i = 1, #DEFAULT_HEADER_ICON_ORDER do
+        Place(DEFAULT_HEADER_ICON_ORDER[i])
+    end
+    -- The leftmost visible control bounds the title and item count.
+    self._hdrEdge = prev
     if self.FitHeaderText then self:FitHeaderText() end
 end
 

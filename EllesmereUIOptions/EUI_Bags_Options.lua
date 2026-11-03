@@ -1099,23 +1099,27 @@ initFrame:SetScript("OnEvent", function(self)
             local iconsRow
             iconsRow, h = W:DualRow(parent, y,
                 { type="label", text="Bag Top Bar Icons",
-                  tooltip="Choose which icons show in the bag window's top bar; the Junk Icon is the Junk Marker." },
+                  tooltip="Show or hide top-bar icons; drag their menu rows to reorder from right to left. Junk Icon controls the Junk Marker." },
                 { type="toggle", text="Gold Tracking and History",
                   tooltip="Track and display gold amounts from all your characters on hover.",
                   getValue=function() return EllesmereUI.GetGoldLedger().IsTracking() end,
                   setValue=function(v) EllesmereUI.GetGoldLedger().SetTracking(v) end }
             ); y = y - h
 
-            -- Bag Top Bar Icons dropdown (left side), its Sort Options cog to the left
+            -- Bag Top Bar Icons dropdown (left side), its Sort Options cog to the left.
+            -- The menu order mirrors the header from right (search) to left.
             if not EllesmereUI._prebuilding then
                 local TOP_BAR_ICONS = {
-                    { key = "bagShowBagsIcon", label = "Bags Icon" },
-                    { key = "bagShowJunkIcon", label = "Junk Icon" },
-                    { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
                     { key = "bagShowSortIcon", label = "Sort Icon" },
+                    { key = "bagShowBagsIcon", label = "Bags Icon" },
+                    { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
+                    { key = "bagShowJunkIcon", label = "Junk Icon" },
+                }
+                local DEFAULT_ICON_ORDER = {
+                    "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon",
                 }
                 local leftRgn = iconsRow._leftRegion
-                local iconsDD, iconsDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                local iconsDD, iconsDDRefresh = EllesmereUI.BuildReorderCBDropdown(
                     leftRgn, 210, leftRgn:GetFrameLevel() + 2, TOP_BAR_ICONS,
                     function(key) return db.profile[key] ~= false end,
                     function(key, v)
@@ -1139,7 +1143,23 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end
                         EllesmereUI:RefreshPage()  -- the Sort Options cog follows Sort Icon
-                    end, nil, 10)
+                    end,
+                    {
+                        hint = "Drag to Reorder (right to left)",
+                        grip = true,
+                        openOrder = function()
+                            return db.profile.bagTopBarIconOrder or DEFAULT_ICON_ORDER
+                        end,
+                        setOrder = function(order)
+                            -- A copy becomes the profile-owned SavedVariable. Leave the
+                            -- key absent until the first drag, preserving older layouts.
+                            local saved = {}
+                            for i = 1, #order do saved[i] = order[i] end
+                            db.profile.bagTopBarIconOrder = saved
+                            local bags = _G.EUI_Bags
+                            if bags and bags.SyncHeaderIcons then bags:SyncHeaderIcons() end
+                        end,
+                    })
                 PP.Point(iconsDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
                 leftRgn._control = iconsDD
                 leftRgn._lastInline = nil
