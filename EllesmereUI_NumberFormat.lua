@@ -259,66 +259,9 @@ local function BuildRows(precision, glyphs, lower)
     return rows
 end
 
--- Resolved opts per value type (false = "use the caller's own default"), wiped
--- by RefreshNumberFormat. cfgBySpec shares one config between identical specs;
--- the locale is fixed per session, so it never needs wiping.
-local optsByType = {}
-local cfgBySpec = {}
-
--- valueType -> opts | false, cacheable (false before the active profile exists)
-local function ResolveOptions(valueType)
-    local active = ActiveProfile()
-    local nf = active and active.numberFormat
-    local precision, threshold = TypeSettings(nf, valueType)
-    local glyphs, western = ActiveUnits(nf)
-
-    if precision == "standard" then
-        if western then return BuildConfig(true), active ~= nil end
-        if valueType == "meter" then return BuildConfig(false), active ~= nil end
-        return false, active ~= nil
-    end
-
-    local lower = nf.case == "lower" and not glyphs
-    local key = (glyphs and EllesmereUI.LOCALE or "en") .. ":" .. precision .. ":" .. threshold .. (lower and ":l" or ":u")
-    local cfg = cfgBySpec[key]
-    if not cfg then
-        cfg = NewConfig(BuildRows(precision, glyphs, lower), threshold)
-        cfgBySpec[key] = cfg
-    end
-    return cfg, true
-end
-
--- The "meter" opts again as a plain upvalue: AbbreviateNumber's warm path.
-local meterOpts
-
--- EllesmereUI.NumberFormatOptions(valueType) -> opts | nil
---   The AbbreviateNumbers options for valueType under the active profile's
---   Number Format. nil means Precision "standard" on a type whose consumer keeps
---   its own default call (plain AbbreviateNumbers, or ForeverAbbreviateNumbers);
---   "meter" always returns a config.
-function EllesmereUI.NumberFormatOptions(valueType)
-    local o = optsByType[valueType]
-    if o == nil then
-        local cacheable
-        o, cacheable = ResolveOptions(valueType)
-        if cacheable then
-            optsByType[valueType] = o
-            if valueType == "meter" then meterOpts = o end
-        end
-    end
-    return o or nil
-end
-local NumberFormatOptions = EllesmereUI.NumberFormatOptions
-
--- EllesmereUI.RegisterNumberFormatCallback(fn)
---   fn() runs after every RefreshNumberFormat, for modules to redraw their text.
-local refreshCallbacks = {}
-function EllesmereUI.RegisterNumberFormatCallback(fn)
-    refreshCallbacks[#refreshCallbacks + 1] = fn
-end
-
 -- The effective settings as one string, so a profile switch that keeps the same
--- format skips the module repaints (the switch repaints them anyway).
+-- format skips the module repaints (the switch repaints them anyway). The first
+-- value drawn records the format it was drawn in (NumberFormatOptions).
 local TYPES = EllesmereUI.NUMBER_FORMAT_TYPES
 local lastSignature
 local function Signature()
@@ -333,25 +276,144 @@ local function Signature()
     return table.concat(parts, ";")
 end
 
+-- Resolved opts per value type (false = "use the caller's own default"), wiped
+-- by RefreshNumberFormat; optsByTypeW holds the forceWestern variants.
+-- cfgBySpec shares one config between identical specs; the locale is fixed per
+-- session, so it never needs wiping.
+local optsByType = {}
+local optsByTypeW = {}
+local cfgBySpec = {}
+
+-- valueType, forceWestern -> opts | false, cacheable (false before the active
+-- profile exists). forceWestern: a module's own K/M/B override (Damage Meters'
+-- Force English Units) over the Unit Style; Precision and threshold stay, the
+-- case only where the Unit Style lets the user set it (else upper, as on CJK).
+local function ResolveOptions(valueType, forceWestern)
+    local active = ActiveProfile()
+    local nf = active and active.numberFormat
+    local precision, threshold = TypeSettings(nf, valueType)
+    local glyphs, western = ActiveUnits(nf)
+    local lower = nf ~= nil and nf.case == "lower" and not glyphs
+    if forceWestern then glyphs, western = nil, true end
+
+    if precision == "standard" then
+        if western then return BuildConfig(true), active ~= nil end
+        if valueType == "meter" then return BuildConfig(false), active ~= nil end
+        return false, active ~= nil
+    end
+
+    local key = (glyphs and EllesmereUI.LOCALE or "en") .. ":" .. precision .. ":" .. threshold .. (lower and ":l" or ":u")
+    local cfg = cfgBySpec[key]
+    if not cfg then
+        cfg = NewConfig(BuildRows(precision, glyphs, lower), threshold)
+        cfgBySpec[key] = cfg
+    end
+    return cfg, true
+end
+
+-- The "meter" opts again as plain upvalues: AbbreviateNumber's warm path.
+local meterOpts, meterOptsW
+
+-- EllesmereUI.NumberFormatOptions(valueType, forceWestern) -> opts | nil
+--   The AbbreviateNumbers options for valueType under the active profile's
+--   Number Format. nil means Precision "standard" on a type whose consumer keeps
+--   its own default call (plain AbbreviateNumbers, or ForeverAbbreviateNumbers);
+--   "meter" always returns a config. forceWestern: K/M/B whatever the Unit Style.
+function EllesmereUI.NumberFormatOptions(valueType, forceWestern)
+    local cache = forceWestern and optsByTypeW or optsByType
+    local o = cache[valueType]
+    if o == nil then
+        local cacheable
+        o, cacheable = ResolveOptions(valueType, forceWestern)
+        if not lastSignature then lastSignature = Signature() end
+        if cacheable then
+            cache[valueType] = o
+            if valueType == "meter" then
+                if forceWestern then meterOptsW = o else meterOpts = o end
+            end
+        end
+    end
+    return o or nil
+end
+local NumberFormatOptions = EllesmereUI.NumberFormatOptions
+
+-- EllesmereUI.RegisterNumberFormatCallback(fn)
+--   fn() runs after every RefreshNumberFormat, for modules to redraw their text.
+local refreshCallbacks = {}
+function EllesmereUI.RegisterNumberFormatCallback(fn)
+    refreshCallbacks[#refreshCallbacks + 1] = fn
+end
+
 -- EllesmereUI.RefreshNumberFormat()
 --   Drops the resolved per-type options (after a settings change or a profile
 --   switch) and, when the effective format changed, notifies the registered
---   modules. It runs inside the profile switch, so one failing callback is
---   reported without stopping the rest.
+--   modules. Before any value is drawn there is nothing to redraw (the
+--   spec-assigned profile is switched in before the modules enable). It runs
+--   inside the profile switch, so one failing callback is reported without
+--   stopping the rest.
 function EllesmereUI.RefreshNumberFormat()
     wipe(optsByType)
-    meterOpts = nil
+    wipe(optsByTypeW)
+    meterOpts, meterOptsW = nil, nil
     local signature = Signature()
     if signature == lastSignature then return end
+    local drawn = lastSignature ~= nil
     lastSignature = signature
+    if not drawn then return end
     local handler = geterrorhandler()
     for i = 1, #refreshCallbacks do xpcall(refreshCallbacks[i], handler) end
 end
 
--- EllesmereUI.AbbreviateNumber(n) -> string
+-- EllesmereUI.ResetNumberFormat()
+--   The active profile back to the default Number Format, then redrawn.
+function EllesmereUI.ResetNumberFormat()
+    local active = ActiveProfile()
+    if active then active.numberFormat = nil end
+    EllesmereUI.RefreshNumberFormat()
+end
+
+-- EllesmereUI.AbbreviateNumber(n, forceWestern) -> string
 --   Formats n as the "meter" value type (Damage Meters, Mythic+ summary).
-function EllesmereUI.AbbreviateNumber(n)
+--   forceWestern: K/M/B whatever the Unit Style (Damage Meters' Force English
+--   Units); with Precision "standard" that is the old fixed English table.
+function EllesmereUI.AbbreviateNumber(n, forceWestern)
+    if forceWestern then
+        return AbbreviateNumbers(tonumber(n) or 0, meterOptsW or NumberFormatOptions("meter", true))
+    end
     return AbbreviateNumbers(tonumber(n) or 0, meterOpts or NumberFormatOptions("meter"))
+end
+
+-- EllesmereUI.AbbreviateValue(v, valueType) -> string
+--   v as valueType under the Number Format (health, max health, absorb and boss
+--   health text). Precision "standard" keeps the default call: the client's own
+--   format, on WoW Forever this file's table with its 10,000 cut. v goes straight
+--   to the C function, so a secret value stays secret-safe.
+local IS_FOREVER = EllesmereUI.IS_FOREVER
+function EllesmereUI.AbbreviateValue(v, valueType)
+    local opts = NumberFormatOptions(valueType)
+    if opts then return AbbreviateNumbers(v, opts) end
+    if IS_FOREVER then return AbbreviateNumbers(v, BuildConfig(false)) end
+    return AbbreviateNumbers(v)
+end
+
+-- EllesmereUI.IsZeroValue(v) -> bool
+--   True for a whole-number amount of 0, secret ones too: a probe FontString's
+--   GetText is nil after TruncateWhenZero (as ns.FormatHealAbsorbInto, Raid Frames).
+--   For a secret amount that text is a secret string, so it is only tested for
+--   truth, never compared (comparing a secret, even to nil, raises).
+--   The probe sits on its own hidden, parentless frame, outside Blizzard's tree.
+do
+    local probe
+    function EllesmereUI.IsZeroValue(v)
+        if not issecretvalue(v) then return v == 0 end
+        if not probe then
+            local holder = CreateFrame("Frame")
+            holder:Hide()
+            probe = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        end
+        probe:SetText(C_StringUtil.TruncateWhenZero(v))
+        return not probe:GetText()
+    end
 end
 
 -- EllesmereUI.AbbreviateNumberFixed(n, forceEnglish) -> string

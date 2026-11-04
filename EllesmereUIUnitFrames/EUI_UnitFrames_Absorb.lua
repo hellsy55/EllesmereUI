@@ -159,24 +159,11 @@ end
 
 -- Max-health reduction uses a dedicated overlay, independent of both absorb styles.
 local function ApplyMaxHealthStyle(bar, style, s)
-    local tex = style == "maxHealthStripes"
-        and "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png"
-        or ns.ResolveAbsorbStyleTex(style, "Interface\\Buttons\\WHITE8X8")
-    local c = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
-    if style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then
-        c = COLOR_WHITE
-    end
-    bar:SetStatusBarTexture(tex)
-    bar:SetStatusBarColor(c.r or 0.7, c.g or 0.1, c.b or 0.1, (s.maxHealthOpacity or 100) / 100)
-    local fill = bar:GetStatusBarTexture()
-    if fill then
-        local tiled = style == "maxHealthStripes" or ns.ABSORB_TILED_STYLES[style] == true
-        fill:SetDrawLayer("ARTWORK", 3)
-        fill:SetHorizTile(tiled); fill:SetVertTile(tiled)
-        ns.UF_ApplyAbsorbTextureTintMode(fill, style)
-    end
+    local fill = EllesmereUI.ApplyMaxHealthStyle(bar, style, s, ns.ResolveAbsorbStyleTex)
+    if fill then ns.UF_ApplyAbsorbTextureTintMode(fill, style) end
     ns.ApplyFillRotation(bar)
 end
+ns.UF_ApplyMaxHealthStyle = ApplyMaxHealthStyle
 
 -- Two-segment absorb rendering via dynamic clip frames, works with secret-valued
 -- absorbs: the value can't be split in Lua (min/subtract on secrets is blocked), so

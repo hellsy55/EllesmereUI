@@ -32,14 +32,9 @@ local AbbreviateNumbers, ApplyFont, defaults = I.AbbreviateNumbers, I.ApplyFont,
 local DISPEL_COLORS, GetFFD, PixelSnap = I.DISPEL_COLORS, I.GetFFD, I.PixelSnap
 local unitToButton = I.unitToButton
 
--- Health, max health and absorb text: the global Number Format for valueType,
--- else the module's default call (which Power Text keeps).
-local NumberFormatOptions = ns.EllesmereUI.NumberFormatOptions
-local function AbbreviateValue(v, valueType)
-    local opts = NumberFormatOptions(valueType)
-    if opts then return AbbreviateNumbers(v, opts) end
-    return AbbreviateNumbers(v)
-end
+-- Health, max health and absorb text: the global Number Format for valueType
+-- (Power Text keeps the module's default call).
+local AbbreviateValue = ns.EllesmereUI.AbbreviateValue
 
 local db
 I.dbSetters[#I.dbSetters + 1] = function(v) db = v end
@@ -618,6 +613,38 @@ local function GetTopNameBarColor(unit, s)
     return 1, 1, 1
 end
 
+-- Top Name Bar text placement. With Attach Role Icons the name is bounded clear of a shown
+-- icon's side (tnb._euiRoleIcon, "..." past it); a centred name keeps equal room both sides.
+function ns.RF_PlaceTopNameText(tnbText, tnb, s)
+    local align = s.topNameBarTextAlign or "center"
+    local ox = s.topNameBarTextOffsetX or 0
+    local oy = s.topNameBarTextOffsetY or 0
+    tnbText:ClearAllPoints()
+    local padL, padR
+    if s.roleIconOnNameBar and tnb._euiRoleIcon ~= false then
+        local pos = s.roleNameBarPosition or "left"
+        local room = (s.roleIconSize or 14) + 4
+        local rx = s.roleNameBarOffsetX or 0
+        if pos:find("left") then padL = room + rx elseif pos:find("right") then padR = room - rx end
+    end
+    if padL or padR then
+        padL, padR = math.max(4, padL or 4), math.max(4, padR or 4)
+        if align ~= "left" and align ~= "right" then
+            padL = math.max(padL, padR); padR = padL
+        end
+        tnbText:SetPoint("LEFT", tnb, "LEFT", padL + ox, oy)
+        tnbText:SetPoint("RIGHT", tnb, "RIGHT", -padR + ox, oy)
+        tnbText:SetJustifyH((align == "left" and "LEFT") or (align == "right" and "RIGHT") or "CENTER")
+    elseif align == "left" then
+        tnbText:SetPoint("LEFT", tnb, "LEFT", 4 + ox, oy); tnbText:SetJustifyH("LEFT")
+    elseif align == "right" then
+        tnbText:SetPoint("RIGHT", tnb, "RIGHT", -4 + ox, oy); tnbText:SetJustifyH("RIGHT")
+    else
+        tnbText:SetPoint("CENTER", tnb, "CENTER", ox, oy); tnbText:SetJustifyH("CENTER")
+    end
+    tnbText:SetJustifyV("MIDDLE")
+end
+
 -- Reserve the Top Name Bar's height from the TOP of a frame and style it. Shared by real buttons
 -- and every preview so they never drift. Layout + appearance only; the caller sets name text +
 -- color. Returns the reserved height (0 when disabled; health re-anchors flush to the top).
@@ -682,18 +709,7 @@ local function LayoutTopNameBar(s, baseH, powerH, healthBar, tnb, tnbBg, tnbText
     end
     if tnbText then
         ApplyFont(tnbText, s.topNameBarTextSize or 11)
-        local align = s.topNameBarTextAlign or "center"
-        local ox = s.topNameBarTextOffsetX or 0
-        local oy = s.topNameBarTextOffsetY or 0
-        tnbText:ClearAllPoints()
-        if align == "left" then
-            tnbText:SetPoint("LEFT", tnb, "LEFT", 4 + ox, oy); tnbText:SetJustifyH("LEFT")
-        elseif align == "right" then
-            tnbText:SetPoint("RIGHT", tnb, "RIGHT", -4 + ox, oy); tnbText:SetJustifyH("RIGHT")
-        else
-            tnbText:SetPoint("CENTER", tnb, "CENTER", ox, oy); tnbText:SetJustifyH("CENTER")
-        end
-        tnbText:SetJustifyV("MIDDLE")
+        ns.RF_PlaceTopNameText(tnbText, tnb, s)
         -- Force re-layout on a JustifyH change (WoW doesn't relayout otherwise)
         local cur = tnbText:GetText()
         if cur then tnbText:SetText(""); tnbText:SetText(cur) end
@@ -801,6 +817,7 @@ do
     local UnitPowerPercent, UnitGetTotalAbsorbs = UnitPowerPercent, UnitGetTotalAbsorbs
     local UnitInRaid, GetRaidRosterInfo, IsInRaid = UnitInRaid, GetRaidRosterInfo, IsInRaid
     local SCHEMA = TextTags.UNIT.keys
+    local IsZeroValue = EllesmereUI.IsZeroValue
 
     -- OFFLINE / DEAD, nil while alive and connected (clean booleans for group units).
     local function Status(unit, pv)
@@ -867,13 +884,16 @@ do
         return SCHEMA["pp:pct"].sample
     end
 
-    -- Full amounts blank at zero, abbreviated ones read 0, as in the Unit Frames.
+    -- Full and abbreviated amounts blank at zero, as the Unit Frames' Absorb Short.
     local function Absorb(key, get)
         local abr, sample = sfind(key, ":abr", 1, true) ~= nil, SCHEMA[key].sample
         return function(unit)
             if not unit then return sample end
             local v = get(unit) or 0
-            if abr then return AbbreviateValue(v, "absorb") end
+            if abr then
+                if IsZeroValue(v) then return "" end
+                return AbbreviateValue(v, "absorb")
+            end
             return C_StringUtil.TruncateWhenZero(v)
         end
     end

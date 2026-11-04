@@ -3295,27 +3295,11 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 healAbsorbBar:Hide()
             end
         end
-
         -- Max-health reduction is independent of both shield styles.
         if maxOverlay then
             local mhStyle = s.maxHealthStyle or "none"
             if mhStyle ~= "none" then
-                local tex = mhStyle == "maxHealthStripes"
-                    and "Interface\\AddOns\\EllesmereUIUnitFrames\\Media\\striped-maxhp.png"
-                    or ns.ResolveAbsorbStyleTex(mhStyle, "Interface\\Buttons\\WHITE8X8")
-                local mc = s.maxHealthColor or { r = 0.7, g = 0.1, b = 0.1 }
-                if mhStyle == "largeOutlinedStripes" or mhStyle == "largeOutlinedStripesR" then
-                    mc = { r = 1, g = 1, b = 1 }
-                end
-                maxOverlay:SetStatusBarTexture(tex)
-                local fill = maxOverlay:GetStatusBarTexture()
-                if fill then
-                    local tiled = mhStyle == "maxHealthStripes" or ns.ABSORB_TILED_STYLES[mhStyle] == true
-                    fill:SetDrawLayer("ARTWORK", 3)
-                    fill:SetHorizTile(tiled); fill:SetVertTile(tiled)
-                    if ns.UF_ApplyAbsorbTextureTintMode then ns.UF_ApplyAbsorbTextureTintMode(fill, mhStyle) end
-                end
-                maxOverlay:SetStatusBarColor(mc.r or 0.7, mc.g or 0.1, mc.b or 0.1, (s.maxHealthOpacity or 100) / 100)
+                ns.UF_ApplyMaxHealthStyle(maxOverlay, mhStyle, s)
                 maxOverlay:SetOrientation(s.healthVerticalFill and "VERTICAL" or "HORIZONTAL")
                 if ns.ApplyFillRotation then ns.ApplyFillRotation(maxOverlay) end
                 maxOverlay:SetValue(0.20)
