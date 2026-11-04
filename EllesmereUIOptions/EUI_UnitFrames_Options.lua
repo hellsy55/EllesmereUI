@@ -927,6 +927,7 @@ initFrame:SetScript("OnEvent", function(self)
     local optState = {}
     optState.showCombatIndicatorPreview = false
     optState.showHealAbsorbPreview      = false  -- eyeball toggle for the Heal Absorb Style preview
+    optState.showMaxHealthPreview       = false  -- eyeball toggle for the Max Health Style preview
     optState.showDispelOverlayPreview   = false  -- eyeball toggle for the player dispel overlay preview
     -- Preview hover-highlight hint text (shared across Single/Multi tabs)
     optState._ufPreviewHintFS_display = nil  -- hint FontString for the Main Frames page

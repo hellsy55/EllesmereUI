@@ -567,6 +567,11 @@ function ns.CompactLabel(pool, idx, owner)
     lf._line = line
     lf:SetScript("OnEnter", LabelOnEnter)
     lf:SetScript("OnLeave", LabelOnLeave)
+    lf:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and self._categoryCollapseKey and not GetCursorInfo() then
+            ns.ToggleBagCategoryCollapsed(self._categoryCollapseKey)
+        end
+    end)
     -- After the scripts, which can turn mouse input on: the label never takes
     -- clicks, and CompactShowLabel turns motion on per paint
     lf:SetMouseClickEnabled(false)
@@ -643,6 +648,8 @@ local ZONE_PIN, ZONE_ASSIGN = 1, 2
 local gN, cN = 0, 0
 local gLabel, gHint, gInter, gClear, gSize, gW, gLi = {}, {}, {}, {}, {}, {}, {}
 local gZone, gKey, gPlanW = {}, {}, {}
+local gRecent = {}
+local gCollapse = {}
 local cData = {}
 -- A counted label per group index and what it was made from, so an
 -- unchanged label makes no string
@@ -660,8 +667,13 @@ local function CountLabel(g, a, b, n)
     return text
 end
 
-local function AddGroup(label, hint, interactive, clear, zone, key)
+local function AddGroup(label, hint, interactive, clear, zone, key, collapseKey, flashRecent)
     gN = gN + 1
+    local clickable = collapseKey and BP().bagCollapsibleCategories == true
+    gCollapse[gN] = clickable and collapseKey or nil
+    if clickable and label then
+        label = label .. (ns.IsBagCategoryCollapsed(collapseKey) and " +" or " -")
+    end
     gLabel[gN] = (label and label ~= "") and label or false
     gHint[gN] = hint or false
     gInter[gN] = interactive and true or false
@@ -669,6 +681,7 @@ local function AddGroup(label, hint, interactive, clear, zone, key)
     gZone[gN] = zone or false
     gKey[gN] = key or false
     gSize[gN] = 0
+    gRecent[gN] = flashRecent == true
 end
 
 local function AddCell(data)
@@ -691,8 +704,12 @@ end
 -- A nested section becomes one group per bucket; the first is named
 -- "<section>: <bucket>", the others by their bucket. Labels end in their
 -- item count.
-function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint)
+function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint, collapseKey, flashRecent)
     local count = #items
+    if collapseKey and ns.IsBagCategoryCollapsed(collapseKey) then
+        AddGroup(name .. " (" .. count .. ")", hint, false, false, false, false, collapseKey)
+        return
+    end
     local pin = kind == "pinned"
     local zone = false
     if zonesOn then
@@ -706,7 +723,8 @@ function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint)
             local bItems = bucket.items
             local bn = #bItems
             if bn > 0 then
-                AddGroup(CountLabel(gN + 1, first and name, bucket.label, bn), false, false, false, zone, assignKey)
+                AddGroup(CountLabel(gN + 1, first and name, bucket.label, bn), false, false, false, zone, assignKey,
+                    first and collapseKey or nil)
                 for j = 1, bn do AddCell(bItems[j]) end
                 first = false
             end
@@ -724,7 +742,8 @@ function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint)
     -- An empty section is dropped, but the Pinned block and an assignable
     -- category stay as a label-only block (a drop target)
     if count == 0 and not pin and not assignKey and not keepEmpty then return end
-    AddGroup(name ~= "" and CountLabel(gN + 1, false, name, count) or false, hint, false, clear, zone, assignKey)
+    AddGroup(name ~= "" and CountLabel(gN + 1, false, name, count) or false, hint, false, clear, zone, assignKey, collapseKey,
+        kind == "recent" or flashRecent == true)
     for j = 1, count do AddCell(items[j]) end
 end
 
@@ -934,6 +953,18 @@ function ns.CompactBagsPlace(child, startX, startY, columns, slotIdx)
             local clear = gClear[g] and room >= CLEAR_MIN_ROOM
             ns.CompactShowLabel(lf, child, startX + groupX[g], groupY[g], room, bandH,
                 gLabel[g], gW[g], gHint[g] or nil, clear and CLEAR_RESERVE or 0, groupW[g])
+            lf._categoryCollapseKey = gCollapse[g]
+            if not InCombatLockdown() then
+                local canClick = lf._categoryCollapseKey ~= nil
+                lf:SetMouseClickEnabled(canClick)
+                -- Clickable headers must not forward clicks to item slots below.
+                if lf.SetPropagateMouseClicks then lf:SetPropagateMouseClicks(not canClick) end
+            end
+            if lf._categoryCollapseKey then
+                -- The complete label band is clickable, including the divider.
+                lf:SetHitRectInsets(0, 0, 0, 0)
+                lf:SetMouseMotionEnabled(true)
+            end
             if clear then
                 ShowRecentClearButton(lf, nil)
                 lf._clearBtn:SetHeight(bandH)  -- inside the band, never over the icons below
@@ -955,7 +986,7 @@ function ns.CompactBagsPlace(child, startX, startY, columns, slotIdx)
             local btn = GetOrCreateSlot(slotIdx)
             if btn then
                 btn:GetParent():SetParent(child)
-                RenderButton(btn, cData[ci], slotIdx, 0, 0, startX + cellX[ci], cellY[ci], columns, interactive)
+                RenderButton(btn, cData[ci], slotIdx, 0, 0, startX + cellX[ci], cellY[ci], columns, interactive, gRecent[g])
             end
         end
     end

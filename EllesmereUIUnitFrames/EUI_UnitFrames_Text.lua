@@ -265,14 +265,8 @@ end
 ns.EUI_IsSmartPowerPercent = EUI_IsSmartPowerPercent
 EllesmereUI.IsSmartPowerPercent = EUI_IsSmartPowerPercent
 
--- Health, max health and absorb values: the global Number Format for valueType
--- (EllesmereUI_NumberFormat.lua), else the plain call. AbbreviateNumbers runs in
--- Blizzard's secure context, so a secret value plus a config stays secret-safe.
-function ns.AbbreviateValue(v, valueType)
-    local opts = EllesmereUI.NumberFormatOptions(valueType)
-    if opts then return AbbreviateNumbers(v, opts) end
-    return AbbreviateNumbers(v)
-end
+-- Health, max health and absorb values use the shared global formatter.
+ns.AbbreviateValue = EllesmereUI.AbbreviateValue
 EllesmereUI.RegisterNumberFormatCallback(function() ns.RefreshAllUnitNames() end)
 
 -- Health Short always abbreviates from 1,000 with one decimal and an uppercase
@@ -932,6 +926,19 @@ do
         if not u or not UnitExists(u) then return "" end
         return ns.AbbreviateValue(UnitGetTotalHealAbsorbs(u) or 0, "absorb")
     end
+    -- [absorb:abr], [healabsorb:abr]: empty at zero like the full tags. The presets
+    -- above keep "0" because ApplyAbsorbGate clips their whole zone instead.
+    local IsZeroValue = EllesmereUI.IsZeroValue
+    local function AbsorbShortTag(get)
+        return function(u)
+            if not u or not UnitExists(u) then return "" end
+            local v = get(u) or 0
+            if IsZeroValue(v) then return "" end
+            return ns.AbbreviateValue(v, "absorb")
+        end
+    end
+    P.absorbshorttag = AbsorbShortTag(UnitGetTotalAbsorbs)
+    P.healabsorbshorttag = AbsorbShortTag(UnitGetTotalHealAbsorbs)
     P.group = function(u)
         if not IsInRaid() then return "" end
         local idx = UnitInRaid(u)
@@ -1045,6 +1052,7 @@ do
         [P.perpp] = "pp", [P.curpp] = "pp", [P.maxpp] = "pp", [P.curppfull] = "pp", [P.maxppfull] = "pp",
         [P.absorb] = "abs", [P.absorbshort] = "abs",
         [P.healabsorb] = "habs", [P.healabsorbshort] = "habs",
+        [P.absorbshorttag] = "abs", [P.healabsorbshorttag] = "habs",
         [P.name] = "id", [P.level] = "id", [P.levelcol] = "id", [P.levelcolall] = "id",
     }
     -- The tags' Name Format modifiers ([name:abbr]): they shape the plain name,
@@ -1068,8 +1076,8 @@ do
         ["hp:max:abr"] = P.maxhpshort, ["hp:pct"] = P.perhp,
         ["pp"] = P.curppfull, ["pp:abr"] = P.curpp, ["pp:max"] = P.maxppfull,
         ["pp:max:abr"] = P.maxpp, ["pp:pct"] = P.perpp,
-        ["absorb"] = P.absorb, ["absorb:abr"] = P.absorbshort,
-        ["healabsorb"] = P.healabsorb, ["healabsorb:abr"] = P.healabsorbshort,
+        ["absorb"] = P.absorb, ["absorb:abr"] = P.absorbshorttag,
+        ["healabsorb"] = P.healabsorb, ["healabsorb:abr"] = P.healabsorbshorttag,
         ["name"] = P.name, ["name:first"] = P.namefirst, ["name:last"] = P.namelast, ["name:abbr"] = P.nameabbr,
         ["target"] = P.tgtname, ["target:first"] = P.tgtfirst, ["target:last"] = P.tgtlast, ["target:abbr"] = P.tgtabbr,
         ["level"] = P.level, ["group"] = P.group,

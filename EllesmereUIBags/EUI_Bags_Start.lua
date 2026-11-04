@@ -61,6 +61,114 @@ local _paintedPanelOpen = false
 I.paintedPanelOpenSetters[#I.paintedPanelOpenSetters + 1] = function(v) _paintedPanelOpen = v end
 
 -------------------------------------------------------------------------------
+--  Recent Items flash (pooled, on-demand, animation-driven)
+-------------------------------------------------------------------------------
+local RECENT_FLASH_DURATION = 1.7
+function ns.PaintRecentItemFlash(btn, data, inRecent)
+    local glow = btn._recentGlow
+    local enabled = BP().bagRecentFlash == true
+    local id = data and data.info and data.info.itemID
+    local stamps = EUI_Bags._recentFlashUntil
+    local mark = enabled and inRecent and id and stamps and stamps[id]
+    -- Acquisitions are queued even while the bags (or Recent Items) are hidden.
+    -- Start the clock on the first visible paint, never at loot time.
+    local pending = enabled and inRecent and id and EUI_Bags._recentFlashPending
+    local pendingSeq = pending and pending[id]
+    if pendingSeq and (not EUI_Bags:IsVisible() or not btn:IsVisible()) then
+        pendingSeq = nil
+    end
+    local left = mark and (mark.untilTime - GetTime()) or 0
+    if left <= 0 and not pendingSeq then
+        if glow then
+            if glow.anim:IsPlaying() then glow.anim:Stop() end
+            glow.frame:Hide()
+            glow.itemID, glow.seq = nil, nil
+        end
+        return
+    end
+    if not glow then
+        -- Secure item buttons must not gain regions or frames during combat.
+        if InCombatLockdown() then return end
+        local frame = CreateFrame("Frame", nil, btn)
+        frame:SetAllPoints(btn)
+        frame:SetFrameLevel(btn:GetFrameLevel() + 8)
+        frame:EnableMouse(false)
+        frame:Hide()
+        local fill = frame:CreateTexture(nil, "ARTWORK")
+        fill:SetAllPoints()
+        fill:SetColorTexture(1, 0.74, 0.22, 0.75)
+        fill:SetBlendMode("ADD")
+        -- A bright outline stays legible over both pale and dark item icons.
+        local function Edge()
+            local tex = frame:CreateTexture(nil, "OVERLAY")
+            tex:SetColorTexture(1, 0.9, 0.45, 1)
+            tex:SetBlendMode("ADD")
+            return tex
+        end
+        local topEdge = Edge()
+        topEdge:SetPoint("TOPLEFT")
+        topEdge:SetPoint("TOPRIGHT")
+        topEdge:SetHeight(3)
+        local bottomEdge = Edge()
+        bottomEdge:SetPoint("BOTTOMLEFT")
+        bottomEdge:SetPoint("BOTTOMRIGHT")
+        bottomEdge:SetHeight(3)
+        local leftEdge = Edge()
+        leftEdge:SetPoint("TOPLEFT")
+        leftEdge:SetPoint("BOTTOMLEFT")
+        leftEdge:SetWidth(3)
+        local rightEdge = Edge()
+        rightEdge:SetPoint("TOPRIGHT")
+        rightEdge:SetPoint("BOTTOMRIGHT")
+        rightEdge:SetWidth(3)
+        local anim = frame:CreateAnimationGroup()
+        local phases = { {0.08, 1, 0.20}, {1, 0.22, 0.27},
+                         {0.22, 1, 0.23}, {1, 0, 1.00} }
+        local fades = {}
+        for index, phase in ipairs(phases) do
+            local fade = anim:CreateAnimation("Alpha")
+            fade:SetOrder(index)
+            fade:SetFromAlpha(phase[1])
+            fade:SetToAlpha(phase[2])
+            fade:SetDuration(phase[3])
+            fades[index] = fade
+        end
+        anim:SetScript("OnFinished", function() frame:Hide() end)
+        glow = { frame = frame, anim = anim, fades = fades }
+        btn._recentGlow = glow
+    end
+    -- A frame can be created only outside combat. Keep its pending pickup
+    -- if creation was deferred; the existing PLAYER_REGEN_ENABLED handler
+    -- repaints the visible bag after combat to play the queued flash.
+    if pendingSeq then
+        if not stamps then stamps = {}; EUI_Bags._recentFlashUntil = stamps end
+        mark = { seq = pendingSeq, untilTime = GetTime() + RECENT_FLASH_DURATION }
+        stamps[id] = mark
+        pending[id] = nil
+        left = RECENT_FLASH_DURATION
+    end
+    if left <= 0 then return end
+    if glow.itemID == id and glow.seq == mark.seq then return end
+    if glow.anim:IsPlaying() then glow.anim:Stop() end
+    glow.itemID, glow.seq = id, mark.seq
+    -- List rows without a visible icon glow across the row; the other views
+    -- glow only the item icon. Retarget pooled frames when the view changes.
+    local target = btn._lvIcon and btn._lvIcon:IsShown() and btn._lvIcon or btn
+    glow.frame:ClearAllPoints()
+    glow.frame:SetAllPoints(target)
+    -- Only run the remaining pickup window; ordinary refreshes do not restart
+    -- an already active glow for this item/sequence.
+    local scale = math.min(left / RECENT_FLASH_DURATION, 1)
+    glow.fades[1]:SetDuration(0.20 * scale)
+    glow.fades[2]:SetDuration(0.27 * scale)
+    glow.fades[3]:SetDuration(0.23 * scale)
+    glow.fades[4]:SetDuration(1.00 * scale)
+    glow.frame:SetAlpha(1)
+    glow.frame:Show()
+    glow.anim:Play()
+end
+
+-------------------------------------------------------------------------------
 --  StartAddon
 -------------------------------------------------------------------------------
 local function StartAddon()
@@ -93,6 +201,19 @@ local function StartAddon()
     local _bagDragging = false
     local _bagDragStartCX, _bagDragStartCY = 0, 0
     local _bagDragStartLeft, _bagDragStartTop = 0, 0
+    local function SaveBagDragPosition()
+        local left, top = EUI_Bags:GetLeft(), EUI_Bags:GetTop()
+        if not left or not top then return end
+        local PP = EUI and EUI.PP
+        if PP and PP.Snap then left = PP.Snap(left); top = PP.Snap(top) end
+        EUI_Bags:ClearAllPoints()
+        EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        if EUI_Bags.AutoSizeOn() or EUI_Bags.ExpandHeightOn() then
+            EUI_Bags:AnchorAutoResizeToBottomRight()
+        else
+            BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
+        end
+    end
     local _bagDragFrame = CreateFrame("Frame")
     _bagDragFrame:Hide()
     _bagDragFrame:SetScript("OnUpdate", function(self)
@@ -100,14 +221,7 @@ local function StartAddon()
         if not IsMouseButtonDown("LeftButton") then
             _bagDragging = false
             self:Hide()
-            local left, top = EUI_Bags:GetLeft(), EUI_Bags:GetTop()
-            if left and top then
-                local PP = EUI and EUI.PP
-                if PP and PP.Snap then left = PP.Snap(left); top = PP.Snap(top) end
-                BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
-                EUI_Bags:ClearAllPoints()
-                EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
-            end
+            SaveBagDragPosition()
             return
         end
         local cx, cy = GetCursorPosition()
@@ -138,14 +252,7 @@ local function StartAddon()
         if button == "LeftButton" and _bagDragging then
             _bagDragging = false
             _bagDragFrame:Hide()
-            local left, top = EUI_Bags:GetLeft(), EUI_Bags:GetTop()
-            if left and top then
-                local PP = EUI and EUI.PP
-                if PP and PP.Snap then left = PP.Snap(left); top = PP.Snap(top) end
-                BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
-                EUI_Bags:ClearAllPoints()
-                EUI_Bags:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
-            end
+            SaveBagDragPosition()
         end
     end)
 
@@ -670,9 +777,19 @@ local function StartAddon()
                 end
                 EUI_Bags._recentSeq = EUI_Bags._recentSeq + 1
                 recent[itemID] = EUI_Bags._recentSeq
+                if BP().bagRecentFlash == true then
+                    local pending = EUI_Bags._recentFlashPending
+                    if not pending then pending = {}; EUI_Bags._recentFlashPending = pending end
+                    -- Do not consume pending highlights until a Recent Items
+                    -- button is actually painted; categories may be hidden.
+                    pending[itemID] = EUI_Bags._recentSeq
+                end
                 ro[#ro + 1] = itemID
                 while #ro > RECENT_MAX do
-                    recent[table.remove(ro, 1)] = nil
+                    local evicted = table.remove(ro, 1)
+                    recent[evicted] = nil
+                    if EUI_Bags._recentFlashUntil then EUI_Bags._recentFlashUntil[evicted] = nil end
+                    if EUI_Bags._recentFlashPending then EUI_Bags._recentFlashPending[evicted] = nil end
                 end
             end
             if not atMail or count > known then
@@ -700,6 +817,8 @@ local function StartAddon()
     function EUI_Bags:ClearRecentItems()
         wipe(EUI_Bags._recentItems)
         wipe(EUI_Bags._recentOrder)
+        if EUI_Bags._recentFlashUntil then wipe(EUI_Bags._recentFlashUntil) end
+        if EUI_Bags._recentFlashPending then wipe(EUI_Bags._recentFlashPending) end
         if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end
     end
 
@@ -913,6 +1032,11 @@ local function StartAddon()
                 if EUI_BagsReagent:IsVisible() and EUI_BagsReagent.RefreshInventory then
                     EUI_BagsReagent:RefreshInventory()
                 end
+            elseif EUI_Bags:IsVisible() and BP().bagRecentFlash == true
+                   and EUI_Bags._recentFlashPending and next(EUI_Bags._recentFlashPending) then
+                -- A secure button may not acquire the flash frame in combat.
+                -- Play pending highlights when the bag can safely repaint.
+                EUI_Bags:RefreshInventory()
             end
             return
         end

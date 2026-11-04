@@ -2095,7 +2095,7 @@ do
         "accentReskinElements",
     })
     -- Shared border-editor key sets (tooltip / popup menu / popup menu button)
-    for _, prefix in ipairs({ "tooltip", "popupMenu", "popupMenuButton" }) do
+    for _, prefix in ipairs({ "tooltip", "popupMenu", "popupMenuButton", "lootWindow", "lootIcon" }) do
         for _, suffix in ipairs({
             "BorderTexture", "BorderThickness", "BorderThicknessPx", "BorderColor",
             "BorderColorMode", "BorderOpacity", "BorderOffsetX",
@@ -2111,7 +2111,7 @@ do
         "reskinPlayerSpells", "reskinAdventureGuide", "reskinProfessionsBook",
         "reskinProfessions", "reskinWorldMap", "reskinGuild", "reskinCalendar",
         "reskinAchievements", "reskinMail", "reskinCatalyst", "reskinSocket",
-        "reskinItemUpgrade", "reskinLoot", "reskinLootToast", "lootToastQualityStrip",
+        "reskinItemUpgrade", "reskinLoot", "lootIconBorder", "lootWindowBorderQualityColor", "reskinLootToast", "lootToastQualityStrip",
         "lootToastQualityStripMoney", "lootToastScale",
         "reskinBNetToast",
         "reskinLootRoll", "reskinLootHistory", "reskinGroupInvite",

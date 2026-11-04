@@ -304,6 +304,11 @@ end
 -- "<section key>/<subtype>" for sub-sections. Saved in the profile.
 -- Shift-click on a top-level section collapses or expands all of them.
 local function ToggleCollapsed(self)
+    if self._categoryCollapseKey then
+        if GetCursorInfo() then return end
+        ns.ToggleBagCategoryCollapsed(self._categoryCollapseKey)
+        return
+    end
     local p = BP()
     local set = p.bagListCollapsed
     if not set then set = {}; p.bagListCollapsed = set end
@@ -865,11 +870,31 @@ local function PlaceSection(key, label, count, x, y, w, sub)
     SetListFont(s._count, small)
     s._label:SetTextColor(sub and 0.55 or 0.7, sub and 0.55 or 0.7, sub and 0.55 or 0.7)
     s._label:SetText(label)
-    s._count:SetText(count)
     s._key, s._sub = key, sub
-    local collapsed = (BP().bagListCollapsed or _emptyP)[key] == true
-    -- Arrow points right when collapsed, down when open
-    s._arrow:SetRotation(collapsed and math.pi or math.pi / 2)
+    local categoryKey = not sub and BP().bagCollapsibleCategories == true
+        and key:sub(1, 4) == "cat:" and key or nil
+    s._categoryCollapseKey = categoryKey
+    local collapsed
+    if categoryKey then
+        collapsed = ns.IsBagCategoryCollapsed(categoryKey)
+        s._arrow:Hide()
+        s._label:ClearAllPoints()
+        s._label:SetPoint("LEFT", s, "LEFT", 0, 0)
+        local number, trailing = count:match("^(.-%))(.*)$")
+        if number then
+            s._count:SetText(number .. (collapsed and " +" or " -") .. trailing)
+        else
+            s._count:SetText(count .. (collapsed and " +" or " -"))
+        end
+    else
+        collapsed = (BP().bagListCollapsed or _emptyP)[key] == true
+        s._arrow:Show()
+        s._label:ClearAllPoints()
+        s._label:SetPoint("LEFT", s._arrow, "RIGHT", 4, 0)
+        s._count:SetText(count)
+        -- Arrow points right when collapsed, down when open
+        s._arrow:SetRotation(collapsed and math.pi or math.pi / 2)
+    end
     if s._clearBtn then
         s._clearBtn:Hide()
         s._line:SetPoint("RIGHT", s, "RIGHT", 0, 0)
@@ -1020,9 +1045,26 @@ function ns.RenderListView(items, opts)
             count = "(" .. b.n .. " / " .. C_Container.GetContainerNumSlots(b.key) .. ")"
         else label, secKey = cats[b.key].name, cats[b.key]._defaultName end
         count = count or ("(" .. b.n .. ")")
+        -- In List, the existing arrow behavior remains when the new option is OFF.
+        -- When ON, only actual category sections use the shared +/- state.
+        if not slotView and BP().bagCollapsibleCategories == true and not (b.key == "main") then
+            local category = type(b.key) == "number" and cats[b.key] or nil
+            if category then
+                secKey = "cat:" .. category._defaultName
+            elseif b.key == "pinned" or b.key == "recent" or b.key == "junk" then
+                for _, cat in ipairs(cats) do
+                    if (b.key == "pinned" and cat.isPinned)
+                        or (b.key == "recent" and cat.isRecent)
+                        or (b.key == "junk" and cat.isJunk) then
+                        secKey = "cat:" .. cat._defaultName
+                        break
+                    end
+                end
+            end
+        end
         if showValue and b.sell > 0 then count = count .. "  " .. C_CurrencyInfo.GetCoinTextureString(b.sell) end
         local h, collapsed = PlaceSection(secKey, label, count, x, y, rowW, false)
-        if secKey == "recent" and BP().bagShowRecentClear == true then
+        if b.key == "recent" and BP().bagShowRecentClear == true then
             local s = _sections[_sectionsUsed]
             s._line:SetPoint("RIGHT", ns.ShowRecentClearButton(s), "LEFT", -6, 0)
         end
@@ -1047,6 +1089,7 @@ function ns.RenderListView(items, opts)
                     else
                         RenderEmptyRow(btn, cols, d, rowW, x, y, i % 2 == 0)
                     end
+                    ns.PaintRecentItemFlash(btn, d, b.key == "recent")
                     y = y - rowH
                 end
             end

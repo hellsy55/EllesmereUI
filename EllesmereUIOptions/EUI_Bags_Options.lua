@@ -400,6 +400,13 @@ initFrame:SetScript("OnEvent", function(self)
                       ResetAndRefreshBagLayout()
                   end }
             end
+            layoutSlots[#layoutSlots + 1] = { type="toggle", text="Auto-Expand Height",
+                tooltip="Automatically grow the bag window upwards from its fixed bottom-right corner to fit visible content. Works with Grid, Compact and List. Screen limits retain scrolling if needed; Auto-Size to Fit can also grow the window leftwards.",
+                getValue=function() return db.profile.bagAutoExpandHeight == true end,
+                setValue=function(v)
+                    db.profile.bagAutoExpandHeight = v
+                    ResetAndRefreshBagLayout()
+                end }
             -- Texture, tint, opacity and slot background are shared by bags,
             -- the character bank and warbank. Reuse the module's live catalogue.
             EllesmereUI.AppendSharedMediaTextures(
@@ -535,6 +542,17 @@ initFrame:SetScript("OnEvent", function(self)
                               db.profile.bagRecentInOneBag = v
                               if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                           end },
+                        { type="toggle", label="Flash Newly Added Items",
+                          tooltip="Flash newly acquired items with two golden pulses when they first appear in Recent Items, even if the bags were closed when looted.",
+                          get=function() return db.profile.bagRecentFlash == true end,
+                          set=function(v)
+                              db.profile.bagRecentFlash = v
+                              if not v and _G.EUI_Bags then
+                                  if _G.EUI_Bags._recentFlashUntil then wipe(_G.EUI_Bags._recentFlashUntil) end
+                                  if _G.EUI_Bags._recentFlashPending then wipe(_G.EUI_Bags._recentFlashPending) end
+                              end
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                          end },
                         { type="toggle", label="Show Clear Button",
                           get=function() return db.profile.bagShowRecentClear == true end,
                           set=function(v)
@@ -638,7 +656,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Category Title Size (also on the Fonts page) | Hide Sidebar Icons When Collapsed
+            -- Category Title Size | Collapsible Categories
             _, h = W:DualRow(parent, y,
                 { type="slider", text="Category Title Size", min=8, max=16, step=1,
                   tooltip="Font size for the category titles above your items.",
@@ -647,13 +665,25 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagCatTitleSize = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
+                { type="toggle", text="Collapsible Categories",
+                  tooltip="Click a category header to collapse or expand its items. A + or - appears after its item count in Grid, Compact, and List displays.",
+                  getValue=function() return db.profile.bagCollapsibleCategories == true end,
+                  setValue=function(v)
+                      db.profile.bagCollapsibleCategories = v and true or false
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end }
+            ); y = y - h
+
+            -- Hide Sidebar Icons When Collapsed
+            _, h = W:DualRow(parent, y,
                 { type="toggle", text="Hide Sidebar Icons When Collapsed",
                   tooltip="Hides a collapsed sidebar; its expand arrow sits by the Inventory title.",
                   getValue=function() return db.profile.bagHideSidebarIconsCollapsed == true end,
                   setValue=function(v)
                       db.profile.bagHideSidebarIconsCollapsed = v and true or false
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end }
+                  end },
+                EllesmereUI.BlankRowCfg()
             ); y = y - h
 
             if anyGrid then
@@ -1069,23 +1099,27 @@ initFrame:SetScript("OnEvent", function(self)
             local iconsRow
             iconsRow, h = W:DualRow(parent, y,
                 { type="label", text="Bag Top Bar Icons",
-                  tooltip="Choose which icons show in the bag window's top bar; the Junk Icon is the Junk Marker." },
+                  tooltip="Show or hide top-bar icons; drag their menu rows to reorder from right to left. Junk Icon controls the Junk Marker." },
                 { type="toggle", text="Gold Tracking and History",
                   tooltip="Track and display gold amounts from all your characters on hover.",
                   getValue=function() return EllesmereUI.GetGoldLedger().IsTracking() end,
                   setValue=function(v) EllesmereUI.GetGoldLedger().SetTracking(v) end }
             ); y = y - h
 
-            -- Bag Top Bar Icons dropdown (left side), its Sort Options cog to the left
+            -- Bag Top Bar Icons dropdown (left side), its Sort Options cog to the left.
+            -- The menu order mirrors the header from right (search) to left.
             if not EllesmereUI._prebuilding then
                 local TOP_BAR_ICONS = {
-                    { key = "bagShowBagsIcon", label = "Bags Icon" },
-                    { key = "bagShowJunkIcon", label = "Junk Icon" },
-                    { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
                     { key = "bagShowSortIcon", label = "Sort Icon" },
+                    { key = "bagShowBagsIcon", label = "Bags Icon" },
+                    { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
+                    { key = "bagShowJunkIcon", label = "Junk Icon" },
+                }
+                local DEFAULT_ICON_ORDER = {
+                    "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon",
                 }
                 local leftRgn = iconsRow._leftRegion
-                local iconsDD, iconsDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
+                local iconsDD, iconsDDRefresh = EllesmereUI.BuildReorderCBDropdown(
                     leftRgn, 210, leftRgn:GetFrameLevel() + 2, TOP_BAR_ICONS,
                     function(key) return db.profile[key] ~= false end,
                     function(key, v)
@@ -1109,7 +1143,23 @@ initFrame:SetScript("OnEvent", function(self)
                             end
                         end
                         EllesmereUI:RefreshPage()  -- the Sort Options cog follows Sort Icon
-                    end, nil, 10)
+                    end,
+                    {
+                        hint = "Drag to Reorder (right to left)",
+                        grip = true,
+                        openOrder = function()
+                            return db.profile.bagTopBarIconOrder or DEFAULT_ICON_ORDER
+                        end,
+                        setOrder = function(order)
+                            -- A copy becomes the profile-owned SavedVariable. Leave the
+                            -- key absent until the first drag, preserving older layouts.
+                            local saved = {}
+                            for i = 1, #order do saved[i] = order[i] end
+                            db.profile.bagTopBarIconOrder = saved
+                            local bags = _G.EUI_Bags
+                            if bags and bags.SyncHeaderIcons then bags:SyncHeaderIcons() end
+                        end,
+                    })
                 PP.Point(iconsDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
                 leftRgn._control = iconsDD
                 leftRgn._lastInline = nil
@@ -1306,6 +1356,29 @@ initFrame:SetScript("OnEvent", function(self)
                   setValue=function(v)
                       db.profile.bagOpenWithCharacter = v and true or false
                       BagsNS.ToggleBagsWithCharacterFrame()
+                  end }
+            ); y = y - h
+
+            -- Slot Count Format | Separate Reagent Slots
+            _, h = W:DualRow(parent, y,
+                { type="dropdown", text="Slot Count Format",
+                  tooltip="Show used or free inventory slots.",
+                  values={ used_total="Used / Total", free_total="Free / Total", free="Free" },
+                  order={ "used_total", "free_total", "free" },
+                  getValue=function()
+                      local v = db.profile.bagSlotCountFormat
+                      return (v == "free_total" or v == "free") and v or "used_total"
+                  end,
+                  setValue=function(v)
+                      db.profile.bagSlotCountFormat = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                  end },
+                EllesmereUI.IS_FOREVER and EllesmereUI.BlankRowCfg() or { type="toggle", text="Separate Reagent Slots",
+                  tooltip="Show reagent bag slots on a separate line.",
+                  getValue=function() return db.profile.bagSeparateReagentSlots == true end,
+                  setValue=function(v)
+                      db.profile.bagSeparateReagentSlots = v
+                      if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end }
             ); y = y - h
 
