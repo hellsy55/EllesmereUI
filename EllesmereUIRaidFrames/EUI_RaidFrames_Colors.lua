@@ -468,9 +468,13 @@ end
 -- The Name Format (Text Display, nameFormat): the character name shaped by
 -- EllesmereUI.ShortName; unset or "full" shows it whole. Nicknames are never
 -- shortened. fmt (a tag's own modifier, [name:abbr]) takes the setting's place.
-function ns.RF_FormatName(display, s, fmt)
+-- unit: whose name it is; the setting asks EllesmereUI.UnitNameFormat (WoW
+-- Forever: First / Last Name leave a non-player's name whole, a mob a member
+-- targets included). A tag's modifier shapes any name.
+function ns.RF_FormatName(display, s, fmt, unit)
     local mode = fmt or (s and s.nameFormat)
     if not mode or mode == "full" then return display end
+    if not fmt then mode = EllesmereUI.UnitNameFormat(mode, unit) end
     return EllesmereUI.ShortName(display, mode)
 end
 
@@ -496,7 +500,7 @@ local function ResolveDisplayName(unit, applyCap, s, fmt)
     if db and db.profile and db.profile.showNicknames == false then
         if Ambiguate then name = Ambiguate(name, "short") end
         local raw = EllesmereUI.WithSurname(name, surname)
-        if ns.RF_FormatName then raw = ns.RF_FormatName(raw, s, fmt) end
+        if ns.RF_FormatName then raw = ns.RF_FormatName(raw, s, fmt, unit) end
         if applyCap then raw = ns.CapName(raw, s) end
         return raw
     end
@@ -517,7 +521,7 @@ local function ResolveDisplayName(unit, applyCap, s, fmt)
                and not (issecretvalue and issecretvalue(dn)) and dn ~= "" then
                 display = dn
             else
-                display = ns.RF_FormatName(EllesmereUI.WithSurname(name, surname), s, fmt)
+                display = ns.RF_FormatName(EllesmereUI.WithSurname(name, surname), s, fmt, unit)
             end
         end
     end
@@ -572,7 +576,7 @@ local function ResolveDisplayName(unit, applyCap, s, fmt)
     end
     if not display then
         if Ambiguate then name = Ambiguate(name, "short") end
-        display = ns.RF_FormatName(EllesmereUI.WithSurname(name, surname), s, fmt)
+        display = ns.RF_FormatName(EllesmereUI.WithSurname(name, surname), s, fmt, unit)
     end
     -- Cap only the in-frame name (applyCap), not the top name bar banner.
     if applyCap then display = ns.CapName(display, s) end

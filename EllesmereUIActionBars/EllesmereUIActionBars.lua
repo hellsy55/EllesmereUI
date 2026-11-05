@@ -633,8 +633,11 @@ for _, info in ipairs(BAR_CONFIG) do
         alwaysShowButtons = true,
         autoCompactSlots = false,
         showPagingArrows = false,
-        skipVisiblePagingBars = false,
+        skipVisiblePagingBars = true,
         pagingArrowsRight = false,
+        -- Paging Arrows off: the arrows still show while bar 1 is on a page
+        -- the player paged to (LayoutPagingFrame's paged driver).
+        pagingArrowsWhilePaged = true,
         paging = {},
         -- Auto-paging opt-outs (MainBar only; see BuildPagingConditions).
         disableFormPaging = false,
