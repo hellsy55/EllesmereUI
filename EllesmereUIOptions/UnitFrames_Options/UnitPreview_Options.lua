@@ -1350,12 +1350,12 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         end
     end
 
-    -- Absorb bars (style-aware preview for player, target, focus):
+    -- Absorb bars (style-aware preview for player, target, focus, boss):
     --   absorbBar     = shield (damage) absorb, white/shield, drawn below
     --   healAbsorbBar = heal absorb, red, one sublevel above; shown only while
     --                   the Heal Absorb Style eyeball is on
     local absorbBar, healAbsorbBar, absorbTopBar, healAbsorbTopBar, maxOverlay, maxTopBar
-    if unitKey == "player" or unitKey == "target" or unitKey == "focus" then
+    if unitKey == "player" or unitKey == "target" or unitKey == "focus" or unitKey == "boss" then
         local PREV_ABS_TEX = {
             striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
             stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
@@ -1398,7 +1398,7 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         absorbBar:SetMinMaxValues(0, 1)
         absorbBar:SetValue(0.14)
         absorbBar:SetFrameLevel(health:GetFrameLevel() + 1)
-        if not absStyle or absStyle == "none" then absorbBar:Hide() end
+        absorbBar:Hide()  -- rendered only while its preview eye is active
 
         -- Heal absorb (red, one sublevel above the shield absorb); on the preview
         -- the two are mutually exclusive -- visible only while the eyeball is on,
@@ -3203,16 +3203,13 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             end
         end
 
-        -- Absorb bars (player/target/focus): the Heal Absorb Style eyeball
-        -- replaces the shield absorb with the heal absorb. Both honor their
-        -- placement cog (absorbEdgeMode / healAbsorbEdgeMode).
+        -- Preview eyeballs are session-only and mutually exclusive. Shield
+        -- and heal absorb honor their respective placement cogs.
+        local _absPrev = optState.showAbsorbPreview
         local _healPrev = optState.showHealAbsorbPreview
-        -- Only replace when there IS a heal absorb to show; with style "none"
-        -- keep the shield preview instead of blanking the absorb area.
-        local _healWillShow = _healPrev and (s.healAbsorbStyle or "clean") ~= "none"
         if absorbBar then
             local absS = s.showPlayerAbsorb
-            if (not _healWillShow) and absS and absS ~= "none" then
+            if _absPrev and absS and absS ~= "none" then
                 local _paTex = {
                     striped         = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped3.tga",
                     stripedReversed = "Interface\\AddOns\\EllesmereUI\\media\\textures\\shields\\striped-5-reversed.png",
@@ -3298,7 +3295,7 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
         -- Max-health reduction is independent of both shield styles.
         if maxOverlay then
             local mhStyle = s.maxHealthStyle or "none"
-            if mhStyle ~= "none" then
+            if optState.showMaxHealthPreview and mhStyle ~= "none" then
                 ns.UF_ApplyMaxHealthStyle(maxOverlay, mhStyle, s)
                 maxOverlay:SetOrientation(s.healthVerticalFill and "VERTICAL" or "HORIZONTAL")
                 if ns.ApplyFillRotation then ns.ApplyFillRotation(maxOverlay) end
@@ -4275,16 +4272,15 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 combatInd:Hide()
             end
         end
-        -- Faction indicator preview, behind its row's eye toggle: your own faction
-        -- on the player frame, the other faction on the target frame (what
-        -- Opposite Faction shows).
+        -- Faction indicator preview: use your own faction for Player and the
+        -- Target's Always sample; use the other faction only for Opposite Faction.
         if factionInd then
             local fMode = s.factionIndicatorMode or "off"
             local fEye = ns._ufPvEyes and ns._ufPvEyes.faction
             if (unitKey == "player" or unitKey == "target") and fMode ~= "off" and fEye then
                 local mine = UnitFactionGroup("player")
                 local fac = mine
-                if unitKey == "target" then
+                if unitKey == "target" and fMode == "opposite" then
                     fac = (mine == "Horde") and "Alliance" or "Horde"
                 end
                 if fac ~= "Horde" and fac ~= "Alliance" then fac = "Horde" end
@@ -4292,7 +4288,7 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
                 local fPos = s.factionIndicatorPosition or "topright"
                 local fOx, fOy = s.factionIndicatorX or 0, s.factionIndicatorY or 0
                 local fStyle = s.factionIndicatorStyle or "pvp"
-                -- The preview shows your own badge on both frames.
+                -- The sample mirrors the selected faction mode.
                 EllesmereUI.SetFactionArt(factionInd, fStyle, fac, EllesmereUI.FactionBadgeFor(fStyle, "player"))
                 factionInd:SetSize(fSz, fSz)
                 factionInd:ClearAllPoints()
@@ -4312,12 +4308,12 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             end
         end
         -- Raid marker / leader / elite previews, shown by their rows' eye toggles
-        -- (and only while the indicator itself is on). Placement mirrors the
-        -- live frames: raid marker centred on a frame corner, the other two on
-        -- a health-bar corner or the portrait.
+        -- (and only while the indicator itself is on). Boss uses its own eye and
+        -- side/center marker anchors; Player/Target use their upper frame edge.
         do
             local eyes = ns._ufPvEyes or {}
             local isPT = unitKey == "player" or unitKey == "target"
+            local isBoss = unitKey == "boss"
             local function PlaceCorner(tex, pos, ox, oy)
                 tex:ClearAllPoints()
                 if pos == "portrait" and portraitFrame and sp then
@@ -4333,17 +4329,34 @@ function ns.UFO_BuildUnitPreview(parent, unitKey, side)
             end
             local rt = pf._pvRaid
             if rt then
-                if isPT and eyes.raid and s.raidMarkerEnabled then
-                    local i = (eyes.raidIndex or 1) - 1
+                local showRaid = (isPT and eyes.raid and s.raidMarkerEnabled)
+                    or (isBoss and eyes.bossRaid and s.raidMarkerEnabled ~= false)
+                if showRaid then
+                    local i = ((isBoss and eyes.bossRaidIndex or eyes.raidIndex) or 1) - 1
                     local col, row = i % 4, math.floor(i / 4)
                     rt:SetTexCoord(col / 4, (col + 1) / 4, row / 4, (row + 1) / 4)
                     local rmSize = s.raidMarkerSize or 28
-                    local rmAlign = s.raidMarkerAlign or "right"
-                    local anchor = (rmAlign == "left") and "TOPLEFT"
-                        or (rmAlign == "center") and "TOP" or "TOPRIGHT"
+                    local rmAlign = s.raidMarkerAlign or (isBoss and "left" or "right")
+                    local ox, oy = s.raidMarkerX or 0, s.raidMarkerY or 0
                     rt:SetSize(rmSize, rmSize)
                     rt:ClearAllPoints()
-                    rt:SetPoint("CENTER", pf, anchor, s.raidMarkerX or 0, s.raidMarkerY or 0)
+                    if isBoss then
+                        -- The live boss unit frame excludes castbar/text-bar height.
+                        -- barArea matches the previewed health/power/portrait body;
+                        -- top text bars add a reserve above that body.
+                        local bossMarkerY = oy - btbTopOff / 2
+                        if rmAlign == "left" then
+                            rt:SetPoint("RIGHT", barArea, "LEFT", ox, bossMarkerY)
+                        elseif rmAlign == "center" then
+                            rt:SetPoint("CENTER", barArea, "CENTER", ox, bossMarkerY)
+                        else
+                            rt:SetPoint("LEFT", barArea, "RIGHT", ox, bossMarkerY)
+                        end
+                    else
+                        local anchor = (rmAlign == "left") and "TOPLEFT"
+                            or (rmAlign == "center") and "TOP" or "TOPRIGHT"
+                        rt:SetPoint("CENTER", pf, anchor, ox, oy)
+                    end
                     rt:Show()
                 else
                     rt:Hide()

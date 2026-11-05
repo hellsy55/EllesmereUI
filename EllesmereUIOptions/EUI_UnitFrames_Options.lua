@@ -926,6 +926,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- builders under UnitFrames_Options\ read and write the live values.
     local optState = {}
     optState.showCombatIndicatorPreview = false
+    optState.showAbsorbPreview          = false  -- eyeball toggle for the Absorb Style preview
     optState.showHealAbsorbPreview      = false  -- eyeball toggle for the Heal Absorb Style preview
     optState.showMaxHealthPreview       = false  -- eyeball toggle for the Max Health Style preview
     optState.showDispelOverlayPreview   = false  -- eyeball toggle for the player dispel overlay preview

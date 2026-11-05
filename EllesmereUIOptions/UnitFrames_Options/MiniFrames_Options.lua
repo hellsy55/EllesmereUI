@@ -3060,6 +3060,39 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                       set=function(v) db.profile.boss.raidMarkerAlign = v; ReloadAndUpdate() end },
                 },
             })
+            -- Same non-persistent preview eye used by the main frames, with
+            -- boss-only state so their sample markers do not turn each other on.
+            ns._ufPvEyes = ns._ufPvEyes or {}
+            local eyes = ns._ufPvEyes
+            local rgn = bossRmRow._leftRegion
+            local eyeBtn = CreateFrame("Button", nil, rgn)
+            eyeBtn:SetSize(26, 26)
+            eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
+            rgn._lastInline = eyeBtn
+            local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+            EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
+            eyeTex:SetAllPoints()
+            local function RefreshBossRaidEye()
+                eyeTex:SetTexture(eyes.bossRaid and EllesmereUI.EYE_INVISIBLE_ICON or EllesmereUI.EYE_VISIBLE_ICON)
+            end
+            RefreshBossRaidEye()
+            RegisterWidgetRefresh(RefreshBossRaidEye)
+            eyeBtn:SetScript("OnClick", function()
+                eyes.bossRaid = not eyes.bossRaid
+                if eyes.bossRaid then eyes.bossRaidIndex = math.random(1, 8) end
+                RefreshBossRaidEye()
+                UpdatePreview()
+            end)
+            eyeBtn:SetScript("OnEnter", function(self)
+                EllesmereUI.SetGlyphAlpha(self, 0.7)
+                EllesmereUI.ShowWidgetTooltip(self, eyes.bossRaid and "Hide raid marker preview" or "Show raid marker preview")
+            end)
+            eyeBtn:SetScript("OnLeave", function(self)
+                EllesmereUI.SetGlyphAlpha(self, 0.4)
+                EllesmereUI.HideWidgetTooltip()
+            end)
         end
 
         return yy
@@ -3726,7 +3759,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             return 80
         end
 
-        -- Row 1: Absorb Style (+ color swatch + placement cog) | Absorb Opacity
+        -- Row 1: Absorb Style (+ preview eye + color swatch + placement cog) | Absorb Opacity
         local absorbRow
         absorbRow, hh = Ww:DualRow(pp, yy,
             { type="dropdown", text="Absorb Style", values=absorbStyleValues, order=absorbStyleOrder,
@@ -3741,6 +3774,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               disabledTooltip="Absorb Style",
               getValue=EffAbsorbOpacity,
               setValue=function(v) BSet("absorbOpacity", v) end });  yy = yy - hh
+        ns.UFO_AddAbsorbPreviewEye(absorbRow._leftRegion, "showAbsorbPreview", "absorb")
         if not EllesmereUI._prebuilding then
             local rgn = absorbRow._leftRegion
             local swatch = EllesmereUI.BuildColorSwatch(
@@ -3856,6 +3890,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               disabledTooltip="Heal Absorb Style",
               getValue=function() return BVal("healAbsorbOpacity", 65) end,
               setValue=function(v) BSet("healAbsorbOpacity", v) end });  yy = yy - hh
+        ns.UFO_AddAbsorbPreviewEye(healAbsorbRow._leftRegion, "showHealAbsorbPreview", "heal absorb")
         if not EllesmereUI._prebuilding then
             local rgn = healAbsorbRow._leftRegion
             local swatch = EllesmereUI.BuildColorSwatch(
@@ -3934,6 +3969,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               disabledTooltip="Max Health Style",
               getValue=function() return BVal("maxHealthOpacity", 100) end,
               setValue=function(v) BSet("maxHealthOpacity", v) end }); yy = yy - hh
+        ns.UFO_AddAbsorbPreviewEye(maxHealthRow._leftRegion, "showMaxHealthPreview", "max health")
         if not EllesmereUI._prebuilding then
             local rgn = maxHealthRow._leftRegion
             local swatch = EllesmereUI.BuildColorSwatch(rgn, maxHealthRow:GetFrameLevel() + 3,

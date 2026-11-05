@@ -19,6 +19,46 @@ local CreateFrame = EllesmereUI._Pool.CreateFrame
 -- another addon could replace.
 local PoolIsIdle = EllesmereUI._Pool.IsIdle
 
+-- Session-only absorb previews shared by Player/Target/Focus and Boss rows.
+-- Place the eye before the swatch so the visible order is cog, color, eye.
+function ns.UFO_AddAbsorbPreviewEye(region, flag, label)
+    if EllesmereUI._prebuilding then return end
+    local env = ns._UFO_OptEnv
+    local state = env.optState
+    local eyeBtn = CreateFrame("Button", nil, region)
+    eyeBtn:SetSize(26, 26)
+    eyeBtn:SetPoint("RIGHT", region._lastInline or region._control, "LEFT", -8, 0)
+    eyeBtn:SetFrameLevel(region:GetFrameLevel() + 5)
+    EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
+    region._lastInline = eyeBtn
+    local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+    EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
+    eyeTex:SetAllPoints()
+    local function RefreshEye()
+        eyeTex:SetTexture(state[flag] and EllesmereUI.EYE_INVISIBLE_ICON or EllesmereUI.EYE_VISIBLE_ICON)
+    end
+    RefreshEye()
+    env.RegisterWidgetRefresh(RefreshEye)
+    eyeBtn:SetScript("OnClick", function()
+        local enabled = not state[flag]
+        state.showAbsorbPreview = false
+        state.showHealAbsorbPreview = false
+        state.showMaxHealthPreview = false
+        state[flag] = enabled
+        env.UpdatePreview()
+        EllesmereUI:RefreshPage()
+    end)
+    eyeBtn:SetScript("OnEnter", function(self)
+        EllesmereUI.SetGlyphAlpha(self, 0.7)
+        EllesmereUI.ShowWidgetTooltip(self, state[flag] and ("Hide " .. label .. " preview") or ("Show " .. label .. " preview"))
+    end)
+    eyeBtn:SetScript("OnLeave", function(self)
+        EllesmereUI.SetGlyphAlpha(self, 0.4)
+        EllesmereUI.HideWidgetTooltip()
+    end)
+    return eyeBtn
+end
+
 function ns.UFO_BuildHealthBarSection(parent, y, ctx)
     local env = ns._UFO_OptEnv
     local AddDarkModeBlock, GROUP_UNIT_ORDER, PP, RegisterWidgetRefresh = env.AddDarkModeBlock, env.GROUP_UNIT_ORDER, env.PP, env.RegisterWidgetRefresh
@@ -3263,6 +3303,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
           setValue=function(v) SSetSupported("absorbOpacity", v) end });  y = y - h
     SApplySupport(absorbRow._leftRegion, "showPlayerAbsorb")
     SApplySupport(absorbRow._rightRegion, "absorbOpacity")
+    ns.UFO_AddAbsorbPreviewEye(absorbRow._leftRegion, "showAbsorbPreview", "absorb")
     -- Inline color swatch for absorb color
     if not EllesmereUI._prebuilding then
         local rgn = absorbRow._leftRegion
@@ -3435,39 +3476,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
           setValue=function(v) SSetSupported("healAbsorbOpacity", v) end });  y = y - h
     SApplySupport(healAbsorbRow._leftRegion, "healAbsorbStyle")
     SApplySupport(healAbsorbRow._rightRegion, "healAbsorbOpacity")
-    -- Inline eyeball: preview heal absorb on the live preview (hides the shield
-    -- absorb there so heal absorb shows in isolation). Session-only runtime flag.
-    if not EllesmereUI._prebuilding then
-        local rgn = healAbsorbRow._leftRegion
-        local EYE_VISIBLE   = EllesmereUI.EYE_VISIBLE_ICON
-        local EYE_INVISIBLE = EllesmereUI.EYE_INVISIBLE_ICON
-        local eyeBtn = CreateFrame("Button", nil, rgn)
-        eyeBtn:SetSize(26, 26)
-        eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-        eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-        EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
-        rgn._lastInline = eyeBtn
-        local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-        EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
-        eyeTex:SetAllPoints()
-        local function RefreshHealEye()
-            eyeTex:SetTexture(optState.showHealAbsorbPreview and EYE_INVISIBLE or EYE_VISIBLE)
-        end
-        RefreshHealEye()
-        eyeBtn:SetScript("OnClick", function()
-            optState.showHealAbsorbPreview = not optState.showHealAbsorbPreview
-            RefreshHealEye()
-            UpdatePreview()
-        end)
-        eyeBtn:SetScript("OnEnter", function(self)
-            EllesmereUI.SetGlyphAlpha(self, 0.7)
-            EllesmereUI.ShowWidgetTooltip(self, optState.showHealAbsorbPreview and "Hide heal absorb preview" or "Show heal absorb preview")
-        end)
-        eyeBtn:SetScript("OnLeave", function(self)
-            EllesmereUI.SetGlyphAlpha(self, 0.4)
-            EllesmereUI.HideWidgetTooltip()
-        end)
-    end
+    ns.UFO_AddAbsorbPreviewEye(healAbsorbRow._leftRegion, "showHealAbsorbPreview", "heal absorb")
     -- Inline color swatch for heal absorb color
     if not EllesmereUI._prebuilding then
         local rgn = healAbsorbRow._leftRegion
@@ -3588,6 +3597,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
           setValue=function(v) SSetSupported("maxHealthOpacity", v) end });  y = y - h
     SApplySupport(maxHealthRow._leftRegion, "maxHealthStyle")
     SApplySupport(maxHealthRow._rightRegion, "maxHealthOpacity")
+    ns.UFO_AddAbsorbPreviewEye(maxHealthRow._leftRegion, "showMaxHealthPreview", "max health")
     if not EllesmereUI._prebuilding then
         local rgn = maxHealthRow._leftRegion
         local swatch = EllesmereUI.BuildColorSwatch(
