@@ -82,11 +82,20 @@ do
         -- Engine.ElementOn, inlined on this per-tick path.
         local off = frame._euiElementsOff
         if off and off.Health then return end
-        -- Bar bounds ride the max-health/identity events (Blizzard's own
-        -- contract); a pure UNIT_HEALTH value tick pushes only the value.
-        if event ~= "UNIT_HEALTH" or not element._maxSet then
+        -- Boss slots can change occupants without a readable GUID or a max-
+        -- health event. Refresh their bounds on health ticks as well, so a
+        -- new boss never inherits the previous occupant's health scale.
+        local isBoss = element._euiUnitKey == "boss"
+        if event ~= "UNIT_HEALTH" or not element._maxSet or isBoss then
             element._maxSet = true
             element:SetMinMaxValues(0, UnitHealthMax(unit))
+        end
+        -- Identity and show repaints must snap to the new boss's health,
+        -- not animate from the old occupant's possibly full bar.
+        local interpolation = element.smoothing
+        if isBoss and (event == "Show" or event == "UnitChanged"
+                       or event == "BossSettled") then
+            interpolation = nil
         end
         -- A corpse fires no further UNIT_HEALTH, so the death tick's paint is the
         -- last one the bar gets: zero it from the dead flag (a plain boolean in
@@ -96,11 +105,11 @@ do
         -- UnitIsDead, not UnitIsDeadOrGhost: a ghost is at full health, and
         -- Blizzard's own bar reads it the same way (CompactUnitFrame_UpdateHealthColor).
         if not UnitIsConnected(unit) then
-            element:SetValue(UnitHealthMax(unit), element.smoothing)
+            element:SetValue(UnitHealthMax(unit), interpolation)
         elseif UnitIsDead(unit) then
             element:SetValue(0)
         else
-            element:SetValue(UnitHealth(unit), element.smoothing)
+            element:SetValue(UnitHealth(unit), interpolation)
         end
         -- Color inputs (class/reaction/dark/disconnect/tap) change via their
         -- own events or identity repaints -- a pure health tick re-runs the

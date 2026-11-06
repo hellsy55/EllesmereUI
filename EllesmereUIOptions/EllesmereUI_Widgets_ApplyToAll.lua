@@ -35,7 +35,7 @@ local function PlaySyncFlash(targetFrame)
     if not glow then
         glow = _G.CreateFrame("Frame", nil, targetFrame)
         PoolAttach(targetFrame, glow, nil, StopGlow)
-        local ar, ag, ab = EllesmereUI.GetAccentColor()
+        local ar, ag, ab = EllesmereUI.GetOptionsPanelAccentColor()
         local function MkEdge()
             local t = glow:CreateTexture(nil, "OVERLAY", nil, 7)
             t:SetColorTexture(ar, ag, ab, 1)
@@ -56,7 +56,7 @@ local function PlaySyncFlash(targetFrame)
         _syncGlowPool[targetFrame] = glow
     end
     -- Re-color edges in case accent changed
-    local ar, ag, ab = EllesmereUI.GetAccentColor()
+    local ar, ag, ab = EllesmereUI.GetOptionsPanelAccentColor()
     for i = 0, (glow._edgeN or 0) - 1 do
         local e = glow["_c_" .. i]
         if e then e:SetColorTexture(ar, ag, ab, 1) end
@@ -120,6 +120,8 @@ EllesmereUI.PlayWhiteFlash = PlayWhiteFlash
 --      elementLabels = { MainBar = "Bar 1", Bar2 = "Bar 2", ... },
 --      getCurrentKey = function() return selectedBarKey end,
 --      onApply       = function(checkedKeys) ... end,
+--      getElementState = function(key) return enabled end, -- optional destination state
+--      getElementOptionState = function(key) return enabled end, -- optional setting state
 --  }
 --  anchorFrame: frame to anchor the dropdown below
 --  flashTargets: optional table or function for PlayWhiteFlash on apply
@@ -152,7 +154,22 @@ local function MakeMultiApplyRow(menu, fontPath)
     local lbl = row:CreateFontString(nil, "OVERLAY")
     lbl:SetFont(fontPath, 13, "")
     lbl:SetPoint("LEFT", box, "RIGHT", 8, 0)
+    lbl:SetJustifyH("LEFT")
+    lbl:SetWordWrap(false)
+    lbl:SetMaxLines(1)
     row._lbl = lbl
+
+    -- This is the destination's ACTUAL configuration, not the checkbox used
+    -- to choose where to copy. The values are refreshed while the menu is open.
+    local status = row:CreateFontString(nil, "OVERLAY")
+    status:SetFont(fontPath, 11, "")
+    status:SetJustifyH("RIGHT")
+    status:SetWordWrap(false)
+    status:SetMaxLines(1)
+    status:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+    status:SetWidth(82)
+    lbl:SetPoint("RIGHT", status, "LEFT", -7, 0)
+    row._status = status
 
     local hl = row:CreateTexture(nil, "ARTWORK")
     hl:SetAllPoints()
@@ -177,7 +194,7 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
     local ITEM_H = 28
     local APPLY_H = 29   -- 10% smaller than the 32px footer button height
     local PAD = 6
-    local menuW = 180
+    local menuW = 270
     local menuH = PAD + APPLY_H + 2 + #keys * ITEM_H + PAD
 
     -- Controller cursor loaded: the one gate for everything controller-only below.
@@ -248,6 +265,9 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
             end
         end
 
+        -- Apply is the only text in the top button. The per-destination
+        -- Enabled/Disabled/Mixed statuses remain visible on the rows below.
+
         -- Separator line below Apply button
         local sep = menu:CreateTexture(nil, "ARTWORK")
         sep:SetHeight(1)
@@ -266,6 +286,8 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
         end)
 
         menu:HookScript("OnHide", function()
+            -- No status checks while the popup is closed.
+            menu:SetScript("OnUpdate", nil)
             blocker:Hide()
             _activeMultiApplyDropdown = nil
             -- Controller cursor: back onto the sync link that opened it (a no-op once that is hidden).
@@ -296,6 +318,8 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
     local ppScale = EllesmereUI.GetPopupScale() or 1
     menu:SetScale(ppScale)
     ma.resetApplyHover()
+    -- The popup frame is reused across settings: never inherit a dynamic label.
+    applyLbl:SetText(EllesmereUI.L("Apply"))
 
     -- Reset the checked state to all-true on every open. Intentionally NOT carried over between opens: a prior per-operation deselection must never silently persist to another source unit or another sync icon (e.g. a stale exclusion could make a Bar Background sync from Target/Focus silently skip the Player frame).
     _multiApplyCheckedState[cacheKey] = {}
@@ -345,7 +369,9 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
         row:Show()
 
         local boxBrd, chk, lbl, hl = row._boxBrd, row._chk, row._lbl, row._hl
-        local gr = EllesmereUI.ELLESMERE_GREEN
+        local status = row._status
+        status:Hide()
+        local gr = EllesmereUI.PANEL_ACCENT
         chk:SetColorTexture(gr.r, gr.g, gr.b, 1)
         chk:SetAlpha(1)
 
@@ -396,10 +422,56 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
     end
     for i = #keys + 1, #rows do rows[i]:Hide() end
 
+    -- Read live profile data, not the checkmarks (those only select targets).
+    -- A nil return means the caller cannot determine a valid state. Never
+    -- report that state as Disabled by guessing a default.
+    local lastStatus = {}
+    local function UpdateStatuses()
+        local getter = opts.getElementOptionState or opts.getElementState
+        if type(getter) ~= "function" then return end
+        for i, key in ipairs(keys) do
+            local row = rows[i]
+            local status = row._status
+            local ok, state = pcall(getter, key)
+            if not ok then state = nil end
+            if state ~= lastStatus[i] then
+                lastStatus[i] = state
+                if state == true then
+                    status:SetText(EllesmereUI.L("Enabled"))
+                    status:SetTextColor(0.30, 0.78, 0.52, 1)
+                    status:Show()
+                elseif state == false then
+                    status:SetText(EllesmereUI.L("Disabled"))
+                    status:SetTextColor(0.65, 0.65, 0.65, 0.95)
+                    status:Show()
+                elseif type(state) == "string" and state ~= "" then
+                    status:SetText(EllesmereUI.L(state))
+                    status:SetTextColor(0.75, 0.75, 0.75, 1)
+                    status:Show()
+                else
+                    status:Hide()
+                end
+            end
+        end
+    end
+    UpdateStatuses()
+    -- The popup blocks edits to the underlying settings page, but a bar may
+    -- change state from elsewhere in-game. Poll ONLY while this menu is open.
+    local statusElapsed = 0
+    if type(opts.getElementOptionState) == "function" or type(opts.getElementState) == "function" then
+        menu:SetScript("OnUpdate", function(_, dt)
+            statusElapsed = statusElapsed + dt
+            if statusElapsed < 0.3 then return end
+            statusElapsed = 0
+            UpdateStatuses()
+        end)
+    end
+
     UpdateApplyState()
 
     -- Apply button click
     applyRow:SetScript("OnClick", function()
+        UpdateStatuses()
         local result = {}
         for _, key in ipairs(keys) do
             if checked[key] and key ~= currentKey then
@@ -449,6 +521,8 @@ end
 --          elementLabels = { MainBar = "Bar 1", ... },
 --          getCurrentKey = function() return key end,
 --          onApply       = function(checkedKeys) ... end,
+--          getElementState = function(key) return bool end, -- destination status
+--          getElementOptionState = function(key) return bool end, -- setting status
 --      },
 --  }
 --  Returns: applyBtn (the "Apply to All" button, or nil if no isSynced)
@@ -545,8 +619,9 @@ local function BuildSyncIcon(opts)
     local label  = region and region._label
     if not region or not label then return nil end
     if not opts.isSynced then return nil end
+    local alwaysApply = opts.alwaysAvailable == true
 
-    local ar, ag, ab = EllesmereUI.GetAccentColor()
+    local ar, ag, ab = EllesmereUI.GetOptionsPanelAccentColor()
 
     -- "Apply to:" prefix label + "All" clickable link
     local applyBtn = CreateFrame("Button", nil, region)
@@ -571,12 +646,12 @@ local function BuildSyncIcon(opts)
     allBtn:SetPoint("LEFT", prefixText, "RIGHT", 4, 0)
 
     allBtn:SetScript("OnEnter", function()
-        local r, g, b = EllesmereUI.GetAccentColor()
+        local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
         allText:SetTextColor(r, g, b, 1)
         if opts.tooltip then ShowWidgetTooltip(allBtn, opts.tooltip, opts.tooltipOpts) end
     end)
     allBtn:SetScript("OnLeave", function()
-        local r, g, b = EllesmereUI.GetAccentColor()
+        local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
         allText:SetTextColor(r, g, b, 0.65)
         if opts.tooltip then HideWidgetTooltip() end
     end)
@@ -601,11 +676,11 @@ local function BuildSyncIcon(opts)
         multiBtn:SetPoint("LEFT", sepText, "RIGHT", 4, 0)
 
         multiBtn:SetScript("OnEnter", function()
-            local r, g, b = EllesmereUI.GetAccentColor()
+            local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
             multiText:SetTextColor(r, g, b, 1)
         end)
         multiBtn:SetScript("OnLeave", function()
-            local r, g, b = EllesmereUI.GetAccentColor()
+            local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
             multiText:SetTextColor(r, g, b, 0.65)
         end)
     end
@@ -639,7 +714,7 @@ local function BuildSyncIcon(opts)
     -- ----------------------------------------------------------------
     --  State: track current animated position (0 = synced, 1 = desynced)
     -- ----------------------------------------------------------------
-    local animState = opts.isSynced() and 0 or 1  -- start at correct state
+    local animState = (alwaysApply or not opts.isSynced()) and 1 or 0  -- start at correct state
     -- Hover gate (see "Hover gate" below): multiplies the state above, 0 while
     -- the slot is not hovered. The controller cursor moves no pointer, so with
     -- it loaded the gate stays open and the state above alone decides.
@@ -655,6 +730,10 @@ local function BuildSyncIcon(opts)
         local labelY = LABEL_Y_NORMAL + s * (LABEL_Y_SHIFTED - LABEL_Y_NORMAL)
         label:ClearAllPoints()
         PP.Point(label, "LEFT", region, "LEFT", labelXOff, labelY)
+        -- Keep the caller's optional label limit across sync animations.
+        if opts.labelRightBound then
+            PP.Point(label, "RIGHT", opts.labelRightBound, "LEFT", -(opts.labelRightGap or 12), 0)
+        end
         applyBtn:SetAlpha(s)
         allBtn:SetAlpha(s)
         if s <= 0 then applyBtn:Hide(); allBtn:Hide() else applyBtn:Show(); allBtn:Show() end
@@ -811,7 +890,7 @@ local function BuildSyncIcon(opts)
     EllesmereUI.RegisterWidgetRefresh(function()
         if Redressed() then return end
         -- Re-color accent in case it changed
-        local r, g, b = EllesmereUI.GetAccentColor()
+        local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
         prefixText:SetTextColor(1, 1, 1, 0.65)
         allText:SetTextColor(r, g, b, 0.65)
         if multiText then multiText:SetTextColor(r, g, b, 0.65) end
@@ -819,7 +898,7 @@ local function BuildSyncIcon(opts)
 
 
         local synced = opts.isSynced()
-        local target = synced and 0 or 1
+        local target = (alwaysApply or not synced) and 1 or 0
 
         -- Slider dragging: allow showing (desynced -> 1) immediately, but defer hiding (synced -> 0) until the drag ends.
         if EllesmereUI._sliderDragging then
@@ -833,12 +912,12 @@ local function BuildSyncIcon(opts)
                 end
                 EllesmereUI._deferredDriftChecks[function()
                     if Redressed() then return end
-                    local r2, g2, b2 = EllesmereUI.GetAccentColor()
+                    local r2, g2, b2 = EllesmereUI.GetOptionsPanelAccentColor()
                     prefixText:SetTextColor(1, 1, 1, 0.65)
                     allText:SetTextColor(r2, g2, b2, 0.65)
                     if multiText then multiText:SetTextColor(r2, g2, b2, 0.65) end
                     ResizeBtn()
-                    AnimateTo(opts.isSynced() and 0 or 1)
+                    AnimateTo((alwaysApply or not opts.isSynced()) and 1 or 0)
                 end] = true
             end
             return
@@ -851,12 +930,12 @@ local function BuildSyncIcon(opts)
             end
             EllesmereUI._deferredDriftChecks[function()
                 if Redressed() then return end
-                local r2, g2, b2 = EllesmereUI.GetAccentColor()
+                local r2, g2, b2 = EllesmereUI.GetOptionsPanelAccentColor()
                 prefixText:SetTextColor(1, 1, 1, 0.65)
                 allText:SetTextColor(r2, g2, b2, 0.65)
                 if multiText then multiText:SetTextColor(r2, g2, b2, 0.65) end
                 ResizeBtn()
-                AnimateTo(opts.isSynced() and 0 or 1)
+                AnimateTo((alwaysApply or not opts.isSynced()) and 1 or 0)
             end] = true
             return
         end

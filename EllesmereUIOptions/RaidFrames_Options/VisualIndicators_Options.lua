@@ -584,7 +584,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     if not EllesmereUI._prebuilding then
         local rgn = rcRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.COGS_ICON,
+            icon = EllesmereUI.PANEL_MORE_ICON,
             title = "Ready Check / Summon / Rez",
             rows = {
                 { type="toggle", label="Show Ready Check",
@@ -736,7 +736,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         cogBtn:SetAlpha(0.4)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.PANEL_MORE_ICON)
         cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
         cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
         cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
@@ -1952,7 +1952,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         cogBtn:SetAlpha(0.4)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.PANEL_MORE_ICON)
         cogBtn:SetScript("OnEnter", function(s) s:SetAlpha(0.7) end)
         cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(0.4) end)
         cogBtn:SetScript("OnClick", function(s) cogShow(s) end)

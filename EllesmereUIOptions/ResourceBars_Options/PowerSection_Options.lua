@@ -115,6 +115,9 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                     return (p.secondary.pipHeight or 20) == v and (p.health.height or 20) == v
                 end,
                 flashTargets = function() return { ctx.syncRows.powerHeight, ctx.syncRows.classHeight, ctx.syncRows.healthHeight } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "primary", "height", SmoothRefresh),
             })
         end
         if not EllesmereUI._prebuilding then
@@ -135,6 +138,9 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                     return (p.secondary.pipWidth or 214) == v and (p.health.width or 220) == v
                 end,
                 flashTargets = function() return { ctx.syncRows.powerWidth, ctx.syncRows.classWidth, ctx.syncRows.healthWidth } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "primary", "width", SmoothRefresh),
             })
         end
     end
@@ -408,6 +414,9 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                         and (p.secondary.borderBehind or false) == bh and (p.health.borderBehind or false) == bh
                 end,
                 flashTargets = function() return { pwrBsRow._leftRegion } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "primary", "borderStyle", SmoothRefresh),
             })
             EllesmereUI.BuildSyncIcon({
                 region  = pwrBsRow._rightRegion,
@@ -435,6 +444,9 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                     return eq(p.secondary) and eq(p.health)
                 end,
                 flashTargets = function() return { ctx.syncRows.powerBorder, ctx.syncRows.classBorder, ctx.syncRows.healthBorder } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "primary", "border", SmoothRefresh),
             })
         end
     end
@@ -598,28 +610,30 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 return (p.secondary.barAlpha or 1) == v and (p.health.barAlpha or 1) == v
             end,
             flashTargets = function() return { ctx.syncRows.powerOpacity, ctx.syncRows.classOpacity, ctx.syncRows.healthOpacity } end,
+       
+            alwaysAvailable = true,
+            multiApply = ns.ERB_MultiSync(DB, "primary", "opacity", SmoothRefresh),
         })
     end
 
     -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Power bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Energy / Focus / Mana Missing reveal a rule-hidden bar while that resource is below full (ns.ERB_MissingWanted, same pass); Mana also covers a WoW Forever druid's Mana Bar while Shapeshifted.
+    -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
+    local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
+        { type="toggle", text="Fade Out of Combat",
+          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshPower() end },
+        { type="slider", text="Fade Opacity", min=0, max=100, step=1,
+          disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
+          disabledTooltip="Fade Out of Combat",
+          getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshPower() end }
+    ); y = y - fadeSyncH
+    ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh)
+    ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh)
+
     if not EllesmereUI._prebuilding then
         local rgn = powerBorderRow._leftRegion
-        local rows = {
-            { type = "toggle", label = "Fade Out of Combat",
-              get = function() local c = cfg(); return c and c.oocFadeEnabled == true end,
-              set = function(v)
-                  local c = cfg(); if not c then return end
-                  c.oocFadeEnabled = v; RefreshPower()
-              end },
-            { type = "slider", label = "Opacity",
-              min = 0, max = 100, step = 1,
-              disabled = function() local c = cfg(); return not (c and c.oocFadeEnabled) end,
-              get = function() local c = cfg(); return math.floor(((c and c.oocAlpha) or 0.5) * 100 + 0.5) end,
-              set = function(v)
-                  local c = cfg(); if not c then return end
-                  c.oocAlpha = v / 100; RefreshPower()
-              end },
-        }
+        local rows = {}
         -- Show When Missing rows for the resources the player's class shows on this bar:
         -- energy and focus share one setting (a class has one of them), mana has its
         -- own. WoW Forever hunters use mana.
@@ -653,12 +667,14 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                   c.showManaWhenMissing = v; RefreshPower()
               end }
         end
-        EllesmereUI.BuildInlineCog(rgn, {
-            disabled = function() local c = cfg(); return c and not c.enabled end,
-            disabledTooltip = powerDisTip,
-            title = (#rows > 2) and "Out of Combat Opacity & Visibility" or "Out of Combat Opacity",
-            rows = rows,
-        })
+        if #rows > 0 then
+            EllesmereUI.BuildInlineCog(rgn, {
+                disabled = function() local c = cfg(); return c and not c.enabled end,
+                disabledTooltip = powerDisTip,
+                title = "Missing Resource Visibility",
+                rows = rows,
+            })
+        end
     end
 
     -- Text Color disables when the bar is off OR Power Text is None
@@ -754,6 +770,8 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
           end },
         { type = "label", text = "Threshold & Hash Lines" }
     );  y = y - h
+    ns.ERB_ScalarSync(powerColorRow._leftRegion, env.DB, "primary", "textSize",
+        "Text Size", SmoothRefresh, { "health", "primary" })
     -- Power Text inline cog: percent sign, anchor, x/y offsets
     if not EllesmereUI._prebuilding then
         local rgn = powerTextSizeRow._leftRegion

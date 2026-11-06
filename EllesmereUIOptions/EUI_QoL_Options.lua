@@ -42,7 +42,7 @@ local function ShowTransformsPopup()
 
     if not transformsPopup then
         local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
-        local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local PP = EllesmereUI.PanelPP
         local COL_W, COL_GAP = 190, 12
         local CONTENT_LEFT, CONTENT_RIGHT, CONTENT_TOP = 41, 36, 118

@@ -347,6 +347,9 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                     return (p.secondary.pipHeight or 20) == v and (p.primary.height or 16) == v
                 end,
                 flashTargets = function() return { ctx.syncRows.healthHeight, ctx.syncRows.classHeight, ctx.syncRows.powerHeight } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "health", "height", SmoothRefresh),
             })
         end
         if not EllesmereUI._prebuilding then
@@ -367,6 +370,9 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                     return (p.primary.width or 220) == v and (p.secondary.pipWidth or 214) == v
                 end,
                 flashTargets = function() return { ctx.syncRows.healthWidth, ctx.syncRows.classWidth, ctx.syncRows.powerWidth } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "health", "width", SmoothRefresh),
             })
         end
     end
@@ -562,6 +568,9 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                         and (p.secondary.borderBehind or false) == bh and (p.primary.borderBehind or false) == bh
                 end,
                 flashTargets = function() return { hpBsRow._leftRegion } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "health", "borderStyle", SmoothRefresh),
             })
             EllesmereUI.BuildSyncIcon({
                 region  = hpBsRow._rightRegion,
@@ -589,6 +598,9 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                     return eq(p.secondary) and eq(p.primary)
                 end,
                 flashTargets = function() return { ctx.syncRows.healthBorder, ctx.syncRows.classBorder, ctx.syncRows.powerBorder } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "health", "border", SmoothRefresh),
             })
         end
     end
@@ -735,31 +747,35 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 return (p.secondary.barAlpha or 1) == v and (p.primary.barAlpha or 1) == v
             end,
             flashTargets = function() return { ctx.syncRows.healthOpacity, ctx.syncRows.classOpacity, ctx.syncRows.powerOpacity } end,
+       
+            alwaysAvailable = true,
+            multiApply = ns.ERB_MultiSync(DB, "health", "opacity", SmoothRefresh),
         })
     end
 
     -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Health bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Health Missing reveals a rule-hidden bar while health is below full (ns.ERB_MissingWanted, same pass).
+    -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
+    local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
+        { type="toggle", text="Fade Out of Combat",
+          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshHealth() end },
+        { type="slider", text="Fade Opacity", min=0, max=100, step=1,
+          disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
+          disabledTooltip="Fade Out of Combat",
+          getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshHealth() end }
+    ); y = y - fadeSyncH
+    ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "health", "oocFade", "Fade Out of Combat", SmoothRefresh)
+    ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "health", "oocAlpha", "Fade Opacity", SmoothRefresh)
+
     if not EllesmereUI._prebuilding then
         local rgn = healthBorderRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             disabled = function() local c = cfg(); return c and not c.enabled end,
             disabledTooltip = "Health Bar",
-            title = "Out of Combat Opacity & Visibility",
+            title = "Missing Health Visibility",
             rows = {
-                { type = "toggle", label = "Fade Out of Combat",
-                  get = function() local c = cfg(); return c and c.oocFadeEnabled == true end,
-                  set = function(v)
-                      local c = cfg(); if not c then return end
-                      c.oocFadeEnabled = v; RefreshHealth()
-                  end },
-                { type = "slider", label = "Opacity",
-                  min = 0, max = 100, step = 1,
-                  disabled = function() local c = cfg(); return not (c and c.oocFadeEnabled) end,
-                  get = function() local c = cfg(); return math.floor(((c and c.oocAlpha) or 0.5) * 100 + 0.5) end,
-                  set = function(v)
-                      local c = cfg(); if not c then return end
-                      c.oocAlpha = v / 100; RefreshHealth()
-                  end },
+
                 { type = "toggle", label = "Show When Health Missing",
                   tooltip = "Shows the Health bar while your health is below full, even when its Visibility setting hides it.",
                   get = function() local c = cfg(); return c and c.showWhenMissing == true end,
@@ -893,6 +909,8 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
           end },
         { type = "label", text = "Threshold & Hash Lines" }
     );  y = y - h
+    ns.ERB_ScalarSync(healthColorRow._leftRegion, env.DB, "health", "textSize",
+        "Text Size", SmoothRefresh, { "health", "primary" })
     -- Threshold & Hash Lines editor: edits the health bar config (multi-spec, with the spec dropdown).
 
     if not EllesmereUI._prebuilding then

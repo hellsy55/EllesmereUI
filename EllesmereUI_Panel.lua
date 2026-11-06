@@ -16,10 +16,10 @@ local MakeFont            = EllesmereUI.MakeFont
 local MakeBorder          = EllesmereUI.MakeBorder
 local SolidTex            = EllesmereUI.SolidTex
 local lerp                = EllesmereUI.lerp
-local RegAccent           = EllesmereUI.RegAccent
+local RegAccent           = EllesmereUI.RegPanelAccent
 local ResetRowCounters    = EllesmereUI.ResetRowCounters
 local ResolveFactionTheme = EllesmereUI._ResolveFactionTheme
-local ELLESMERE_GREEN     = EllesmereUI.ELLESMERE_GREEN
+local ELLESMERE_GREEN     = EllesmereUI.PANEL_ACCENT
 local BORDER_COLOR        = EllesmereUI.BORDER_COLOR
 local DARK_BG             = EllesmereUI.DARK_BG
 local TEXT_DIM            = EllesmereUI.TEXT_DIM
@@ -1216,7 +1216,7 @@ local function BuildSidebar()
                 local t = dot:CreateTexture(nil, "OVERLAY")
                 t:SetAllPoints()
                 t:SetColorTexture(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)
-                EllesmereUI.RegAccent({ type = "solid", obj = t, a = 1 })
+                EllesmereUI.RegPanelAccent({ type = "solid", obj = t, a = 1 })
                 -- Round: run the solid color through the portrait circle mask.
                 local mask = dot:CreateMaskTexture()
                 mask:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\portraits\\circle_mask.tga",

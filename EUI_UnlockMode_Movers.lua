@@ -363,7 +363,15 @@ local function CreateMover(barKey)
         return nil
     end
 
-    if existing then return existing end
+    -- A mover is kept across Unlock Mode sessions. Reapply the CURRENT UI
+    -- accent when it is reused (the options panel may have changed the accent
+    -- while Unlock Mode was closed). Do not rebuild or reset its position.
+    if existing then
+        if existing._refreshAccent then
+            existing._refreshAccent(GetAccent())
+        end
+        return existing
+    end
 
     local bar = UM.GetBarFrame(barKey)
     if not bar then return nil end
@@ -4548,8 +4556,40 @@ local function CreateMover(barKey)
     -- Element filter (EUI_UnlockMode_Filter.lua): a new or re-shown mover stays hidden while filtered.
     if UM.FilterOnShow then mover:HookScript("OnShow", UM.FilterOnShow); UM.FilterOnShow(mover) end
 
+    -- Recolor existing movers without recreating them (their link-button
+    -- callbacks capture ar/ag/ab at creation time).
+    mover._refreshAccent = function(r, g, b)
+        ar, ag, ab = r, g, b
+        if not mover._selected and not mover:IsMouseOver() then
+            mover._brd:SetColor(r, g, b, 0.6)
+        end
+        -- Inactive link buttons use the accent, active links stay orange.
+        RefreshLinkStates()
+    end
     movers[barKey] = mover
     return mover
+end
+
+-- Refresh every *cached* Unlock Mode overlay, even while the editor is
+-- closed. It reuses mover/Blizzard-overlay frames between sessions, so an
+-- isUnlocked guard kept the old color until a relog in the common case where
+-- the player edits the accent from the normal options panel.
+function EllesmereUI.RefreshUnlockAccent(r, g, b)
+    for _, mover in pairs(movers) do
+        if mover._refreshAccent then mover._refreshAccent(r, g, b) end
+    end
+    if EllesmereUI._RefreshBlizzUnlockAccent then
+        EllesmereUI._RefreshBlizzUnlockAccent(r, g, b)
+    end
+    if UM.hudFrame and UM.hudFrame._refreshAccent then
+        UM.hudFrame._refreshAccent(r, g, b)
+    end
+    if UM.gridFrame and UM.gridFrame.Rebuild then
+        UM.gridFrame:Rebuild()
+    end
+    if EllesmereUI._RecolorFallbackGhosts then
+        EllesmereUI._RecolorFallbackGhosts()
+    end
 end
 
 -- Override RegisterUnlockElements so that late-registering addons (e.g. CDM

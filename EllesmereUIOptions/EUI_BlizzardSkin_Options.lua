@@ -1148,7 +1148,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY"); cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            local cogTex = cogBtn:CreateTexture(nil, "OVERLAY"); cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.PANEL_MORE_ICON)
             local function ilvlOn() return EllesmereUIDB and EllesmereUIDB.showItemLevel ~= false end
             cogBtn:SetScript("OnEnter", function(s) if ilvlOn() then s:SetAlpha(0.7) end end)
             cogBtn:SetScript("OnLeave", function(s) s:SetAlpha(ilvlOn() and 0.4 or 0.15) end)

@@ -34,12 +34,21 @@ end
 
 -- Accent color helper
 local function GetAccentRGB()
+    local cfg = DB()
+    if cfg and cfg.accentColorEnabled and type(cfg.accentColor) == "table" then
+        local ac = cfg.accentColor
+        if type(ac.r) == "number" and type(ac.g) == "number" and type(ac.b) == "number" then
+            return ac.r, ac.g, ac.b
+        end
+    end
     local EG = EUI.ELLESMERE_GREEN
     if EG then return EG.r, EG.g, EG.b end
     return EUI.DEFAULT_ACCENT_R or 12/255,
            EUI.DEFAULT_ACCENT_G or 210/255,
            EUI.DEFAULT_ACCENT_B or 157/255
 end
+-- Shared by meters, standalone timer and Spell History.
+ns.DMAccentRGB = GetAccentRGB
 -- A header title's "Use Accent" colour: WoW Forever's gold under the variant
 -- (its kit carries no EllesmereUI accent), the accent otherwise.
 function ns.DMTitleRGB()

@@ -1545,7 +1545,7 @@ local function DmPvEnter(self)
     if self._hoverBdr then
         local lPP = EllesmereUI.PanelPP or EllesmereUI.PP
         if lPP then
-            local ac = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+            local ac = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
             lPP.UpdateBorder(self._hoverBdr, 2, ac.r, ac.g, ac.b, 1)
             self._hoverBdr:Show()
         end
@@ -2362,7 +2362,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
         addBtn:SetPoint("TOP", sidebarChild, "TOPLEFT", floor(sidebarW / 2), tileY - ADD_BTN_PAD)
         addBtn:SetFrameLevel(sidebarChild:GetFrameLevel() + 1)
 
-        local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local accentColor = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
         addBg:SetAllPoints()
         addBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
@@ -2508,7 +2508,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
                 popup._indDD = indDD
                 py = py - ROW_H2 - DD_GAP
 
-                local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+                local accentColor = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
                 local cBtn = CreateFrame("Button", nil, popup)
                 cBtn:SetSize(ddW, ROW_H2)
                 cBtn:SetPoint("TOPLEFT", popup, "TOPLEFT", POPUP_PAD, py)
@@ -2707,7 +2707,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
     settingsTitle:SetPoint("TOPLEFT", leftFixed, "TOPLEFT", PAD, ly)
     settingsTitle:SetJustifyH("LEFT")
     settingsTitle:SetWordWrap(false)
-    local ac2 = EllesmereUI.ELLESMERE_GREEN
+    local ac2 = EllesmereUI.PANEL_ACCENT
     if ac2 then settingsTitle:SetTextColor(ac2.r, ac2.g, ac2.b)
     else settingsTitle:SetTextColor(0.05, 0.82, 0.62) end
 
@@ -2802,7 +2802,7 @@ function ns.DMP_BuildPage(pageName, parent, yOffset)
         linkFS:SetFont(fontPath, 12, "")
         linkFS:SetPoint("TOPLEFT")
         linkFS:SetText(EllesmereUI.Lf("Edit in %1$s", gname2))
-        local lac = EllesmereUI.ELLESMERE_GREEN
+        local lac = EllesmereUI.PANEL_ACCENT
         if lac then linkFS:SetTextColor(lac.r, lac.g, lac.b, 0.85)
         else linkFS:SetTextColor(0.05, 0.82, 0.62, 0.85) end
         link:SetSize(linkFS:GetStringWidth() + 4, 18)
@@ -2916,7 +2916,7 @@ function ns.BMP_ShowFilterEditor(show, hide)
         or "Fonts\\FRIZQT__.TTF"
     local ar, ag, ab = 1, 0.82, 0.30
     if EllesmereUI.GetAccentColor then ar, ag, ab = EllesmereUI.GetAccentColor() end
-    local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+    local eg = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
 
     local POPUP_W, POPUP_H = 620, 520
     local SIDE_W = 180

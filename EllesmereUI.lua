@@ -269,15 +269,27 @@ end
 -- Registry of accent-colored elements (sidebar indicators, glows, tab underlines,
 -- footer buttons, popup confirm). Entry = { type="solid"|"gradient"|"font"|"callback", obj=... }
 local _accentElements = { _idx = {} }  -- _idx: obj -> index, prevents duplicates
-local function RegAccent(entry)
+local _panelAccentElements = { _idx = {} }
+-- The shared account store is the saved-variable authority.  The global
+-- mirror survives profile hand-offs made by the suite's Lite DB guard.
+local panelSaved = EllesmereUIDB and (EllesmereUIDB.optionsPanelAccentColor
+    or (type(EllesmereUIDB.global) == "table" and EllesmereUIDB.global.optionsPanelAccentColor))
+local PANEL_ACCENT = {
+    r = panelSaved and panelSaved.r or ELLESMERE_GREEN.r,
+    g = panelSaved and panelSaved.g or ELLESMERE_GREEN.g,
+    b = panelSaved and panelSaved.b or ELLESMERE_GREEN.b,
+}
+local function RegisterAccent(registry, entry)
     local key = entry.obj or entry.fn
-    if key and _accentElements._idx[key] then
-        _accentElements[_accentElements._idx[key]] = entry
+    if key and registry._idx[key] then
+        registry[registry._idx[key]] = entry
     else
-        _accentElements[#_accentElements + 1] = entry
-        if key then _accentElements._idx[key] = #_accentElements end
+        registry[#registry + 1] = entry
+        if key then registry._idx[key] = #registry end
     end
 end
+local function RegAccent(entry) RegisterAccent(_accentElements, entry) end
+local function RegPanelAccent(entry) RegisterAccent(_panelAccentElements, entry) end
 local DARK_BG         = { r = STYLE.PANEL_BG_R, g = STYLE.PANEL_BG_G, b = STYLE.PANEL_BG_B }
 local BORDER_COLOR    = { r = STYLE.BORDER_R, g = STYLE.BORDER_G, b = STYLE.BORDER_B, a = STYLE.BORDER_A }
 local TEXT_WHITE      = { r = STYLE.TEXT_WHITE_R, g = STYLE.TEXT_WHITE_G, b = STYLE.TEXT_WHITE_B }
@@ -1340,6 +1352,7 @@ end
 -------------------------------------------------------------------------------
 -- Visual constants (tables)
 EllesmereUI.ELLESMERE_GREEN = ELLESMERE_GREEN
+EllesmereUI.PANEL_ACCENT = PANEL_ACCENT
 EllesmereUI.DARK_BG         = DARK_BG
 EllesmereUI.BORDER_COLOR    = BORDER_COLOR
 EllesmereUI.TEXT_WHITE       = TEXT_WHITE
@@ -1351,6 +1364,7 @@ EllesmereUI.CS              = CS
 -- The settings cog (the inline cog's default, owner 2026-11-05); Unlock Mode's
 -- mover cog keeps the cogwheel art.
 EllesmereUI.COGS_ICON       = MEDIA_PATH .. "icons\\settings.png"
+EllesmereUI.PANEL_MORE_ICON = MEDIA_PATH .. "icons\\eui-more-options.png"
 EllesmereUI.UNDO_ICON       = MEDIA_PATH .. "icons\\undo.png"
 EllesmereUI.RESIZE_ICON     = MEDIA_PATH .. "icons\\eui-resize-5.png"
 EllesmereUI.DIRECTIONS_ICON = MEDIA_PATH .. "icons\\eui-directions.png"
@@ -2843,6 +2857,7 @@ EllesmereUI.ResetRowCounters  = ResetRowCounters
 EllesmereUI.lerp              = lerp
 EllesmereUI.MakeDropdownArrow = MakeDropdownArrow
 EllesmereUI.RegAccent         = RegAccent
+EllesmereUI.RegPanelAccent    = RegPanelAccent
 
 -- Internal references (needed by Widget Factory accent system)
 EllesmereUI.DEFAULT_ACCENT_R = DEFAULT_ACCENT_R
@@ -2851,6 +2866,7 @@ EllesmereUI.DEFAULT_ACCENT_B = DEFAULT_ACCENT_B
 EllesmereUI._ResolveFactionTheme = ResolveFactionTheme
 EllesmereUI._playerClass     = playerClass
 EllesmereUI._accentElements  = _accentElements
+EllesmereUI._panelAccentElements = _panelAccentElements
 EllesmereUI._widgetRefreshList = _widgetRefreshList
 EllesmereUI._rowCounters     = rowCounters
 EllesmereUI._STYLE          = STYLE
@@ -3868,7 +3884,7 @@ end
 --  caller turns the mouse off (EnableMouse) while a click would do nothing.
 -------------------------------------------------------------------------------
 function EllesmereUI.BuildStatusBadge(parent, text, name, opts)
-    local accent = ELLESMERE_GREEN
+    local accent = PANEL_ACCENT
     local dotted = not (opts and opts.dot == false)
     local onClick = opts and opts.onClick
     local f = POOL.CreateFrame(onClick and "Button" or "Frame", name, parent)

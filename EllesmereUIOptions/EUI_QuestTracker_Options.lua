@@ -75,7 +75,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- choice is saved in the quest tracker DB (forceOnScreen) and re-applied at
             -- load by EQT.ApplyForceOnScreen(), so it persists through reload/logout.
             -- Edit Mode is opened so the user can reposition the frame after toggling.
-            local EG = EllesmereUI.ELLESMERE_GREEN
+            local EG = EllesmereUI.PANEL_ACCENT
             local fosBtn = CreateFrame("Button", nil, parent)
             local fosFS = fosBtn:CreateFontString(nil, "OVERLAY")
             fosFS:SetFont(fontPath, 15, "")

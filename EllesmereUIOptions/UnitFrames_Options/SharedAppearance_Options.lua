@@ -235,6 +235,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             SyncUnitVisBooleans(dst)
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Visibility to all Frames",
             isSynced = function()
@@ -255,6 +256,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -313,6 +315,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             ReloadAndUpdate(); UpdatePreview(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Texture to all Frames",
             onClick = function() ApplyTexTo(GROUP_UNIT_ORDER) end,
@@ -326,6 +329,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -455,6 +459,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local bsLeftRgn = sharedScaleBorderRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = bsLeftRgn,
             tooltip = "Apply Border Style to all Frames",
             onClick = function()
@@ -503,6 +508,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { bsLeftRgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -536,6 +542,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedScaleBorderRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Border to all Frames",
             onClick = function()
@@ -604,6 +611,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -812,6 +820,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Frame Strata to all Frames",
             onClick = function() ApplyStrataTo(GROUP_UNIT_ORDER) end,
@@ -824,6 +833,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1204,6 +1214,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedPortraitModeRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Portrait Mode to all Frames",
             onClick = function()
@@ -1225,6 +1236,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1303,6 +1315,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedPortraitModeRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Art Style to all Frames",
             onClick = function()
@@ -1321,6 +1334,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1372,6 +1386,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Non-Player Portrait to all Frames",
             onClick = function() ApplyNonPlayer(GROUP_UNIT_ORDER) end,
@@ -1387,6 +1402,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1440,6 +1456,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedSizePosRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Portrait Size to all Frames",
             onClick = function()
@@ -1458,6 +1475,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1526,6 +1544,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedSizePosRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Portrait Position to all Frames",
             onClick = function()
@@ -1544,6 +1563,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1713,6 +1733,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedShapeBorderRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Portrait Shape to all Frames",
             onClick = function()
@@ -1731,6 +1752,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1750,6 +1772,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             detachedPortraitOuterRingScale = 118, detachedPortraitInnerShadow = false,
         }
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Shape Border to all Frames",
             onClick = function()
@@ -1793,6 +1816,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1944,6 +1968,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbToggleRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Enable Text Bar to all Frames",
             onClick = function()
@@ -1962,6 +1987,8 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementOptionState = function(key) return UNIT_DB_MAP[key]().bottomTextBar == true end,
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1977,6 +2004,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbToggleRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Position to all Frames",
             onClick = function()
@@ -1995,6 +2023,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2099,6 +2128,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbHeightRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Height to all Frames",
             onClick = function()
@@ -2115,6 +2145,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2129,6 +2160,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbHeightRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Width to all Frames",
             onClick = function()
@@ -2145,6 +2177,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2485,6 +2518,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbTextRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Left Text to all Frames",
             onClick = function()
@@ -2509,6 +2543,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2528,6 +2563,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbTextRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Right Text to all Frames",
             onClick = function()
@@ -2552,6 +2588,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2745,6 +2782,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbCenterRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Center Text to all Frames",
             onClick = function()
@@ -2769,6 +2807,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2788,6 +2827,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedBtbCenterRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Bar Class Icon to all Frames",
             onClick = function()
@@ -2804,6 +2844,8 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
+                            getElementOptionState = function(key) return (UNIT_DB_MAP[key]().btbClassIcon or "none") ~= "none" end,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2910,6 +2952,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
         local rgn = sharedAddRow1._leftRegion
         local ciSyncUnits = { "player", "target" }
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Combat Indicator Style to all Frames",
             onClick = function()
@@ -2926,6 +2969,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = ciSyncUnits,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3121,6 +3165,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedAddRow4._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Raid Marker to all Frames",
             onClick = function()
@@ -3141,6 +3186,8 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementOptionState = function(key) return UNIT_DB_MAP[key]().raidMarkerEnabled == true end,
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3156,6 +3203,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedAddRow4._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Marker Size to all Frames",
             onClick = function()
@@ -3172,6 +3220,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3242,6 +3291,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
                 return v
             end
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region = rgn,
                 tooltip = tooltip,
                 onClick = function()
@@ -3258,6 +3308,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                            getElementState = env.GetUnitApplyState,
                     elementKeys = leaderSyncUnits,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return optState.selectedUnit end,
@@ -3475,13 +3526,46 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
               disabledTooltip="Blizzard's target frame plays these sounds itself.", rawTooltip=true,
               getValue=function() return db.profile.targetSounds == true end,
               setValue=function(v) db.profile.targetSounds = v; ns.UF_SyncTargetSounds() end } or EllesmereUI.BlankRowCfg()
-        h = select(2, W:DualRow(parent, y,
+        local rangeRow
+        rangeRow, h = W:DualRow(parent, y,
             { type="slider", text="Out of Range Alpha", min=10, max=100, step=1,
               tooltip="Fades the frame when the unit is out of range of your spells. Set to 100% to disable the fade.",
               getValue=function() return math.floor(((SValSupported("oorAlpha", 0.4)) * 100) + 0.5) end,
               setValue=function(v) UNIT_DB_MAP[optState.selectedUnit]().oorAlpha = v / 100 end },
-            soundCfg))
+            soundCfg)
         y = y - h
+        if not EllesmereUI._prebuilding then
+            local rangeUnits = { "target", "focus" }
+            local rangeRegion = rangeRow._leftRegion
+            local function GetAlpha(unit)
+                local t = UNIT_DB_MAP[unit] and UNIT_DB_MAP[unit]()
+                return t and t.oorAlpha or 0.4
+            end
+            local function CopyAlpha(units)
+                local a = GetAlpha(optState.selectedUnit)
+                for _, unit in ipairs(units) do
+                    local t = UNIT_DB_MAP[unit] and UNIT_DB_MAP[unit]()
+                    if t then t.oorAlpha = a end
+                end
+                ReloadAndUpdate()
+                EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                region = rangeRegion,
+                alwaysAvailable = true,
+                tooltip = "Apply Out of Range Alpha to Target and Focus",
+                onClick = function() CopyAlpha(rangeUnits) end,
+                isSynced = function() return GetAlpha("target") == GetAlpha("focus") end,
+                flashTargets = function() return { rangeRegion } end,
+                multiApply = {
+                    elementKeys = rangeUnits,
+                    elementLabels = { target = "Target", focus = "Focus" },
+                    getCurrentKey = function() return optState.selectedUnit end,
+                    getElementState = env.GetUnitApplyState,
+                    onApply = CopyAlpha,
+                },
+            })
+        end
     end
 
     return y, sharedAddHeader, sharedAddRow1, sharedAddRow4, sharedAddRow5

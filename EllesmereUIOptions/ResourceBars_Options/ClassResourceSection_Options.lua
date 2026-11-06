@@ -67,6 +67,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
     -- special bars that pick which resource is drawn.
     local artKeep = {
         ["Show Class Resource"] = true, ["Height"] = true, ["Width"] = true, ["Opacity"] = true,
+        ["Fade Out of Combat"] = true, ["Fade Opacity"] = true,
         ["Guardian Druid Ironfur Bar"] = true, ["Show Hash Lines"] = true,
         ["Prot Warrior Ignore Pain Bar"] = true, ["Show Hash Line"] = true,
         ["Arms Warrior Sweeping Strikes Bar"] = true,
@@ -317,6 +318,9 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                     return (p.primary.height or 16) == v and (p.health.height or 20) == v
                 end,
                 flashTargets = function() return { ctx.syncRows.classHeight, ctx.syncRows.powerHeight, ctx.syncRows.healthHeight } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "secondary", "height", SmoothRefresh),
             })
         end
         if not EllesmereUI._prebuilding then
@@ -336,6 +340,9 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                     return (p.primary.width or 220) == totalW and (p.health.width or 220) == totalW
                 end,
                 flashTargets = function() return { ctx.syncRows.classWidth, ctx.syncRows.powerWidth, ctx.syncRows.healthWidth } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "secondary", "width", SmoothRefresh),
             })
         end
     end
@@ -601,6 +608,9 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                         and (p.primary.borderBehind or false) == bh and (p.health.borderBehind or false) == bh
                 end,
                 flashTargets = function() return { classBsRow._leftRegion } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "secondary", "borderStyle", SmoothRefresh),
             })
             -- Border: right region of the Border Style row
             EllesmereUI.BuildSyncIcon({
@@ -629,6 +639,9 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                     return eq(p.primary) and eq(p.health)
                 end,
                 flashTargets = function() return { ctx.syncRows.classBorder, ctx.syncRows.powerBorder, ctx.syncRows.healthBorder } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "secondary", "border", SmoothRefresh),
             })
         end
 
@@ -946,35 +959,27 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                     return (p.primary.barAlpha or 1) == v and (p.health.barAlpha or 1) == v
                 end,
                 flashTargets = function() return { ctx.syncRows.classOpacity, ctx.syncRows.powerOpacity, ctx.syncRows.healthOpacity } end,
+           
+                alwaysAvailable = true,
+                multiApply = ns.ERB_MultiSync(DB, "secondary", "opacity", SmoothRefresh),
             })
         end
     end
 
     -- Out of Combat Opacity cog: dims the Class Resource bar to this alpha out of combat (100 = no fade); applied by ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat.
-    if not EllesmereUI._prebuilding then
-        local rgn = classBorderRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
-            disabled = function() local c = cfg(); return c and not c.enabled end,
-            disabledTooltip = "Class Resource",
-            title = "Out of Combat Opacity",
-            rows = {
-                { type = "toggle", label = "Fade Out of Combat",
-                  get = function() local c = cfg(); return c and c.oocFadeEnabled == true end,
-                  set = function(v)
-                      local c = cfg(); if not c then return end
-                      c.oocFadeEnabled = v; RefreshClass()
-                  end },
-                { type = "slider", label = "Opacity",
-                  min = 0, max = 100, step = 1,
-                  disabled = function() local c = cfg(); return not (c and c.oocFadeEnabled) end,
-                  get = function() local c = cfg(); return math.floor(((c and c.oocAlpha) or 0.5) * 100 + 0.5) end,
-                  set = function(v)
-                      local c = cfg(); if not c then return end
-                      c.oocAlpha = v / 100; RefreshClass()
-                  end },
-            },
-        })
-    end
+    -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
+    local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
+        { type="toggle", text="Fade Out of Combat",
+          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshClass() end },
+        { type="slider", text="Fade Opacity", min=0, max=100, step=1,
+          disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
+          disabledTooltip="Fade Out of Combat",
+          getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshClass() end }
+    ); y = y - fadeSyncH
+    ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "secondary", "oocFade", "Fade Out of Combat", SmoothRefresh)
+    ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "secondary", "oocAlpha", "Fade Opacity", SmoothRefresh)
 
     -- Resource Text and the Hunter Focus row below touch only the class-resource
     -- (secondary) config. DB() is shadowed in this scope so DB().secondary resolves to

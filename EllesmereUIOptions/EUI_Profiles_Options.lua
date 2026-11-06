@@ -84,7 +84,7 @@ local INCLUDE_CENTER_X = -(SIDE_PAD + STATUS_W + 30 + CHK_SZ / 2)
 -- the value flips, linked() -> members, own key, display map, linkedTip(list),
 -- blockedTip (hover text on inactive rows; nil = silent).
 local function BuildAddonListRow(scrollChild, i, item, totalW, o)
-    local EG = EllesmereUI.ELLESMERE_GREEN
+    local EG = EllesmereUI.PANEL_ACCENT
     local READY_R, READY_G, READY_B = 0.196, 0.737, 0.325
     local rowFrame = CreateFrame("Frame", nil, scrollChild)
     rowFrame:SetSize(totalW, ROW_H_A)
@@ -222,7 +222,7 @@ end
 -- Done-style button hover: label and border alpha fade 0.7 -> 1 over 0.1s.
 -- Returns reset(), which snaps the fade state back to idle.
 local function MakeAccentFade(btn, lbl, brd)
-    local EG = EllesmereUI.ELLESMERE_GREEN
+    local EG = EllesmereUI.PANEL_ACCENT
     local lerp = EllesmereUI.lerp
     local progress, target = 0, 0
     local FADE = 0.1
@@ -255,7 +255,7 @@ function _G._EUI_BuildProfilesPage(pageName, parent, yOffset)
     local y = yOffset
     local _, h
     local FONT = EllesmereUI.EXPRESSWAY
-    local EG = EllesmereUI.ELLESMERE_GREEN
+    local EG = EllesmereUI.PANEL_ACCENT
     local MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\"
 
     -- Safety net: if the active profile does not match the current spec assignment (e.g. spec info was unavailable at login), correct it now.

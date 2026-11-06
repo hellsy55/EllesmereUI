@@ -42,6 +42,148 @@ local MINI_ENABLE_LABELS = {
 }
 
 ---------------------------------------------------------------------------
+--  Shared mini settings: the same per-slot Apply to pattern as main frames.
+--  Only keys present for every member of the mini group are eligible.  Boss
+--  frames and pet-only aura/power/happiness options never enter this wrapper.
+---------------------------------------------------------------------------
+local MINI_SHARED_KEYS = {
+    ["Show Portrait"] = { "showPortrait", "portraitSide" },
+    ["Bar Texture"] = { "healthBarTexture", "textureBg" },
+    ["Strata"] = { "frameStrata" },
+    ["Border Size"] = { "borderSizeOverride" },
+    ["Show Highlight Border"] = { "showHighlightBorder" },
+    ["Dark Mode"] = { "darkTheme" },
+    ["Health Bar Height"] = { "healthHeight" },
+    ["Bar Width"] = { "frameWidth" },
+    ["Frame Scale"] = { "blizzScale" },
+    ["Fill Color"] = { "customFillColor", "healthClassColored" },
+    ["Fill Opacity"] = { "healthBarOpacity" },
+    ["Bar Background"] = { "customBgAlpha", "customBgColor", "bgClassColored" },
+    ["Reverse Fill"] = { "healthReverseFill" },
+    ["Vertical Fill"] = { "healthVerticalFill" },
+    ["Smooth Health Bars"] = { "smoothBars" },
+    ["Left Text"] = {}, ["Right Text"] = {}, ["Center Text"] = {},
+}
+
+local function MiniValueEqual(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return a == b end
+    for k, v in pairs(a) do if not MiniValueEqual(v, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+
+local function MiniSyncWidgetWrapper(W, unitKey)
+    local env = ns._UFO_OptEnv
+    local db = env.db
+    local members = env.MINI_GROUP_ORDER
+    local section
+    local syncW = setmetatable({}, { __index = W })
+    function syncW:SectionHeader(parent, name, y)
+        section = name
+        return W:SectionHeader(parent, name, y)
+    end
+    function syncW:DualRow(parent, y, left, right)
+        local row, h = W:DualRow(parent, y, left, right)
+        if EllesmereUI._prebuilding or not row then return row, h end
+        if section ~= "DISPLAY" and section ~= "HEALTH BAR" and section ~= "CORE TEXT POSITIONS" then return row, h end
+        local slots = { left, right }
+        local regions = { row._leftRegion, row._rightRegion }
+        for i = 1, 2 do
+            local cfg, rgn = slots[i], regions[i]
+            local name = type(cfg) == "table" and cfg.text
+            local listed = name and MINI_SHARED_KEYS[name]
+            if (name == "Bar Background" or name == "Fill Color") and section ~= "HEALTH BAR" then
+                listed = nil
+            end
+            if listed and rgn then
+                local keys = {}
+                for _, k in ipairs(listed) do
+                    if env.IsGroupSharedKey(k, members) then keys[#keys + 1] = k end
+                end
+                -- Copy the entire text slot (format, offsets, size and color),
+                -- rather than only its visible content dropdown.
+                local prefix = (name == "Left Text" and "leftText")
+                    or (name == "Right Text" and "rightText")
+                    or (name == "Center Text" and "centerText")
+                if prefix then
+                    local seen = {}
+                    for _, u in ipairs(members) do
+                        local src = db.profile[u] or {}
+                        local defs = db._profileDefaults and db._profileDefaults[u] or {}
+                        for k in pairs(src) do
+                            if type(k) == "string" and k:sub(1, #prefix) == prefix
+                                and env.IsGroupSharedKey(k, members) then seen[k] = true end
+                        end
+                        for k in pairs(defs) do
+                            if type(k) == "string" and k:sub(1, #prefix) == prefix
+                                and env.IsGroupSharedKey(k, members) then seen[k] = true end
+                        end
+                    end
+                    for k in pairs(seen) do keys[#keys + 1] = k end
+                end
+                if #keys > 0 then
+                    local function CopyTo(destinations)
+                        local source = db.profile[unitKey]
+                        for _, target in ipairs(destinations) do
+                            if target ~= unitKey then
+                                local dest = db.profile[target]
+                                if dest then
+                                    for _, k in ipairs(keys) do
+                                        local v = source[k]
+                                        dest[k] = type(v) == "table" and EllesmereUI.Lite.DeepCopy(v) or v
+                                    end
+                                    if prefix and ns.UF_IsUniqueContent then
+                                        local content = source[prefix .. "Content"]
+                                        if ns.UF_IsUniqueContent(content) then
+                                            for _, other in ipairs({ "leftText", "rightText", "centerText" }) do
+                                                if other ~= prefix and dest[other .. "Content"] == content then
+                                                    dest[other .. "Content"] = "none"
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        env.ReloadAndUpdate()
+                        EllesmereUI:RefreshPage()
+                    end
+                    EllesmereUI.BuildSyncIcon({
+                        alwaysAvailable = true,
+                        region = rgn,
+                        tooltip = "Apply " .. name .. " to other Mini Frames",
+                        isSynced = function()
+                            local source = db.profile[unitKey]
+                            for _, target in ipairs(members) do
+                                local dest = db.profile[target]
+                                if dest then
+                                    for _, k in ipairs(keys) do
+                                        if not MiniValueEqual(source[k], dest[k]) then return false end
+                                    end
+                                end
+                            end
+                            return true
+                        end,
+                        onClick = function() CopyTo(members) end,
+                        flashTargets = function() return { rgn } end,
+                        multiApply = {
+                            getElementState = env.GetUnitApplyState,
+                            elementKeys = members,
+                            elementLabels = env.SHORT_LABELS,
+                            getCurrentKey = function() return unitKey end,
+                            onApply = CopyTo,
+                        },
+                    })
+                end
+            end
+        end
+        return row, h
+    end
+    return syncW
+end
+
+---------------------------------------------------------------------------
 --  Shared mini frame settings builder
 ---------------------------------------------------------------------------
 local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow, afterSizeRow, opts)
@@ -1744,7 +1886,7 @@ function ns.UFO_BuildFoTToTOptions(W, parent, y, settingsTable, unitKey)
     end
 
     local displayHeader, sizeRow, textHeader, textRow
-    y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enableRow)
+    y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(MiniSyncWidgetWrapper(W, unitKey), parent, y, settingsTable, unitKey, enableRow)
 
     -- Store click targets for hover highlight system
     parent._ufClickTargets = {
@@ -1862,7 +2004,7 @@ function ns.UFO_BuildPetOptions(W, parent, y)
     end
 
     local displayHeader, sizeRow, textHeader, textRow
-    y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(W, parent, y, db.profile.pet, "pet", enableRow, nil, petOpts)
+    y, displayHeader, sizeRow, textHeader, textRow = BuildMiniTextAndSize(MiniSyncWidgetWrapper(W, "pet"), parent, y, db.profile.pet, "pet", enableRow, nil, petOpts)
 
     -- BUFFS AND DEBUFFS, on the EllesmereUI pet frame only (an inactive frame
     -- shows the notice above instead). Location, size (Cropped Icons
@@ -2649,8 +2791,21 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                   disabled=debuffTextOff, disabledTooltip="Show Duration (Inside Cog)",
                   getValue=function() return db.profile.boss.debuffCooldownTextSize or 10 end,
                   setValue=function(v) db.profile.boss.debuffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
-            if not EllesmereUI._prebuilding then  -- Directions cog on Debuff Size (X/Y cluster offset)
-                EllesmereUI.BuildInlineCog(textSizeRow._leftRegion, { disabled = bossDebuffSizeOff, title = "Debuff Position", rows = {
+            if not EllesmereUI._prebuilding then  -- Icon Zoom cog on Debuff Size
+                local bossDebuffZoomOff = function() return (db.profile.boss.debuffAnchor or "bottomleft") == "none" end
+                EllesmereUI.BuildInlineCog(textSizeRow._leftRegion, { disabled = bossDebuffZoomOff, disabledTooltip = "Debuffs Location", title = "Icon Zoom", rows = {
+                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
+                      get=function() return db.profile.boss.debuffIconZoom or 0.07 end,
+                      set=function(v) db.profile.boss.debuffIconZoom = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
+                } })
+            end
+            if not EllesmereUI._prebuilding then  -- Arrows button on Debuff Size (X/Y cluster offset)
+                EllesmereUI.BuildInlineCog(textSizeRow._leftRegion, {
+                    icon = EllesmereUI.DIRECTIONS_ICON,
+                    paint = function(btn, off, hot)
+                        btn:SetAlpha(off and 0.15 or (hot and 0.7 or 0.4))
+                    end,
+                    disabled = bossDebuffSizeOff, title = "Debuff Position", rows = {
                     { type="slider", label="Offset X", min=-200, max=200, step=1,
                       get=function() return db.profile.boss.debuffOffsetX or 0 end,
                       set=function(v) db.profile.boss.debuffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -2661,14 +2816,6 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     { type="slider", pixel=true, label="Spacing", min=-1, max=10, step=1,
                       get=function() return db.profile.boss.debuffSpacing or 1 end,
                       set=function(v) db.profile.boss.debuffSpacing = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
-                } })
-            end
-            if not EllesmereUI._prebuilding then  -- Icon Zoom cog on Debuff Size
-                local bossDebuffZoomOff = function() return (db.profile.boss.debuffAnchor or "bottomleft") == "none" end
-                EllesmereUI.BuildInlineCog(textSizeRow._leftRegion, { disabled = bossDebuffZoomOff, disabledTooltip = "Debuffs Location", title = "Icon Zoom", rows = {
-                    { type="slider", label="Zoom", min=0, max=0.20, step=0.01,
-                      get=function() return db.profile.boss.debuffIconZoom or 0.07 end,
-                      set=function(v) db.profile.boss.debuffIconZoom = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
                 } })
             end
             -- Debuff Text Size cog (right): Show Duration + Duration X/Y + Stack.
@@ -3023,13 +3170,16 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             })
         end
 
-        -- Row 2: Show Raid Marker | Raid Marker Size (+ position cog)
+        -- Keep the Raid Marker controls under Extras, as on the main frames.
+        _, hh = Ww:SectionHeader(pp, "EXTRAS", yy); yy = yy - hh
+
+        -- Raid Marker | Marker Size (+ position cog on size)
         local function bossRmOff()
             return db.profile.boss.raidMarkerEnabled == false
         end
         local bossRmRow
         bossRmRow, hh = Ww:DualRow(pp, yy,
-            { type="toggle", text="Show Raid Marker",
+            { type="toggle", text="Raid Marker",
               tooltip="Shows the raid target marker icon on boss frames.",
               getValue=function() return db.profile.boss.raidMarkerEnabled ~= false end,
               setValue=function(v)
@@ -3037,13 +3187,14 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 ReloadAndUpdate()
                 EllesmereUI:RefreshPage()
               end },
-            { type="slider", text="Raid Marker Size", min=12, max=48, step=1,
+            { type="slider", text="Marker Size", min=12, max=48, step=1,
               disabled=bossRmOff, disabledTooltip="Raid Marker",
               getValue=function() return db.profile.boss.raidMarkerSize or 28 end,
               setValue=function(v) db.profile.boss.raidMarkerSize = v; ReloadAndUpdate() end });  yy = yy - hh
         if not EllesmereUI._prebuilding then
-            EllesmereUI.BuildInlineCog(bossRmRow._leftRegion, {
-                title = "Raid Marker Position",
+            EllesmereUI.BuildInlineCog(bossRmRow._rightRegion, {
+                disabled = bossRmOff, disabledTooltip = "Raid Marker",
+                title = "Raid Marker Settings",
                 rows = {
                     { type="slider", label="X Offset", min=-50, max=50, step=1,
                       get=function() return db.profile.boss.raidMarkerX or 0 end,
@@ -3113,7 +3264,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
-            cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
+            cogTex:SetTexture(iconPath or EllesmereUI.PANEL_MORE_ICON)
             local function isOff() return disabledFn and disabledFn() or false end
             cogBtn:SetScript("OnEnter", function(self) if not isOff() then self:SetAlpha(0.7) end end)
             cogBtn:SetScript("OnLeave", function(self) if not isOff() then self:SetAlpha(0.4) end end)
@@ -3581,33 +3732,6 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             { type="spacer" }); yy = yy - hh
         if not EllesmereUI._prebuilding then
             local rgn = bossImpGlowRow._leftRegion
-            local sw, updateSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                function()
-                    local c = B.castbarImportantGlowColor or { r = 1, g = 0.2, b = 0.2 }
-                    return c.r, c.g, c.b, 1
-                end,
-                function(r, g, b)
-                    B.castbarImportantGlowColor = { r = r, g = g, b = b }
-                    ReloadAndUpdate()
-                end, false, 20)
-            PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
-            rgn._lastInline = sw
-            local swBlock = CreateFrame("Frame", nil, sw)
-            swBlock:SetAllPoints()
-            swBlock:SetFrameLevel(sw:GetFrameLevel() + 10)
-            swBlock:EnableMouse(true)
-            swBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Important Cast Glow"))
-            end)
-            swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function applySwState()
-                local off = bossImpGlowOff()
-                sw:SetAlpha(off and 0.3 or 1)
-                if off then swBlock:Show() else swBlock:Hide() end
-                if updateSw then updateSw() end
-            end
-            applySwState()
-            EllesmereUI.RegisterWidgetRefresh(applySwState)
 
             EllesmereUI.BuildInlineCog(rgn, {
                 gap = 6,
@@ -3644,6 +3768,33 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                       disabledTooltip = "Pixel Glow Background" },
                 },
             })
+            local sw, updateSw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                function()
+                    local c = B.castbarImportantGlowColor or { r = 1, g = 0.2, b = 0.2 }
+                    return c.r, c.g, c.b, 1
+                end,
+                function(r, g, b)
+                    B.castbarImportantGlowColor = { r = r, g = g, b = b }
+                    ReloadAndUpdate()
+                end, false, 20)
+            PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
+            rgn._lastInline = sw
+            local swBlock = CreateFrame("Frame", nil, sw)
+            swBlock:SetAllPoints()
+            swBlock:SetFrameLevel(sw:GetFrameLevel() + 10)
+            swBlock:EnableMouse(true)
+            swBlock:SetScript("OnEnter", function()
+                EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Important Cast Glow"))
+            end)
+            swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function applySwState()
+                local off = bossImpGlowOff()
+                sw:SetAlpha(off and 0.3 or 1)
+                if off then swBlock:Show() else swBlock:Hide() end
+                if updateSw then updateSw() end
+            end
+            applySwState()
+            EllesmereUI.RegisterWidgetRefresh(applySwState)
         end
 
         -- Custom Border Style rows (the Cast Bar cog's opt-in): one table
@@ -3693,7 +3844,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
-            cogTex:SetTexture(EllesmereUI.COGS_ICON)
+            cogTex:SetTexture(EllesmereUI.PANEL_MORE_ICON)
             cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
             cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             cogBtn:SetScript("OnClick", function(self) showFn(self) end)
@@ -3770,27 +3921,6 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               getValue=EffAbsorbOpacity,
               setValue=function(v) BSet("absorbOpacity", v) end });  yy = yy - hh
         ns.UFO_AddAbsorbPreviewEye(absorbRow._leftRegion, "showAbsorbPreview", "absorb")
-        if not EllesmereUI._prebuilding then
-            local rgn = absorbRow._leftRegion
-            local swatch = EllesmereUI.BuildColorSwatch(
-                rgn, absorbRow:GetFrameLevel() + 3,
-                function()
-                    local c = B.absorbColor
-                    if c then return c.r, c.g, c.b, 1 end
-                    return 1, 1, 1, 1
-                end,
-                function(r, g, b)
-                    B.absorbColor = { r=r, g=g, b=b }
-                    ReloadAndUpdate(); UpdatePreview()
-                end, false, 20)
-            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = swatch
-            local function UpdateAbsorbSwatchVis()
-                swatch:SetAlpha(BVal("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
-            end
-            RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
-            UpdateAbsorbSwatchVis()
-        end
         do
             local rgn = absorbRow._leftRegion
             local absorbEdgeLabels = { overlay = "Overlay", overlayReverse = "Overlay Reverse" }
@@ -3870,6 +4000,27 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             ACogBtn(rgn, cogShow)
         end
 
+        if not EllesmereUI._prebuilding then
+            local rgn = absorbRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, absorbRow:GetFrameLevel() + 3,
+                function()
+                    local c = B.absorbColor
+                    if c then return c.r, c.g, c.b, 1 end
+                    return 1, 1, 1, 1
+                end,
+                function(r, g, b)
+                    B.absorbColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local function UpdateAbsorbSwatchVis()
+                swatch:SetAlpha(BVal("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
+            end
+            RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
+            UpdateAbsorbSwatchVis()
+        end
         -- Row 2: Heal Absorb Style (+ color swatch + placement cog) | Heal Absorb Opacity
         local healAbsorbRow
         healAbsorbRow, hh = Ww:DualRow(pp, yy,
@@ -3886,35 +4037,6 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               getValue=function() return BVal("healAbsorbOpacity", 65) end,
               setValue=function(v) BSet("healAbsorbOpacity", v) end });  yy = yy - hh
         ns.UFO_AddAbsorbPreviewEye(healAbsorbRow._leftRegion, "showHealAbsorbPreview", "heal absorb")
-        if not EllesmereUI._prebuilding then
-            local rgn = healAbsorbRow._leftRegion
-            local swatch = EllesmereUI.BuildColorSwatch(
-                rgn, healAbsorbRow:GetFrameLevel() + 3,
-                function()
-                    local c = B.healAbsorbColor
-                    if c then return c.r or 0.8, c.g or 0.15, c.b or 0.15, 1 end
-                    return 0.8, 0.15, 0.15, 1
-                end,
-                function(r, g, b)
-                    B.healAbsorbColor = { r=r, g=g, b=b }
-                    ReloadAndUpdate(); UpdatePreview()
-                end, false, 20)
-            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = swatch
-            local swatchBlock = CreateFrame("Frame", nil, swatch)
-            swatchBlock:SetAllPoints()
-            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-            swatchBlock:EnableMouse(true)
-            swatchBlock:Hide()
-            local function UpdateHealAbsorbSwatchVis()
-                local st = BVal("healAbsorbStyle", "clean")
-                local off = (st == "none" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR")
-                swatch:SetAlpha(off and 0.3 or 1)
-                if off then swatchBlock:Show() else swatchBlock:Hide() end
-            end
-            RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
-            UpdateHealAbsorbSwatchVis()
-        end
         do
             local rgn = healAbsorbRow._leftRegion
             local healAbsorbEdgeLabels = { overlay = "Overlay" }
@@ -3953,6 +4075,35 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             ACogBtn(rgn, cogShow)
         end
 
+        if not EllesmereUI._prebuilding then
+            local rgn = healAbsorbRow._leftRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, healAbsorbRow:GetFrameLevel() + 3,
+                function()
+                    local c = B.healAbsorbColor
+                    if c then return c.r or 0.8, c.g or 0.15, c.b or 0.15, 1 end
+                    return 0.8, 0.15, 0.15, 1
+                end,
+                function(r, g, b)
+                    B.healAbsorbColor = { r=r, g=g, b=b }
+                    ReloadAndUpdate(); UpdatePreview()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            local swatchBlock = CreateFrame("Frame", nil, swatch)
+            swatchBlock:SetAllPoints()
+            swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            swatchBlock:EnableMouse(true)
+            swatchBlock:Hide()
+            local function UpdateHealAbsorbSwatchVis()
+                local st = BVal("healAbsorbStyle", "clean")
+                local off = (st == "none" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR")
+                swatch:SetAlpha(off and 0.3 or 1)
+                if off then swatchBlock:Show() else swatchBlock:Hide() end
+            end
+            RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
+            UpdateHealAbsorbSwatchVis()
+        end
         -- Max Health Style below Heal Absorb Style.
         local maxHealthRow
         maxHealthRow, hh = Ww:DualRow(pp, yy,
@@ -3965,6 +4116,16 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               getValue=function() return BVal("maxHealthOpacity", 100) end,
               setValue=function(v) BSet("maxHealthOpacity", v) end }); yy = yy - hh
         ns.UFO_AddAbsorbPreviewEye(maxHealthRow._leftRegion, "showMaxHealthPreview", "max health")
+        do
+            local rgn = maxHealthRow._leftRegion
+            local _, show = EllesmereUI.BuildCogPopup({
+                title="Max Health Rendering",
+                rows={ { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+                    get=function() return BVal("maxHealthBgOpacity", 100) end,
+                    set=function(v) BSet("maxHealthBgOpacity", v) end } },
+            })
+            ACogBtn(rgn, show)
+        end
         if not EllesmereUI._prebuilding then
             local rgn = maxHealthRow._leftRegion
             local swatch = EllesmereUI.BuildColorSwatch(rgn, maxHealthRow:GetFrameLevel() + 3,
@@ -3984,16 +4145,6 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 swatch:SetAlpha((style == "none" or style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR") and 0.3 or 1)
             end
             RegisterWidgetRefresh(RefreshColor); RefreshColor()
-        end
-        do
-            local rgn = maxHealthRow._leftRegion
-            local _, show = EllesmereUI.BuildCogPopup({
-                title="Max Health Rendering",
-                rows={ { type="slider", label="Backing Opacity", min=0, max=100, step=1,
-                    get=function() return BVal("maxHealthBgOpacity", 100) end,
-                    set=function(v) BSet("maxHealthBgOpacity", v) end } },
-            })
-            ACogBtn(rgn, show)
         end
 
         -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ color swatch)

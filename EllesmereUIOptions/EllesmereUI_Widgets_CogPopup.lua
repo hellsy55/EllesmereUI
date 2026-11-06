@@ -21,7 +21,7 @@ local MakeFont = EllesmereUI.MakeFont
 local MakeBorder = EllesmereUI.MakeBorder
 local MakeDropdownArrow = EllesmereUI.MakeDropdownArrow
 local EXPRESSWAY = EllesmereUI.EXPRESSWAY
-local ELLESMERE_GREEN = EllesmereUI.ELLESMERE_GREEN
+local ELLESMERE_GREEN = EllesmereUI.PANEL_ACCENT
 local BORDER_COLOR = EllesmereUI.BORDER_COLOR
 local WI = EllesmereUI._widgetInternals
 local PixelizeSliderCfg = WI.PixelizeSliderCfg
@@ -879,7 +879,7 @@ local function BuildCogPopup(opts)
                 local rowFrames, rowPool = {}, {}
                 local insLine = sChild:CreateTexture(nil, "OVERLAY", nil, 7)
                 insLine:SetHeight(2)
-                local EG2 = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+                local EG2 = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
                 insLine:SetColorTexture(EG2.r, EG2.g, EG2.b, 0.9)
                 insLine:Hide()
 

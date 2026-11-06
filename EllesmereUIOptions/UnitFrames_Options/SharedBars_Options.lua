@@ -20,7 +20,7 @@ local CreateFrame = EllesmereUI._Pool.CreateFrame
 local PoolIsIdle = EllesmereUI._Pool.IsIdle
 
 -- Session-only absorb previews shared by Player/Target/Focus and Boss rows.
--- Place the eye before the swatch so the visible order is cog, color, eye.
+-- Place the eye before the cog and swatch; visible order is color, cog, eye.
 function ns.UFO_AddAbsorbPreviewEye(region, flag, label)
     if EllesmereUI._prebuilding then return end
     local env = ns._UFO_OptEnv
@@ -105,6 +105,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedSizeRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Health Bar Height to all Frames",
             onClick = function()
@@ -123,6 +124,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -157,6 +159,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedSizeRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Width to all Frames",
             onClick = function()
@@ -175,6 +178,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -345,6 +349,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Background to all Frames",
             onClick = function() ApplyBgTo(GROUP_UNIT_ORDER) end,
@@ -365,6 +370,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -406,6 +412,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Color to all Frames",
             onClick = function() ApplyColorTo(GROUP_UNIT_ORDER) end,
@@ -432,6 +439,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -552,6 +560,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedOpacityRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Opacity to all Frames",
             onClick = function()
@@ -570,6 +579,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -657,6 +667,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
                 end
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Left Text to all Frames",
                     onClick = function() ApplyLeftTextTo(GROUP_UNIT_ORDER) end,
@@ -681,6 +692,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                            getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return optState.selectedUnit end,
@@ -863,6 +875,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
                 end
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Right Text to all Frames",
                     onClick = function() ApplyRightTextTo(GROUP_UNIT_ORDER) end,
@@ -887,6 +900,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                            getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return optState.selectedUnit end,
@@ -1060,6 +1074,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
                 end
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Center Text to all Frames",
                     onClick = function() ApplyCenterTextTo(GROUP_UNIT_ORDER) end,
@@ -1084,6 +1099,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                            getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return optState.selectedUnit end,
@@ -1241,6 +1257,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     ReloadAndUpdate(); EllesmereUI:RefreshPage(true)
                 end
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Extra Text to all Frames",
                     onClick = function() ApplyExtraTextTo(GROUP_UNIT_ORDER) end,
@@ -1266,6 +1283,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                            getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return optState.selectedUnit end,
@@ -1502,6 +1520,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Hide Power Bar to all Frames",
             onClick = function() ApplyHideTo(GROUP_UNIT_ORDER) end,
@@ -1514,6 +1533,8 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementOptionState = function(key) return ns.UF_StockHidesPower(UNIT_DB_MAP[key]()) end,
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1523,6 +1544,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     elseif not EllesmereUI._prebuilding then
         local rgn = sharedPowerRow1._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Power Bar Height to all Frames",
             onClick = function()
@@ -1539,6 +1561,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1568,6 +1591,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding and not stockPower then
         local rgn = sharedPowerRow1._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Position to all Frames",
             onClick = function()
@@ -1584,6 +1608,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1642,6 +1667,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedPowerRow2._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Power Text Format to all Frames",
             onClick = function()
@@ -1666,6 +1692,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1686,6 +1713,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedPowerRow2._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Opacity to all Frames",
             onClick = function()
@@ -1704,6 +1732,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1871,6 +1900,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Background to all Frames",
             onClick = function() ApplyBgTo(GROUP_UNIT_ORDER) end,
@@ -1891,6 +1921,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1926,6 +1957,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Color to all Frames",
             onClick = function() ApplyColorTo(GROUP_UNIT_ORDER) end,
@@ -1953,6 +1985,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2056,6 +2089,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedPowerRow4._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Power Text Position to all Frames",
             onClick = function()
@@ -2072,6 +2106,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2087,6 +2122,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedPowerRow4._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Text Color to all Frames",
             onClick = function()
@@ -2110,6 +2146,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2825,6 +2862,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedClassResRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Class Resource Style to all Frames",
             onClick = function()
@@ -2844,6 +2882,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2861,6 +2900,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedClassResRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Class Colors to all Frames",
             onClick = function()
@@ -2881,6 +2921,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2948,6 +2989,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = row._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Class Resource Position to all Frames",
             onClick = function()
@@ -2964,6 +3006,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -2978,6 +3021,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = row._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Class Resource Size to all Frames",
             onClick = function()
@@ -2994,6 +3038,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3036,6 +3081,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedClassResRow3._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Class Resource Bar Spacing to all Frames",
             onClick = function()
@@ -3052,6 +3098,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3066,6 +3113,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedClassResRow3._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Class Resource Background Color to all Frames",
             onClick = function()
@@ -3094,6 +3142,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3148,6 +3197,72 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     _, h = W:Spacer(parent, y, 20); y = y - h
 
     return y, sharedClassResHeader, sharedClassResRow
+end
+
+-- Common selective sync for actual shared Player/Target/Focus fields. Keep
+-- per-unit identity, visibility rules and positioning outside the copied list.
+-- Does not mirror a table reference: colors and glow options are deep-copied.
+function ns.UFO_BuildSharedFieldsSync(region, fields, label, currentUnit, refresh, targets)
+    if EllesmereUI._prebuilding or not region then return end
+    local env = ns._UFO_OptEnv
+    local keys = targets or env.GROUP_UNIT_ORDER
+    local function data(key)
+        local get = env.UNIT_DB_MAP[key]
+        return get and get()
+    end
+    local function equal(a, b)
+        if type(a) ~= type(b) then return false end
+        if type(a) ~= "table" then return a == b end
+        for k, v in pairs(a) do if not equal(v, b[k]) then return false end end
+        for k in pairs(b) do if a[k] == nil then return false end end
+        return true
+    end
+    local function copyTo(destinations)
+        local src = data(currentUnit())
+        if not src then return end
+        for _, key in ipairs(destinations) do
+            local dst = data(key)
+            if dst and dst ~= src then
+                for _, field in ipairs(fields) do
+                    local value = src[field]
+                    dst[field] = type(value) == "table" and CopyTable(value) or value
+                end
+            end
+        end
+        refresh()
+        EllesmereUI:RefreshPage()
+    end
+    EllesmereUI.BuildSyncIcon({
+        region = region, alwaysAvailable = true,
+        tooltip = "Apply " .. label .. " to other Frames",
+        isSynced = function()
+            local src = data(currentUnit())
+            if not src then return true end
+            for _, key in ipairs(keys) do
+                local dst = data(key)
+                if dst and dst ~= src then
+                    for _, field in ipairs(fields) do
+                        if not equal(src[field], dst[field]) then return false end
+                    end
+                end
+            end
+            return true
+        end,
+        onClick = function() copyTo(keys) end,
+        flashTargets = function() return { region } end,
+        multiApply = {
+            elementKeys = keys, elementLabels = env.SHORT_LABELS,
+            getCurrentKey = currentUnit,
+            getElementState = env.GetUnitApplyState,
+            getElementOptionState = (#fields == 1) and function(key)
+                local d = data(key)
+                local v = d and d[fields[1]]
+                if type(v) == "boolean" then return v end
+                return nil
+            end or nil,
+            onApply = copyTo,
+        },
+    })
 end
 
 function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
@@ -3226,8 +3341,8 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         return 80
     end
 
-    -- Absorb Style / Heal Absorb Style sync icons carry style + swatch + every
-    -- inline-cog setting together. Each entry is a DB key + default, so an unset
+    -- Absorb, Heal Absorb and Max Health style sync icons carry style,
+    -- swatch and rendering settings. Each entry is a DB key + default, so an unset
     -- value compares equal to an explicit one; color tables are deep-copied and compared by component.
     local ABSORB_SYNC_DEFS = {
         { k = "showPlayerAbsorb", d = "none" },
@@ -3243,6 +3358,11 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         { k = "healAbsorbColor",     d = { r = 0.8, g = 0.15, b = 0.15 } },
         { k = "healAbsorbEdgeMode",  d = "overlay" },
         { k = "healAbsorbBgOpacity", d = 15 },
+    }
+    local MAX_HEALTH_SYNC_DEFS = {
+        { k = "maxHealthStyle",     d = "none" },
+        { k = "maxHealthColor",     d = { r = 0.7, g = 0.1, b = 0.1 } },
+        { k = "maxHealthBgOpacity", d = 100 },
     }
     local function _AbsSyncValEq(a, b)
         if type(a) == "table" or type(b) == "table" then
@@ -3297,28 +3417,6 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     SApplySupport(absorbRow._leftRegion, "showPlayerAbsorb")
     SApplySupport(absorbRow._rightRegion, "absorbOpacity")
     ns.UFO_AddAbsorbPreviewEye(absorbRow._leftRegion, "showAbsorbPreview", "absorb")
-    -- Inline color swatch for absorb color
-    if not EllesmereUI._prebuilding then
-        local rgn = absorbRow._leftRegion
-        local swatch = EllesmereUI.BuildColorSwatch(
-            rgn, absorbRow:GetFrameLevel() + 3,
-            function()
-                local c = SGetSupported("absorbColor")
-                if c then return c.r, c.g, c.b, 1 end
-                return 1, 1, 1, 1
-            end,
-            function(r, g, b)
-                UNIT_DB_MAP[optState.selectedUnit]().absorbColor = { r=r, g=g, b=b }
-                ReloadAndUpdate(); UpdatePreview()
-            end, false, 20)
-        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-        rgn._lastInline = swatch
-        local function UpdateAbsorbSwatchVis()
-            swatch:SetAlpha(SValSupported("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
-        end
-        RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
-        UpdateAbsorbSwatchVis()
-    end
     -- Inline cog: absorb placement (overlay / right edge / left edge)
     do
         local rgn = absorbRow._leftRegion
@@ -3448,6 +3546,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = absorbRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Absorb Style, color and rendering to all Frames",
             onClick = function()
@@ -3459,6 +3558,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3492,38 +3592,6 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     SApplySupport(healAbsorbRow._leftRegion, "healAbsorbStyle")
     SApplySupport(healAbsorbRow._rightRegion, "healAbsorbOpacity")
     ns.UFO_AddAbsorbPreviewEye(healAbsorbRow._leftRegion, "showHealAbsorbPreview", "heal absorb")
-    -- Inline color swatch for heal absorb color
-    if not EllesmereUI._prebuilding then
-        local rgn = healAbsorbRow._leftRegion
-        local swatch = EllesmereUI.BuildColorSwatch(
-            rgn, healAbsorbRow:GetFrameLevel() + 3,
-            function()
-                local c = SGetSupported("healAbsorbColor")
-                if c then return c.r or 0.8, c.g or 0.15, c.b or 0.15, 1 end
-                return 0.8, 0.15, 0.15, 1
-            end,
-            function(r, g, b)
-                UNIT_DB_MAP[optState.selectedUnit]().healAbsorbColor = { r=r, g=g, b=b }
-                ReloadAndUpdate(); UpdatePreview()
-            end, false, 20)
-        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-        rgn._lastInline = swatch
-        -- Blocking overlay: disabled for "none" and the pre-colored
-        -- "Large Outlined Stripes" heal styles (their texture is not tinted).
-        local swatchBlock = CreateFrame("Frame", nil, swatch)
-        swatchBlock:SetAllPoints()
-        swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-        swatchBlock:EnableMouse(true)
-        swatchBlock:Hide()
-        local function UpdateHealAbsorbSwatchVis()
-            local st = SValSupported("healAbsorbStyle", "clean")
-            local off = (st == "none" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR")
-            swatch:SetAlpha(off and 0.3 or 1)
-            if off then swatchBlock:Show() else swatchBlock:Hide() end
-        end
-        RegisterWidgetRefresh(UpdateHealAbsorbSwatchVis)
-        UpdateHealAbsorbSwatchVis()
-    end
     -- Inline cog: heal absorb placement (independent of shield absorb)
     do
         local rgn = healAbsorbRow._leftRegion
@@ -3608,6 +3676,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = healAbsorbRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Heal Absorb Style, color and rendering to all Frames",
             onClick = function()
@@ -3619,6 +3688,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3645,6 +3715,14 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
     SApplySupport(maxHealthRow._leftRegion, "maxHealthStyle")
     SApplySupport(maxHealthRow._rightRegion, "maxHealthOpacity")
     ns.UFO_AddAbsorbPreviewEye(maxHealthRow._leftRegion, "showMaxHealthPreview", "max health")
+    EllesmereUI.BuildInlineCog(maxHealthRow._leftRegion, {
+        title = "Max Health Rendering",
+        rows = {
+            { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+              get=function() return SValSupported("maxHealthBgOpacity", 100) end,
+              set=function(v) SSetSupported("maxHealthBgOpacity", v) end },
+        },
+    })
     if not EllesmereUI._prebuilding then
         local rgn = maxHealthRow._leftRegion
         local swatch = EllesmereUI.BuildColorSwatch(
@@ -3672,14 +3750,33 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         RegisterWidgetRefresh(RefreshColor)
         RefreshColor()
     end
-    EllesmereUI.BuildInlineCog(maxHealthRow._leftRegion, {
-        title = "Max Health Rendering",
-        rows = {
-            { type="slider", label="Backing Opacity", min=0, max=100, step=1,
-              get=function() return SValSupported("maxHealthBgOpacity", 100) end,
-              set=function(v) SSetSupported("maxHealthBgOpacity", v) end },
-        },
-    })
+    -- Sync icon: Max Health Style + color swatch + rendering across all frames
+    if not EllesmereUI._prebuilding then
+        local rgn = maxHealthRow._leftRegion
+        EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
+            region  = rgn,
+            tooltip = "Apply Max Health Style, color and rendering to all Frames",
+            onClick = function()
+                for _, key in ipairs(GROUP_UNIT_ORDER) do CopyAbsorbSync(MAX_HEALTH_SYNC_DEFS, optState.selectedUnit, key) end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end,
+            isSynced = function()
+                return AbsorbSyncMatches(MAX_HEALTH_SYNC_DEFS, optState.selectedUnit, GROUP_UNIT_ORDER)
+            end,
+            flashTargets = function() return { rgn } end,
+            multiApply = {
+                            getElementState = env.GetUnitApplyState,
+                elementKeys   = GROUP_UNIT_ORDER,
+                elementLabels = SHORT_LABELS,
+                getCurrentKey = function() return optState.selectedUnit end,
+                onApply       = function(checkedKeys)
+                    for _, key in ipairs(checkedKeys) do CopyAbsorbSync(MAX_HEALTH_SYNC_DEFS, optState.selectedUnit, key) end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end,
+            },
+        })
+    end
 
     -- Row 3: Absorb Bar (position dropdown) | Bar Height (+ alpha swatch)
     local absorbBarRow
@@ -3716,6 +3813,13 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         end
         RegisterWidgetRefresh(UpdateAbsorbBarSwatchVis)
         UpdateAbsorbBarSwatchVis()
+    end
+
+    if not EllesmereUI._prebuilding then
+        local sync = ns.UFO_BuildSharedFieldsSync
+        local unit = function() return optState.selectedUnit end
+        sync(absorbBarRow._leftRegion, { "absorbBarPosition" }, "Absorb Bar Position", unit, ReloadAndUpdate)
+        sync(absorbBarRow._rightRegion, { "absorbBarHeight", "absorbBarColor" }, "Absorb Bar Height and Color", unit, ReloadAndUpdate)
     end
 
     -- Row 4: Heal Absorb Bar (position dropdown) | Bar Height (+ alpha swatch)
@@ -3755,6 +3859,13 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         UpdateHealAbsorbBarSwatchVis()
     end
 
+    if not EllesmereUI._prebuilding then
+        local sync = ns.UFO_BuildSharedFieldsSync
+        local unit = function() return optState.selectedUnit end
+        sync(healAbsorbBarRow._leftRegion, { "healAbsorbBarPosition" }, "Heal Absorb Bar Position", unit, ReloadAndUpdate)
+        sync(healAbsorbBarRow._rightRegion, { "healAbsorbBarHeight", "healAbsorbBarColor" }, "Heal Absorb Bar Height and Color", unit, ReloadAndUpdate)
+    end
+
     -- Max Health Bar: same positions as Heal Absorb Bar, plus a chained slot.
     local maxBarRow
     maxBarRow, h = W:DualRow(parent, y,
@@ -3788,6 +3899,13 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             swatch:SetAlpha(SValSupported("maxHealthBarPosition", "none") == "none" and 0.3 or 1)
         end
         RegisterWidgetRefresh(RefreshColor); RefreshColor()
+    end
+
+    if not EllesmereUI._prebuilding then
+        local sync = ns.UFO_BuildSharedFieldsSync
+        local unit = function() return optState.selectedUnit end
+        sync(maxBarRow._leftRegion, { "maxHealthBarPosition" }, "Max Health Bar Position", unit, ReloadAndUpdate)
+        sync(maxBarRow._rightRegion, { "maxHealthBarHeight", "maxHealthBarColor" }, "Max Health Bar Height and Color", unit, ReloadAndUpdate)
     end
 
     -- Row 5: Heal Prediction (+ your / others' color swatches) | Prediction Opacity
@@ -3860,6 +3978,13 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         PredSwatch("healPredOtherColor", ns.UF_HEAL_PRED_OTHER or { r = 40/255, g = 170/255, b = 40/255 }, "Other players' heals")
         PredSwatch("healPredColor", ns.UF_HEAL_PRED_MY or { r = 102/255, g = 243/255, b = 102/255 }, "Your heals")
     end
+    if not EllesmereUI._prebuilding then
+        local sync = ns.UFO_BuildSharedFieldsSync
+        local unit = function() return optState.selectedUnit end
+        sync(healPredRow._leftRegion, { "healPrediction", "healPredColor", "healPredOtherColor" },
+            "Heal Prediction and Colors", unit, ReloadAndUpdate)
+        sync(healPredRow._rightRegion, { "healPredOpacity" }, "Prediction Opacity", unit, ReloadAndUpdate)
+    end
     -- Row 6: Overheal (how far heal prediction may run past the bar's end) | Texture
     -- (Health Bar follows the frame's own health texture; no absorb stripes:
     -- stripes read as absorbs on these frames).
@@ -3894,6 +4019,12 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
           setValue=function(v) SSetSupported("healPredTexture", v); UpdatePreview() end });  y = y - h
     SApplySupport(overhealRow._leftRegion, "healPredOverheal")
     SApplySupport(overhealRow._rightRegion, "healPredTexture")
+    if not EllesmereUI._prebuilding then
+        local sync = ns.UFO_BuildSharedFieldsSync
+        local unit = function() return optState.selectedUnit end
+        sync(overhealRow._leftRegion, { "healPredOverheal" }, "Overheal", unit, ReloadAndUpdate)
+        sync(overhealRow._rightRegion, { "healPredTexture" }, "Heal Prediction Texture", unit, ReloadAndUpdate)
+    end
 
     _, h = W:Spacer(parent, y, 20); y = y - h
     end -- _supportsAbsorbs

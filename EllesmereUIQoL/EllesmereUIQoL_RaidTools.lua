@@ -462,6 +462,7 @@ local pullButtons = {}         -- fixed set of 3; only the ones above 0s show
 local raidGroupButtons = {}    -- plain buttons, gated on the raid frames only
 runtime.roleCountButtons = {}  -- display-only raid role counters
 local raidGroupsRowLabel
+local buttonTextLabels = {}    -- fixed list of button labels, populated at build
 local COMBINED_MARKERS_TOP = 0 -- y-offset of the marker block inside combined Group holder
 -- Individually hideable content. Every one of these is created at build and
 -- kept for the lifetime of the session; the layout pass decides which of them
@@ -509,6 +510,12 @@ local DB_DEFAULTS = {
         -- One scale for the whole feature: whichever windows the Show as
         -- choice puts on screen (and the collapsed icon) all wear it.
         scale         = 1,
+        -- Opt-in color for text on Raid Tools buttons. Off preserves the
+        -- original white text and raid-group accent/disabled colors.
+        buttonTextColorEnabled = false,
+        buttonTextR   = 1,
+        buttonTextG   = 1,
+        buttonTextB   = 1,
         -- "always" | "mouseover". Always keeps the shown shells and the
         -- collapsed icon at full opacity; mouseover fades each of them out
         -- (alpha 0, still shown/clickable for the secure state machine)
@@ -625,6 +632,24 @@ local function P()
     return db and db.profile and db.profile.raidTools
 end
 ns.RaidToolsProfile = P
+
+local function TrackButtonLabel(fs)
+    buttonTextLabels[#buttonTextLabels + 1] = fs
+end
+
+local function CustomButtonTextColor()
+    local p = P()
+    if not p or p.buttonTextColorEnabled ~= true then return end
+    return p.buttonTextR or 1, p.buttonTextG or 1, p.buttonTextB or 1
+end
+
+local function ApplyButtonTextColors()
+    local r, g, b = CustomButtonTextColor()
+    if not r then r, g, b = 1, 1, 1 end
+    for _, fs in ipairs(buttonTextLabels) do
+        fs:SetTextColor(r, g, b, 1)
+    end
+end
 
 local function Mode()
     local p = P()
@@ -782,6 +807,7 @@ local function MakeGroupButton(parent, text, width, onClick, needsLeader, regist
     SkinButtonChrome(b)
     local lbl = TrackFont(parent, EllesmereUI.MakeFont(b, 11, nil, 1, 1, 1), 11)
     lbl:SetPoint("CENTER")
+    TrackButtonLabel(lbl)
     if text ~= "" then lbl:SetText(EllesmereUI.L(text)) end
     b:SetScript("OnClick", onClick)
     b._lbl = lbl
@@ -1034,11 +1060,13 @@ end
 -- border rides the same signal: white while the group is shown, back to the
 -- button chrome's normal gray line the moment it is filtered out.
 local function PaintRaidGroup(b, shown, ar, ag, ab)
+    local r, g, blue = CustomButtonTextColor()
+    if r then ar, ag, ab = r, g, blue end
     if shown then
         b._lbl:SetTextColor(ar, ag, ab, 1)
         if b._border and b._border.SetColor then b._border:SetColor(1, 1, 1, 1) end
     else
-        b._lbl:SetTextColor(1, 1, 1, 0.35)
+        b._lbl:SetTextColor(r or 1, g or 1, blue or 1, 0.35)
         if b._border and b._border.SetColor then b._border:SetColor(BRD_R, BRD_G, BRD_B, BRD_A) end
     end
 end
@@ -1623,6 +1651,7 @@ local function MakeShell(key)
     SkinButtonChrome(col)
     local colFs = TrackFont(f, EllesmereUI.MakeFont(col, 16, nil, 1, 1, 1), 16)
     colFs:SetPoint("CENTER", col, "CENTER", 0, 1)
+    TrackButtonLabel(colFs)
     colFs:SetText("-")
     colFs:SetAlpha(0.7)
     col:SetScript("OnEnter", function(self)
@@ -1825,6 +1854,7 @@ local function BuildGroupContent()
     chkHover:SetAllPoints(assistCheckRow)
     local chkLbl = TrackFont(f, EllesmereUI.MakeFont(assistCheckRow, 11, nil, 1, 1, 1), 11)
     chkLbl:SetPoint("LEFT", chkBox, "RIGHT", 6, 0)
+    TrackButtonLabel(chkLbl)
     chkLbl:SetJustifyH("LEFT")
     chkLbl:SetText(EllesmereUI.L("Make Everyone Assistant"))
     assistCheckRow:SetScript("OnClick", function()
@@ -2082,6 +2112,7 @@ local function BuildRaidGroupsCog()
     -- matched.
     local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 18, nil, 1, 1, 1), 18)
     lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
+    TrackButtonLabel(lbl)
     lbl:SetText("+")
     lbl:SetAlpha(0.7)
     b:SetScript("OnEnter", function(self)
@@ -2124,6 +2155,7 @@ local function BuildRaidCheckButton()
     SkinButtonChrome(b)
     local lbl = TrackFont(sections.Group, EllesmereUI.MakeFont(b, 16, nil, 1, 1, 1), 16)
     lbl:SetPoint("CENTER", b, "CENTER", 0, -2)
+    TrackButtonLabel(lbl)
     lbl:SetText("*")
     lbl:SetAlpha(0.7)
     b:SetScript("OnEnter", function(self)
@@ -2196,6 +2228,7 @@ local function BuildReportButtons()
         SkinButtonChrome(b)
         local lbl = TrackFont(groupHolder, EllesmereUI.MakeFont(b, 11, nil, 1, 1, 1), 11)
         lbl:SetPoint("CENTER", b, "CENTER", 0, 0)
+        TrackButtonLabel(lbl)
         lbl:SetText(EllesmereUI.L(def.title))
         lbl:SetAlpha(0.7)
         -- Width is assigned by LayoutGroupContent so all five buttons fill
@@ -3215,6 +3248,7 @@ function Apply()
     ApplyToggleKeybind()
     ApplyQuickFireBindings()
     ApplyFonts()
+    ApplyButtonTextColors()
     RefreshPermissions(true)
     runtime.RefreshRoleCounts(true)
     RefreshRaidGroups(true)

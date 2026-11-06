@@ -49,6 +49,20 @@ function ns.UFO_BuildPandemicRow(W, parent, y, getS, onChanged)
         { type = "label", text = "Pandemic Glow Preview" })
     GO.AttachInline(row._leftRegion, descriptor)
     if not EllesmereUI._prebuilding then
+        local env = ns._UFO_OptEnv
+        local unit = env.optState and env.optState.selectedUnit
+        local get = unit and env.UNIT_DB_MAP[unit]
+        if (unit == "target" or unit == "focus") and get and getS() == get() then
+            ns.UFO_BuildSharedFieldsSync(row._leftRegion, {
+                "debuffPandemicGlow", "debuffPandemicGlowPick", "debuffPandemicGlowMode",
+                "debuffPandemicGlowColor", "debuffPandemicGlowLines",
+                "debuffPandemicGlowThickness", "debuffPandemicGlowSpeed",
+                "debuffPandemicGlowBackground", "debuffPandemicGlowBackgroundColor",
+            }, "Pandemic Glow", function() return env.optState.selectedUnit end,
+                onChanged, { "target", "focus" })
+        end
+    end
+    if not EllesmereUI._prebuilding then
         local rgn = row._rightRegion
         GO.BuildPreview(rgn, descriptor, {
             anchor = rgn, point = "RIGHT", relPoint = "RIGHT", x = -20, icon = 136197 })
@@ -181,6 +195,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
         local rgn = sharedCastRow1._leftRegion
         local isKickUnit = optState.selectedUnit == "target" or optState.selectedUnit == "focus"
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = isKickUnit and "Apply Show Cast Bar and Cast Color to Target and Focus"
                 or "Apply Show Cast Bar and Fill Color to all Frames",
@@ -225,6 +240,8 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                getElementOptionState = function(key) return GetCastbarEnabled(key) end,
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -431,6 +448,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = sharedCastRow1._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Cast Bar Height to all Frames",
             onClick = function()
@@ -453,6 +471,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -503,6 +522,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = castRow2._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Show Icon to all Frames",
             onClick = function()
@@ -530,6 +550,8 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementOptionState = function(key) return (key == "player" and UNIT_DB_MAP[key]().showPlayerCastIcon ~= false) or (key ~= "player" and UNIT_DB_MAP[key]().showCastIcon ~= false) end,
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -747,6 +769,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             ReloadAndUpdate(); EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Background to all Frames",
             onClick = function() ApplyCastBgTo(GROUP_UNIT_ORDER) end,
@@ -770,6 +793,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -868,15 +892,19 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
 
     if optState.selectedUnit == "player" or optState.selectedUnit == "target" or optState.selectedUnit == "focus" then
         local function BuildCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback, showSourceCog)
+            local description = (enabledKey == "cancelledCastEnabled")
+                and "Briefly keeps the cast bar visible when the unit cancels its spell before completion. This does not mean another unit interrupted it."
+                or "Briefly shows an interrupted cast after another unit stops the spell, with an optional interrupter name."
             local row
             row, h = W:DualRow(parent, y,
-                { type="toggle", text=label,
+                { type="toggle", text=label, tooltip=description,
                   getValue=function() return UNIT_DB_MAP[optState.selectedUnit]()[enabledKey] == true end,
                   setValue=function(v)
                       UNIT_DB_MAP[optState.selectedUnit]()[enabledKey] = v and true or false
                       ReloadAndUpdate(); EllesmereUI:RefreshPage()
                   end },
                 { type="slider", text="Duration", min=0.1, max=3, step=0.1,
+                  tooltip="How many seconds the cancelled or interrupted cast remains visible.",
                   disabled=function() return UNIT_DB_MAP[optState.selectedUnit]()[enabledKey] ~= true end,
                   disabledTooltip=label,
                   getValue=function() return UNIT_DB_MAP[optState.selectedUnit]()[durationKey] or 1.5 end,
@@ -923,6 +951,94 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 MakeCogBtn(rgn, cogShow, swatch, nil, function()
                     return UNIT_DB_MAP[optState.selectedUnit]()[enabledKey] ~= true
                 end)
+            end
+
+            -- These outcomes exist independently on Target and Focus. Copy
+            -- the on/off state and its styling together, but keep Duration as
+            -- a separate apply target, matching the two halves of this row.
+            if not EllesmereUI._prebuilding
+                and (optState.selectedUnit == "target" or optState.selectedUnit == "focus") then
+                local units = { "target", "focus" }
+                local function Data(unit) return UNIT_DB_MAP[unit]() end
+                local source = optState.selectedUnit
+                local other = source == "target" and "focus" or "target"
+                local fields = {
+                    enabledKey,
+                    colorPrefix .. "R", colorPrefix .. "G", colorPrefix .. "B", colorPrefix .. "A",
+                }
+                if showSourceCog then fields[#fields + 1] = colorPrefix .. "ShowSource" end
+                local function SameStyle()
+                    local a, b = Data(source), Data(other)
+                    if (a[enabledKey] == true) ~= (b[enabledKey] == true) then return false end
+                    for _, field in ipairs(fields) do
+                        if field ~= enabledKey then
+                            local suffix = field:sub(#colorPrefix + 1)
+                            local component = ({ R = 1, G = 2, B = 3, A = 4 })[suffix]
+                            local default = component and (fallback[component] or 1)
+                                or (field == colorPrefix .. "ShowSource" and true or nil)
+                            local av = a[field]; if av == nil then av = default end
+                            local bv = b[field]; if bv == nil then bv = default end
+                            if av ~= bv then return false end
+                        end
+                    end
+                    return true
+                end
+                local function CopyStyle(targets)
+                    local a = Data(source)
+                    for _, unit in ipairs(targets) do
+                        if unit ~= source then
+                            local b = Data(unit)
+                            for _, field in ipairs(fields) do b[field] = a[field] end
+                        end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end
+                local function CopyDuration(targets)
+                    local v = Data(source)[durationKey]
+                    for _, unit in ipairs(targets) do
+                        if unit ~= source then Data(unit)[durationKey] = v end
+                    end
+                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
+                end
+                local common = {
+                    elementKeys = units,
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return optState.selectedUnit end,
+                    getElementState = env.GetUnitApplyState,
+                }
+                EllesmereUI.BuildSyncIcon({
+                    alwaysAvailable = true,
+                    region = row._leftRegion,
+                    tooltip = "Apply " .. label .. " and its color to Target / Focus",
+                    isSynced = SameStyle,
+                    onClick = function() CopyStyle(units) end,
+                    flashTargets = function() return { row._leftRegion } end,
+                    multiApply = {
+                        elementKeys = common.elementKeys,
+                        elementLabels = common.elementLabels,
+                        getCurrentKey = common.getCurrentKey,
+                        getElementState = common.getElementState,
+                        getElementOptionState = function(unit) return Data(unit)[enabledKey] == true end,
+                        onApply = CopyStyle,
+                    },
+                })
+                EllesmereUI.BuildSyncIcon({
+                    alwaysAvailable = true,
+                    region = row._rightRegion,
+                    tooltip = "Apply " .. label .. " Duration to Target / Focus",
+                    isSynced = function()
+                        return (Data(source)[durationKey] or 1.5) == (Data(other)[durationKey] or 1.5)
+                    end,
+                    onClick = function() CopyDuration(units) end,
+                    flashTargets = function() return { row._rightRegion } end,
+                    multiApply = {
+                        elementKeys = common.elementKeys,
+                        elementLabels = common.elementLabels,
+                        getCurrentKey = common.getCurrentKey,
+                        getElementState = common.getElementState,
+                        onApply = CopyDuration,
+                    },
+                })
             end
         end
         BuildCastOutcomeRow("Show Cancelled Cast", "cancelledCastEnabled", "cancelledCastDuration", "cancelledCast", {0.95,0.55,0.10})
@@ -1060,6 +1176,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = castTextRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Spell Name Size, Color and Show Full Spell Name to all Frames",
             onClick = function()
@@ -1089,6 +1206,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1109,6 +1227,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = castTextRow._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Duration Size and Color to all Frames",
             onClick = function()
@@ -1134,6 +1253,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1206,22 +1326,6 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             impGlowRow, impGlowSide = castTextureRow, "_rightRegion"
         end
     end
-    -- Inline color swatch on Spell Target Size
-    if not EllesmereUI._prebuilding then
-        local trgRgn = castTargetRow._leftRegion
-        local trgSw = EllesmereUI.BuildColorSwatch(trgRgn, trgRgn:GetFrameLevel() + 5,
-            function()
-                local c = SGetSupported("castSpellTargetColor")
-                c = c or { r=1, g=1, b=1 }
-                return c.r, c.g, c.b, 1
-            end,
-            function(r, g, b)
-                UNIT_DB_MAP[optState.selectedUnit]().castSpellTargetColor = { r=r, g=g, b=b }
-                ReloadAndUpdate(); UpdatePreview()
-            end, false, 20)
-        trgSw:SetPoint("RIGHT", trgRgn._lastInline or trgRgn._control, "LEFT", -12, 0)
-        trgRgn._lastInline = trgSw
-    end
     -- Inline cog on Spell Target Size: toggle + X/Y offsets
     if not EllesmereUI._prebuilding then
         local tgCogRgn = castTargetRow._leftRegion
@@ -1261,6 +1365,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local rgn = castTargetRow._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Spell Target Size and Color to all Frames",
             onClick = function()
@@ -1286,6 +1391,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1331,11 +1437,18 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             local GO = EllesmereUI.GlowOptions
             GO.AttachInline(rgn, impGlowDesc,
                 impGlowSide == "_leftRegion" and impGlowRow._rightRegion or nil)
-            local pv = GO.BuildPreview(rgn, impGlowDesc, { width = 40, height = 14,
-                anchor = rgn._lastInline or rgn._control, x = -12 })
+            -- Leave room for the native Apply to: All link below this long
+            -- label. A compact preview and a fixed right bound prevent the
+            -- text from drawing through the swatches as the page is rebuilt.
+            local pv = GO.BuildPreview(rgn, impGlowDesc, { width = 20, height = 14,
+                anchor = rgn._lastInline or rgn._control, x = -8 })
             if pv then
                 pv:SetFrameLevel(rgn:GetFrameLevel() + 5)
                 rgn._lastInline = pv
+            end
+            local labelBound = rgn._lastInline or rgn._control
+            if rgn._label and labelBound then
+                rgn._label:SetPoint("RIGHT", labelBound, "LEFT", -12, 0)
             end
 
             -- Sync icon: apply glow settings to the other kick unit (target <-> focus)
@@ -1348,23 +1461,26 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 if a and b then return a.r == b.r and a.g == b.g and a.b == b.b end
                 return a == b
             end
-            EllesmereUI.BuildSyncIcon({
-                region  = rgn,
-                tooltip = "Apply Important Cast Glow to Target and Focus",
-                onClick = function()
-                    local src = UNIT_DB_MAP[optState.selectedUnit]()
-                    for _, key in ipairs({ "target", "focus" }) do
-                        if key ~= optState.selectedUnit then
-                            local d = UNIT_DB_MAP[key]()
-                            for _, k in ipairs(GLOW_KEYS) do d[k] = src[k] end
-                            for _, k in ipairs(GLOW_COLOR_KEYS) do
-                                local c = src[k]
-                                d[k] = c and { r = c.r, g = c.g, b = c.b } or nil
-                            end
+            local function CopyImportantGlowTo(destinations)
+                local src = UNIT_DB_MAP[optState.selectedUnit]()
+                for _, key in ipairs(destinations) do
+                    if key ~= optState.selectedUnit then
+                        local d = UNIT_DB_MAP[key]()
+                        for _, k in ipairs(GLOW_KEYS) do d[k] = src[k] end
+                        for _, k in ipairs(GLOW_COLOR_KEYS) do
+                            local c = src[k]
+                            d[k] = c and { r = c.r, g = c.g, b = c.b } or nil
                         end
                     end
-                    ReloadAndUpdate(); EllesmereUI:RefreshPage()
-                end,
+                end
+                ReloadAndUpdate(); EllesmereUI:RefreshPage()
+            end
+            EllesmereUI.BuildSyncIcon({
+                alwaysAvailable = true,
+                region  = rgn,
+                labelRightBound = labelBound,
+                tooltip = "Apply Important Cast Glow to Target and Focus",
+                onClick = function() CopyImportantGlowTo({ "target", "focus" }) end,
                 isSynced = function()
                     local src = UNIT_DB_MAP[optState.selectedUnit]()
                     for _, key in ipairs({ "target", "focus" }) do
@@ -1379,6 +1495,14 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
+                multiApply = {
+                            getElementOptionState = function(key) return UNIT_DB_MAP[key]().castbarImportantGlow == true end,
+                            getElementState = env.GetUnitApplyState,
+                    elementKeys = { "target", "focus" },
+                    elementLabels = SHORT_LABELS,
+                    getCurrentKey = function() return optState.selectedUnit end,
+                    onApply = CopyImportantGlowTo,
+                },
             })
         end
     end
@@ -1561,10 +1685,13 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
           getValue=function() return SValSupported("buffSize", 22) end,
           setValue=function(v) SSetSupported("buffSize", v) end });  y = y - h
     SApplySupport(sharedAddRow2._leftRegion, "showBuffs")
+    ns.UFO_BuildSharedFieldsSync(sharedAddRow2._rightRegion,
+        { "buffSize" }, "Buff Size", function() return optState.selectedUnit end, ReloadAndUpdate)
     -- Sync icon: Buffs Location (left)
     if not EllesmereUI._prebuilding then
         local rgn = sharedAddRow2._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Buffs Location to all Frames",
             onClick = function()
@@ -1593,6 +1720,8 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                            getElementState = env.GetUnitApplyState,
+                            getElementOptionState = function(key) return UNIT_DB_MAP[key]().showBuffs ~= false end,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -1662,6 +1791,13 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
           disabled=BuffDisabled, disabledTooltip="Buff Display",
           getValue=function() return SValSupported("buffStackTextSize", 14) end,
           setValue=function(v) SSetSupported("buffStackTextSize", v) end });  y = y - h
+    ns.UFO_BuildSharedFieldsSync(sharedBuffRow2._leftRegion,
+        { "buffCooldownTextSize", "buffCooldownTextOffsetX", "buffCooldownTextOffsetY",
+          "buffCooldownTextPrecision", "buffShowCooldownText" },
+        "Buff Duration Text", function() return optState.selectedUnit end, ReloadAndUpdate)
+    ns.UFO_BuildSharedFieldsSync(sharedBuffRow2._rightRegion,
+        { "buffStackTextSize", "buffStackTextPosition", "buffStackTextOffsetX", "buffStackTextOffsetY" },
+        "Buff Stack Text", function() return optState.selectedUnit end, ReloadAndUpdate)
     -- Directions cog on Buff Duration Size (X/Y offsets) -- disabled with the row
     if not EllesmereUI._prebuilding then
         local leftRgn = sharedBuffRow2._leftRegion
@@ -1731,6 +1867,8 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
           disabled=DebuffDisabled, disabledTooltip="Debuff Display",
           getValue=function() return SValSupported("debuffSize", 22) end,
           setValue=function(v) SSetSupported("debuffSize", v) end });  y = y - h
+    ns.UFO_BuildSharedFieldsSync(sharedAddRow3._rightRegion,
+        { "debuffSize" }, "Debuff Size", function() return optState.selectedUnit end, ReloadAndUpdate)
     -- Cog on Debuffs Location: the shared settings rows, then Icon Zoom,
     -- Dispel Type Borders and (player) Use Dispel Colors
     if not EllesmereUI._prebuilding then
@@ -1807,6 +1945,13 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
           disabled=DebuffDisabled, disabledTooltip="Debuff Display",
           getValue=function() return SValSupported("debuffStackTextSize", 14) end,
           setValue=function(v) SSetSupported("debuffStackTextSize", v) end });  y = y - h
+    ns.UFO_BuildSharedFieldsSync(sharedDebuffRow2._leftRegion,
+        { "debuffCooldownTextSize", "debuffCooldownTextOffsetX", "debuffCooldownTextOffsetY",
+          "debuffCooldownTextPrecision", "debuffShowCooldownText" },
+        "Debuff Duration Text", function() return optState.selectedUnit end, ReloadAndUpdate)
+    ns.UFO_BuildSharedFieldsSync(sharedDebuffRow2._rightRegion,
+        { "debuffStackTextSize", "debuffStackTextPosition", "debuffStackTextOffsetX", "debuffStackTextOffsetY" },
+        "Debuff Stack Text", function() return optState.selectedUnit end, ReloadAndUpdate)
     -- Directions cog on Debuff Duration Size (X/Y offsets) -- disabled with the row
     if not EllesmereUI._prebuilding then
         local leftRgn = sharedDebuffRow2._leftRegion

@@ -1038,7 +1038,7 @@ local function EnsureSearchUI()
         results = SearchIndex(query, MAX_VISIBLE_RESULTS)
         -- Accent-colored "Page:"/"Section:" prefixes. Hex is computed per
         -- search, so a live accent change is picked up on the next keystroke.
-        local EG = EllesmereUI.ELLESMERE_GREEN
+        local EG = EllesmereUI.PANEL_ACCENT
         local accentHex = EG and EllesmereUI.HexColor(EG.r, EG.g, EG.b) or EllesmereUI.COLOR_CODES.WHITE
         for i, row in ipairs(resultRows) do
             local entry = results[i]

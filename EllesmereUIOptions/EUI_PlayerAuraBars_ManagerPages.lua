@@ -170,6 +170,20 @@ local function PabAllBarEntries()
     return list
 end
 
+-- Current enabled state for a Multi Apply destination. The default bars
+-- treat nil as on; custom bars have an explicit enabled boolean.
+local function PabApplyState(key)
+    for _, entry in ipairs(PabAllBarEntries()) do
+        if entry.key == key then
+            if key == "buffs" or key == "debuffs" then
+                return entry.cfg.enabled ~= false
+            end
+            return entry.cfg.enabled == true
+        end
+    end
+    return nil
+end
+
 -- Which PabAllBarEntries() row a given (cfg, isBuff) pair is.
 local function PabBarKeyOf(cfg, isBuff)
     local s = ns.db and ns.db.profile and ns.db.profile.playerAuraBars
@@ -944,6 +958,70 @@ end
 -- (BuildContainerSpec doesn't care about slots vs. groups). isBuff is currently unused
 -- here (Sort Method's option set is now shared between buffs/debuffs, see
 -- SORT_METHOD_VALUES' doc comment) but kept for callers/future per-polarity fields.
+-- A single per-field Apply to All | Multiple for the common core/display
+-- controls. This is intentionally narrower than the style-copy operations:
+-- other bar-only settings (visibility, filters, spells, offsets) stay intact.
+local function PabSimpleFieldSync(region, cfg, isBuff, field, default, label)
+    if EllesmereUI._prebuilding then return end
+    local keys, labels = {}, {}
+    for _, entry in ipairs(PabAllBarEntries()) do
+        keys[#keys + 1] = entry.key
+        labels[entry.key] = entry.label
+    end
+    local function Value(t, buffBar)
+        local v = t[field]
+        if v ~= nil then return v end
+        if field == "iconsPerRow" then return buffBar and 11 or 8 end
+        return default
+    end
+    local function Copy(entry)
+        local v = Value(cfg, isBuff)
+        local dst = entry.cfg
+        dst[field] = v
+        if field == "growDirection" then
+            -- Match the Growth Direction dropdown's wrap-axis normalization.
+            if v == "UP" or v == "DOWN" then
+                if dst.iconWrapDirection ~= "LEFT" and dst.iconWrapDirection ~= "RIGHT" then
+                    dst.iconWrapDirection = "LEFT"
+                end
+            elseif v == "LEFT" or v == "RIGHT" then
+                if dst.iconWrapDirection ~= "UP" and dst.iconWrapDirection ~= "DOWN" then
+                    dst.iconWrapDirection = "DOWN"
+                end
+            end
+        end
+        PabApplyBarEntry(entry)
+    end
+    local function Apply(selected)
+        local want = {}
+        for _, key in ipairs(selected) do want[key] = true end
+        for _, entry in ipairs(PabAllBarEntries()) do
+            if want[entry.key] and entry.cfg ~= cfg then Copy(entry) end
+        end
+        EllesmereUI:RefreshPage()
+    end
+    EllesmereUI.BuildSyncIcon({
+        region = region,
+        alwaysAvailable = true,
+        tooltip = "Apply " .. label .. " to all Bars",
+        onClick = function() Apply(keys) end,
+        isSynced = function()
+            local v = Value(cfg, isBuff)
+            for _, entry in ipairs(PabAllBarEntries()) do
+                if Value(entry.cfg, entry.isBuff) ~= v then return false end
+            end
+            return true
+        end,
+        flashTargets = function() return { region } end,
+        multiApply = {
+            elementKeys = keys, elementLabels = labels,
+            getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
+            getElementState = PabApplyState,
+            onApply = Apply,
+        },
+    })
+end
+
 local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     local W = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
@@ -979,7 +1057,8 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         }
     ); sy = sy - hh
 
-    _, hh = W:DualRow(frame, sy,
+    local sortRow
+    sortRow, hh = W:DualRow(frame, sy,
         {
             type = "dropdown", text = "Sort Method",
             values = SORT_METHOD_VALUES, order = SORT_METHOD_ORDER,
@@ -993,6 +1072,10 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             setValue = function(v) cfg.sortDirection = v; apply() end
         }
     ); sy = sy - hh
+    PabSimpleFieldSync(sizeRow._leftRegion, cfg, isBuff, "iconSize", 32, "Icon Size")
+    PabSimpleFieldSync(sizeRow._rightRegion, cfg, isBuff, "growDirection", "LEFT", "Growth Direction")
+    PabSimpleFieldSync(sortRow._leftRegion, cfg, isBuff, "sortMethod", "Default", "Sort Method")
+    PabSimpleFieldSync(sortRow._rightRegion, cfg, isBuff, "sortDirection", "Normal", "Sort Direction")
     do
         local rgn = sizeRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
@@ -1298,6 +1381,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                getElementState = PabApplyState,
                 elementKeys = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1355,6 +1439,8 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             setValue = function(v) cfg.padding = v; apply() end
         }
     ); sy = sy - hh
+    PabSimpleFieldSync(rowRow._leftRegion, cfg, isBuff, "iconsPerRow", isBuff and 11 or 8, "Icons Per Row")
+    PabSimpleFieldSync(rowRow._rightRegion, cfg, isBuff, "padding", 5, "Spacing")
     do
         local rgn = styleRow._rightRegion
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
@@ -1421,6 +1507,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                getElementState = PabApplyState,
                 elementKeys   = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1574,6 +1661,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                getElementState = PabApplyState,
                 elementKeys   = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -2035,7 +2123,7 @@ local function BuildBarTitle(frame, fontPath, name, subtitle, y)
     title:SetPoint("TOPLEFT", frame, "TOPLEFT", pad, y - 11)
     title:SetJustifyH("LEFT")
     title:SetWordWrap(false)
-    local ac = EllesmereUI.ELLESMERE_GREEN
+    local ac = EllesmereUI.PANEL_ACCENT
     if ac then title:SetTextColor(ac.r, ac.g, ac.b)
     else title:SetTextColor(0.05, 0.82, 0.62) end
     title:SetText(name)
@@ -2107,7 +2195,7 @@ local function AddNewButton(parentFrame, y, width, label, onClick)
     addBtn:SetSize(btnW, 30)
     addBtn:SetPoint("TOP", parentFrame, "TOPLEFT", floor(width / 2), y - 10)
     addBtn:SetFrameLevel(parentFrame:GetFrameLevel() + 1)
-    local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+    local accentColor = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
     local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
     addBg:SetAllPoints()
     addBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
@@ -2249,7 +2337,7 @@ function ns.PABMP_ShowFilterEditor()
     local fontPath = (EllesmereUI.GetFontPath("unitFrames")) or "Fonts\\FRIZQT__.TTF"
     local ar, ag, ab = 1, 0.82, 0.30
     if EllesmereUI.GetAccentColor then ar, ag, ab = EllesmereUI.GetAccentColor() end
-    local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+    local eg = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
     local MEDIA_FE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\"
 
     local POPUP_W, POPUP_H, SIDE_W = 620, 520, 180
@@ -2808,7 +2896,7 @@ local function ShowAddBarPopup(anchorBtn, kind, fontPath)
         popup._nameBox = nameBox
         py = py - ROW_H - GAP
 
-        local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local accentColor = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local cBtn = CreateFrame("Button", nil, popup)
         cBtn:SetSize(ddW, ROW_H)
         cBtn:SetPoint("TOPLEFT", popup, "TOPLEFT", POPUP_PAD, py)
@@ -3543,7 +3631,7 @@ function ns.PABMP_BuildPage(pageName, parent, yOffset)
         linkFS:SetFont(fontPath, 12, "")
         linkFS:SetPoint("TOPLEFT")
         linkFS:SetText(EllesmereUI.Lf("Edit in %1$s", gname))
-        local lac = EllesmereUI.ELLESMERE_GREEN
+        local lac = EllesmereUI.PANEL_ACCENT
         if lac then linkFS:SetTextColor(lac.r, lac.g, lac.b, 0.85)
         else linkFS:SetTextColor(0.05, 0.82, 0.62, 0.85) end
         link:SetSize(linkFS:GetStringWidth() + 4, 18)

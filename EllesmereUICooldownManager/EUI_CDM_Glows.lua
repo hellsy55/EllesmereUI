@@ -252,6 +252,83 @@ function EllesmereUI.ApplyPandemicGlowToAll(payload, opts)
     if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
 end
 
+-- Selective pandemic glow synchronization, using the same name-based style
+-- coercion as ApplyPandemicGlowToAll. A Tracking Bar can only render Pixel / 
+-- Auto-Cast; PG_TbbIndexFromName handles unsupported styles safely.
+-- Group destinations by compatible rendering surface; popup selection is not
+-- stored in profiles. Individual bars inside a group retain their own identity.
+function EllesmereUI.PandemicMultiApply(sourceOptions, payloadFn, onApplied)
+    sourceOptions = sourceOptions or {}
+    -- Group destinations by rendering surface rather than listing dozens of
+    -- per-spell CDM bars in an unscrollable sync popup. A group's state may be
+    -- Enabled, Disabled or Mixed; each group excludes its current source.
+    local keys, labels = {}, {}
+    local function Add(key, label) keys[#keys + 1] = key; labels[key] = label end
+    local function Destinations(key)
+        local list = {}
+        if key == "nameplates" then
+            local np = PG_GetNPProfile()
+            if not sourceOptions.skipNameplates and np and EllesmereUI.NameplatePandemicGlowStyles then
+                list[1] = np
+            end
+        elseif key == "cdm" then
+            local p = ECME.db and ECME.db.profile
+            for _, b in ipairs(p and p.cdmBars and p.cdmBars.bars or {}) do
+                if b.key ~= sourceOptions.skipCdmKey and not b.isGhostBar and b.barType ~= "custom_buff" then
+                    list[#list + 1] = b
+                end
+            end
+        elseif key == "tbb" then
+            local tbb = ns.GetTrackedBuffBars and ns.GetTrackedBuffBars()
+            for _, b in ipairs(tbb and tbb.bars or {}) do
+                if b ~= sourceOptions.skipTbbBar then list[#list + 1] = b end
+            end
+        end
+        return list
+    end
+    for _, info in ipairs({ { "nameplates", "Nameplates" }, { "cdm", "CDM Bars" },
+            { "tbb", "Tracking Bars" } }) do
+        if #Destinations(info[1]) > 0 then Add(info[1], info[2]) end
+    end
+    return {
+        elementKeys = keys, elementLabels = labels,
+        getCurrentKey = function() return nil end, -- source is excluded within its group
+        getElementOptionState = function(key)
+            local list = Destinations(key)
+            if #list == 0 then return nil end
+            local on = 0
+            for _, t in ipairs(list) do if t.pandemicGlow == true then on = on + 1 end end
+            if on == 0 then return false end
+            if on == #list then return true end
+            return "Mixed"
+        end,
+        onApply = function(selected)
+            local payload = payloadFn and payloadFn()
+            if not payload then return end
+            local changed = false
+            for _, key in ipairs(selected) do
+                for _, dst in ipairs(Destinations(key)) do
+                    if key == "nameplates" then
+                        PG_Write(dst, payload, PG_NameplateIndexFromName, "pandemicGlowPick")
+                        dst.pandemicGlowMode = payload.mode or "default"
+                    elseif key == "cdm" then
+                        PG_Write(dst, payload, PG_CdmIndexFromName)
+                    elseif key == "tbb" then
+                        PG_Write(dst, payload, PG_TbbIndexFromName)
+                    end
+                    changed = true
+                end
+            end
+            if changed then
+                if ns.BuildAllCDMBars then ns.BuildAllCDMBars() end
+                if ns.BuildTrackedBuffBars then ns.BuildTrackedBuffBars() end
+                if _G._ENP_RefreshAllSettings then _G._ENP_RefreshAllSettings() end
+                if onApplied then onApplied() end
+            end
+        end,
+    }
+end
+
 -- True when every (non-skipped) surface already matches the payload.
 function EllesmereUI.IsPandemicGlowSyncedToAll(payload, opts)
     opts = opts or {}

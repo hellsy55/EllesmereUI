@@ -31,11 +31,11 @@ local RowBg            = EllesmereUI.RowBg
 local lerp             = EllesmereUI.lerp
 local MakeDropdownArrow = EllesmereUI.MakeDropdownArrow
 local RegisterWidgetRefresh = EllesmereUI.RegisterWidgetRefresh
-local RegAccent        = EllesmereUI.RegAccent
+local RegAccent        = EllesmereUI.RegPanelAccent
 
 -- Visual constants (used in hot paths)
 local EXPRESSWAY       = EllesmereUI.EXPRESSWAY
-local ELLESMERE_GREEN  = EllesmereUI.ELLESMERE_GREEN
+local ELLESMERE_GREEN  = EllesmereUI.PANEL_ACCENT
 local CONTENT_PAD      = EllesmereUI.CONTENT_PAD
 local DARK_BG          = EllesmereUI.DARK_BG
 local BORDER_COLOR     = EllesmereUI.BORDER_COLOR
@@ -814,7 +814,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             end
             iLbl:SetText(TR(mainText))
             if dnAction then
-                local EG = EllesmereUI.ELLESMERE_GREEN
+                local EG = EllesmereUI.PANEL_ACCENT
                 iLbl:SetTextColor(EG.r, EG.g, EG.b, 0.8)
                 item._isAction = true  -- Refresh keeps the accent across menu opens
             elseif _menuOpts and _menuOpts.labelColor then
@@ -966,7 +966,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
             item:SetScript("OnLeave", function()
                 if disabledValuesFn and disabledValuesFn(key) then HideWidgetTooltip(); return end
                 if dnAction then
-                    local EG = EllesmereUI.ELLESMERE_GREEN
+                    local EG = EllesmereUI.PANEL_ACCENT
                     iLbl:SetTextColor(EG.r, EG.g, EG.b, 0.8)
                 elseif item._lblColor then
                     local lc = item._lblColor
@@ -1311,7 +1311,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
                 item._highlight:SetAlpha((item._key == cur and not off) and DD_ITEM_SEL_A or 0)
                 item._label:SetAlpha(1)
                 if item._isAction then
-                    local EG = EllesmereUI.ELLESMERE_GREEN
+                    local EG = EllesmereUI.PANEL_ACCENT
                     item._label:SetTextColor(EG.r, EG.g, EG.b, 0.8)
                 elseif item._lblColor then
                     local lc = item._lblColor
@@ -2681,7 +2681,7 @@ EllesmereUI.CreatePreviewHitOverlay = function(element, navigate, key, isText, f
     if opts and opts.parent then btn:SetParent(opts.parent) end
     btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
     btn:RegisterForClicks("LeftButtonDown")
-    local c = EllesmereUI.ELLESMERE_GREEN
+    local c = EllesmereUI.PANEL_ACCENT
     local hlBase, hlCont, brd
     if style and style.container then
         if opts and opts.hlBehindText then

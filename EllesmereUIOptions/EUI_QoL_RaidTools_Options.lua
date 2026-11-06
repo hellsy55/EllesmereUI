@@ -372,6 +372,33 @@ initFrame:SetScript("OnEvent", function(self)
         end
         y = y - h
 
+        -- Optional button text color for the Raid Tools windows only. When
+        -- disabled, the native white and raid-group accent colors remain.
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Custom Button Text Color",
+              tooltip = "Use a custom color for the text on Raid Tools window buttons. Disable to keep the original colors, including the raid group accent.",
+              disabled = Disabled,
+              getValue = function() return Cfg("buttonTextColorEnabled") == true end,
+              setValue = function(v)
+                  Set("buttonTextColorEnabled", v and true or false)
+                  Refresh()
+                  EllesmereUI:RefreshPage()
+              end },
+            { type = "colorpicker", text = "Button Text Color", hasAlpha = false,
+              tooltip = "Text color for Raid Tools action, report, role count and corner buttons. Disabled buttons retain their dimming.",
+              disabled = function() return Disabled() or Cfg("buttonTextColorEnabled") ~= true end,
+              getValue = function()
+                  return Cfg("buttonTextR") or 1, Cfg("buttonTextG") or 1,
+                         Cfg("buttonTextB") or 1, 1
+              end,
+              setValue = function(r, g, b)
+                  Set("buttonTextR", r)
+                  Set("buttonTextG", g)
+                  Set("buttonTextB", b)
+                  Refresh()
+              end }
+        );  y = y - h
+
         -- RAID GROUPS: grouped per-profile controls. Core planning, applying,
         -- setups and nickname history remain available even when an optional
         -- feature is turned off. Existing users keep every feature enabled.

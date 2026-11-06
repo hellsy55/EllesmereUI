@@ -144,7 +144,7 @@ end
 local function HeaderBuilder(hdr)
     local PP = EllesmereUI.PanelPP
     local L = EllesmereUI.L
-    local accent = EllesmereUI.ELLESMERE_GREEN
+    local accent = EllesmereUI.PANEL_ACCENT
     local y = -16
 
     local labels = {}

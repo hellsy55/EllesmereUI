@@ -384,7 +384,7 @@ initFrame:SetScript("OnEvent", function(self)
     local _eabrHitOverlays = {}
 
     local function EABRPlaySettingGlow(targetFrame)
-        _eabrGlow = _eabrGlow or EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+        _eabrGlow = _eabrGlow or EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
         _eabrGlow(targetFrame)
     end
 

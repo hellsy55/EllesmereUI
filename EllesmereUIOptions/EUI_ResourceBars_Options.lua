@@ -39,6 +39,115 @@ function ns.ERB_BorderAllRow()
 end
 local CLASSIC_SYNC_KEYS = { "health", "primary", "secondary" }
 local CLASSIC_MATCH_KEYS = { "ERB_Health", "ERB_Power", "ERB_ClassResource" }
+
+-- The same three resource bars are eligible for per-destination Apply to Multiple.
+-- Copy only the selected properties; never overwrite a destination bar's
+-- enabled state, resource identity, spec-specific rules or position.
+local RESOURCE_SYNC_KEYS = { "secondary", "primary", "health" }
+local RESOURCE_SYNC_LABELS = { secondary = "Class Resource", primary = "Power", health = "Health" }
+local RESOURCE_SIZE_KEY = {
+    secondary = { height = "pipHeight", width = "pipWidth" },
+    primary   = { height = "height", width = "width" },
+    health    = { height = "height", width = "width" },
+}
+function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
+    local function Value(t, key)
+        if field == "height" or field == "width" then
+            local v = t[RESOURCE_SIZE_KEY[key][field]]
+            if v ~= nil then return v end
+            if field == "width" then return key == "secondary" and 214 or 220 end
+            return key == "primary" and 16 or 20
+        end
+        if field == "opacity" then return t.barAlpha or 1 end
+        if field == "oocFade" then return t.oocFadeEnabled == true end
+        if field == "oocAlpha" then return t.oocAlpha or 0.5 end
+        if field == "textSize" then return t.textSize or 11 end
+        if field == "classic" then return t.stockBorderScale end
+    end
+    local function Copy(t, src, destKey)
+        if field == "height" or field == "width" then
+            t[RESOURCE_SIZE_KEY[destKey][field]] = Value(src, sourceKey)
+        elseif field == "opacity" then
+            t.barAlpha = Value(src, sourceKey)
+        elseif field == "oocFade" then
+            t.oocFadeEnabled = Value(src, sourceKey)
+        elseif field == "oocAlpha" then
+            t.oocAlpha = Value(src, sourceKey)
+        elseif field == "textSize" then
+            t.textSize = Value(src, sourceKey)
+        elseif field == "classic" then
+            t.stockBorderScale = src.stockBorderScale
+        elseif field == "borderStyle" then
+            -- A border-style copy matches the existing Apply to All operation.
+            for _, key in ipairs({ "borderTexture", "borderTextureOffset", "borderTextureOffsetY",
+                    "borderTextureShiftX", "borderTextureShiftY", "borderR", "borderG", "borderB",
+                    "borderA", "borderSize", "borderBehind" }) do t[key] = src[key] end
+            ns.ERB_CopyBorderPx(t, src)
+        elseif field == "border" then
+            for _, key in ipairs({ "borderR", "borderG", "borderB", "borderA", "borderSize",
+                    "borderTexture", "cornerRadius", "cornerMask" }) do t[key] = src[key] end
+            ns.ERB_CopyBorderPx(t, src)
+        end
+    end
+    return {
+        elementKeys = targets or RESOURCE_SYNC_KEYS,
+        elementLabels = RESOURCE_SYNC_LABELS,
+        getElementOptionState = field == "oocFade" and function(key)
+            local p = dbFn(); return p and p[key] and p[key].oocFadeEnabled == true or false
+        end or nil,
+        getCurrentKey = function() return sourceKey end,
+        getElementState = function(key)
+            local p = dbFn(); local b = p and p[key]
+            return b and b.enabled ~= false or false
+        end,
+        onApply = function(selected)
+            local p = dbFn(); if not p or not p[sourceKey] then return end
+            local src = p[sourceKey]
+            local was = (field == "border" or field == "borderStyle") and ns.ERB_TexturedBars(p) or nil
+            for _, key in ipairs(selected) do
+                local target = p[key]
+                if key ~= sourceKey and target and RESOURCE_SIZE_KEY[key] then
+                    Copy(target, src, key)
+                    if field == "classic" and EllesmereUI.ReapplyMatchPads then
+                        local matchKey = ({ secondary = "ERB_ClassResource", primary = "ERB_Power", health = "ERB_Health" })[key]
+                        EllesmereUI.ReapplyMatchPads(matchKey)
+                    end
+                end
+            end
+            if refresh then refresh() end
+            EllesmereUI:RefreshPage(was and ns.ERB_TexturedBars(p) ~= was or false)
+        end,
+    }
+end
+
+-- One simple scalar sync, with destination selection and live status. This
+-- is shared by the newly exposed fade controls and Health/Power Text Size.
+function ns.ERB_ScalarSync(region, dbFn, sourceKey, field, label, refresh, targets)
+    if EllesmereUI._prebuilding then return end
+    local multi = ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
+    local function value(c)
+        if not c then return nil end
+        if field == "oocFade" then return c.oocFadeEnabled == true end
+        if field == "oocAlpha" then return c.oocAlpha or 0.5 end
+        if field == "textSize" then return c.textSize or 11 end
+    end
+    EllesmereUI.BuildSyncIcon({
+        alwaysAvailable = true, region = region,
+        tooltip = "Apply " .. label .. " to other Bars",
+        onClick = function() multi.onApply(targets or RESOURCE_SYNC_KEYS) end,
+        isSynced = function()
+            local p = dbFn(); if not p then return true end
+            local v = value(p[sourceKey])
+            for _, key in ipairs(targets or RESOURCE_SYNC_KEYS) do
+                if value(p[key]) ~= v then return false end
+            end
+            return true
+        end,
+        flashTargets = function() return { region } end,
+        multiApply = multi,
+    })
+end
+
 -- matchKey: the bar's unlock element, whose size matches read the frame's
 -- reach (getMatchPad) and are re-applied when it changes. While "Border
 -- Around All" is on, the three bars share one frame and so one size: every
@@ -126,6 +235,8 @@ function ns.ERB_ClassicBorderSync(region, dbFn, key, refresh, flashFn)
             return true
         end,
         flashTargets = flashFn,
+        alwaysAvailable = true,
+        multiApply = ns.ERB_MultiSync(dbFn, key, "classic", refresh),
     })
 end
 
@@ -1605,7 +1716,7 @@ initFrame:SetScript("OnEvent", function(self)
             local region = (m.slotSide == "left") and m.target._leftRegion or m.target._rightRegion
             if region then glowTarget = region end
         end
-        PlaySettingGlow = PlaySettingGlow or EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN, thickness = function() return PP.Scale(2) end, noSnap = true })
+        PlaySettingGlow = PlaySettingGlow or EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT, thickness = function() return PP.Scale(2) end, noSnap = true })
         -- A row the page dressed again meanwhile (a rebuild) shows another setting now: no glow.
         local gen = PoolGen(glowTarget)
         C_Timer.After(0.15, function()
@@ -2216,7 +2327,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Insertion line shown while dragging a row; theme accent, matches the raid "Sort By" reorder line
             insLine = popup:CreateTexture(nil, "OVERLAY", nil, 7)
             insLine:SetHeight(2)
-            local eg = EllesmereUI.ELLESMERE_GREEN
+            local eg = EllesmereUI.PANEL_ACCENT
             insLine:SetColorTexture(eg.r, eg.g, eg.b, 0.9)
             insLine:Hide()
 
@@ -2569,7 +2680,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local function Update()
-            local ar, ag, ab = EllesmereUI.GetAccentColor()
+            local ar, ag, ab = EllesmereUI.GetOptionsPanelAccentColor()
             THR_NOTE_IDLE[1], THR_NOTE_IDLE[2], THR_NOTE_IDLE[3] = ar, ag, ab
             THR_NOTE_IDLE[4] = EllesmereUI.HexColor(ar, ag, ab):sub(5)
             local list, active = ns.ThresholdNoticeInfo(getBarData())
@@ -2592,7 +2703,7 @@ initFrame:SetScript("OnEvent", function(self)
         anchorBtn:HookScript("OnShow", Update)
         EllesmereUI.RegisterWidgetRefresh(Update)
         -- Keyed by the badge: the page pool forgets the entry when it resets it.
-        EllesmereUI.RegAccent({ type = "callback", obj = badge, fn = function() Update() end })
+        EllesmereUI.RegPanelAccent({ type = "callback", obj = badge, fn = function() Update() end })
         Update()
         return Update
     end
@@ -2659,7 +2770,7 @@ initFrame:SetScript("OnEvent", function(self)
             watch:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
             watch:SetScript("OnEvent", OnEvent)
             -- The selection highlight follows the live theme accent
-            EllesmereUI.RegAccent({ type = "callback", fn = function()
+            EllesmereUI.RegPanelAccent({ type = "callback", fn = function()
                 for page, ed in pairs(shown) do
                     if PoolGen(page) == ed.gen then ed.repaint() else ThrEditorHidden(page) end
                 end
@@ -2880,7 +2991,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Paints one row's bg/accent for the current selection state
         local function PaintRow(f)
             local sel = (f._entryIdx ~= nil) and (_selectedIdx == f._entryIdx)
-            local eg = EllesmereUI.ELLESMERE_GREEN
+            local eg = EllesmereUI.PANEL_ACCENT
             f._selected = sel
             f._accent:SetShown(sel)
             -- Re-apply the live theme accent each paint; the creation-time color goes stale after a theme change
@@ -2940,7 +3051,7 @@ initFrame:SetScript("OnEvent", function(self)
             contentHalfSize = math.floor(thrPage:GetWidth() / 2 - (SIDE_PAD * 2))
             local BUTTON_W, BUTTON_H = 80, 29
             local MEDIA = "Interface\\AddOns\\EllesmereUI\\media\\"
-            local eg = EllesmereUI.ELLESMERE_GREEN
+            local eg = EllesmereUI.PANEL_ACCENT
 
             -- Back: the styled button (bg / border / label hover), the arrow leading its label
             local backBtn = CreateFrame("Button", nil, thrPage)

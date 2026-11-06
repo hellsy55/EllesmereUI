@@ -111,7 +111,7 @@ function EllesmereUI.BuildTipCallout(parent, opts)
     local pp = opts.pp or PP
     local strata = opts.strata
     if strata == nil then strata = "FULLSCREEN_DIALOG" end
-    local accent = EllesmereUI.ELLESMERE_GREEN
+    local accent = EllesmereUI.PANEL_ACCENT
     local ar, ag, ab = accent.r, accent.g, accent.b
     local bgA = opts.bgAlpha or 1
     local w = opts.width
@@ -458,8 +458,8 @@ EllesmereUI.ResolveThemeColor = ResolveThemeColor
 local _gradStart = CreateColor(0, 0, 0, 0)
 local _gradEnd   = CreateColor(0, 0, 0, 0)
 
-local function UpdateAccentElements(r, g, b)
-    for _, entry in ipairs(EllesmereUI._accentElements) do
+local function UpdateAccentElements(registry, r, g, b)
+    for _, entry in ipairs(registry) do
         if entry.type == "solid" and entry.obj then
             entry.obj:SetColorTexture(r, g, b, entry.a or 1)
         elseif entry.type == "gradient" and entry.obj then
@@ -479,13 +479,84 @@ end
 local function ApplyAccentLive(r, g, b)
     -- Canonical colour table updated in place, then registered one-time elements
     ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = r, g, b
-    UpdateAccentElements(r, g, b)
+    UpdateAccentElements(EllesmereUI._accentElements, r, g, b)
+    if not EllesmereUI.HasOptionsPanelAccentOverride() then
+        local ac = EllesmereUI.PANEL_ACCENT
+        ac.r, ac.g, ac.b = r, g, b
+        UpdateAccentElements(EllesmereUI._panelAccentElements, r, g, b)
+    end
+
+    -- Movers/ghosts/grid are created on Unlock Mode entry and otherwise
+    -- retain their old tint until the next opening. Repaint them in place.
+    if EllesmereUI.RefreshUnlockAccent then EllesmereUI.RefreshUnlockAccent(r, g, b) end
 
     -- The cached confirm popup repaints its accent parts
     EllesmereUI._InvalidateConfirmPopup()
 
     -- Fast path only; a full rebuild would churn memory
     EllesmereUI:RefreshPage()
+end
+
+--- Options-panel accent is an account-wide override. Without it, the panel
+--- follows the existing UI accent (including per-profile and class colors).
+function EllesmereUI.GetOptionsPanelAccentColor()
+    local ac = EllesmereUI.PANEL_ACCENT
+    return ac.r, ac.g, ac.b
+end
+
+local function SavedOptionsPanelAccent()
+    local db = EllesmereUIDB
+    if type(db) ~= "table" then return nil end
+    if type(db.optionsPanelAccentColor) == "table" then return db.optionsPanelAccentColor end
+    return type(db.global) == "table" and db.global.optionsPanelAccentColor or nil
+end
+
+function EllesmereUI.HasOptionsPanelAccentOverride()
+    return type(SavedOptionsPanelAccent()) == "table"
+end
+
+local function RefreshOptionsPanelAccent(r, g, b)
+    local ac = EllesmereUI.PANEL_ACCENT
+    ac.r, ac.g, ac.b = r, g, b
+    UpdateAccentElements(EllesmereUI._panelAccentElements, r, g, b)
+    EllesmereUI:RefreshPage()
+end
+
+-- Player login is after the parent addon's SavedVariables hand-off.
+-- Rehydrate the live swatches if the DB guard has exchanged its stand-in.
+do
+    local login = CreateFrame("Frame")
+    login:RegisterEvent("PLAYER_LOGIN")
+    login:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        local saved = SavedOptionsPanelAccent()
+        if type(saved) == "table" and type(saved.r) == "number"
+            and type(saved.g) == "number" and type(saved.b) == "number" then
+            -- Keep the authoritative top-level key in step with its mirror.
+            EllesmereUIDB.optionsPanelAccentColor = { r = saved.r, g = saved.g, b = saved.b }
+            RefreshOptionsPanelAccent(saved.r, saved.g, saved.b)
+        end
+    end)
+end
+
+function EllesmereUI.SetOptionsPanelAccentColor(r, g, b)
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    EllesmereUIDB.optionsPanelAccentColor = { r = r, g = g, b = b }
+    -- Store a second copy in the account-global namespace. Profile switches
+    -- and the Lite guard must never turn this panel-only choice into a default.
+    if type(EllesmereUIDB.global) ~= "table" then EllesmereUIDB.global = {} end
+    EllesmereUIDB.global.optionsPanelAccentColor = { r = r, g = g, b = b }
+    RefreshOptionsPanelAccent(r, g, b)
+end
+
+function EllesmereUI.ResetOptionsPanelAccentColor()
+    if EllesmereUIDB then
+        EllesmereUIDB.optionsPanelAccentColor = nil
+        if type(EllesmereUIDB.global) == "table" then
+            EllesmereUIDB.global.optionsPanelAccentColor = nil
+        end
+    end
+    RefreshOptionsPanelAccent(EllesmereUI.GetAccentColor())
 end
 
 --- SetActiveTheme: persists and applies with an animated transition. Changes only the options panel background; accent colour is independent (accent swatch / class colour toggle).
@@ -610,6 +681,8 @@ EllesmereUI.ResetTheme = function()
     if not EllesmereUIDB then return end
     EllesmereUIDB.accentColor   = nil
     EllesmereUIDB.activeTheme   = nil
+    EllesmereUIDB.optionsPanelAccentColor = nil
+    if type(EllesmereUIDB.global) == "table" then EllesmereUIDB.global.optionsPanelAccentColor = nil end
 end
 
 -------------------------------------------------------------------------------

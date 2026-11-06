@@ -953,14 +953,216 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
     -------------------------------------------------------------------
     --  BAR LAYOUT
     -------------------------------------------------------------------
+    -- Live enabled state shown alongside (not in place of) each apply
+    -- destination checkbox. Read the current profile, never captured barData.
+    local function GetCDMApplyState(key)
+        local current = DB()
+        if not current or not current.cdmBars then return nil end
+        for _, item in ipairs(current.cdmBars.bars) do
+            if item.key == key then return item.enabled == true end
+        end
+        return nil
+    end
+
     -- Sync helper: all bars except ghost/focuskick. FocusKick is a nameplate-anchored
     -- identity and never receives global syncs.
+    -- Multi-target operations share the exact same copy callbacks as Apply to All.
+    -- Filter destinations only for the duration of the selected operation.
+    local syncTargetFilter
     local function ForEachSyncBar(fn)
         local pp = DB(); if not pp or not pp.cdmBars then return end
         for _, b in ipairs(pp.cdmBars.bars) do
-            if not b.isGhostBar and b.key ~= "focuskick" then fn(b) end
+            if not b.isGhostBar and b.key ~= "focuskick"
+                and (not syncTargetFilter or syncTargetFilter[b.key]) then
+                fn(b)
+            end
         end
     end
+
+    local function BuildCDMBarSync(opts)
+        local keys, labels = {}, {}
+        local pp = DB()
+        if pp and pp.cdmBars then
+            for _, b in ipairs(pp.cdmBars.bars) do
+                if not b.isGhostBar and b.key ~= "focuskick" then
+                    keys[#keys + 1] = b.key
+                    labels[b.key] = b.name or b.key
+                end
+            end
+        end
+        local applyAll = opts.onClick
+        if applyAll and #keys > 1 then
+            opts.multiApply = {
+                getElementState = GetCDMApplyState,
+                elementKeys = keys,
+                elementLabels = labels,
+                getCurrentKey = function() return barKey end,
+                onApply = function(selected)
+                    local filter = {}
+                    for i = 1, #selected do filter[selected[i]] = true end
+                    syncTargetFilter = filter
+                    local ok, err = pcall(applyAll)
+                    syncTargetFilter = nil
+                    if not ok then error(err) end
+                end,
+            }
+        end
+        opts.alwaysAvailable = opts.multiApply ~= nil
+        return EllesmereUI.BuildSyncIcon(opts)
+    end
+
+    -- Options not already using a dedicated composite sync icon share these
+    -- settings across CDM bars. Row-specific field groups keep unrelated bar
+    -- identity, anchor, tracked-spell and per-spec settings untouched.
+    local sharedRowFields = {
+        ["Number of Rows"] = { "numRows", "customTopRowEnabled", "topRowCount",
+            "customBottomRowEnabled", "bottomRowCount", "topRowSizeOffset",
+            "customTopRowSizeEnabled", "bottomRowSizeOffset", "customBottomRowSizeEnabled" },
+        ["Bar Background"] = { "barBgEnabled", "barBgR", "barBgG", "barBgB", "barBgA" },
+        ["Bar Opacity"] = { "barOpacity" },
+        ["Max Icons (0 = Off)"] = { "maxIcons" },
+        ["Icon Scale"] = { "iconSize" },
+        ["Duration Size"] = { "cooldownFontSize", "cooldownTextR", "cooldownTextG", "cooldownTextB" },
+        ["Charge/Stack Size"] = { "stackCountSize", "stackCountR", "stackCountG", "stackCountB" },
+        ["Suppress GCD"] = { "suppressGCD" },
+        ["Pixel Glow Thickness"] = { "pixelGlowThickness", "pixelGlowLines",
+            "pixelGlowSpeed", "pixelGlowBackground", "pixelGlowBackgroundR",
+            "pixelGlowBackgroundG", "pixelGlowBackgroundB" },
+        ["Only Show Numbers"] = { "onlyShowNumbers" },
+        ["Charges/Stacks Only (No Icon)"] = { "chargesOnly" },
+        ["Hide Charge Count at 0"] = { "hideZeroChargeText" },
+        ["Show Tooltip on Hover"] = { "showTooltip" },
+        ["Show Keybind"] = { "showKeybind" },
+        ["Mirror Key Presses"] = { "pressMirror" },
+        ["Bar Strata"] = { "barStrata" },
+        ["Vertical Orientation"] = { "verticalOrientation", "growDirection", "rowGrowDirection" },
+        ["Always Show Buffs"] = { "showInactiveBuffIcons" },
+        ["Keep Buffs in Same Place"] = { "hidePlaceholderIcon" },
+    }
+    local realW = W
+    local syncW = setmetatable({}, { __index = realW })
+    function syncW:DualRow(p, rowY, left, right)
+        local row, height = realW:DualRow(p, rowY, left, right)
+        if EllesmereUI._prebuilding or isFocusKick or barData.isGhostBar then return row, height end
+        local cfgs = { left, right }
+        local regions = { row._leftRegion, row._rightRegion }
+        for i = 1, 2 do
+            local cfg = cfgs[i]
+            local label = type(cfg) == "table" and cfg.text
+            local fields = label and sharedRowFields[label]
+            if fields and regions[i] then
+                local isBuffSetting = (label == "Only Show Numbers")
+                local isPixelSetting = (label == "Pixel Glow Thickness")
+                local buffPixel = isPixelSetting and ns.IsBarBuffFamily(BD())
+                if buffPixel then
+                    fields = { "buffGlowThickness", "buffGlowLines", "buffGlowSpeed",
+                        "buffGlowBackground", "buffGlowBackgroundR", "buffGlowBackgroundG",
+                        "buffGlowBackgroundB" }
+                end
+                local function Eligible(b)
+                    if b.isGhostBar or b.key == "focuskick" then return false end
+                    if label == "Always Show Buffs" or label == "Keep Buffs in Same Place" then
+                        -- Native buff bars alone have these mutually exclusive flags.
+                        if not ns.IsBarBuffFamily(b) then return false end
+                        if label == "Keep Buffs in Same Place" and AnyIconAlwaysShowOn(b.key) then return false end
+                        return true
+                    end
+                    if isBuffSetting or buffPixel then return ns.IsBarBuffFamily(b) end
+                    if isPixelSetting then return ns.CDM_BarHasPixelRow(b) end
+                    return true
+                end
+                local selected = BD()
+                if Eligible(selected) then
+                    local members, labels = {}, {}
+                    local pp = DB()
+                    for _, bar in ipairs(pp.cdmBars.bars) do
+                        if Eligible(bar) then
+                            members[#members + 1] = bar.key
+                            labels[bar.key] = bar.name or bar.key
+                        end
+                    end
+                    if #members > 1 then
+                        local rgn = regions[i]
+                        local function CopyTo(destinations)
+                            local src = BD()
+                            local wanted = {}
+                            for _, k in ipairs(destinations) do wanted[k] = true end
+                            for _, dest in ipairs(DB().cdmBars.bars) do
+                                if wanted[dest.key] and dest ~= src and Eligible(dest) then
+                                    for _, field in ipairs(fields) do
+                                        local v = src[field]
+                                        dest[field] = type(v) == "table" and EllesmereUI.Lite.DeepCopy(v) or v
+                                    end
+                                    -- Reproduce native per-row invariants instead of blindly
+                                    -- copying mutually exclusive buff visibility modes.
+                                    if label == "Vertical Orientation" then
+                                        dest.growDirection = src.verticalOrientation and "DOWN" or "RIGHT"
+                                        dest.rowGrowDirection = nil
+                                    elseif label == "Always Show Buffs" and src.showInactiveBuffIcons then
+                                        dest.hidePlaceholderIcon = false
+                                    elseif label == "Keep Buffs in Same Place" and src.hidePlaceholderIcon then
+                                        dest.showInactiveBuffIcons = false
+                                    end
+                                    -- Layout dimensions are recomputed after a copy.
+                                    dest._matchIconPhys = nil
+                                    dest._matchExtraPixels = nil
+                                    dest._matchStride = nil
+                                    dest._matchExtraPixelsH = nil
+                                    dest._matchStrideH = nil
+                                end
+                            end
+                            ns.BuildAllCDMBars(); Refresh(); UpdateCDMPreview(); EllesmereUI:RefreshPage()
+                        end
+                        EllesmereUI.BuildSyncIcon({
+                            alwaysAvailable = true,
+                            region = rgn,
+                            tooltip = "Apply " .. label .. " to other CDM Bars",
+                            isSynced = function()
+                                local src = BD()
+                                for _, dest in ipairs(DB().cdmBars.bars) do
+                                    if Eligible(dest) then
+                                        for _, field in ipairs(fields) do
+                                            if src[field] ~= dest[field] then return false end
+                                        end
+                                    end
+                                end
+                                return true
+                            end,
+                            onClick = function() CopyTo(members) end,
+                            flashTargets = function() return { rgn } end,
+                            multiApply = {
+                getElementState = GetCDMApplyState,
+                                elementKeys = members,
+                                elementLabels = labels,
+                                getCurrentKey = function() return barKey end,
+                                getElementOptionState = ({
+                                    ["Bar Background"] = true,
+                                    ["Suppress GCD"] = true,
+                                    ["Only Show Numbers"] = true,
+                                    ["Charges/Stacks Only (No Icon)"] = true,
+                                    ["Hide Charge Count at 0"] = true,
+                                    ["Mirror Key Presses"] = true,
+                                    ["Vertical Orientation"] = true,
+                                    ["Always Show Buffs"] = true,
+                                    ["Keep Buffs in Same Place"] = true,
+                                })[label] and function(key)
+                                    local pp = DB()
+                                    if not pp or not pp.cdmBars then return nil end
+                                    for _, dest in ipairs(pp.cdmBars.bars) do
+                                        if dest.key == key then return dest[fields[1]] == true end
+                                    end
+                                    return nil
+                                end or nil,
+                                onApply = CopyTo,
+                            },
+                        })
+                    end
+                end
+            end
+        end
+        return row, height
+    end
+    W = syncW
 
     if not isFocusKick then
     hdr, h = W:SectionHeader(parent, "BAR LAYOUT", y);  y = y - h
@@ -1020,7 +1222,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
     -- carry the mode selection and every option boolean together.
     if not EllesmereUI._prebuilding then
         local rgn = visRow._leftRegion
-        EllesmereUI.BuildSyncIcon({
+        BuildCDMBarSync({
             region  = rgn,
             tooltip = "Apply Visibility to all Bars",
             isSynced = function()
@@ -2064,7 +2266,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
 
         -- Sync icon on Custom Icon Shape (left of row 3)
         if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildSyncIcon({
+        BuildCDMBarSync({
             region  = buffShapeZoomRow._leftRegion,
             tooltip = "Apply Icon Shape to all Bars",
             isSynced = function()
@@ -2098,7 +2300,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
         end
         -- Sync icon on Icon Zoom (right of row 3)
         if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildSyncIcon({
+        BuildCDMBarSync({
             region  = buffShapeZoomRow._rightRegion,
             tooltip = "Apply Icon Zoom to all Bars",
             isSynced = function()
@@ -2321,7 +2523,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             end
             -- Sync icon: Border Size (left region)
             if not EllesmereUI._prebuilding then
-            EllesmereUI.BuildSyncIcon({
+            BuildCDMBarSync({
                 region  = buffBsRow._leftRegion,
                 tooltip = "Apply Border Size to all Bars",
                 isSynced = function()
@@ -2352,7 +2554,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             end
             -- Sync icon: Border Style (right region)
             if not EllesmereUI._prebuilding then
-            EllesmereUI.BuildSyncIcon({
+            BuildCDMBarSync({
                 region  = buffBsRow._rightRegion,
                 tooltip = "Apply Border Style to all Bars",
                 onClick = function()
@@ -2448,7 +2650,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
 
     -- Sync icon on Icon Spacing (right of row 1)
     if not EllesmereUI._prebuilding then
-    EllesmereUI.BuildSyncIcon({
+    BuildCDMBarSync({
         region  = scaleAnimRow._rightRegion,
         tooltip = "Apply Icon Spacing to all Bars",
         isSynced = function()
@@ -2647,7 +2849,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
         end
         -- Sync icon: Border Style (left region of bsRow)
         if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildSyncIcon({
+        BuildCDMBarSync({
             region  = bsRow._leftRegion,
             tooltip = "Apply Border Style to all Bars",
             onClick = function()
@@ -2765,7 +2967,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
         end
         -- Sync icon on Border Size (right region)
         if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildSyncIcon({
+        BuildCDMBarSync({
             region  = bsRow._rightRegion,
             tooltip = "Apply Border Size to all Bars",
             isSynced = function()
@@ -2861,7 +3063,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
     AttachCropCog(shapeRow._leftRegion)
 
     if not EllesmereUI._prebuilding then
-    EllesmereUI.BuildSyncIcon({
+    BuildCDMBarSync({
         region  = shapeRow._leftRegion,
         tooltip = "Apply Icon Shape to all Bars",
         isSynced = function()
@@ -2894,7 +3096,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
     })
     end
     if not EllesmereUI._prebuilding then
-    EllesmereUI.BuildSyncIcon({
+    BuildCDMBarSync({
         region  = shapeRow._rightRegion,
         tooltip = "Apply Icon Zoom to all Bars",
         isSynced = function()
@@ -3350,6 +3552,10 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                         EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromCdmBar(BD()), { skipCdmKey = barKey })
                         Refresh()
                     end,
+               
+                    alwaysAvailable = true,
+                    multiApply = EllesmereUI.PandemicMultiApply({ skipCdmKey = barKey },
+                        function() return EllesmereUI.PandemicPayloadFromCdmBar(BD()) end, function() Refresh() end),
                 })
             end
         end

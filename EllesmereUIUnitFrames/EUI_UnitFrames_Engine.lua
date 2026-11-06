@@ -570,6 +570,20 @@ local RESETTLE_EVENTS = {
     UNIT_MAX_HEALTH_MODIFIERS_CHANGED = true,
 }
 
+-- A newly shown boss slot can first paint before its health/max values have
+-- settled. Recheck that one bar next frame, without a recurring ticker or a
+-- full-frame repaint; the health painter also snaps its interpolation.
+local function QueueBossHealthResettle(frame)
+    if frame._euiBossHealthResettle then return end
+    frame._euiBossHealthResettle = true
+    C_Timer.After(0, function()
+        frame._euiBossHealthResettle = nil
+        if not frame:IsShown() then return end
+        local fn = painters.health
+        if fn then fn(frame, frame._euiUnit, "BossSettled") end
+    end)
+end
+
 -- tracker.channelsByEvent: event -> { channelName, ... } for its frame.
 local function TrackerOnEvent(self, event, unitToken, ...)
     local frame = self._euiFrame
@@ -588,6 +602,7 @@ local function TrackerOnEvent(self, event, unitToken, ...)
             self._euiGuid = guid
             if old ~= nil and old ~= guid then
                 Engine.RepaintAll(frame, "UnitChanged")
+                QueueBossHealthResettle(frame)
                 return
             end
         end
@@ -652,7 +667,10 @@ function Engine.Attach(frame, unit, channels)
     -- skip dispatch), so a freshly shown frame repaints in full.
     if not frame._euiEngineShowHook then
         frame._euiEngineShowHook = true
-        frame:HookScript("OnShow", function(f) Engine.RepaintAll(f, "Show") end)
+        frame:HookScript("OnShow", function(f)
+            Engine.RepaintAll(f, "Show")
+            if t._euiGuidGuard then QueueBossHealthResettle(f) end
+        end)
     end
     local secondary = SECONDARY_TOKEN[unit]
     local byEvent = t._euiChannelsByEvent
@@ -677,6 +695,12 @@ function Engine.Attach(frame, unit, channels)
                 if not seen then list[#list + 1] = ch end
             end
         end
+    end
+    -- RegisterUnitWatch may have shown a boss before this hook was attached
+    -- (e.g. a reload during combat); paint that initial occupant as well.
+    if t._euiGuidGuard and frame:IsShown() then
+        Engine.RepaintAll(frame, "Show")
+        QueueBossHealthResettle(frame)
     end
 end
 

@@ -1544,7 +1544,7 @@ initFrame:SetScript("OnEvent", function(self)
         local themeRow
         themeRow, h = W:DualRow(parent, y,
             { type="multiSwatch", text="UI Accent Color",
-              tooltip="Sets the accent color used across all EllesmereUI elements (tabs, glows, highlights, borders). Defaults to your theme color.",
+              tooltip="Sets the accent color used by EllesmereUI game elements. The options panel can use its own accent below. Defaults to your theme color.",
               swatches = {
                 { tooltip = "Class Color",
                   getValue = function()
@@ -1645,7 +1645,35 @@ initFrame:SetScript("OnEvent", function(self)
             end)
         end
 
-        -- EUI Options Language (Row 2's right slot): options-panel display language (auto-detects the client; untranslated text falls back to English).
+        -- Independent options-panel accent (account-wide). OFF retains the
+        -- existing panel colors, which follow the active UI accent.
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Custom Options Panel Accent",
+              tooltip="Enable an independent accent color for the EllesmereUI options panel. Off: the panel follows UI Accent Color.",
+              getValue=function() return EllesmereUI.HasOptionsPanelAccentOverride() end,
+              setValue=function(v)
+                  if v then
+                      if not EllesmereUI.HasOptionsPanelAccentOverride() then
+                          EllesmereUI.SetOptionsPanelAccentColor(EllesmereUI.GetAccentColor())
+                      end
+                  else
+                      EllesmereUI.ResetOptionsPanelAccentColor()
+                  end
+                  EllesmereUI:RefreshPage(true)
+              end },
+            { type="colorpicker", text="Options Panel Accent Color", hasAlpha=false,
+              tooltip="Accent used by the options panel only, independent of the in-game UI accent.",
+              disabled=function() return not EllesmereUI.HasOptionsPanelAccentOverride() end,
+              getValue=function()
+                  local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
+                  return r, g, b, 1
+              end,
+              setValue=function(r, g, b)
+                  EllesmereUI.SetOptionsPanelAccentColor(r, g, b)
+              end }
+        ); y = y - h
+
+        -- EUI Options Language (UI Scale row's right slot): options-panel display language (auto-detects the client; untranslated text falls back to English).
         local langCfg
         do
             -- _noLoc: the language list itself is never translated, so a player who booted the wrong language can always read and change it.
@@ -1707,7 +1735,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end }
         end
 
-        -- Row 2: UI Scale | EUI Options Language
+        -- Row 3: UI Scale | EUI Options Language
         _, h = W:DualRow(parent, y,
             { type="slider", text="UI Scale",
               min=0.40, max=1.00, step=0.01,
@@ -2367,7 +2395,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     -- Builds the centered mode toggle, returning the vertical space used. Plain local closure on purpose: no widget row, no capture config, no saved state.
     local function BuildOverridesModeToggle(parent, y)
-        local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local fontPath = (EllesmereUI.GetFontPath())
             or "Fonts\\FRIZQT__.TTF"
         -- Wider than the Raid Frames pair (162): "Conditional Overrides" is a longer label than "Custom Buff Display" and must not clip.
@@ -2452,7 +2480,7 @@ initFrame:SetScript("OnEvent", function(self)
         local DARK_BG = EllesmereUI.DARK_BG
         local bbg = EllesmereUI.SolidTex(btn, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, 0.92)
         bbg:SetAllPoints()
-        local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local bbrd = EllesmereUI.MakeBorder(btn, EG.r, EG.g, EG.b, 0.5)
         local blbl = EllesmereUI.MakeFont(btn, 13, nil, EG.r, EG.g, EG.b, 1)
         blbl:SetAlpha(0.8)
@@ -2712,12 +2740,12 @@ initFrame:SetScript("OnEvent", function(self)
             local glowHost = CreateFrame("Frame", nil, ctl)
             glowHost:SetPoint("TOPLEFT", ctl, "TOPLEFT", -10, 6)
             glowHost:SetPoint("BOTTOMRIGHT", ctl, "BOTTOMRIGHT", 8, -6)
-            local PlayGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+            local PlayGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
             EllesmereUI._FlashWindowScale = function()
                 ScaleCtlRefresh()
                 PlayGlow(glowHost)
             end
-            EllesmereUI.RegAccent({ type = "callback", fn = function() refresh() end })
+            EllesmereUI.RegPanelAccent({ type = "callback", fn = function() refresh() end })
             -- Any scale change (this slider, Reset) lands here once its glide ends.
             if not EllesmereUI._onScaleChanged then EllesmereUI._onScaleChanged = {} end
             EllesmereUI._onScaleChanged[#EllesmereUI._onScaleChanged + 1] = function()
@@ -2754,7 +2782,7 @@ initFrame:SetScript("OnEvent", function(self)
                 prefixFs:SetPoint("RIGHT", nameFs, "LEFT", -4, 0)
                 prefixFs:SetText(EllesmereUI.L("Special thanks to:"))
                 thanksBtn._nameFs, thanksBtn._prefixFs = nameFs, prefixFs
-                EllesmereUI.RegAccent({ type = "callback", obj = nameFs,
+                EllesmereUI.RegPanelAccent({ type = "callback", obj = nameFs,
                     fn = function(r, g, b) nameFs:SetTextColor(r, g, b, 0.9) end })
                 thanksBtn:SetScript("OnEnter", function(self)
                     self._prefixFs:SetAlpha(0.75)
@@ -2771,7 +2799,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI:SelectModule(LEGENDS_KEY)
                 end)
             end
-            local EG = EllesmereUI.ELLESMERE_GREEN
+            local EG = EllesmereUI.PANEL_ACCENT
             thanksBtn._nameFs:SetTextColor(EG.r, EG.g, EG.b, 0.9)
             thanksBtn._nameFs:SetText(name)
             thanksBtn:SetWidth(thanksBtn._nameFs:GetStringWidth() + 4 + thanksBtn._prefixFs:GetStringWidth())

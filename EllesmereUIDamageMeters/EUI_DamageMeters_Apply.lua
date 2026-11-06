@@ -27,6 +27,7 @@ ns.RefreshMeter = function()
     for _, w in ipairs(_windows) do
         if cfg.barSeparators or cfg.iconSeparator or w._decorSync then ns.DMSetWindowBorderLayer(w, cfg) end
         w.Refresh()
+        if w.RefreshHomeAccent then w.RefreshHomeAccent() end
     end
 end
 

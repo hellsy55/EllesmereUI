@@ -129,6 +129,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 CopyVisibilitySettings(EAB.db.profile.bars[key], src, key)
             end
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Visibility to all Bars",
                 onClick = function()
@@ -151,6 +152,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -300,6 +302,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
     do
         local rgn = row._leftRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Bar Opacity to all Bars",
             onClick = function()
@@ -322,6 +325,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                        getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return SelectedKey() end,
@@ -480,12 +484,14 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             },
         })
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Advanced Fade to all Bars",
             onClick = function() ApplyAdvancedFadeTo(GROUP_BAR_ORDER) end,
             isSynced = AdvancedFadeSynced,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                        getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return SelectedKey() end,
@@ -512,6 +518,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 EAB:ApplyClickThroughForBar(key)
             end
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Click Through to all Bars",
                 onClick = function()
@@ -528,6 +535,8 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementOptionState = function(key) return EAB.db.profile.bars[key].clickThrough == true end,
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -638,6 +647,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         do
             local rgn = iconSizeRow._leftRegion
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Icon Size to all Bars",
                 onClick = function()
@@ -668,6 +678,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -690,6 +701,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         do
             local rgn = iconSizeRow._rightRegion
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Button Spacing to all Bars",
                 onClick = function()
@@ -709,6 +721,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -760,6 +773,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         do
             local rgn = row._leftRegion
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Number of Icons to all Bars",
                 onClick = function()
@@ -779,6 +793,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -796,6 +811,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         do
             local rgn = row._rightRegion
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Number of Rows to all Bars",
                 onClick = function()
@@ -815,6 +831,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -896,6 +913,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             do
                 local rgn = orientRow._leftRegion
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Orientation to all Bars",
                     onClick = function()
@@ -916,6 +934,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        getElementState = env.IsBarEnabled,
                         elementKeys   = GROUP_BAR_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return SelectedKey() end,
@@ -937,6 +956,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             do
                 local rgn = orientRow._rightRegion
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Background Settings to all Bars",
                     onClick = function()
@@ -978,6 +998,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        getElementState = env.IsBarEnabled,
                         elementKeys   = GROUP_BAR_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return SelectedKey() end,
@@ -1106,6 +1127,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end
                 end
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply Show Bar Background to all Bars",
                     onClick = function()
@@ -1122,6 +1144,8 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        getElementOptionState = function(key) return ns.AB_ForeverBg(key) == true end,
+                        getElementState = env.IsBarEnabled,
                         elementKeys   = GROUP_BAR_ORDER,
                         elementLabels = SHORT_LABELS,
                         getCurrentKey = function() return SelectedKey() end,
@@ -1151,6 +1175,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         do
             local rgn = ctRow._rightRegion
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Strata Level to all Bars",
                 onClick = function()
@@ -1170,6 +1195,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,
@@ -1215,6 +1241,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         do
             local rgn = autoCompactRow._leftRegion
             EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                 region  = rgn,
                 tooltip = "Apply Auto-Compact Bar to all Bars",
                 onClick = function()
@@ -1236,6 +1263,8 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                        getElementOptionState = function(key) return EAB.db.profile.bars[key].autoCompactSlots == true end,
+                        getElementState = env.IsBarEnabled,
                     elementKeys   = AUTO_COMPACT_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
                     getCurrentKey = function() return SelectedKey() end,

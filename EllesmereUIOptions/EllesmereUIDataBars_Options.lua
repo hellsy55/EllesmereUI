@@ -1615,7 +1615,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         -- Second arg holdWhile keeps the glow pulsing while the setting still
         -- needs filling in (a 0.75s flash is gone before they finish reading).
-        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
 
         local function GlowTargetOf(m)
             if not m.slotSide then return m.target end

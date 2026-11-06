@@ -1262,7 +1262,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 end
                                 C_Timer.After(0.15, function()
                                     if PoolGen(target) ~= targetGen or not target:IsShown() then return end
-                                    local eg = EllesmereUI.ELLESMERE_GREEN
+                                    local eg = EllesmereUI.PANEL_ACCENT
                                     if not editGlow or glowR ~= eg.r or glowG ~= eg.g or glowB ~= eg.b then
                                         glowR, glowG, glowB = eg.r, eg.g, eg.b
                                         editGlow = EllesmereUI.MakeSettingGlow({ color = eg })
@@ -1480,7 +1480,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local PP = EllesmereUI.PanelPP or EllesmereUI.PP
         local fontPath = (EllesmereUI.GetFontPath("raidFrames")) or "Fonts\\FRIZQT__.TTF"
-        local accentColor = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+        local accentColor = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local s = db.profile
 
         if not testModeFrame then

@@ -878,6 +878,10 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                         EllesmereUI.PandemicPayloadFromNameplate(DB()), { skipNameplates = true })
                     C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
                 end,
+           
+                alwaysAvailable = true,
+                multiApply = EllesmereUI.PandemicMultiApply({ skipNameplates = true },
+                    function() return EllesmereUI.PandemicPayloadFromNameplate(DB()) end, function() C_Timer.After(0, function() EllesmereUI:RefreshPage() end) end),
             })
         end
     end

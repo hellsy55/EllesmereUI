@@ -131,6 +131,7 @@ function ns.UF_ClassicCastBorderRow(W, parent, y, getS, key, onChange, sync, mat
             EllesmereUI:RefreshPage()
         end
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Border Size to all Frames",
             onClick = function() apply(sync.units) end,
@@ -145,6 +146,7 @@ function ns.UF_ClassicCastBorderRow(W, parent, y, getS, key, onChange, sync, mat
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                        getElementState = ns.UFO_GetUnitApplyState,
                 elementKeys   = sync.units,
                 elementLabels = sync.labels,
                 getCurrentKey = sync.current,
@@ -461,12 +463,14 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
         end
         local lr, rr = row._leftRegion, row._rightRegion
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = lr,
             tooltip = "Apply Cast Bar Border Style to all Frames",
             onClick = function() CopyTo(sync.units, false) end,
             isSynced = StyleSynced,
             flashTargets = function() return { lr } end,
             multiApply = {
+                        getElementState = ns.UFO_GetUnitApplyState,
                 elementKeys   = sync.units,
                 elementLabels = sync.labels,
                 getCurrentKey = sync.current,
@@ -474,12 +478,14 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
             },
         })
         EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
             region  = rr,
             tooltip = "Apply Cast Bar Border to all Frames",
             onClick = function() CopyTo(sync.units, true) end,
             isSynced = SizeSynced,
             flashTargets = function() return { rr } end,
             multiApply = {
+                        getElementState = ns.UFO_GetUnitApplyState,
                 elementKeys   = sync.units,
                 elementLabels = sync.labels,
                 getCurrentKey = sync.current,
@@ -1087,6 +1093,22 @@ initFrame:SetScript("OnEvent", function(self)
         pet          = function() return db.profile.pet end,
         boss         = function() return db.profile.boss end,
     }
+
+    -- Live destination state for the shared Apply to Multiple popup. This is
+    -- the frame's configured availability, NOT the apply-selection checkmark.
+    function ns.UFO_GetUnitApplyState(key)
+        if key == "targettarget" or key == "focustarget" or key == "pet" then
+            local flags = db.profile.enabledFrames
+            return not (flags and flags[key] == false)
+        end
+        if not UNIT_DB_MAP[key] then return nil end
+        local source = ns.GetUnitFrameSource and ns.GetUnitFrameSource(key)
+        if source == "blizzard" then return "Blizzard" end
+        if source == "hidden" then return false end
+        local settings = UNIT_DB_MAP[key]()
+        if not settings then return nil end
+        return ns.VisEffective(settings) ~= "never"
+    end
 
     ---------------------------------------------------------------------------
     --  Glow site: the target/focus Purgeable Buff Glow as a shared glow
@@ -2361,7 +2383,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
             cogTex:SetAllPoints()
-            cogTex:SetTexture(iconPath or EllesmereUI.COGS_ICON)
+            cogTex:SetTexture(iconPath or EllesmereUI.PANEL_MORE_ICON)
 
             local function IsDisabled()
                 return disabledFn and disabledFn() or false
@@ -2639,7 +2661,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  CLICK NAVIGATION
         -------------------------------------------------------------------
-        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
         local function NavigateToSetting(key)
             ns._UFNavigateToSetting(parent._sharedClickTargets or parent._ufClickTargets, key, PlaySettingGlow, true)
         end
@@ -2855,7 +2877,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  CLICK NAVIGATION
         -------------------------------------------------------------------
-        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
         local function NavigateToSetting(key)
             ns._UFNavigateToSetting(parent._ufClickTargets, key, PlaySettingGlow)
         end
@@ -2960,7 +2982,7 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         --  CLICK NAVIGATION  (mirrors the Mini Frames page)
         -------------------------------------------------------------------
-        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
         local function NavigateToSetting(key)
             ns._UFNavigateToSetting(parent._ufClickTargets, key, PlaySettingGlow)
         end
@@ -3124,13 +3146,14 @@ initFrame:SetScript("OnEvent", function(self)
         detPortraitShapeValues = detPortraitShapeValues, frames = frames, GetUFOptOutline = GetUFOptOutline,
         GROUP_UNIT_ORDER = GROUP_UNIT_ORDER, HideExhaustionRow = HideExhaustionRow, healthTextOrder = healthTextOrder, healthTextOrderBoss = healthTextOrderBoss,
         healthTextOrderPlayer = healthTextOrderPlayer, healthTextOrderTargetFocus = healthTextOrderTargetFocus, healthTextValues = healthTextValues,
+        IsGroupSharedKey = IsGroupSharedKey,
         MINI_GROUP_ORDER = MINI_GROUP_ORDER, optState = optState, portraitArtOrder = portraitArtOrder,
         portraitArtValues = portraitArtValues, portraitModeOrder2 = portraitModeOrder2, portraitModeValues2 = portraitModeValues2,
         portraitNonPlayerOrder = portraitNonPlayerOrder, portraitNonPlayerValues = portraitNonPlayerValues, PP = PP,
         PREVIEW_FONT = PREVIEW_FONT, PromptReloadIfUnspawned = PromptReloadIfUnspawned, RegisterWidgetRefresh = RegisterWidgetRefresh,
         ReloadAndUpdate = ReloadAndUpdate, ResolveBlizzPreview = ResolveBlizzPreview, SetPVFont = SetPVFont,
         SHORT_LABELS = SHORT_LABELS, SOLID_BACKDROP = SOLID_BACKDROP, SwapAuraSlot = SwapAuraSlot,
-        UF_ImpCastGlowDesc = UF_ImpCastGlowDesc, UF_PurgeGlowDesc = UF_PurgeGlowDesc, UNIT_DB_MAP = UNIT_DB_MAP,
+        UF_ImpCastGlowDesc = UF_ImpCastGlowDesc, UF_PurgeGlowDesc = UF_PurgeGlowDesc, GetUnitApplyState = ns.UFO_GetUnitApplyState, UNIT_DB_MAP = UNIT_DB_MAP,
         UNIT_LABELS_SUP = UNIT_LABELS_SUP, unitSide = unitSide, UpdatePreview = UpdatePreview,
     }
 
