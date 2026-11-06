@@ -203,6 +203,7 @@ local function GetOrCreateReagentSlot(idx)
         btn.IconMask:ClearAllPoints()
         btn.IconMask:SetSize(0.001, 0.001)
     end
+    ns.UnmaskItemButton(btn)
 
     if btn.Cooldown then
         local cdText = btn.Cooldown:GetRegions()

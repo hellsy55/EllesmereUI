@@ -3650,7 +3650,6 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                     return g == "UP" or g == "DOWN"
                 end
                 EllesmereUI.BuildInlineCog(rgn, {
-                    icon = EllesmereUI.DIRECTIONS_ICON,
                     title = "Position Offset",
                     rows = {
                         { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -3722,21 +3721,7 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                   setValue=function(v) ind.showStacks = v; ReloadAndUpdate() end })
             do
                 local rgn = durRow._leftRegion
-                local swatch = EllesmereUI.BuildColorSwatch(
-                    rgn, durRow:GetFrameLevel() + 3,
-                    function()
-                        local c = ind.durationTextColor or { r=1, g=1, b=1 }
-                        return c.r, c.g, c.b, 1
-                    end,
-                    function(r, g, b)
-                        ind.durationTextColor = { r=r, g=g, b=b }
-                        ReloadAndUpdate()
-                    end, false, 20)
-                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                rgn._lastInline = swatch
-
                 EllesmereUI.BuildInlineCog(rgn, {
-                    icon = EllesmereUI.RESIZE_ICON,
                     title = "Duration Text",
                     rows = {
                         { type="slider", label="Text Size", min=6, max=26, step=1,
@@ -3750,27 +3735,24 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                           set=function(v) ind.durationTextOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
-            end
 
-            do
-                local rgn = durRow._rightRegion
                 local swatch = EllesmereUI.BuildColorSwatch(
                     rgn, durRow:GetFrameLevel() + 3,
                     function()
-                        local c = ind.stacksTextColor or { r=1, g=1, b=1 }
+                        local c = ind.durationTextColor or { r=1, g=1, b=1 }
                         return c.r, c.g, c.b, 1
                     end,
                     function(r, g, b)
-                        ind.stacksTextColor = { r=r, g=g, b=b }
+                        ind.durationTextColor = { r=r, g=g, b=b }
                         ReloadAndUpdate()
                     end, false, 20)
                 swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = swatch
             end
+
             do
                 local rgn = durRow._rightRegion
                 EllesmereUI.BuildInlineCog(rgn, {
-                    icon = EllesmereUI.RESIZE_ICON,
                     disabled = function() return ind.showStacks == false end,
                     disabledTooltip = "Show Stacks",
                     title = "Stacks Text",
@@ -3786,6 +3768,21 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                           set=function(v) ind.stacksOffsetY = v; ReloadAndUpdate() end },
                     },
                 })
+            end
+            do
+                local rgn = durRow._rightRegion
+                local swatch = EllesmereUI.BuildColorSwatch(
+                    rgn, durRow:GetFrameLevel() + 3,
+                    function()
+                        local c = ind.stacksTextColor or { r=1, g=1, b=1 }
+                        return c.r, c.g, c.b, 1
+                    end,
+                    function(r, g, b)
+                        ind.stacksTextColor = { r=r, g=g, b=b }
+                        ReloadAndUpdate()
+                    end, false, 20)
+                swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                rgn._lastInline = swatch
             end
             -- Display-level Icon Glow (v2): permanent, every visible icon of the
             -- group glows while shown. No Max Duration setting by design: the
@@ -3908,17 +3905,6 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                       setValue=function(v) ind.pandemicBorderEnabled = v; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
                     extraCfg)
                 local rgn = pandemicRow._leftRegion
-                EllesmereUI.BuildInlineSwatches(rgn, {
-                    { tooltip = "Pandemic Border Color",
-                      getValue = function()
-                          local c = ind.pandemicBorderColor or { r=1, g=0.2, b=0.2 }
-                          return c.r, c.g, c.b, 1
-                      end,
-                      setValue = function(r, g, b)
-                          ind.pandemicBorderColor = { r=r, g=g, b=b }
-                          ReloadAndUpdate()
-                      end },
-                }, { disabled = pandemicOff, disabledTooltip = pandemicTip, requireState = pandemicState, size = 20 })
                 EllesmereUI.BuildInlineCog(rgn, {
                     disabled = pandemicOff, disabledTooltip = pandemicTip, requireState = pandemicState,
                     title = "Pandemic Border",
@@ -3936,6 +3922,17 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                           set=function(v) ind.pandemicBorderWidth = v; ReloadAndUpdate() end },
                     },
                 })
+                EllesmereUI.BuildInlineSwatches(rgn, {
+                    { tooltip = "Pandemic Border Color",
+                      getValue = function()
+                          local c = ind.pandemicBorderColor or { r=1, g=0.2, b=0.2 }
+                          return c.r, c.g, c.b, 1
+                      end,
+                      setValue = function(r, g, b)
+                          ind.pandemicBorderColor = { r=r, g=g, b=b }
+                          ReloadAndUpdate()
+                      end },
+                }, { disabled = pandemicOff, disabledTooltip = pandemicTip, requireState = pandemicState, size = 20 })
             end
 
             -- THRESHOLD section
@@ -3974,7 +3971,6 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 do
                     local rgn = posRow._leftRegion
                     EllesmereUI.BuildInlineCog(rgn, {
-                        icon = EllesmereUI.DIRECTIONS_ICON,
                         title = "Position Offset",
                         rows = {
                             { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -4079,7 +4075,6 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                 do
                     local rgn = posRow._leftRegion
                     EllesmereUI.BuildInlineCog(rgn, {
-                        icon = EllesmereUI.DIRECTIONS_ICON,
                         title = "Position Offset",
                         rows = {
                             { type="slider", label="Offset X", min=-50, max=50, step=1,

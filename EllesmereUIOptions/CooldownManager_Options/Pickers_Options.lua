@@ -486,7 +486,7 @@ local function ShowCustomItemIDPopup(barKey, onAdded)
         editBox:SetJustifyH("CENTER")
         local ebBg = editBox:CreateTexture(nil, "BACKGROUND")
         ebBg:SetAllPoints(); ebBg:SetColorTexture(0.060, 0.049, 0.037, 1)
-        EllesmereUI.MakeBorder(editBox, 1, 1, 1, 0.12, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(editBox, 1, 1, 1, 0.12, ebBg)
 
         local placeholder = editBox:CreateFontString(nil, "ARTWORK")
         placeholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
@@ -641,7 +641,7 @@ local function ShowEquipmentSlotPopup(barKey, onAdded)
         editBox:SetJustifyH("CENTER")
         local ebBg = editBox:CreateTexture(nil, "BACKGROUND")
         ebBg:SetAllPoints(); ebBg:SetColorTexture(0.060, 0.049, 0.037, 1)
-        EllesmereUI.MakeBorder(editBox, 1, 1, 1, 0.12, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(editBox, 1, 1, 1, 0.12, ebBg)
 
         local placeholder = editBox:CreateFontString(nil, "ARTWORK")
         placeholder:SetFont(FONT_PATH, 12, GetCDMOptOutline())
@@ -814,7 +814,7 @@ local function ShowBuffBarPicker(anchorFrame, targetBarKey, onChanged)
 
     local bgTex = menu:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints(); bgTex:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
-    EllesmereUI.MakeBorder(menu, 1, 1, 1, mBrdA, EllesmereUI.PP)
+    EllesmereUI.MakeRoundedBorder(menu, 1, 1, 1, mBrdA, bgTex, nil, true)
 
     local inner = CreateFrame("Frame", nil, menu)
     inner:SetWidth(menuW)
@@ -1068,7 +1068,7 @@ local function ShowBuffBarPicker(anchorFrame, targetBarKey, onChanged)
     -- Scroll if needed
     if mH + 4 > MAX_H then
         local sf = CreateFrame("ScrollFrame", nil, menu)
-        sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+        sf:SetPoint("TOPLEFT", 0, -1); sf:SetPoint("BOTTOMRIGHT", 0, 1)
         sf:SetFrameLevel(menu:GetFrameLevel() + 1)
         sf:EnableMouseWheel(true)
         sf:SetScrollChild(inner)
@@ -1093,10 +1093,12 @@ local function ShowBuffBarPicker(anchorFrame, targetBarKey, onChanged)
     menu:Show()
 end
 
--- Buff picker targeting a CD/UTILITY bar. A buff placed here is a custom injected
--- spell (always-shown icon) with an aura-driven Active State; ns.AddBuffToCDUtilBar
--- wires the injection and the gold aura overlay together. Lists the class's
--- CDM-trackable buffs plus a Custom Spell ID entry; no durations, item or preset rows.
+-- Buff picker targeting a CD/UTILITY bar. A buff placed here is HOSTED
+-- (ns.AddBuffToCDUtilBar): Blizzard's own buff frame is diverted onto the bar, or a
+-- greyed placeholder holds its slot while the aura is down. A Custom Spell ID
+-- Blizzard does not track has no such frame, so an aura icon of ours draws it
+-- (EUI_CDM_AuraIcons.lua). Lists the class's CDM-trackable buffs plus a Custom
+-- Spell ID entry; no durations, item or preset rows.
 -- onPicked(spellID, collidedCdID) = selection mode ("Replace with Buff"): every
 -- catalog buff is listed, a "None" row clears, one click picks and closes, nothing is
 -- hosted and there is no Custom Spell ID row (a replacement needs a Blizzard viewer
@@ -1160,7 +1162,7 @@ local function ShowBuffToCDPicker(anchorFrame, targetBarKey, onChanged, onPicked
 
     local bgTex = menu:CreateTexture(nil, "BACKGROUND")
     bgTex:SetAllPoints(); bgTex:SetColorTexture(mBgR, mBgG, mBgB, mBgA)
-    EllesmereUI.MakeBorder(menu, 1, 1, 1, mBrdA, EllesmereUI.PP)
+    EllesmereUI.MakeRoundedBorder(menu, 1, 1, 1, mBrdA, bgTex, nil, true)
 
     local inner = CreateFrame("Frame", nil, menu)
     inner:SetWidth(menuW)
@@ -1313,7 +1315,7 @@ local function ShowBuffToCDPicker(anchorFrame, targetBarKey, onChanged, onPicked
 
     if mH + 4 > MAX_H then
         local sf = CreateFrame("ScrollFrame", nil, menu)
-        sf:SetPoint("TOPLEFT"); sf:SetPoint("BOTTOMRIGHT")
+        sf:SetPoint("TOPLEFT", 0, -1); sf:SetPoint("BOTTOMRIGHT", 0, 1)
         sf:SetFrameLevel(menu:GetFrameLevel() + 1)
         sf:EnableMouseWheel(true)
         sf:SetScrollChild(inner)
@@ -1389,7 +1391,7 @@ local function ShowDurationPopup(currentVal, onConfirm)
         durBox:SetJustifyH("CENTER")
         local durBg = durBox:CreateTexture(nil, "BACKGROUND")
         durBg:SetAllPoints(); durBg:SetColorTexture(0.060, 0.049, 0.037, 1)
-        EllesmereUI.MakeBorder(durBox, 1, 1, 1, 0.12, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(durBox, 1, 1, 1, 0.12, durBg)
         popup._durBox = durBox
 
         local ar, ag, ab = EllesmereUI.GetAccentColor()
@@ -1494,7 +1496,7 @@ local function ShowAlphaPopup(currentPct, onConfirm, title, hint)
         box:SetJustifyH("CENTER")
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints(); boxBg:SetColorTexture(0.060, 0.049, 0.037, 1)
-        EllesmereUI.MakeBorder(box, 1, 1, 1, 0.12, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(box, 1, 1, 1, 0.12, boxBg)
         popup._box = box
 
         local ar, ag, ab = EllesmereUI.GetAccentColor()
@@ -1601,7 +1603,7 @@ local function ShowThresholdSecondsPopup(currentVal, onConfirm, title, hint)
         box:SetJustifyH("CENTER")
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints(); boxBg:SetColorTexture(0.060, 0.049, 0.037, 1)
-        EllesmereUI.MakeBorder(box, 1, 1, 1, 0.12, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(box, 1, 1, 1, 0.12, boxBg)
         popup._box = box
 
         local ar, ag, ab = EllesmereUI.GetAccentColor()
@@ -1709,7 +1711,7 @@ ns.ShowCDMCustomIconPopup = function(currentID, onConfirm)
         box:SetJustifyH("CENTER")
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints(); boxBg:SetColorTexture(0.060, 0.049, 0.037, 1)
-        EllesmereUI.MakeBorder(box, 1, 1, 1, 0.12, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(box, 1, 1, 1, 0.12, boxBg)
         popup._box = box
 
         -- Live preview of the typed ID (question mark for empty/unknown;
