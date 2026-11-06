@@ -2426,6 +2426,8 @@ end
 --    bagCurrencyByChar    Bags' tracked currencies per character
 --    mageArmorByChar      AuraBuff Reminders (WoW Forever): the mage armor
 --                         each character last had up
+--    global               friend groups: the groups, their order and colours,
+--                         and each friend's group by BattleTag
 --  (The upgrade-calc and gold blobs are what PRIVATE_ADDON_KEYS strips from
 --  normal strings, at their current top-level homes. The three legacy gold
 --  keys stay listed: until Bags or DataBars loads and absorbs them they are
@@ -2463,6 +2465,7 @@ local FULL_EXPORT_EXCLUDED = {
     cdmCachedBarSizes     = true,
     bagCurrencyByChar     = true,
     mageArmorByChar       = true,
+    global                = true,
     cogSeen               = true,
 }
 

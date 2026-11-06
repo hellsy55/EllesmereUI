@@ -227,6 +227,7 @@ end
 -- SetFrameStrata is not combat-protected on this frame, so no lockdown guard
 -- is needed here (mirrors ApplyBackground / ApplyForceOnScreen elsewhere).
 function EQT.ApplyFrameStrata()
+    if EQT.ApplyCustomFrameStrata then EQT.ApplyCustomFrameStrata() end
     local otf = _G.ObjectiveTrackerFrame
     if not otf or not otf.SetFrameStrata then return end
     otf:SetFrameStrata(EQT.Cfg("frameStrata") or "MEDIUM")
