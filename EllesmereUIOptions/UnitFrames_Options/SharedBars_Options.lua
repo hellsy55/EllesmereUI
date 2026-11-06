@@ -32,7 +32,6 @@ function ns.UFO_AddAbsorbPreviewEye(region, flag, label)
     EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
     region._lastInline = eyeBtn
     local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-    EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
     eyeTex:SetAllPoints()
     local function RefreshEye()
         eyeTex:SetTexture(state[flag] and EllesmereUI.EYE_INVISIBLE_ICON or EllesmereUI.EYE_VISIBLE_ICON)
