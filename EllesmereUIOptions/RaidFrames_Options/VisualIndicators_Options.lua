@@ -78,7 +78,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         eyeBtn:SetFrameLevel(indicatorHeader:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-        EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
         eyeTex:SetAllPoints()
 
         -- On ns so the preview can read it.
@@ -486,7 +485,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     if not EllesmereUI._prebuilding then
         local rgn = roleRow2._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Role Icon Offset",
             disabled = RoleAttached,
             disabledTooltip = "Attach Role Icons", requireState = "disabled",
@@ -538,7 +536,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     do
         local rgn = row._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Marker Offset",
             rows = {
                 { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -588,7 +585,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         local rgn = rcRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             icon = EllesmereUI.COGS_ICON,
-            title = "Status Icon",
+            title = "Ready Check / Summon / Rez",
             rows = {
                 { type="toggle", label="Show Ready Check",
                   get=function() return SVal("showReadyCheck", true) end,
@@ -806,7 +803,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     do
         local rgn = row._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Leader Icon",
             rows = {
                 { type="toggle", label="Show In Combat",
@@ -942,7 +938,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         if not EllesmereUI._prebuilding then
             local rgn = gnRow._leftRegion
             EllesmereUI.BuildInlineCog(rgn, {
-                icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Group Number Offset",
                 rows = {
                     { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -997,7 +992,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     if not EllesmereUI._prebuilding then
         local rgn = pingRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Ping Marker Offset",
             rows = {
                 { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -1045,7 +1039,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         eyeBtn:SetFrameLevel(dispelHeader:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-        EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
         eyeTex:SetAllPoints()
 
         if ns._dispelsVisible == nil then ns._dispelsVisible = false end
@@ -1143,7 +1136,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     do
         local rgn = row._rightRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.RESIZE_ICON,
             disabled = function() return not SVal("showDispelIcons", false) end,
             disabledTooltip = "This option requires a Type Icon Position other than None",
             title = "Dispel Icon",
@@ -1292,7 +1284,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     do
         local rgn = tnbRow2._rightRegion
         EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Text Offset",
             rows = {
                 { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -1376,7 +1367,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         EllesmereUI.BlankRowCfg());  y = y - h
     if not EllesmereUI._prebuilding then
         EllesmereUI.BuildInlineCog(tnbRow4._leftRegion, {
-            icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Role Icon Position",
             disabled = function() return not SVal("roleIconOnNameBar", false) end,
             disabledTooltip = "Attach Role Icons",
@@ -2127,7 +2117,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-        EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
         eyeTex:SetAllPoints(); eyeTex:SetTexture(EYE_VISIBLE)
         local function RefreshHMEye()
             eyeTex:SetTexture(ns._hmPreview and EYE_INVISIBLE or EYE_VISIBLE)
@@ -2286,7 +2275,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
-            EllesmereUI.AccentGlyph(eyeBtn, eyeTex)
             eyeTex:SetAllPoints(); eyeTex:SetTexture(EYE_VISIBLE)
             local function RefreshPGEye()
                 eyeTex:SetTexture(ns._pgPreview and EYE_INVISIBLE or EYE_VISIBLE)
