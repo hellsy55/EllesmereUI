@@ -1072,7 +1072,14 @@ local function SkinCharacterSheet()
         if GetFFD(frame).iLvlText         then GetFFD(frame).iLvlText:SetShown(isCharacterTab)         end
         if GetFFD(frame).sidebarBgFrame   then GetFFD(frame).sidebarBgFrame:SetShown(isCharacterTab)   end
         if GetFFD(frame).scrollFrame      then GetFFD(frame).scrollFrame:SetShown(isCharacterTab)      end
-        if GetFFD(frame).scrollBar        then GetFFD(frame).scrollBar:SetShown(isCharacterTab)        end
+        -- Only show the stats thumb when its content actually overflows.
+        if GetFFD(frame).scrollBar then
+            if isCharacterTab then
+                if GetFFD(frame).updateScrollThumb then GetFFD(frame).updateScrollThumb() end
+            else
+                GetFFD(frame).scrollBar:SetShown(false)
+            end
+        end
         if GetFFD(frame).socketContainer  then GetFFD(frame).socketContainer:SetShown(isCharacterTab)  end
 
         if GetFFD(frame).statsSections then
