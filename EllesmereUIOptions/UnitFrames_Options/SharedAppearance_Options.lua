@@ -3513,6 +3513,15 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
         parent._ufFactionRow = factionRow
     end
 
+    -- Row 6: Rested Indicator | blank (player only): Quality of Life's EXTRAS
+    -- row mirrored, the same account-wide settings (EllesmereUI.RestedIndicatorCfg).
+    if optState.selectedUnit == "player" then
+        local restRow
+        restRow, h = W:DualRow(parent, y, EllesmereUI.RestedIndicatorCfg(), EllesmereUI.BlankRowCfg())
+        y = y - h
+        EllesmereUI.BuildRestedIndicatorCog(restRow._leftRegion)
+    end
+
     -- Row 6: Out of Range Alpha. Target/Focus only -- mirrors the Boss
     -- Frames "Indicators" section slider of the same name. Read live by
     -- the range ticker (Unit Frame Range Dimming block), so no reload is

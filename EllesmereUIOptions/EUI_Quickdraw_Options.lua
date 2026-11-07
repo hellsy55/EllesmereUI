@@ -664,6 +664,7 @@ initFrame:SetScript("OnEvent", function(self)
                     or (slot.kind == "randomhearth"
                         and "random hearthstone, rolled again on each open")
                     or (slot.kind == "panel" and "interface panel")
+                    or (slot.kind == "equipmentset" and "equipment set")
                     or (slot.kind == "spec" and "specialization")
                     -- Same icon and same name as a fixed spec entry on the
                     -- character that made it, so the caption is the only place
@@ -802,8 +803,11 @@ initFrame:SetScript("OnEvent", function(self)
                 for i = li.itemIndexOffset + 1, li.itemIndexOffset + li.numSpellBookItems do
                     local info = C_SpellBook.GetSpellBookItemInfo(i, bank)
                     -- FutureSpell (a rank not learned yet) falls out here too:
-                    -- only Spell and Flyout are handled.
-                    if info and not info.isPassive and not info.isOffSpec then
+                    -- only Spell and Flyout are handled. On WoW Forever the book
+                    -- holds every learned rank, and an entry casts the highest
+                    -- known one, so a lower rank would only repeat its spell's row.
+                    if info and not info.isPassive and not info.isOffSpec
+                       and not (EllesmereUI.IS_FOREVER and C_SpellBook.IsSpellBookItemLowRank(i, bank)) then
                         if info.itemType == Enum.SpellBookItemType.Spell then
                             -- actionID, not spellID: for a spell actionID is the
                             -- BASE id while spellID is whatever override is up
@@ -1198,6 +1202,15 @@ initFrame:SetScript("OnEvent", function(self)
         return out
     end
 
+    local function EquipmentSetEntries()
+        local out = {}
+        for _, slot in ipairs(ns.EquipmentSetSlots()) do
+            local icon, name = ns.SlotDisplay(slot)
+            out[#out + 1] = { icon = icon, name = name, slot = slot }
+        end
+        return out
+    end
+
     -- Every palette this one may open. Not a list of things the game owns, so
     -- it is rebuilt on each use rather than cached: adding a palette or filling
     -- one in has to show up here without reopening the picker.
@@ -1246,6 +1259,8 @@ initFrame:SetScript("OnEvent", function(self)
         { key = "battlepet", label = "Battle Pets",  build = PetEntries },
         { key = "outfit",    label = "Outfits",      build = OutfitEntries,
           keepOrder = true },
+        { key = "equipmentset", label = "Equipment Sets",
+          build = EquipmentSetEntries },
         -- keepOrder on both: the markers run star to skull, the order every
         -- marker menu in the game shows. noSearch on both too -- a fixed
         -- handful of rows has nothing worth filtering, and the nav strip
@@ -1956,6 +1971,13 @@ initFrame:SetScript("OnEvent", function(self)
         return out, dropped
     end
 
+    local function EquipmentSetSlots()
+        local out = ns.EquipmentSetSlots()
+        local dropped = math.max(0, #out - MAX_SLOTS)
+        for i = #out, MAX_SLOTS + 1, -1 do out[i] = nil end
+        return out, dropped
+    end
+
     -- Self-teleports only, keyed by class. Mage portals are deliberately not
     -- here: a palette entry fires for its owner, and the teleport is the spell
     -- an owner wants.
@@ -2166,6 +2188,7 @@ initFrame:SetScript("OnEvent", function(self)
         { label = "Pings",          build = PingSlots },
         { label = "Hearthstones",   build = HearthstoneSlots },
         { label = "Outfits",        build = OutfitSlots },
+        { label = "Equipment Sets", build = EquipmentSetSlots },
         { label = "Teleports",      build = TeleportSlots },
         { label = "Potions",        build = PotionSlots },
         { label = "Druid Forms",    build = FormSlots },

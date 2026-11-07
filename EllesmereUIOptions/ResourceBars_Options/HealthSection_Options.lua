@@ -753,7 +753,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         })
     end
 
-    -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Health bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Health Missing reveals a rule-hidden bar while health is below full (ns.ERB_MissingWanted, same pass).
+    -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Health bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Health Missing shows the bar at its normal opacity while health is below full, a rule-hidden bar and a faded one alike (ns.ERB_MissingWanted / ns.ERB_MissingLiftFloor, same pass).
     -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
     local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
         { type="toggle", text="Fade Out of Combat",
