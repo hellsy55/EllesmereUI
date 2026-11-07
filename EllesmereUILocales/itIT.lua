@@ -8620,3 +8620,6 @@ L["Scenario"] = true
 
 -- Preserved fork and upstream translations.
 L["Enabled"]           = "Attivato"
+
+-- Group Finder Hide Applicant Info
+L["Note"] = "Nota"
