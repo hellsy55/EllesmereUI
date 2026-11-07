@@ -669,8 +669,12 @@ local function BuildAssignedBuffsFields(frame, fontPath, sy, cfg, apply, isDefau
         end
         local function SpellEntry(id)
             local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
-            return { key = id, label = (name or ("Spell " .. tostring(id))),
-                icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) }
+            local label = name or ("Spell " .. tostring(id))
+            local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
+            return { key = id, label = label,
+                tooltip = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+                    .. label .. "\nSpell ID: " .. tostring(id),
+                icon = tex }
         end
         local function ByLabel(a, b) return a.label < b.label end
         local function ExtraItems()
@@ -2613,9 +2617,13 @@ function ns.PABMP_ShowFilterEditor()
                 -- An id kept only for the other client is not on the filter here.
                 if sel.spells[id] == nil or ns.PAB_OtherClientSpell(sel, id) then
                     local nm2 = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                    local label = nm2 or tostring(id)
+                    local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
                     out[#out + 1] = {
-                        key = id, label = nm2 or tostring(id), noCheck = true,
-                        icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id),
+                        key = id, label = label, noCheck = true,
+                        tooltip = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+                            .. label .. "\nSpell ID: " .. tostring(id),
+                        icon = tex,
                     }
                 end
             end
@@ -2760,8 +2768,16 @@ function ns.PABMP_ShowFilterEditor()
             ico:SetDesaturated(not on)
         end
         UpdateRow()
-        srow:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.04) end)
-        srow:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
+        local tooltipText = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+            .. (name or ("Spell " .. tostring(id))) .. "\nSpell ID: " .. tostring(id)
+        srow:SetScript("OnEnter", function(self)
+            hl:SetColorTexture(1, 1, 1, 0.04)
+            EllesmereUI.ShowWidgetTooltip(self, tooltipText, { justify = "LEFT" })
+        end)
+        srow:SetScript("OnLeave", function()
+            hl:SetColorTexture(1, 1, 1, 0)
+            EllesmereUI.HideWidgetTooltip()
+        end)
         srow:SetScript("OnClick", function()
             ns.PAB_SetSpellState(sel.id, id, not on)
             ApplyAll()
