@@ -11,7 +11,7 @@ EllesmereUI._deferredInits[#EllesmereUI._deferredInits + 1] = function()
 -- build's frames back reset to new; on any other parent it creates as before.
 local CreateFrame = EllesmereUI._Pool.CreateFrame
 local PP = EllesmereUI.PanelPP
-local ELLESMERE_GREEN = EllesmereUI.ELLESMERE_GREEN
+local ELLESMERE_GREEN = EllesmereUI.PANEL_ACCENT
 local MEDIA_PATH = EllesmereUI.MEDIA_PATH
 local ShowWidgetTooltip = EllesmereUI.ShowWidgetTooltip
 local HideWidgetTooltip = EllesmereUI.HideWidgetTooltip

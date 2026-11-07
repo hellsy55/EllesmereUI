@@ -371,6 +371,7 @@ local function DataBarKit(parent)
             end,
             flashTargets = function() return { region } end,
             multiApply = {
+                        getElementState = env.IsBarEnabled,
                 elementKeys = BORDER_SYNC_KEYS,
                 elementLabels = DATA_BAR_LABELS,
                 getCurrentKey = function() return srcKey end,

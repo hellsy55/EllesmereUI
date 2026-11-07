@@ -1289,6 +1289,15 @@ local function CreateBlizzOwnedOverlay(def, parent)
     actionFs:SetText(EllesmereUI.L("Move via Blizz Edit Mode"))
     actionFs:SetAlpha(0)
     ov._actionFs = actionFs
+    -- This overlay is pooled across Unlock Mode sessions; the hover/leave
+    -- closures below capture the original RGB. Update those captures too.
+    ov._refreshAccent = function(r, g, b)
+        ar, ag, ab = r, g, b
+        if not ov:IsMouseOver() then
+            ov._brd:SetColor(r, g, b, 0.6)
+            actionFs:SetTextColor(r, g, b, 0.9)
+        end
+    end
     -- Clickable button sized to the action text only
     local actionBtn = CreateFrame("Button", nil, ov)
     actionBtn:SetFrameLevel(ov:GetFrameLevel() + 2)
@@ -1433,6 +1442,14 @@ local function HideBlizzOwnedOverlays()
 end
 
 UM.GetAccent, UM.CreateGrid, UM.ClearSnapHighlight, UM.ShowSnapHighlight = GetAccent, CreateGrid, ClearSnapHighlight, ShowSnapHighlight
+-- Repaint the Blizzard Edit Mode info overlays without closing Unlock Mode.
+-- Their borders and hover callbacks retain RGB captured at construction time.
+EllesmereUI._RefreshBlizzUnlockAccent = function(r, g, b)
+    for _, ov in pairs(_blizzOwnedOverlays) do
+        if ov._refreshAccent then ov._refreshAccent(r, g, b) end
+    end
+end
+
 UM.HideAllGuidesAndHighlight, UM.ShowAlignmentGuides, UM.SnapPosition, UM.SelectMover = HideAllGuidesAndHighlight, ShowAlignmentGuides, SnapPosition, SelectMover
 UM.DeselectMover, UM.ApplyDarkOverlays, UM.SetupArrowKeyFrame, UM.GetActionBarVisualSize = DeselectMover, ApplyDarkOverlays, SetupArrowKeyFrame, GetActionBarVisualSize
 UM.SortMoverFrameLevels, UM.ShowBlizzOwnedOverlays, UM.HideBlizzOwnedOverlays = SortMoverFrameLevels, ShowBlizzOwnedOverlays, HideBlizzOwnedOverlays

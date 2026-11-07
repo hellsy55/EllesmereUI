@@ -11,7 +11,7 @@ local PoolKeep, PoolGen = EllesmereUI._Pool.Keep, EllesmereUI._Pool.Gen
 -- changes. Keyed by the piece: the page pool forgets the entry when it resets
 -- it, and the kept Legends page registers each piece once.
 local function OnAccent(obj, paint)
-    EllesmereUI.RegAccent({ type = "callback", obj = obj, fn = paint })
+    EllesmereUI.RegPanelAccent({ type = "callback", obj = obj, fn = paint })
 end
 
 -------------------------------------------------------------------------------
@@ -31,7 +31,7 @@ local NOTES_ICON = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\notes
 local LEGENDS_KEY = "_EUILegends"
 function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     local PP  = EllesmereUI.PanelPP
-    local EG  = EllesmereUI.ELLESMERE_GREEN
+    local EG  = EllesmereUI.PANEL_ACCENT
     local PAD = EllesmereUI.CONTENT_PAD
     local W   = EllesmereUI.Widgets
     local MakeFont   = EllesmereUI.MakeFont
@@ -740,7 +740,7 @@ function EllesmereUI._BuildLegendsPage(pageName, parent, yOffset)
         return math.abs(yOffset - legendsSpan)
     end
     local PP  = EllesmereUI.PanelPP
-    local EG  = EllesmereUI.ELLESMERE_GREEN
+    local EG  = EllesmereUI.PANEL_ACCENT
     local PAD = EllesmereUI.CONTENT_PAD
     local L   = EllesmereUI.L
     local MakeFont   = EllesmereUI.MakeFont

@@ -63,7 +63,7 @@ end
 
 local function Build()
     local groups = qns.FvStats.groups
-    local EG = EllesmereUI.ELLESMERE_GREEN
+    local EG = EllesmereUI.PANEL_ACCENT
 
     -- Groups wrap NUM_COLS to a line; each line is as tall as its longest group.
     local lineTop, y = {}, CONTENT_TOP

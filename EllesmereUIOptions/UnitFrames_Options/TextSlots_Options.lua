@@ -280,8 +280,23 @@ function ns.UFO_BuildTextSlots(W, parent, y, opts)
                 if not Assigned(cell.key) then return true end
                 if v ~= cell.key and Assigned(v) then return true end
             end,
-            tooltip="Choose this text's slot position." })
+            tooltip=cell.key == "extraText" and "Extra Text (full length)\nChoose this text's slot position."
+                or "Choose this text's slot position." })
         cell.decorate(rgn)
+        -- The slot name must stay short even before deferred layout settles.
+        -- The label-menu tooltip above keeps the full name on mouseover.
+        if cell.key == "extraText" and (opts.unit == "player" or opts.unit == "target" or opts.unit == "focus") then
+            local label, arrow = rgn._label, rgn._labelArrow
+            local bound = rgn._lastInline or rgn._control
+            if label and arrow and bound then
+                label:SetText(EllesmereUI.L("Extra Text") .. "...")
+                label:ClearAllPoints()
+                label:SetPoint("LEFT", rgn, "LEFT", 20, 0)
+                label:SetPoint("RIGHT", bound, "LEFT", -(18 + arrow:GetWidth()), 0)
+                arrow:ClearAllPoints()
+                arrow:SetPoint("LEFT", label, "RIGHT", 6, -1)
+            end
+        end
         if cell.cfg.values and cell.cfg.values.custom then
             ns.UFO_AddCustomFormatAccessor(rgn, cell.position, cell.key, cell.cfg.getValue(), opts.db, opts.apply)
         end

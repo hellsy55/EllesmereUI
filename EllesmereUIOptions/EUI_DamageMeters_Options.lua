@@ -45,6 +45,11 @@ initFrame:SetScript("OnEvent", function(self)
     -- 2s idle). Just Set() and go -- except the WoW Forever look's Border
     -- Style, which asks for a reload.
 
+    local function CurrentDMAccentRGB()
+        if ns.DMAccentRGB then return ns.DMAccentRGB() end
+        return EllesmereUI.ResolveActiveAccent()
+    end
+
     -- Shared capture button for both damage meter hotkeys (reset data, show/hide
     -- windows). Returns the button so the caller can anchor its cog to it.
     local function MakeKeybindButton(rgn, dbKey, tooltip)
@@ -118,6 +123,42 @@ initFrame:SetScript("OnEvent", function(self)
         -- selects window 1, which always exists (its header button is New Window).
         EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EDM_Win1" })
         y = EllesmereUI.BlizzStyle.Note(parent, y, "damagemeters")
+
+        -- Optional per-profile accent; OFF follows the UI accent as before.
+        local function ApplyDamageMetersAccent()
+            if ns.ApplyHeader then ns.ApplyHeader() end
+            if ns.ApplyIconColor then ns.ApplyIconColor() end
+            if ns.RefreshMeter then ns.RefreshMeter() end
+            if ns.ApplySpellHistory then ns.ApplySpellHistory() end
+            if ns.ApplySATimer then ns.ApplySATimer() end
+        end
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Custom Accent Color",
+              tooltip="Use an accent color for Damage Meters independently of UI Accent Color.",
+              getValue=function() return Cfg("accentColorEnabled") == true end,
+              setValue=function(v)
+                  if v and not Cfg("accentColor") then
+                      local r, g, b = EllesmereUI.GetAccentColor()
+                      Set("accentColor", { r = r, g = g, b = b })
+                  end
+                  Set("accentColorEnabled", v)
+                  ApplyDamageMetersAccent()
+                  EllesmereUI:RefreshPage(true)
+              end },
+            { type="colorpicker", text="Accent Color", hasAlpha=false,
+              tooltip="Color used by Damage Meters elements that follow the accent, including bars, header text, icons, timer and Spell History.",
+              disabled=function() return Cfg("accentColorEnabled") ~= true end,
+              getValue=function()
+                  local c = Cfg("accentColor")
+                  if c then return c.r, c.g, c.b, 1 end
+                  local r, g, b = EllesmereUI.GetAccentColor()
+                  return r, g, b, 1
+              end,
+              setValue=function(r, g, b)
+                  Set("accentColor", { r = r, g = g, b = b })
+                  ApplyDamageMetersAccent()
+              end }
+        ); y = y - h
 
         -- Visibility (one control)
         local function VisApply()
@@ -518,7 +559,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, hdrBorderRow:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveActiveAccent()
+                    return CurrentDMAccentRGB()
                 end,
                 function()
                     Set("iconColorUseAccent", true)
@@ -654,7 +695,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, hdrRow2:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveActiveAccent()
+                    return CurrentDMAccentRGB()
                 end,
                 function()
                     Set("hdrTextUseAccent", true)
@@ -743,7 +784,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveActiveAccent()
+                        return CurrentDMAccentRGB()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1484,7 +1525,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveActiveAccent()
+                        return CurrentDMAccentRGB()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -1803,7 +1844,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end },
                   { tooltip = "Accent Color",
                     hasAlpha = false,
-                    getValue = function() return EllesmereUI.ResolveActiveAccent() end,
+                    getValue = function() return CurrentDMAccentRGB() end,
                     setValue = function() end,
                     onClick = function()
                         SHDB().iconInterruptedUseAccent = true
@@ -2083,7 +2124,7 @@ initFrame:SetScript("OnEvent", function(self)
                   { tooltip = "Accent Color",
                     hasAlpha = false,
                     getValue = function()
-                        return EllesmereUI.ResolveActiveAccent()
+                        return CurrentDMAccentRGB()
                     end,
                     setValue = function() end,
                     onClick = function()
@@ -2148,7 +2189,7 @@ initFrame:SetScript("OnEvent", function(self)
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
                 rgn, textRow:GetFrameLevel() + 3,
                 function()
-                    return EllesmereUI.ResolveActiveAccent()
+                    return CurrentDMAccentRGB()
                 end,
                 function()
                     SHDB().textColorUseAccent = true

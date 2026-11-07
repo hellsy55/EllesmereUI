@@ -371,13 +371,13 @@ local function BuildInlineCog(rgn, opts)
         local ring = layer:CreateTexture(nil, "OVERLAY")
         note = layer:CreateTexture(nil, "OVERLAY", nil, 1)
         L.note, L.ring = note, ring
-        local r, g, b = EllesmereUI.GetAccentColor()
+        local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
         note:SetVertexColor(r, g, b, 1)
         ring:SetVertexColor(r, g, b, 1)
         ring:SetAlpha(0)
         -- Keyed by the textures: the page pool forgets the entries when it resets them.
-        EllesmereUI.RegAccent({ type = "vertex", obj = note })
-        EllesmereUI.RegAccent({ type = "vertex", obj = ring })
+        EllesmereUI.RegPanelAccent({ type = "vertex", obj = note })
+        EllesmereUI.RegPanelAccent({ type = "vertex", obj = ring })
         local pulse = ring:CreateAnimationGroup()
         local grow = pulse:CreateAnimation("Scale")
         grow:SetScaleFrom(1, 1)
@@ -448,7 +448,7 @@ local function BuildInlineCog(rgn, opts)
     btn._euiCogState = State
     -- opts.paint reads the accent (the unlock jump), so it repaints on accent changes.
     -- Keyed by the texture: the page pool forgets the entry when it resets it.
-    if paint then EllesmereUI.RegAccent({ type = "callback", obj = tex, fn = function() State() end }) end
+    if paint then EllesmereUI.RegPanelAccent({ type = "callback", obj = tex, fn = function() State() end }) end
 
     btn:SetScript("OnEnter", function(self)
         State(true)
@@ -575,7 +575,7 @@ end
 -- disabled (owner 2026-10-23).
 local function UnlockJumpPaint(btn, off, hot)
     btn:SetAlpha(off and 0.2 or (hot and 1 or 0.7))
-    local r, g, b = EllesmereUI.GetAccentColor()
+    local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
     btn._icon:SetVertexColor(r, g, b)
 end
 
@@ -644,7 +644,7 @@ local function NoSelection() return nil end
 
 -- The accent, or a darker white when the accent itself is near white.
 local function RowMenuLitColor()
-    local ac = EllesmereUI.ELLESMERE_GREEN
+    local ac = EllesmereUI.PANEL_ACCENT
     if ac.r > 0.9 and ac.g > 0.9 and ac.b > 0.9 then return 0.72, 0.72, 0.72 end
     return ac.r, ac.g, ac.b
 end
@@ -819,7 +819,7 @@ local function BuildLessCommonLink(parent, y, sectionKey, label, expanded)
 
     btn:SetWidth(math.max((fs:GetStringWidth() or 0) + 2 * (ARROW_SZ + ARROW_GAP) + 8, 120))
 
-    local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+    local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
     btn:SetScript("OnEnter", function()
         fs:SetTextColor(EG.r, EG.g, EG.b); fs:SetAlpha(1)
         leftArrow:SetVertexColor(EG.r, EG.g, EG.b); leftArrow:SetAlpha(1)

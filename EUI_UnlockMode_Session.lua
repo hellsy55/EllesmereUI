@@ -396,7 +396,7 @@ local function CreateHUD(parent)
         btn:SetFrameLevel(UM.hudFrame:GetFrameLevel() + 2)
 
         local eg = EllesmereUI.ELLESMERE_GREEN or { r = 12/255, g = 210/255, b = 157/255 }
-        EllesmereUI.MakeBorder(btn, eg.r, eg.g, eg.b, 0.7)
+        local saveBrd = EllesmereUI.MakeBorder(btn, eg.r, eg.g, eg.b, 0.7)
         local bg = btn:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0.077, 0.068, 0.058, 0.92)
@@ -426,6 +426,12 @@ local function CreateHUD(parent)
         btn:SetScript("OnLeave", function(self) target = 0; self:SetScript("OnUpdate", OnUpdate) end)
         btn:SetScript("OnClick", function() ns.RequestClose(true) end)
         UM.hudFrame._saveBtn = btn
+        -- The HUD is cached while Unlock Mode is closed. Keep its Save
+        -- button in sync with UI Accent Color without rebuilding the toolbar.
+        UM.hudFrame._refreshAccent = function(r, g, b)
+            saveBrd:SetColor(r, g, b, 0.7)
+            lbl:SetTextColor(r, g, b, lerp(0.7, 1, progress))
+        end
     end
 
     ---------------------------------------------------------------

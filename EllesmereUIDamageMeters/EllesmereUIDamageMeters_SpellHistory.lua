@@ -161,6 +161,7 @@ local function GetBarTexturePath()
 end
 
 local function GetAccentRGB()
+    if ns.DMAccentRGB then return ns.DMAccentRGB() end
     local EG = EUI.ELLESMERE_GREEN
     if EG then return EG.r, EG.g, EG.b end
     return EUI.DEFAULT_ACCENT_R or 12/255, EUI.DEFAULT_ACCENT_G or 210/255, EUI.DEFAULT_ACCENT_B or 157/255

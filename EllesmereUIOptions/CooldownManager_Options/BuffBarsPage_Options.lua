@@ -1700,7 +1700,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         --  parent._tbbClickTargets (populated by the bar-mode section build below);
         --  overlays resolve it at click time so a header rebuild never holds stale refs.
         -------------------------------------------------------------------
-        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN })
+        local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
 
         local function NavigateToSetting(key)
             local targets = parent._tbbClickTargets
@@ -1740,6 +1740,143 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         -- Expose this build's RefreshTBB to the outer spec-change watcher so a spec swap
         -- while this page is open rebuilds the dropdown/preview.
         _tbbRefreshFn = RefreshTBB
+
+
+        local EvictTBBTextConflicts  -- defined below the BAR LAYOUT controls
+        -- Selective sync for Tracking Bars. Grouped bars are one destination for
+        -- dimensions (their size is linked); text positions remain per bar.
+        -- Keys are regenerated on each page build, never stored in profiles.
+        local function BuildTBBMulti(field, sameOrientation)
+            local src = SelectedTBB()
+            local t = ns.GetTrackedBuffBars()
+            local keys, labels, seen = {}, {}, {}
+            local function GroupKey(bar, idx)
+                if sameOrientation or field == "strata" then
+                    local gid = ns.TBBBarGroupID(bar)
+                    if gid and gid ~= 0 then return "group_" .. gid end
+                end
+                return "bar_" .. idx
+            end
+            local function Members(key)
+                local members = {}
+                local all = ns.GetTrackedBuffBars()
+                for i, bar in ipairs(all.bars or {}) do
+                    if GroupKey(bar, i) == key then members[#members + 1] = bar end
+                end
+                return members
+            end
+            local function Compatible(bar)
+                if sameOrientation and src and (bar.verticalOrientation == true) ~= (src.verticalOrientation == true) then return false end
+                if field == "name" and bar.verticalOrientation then return false end
+                if field == "fillUp" then
+                    return bar.trackType == "cooldown" and not
+                        (bar.chargeHashLines == true and ns.GetTBBMaxCharges(bar) ~= nil)
+                end
+                return true
+            end
+            for i, bar in ipairs(t.bars or {}) do
+                if Compatible(bar) then
+                    local key = GroupKey(bar, i)
+                    if not seen[key] then
+                        seen[key] = true
+                        keys[#keys + 1] = key
+                        local gid = (sameOrientation or field == "strata") and ns.TBBBarGroupID(bar) or 0
+                        labels[key] = gid ~= 0 and ("Group " .. tostring(gid))
+                            or ((bar.name and bar.name ~= "") and bar.name or ("Tracking Bar " .. i))
+                    end
+                end
+            end
+            local sourceKey = src and GroupKey(src, _tbbSelectedBar) or nil
+            local function CurrentValue(bar)
+                if field == "height" or field == "width" then return bar[field] or (field == "height" and 24 or 270) end
+                if field == "texture" then return bar.texture or "none" end
+                if field == "strata" then return bar.strata or "MEDIUM" end
+                if field == "reverseFill" or field == "fillUp" then return bar[field] == true end
+                if field == "showTooltips" then return bar.showTooltips ~= false end
+                if field == "name" then return bar.namePosition or ((bar.showName ~= false) and "left" or "none") end
+                if field == "timer" then return bar.timerPosition or (bar.showTimer and "right" or "none") end
+                return bar.stacksPosition or "center"
+            end
+            return {
+                elementKeys = keys,
+                elementLabels = labels,
+                getCurrentKey = function() return sourceKey end,
+                getElementState = function(key)
+                    local members = Members(key)
+                    if #members == 0 then return nil end
+                    for _, bar in ipairs(members) do if bar.enabled ~= false then return true end end
+                    return false
+                end,
+                getElementOptionState = (field == "height" or field == "width"
+                    or field == "texture" or field == "strata") and nil or function(key)
+                    local members = Members(key)
+                    if #members == 0 then return nil end
+                    if field == "reverseFill" or field == "fillUp" or field == "showTooltips" then
+                        return CurrentValue(members[1]) == true
+                    end
+                    return CurrentValue(members[1]) ~= "none"
+                end,
+                onApply = function(selected)
+                    local source = SelectedTBB(); if not source then return end
+                    local val = CurrentValue(source)
+                    for _, key in ipairs(selected) do
+                        if key ~= GroupKey(source, _tbbSelectedBar) then
+                            for _, bar in ipairs(Members(key)) do
+                                if Compatible(bar) then
+                                    if field == "height" or field == "width" then bar[field] = val
+                                    elseif field == "texture" or field == "strata" or field == "reverseFill"
+                                        or field == "fillUp" or field == "showTooltips" then
+                                        bar[field] = val
+                                    elseif field == "name" then
+                                        EvictTBBTextConflicts(bar, "namePosition", val)
+                                        bar.namePosition = val; bar.showName = val ~= "none"
+                                    elseif field == "timer" then
+                                        EvictTBBTextConflicts(bar, "timerPosition", val)
+                                        bar.timerPosition = val; bar.showTimer = val ~= "none"
+                                    else
+                                        EvictTBBTextConflicts(bar, "stacksPosition", val)
+                                        bar.stacksPosition = val
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    RefreshTBB(); EllesmereUI:RefreshPage()
+                end,
+            }
+        end
+
+        -- Reuse the existing multi-target picker; never copy tracking spells,
+        -- group membership, position or other identity-specific options.
+        local function AddTBBScalarSync(region, field, label)
+            if EllesmereUI._prebuilding or not region then return end
+            local src = SelectedTBB()
+            if not src then return end
+            local multi = BuildTBBMulti(field, false)
+            local function value(bar)
+                if field == "texture" then return bar.texture or "none" end
+                if field == "strata" then return bar.strata or "MEDIUM" end
+                if field == "showTooltips" then return bar.showTooltips ~= false end
+                return bar[field] == true
+            end
+            EllesmereUI.BuildSyncIcon({
+                alwaysAvailable = true, region = region,
+                tooltip = "Apply " .. label .. " to other Tracking Bars",
+                isSynced = function()
+                    local s = SelectedTBB(); if not s then return true end
+                    local source = value(s)
+                    for _, b in ipairs(ns.GetTrackedBuffBars().bars or {}) do
+                        if b ~= s and (field ~= "fillUp" or (b.trackType == "cooldown" and not
+                            (b.chargeHashLines == true and ns.GetTBBMaxCharges(b) ~= nil)))
+                            and value(b) ~= source then return false end
+                    end
+                    return true
+                end,
+                onClick = function() multi.onApply(multi.elementKeys) end,
+                flashTargets = function() return { region } end,
+                multiApply = multi,
+            })
+        end
 
         -- Drag-and-drop move: put a bar into another group (or make it independent).
         -- Joining a group adopts its current look, same as a freshly added bar; selects the moved bar.
@@ -3458,6 +3595,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     end
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
+
+                alwaysAvailable = true,
+                multiApply = BuildTBBMulti("height", true),
             })
             EllesmereUI.BuildSyncIcon({
                 region = hwRow._rightRegion,
@@ -3480,11 +3620,15 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     end
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
+
+                alwaysAvailable = true,
+                multiApply = BuildTBBMulti("width", true),
             })
         end
 
         -- Vertical Orientation | Bar Texture
-        _, h = W:DualRow(parent, y,
+        local textureRow
+        textureRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Vertical Orientation",
               tooltip = "Vertical bars fill upward; flipping a grouped bar flips its whole group.",
               getValue = function() local bd = SelectedTBB(); return bd and bd.verticalOrientation end,
@@ -3525,6 +3669,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   bd.texture = v; RefreshTBB()
               end })
         );  y = y - h
+        AddTBBScalarSync(textureRow._rightRegion, "texture", "Bar Texture")
 
         -- Name Text (dropdown + cog) | Duration Text (dropdown + cog)
         local TBB_POS_VALUES = { none = "None", center = "Center", top = "Top", bottom = "Bottom", left = "Left", right = "Right" }
@@ -3533,7 +3678,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         -- When a text element claims a position, evict any other text already there so
         -- labels never overlap. Compares EFFECTIVE (rendered) positions: name text never
         -- renders on vertical bars, so its stored slot must not evict anything there.
-        local function EvictTBBTextConflicts(bd, changedKey, newPos)
+        EvictTBBTextConflicts = function(bd, changedKey, newPos)
             if newPos == "none" then return end
             local function resolvePos(key)
                 if key == "namePosition" and bd.verticalOrientation then return "none" end
@@ -3749,6 +3894,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     end
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
+
+                alwaysAvailable = true,
+                multiApply = BuildTBBMulti("name", false),
             })
         end
         -- Cog on Duration Text: timer size + x/y
@@ -3834,6 +3982,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     end
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
+
+                alwaysAvailable = true,
+                multiApply = BuildTBBMulti("timer", false),
             })
         end
 
@@ -3867,6 +4018,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   RefreshTBB()
               end }
         );  y = y - h
+        AddTBBScalarSync(stacksRow._rightRegion, "strata", "Bar Strata")
         do
             local rgn = stacksRow._leftRegion
             EllesmereUI.BuildInlineCog(rgn, {
@@ -3921,6 +4073,9 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     for _, b in ipairs(tbb.bars or {}) do b.stacksPosition = pos end
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
+
+                alwaysAvailable = true,
+                multiApply = BuildTBBMulti("stacks", false),
             })
         end
 
@@ -3975,6 +4130,8 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   RefreshTBB()
               end }
         );  y = y - h
+        AddTBBScalarSync(fillDirRow._leftRegion, "reverseFill", "Reverse Fill")
+        AddTBBScalarSync(fillDirRow._rightRegion, "fillUp", "Fill Up")
 
         -- Charge Hash Lines | Smooth Bars. Hash separator count/orientation resolve
         -- automatically from the spell's max charges; Smooth Bars is profile-wide, not per bar/spec.
@@ -4467,6 +4624,10 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                         EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
                         RefreshTBB()
                     end,
+
+                    alwaysAvailable = true,
+                    multiApply = EllesmereUI.PandemicMultiApply({ skipTbbBar = SelectedTBB() },
+                        function() return EllesmereUI.PandemicPayloadFromRectBar(SelectedTBB()) end, function() RefreshTBB() end),
                 })
             end
         end

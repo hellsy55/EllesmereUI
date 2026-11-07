@@ -158,6 +158,7 @@ local function MakeGhostSet(opts)
             bg:SetColorTexture(wr, wg, wb, 0.10)
         end
         g._brd = EllesmereUI.MakeBorder(g, wr, wg, wb, 0.6)
+        g._bg = bg
 
         local labelFrame = CreateFrame("Frame", nil, g)
         labelFrame:SetAllPoints()
@@ -254,6 +255,25 @@ local function MakeGhostSet(opts)
 
     local set = { ghosts = ghosts, Hide = HideGhost, Sync = SyncGhost, Create = CreateGhost }
 
+    -- Ghosts keep their original tint until recreated unless we explicitly
+    -- resolve the new accent for the existing frames.
+    function set.Recolor()
+        for _, g in pairs(ghosts) do
+            local wr, wg, wb, mr, mg, mb = opts.init(g, g._childKey, g._gid)
+            g._wr, g._wg, g._wb = wr, wg, wb
+            if g._brd then SetGhostSelected(g, selectedGhost == g) end
+            local bg = g._bg
+            if bg then
+                if UM.darkOverlaysEnabled then
+                    bg:SetColorTexture(0.075 + (mr - 0.075) * 0.10,
+                        0.113 + (mg - 0.113) * 0.10, 0.141 + (mb - 0.141) * 0.10, 0.95)
+                else
+                    bg:SetColorTexture(wr, wg, wb, 0.10)
+                end
+            end
+        end
+    end
+
     function set.HideAll()
         for _, g in pairs(ghosts) do HideGhost(g) end
     end
@@ -330,6 +350,7 @@ do
     })
     local ghosts = set.ghosts
 
+    EllesmereUI._RecolorFallbackGhosts = set.Recolor
     EllesmereUI._HideFallbackGhosts = set.HideAll
     EllesmereUI._SetFallbackGhostsAlpha = set.SetAlpha
     EllesmereUI._DeselectFallbackGhosts = set.Deselect

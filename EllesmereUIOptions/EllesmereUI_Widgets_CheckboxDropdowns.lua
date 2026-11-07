@@ -446,7 +446,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -1, ay)
                 row:SetFrameLevel(menu:GetFrameLevel() + 2)
                 local lbl, hl = row._lbl, row._hl
-                lbl:SetTextColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 0.8)
+                lbl:SetTextColor(EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b, 0.8)
                 lbl:SetText(EllesmereUI.L(item.label))
                 hl:SetColorTexture(1, 1, 1, 0)
                 -- Opt-in locked state (item.lockedFn + item.lockedTooltip): evaluated LIVE on hover/click (checkbox toggles can flip it while the menu is open), plus once at build for the initial tint.
@@ -457,7 +457,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                     if TALocked() then
                         lbl:SetTextColor(1, 1, 1, 0.3)
                     else
-                        lbl:SetTextColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 0.8)
+                        lbl:SetTextColor(EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b, 0.8)
                     end
                 end
                 TATint()
@@ -675,14 +675,14 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 row:SetPoint("TOPRIGHT", child, "TOPRIGHT", -1, yOff)
                 row:SetFrameLevel(menu:GetFrameLevel() + 2)
                 local lbl, hl = row._lbl, row._hl
-                lbl:SetTextColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 0.8)
+                lbl:SetTextColor(EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b, 0.8)
                 lbl:SetText(EllesmereUI.L(item.labelFn and item.labelFn() or item.label))
                 local function UpdateActionLabel()
                     if item.labelFn then lbl:SetText(EllesmereUI.L(item.labelFn())) end
                 end
                 row._updateActionLabel = UpdateActionLabel
                 hl:SetColorTexture(1, 1, 1, 0)
-                local EG_r, EG_g, EG_b = EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b
+                local EG_r, EG_g, EG_b = EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b
                 local function UpdateActionLocked()
                     local isLocked = item.lockedFn and item.lockedFn()
                     if isLocked then
@@ -725,7 +725,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             row._isLocked = nil
             local box, boxBrd, chk = row._box, row._boxBrd, row._chk
             if chk then
-                chk:SetColorTexture(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 1)
+                chk:SetColorTexture(EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b, 1)
                 box:SetScript("OnEnter", nil)
                 box:SetScript("OnLeave", nil)
                 box:EnableMouse(false)
@@ -747,7 +747,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             -- sibling's click flips the checked state (UpdateCheck runs on every row).
             local function RestColor()
                 if item.isModifier and getFn(item.key) then
-                    return EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b
+                    return EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b
                 end
                 if Dimmed() then return 0.5, 0.5, 0.5 end
                 return 0.75, 0.75, 0.75
@@ -791,7 +791,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
                 if chk then
                     if getFn(item.key) then
                         chk:Show()
-                        boxBrd:SetColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 0.8)
+                        boxBrd:SetColor(EllesmereUI.PANEL_ACCENT.r, EllesmereUI.PANEL_ACCENT.g, EllesmereUI.PANEL_ACCENT.b, 0.8)
                     else
                         chk:Hide()
                         boxBrd:SetColor(0.4, 0.4, 0.4, 0.6)
@@ -1051,7 +1051,7 @@ function EllesmereUI.BuildVisOptsCBDropdown(parentFrame, ddW, fLevel, items, get
             local CLOSE_H = 26
             local closePad = 6
             yOff = yOff - closePad
-            local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+            local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
             if not closeBtn then
                 closeBtn = CreateFrame("Button", nil, child)
                 closeBtn:SetHeight(CLOSE_H)
@@ -1561,7 +1561,7 @@ function EllesmereUI.BuildReorderCBDropdown(parentFrame, ddW, fLevel, items, get
     if standIn then return standIn, standIn end
     opts = opts or {}
     local PP = EllesmereUI.PP or EllesmereUI.PanelPP
-    local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+    local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
     -- Options panel is Expressway-locked by design (locale-aware: CJK/Cyrillic get the system glyph font). The user's global font intentionally does not restyle the settings UI.
     local fontPath = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
 

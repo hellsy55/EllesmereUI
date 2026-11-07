@@ -104,7 +104,8 @@ local function LayoutMenu(menu, items, onDismiss, isChild)
     local outline = (EUI.GetFontOutlineFlag("damageMeters")) or ""
     -- WoW Forever: gold active and hovered items, tan timers (no accent).
     local fv = ns.DMForever()
-    local EG = fv and ns.DM_FV.gold or EUI.ELLESMERE_GREEN
+    local mr, mg, mb = GetAccentRGB()
+    local EG = fv and ns.DM_FV.gold or { r = mr, g = mg, b = mb }
     local hlAlpha = EUI.DD_ITEM_HL_A or 0.08
     for _, r in ipairs(menu._pool) do r:Hide() end
     if not menu._mfs then menu._mfs = menu:CreateFontString(nil, "OVERLAY") end
@@ -683,7 +684,8 @@ local function CreateDMWindow(winIdx)
     if EUI.RegAccent then
         -- Propagates a live accent color change to header text, header icons, bars (via
         -- Refresh), and home screen cards (via RefreshHome), each gated on its own accent-use toggle
-        EUI.RegAccent({ type = "callback", fn = function(r, g, b)
+        EUI.RegAccent({ type = "callback", fn = function()
+            local r, g, b = GetAccentRGB()
             -- A parked window re-reads the accent when it is brought back (W.Reapply).
             if W._parked then return end
             local c = DB()
@@ -2026,6 +2028,10 @@ local function CreateDMWindow(winIdx)
 
     -- sync: paint in this call even past PEAK_BUDGET (the OnShow catch-up, which must
     -- never leave the pre-hide rows up for a frame).
+    W.RefreshHomeAccent = function()
+        if RefreshHome then RefreshHome() end
+    end
+
     function W.Refresh(sync)
         if not frame then return end
         -- Hidden by any rule (instance rule, the hotkey, a failing global rule, between
@@ -2484,7 +2490,6 @@ local function CreateDMWindow(winIdx)
         local bookmarks = GetBookmarks()
         local fontPath = (EUI.GetFontPath("damageMeters")) or "Fonts\\FRIZQT__.TTF"
         local outline = (EUI.GetFontOutlineFlag("damageMeters")) or ""
-        local EG = EUI.ELLESMERE_GREEN
         local acR, acG, acB = GetAccentRGB()
         -- WoW Forever: the header's tan glyphs in place of the accent.
         local fvG = ns.DMForever() and ns.DM_FV.glyph

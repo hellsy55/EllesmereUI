@@ -54,7 +54,7 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
     local fontPath = opts.fontPath or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
     local ppScale = (EllesmereUI.GetPopupScale()) or 1
-    local EG = EllesmereUI.ELLESMERE_GREEN
+    local EG = EllesmereUI.PANEL_ACCENT
 
     if _trackedAurasDimmer then _trackedAurasDimmer:Hide(); _trackedAurasDimmer = nil end
     if _trackedAurasPanel then _trackedAurasPanel:Hide() end
@@ -597,7 +597,7 @@ function EllesmereUI.ShowSpellBlacklistPopup(opts)
     end
     opts = opts or {}
     local fontPath = EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
-    local eg = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+    local eg = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
     local PW, PH = 320, 400
 
     -- Controller cursor loaded: the dimmer is a named Button, so the cursor can

@@ -111,7 +111,7 @@ function EllesmereUI.BuildTipCallout(parent, opts)
     local pp = opts.pp or PP
     local strata = opts.strata
     if strata == nil then strata = "FULLSCREEN_DIALOG" end
-    local accent = EllesmereUI.ELLESMERE_GREEN
+    local accent = EllesmereUI.PANEL_ACCENT
     local ar, ag, ab = accent.r, accent.g, accent.b
     local bgA = opts.bgAlpha or 1
     local w = opts.width
@@ -234,7 +234,11 @@ local function GetTooltipFrame()
         bg:SetAllPoints()
         tooltipFrame.bg = bg
         MakeBorder(tooltipFrame, 1, 1, 1, 0.15, PP)
-        tooltipFrame.text = MakeFont(tooltipFrame, 10, nil, 1, 1, 1, 0.80)
+        -- The panel font as a font family: the tooltip also shows friends' names
+        -- and notes, whose scripts the panel font may lack.
+        tooltipFrame.text = tooltipFrame:CreateFontString(nil, "OVERLAY")
+        EllesmereUI.SetFontFamily(tooltipFrame.text, EllesmereUI.EXPRESSWAY, 10, "", false)
+        tooltipFrame.text:SetTextColor(1, 1, 1, 0.80)
         tooltipFrame.text:SetPoint("TOPLEFT", 8, -8)
         tooltipFrame.text:SetPoint("TOPRIGHT", -8, -8)
         tooltipFrame.text:SetWordWrap(true)
@@ -458,8 +462,8 @@ EllesmereUI.ResolveThemeColor = ResolveThemeColor
 local _gradStart = CreateColor(0, 0, 0, 0)
 local _gradEnd   = CreateColor(0, 0, 0, 0)
 
-local function UpdateAccentElements(r, g, b)
-    for _, entry in ipairs(EllesmereUI._accentElements) do
+local function UpdateAccentElements(registry, r, g, b)
+    for _, entry in ipairs(registry) do
         if entry.type == "solid" and entry.obj then
             entry.obj:SetColorTexture(r, g, b, entry.a or 1)
         elseif entry.type == "gradient" and entry.obj then
@@ -479,13 +483,84 @@ end
 local function ApplyAccentLive(r, g, b)
     -- Canonical colour table updated in place, then registered one-time elements
     ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b = r, g, b
-    UpdateAccentElements(r, g, b)
+    UpdateAccentElements(EllesmereUI._accentElements, r, g, b)
+    if not EllesmereUI.HasOptionsPanelAccentOverride() then
+        local ac = EllesmereUI.PANEL_ACCENT
+        ac.r, ac.g, ac.b = r, g, b
+        UpdateAccentElements(EllesmereUI._panelAccentElements, r, g, b)
+    end
+
+    -- Movers/ghosts/grid are created on Unlock Mode entry and otherwise
+    -- retain their old tint until the next opening. Repaint them in place.
+    if EllesmereUI.RefreshUnlockAccent then EllesmereUI.RefreshUnlockAccent(r, g, b) end
 
     -- The cached confirm popup repaints its accent parts
     EllesmereUI._InvalidateConfirmPopup()
 
     -- Fast path only; a full rebuild would churn memory
     EllesmereUI:RefreshPage()
+end
+
+--- Options-panel accent is an account-wide override. Without it, the panel
+--- follows the existing UI accent (including per-profile and class colors).
+function EllesmereUI.GetOptionsPanelAccentColor()
+    local ac = EllesmereUI.PANEL_ACCENT
+    return ac.r, ac.g, ac.b
+end
+
+local function SavedOptionsPanelAccent()
+    local db = EllesmereUIDB
+    if type(db) ~= "table" then return nil end
+    if type(db.optionsPanelAccentColor) == "table" then return db.optionsPanelAccentColor end
+    return type(db.global) == "table" and db.global.optionsPanelAccentColor or nil
+end
+
+function EllesmereUI.HasOptionsPanelAccentOverride()
+    return type(SavedOptionsPanelAccent()) == "table"
+end
+
+local function RefreshOptionsPanelAccent(r, g, b)
+    local ac = EllesmereUI.PANEL_ACCENT
+    ac.r, ac.g, ac.b = r, g, b
+    UpdateAccentElements(EllesmereUI._panelAccentElements, r, g, b)
+    EllesmereUI:RefreshPage()
+end
+
+-- Player login is after the parent addon's SavedVariables hand-off.
+-- Rehydrate the live swatches if the DB guard has exchanged its stand-in.
+do
+    local login = CreateFrame("Frame")
+    login:RegisterEvent("PLAYER_LOGIN")
+    login:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        local saved = SavedOptionsPanelAccent()
+        if type(saved) == "table" and type(saved.r) == "number"
+            and type(saved.g) == "number" and type(saved.b) == "number" then
+            -- Keep the authoritative top-level key in step with its mirror.
+            EllesmereUIDB.optionsPanelAccentColor = { r = saved.r, g = saved.g, b = saved.b }
+            RefreshOptionsPanelAccent(saved.r, saved.g, saved.b)
+        end
+    end)
+end
+
+function EllesmereUI.SetOptionsPanelAccentColor(r, g, b)
+    if not EllesmereUIDB then EllesmereUIDB = {} end
+    EllesmereUIDB.optionsPanelAccentColor = { r = r, g = g, b = b }
+    -- Store a second copy in the account-global namespace. Profile switches
+    -- and the Lite guard must never turn this panel-only choice into a default.
+    if type(EllesmereUIDB.global) ~= "table" then EllesmereUIDB.global = {} end
+    EllesmereUIDB.global.optionsPanelAccentColor = { r = r, g = g, b = b }
+    RefreshOptionsPanelAccent(r, g, b)
+end
+
+function EllesmereUI.ResetOptionsPanelAccentColor()
+    if EllesmereUIDB then
+        EllesmereUIDB.optionsPanelAccentColor = nil
+        if type(EllesmereUIDB.global) == "table" then
+            EllesmereUIDB.global.optionsPanelAccentColor = nil
+        end
+    end
+    RefreshOptionsPanelAccent(EllesmereUI.GetAccentColor())
 end
 
 --- SetActiveTheme: persists and applies with an animated transition. Changes only the options panel background; accent colour is independent (accent swatch / class colour toggle).
@@ -610,6 +685,8 @@ EllesmereUI.ResetTheme = function()
     if not EllesmereUIDB then return end
     EllesmereUIDB.accentColor   = nil
     EllesmereUIDB.activeTheme   = nil
+    EllesmereUIDB.optionsPanelAccentColor = nil
+    if type(EllesmereUIDB.global) == "table" then EllesmereUIDB.global.optionsPanelAccentColor = nil end
 end
 
 -------------------------------------------------------------------------------
@@ -626,6 +703,7 @@ end
 --                        setValue(v) the whole number, floored at min (or 1)
 --    icon = texture      a cropped 16px icon before the label
 --    noLoc = true        the label as given (no L())
+--    desc = "..."        a small grey line under the label (as given, no L())
 --  opts (optional): below = true hangs the menu off `anchor`'s bottom-left edge
 --  instead of the cursor (the dropdown placement of the options widgets);
 --  minWidth widens the menu to the anchor's width so it reads as a dropdown.
@@ -954,6 +1032,18 @@ local function CtxIcon(row)
     return icon
 end
 
+-- the small line under a label, made on first need
+local function CtxDesc(row)
+    local d = row._desc
+    if not d then
+        d = row:CreateFontString(nil, "OVERLAY")
+        d:SetJustifyH("LEFT")
+        d:SetWordWrap(false)
+        row._desc = d
+    end
+    return d
+end
+
 local function CtxLayout(panel, items, minW, fontKey)
     local look = panel._look
     if look.popupBorder and not panel._art and EllesmereUI._applyBlizzardConfiguredBorder
@@ -987,6 +1077,13 @@ local function CtxLayout(panel, items, minW, fontKey)
             local w = mfs:GetStringWidth() or 0
             if item.onRemove then w = w + 20 end
             if w > widest then widest = w end
+            if item.desc then
+                mfs:SetFont(fontPath, size - 2, outline)
+                mfs:SetText(item.desc)
+                w = mfs:GetStringWidth() or 0
+                if w > widest then widest = w end
+                mfs:SetFont(fontPath, size, outline)
+            end
             if item.icon then iconW = 22 end
         end
     end
@@ -1017,9 +1114,12 @@ local function CtxLayout(panel, items, minW, fontKey)
         if row._box then row._box:Hide() end
         if row._icon then row._icon:Hide() end
         if row._rm then row._rm:Hide() end
+        if row._desc then row._desc:Hide() end
+        local desc = type(item) == "table" and item.desc
         -- The label starts past the item's icon.
-        lbl:SetPoint("LEFT", row, "LEFT", look.left + ((type(item) == "table" and item.icon) and 22 or 0), 0)
-        local h = look.rowH
+        lbl:SetPoint("LEFT", row, "LEFT", look.left + ((type(item) == "table" and item.icon) and 22 or 0), desc and 6 or 0)
+        lbl:SetPoint("RIGHT", row, "RIGHT", look.right, desc and 6 or 0)
+        local h = desc and look.rowH + 10 or look.rowH
         if item == "---" then
             h = look.sepH
             row._item, row._disabled = nil, true
@@ -1029,6 +1129,15 @@ local function CtxLayout(panel, items, minW, fontKey)
         else
             row._item = item
             lbl:SetText(item.noLoc and item.text or L(item.text or ""))
+            if desc then
+                local d = CtxDesc(row)
+                d:SetFont(fontPath, size - 2, outline)
+                d:SetPoint("TOPLEFT", lbl, "BOTTOMLEFT", 0, -3)
+                d:SetPoint("RIGHT", row, "RIGHT", look.right, 0)
+                d:SetText(desc)
+                d:SetTextColor(1, 1, 1, (item.isDisabled and item.isDisabled()) and 0.25 or 0.5)
+                d:Show()
+            end
             if item.icon then
                 local ic = CtxIcon(row)
                 ic:SetPoint("LEFT", row, "LEFT", look.left, 0)
@@ -1433,7 +1542,9 @@ end -- IS_FOREVER
 --    PadInUse()             PadCP() or PadNative(): the controller signal
 --    PadConnected()         gamepad support is on and a controller is
 --                           connected (not the last input: no mouse flicker)
---    WatchPad(owner, fn)    fn(padOn) once per burst of PadConnected() edges
+--    PadModeOn()            what the controller hides follow: WoW Forever's
+--                           Gamepad interface style, elsewhere PadConnected()
+--    WatchPad(owner, fn)    fn(padOn) once per burst of PadModeOn() edges
 --    UnwatchPad(owner)      stop following; the last one drops the events
 --    PadGamepadUI()         WoW Forever's Gamepad interface style is on
 --    PadTaintStandDown()    that style is on and its navigation still lets an
@@ -1497,23 +1608,40 @@ do
         return PadGamepadUI() and _G.SmartNavigationSecureHelper == nil
     end
 
+    -- What the controller hides (Global Settings > Gamepad) follow. On WoW
+    -- Forever its Gamepad interface style: Blizzard's own gamepad bars and cast
+    -- bar show only under it, so a controller left connected during keyboard and
+    -- mouse play hides nothing. Elsewhere a connected controller.
+    local function PadModeOn()
+        if IS_FOREVER then return PadGamepadUI() end
+        return PadConnected()
+    end
+
     EllesmereUI.PadCP        = PadCP
     EllesmereUI.PadNative    = PadNative
     EllesmereUI.PadInUse     = PadInUse
     EllesmereUI.PadConnected = PadConnected
     EllesmereUI.PadGamepadUI = PadGamepadUI
     EllesmereUI.PadTaintStandDown = PadTaintStandDown
+    EllesmereUI.PadModeOn    = PadModeOn
 
-    -- Following PadConnected(): one shared watcher for every feature that hides
+    -- Following PadModeOn(): one shared watcher for every feature that hides
     -- or shows something with the controller. Its frame is built at the first
-    -- WatchPad and holds GAME_PAD_CONNECTED / GAME_PAD_DISCONNECTED and the
-    -- GamePadEnable CVAR_UPDATE only while at least one watcher exists. Edges
-    -- come in bursts (a reconnect is DISCONNECTED then CONNECTED, a second pad
-    -- adds its own, the CVar can land beside them), so a burst arms ONE flush
-    -- next frame that reads PadConnected() once and calls every watcher's
-    -- fn(padOn). WatchPad never calls fn itself: the caller reads
-    -- PadConnected() when it starts watching. Watching again replaces fn.
+    -- WatchPad and holds its events only while at least one watcher exists:
+    -- GAME_PAD_CONNECTED / GAME_PAD_DISCONNECTED and the GamePadEnable
+    -- CVAR_UPDATE, or on WoW Forever the interface style's
+    -- INPUT_DEVICE_INTERFACE_TRANSITION (the style reads right one frame later,
+    -- when the flush runs). Edges come in bursts (a reconnect is DISCONNECTED
+    -- then CONNECTED, a second pad adds its own, the CVar can land beside them),
+    -- so a burst arms ONE flush next frame that reads PadModeOn() once and calls
+    -- every watcher's fn(padOn). WatchPad never calls fn itself: the caller
+    -- reads PadModeOn() when it starts watching. Watching again replaces fn.
     do
+        -- The style transition, where the client knows it (an unknown event
+        -- name errors at registration).
+        local STYLE_EVENT = IS_FOREVER and not (C_EventUtils and C_EventUtils.IsEventValid
+            and not C_EventUtils.IsEventValid("INPUT_DEVICE_INTERFACE_TRANSITION"))
+            and "INPUT_DEVICE_INTERFACE_TRANSITION" or nil
         local watchers, watchFrame, flushArmed, flushOwners
 
         local function FlushPad()
@@ -1525,7 +1653,7 @@ do
                 n = n + 1
                 flushOwners[n] = owner
             end
-            local on = PadConnected()
+            local on = PadModeOn()
             -- One failing watcher must not stop the rest (or strand the
             -- snapshot slots): report it and carry on.
             for i = 1, n do
@@ -1554,9 +1682,13 @@ do
                 watchFrame:SetScript("OnEvent", OnPadEdge)
             end
             if next(watchers) == nil then
-                watchFrame:RegisterEvent("GAME_PAD_CONNECTED")
-                watchFrame:RegisterEvent("GAME_PAD_DISCONNECTED")
-                watchFrame:RegisterEvent("CVAR_UPDATE")
+                if IS_FOREVER then
+                    if STYLE_EVENT then watchFrame:RegisterEvent(STYLE_EVENT) end
+                else
+                    watchFrame:RegisterEvent("GAME_PAD_CONNECTED")
+                    watchFrame:RegisterEvent("GAME_PAD_DISCONNECTED")
+                    watchFrame:RegisterEvent("CVAR_UPDATE")
+                end
             end
             watchers[owner] = fn
         end

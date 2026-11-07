@@ -1013,7 +1013,7 @@ function _G._EUI_BuildStylePage(pageName, parent, yOffset)
     local hasHero = EllesmereUI.BuildStyleCards ~= nil
     if hasHero and not EllesmereUI._prebuilding then
         local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
-        local EG = EllesmereUI.ELLESMERE_GREEN
+        local EG = EllesmereUI.PANEL_ACCENT
         local host = CreateFrame("Frame", nil, parent)
         PP.Size(host, parent:GetWidth() - EllesmereUI.CONTENT_PAD * 2, HERO_H)
         host:SetPoint("TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y - 20)

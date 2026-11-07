@@ -208,7 +208,7 @@ initFrame:SetScript("OnEvent", function(self)
             editOverlayFrame._bg = bg
 
             if EllesmereUI and EllesmereUI.MakeBorder then
-                local eg = EllesmereUI.ELLESMERE_GREEN
+                local eg = EllesmereUI.PANEL_ACCENT
                 local ar, ag, ab = 1, 1, 1
                 if eg then ar, ag, ab = eg.r, eg.g, eg.b end
                 editOverlayFrame._border = EllesmereUI.MakeBorder(editOverlayFrame, ar, ag, ab, 0.6, EllesmereUI.PanelPP)
@@ -551,6 +551,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             if o.syncKeys then
                 EllesmereUI.BuildSyncIcon({
+            alwaysAvailable = true,
                     region  = rgn,
                     tooltip = "Apply End Caps to all Bars",
                     onClick = function()
@@ -565,6 +566,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        getElementState = IsBarEnabled,
                         elementKeys   = o.syncKeys,
                         elementLabels = o.syncLabels,
                         getCurrentKey = function() return o.key() end,
@@ -658,7 +660,7 @@ initFrame:SetScript("OnEvent", function(self)
             -------------------------------------------------------------------
             --  CLICK NAVIGATION
             -------------------------------------------------------------------
-            local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.ELLESMERE_GREEN, thickness = function() return PP.Scale(2) end, noSnap = true })
+            local PlaySettingGlow = EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT, thickness = function() return PP.Scale(2) end, noSnap = true })
 
             local clickMappings = {
                 icon       = { section = iconsSectionHeader, target = classColorBorderRow },
@@ -884,7 +886,7 @@ initFrame:SetScript("OnEvent", function(self)
         CopyVisibilitySettings = CopyVisibilitySettings, EAB = EAB, EndCapsCtl = EndCapsCtl,
         FirstBarButton = FirstBarButton, floor = floor, GetVisibilityKey = GetVisibilityKey,
         GROUP_BAR_ORDER = GROUP_BAR_ORDER, InCombatLockdown = InCombatLockdown,
-        IsDataBar = IsDataBar, optState = optState, pcall = pcall, PP = PP,
+        IsBarEnabled = IsBarEnabled, IsDataBar = IsDataBar, optState = optState, pcall = pcall, PP = PP,
         RANGE_INDICATOR = RANGE_INDICATOR, SB = SB,
         SECTION_ICON_APPEARANCE = SECTION_ICON_APPEARANCE, SECTION_LAYOUT = SECTION_LAYOUT,
         SECTION_TEXT = SECTION_TEXT, SECTION_VISIBILITY = SECTION_VISIBILITY,

@@ -14,7 +14,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  shared with Cursor/BattleRes/Bloodlust: each NewDB merges its own defaults
 --  into the SAME profile table, repointed by the profile system on swap.
 -------------------------------------------------------------------------------
-if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue and EllesmereUI.SetFramePlacer and EllesmereUI.RAID_PREP_IDS and EllesmereUI.AbbrevDungeon and EllesmereUI.GetUpgradeTrack and EllesmereUI.GetCraftedTrackColor and EllesmereUI.UPGRADE_TRACK_COLORS and EllesmereUI.BindLabel and EllesmereUI.ParseKeystoneLink and EllesmereUI.ItemLevelRGB and EllesmereUI.JUNK_BADGE) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Shifter's loot windows use the parent's frame placer; Raid Buff Check reads the parent's buff lists)
+if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue and EllesmereUI.SetFramePlacer and EllesmereUI.RAID_PREP_IDS and EllesmereUI.AbbrevDungeon and EllesmereUI.GetUpgradeTrack and EllesmereUI.GetCraftedTrackColor and EllesmereUI.UPGRADE_TRACK_COLORS and EllesmereUI.BindLabel and EllesmereUI.ParseKeystoneLink and EllesmereUI.ItemLevelRGB and EllesmereUI.JUNK_BADGE and EllesmereUI.SetFontFamily) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Shifter's loot windows use the parent's frame placer; Raid Buff Check reads the parent's buff lists)
 local QOL_ADDON_NAME, ns = ...
 EllesmereUI._ModuleNS["EllesmereUIQoL"] = ns  -- LOD options files read this module ns via the registry
 ns.CombatQueue = EllesmereUI.NewCombatQueue(CreateFrame("Frame"))
@@ -4468,7 +4468,8 @@ do
             outline = (outline == "") and "OUTLINE" or (outline .. ", OUTLINE")
         end
         local size = (EllesmereUIDB and EllesmereUIDB.groupDeathTextSize) or DEFAULT_TEXT_SIZE
-        alertOverlay._text:SetFont(fontPath, size, outline)
+        -- A font family: the alert shows a group member's name, in any script
+        EllesmereUI.SetFontFamily(alertOverlay._text, fontPath, size, outline, false)
         -- Keep the frame (and unlock-mode mover) sized to the alert text, not a fixed wide box.
         alertOverlay:SetSize(size * 7, size + 14)
 
