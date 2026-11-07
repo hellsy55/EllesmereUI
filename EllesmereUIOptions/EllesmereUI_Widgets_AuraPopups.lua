@@ -450,14 +450,22 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                         self:SetAlpha(0.5)
                         EllesmereUI.HideWidgetTooltip()
                     end)
-                    row:SetScript("OnEnter", function(self) self.hl:SetColorTexture(1, 1, 1, 0.04) end)
-                    row:SetScript("OnLeave", function(self) self.hl:SetColorTexture(1, 1, 1, 0) end)
+                    row:SetScript("OnEnter", function(self)
+                        self.hl:SetColorTexture(1, 1, 1, 0.04)
+                        EllesmereUI.ShowWidgetTooltip(self, "|T" .. tostring(self._iconTexture) .. ":16:16|t  " .. self._name .. "\nSpell ID: " .. tostring(self._id), { justify = "LEFT" })
+                    end)
+                    row:SetScript("OnLeave", function(self)
+                        self.hl:SetColorTexture(1, 1, 1, 0)
+                        EllesmereUI.HideWidgetTooltip()
+                    end)
                     rows[i] = row
                 end
                 local entry = sorted[i]
                 row._id = entry.id
+                row._name = entry.name
                 local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.id)
-                row.icon:SetTexture(tex or 134400)
+                row._iconTexture = tex or 134400
+                row.icon:SetTexture(row._iconTexture)
                 row.name:SetText(entry.name .. " |cff808080(" .. entry.id .. ")|r")
                 -- Checked = entry active; unchecked entries dim.
                 row.chk:SetShown(entry.on)
@@ -720,6 +728,13 @@ function EllesmereUI.ShowSpellBlacklistPopup(opts)
             if not row then
                 row = CreateFrame("Frame", nil, child)
                 row:SetSize(PW - 24, 26)
+                row:EnableMouse(true)
+                row:SetScript("OnEnter", function(self)
+                    EllesmereUI.ShowWidgetTooltip(self, self._spellTooltip, { justify = "LEFT" })
+                end)
+                row:SetScript("OnLeave", function()
+                    EllesmereUI.HideWidgetTooltip()
+                end)
                 row.icon = row:CreateTexture(nil, "ARTWORK")
                 row.icon:SetSize(18, 18)
                 row.icon:SetPoint("LEFT", row, "LEFT", 2, 0)
@@ -750,9 +765,13 @@ function EllesmereUI.ShowSpellBlacklistPopup(opts)
             row:ClearAllPoints()
             row:SetPoint("TOPLEFT", child, "TOPLEFT", 0, y)
             local info = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(id)
-            row.icon:SetTexture((info and info.iconID) or 134400)
-            row.name:SetText((info and info.name) or ("Spell " .. tostring(id)))
+            local texture = (info and info.iconID) or 134400
+            local spellName = (info and info.name) or ("Spell " .. tostring(id))
+            row.icon:SetTexture(texture)
+            row.name:SetText(spellName)
             row.idText:SetText(tostring(id))
+            row._spellTooltip = "|T" .. tostring(texture) .. ":16:16|t  "
+                .. spellName .. "\nSpell ID: " .. tostring(id)
             row.rm:SetScript("OnClick", function()
                 if opts.remove then opts.remove(id) end
                 if opts.onChanged then opts.onChanged() end

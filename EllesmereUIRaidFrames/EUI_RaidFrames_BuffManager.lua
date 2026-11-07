@@ -2898,9 +2898,12 @@ function ns.BM_BuildPage(pageName, parent, yOffset)
                         -- the live API internally when no curated name exists.
                         local name = SPELL_NAME_BY_ID[id]
                         local label = name or ("Spell " .. tostring(id))
+                        local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
                         -- Truncated rows still need to be told apart on hover.
-                        return { key = id, label = label, tooltip = label,
-                            icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) }
+                        return { key = id, label = label,
+                            tooltip = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+                                .. label .. "\nSpell ID: " .. tostring(id),
+                            icon = tex }
                     end
                     -- Dynamic items: fresh per menu open. Spells already supplied by
                     -- CHECKED filters are excluded from Presets (redundant as extras); picked extras always show under Selected.

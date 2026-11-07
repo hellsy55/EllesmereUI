@@ -8659,3 +8659,6 @@ L["Hakkari Thorium Vein"] = "[Hakkari Thorium Vein]"
 
 -- Preserved fork and upstream translations.
 L["Enabled"]           = "Activado"
+
+-- Group Finder Hide Applicant Info
+L["Note"] = "Nota"

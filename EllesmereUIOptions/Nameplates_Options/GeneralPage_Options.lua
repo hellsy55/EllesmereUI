@@ -789,6 +789,25 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                   if sourceCogBtn and sourceCogBtn._euiCogState then sourceCogBtn._euiCogState() end
               end },
             buffFilterDropdown); y = y - h
+        -- "Dispellable By Me" (retail only, off by default): narrows Only Dispellable to your group's dispels.
+        if not EllesmereUI._prebuilding and not EllesmereUI.IS_FOREVER then
+            EllesmereUI.BuildInlineCog(sourceRow._rightRegion, {
+                disabled = function() return DBVal("npEnemyBuffFilter") ~= "dispellable" end,
+                disabledTooltip = "Requires Enemy Buff Filter set to Only Dispellable", rawTooltip = true,
+                title = "Enemy Buff Filter",
+                rows = {
+                    { type = "toggle", label = "Dispellable By Me",
+                      tooltip = "With Only Dispellable, show just the buffs you or your group can dispel, purge or soothe, instead of every dispellable buff.",
+                      get = function() return DBVal("npEnemyBuffDispelByMe") == true end,
+                      set = function(v)
+                          DB().npEnemyBuffDispelByMe = v or nil
+                          RefreshAllAuras()
+                          UpdatePreview()
+                      end },
+                },
+            })
+        end
+
         sourceCogBtn, sourceCogShow = EllesmereUI.BuildInlineCog(sourceRow._leftRegion, {
             title = "Source Name Settings",
             disabled = function() return DBVal("debuffShowSourceName") ~= true end,

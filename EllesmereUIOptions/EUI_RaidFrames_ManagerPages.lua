@@ -3283,9 +3283,13 @@ function ns.BMP_ShowFilterEditor(show, hide)
                 if not onFilter then
                     local nm = (ns.SPELL_NAME_BY_ID and ns.SPELL_NAME_BY_ID[id])
                         or (C_Spell.GetSpellName and C_Spell.GetSpellName(id))
+                    local label = nm or tostring(id)
+                    local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
                     out[#out + 1] = {
-                        key = id, label = nm or tostring(id), noCheck = true,
-                        icon = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id),
+                        key = id, label = label, noCheck = true,
+                        tooltip = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+                            .. label .. "\nSpell ID: " .. tostring(id),
+                        icon = tex,
                     }
                 end
             end
@@ -3430,8 +3434,16 @@ function ns.BMP_ShowFilterEditor(show, hide)
             ico:SetDesaturated(not on)
         end
         UpdateRow()
-        srow:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.04) end)
-        srow:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
+        local tooltipText = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+            .. (name or ("Spell " .. tostring(id))) .. "\nSpell ID: " .. tostring(id)
+        srow:SetScript("OnEnter", function(self)
+            hl:SetColorTexture(1, 1, 1, 0.04)
+            EllesmereUI.ShowWidgetTooltip(self, tooltipText, { justify = "LEFT" })
+        end)
+        srow:SetScript("OnLeave", function()
+            hl:SetColorTexture(1, 1, 1, 0)
+            EllesmereUI.HideWidgetTooltip()
+        end)
         srow:SetScript("OnClick", function()
             ns.BM2_SetSpellState(sel.id, id, not on)
             Apply()
@@ -3634,9 +3646,12 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
             local name = (ns.SPELL_NAME_BY_ID and ns.SPELL_NAME_BY_ID[id])
                 or (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id))
             local label = name or ("Spell " .. tostring(id))
+            local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
             -- Truncated rows (long/duplicate names) still need to be told apart on hover.
-            return { key = id, label = label, tooltip = label,
-                icon = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id) }
+            return { key = id, label = label,
+                tooltip = "|T" .. tostring(tex or 134400) .. ":16:16|t  "
+                    .. label .. "\nSpell ID: " .. tostring(id),
+                icon = tex }
         end
         local function ByLabel(a, b) return a.label < b.label end
         local function ExtraItems()
