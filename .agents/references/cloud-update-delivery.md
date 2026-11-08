@@ -5,8 +5,13 @@ user selects a workflow that executes an update. Read it before the first
 modification of any installable target to capture its initial state. This is an
 additional delivery layer: it never replaces, changes, or bypasses
 [AGENTS.md](../../AGENTS.md) or the [update skill](../skills/eui-update/SKILL.md).
-Checkpoints, conflicts, approvals, merge semantics, libraries, publication, and
-installation remain governed exclusively by the normal project workflow.
+Checkpoints, conflicts, approvals, merge semantics, libraries, and publication
+remain governed by the normal project workflow. Use the frozen `cloud`
+environment from the shared maintenance context. The physical installation
+checkpoint is intentionally skipped in all modes. Continue directly to this
+delivery and the final report after the required validation and publication.
+Do not load physical installation instructions, show a menu, ask for local WoW
+destinations, or run physical installation or line-ending fixes.
 If that workflow fails or pauses for approval or a decision, the update remains
 pending; do not generate final artifacts early. Options that do not execute an
 update do not automatically receive an installer or update summary.
@@ -93,13 +98,18 @@ Drive delivery failed. Continue delivering any remaining valid final ZIPs.
 
 ## Final delivery report
 
-For each target/installer, report in Portuguese:
+Use the [final update report rules](../skills/eui-update/SKILL.md#final-update-report)
+for GitHub commit links and publication status. Report each selected branch
+separately, including when no ZIP was produced. Report in Portuguese:
 
 - Target; initial and final versions, when available.
-- Initial subject + short SHA; final subject + short SHA; `initial -> final`.
-- ZIP filename, packaged file count, and required manual deletion paths (or none).
-- Confirmation that the ZIP contains only the final net diff and that no files
-  were installed into the WoW folder.
+- Initial and final subjects with their respective short SHAs. Link only
+  verified published commits, including any additional commits shown.
+- For each validated ZIP, give the actual artifact download link when
+  available, filename, packaged file count, and required manual deletion paths
+  (or none). Confirm that it contains only the final net diff. If no ZIP was
+  produced, report that status and any required manual deletions.
+- State that physical installation was skipped in Cloud.
 - For each ZIP with attempted Drive delivery: filename, local size, local SHA-256
   (reuse an existing hash or calculate it when inexpensive), `Google Drive: OK`
   or the actual error/missing capability, and the file link/ID returned by the

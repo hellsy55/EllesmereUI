@@ -19,12 +19,12 @@ unresolved until their first required use.
   syncs and installation without a new commit skip compiler discovery.
   Reuse the descriptor across skills and branches; see Lua compiler resolution.
 - Determine and cache `physical_install` only at the install stage when needed:
-  unavailable in Cloud or other nonlocal execution.
+  skip the stage in Cloud and other nonlocal execution.
   In local Windows, establish access to the existing operational script directory
   and mode-relevant WoW folders from trusted host evidence or a minimal read-only
   existence/access check. Do not load physical install commands before approval.
-  Record unavailable if access cannot be established; sync may still continue,
-  and the unchanged install menu remains mandatory.
+  Record unavailable if access cannot be established. Sync may still continue,
+  and the local Windows install menu remains mandatory.
 - Discover and cache environment fallbacks only when first needed
   (Windows interpreter discovery only on Windows; prepared rootless SVN only in
   confirmed Cloud). Discovery is not authorization to install or bootstrap tools.
@@ -108,5 +108,5 @@ dependency. Git is required for sync; accepted library checks may also need SVN
 and network access. Check these only at their relevant stage and reuse results.
 
 Only confirmed Cloud setup needs [Cloud preparation](cloud-svn.md).
-Normal updates never install tools. At the install checkpoint, load only
-`eui-install` for its unchanged menu; physical commands remain local Windows only.
+Normal updates never install tools. Only confirmed local Windows reaches the
+install checkpoint and loads `eui-install` for its menu.
