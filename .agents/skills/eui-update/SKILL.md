@@ -85,9 +85,27 @@ Before the incoming integration described in Sync A or Sync B (including a fast-
 
 ## Mode sequence and checkpoints
 
-- Retail: Sync A, then the Retail install menu.
-- PTR: Sync A, then Sync B, then the PTR install menu. Sync A must not cause a Retail install, Retail library update, or any touch to the Retail install folder.
-- Both: Sync A, then Sync B, then one install menu for Retail + PTR.
+| Mode | Sync sequence | Menu in `local_windows` |
+| --- | --- | --- |
+| Retail | Sync A | Retail |
+| PTR | Sync A, then Sync B | PTR |
+| Both | Sync A, then Sync B | One combined Retail + PTR menu |
+
+In PTR mode, Sync A must not cause a Retail install, Retail library update, or
+any touch to the Retail install folder. After sync, publication and any
+applicable library stages, route completion using the frozen environment.
+
+- `local_windows`: load [eui-install](../eui-install/SKILL.md) at the install
+  checkpoint. Preserve its exact menu and authorization, including after a
+  no-op or resolved conflict.
+- `cloud`: intentionally skip the physical install checkpoint in every mode.
+  Do not load the install skill or its operational reference, present a menu,
+  ask about installation or local WoW destinations, or run installation,
+  extraction, copying into game folders, or line-ending fixes. Proceed with any
+  applicable [Cloud delivery](../../references/cloud-update-delivery.md) and
+  the final report after the required validations and publication.
+- `other`: skip physical installation and report the outcome. Use the shared
+  preflight rules if an environment-specific action needs clarification.
 
 ## Event-driven external libraries
 
@@ -95,6 +113,33 @@ Ordinary updates do not load `eui-libs`, run the external version checker, ask a
 
 The other trigger is an upstream change in the exact incoming range recorded before Sync A. Run `<python_runtime> .tools/classify_library_range.py <base> <release_target>` only when Sync A has incoming commits. Post-release upstream changes and an already-incorporated release never trigger this check. This local-only command summarizes affected libraries using `.pkgmeta` externals, library directories, and library metadata; it does not query releases or vendor files. If it reports no library changes, continue silently. If it reports changes, summarize only the added, modified, or removed libraries and ask exactly: `O upstream alterou libraries. Deseja verificar se há atualizações nas demais libraries? a) Sim b) Não`. Do not load `eui-libs` or run the checker until the user chooses a). If the user chooses b), continue without claiming the other libraries are current; when needed, say only `Demais libraries: não verificadas`. In Both mode, an accepted check applies to Retail after Sync A and PTR after Sync B, with separate reports, lockfiles, approvals, and commits.
 
-At the install stage, read [eui-install](../eui-install/SKILL.md). Preserve its exact menu and authorization even after a no-op or resolved conflict. Report in a few Portuguese progress lines: preflight scope and clean/dirty state; release target, incoming release commit count, excluded post-release count, and only branches that changed; then the install checkpoint. Surface errors, conflicts, feature risks, and required choices. Keep hashes other than the release summary, full status, fetch output, checkout output, temporary paths, copied-file lists, and line-ending details out of routine output. Report line-ending fix scope only if relevant.
+Report in a few Portuguese progress lines: preflight scope and clean/dirty state; release target, incoming release commit count, excluded post-release count, and only branches that changed; then the install checkpoint in local Windows. Surface errors, conflicts, feature risks, and required choices. Keep hashes other than the release summary, full status, fetch output, checkout output, temporary paths, copied-file lists, and line-ending details out of routine output. Report line-ending fix scope only if relevant.
+
+## Final update report
+
+Before modifying either selected branch, record its initial commit. In Both
+mode, capture both baselines before any branch mutation. Reuse the immutable
+delivery bases when Cloud delivery applies. Report the initial and final
+commits separately for each selected branch in Portuguese, including on a no-op.
+Give each additional relevant commit a separate entry when reporting it.
+
+Resolve each reported commit to its full object ID with
+`git rev-parse --verify "<ref>^{commit}"` and obtain its display SHA from Git.
+Validate that `origin` points to `hellsy55/EllesmereUI` for fetch and push
+before using the URL below. Confirm that the commit is reachable from the
+corresponding published branch tip, using the verified origin fetch for
+existing commits and remote confirmation after a push for newly published
+commits. Check ancestry with `git merge-base --is-ancestor`; only exit 0
+proves reachability. A local ref or an abbreviated SHA is insufficient evidence.
+
+Format each verified published commit as
+`[SHORT_SHA](https://github.com/hellsy55/EllesmereUI/commit/FULL_SHA)`.
+For an unpublished commit, a failed push without independent publication
+evidence, or unavailable verification, report the SHA as plain text with its
+actual publication status. A no-op may link its existing published commit.
+Keep GitHub links separate from artifact and Drive links and out of the
+copy-ready English functional summary.
+
+## Local installation policy
 
 Installation policy changes remain centralized in `.tools/install/` and propagate from Retail to PTR through Sync B. Records remain independent per AddOns destination; branch sync never deletes installed folders. The install skill owns the shared transaction and fingerprint cleanup rules. Installation backups are temporary recovery data: remove only the current operation's backups after success or verified complete rollback, preserve incomplete recovery and preexisting backups, and report cleanup failures.
