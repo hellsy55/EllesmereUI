@@ -3445,7 +3445,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "9.8.1"
+EllesmereUI.VERSION = "9.8.2"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -3736,14 +3736,9 @@ end
 C_Timer.After(2, function()
     if EllesmereUIDB and EllesmereUIDB.firstInstallPopupShown then
         -- Defer while any intro popup is still pending/open; each runs the conflict check itself
-        -- when dismissed (RaidFrames / PatchNotes / WindowSkins / SpecOverrides / PTRManagers /
-        -- StyleLaunch / GroupFinder / KickTracker popup files, plus the 12.1 launch video
-        -- announcement in EllesmereUI_VideoGuides.lua).
-        if EllesmereUI._raidFramesIntroPending or EllesmereUI._patchNotesIntroPending
-           or EllesmereUI._windowSkinsIntroPending or EllesmereUI._specOvIntroPending
-           or EllesmereUI._ptrManagersIntroPending or EllesmereUI._launchVideoIntroPending
-           or EllesmereUI._styleLaunchIntroPending or EllesmereUI._groupFinderIntroPending
-           or EllesmereUI._kickTrackerIntroPending
+        -- when dismissed (the Kick Tracker and style choice popup files, plus the 12.1 launch
+        -- video announcement in EllesmereUI_VideoGuides.lua).
+        if EllesmereUI._launchVideoIntroPending or EllesmereUI._kickTrackerIntroPending
            or EllesmereUI._styleChoicePending then return end
         EllesmereUI._RunConflictCheck()
     end
@@ -3835,7 +3830,7 @@ SlashCmdList.EUIRESETHINT = function()
             EllesmereUIDB.inlineCogTipSeen = nil
             EllesmereUIDB.cogSeen = nil
         end
-        EllesmereUI.Print("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again.")
+        EllesmereUI.Print(EllesmereUI.L("|cff00ff00[EllesmereUI]|r All hints reset. /reload to see them again."))
     end)
 end
 
@@ -3847,7 +3842,7 @@ SlashCmdList.EUIRESETSCALE = function()
             EllesmereUIDB.ppUIScale = nil
             EllesmereUIDB.ppUIScaleAuto = nil
         end
-        EllesmereUI.Print("|cff00ff00[EllesmereUI]|r UI scale reset. /reload to re-snapshot from your Blizzard scale.")
+        EllesmereUI.Print(EllesmereUI.L("|cff00ff00[EllesmereUI]|r UI scale reset. /reload to re-snapshot from your Blizzard scale."))
     end)
 end
 
