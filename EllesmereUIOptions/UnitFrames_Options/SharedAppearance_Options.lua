@@ -775,7 +775,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 end
                 ReloadAndUpdate()
             end)
-        PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+        EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
         rgn._control = cbDD
         rgn._lastInline = nil
         EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -943,7 +943,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 end
                 if UpdateHBSwatchVis then UpdateHBSwatchVis() end
             end)
-        PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+        EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
         rightRgn._control = cbDD
         rightRgn._lastInline = nil
 
@@ -1580,7 +1580,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     -- Cog on Position for X/Y offsets
     if not EllesmereUI._prebuilding then
         local posRgn = sharedSizePosRow._rightRegion
-        EllesmereUI.BuildInlineCog(posRgn, {
+        EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() return SVal("portraitStyle", "attached") ~= "detached" end,
             disabledTooltip = "This option requires Portrait Mode to be set to Detached.",
             title = "Portrait Position Offsets",
@@ -2076,7 +2076,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     -- Cog on Position for X/Y offsets
     if not EllesmereUI._prebuilding then
         local posRgn = sharedBtbToggleRow._rightRegion
-        EllesmereUI.BuildInlineCog(posRgn, {
+        EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() local pos = SVal("btbPosition", "bottom"); return not SVal("bottomTextBar", false) or (pos ~= "detached_top" and pos ~= "detached_bottom") end,
             disabledTooltip = function() return not SVal("bottomTextBar", false) and "Text Bar" or "This option requires a detached position to be active." end,
             title = "Detached Position Offsets",
@@ -2287,7 +2287,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                     { tooltip = "Class Colored", hasAlpha = false,
                       getValue = function()
                           local _, ct = UnitClass("player")
-                          local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                          local cc = ct and EllesmereUI.GetClassColor(ct)
                           if cc then return cc.r, cc.g, cc.b end
                           return 1, 1, 1
                       end,
@@ -2316,7 +2316,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             btbLRgn, btbLRgn:GetFrameLevel() + 5,
             function()
                 local _, classFile = UnitClass("player")
-                local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                local cc = classFile and EllesmereUI.GetClassColor(classFile)
                 if cc then return cc.r, cc.g, cc.b end
                 return 1, 1, 1
             end,
@@ -2420,7 +2420,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                     { tooltip = "Class Colored", hasAlpha = false,
                       getValue = function()
                           local _, ct = UnitClass("player")
-                          local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                          local cc = ct and EllesmereUI.GetClassColor(ct)
                           if cc then return cc.r, cc.g, cc.b end
                           return 1, 1, 1
                       end,
@@ -2449,7 +2449,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             btbRRgn, btbRRgn:GetFrameLevel() + 5,
             function()
                 local _, classFile = UnitClass("player")
-                local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                local cc = classFile and EllesmereUI.GetClassColor(classFile)
                 if cc then return cc.r, cc.g, cc.b end
                 return 1, 1, 1
             end,
@@ -2661,7 +2661,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                     { tooltip = "Class Colored", hasAlpha = false,
                       getValue = function()
                           local _, ct = UnitClass("player")
-                          local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                          local cc = ct and EllesmereUI.GetClassColor(ct)
                           if cc then return cc.r, cc.g, cc.b end
                           return 1, 1, 1
                       end,
@@ -2690,7 +2690,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             btbCRgn, btbCRgn:GetFrameLevel() + 5,
             function()
                 local _, classFile = UnitClass("player")
-                local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                local cc = classFile and EllesmereUI.GetClassColor(classFile)
                 if cc then return cc.r, cc.g, cc.b end
                 return 1, 1, 1
             end,

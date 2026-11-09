@@ -740,7 +740,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 })
             local PP = EllesmereUI.PP
-            PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
             leftRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -836,7 +836,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end,
                 })
             local PP = EllesmereUI.PP
-            PP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
             leftRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -966,6 +966,7 @@ initFrame:SetScript("OnEvent", function(self)
                           RefreshMinimap()
                       end },
                     { type = "dropdown", label = "Grow Tooltip/Popup",
+                      tooltip="Choose the direction in which minimap flyouts open. Auto chooses a direction based on their available screen space.",
                       values = { auto = "Auto", up = "Up", down = "Down", left = "Left", right = "Right" },
                       order = { "auto", "up", "down", "left", "right" },
                       get = function() local m = MinimapDB(); return (m and m.flyoutGrowDir) or "auto" end,
@@ -1066,7 +1067,7 @@ initFrame:SetScript("OnEvent", function(self)
         if not EllesmereUI._prebuilding then
             local rgn = omniumRow._leftRegion
             local function omniumOff() return OmniumMode() == "never" end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = omniumOff,
                 disabledTooltip = "Show Omnium Folio",
                 title = "Omnium Folio Position",
@@ -1120,7 +1121,7 @@ initFrame:SetScript("OnEvent", function(self)
               end });  y = y - h
         if not EllesmereUI._prebuilding then
             local rgn = compartmentRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = CompartmentOff,
                 disabledTooltip = "Show Addon Compartment",
                 title = "Addon Compartment Position",
@@ -1192,7 +1193,7 @@ initFrame:SetScript("OnEvent", function(self)
                     RefreshMinimap()
                     EllesmereUI:RefreshPage()
                 end)
-            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -1238,7 +1239,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local m = MinimapDB()
                 return not m or m.hideMail or (m.mailPosition or "button") == "button"
             end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = mailOff,
                 disabledTooltip = function()
                     local m = MinimapDB()
@@ -1347,7 +1348,7 @@ initFrame:SetScript("OnEvent", function(self)
             local function clockOff()
                 return ClockMode() == "none"
             end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 chain = false,
                 disabled = clockOff,
                 disabledTooltip = "Clock Style",
@@ -1452,7 +1453,7 @@ initFrame:SetScript("OnEvent", function(self)
             local function locOff()
                 return LocationMode() == "none"
             end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 chain = false,
                 disabled = locOff,
                 disabledTooltip = "Zone Text Style",
@@ -1542,7 +1543,7 @@ initFrame:SetScript("OnEvent", function(self)
         if not EllesmereUI._prebuilding then
             local rgn = coordsRow._rightRegion
             local function coordsOff() return CoordsMode() == "never" end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 chain = false,
                 disabled = coordsOff,
                 disabledTooltip = "Show Coordinates",
@@ -1650,7 +1651,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Inline offset cog on FPS/MS Position
         if not EllesmereUI._prebuilding then
             local rgn = fpsRow._rightRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 chain = false,
                 disabled = FpsOff,
                 disabledTooltip = "Show FPS/MS",
@@ -1752,7 +1753,7 @@ initFrame:SetScript("OnEvent", function(self)
             local function diffOff()
                 return not DiffTextOn()
             end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 chain = false,
                 disabled = diffOff,
                 disabledTooltip = "Show Instance Difficulty as Text",
@@ -1837,7 +1838,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                     RefreshMinimap()
                 end)
-            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)

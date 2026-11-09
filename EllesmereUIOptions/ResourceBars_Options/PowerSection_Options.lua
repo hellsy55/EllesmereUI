@@ -117,7 +117,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.powerHeight, ctx.syncRows.classHeight, ctx.syncRows.healthHeight } end,
 
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "primary", "height", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "primary", "height", SmoothRefresh),
             })
         end
         if not EllesmereUI._prebuilding then
@@ -140,7 +140,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.powerWidth, ctx.syncRows.classWidth, ctx.syncRows.healthWidth } end,
 
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "primary", "width", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "primary", "width", SmoothRefresh),
             })
         end
     end
@@ -166,7 +166,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                   if c.borderSizePx then c.borderSizePx = false end
                   RebuildPower(); EllesmereUI:RefreshPage(true)
               end }),
-            ns.ERB_ClassicBorderRow() and ns.ERB_ClassicBorderSizeCfg(cfg, powerOff, powerDisTip, RebuildPower, "ERB_Power") or
+            (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) and ns.ERB_ClassicBorderSizeCfg(cfg, powerOff, powerDisTip, RebuildPower, "ERB_Power") or
             EllesmereUI.BlizzStyle.Gate("resourcebars", EllesmereUI.BorderPxSliderCfg({ text = "Border Size",
               disabled = powerOff,
               disabledTooltip = powerDisTip,
@@ -201,7 +201,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                     EllesmereUI.BlizzStyle.Gate("resourcebars", ocfgR));  y = y - h
             end
         end
-        if not EllesmereUI._prebuilding and not ns.ERB_ClassicBorderRow() then
+        if not EllesmereUI._prebuilding and not (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             local rgn = pwrBsRow._rightRegion
             local ctrl = rgn._control
             -- Corner Radius (EllesmereUI_RoundedCorners.lua): an inline cog on the
@@ -376,12 +376,12 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
             local function UpdateCogVis()
                 local c = cfg()
                 local tex = c and c.borderTexture or "solid"
-                if tex == "solid" or ns.ERB_ClassicBorderRow() then cogBtn:Hide() else cogBtn:Show() end
+                if tex == "solid" or (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then cogBtn:Hide() else cogBtn:Show() end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
             UpdateCogVis()
         end
-        if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and ns.ERB_ClassicBorderRow() then
+        if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             ctx.syncRows.powerBorder = pwrBsRow._rightRegion
             ns.ERB_ClassicBorderSync(pwrBsRow._rightRegion, DB, "primary", SmoothRefresh,
                 function() return { ctx.syncRows.powerBorder, ctx.syncRows.classBorder, ctx.syncRows.healthBorder } end)
@@ -416,7 +416,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 flashTargets = function() return { pwrBsRow._leftRegion } end,
 
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "primary", "borderStyle", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "primary", "borderStyle", SmoothRefresh),
             })
             EllesmereUI.BuildSyncIcon({
                 region  = pwrBsRow._rightRegion,
@@ -446,7 +446,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.powerBorder, ctx.syncRows.classBorder, ctx.syncRows.healthBorder } end,
 
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "primary", "border", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "primary", "border", SmoothRefresh),
             })
         end
     end
@@ -612,7 +612,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
             flashTargets = function() return { ctx.syncRows.powerOpacity, ctx.syncRows.classOpacity, ctx.syncRows.healthOpacity } end,
 
             alwaysAvailable = true,
-            multiApply = ns.ERB_MultiSync(DB, "primary", "opacity", SmoothRefresh),
+            multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "primary", "opacity", SmoothRefresh),
         })
     end
 
@@ -628,8 +628,8 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
           getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
           setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshPower() end }
     ); y = y - fadeSyncH
-    ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh)
-    ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh)
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh) end
 
     if not EllesmereUI._prebuilding then
         local rgn = powerBorderRow._leftRegion
@@ -771,8 +771,8 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
           end },
         { type = "label", text = "Threshold & Hash Lines" }
     );  y = y - h
-    ns.ERB_ScalarSync(powerColorRow._leftRegion, env.DB, "primary", "textSize",
-        "Text Size", SmoothRefresh, { "health", "primary" })
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerColorRow._leftRegion, env.DB, "primary", "textSize",
+        "Text Size", SmoothRefresh, { "health", "primary" }) end
     -- Power Text inline cog: percent sign, anchor, x/y offsets
     if not EllesmereUI._prebuilding then
         local rgn = powerTextSizeRow._leftRegion
@@ -826,6 +826,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
         thresholdCog = { title = "Threshold Coloring", minWidth = 280, rows = function(cur)
             return {
                 { type = "toggle", label = "Threshold color below value",
+                  tooltip="Apply the threshold color while the current resource value is below the selected limit. Multi-band coloring overrides the single threshold.",
                   rawTooltip = true,
                   disabled = function() local ent = cur(); return (ent and ent.multiBandEnabled) and true or false end,
                   disabledTooltip = "Single-threshold options don't apply while Multi-band coloring is on.",

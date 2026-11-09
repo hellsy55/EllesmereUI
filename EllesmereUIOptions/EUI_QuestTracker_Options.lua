@@ -811,12 +811,14 @@ initFrame:SetScript("OnEvent", function(self)
 
         row, h = W:DualRow(parent, y,
             { type="toggle", text="Auto Accept Quests",
+              tooltip="Automatically accept eligible quests when interacting with quest givers. Shift behavior and quest filters are configured in the adjacent settings menu.",
               getValue=function() return Cfg("autoAccept") or false end,
               setValue=function(v)
                   Set("autoAccept", v)
                   if EQT.SyncAutoQuests then EQT.SyncAutoQuests() end
               end },
             { type="toggle", text="Auto Turn In Quests",
+              tooltip="Automatically complete eligible quests at quest givers. Shift behavior and other conditions are configured in the adjacent settings menu.",
               getValue=function() return Cfg("autoTurnIn") or false end,
               setValue=function(v)
                   Set("autoTurnIn", v)
@@ -846,6 +848,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- WoW Forever has no older expansions to skip.
         if not EllesmereUI.IS_FOREVER then
             acceptRows[#acceptRows + 1] = { type="toggle", label="Ignore Older Expansion Quests",
+              tooltip="Exclude quests from older expansions from automatic quest acceptance; this does not hide them in the quest tracker.",
                 get=function() return Cfg("autoAcceptIgnoreOldExpansion") or false end,
                 set=function(v) Set("autoAcceptIgnoreOldExpansion", v) end }
         end

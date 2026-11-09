@@ -348,14 +348,15 @@ local function BuildInlineCog(rgn, opts)
     end
     local show = opts.show or select(2, BuildCogPopup(opts))
     local paint = opts.paint
+    local iconOnly = opts.icon ~= nil and not paint
     local h = opts.size or (paint and 26 or 30)
     local btn = CreateFrame("Button", nil, rgn)
-    btn:SetSize(paint and h or math.floor(h * 0.8 + 0.5), h)
+    btn:SetSize((paint or iconOnly) and h or math.floor(h * 0.8 + 0.5), h)
     PP.Point(btn, "RIGHT", opts.anchorTo or (opts.chain ~= false and rgn._lastInline) or rgn._control or rgn, opts.relPoint or "LEFT", -(opts.gap or 8), 0)
     if opts.chain ~= false then rgn._lastInline = btn end
     btn:SetFrameLevel(rgn:GetFrameLevel() + 5)
     local tex, L, note, id, hostCfg
-    if paint then
+    if paint or iconOnly then
         tex = btn:CreateTexture(nil, "OVERLAY")
         tex:SetTexture(opts.icon)
         tex:SetAllPoints()
@@ -432,6 +433,7 @@ local function BuildInlineCog(rgn, opts)
         -- panel session, until the cog is first opened, never while the cog or
         -- the setting it sits on is disabled.
         if paint then paint(btn, off, hot)
+        elseif iconOnly then btn:SetAlpha(off and 0.15 or (hot and 0.7 or 0.4))
         else
             btn:SetAlpha(off and 0.3 or 1)
             local a = off and 0.5 or (hot and 0.75 or 0.55)
@@ -461,7 +463,7 @@ local function BuildInlineCog(rgn, opts)
     btn:SetScript("OnClick", function(self)
         -- A cog clicked while the cog tip is up: the tip has done its job.
         -- Opened once, its dot is gone for good.
-        if not paint then
+        if not paint and not iconOnly then
             if cogTipCog then CogTipDone() end
             CogDot.Mark(id)
         end
@@ -1096,7 +1098,7 @@ local function BuildCursorAnchorRow(opts)
     end
 
     -- Inline cog: X + Y offsets
-    BuildInlineCog(row._rightRegion, {
+    BuildInlineCog(row._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
         title = "Cursor Offset",
         rows = {
             { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,

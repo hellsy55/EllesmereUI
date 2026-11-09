@@ -853,7 +853,8 @@ initFrame:SetScript("OnEvent", function(self)
                                 local spellID, _, isKnown, spellName =
                                     GetFlyoutSlotInfo(info.actionID, s)
                                 if isKnown then
-                                    Add(spellID, spellName, C_Spell.GetSpellTexture(spellID))
+                                    -- One icon only: the second return would land in rankText.
+                                    Add(spellID, spellName, (C_Spell.GetSpellTexture(spellID)))
                                 end
                             end
                         end
@@ -3551,7 +3552,7 @@ initFrame:SetScript("OnEvent", function(self)
                 return Disabled() or (ACfg("centerMode") or "CURSOR") ~= "SCREEN"
             end
             -- The cog disables with the offsets it opens, so the row still says they exist.
-            EllesmereUI.BuildInlineCog(row._rightRegion, {
+            EllesmereUI.BuildInlineCog(row._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Fixed Position",
                 disabled = fixedOnly,
                 disabledTooltip = function() return Disabled() and "the module" or "Fixed Position mode" end,
@@ -3579,6 +3580,7 @@ initFrame:SetScript("OnEvent", function(self)
         if layoutMode == "GRID" then
             row, h = W:DualRow(parent, y,
                 { type="toggle", text="Auto Columns",
+                  tooltip="Let Grid mode choose the column count automatically. Disable to set the number manually with Grid Columns.",
                   disabled=Disabled, disabledTooltip="the module",
                   getValue=function() return ACfg("gridAutoColumns") ~= false end,
                   setValue=function(v) ASet("gridAutoColumns", v); Refresh() end },

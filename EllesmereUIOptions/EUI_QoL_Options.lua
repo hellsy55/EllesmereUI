@@ -663,6 +663,7 @@ initFrame:SetScript("OnEvent", function(self)
                     minWidth = 300,
                     rows = {
                         { type="dropdown", label="Mode",
+                          tooltip="Hide the Loot Rolls window completely or close it automatically after the configured delay.",
                           values={ hide = "Hide Completely", autoclose = "Close After Delay" },
                           order={ "hide", "autoclose" },
                           get=function() return (EllesmereUIDB and EllesmereUIDB.lootHistoryMode) or "hide" end,
@@ -973,6 +974,7 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "FPS Counter Settings",
                 rows = {
                     { type="toggle", label="Attach to Secondary Stats",
+                      tooltip="Display the FPS counter alongside Secondary Stats and use that panel's text presentation.",
                       disabled=function()
                         return not EllesmereUI.QoLExtrasGet("showSecondaryStats")
                       end,

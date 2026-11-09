@@ -87,7 +87,7 @@ function ns.ERB_BuildGCDBarPage(pageName, parent, yOffset)
     -- Inline position cog (X/Y + unlock) on Enable
     if not EllesmereUI._prebuilding then
         local rgn = enableRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() local p = DB(); return p and not p.gcdBar.enabled end,
             disabledTooltip = "GCD Bar",
             title = "GCD Bar Position",

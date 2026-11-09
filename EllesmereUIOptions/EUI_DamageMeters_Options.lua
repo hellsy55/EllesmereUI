@@ -652,7 +652,7 @@ initFrame:SetScript("OnEvent", function(self)
             local ctrl = rgn._control
 
             -- Inline cog: header text X/Y offset
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Title Position",
                 rows = {
                     { type = "slider", label = "X Offset", min = -20, max = 20, step = 1,
@@ -1625,6 +1625,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if not v and ns.ShowSATimerPreview then ns.ShowSATimerPreview() end
                   end },
                 { type="dropdown", text="Anchor to Windows",
+                  tooltip="Keep the Combat Timer freely movable or anchor it to a chosen corner of the Damage Meters windows.",
                   values = { free = "Free Move", topleft = "Top Left", topright = "Top Right",
                              bottomleft = "Bottom Left", bottomright = "Bottom Right" },
                   order = { "free", "topleft", "topright", "bottomleft", "bottomright" },
@@ -1678,12 +1679,14 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "Keybind Scope",
                 rows = {
                     { type = "toggle", label = "Include Combat Timer",
+                      tooltip="Also show or hide the Combat Timer when using the Damage Meters visibility shortcut.",
                       get = function() return Cfg("toggleIncludeTimer") == true end,
                       set = function(v)
                           Set("toggleIncludeTimer", v)
                           if ns.ApplyDMToggleState then ns.ApplyDMToggleState() end
                       end },
                     { type = "toggle", label = "Include Spell History",
+                      tooltip="Also show or hide Spell History when using the Damage Meters visibility shortcut.",
                       get = function() return Cfg("toggleIncludeSpellHistory") == true end,
                       set = function(v)
                           Set("toggleIncludeSpellHistory", v)
@@ -1801,7 +1804,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SH_ICON_VIS_ITEMS,
                 function(k) return SHDB()[k] or false end,
                 function(k, v) SHDB()[k] = v; RefreshSH() end)
-            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -1992,7 +1995,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SH_BAR_VIS_ITEMS,
                 function(k) return SHDB()[k] or false end,
                 function(k, v) SHDB()[k] = v; RefreshSH() end)
-            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)

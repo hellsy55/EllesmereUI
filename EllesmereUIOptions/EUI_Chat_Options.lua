@@ -785,6 +785,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 1: Enable Idle Fade | Fade Delay
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Enable Idle Fade",
+              tooltip="Fade the chat panel when it is idle; moving or hovering over it restores visibility.",
               getValue=function() return Cfg("idleFadeEnabled") ~= false end,
               setValue=function(v)
                   Set("idleFadeEnabled", v)
@@ -793,6 +794,7 @@ initFrame:SetScript("OnEvent", function(self)
                   EllesmereUI:RefreshPage()
               end },
             { type="slider", text="Fade Delay",
+              tooltip="How many seconds of inactivity must pass before the chat panel starts fading.",
               min = 5, max = 30, step = 1,
               disabled=function() return Cfg("idleFadeEnabled") == false end,
               disabledTooltip="Enable Idle Fade",
@@ -805,6 +807,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Row 2 (odd last slot): Fade Strength | (empty)
         _, h = W:DualRow(parent, y,
             { type="slider", text="Fade Strength",
+              tooltip="How strongly the chat panel fades while idle. Higher values produce a stronger fade.",
               min = 0, max = 100, step = 1,
               disabled=function() return Cfg("idleFadeEnabled") == false end,
               disabledTooltip="Enable Idle Fade",
@@ -1009,7 +1012,7 @@ initFrame:SetScript("OnEvent", function(self)
                         })
                     end,
                 })
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)

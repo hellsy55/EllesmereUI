@@ -1008,7 +1008,7 @@ initFrame:SetScript("OnEvent", function(self)
 
     ---------------------------------------------------------------------------
     --  WoW Forever spell groups: one section per group. Slots, left to right:
-    --  Add Spell ID, Rename, one per spell (Remove), Remove Group last.
+    --  Add Spell ID, Rename, one per spell, Remove Group last.
     ---------------------------------------------------------------------------
     local function BuildForeverGroupSections(parent, y)
         local f = FDB()
@@ -1016,7 +1016,7 @@ initFrame:SetScript("OnEvent", function(self)
         for groupIndex, group in ipairs(f.customGroups) do
             local slots = {
                 { type="input", text="Add Spell ID", inputStyle="popup", placeholder="Spell ID", inputWidth=110,
-                  tooltip="Type a spell ID and press Enter to add it to this group. Unknown IDs are ignored.\nThe reminder shows the icon of the first spell in the list.",
+                  tooltip="Type a spell ID and press Enter to add it to this group. Unknown IDs are ignored.\nThe reminder shows the icon of the first spell in the list that you know, or of the spell you picked with the Action Picker.",
                   getValue=function() return "" end,
                   setValue=function(text) AddSpellIDToList(group.ids, text) end },
                 { type="labeledButton", text="Rename Group", buttonText="Rename", width=90,
@@ -1029,6 +1029,11 @@ initFrame:SetScript("OnEvent", function(self)
                     tooltip="Remove this spell from the group.",
                     onClick=function()
                         table.remove(group.ids, spellIndex)
+                        if group.castSpellID == spellID then group.castSpellID = nil end
+                        if group.castRanks then
+                            group.castRanks[spellID] = nil
+                            if not next(group.castRanks) then group.castRanks = nil end
+                        end
                         RefreshAll()
                         EllesmereUI:RefreshPage(true)
                     end }
@@ -1797,6 +1802,19 @@ initFrame:SetScript("OnEvent", function(self)
               end }
         );  y = y - h
 
+        if FOREVER then
+            _, h = W:DualRow(parent, y,
+                { type="toggle", text="Action Picker",
+                  tooltip="Right-click a spell group or Class Buffs reminder that has more than one spell to choose the spell its left click casts. Scroll over a spell in the picker to choose its rank.",
+                  getValue=function() local f = FDB(); return f and f.pickerEnabled == true end,
+                  setValue=function(v)
+                      local f = FDB(); if not f then return end; f.pickerEnabled = v
+                      RefreshAll()
+                  end },
+                EllesmereUI.BlankRowCfg()
+            );  y = y - h
+        end
+
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -----------------------------------------------------------------------
@@ -1931,6 +1949,7 @@ initFrame:SetScript("OnEvent", function(self)
                     disabledTooltip = "Gathering Tracking",
                     rows = {
                         { type="toggle", label="Ignore If Class Tracking Is Active",
+                          tooltip="Do not show a gathering-tracking reminder while a class tracking effect is already active.",
                           get=function() local f = FDB(); return not f or f.gatherClassTrack ~= false end,
                           set=function(v) local f = FDB(); if f then f.gatherClassTrack = v; RefreshAll() end end },
                     },

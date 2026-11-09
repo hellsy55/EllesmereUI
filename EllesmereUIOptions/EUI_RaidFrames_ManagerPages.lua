@@ -306,7 +306,7 @@ local function BuildFilterCBDropdown(rgn, claim, dm)
             DmApply()
         end,
         nil, 12)
-    PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+    EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
     rgn._control = cbDD
     rgn._lastInline = nil
 end
@@ -506,7 +506,7 @@ local function BuildTileFiltersDD(rgn, t, dm)
         { separatorFn = function()
             return ns.DM_TileMatchOn(t) and " & " or ", "
         end })
-    PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+    EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
     rgn._control = cbDD
     rgn._lastInline = nil
     if cbRefresh then EllesmereUI.RegisterWidgetRefresh(cbRefresh) end
@@ -916,7 +916,7 @@ local function BuildBaseDetailDM(frame, fontPath)
             { separatorFn = function()
                 return (dm.match == "all" and not AllOn()) and " & " or ", "
             end })
-        PPl.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+        EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
         rgn._control = cbDD
         rgn._lastInline = nil
         if cbRefresh then EllesmereUI.RegisterWidgetRefresh(cbRefresh) end
@@ -963,7 +963,7 @@ local function BuildBaseDetailDM(frame, fontPath)
           setValue = function(v) p.debuffGrowDirection = v; DmApply() end }); sy = sy - hh
     do
         local rgn = posRow2._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Position Offset",
             rows = {
                 { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -1214,7 +1214,7 @@ local function BuildTileDetail(frame, fontPath, t)
               setValue = function(v) TSet("growDirection", v) end }); sy = sy - hh
         do
             local rgn = posRow2._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Position Offset",
                 rows = {
                     { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -1405,7 +1405,7 @@ local function BuildTileDetail(frame, fontPath, t)
               setValue = function(v) TSet("position", v) end }); sy = sy - hh
         do
             local rgn = coreRow._rightRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Position Offset",
                 rows = {
                     { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -3599,7 +3599,7 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
                 EllesmereUI:RefreshPage()
             end,
             nil, 12)
-        PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+        EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
         rgn._control = cbDD
         rgn._lastInline = nil
         EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -3715,7 +3715,7 @@ function ns.BMP_BuildAssignedFilters(parent, sy, ind, fontPath)
                 if ns.ReloadFrames then ns.ReloadFrames() end
             end,
             nil, 10, true)
-        PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+        EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
         rgn._control = cbDD
         rgn._lastInline = nil
         EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)

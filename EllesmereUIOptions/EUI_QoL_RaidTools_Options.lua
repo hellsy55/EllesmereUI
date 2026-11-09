@@ -1182,7 +1182,7 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             { type = "slider", text = "Compact Band Background Opacity",
               min = 0, max = 100, step = 5,
-              tooltip = "Opacity of the background overlay. 0 removes it entirely; the 9.0.7 default is 62.",
+              tooltip = "Opacity of the background overlay. 0 removes it entirely; the default is 62.",
               disabled = CBDisabled,
               getValue = function() return math.floor(((CBCfg("bgA")) or 0.62) * 100 + 0.5) end,
               setValue = function(v)

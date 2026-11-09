@@ -329,7 +329,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                     ReloadAndUpdate()
                     if UpdateHBSwatchVis then UpdateHBSwatchVis() end
                 end)
-            PP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rightRgn, "RIGHT", -20, 0)
             rightRgn._control = cbDD
             rightRgn._lastInline = nil
 
@@ -529,6 +529,8 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
     local mhDis, mhTip, mhRaw = EllesmereUI.MatchGuard(unitKey, "Height")
     local mwDis, mwTip, mwRaw = EllesmereUI.MatchGuard(unitKey, "Width")
     local rightSlot
+    -- Vertical Fill wants tall, narrow bars: the Vertical Fill toggle rebuilds the page.
+    local vertFill = settingsTable.healthVerticalFill == true
     if EllesmereUI.BlizzStyle.Get("unitframes") then
         -- Blizzard Style: the stock size is fixed, so the whole frame scales
         -- instead; the slider takes the gated width's slot (no blank slot).
@@ -539,13 +541,13 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
     elseif opts.hideBarWidth then
         rightSlot = EllesmereUI.BlankRowCfg()
     else
-        rightSlot = EllesmereUI.BlizzStyle.Gate("unitframes", { type="slider", text="Bar Width", min=60, max=300, step=1,
+        rightSlot = EllesmereUI.BlizzStyle.Gate("unitframes", { type="slider", text="Bar Width", min=vertFill and 20 or 60, max=300, step=1,
             disabled=mwDis, disabledTooltip=mwTip, rawTooltip=mwRaw,
             getValue=function() return settingsTable.frameWidth end,
             setValue=function(v) settingsTable.frameWidth = v; ReloadAndUpdate() end })
     end
     sizeRow, h = W:DualRow(parent, y,
-        EllesmereUI.BlizzStyle.Gate("unitframes", { type="slider", text="Health Bar Height", min=10, max=100, step=1,
+        EllesmereUI.BlizzStyle.Gate("unitframes", { type="slider", text="Health Bar Height", min=10, max=vertFill and 400 or 100, step=1,
           disabled=mhDis, disabledTooltip=mhTip, rawTooltip=mhRaw,
           getValue=function() return settingsTable.healthHeight end,
           setValue=function(v) settingsTable.healthHeight = v; ReloadAndUpdate() end }),
@@ -826,7 +828,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         EllesmereUI.BlizzStyle.Gate("unitframes", { type="toggle", text="Vertical Fill",
           tooltip="Fill the health bar bottom-to-top instead of left-to-right. Reverse Fill flips it to top-to-bottom.",
           getValue=function() return settingsTable.healthVerticalFill end,
-          setValue=function(v) settingsTable.healthVerticalFill = v; ReloadAndUpdate() end }),
+          setValue=function(v) settingsTable.healthVerticalFill = v; ReloadAndUpdate(); EllesmereUI:RefreshPage(true) end }),
         unitKey ~= "boss" and smoothBarsWidget or EllesmereUI.BlankRowCfg());  y = y - h
 
     -- Blizzard Style: the stock level number in the boss art's level circle
@@ -917,7 +919,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                             { tooltip = "Class Colored", hasAlpha = false,
                               getValue = function()
                                   local _, ct = UnitClass("player")
-                                  local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                                  local cc = ct and EllesmereUI.GetClassColor(ct)
                                   if cc then return cc.r, cc.g, cc.b end
                                   return 1, 1, 1
                               end,
@@ -951,7 +953,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                     rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local _, classFile = UnitClass("player")
-                        local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                        local cc = classFile and EllesmereUI.GetClassColor(classFile)
                         if cc then return cc.r, cc.g, cc.b end
                         return 1, 1, 1
                     end,
@@ -1044,7 +1046,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                             { tooltip = "Class Colored", hasAlpha = false,
                               getValue = function()
                                   local _, ct = UnitClass("player")
-                                  local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                                  local cc = ct and EllesmereUI.GetClassColor(ct)
                                   if cc then return cc.r, cc.g, cc.b end
                                   return 1, 1, 1
                               end,
@@ -1078,7 +1080,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                     rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local _, classFile = UnitClass("player")
-                        local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                        local cc = classFile and EllesmereUI.GetClassColor(classFile)
                         if cc then return cc.r, cc.g, cc.b end
                         return 1, 1, 1
                     end,
@@ -1166,7 +1168,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                             { tooltip = "Class Colored", hasAlpha = false,
                               getValue = function()
                                   local _, ct = UnitClass("player")
-                                  local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                                  local cc = ct and EllesmereUI.GetClassColor(ct)
                                   if cc then return cc.r, cc.g, cc.b end
                                   return 1, 1, 1
                               end,
@@ -1200,7 +1202,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                     rgn, rgn:GetFrameLevel() + 5,
                     function()
                         local _, classFile = UnitClass("player")
-                        local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                        local cc = classFile and EllesmereUI.GetClassColor(classFile)
                         if cc then return cc.r, cc.g, cc.b end
                         return 1, 1, 1
                     end,
@@ -1293,7 +1295,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                                 { tooltip = "Class Colored", hasAlpha = false,
                                   getValue = function()
                                       local _, ct = UnitClass("player")
-                                      local cc = ct and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[ct]
+                                      local cc = ct and EllesmereUI.GetClassColor(ct)
                                       if cc then return cc.r, cc.g, cc.b end
                                       return 1, 1, 1
                                   end,
@@ -1327,7 +1329,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                         rgn, rgn:GetFrameLevel() + 5,
                         function()
                             local _, classFile = UnitClass("player")
-                            local cc = classFile and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classFile]
+                            local cc = classFile and EllesmereUI.GetClassColor(classFile)
                             if cc then return cc.r, cc.g, cc.b end
                             return 1, 1, 1
                         end,
@@ -1640,7 +1642,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         -- Size + X/Y offsets cog on Text Position (right)
         if not EllesmereUI._prebuilding then
             local rgn = pwrTextRow._rightRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() return MVal("powerPercentText", "none") == "none" end,
                 disabledTooltip = "This option requires a text position other than none.",
                 title = "Text Position",
@@ -1987,7 +1989,7 @@ function ns.UFO_BuildPetOptions(W, parent, y)
                   setValue=function(v) P.happinessAlign = v; happyApply() end },
                 EllesmereUI.BlankRowCfg());  yy = yy - hh
             if not EllesmereUI._prebuilding then
-                EllesmereUI.BuildInlineCog(posRow._leftRegion, {
+                EllesmereUI.BuildInlineCog(posRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                     disabled = happyOff, disabledTooltip = "Show Happiness",
                     title = "Happiness Position",
                     rows = {
@@ -2091,13 +2093,54 @@ function ns.UFO_BuildPetOptions(W, parent, y)
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(buffRow._leftRegion, { disabled=buffsOff, disabledTooltip="Buffs Location",
                 title="Buff Settings", rows=ns.UFO_AuraSettingsRows("buff", PGet, PSet, 40, 4) })
-            EllesmereUI.BuildInlineCog(buffRow._rightRegion, { disabled=buffsOff,
+            EllesmereUI.BuildInlineCog(buffRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON, disabled=buffsOff,
                 disabledTooltip="Buffs Location", title="Buff Position", rows=ns.UFO_AuraPositionRows("buff", PGet, PSet) })
             EllesmereUI.BuildInlineCog(debuffRow._leftRegion, { disabled=debuffsOff, disabledTooltip="Debuffs Location",
                 title="Debuff Settings", rows=ns.UFO_AuraSettingsRows("debuff", PGet, PSet, 20, 10) })
-            EllesmereUI.BuildInlineCog(debuffRow._rightRegion, { disabled=debuffsOff,
+            EllesmereUI.BuildInlineCog(debuffRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON, disabled=debuffsOff,
                 disabledTooltip="Debuffs Location", title="Debuff Position", rows=ns.UFO_AuraPositionRows("debuff", PGet, PSet) })
         end
+    end
+
+    -- CAST BAR, on the EllesmereUI pet frame only. Off by default; the bar is
+    -- built at login, so turning it on asks for a reload. Move it in Unlock Mode.
+    if ns.GetUnitFrameSource("pet") == "eui" then
+        local P = db.profile.pet
+        local function castOff() return P.showCastbar ~= true end
+        _, h = W:SectionHeader(parent, "CAST BAR", y);  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Cast Bar",
+              tooltip="Shows a cast bar for your pet's spells (e.g. Seduction). Turning it on needs a reload. Position it in Unlock Mode.",
+              getValue=function() return P.showCastbar == true end,
+              setValue=function(v)
+                  P.showCastbar = v
+                  ReloadAndUpdate()
+                  local pf = ns.frames and ns.frames.pet
+                  if v and pf and not pf.Castbar then
+                      EllesmereUI:ShowConfirmPopup({
+                          title = "Reload Required",
+                          message = "The pet cast bar is built at login. Reload to show it.",
+                          confirmText = "Reload Now",
+                          cancelText = "Later",
+                          reload = true,
+                      })
+                  end
+                  EllesmereUI:RefreshPage()
+              end },
+            { type="slider", text="Cast Bar Width", min=30, max=400, step=1,
+              disabled=castOff, disabledTooltip="Show Cast Bar",
+              getValue=function() return P.castbarWidth or 120 end,
+              setValue=function(v) P.castbarWidth = v; ReloadAndUpdate() end });  y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Cast Bar Height", min=1, max=40, step=1,
+              disabled=castOff, disabledTooltip="Show Cast Bar",
+              getValue=function() return P.castbarHeight or 12 end,
+              setValue=function(v) P.castbarHeight = v; ReloadAndUpdate() end },
+            { type="toggle", text="Hide When Idle",
+              tooltip="Only show the cast bar while a cast is in progress.",
+              disabled=castOff, disabledTooltip="Show Cast Bar",
+              getValue=function() return P.castbarHideWhenInactive ~= false end,
+              setValue=function(v) P.castbarHideWhenInactive = v; ReloadAndUpdate() end });  y = y - h
     end
 
     -- Store click targets for hover highlight system
@@ -2246,7 +2289,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
     local function bossAfterSize(Ww, pp, yy)
         local _, hh
         -- BUFFS AND DEBUFFS section (below DISPLAY)
-        bossAuraHeader, hh = Ww:SectionHeader(pp, "Buffs and Debuffs", yy);  yy = yy - hh
+        bossAuraHeader, hh = Ww:SectionHeader(pp, "BUFFS AND DEBUFFS", yy);  yy = yy - hh
 
         -- Effective boss aura locations: Simple display overrides the stored
         -- location at runtime (dropdowns show None while active), so every
@@ -2330,7 +2373,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         -- writing here makes the simple offset independent. Disabled while None.
         if not EllesmereUI._prebuilding then
             local leftRgn = simpleBuffRow._leftRegion
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() return ns.GetBossSimpleBuffMode(db.profile.boss) == "none" end,
                 disabledTooltip = "Simple Buff Display",
                 title = "Simple Buff Position",
@@ -2473,7 +2516,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         -- independent. Disabled while Simple Debuff Display is None.
         if not EllesmereUI._prebuilding then
             local leftRgn = simpleRow._leftRegion
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() return ns.GetBossSimpleDebuffMode(db.profile.boss) == "none" end,
                 disabledTooltip = "Simple Debuff Display",
                 title = "Simple Debuff Position",
@@ -2664,7 +2707,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               getValue=function() return db.profile.boss.buffCooldownTextSize or 10 end,
               setValue=function(v) db.profile.boss.buffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
         if not EllesmereUI._prebuilding then  -- Directions cog on Buff Size (X/Y cluster offset)
-            EllesmereUI.BuildInlineCog(bossAuraSizeRow._leftRegion, { disabled = bossBuffSizeOff, title = "Buff Position", rows = {
+            EllesmereUI.BuildInlineCog(bossAuraSizeRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON, disabled = bossBuffSizeOff, title = "Buff Position", rows = {
                 { type="slider", label="Offset X", min=-200, max=200, step=1,
                   get=function() return db.profile.boss.buffOffsetX or 0 end,
                   set=function(v) db.profile.boss.buffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -2994,6 +3037,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     return ns.GetBossSimpleBuffMode(p) == "none" and not p.showBuffs
                 end
                 bossFilterRightSlot = { type="dropdown", text="Boss Buff Filter",
+                  tooltip="Choose which buffs are shown on Boss Frames independently of the Boss Debuff Filter.",
                   disabled=buffFilterOff, disabledTooltip="Buffs", requireState="displayed",
                   values={ __placeholder="..." }, order={ "__placeholder" },
                   getValue=function() return "__placeholder" end, setValue=function() end }
@@ -3136,7 +3180,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
     local function bossIndicators(Ww, pp, yy)
         local hh
 
-        _, hh = Ww:SectionHeader(pp, "Indicators", yy);  yy = yy - hh
+        _, hh = Ww:SectionHeader(pp, "INDICATORS", yy);  yy = yy - hh
 
         -- Row 1: Out of Range Alpha | Spell Target
         -- (Out of Range read live by the range ticker, so no reload needed.)
@@ -3559,9 +3603,12 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         end
 
         local function BuildBossCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback, showSourceCog)
+            local description = (enabledKey == "cancelledCastEnabled")
+                and "Briefly keeps the cast bar visible when the unit cancels its spell before completion. This does not mean another unit interrupted it."
+                or "Briefly shows an interrupted cast after another unit stops the spell, with an optional interrupter name."
             local row
             row, hh = Ww:DualRow(pp, yy,
-                { type="toggle", text=label,
+                { type="toggle", text=label, tooltip=description,
                   getValue=function() return B[enabledKey] == true end,
                   setValue=function(v) B[enabledKey]=v and true or false; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
                 { type="slider", text="Duration", min=0.1, max=3, step=0.1,

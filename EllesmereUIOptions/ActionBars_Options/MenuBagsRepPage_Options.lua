@@ -731,7 +731,7 @@ local function DataBarKit(parent)
         if extraRows then
             for _, r in ipairs(extraRows) do textRows[#textRows + 1] = r end
         end
-        EllesmereUI.BuildInlineCog(region, { anchorTo = region._control,
+        EllesmereUI.BuildInlineCog(region, { icon = EllesmereUI.DIRECTIONS_ICON, anchorTo = region._control,
             title = "Bar Text Offsets",
             disabled = _blizzDis, disabledTooltip = BLIZZ_DIS_TIP, rawTooltip = true,
             rows = textRows,
