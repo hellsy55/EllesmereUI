@@ -149,6 +149,18 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                     end
                     ns.RefreshAllSettings()
                   end },
+                { type = "colorpicker", label = "Health Bar Color",
+                  tooltip = "Health bar color for friendly players when Class Colored Health Bar is off.",
+                  disabled = function() return DBVal("classColorFriendly") ~= false end,
+                  disabledTooltip = "Class Colored Health Bar", requireState = "disabled",
+                  get = function()
+                    local c = DBVal("friendlyBarColor") or defaults.friendlyBarColor
+                    return c.r, c.g, c.b
+                  end,
+                  set = function(r, g, b)
+                    DB().friendlyBarColor = { r = r, g = g, b = b }
+                    ns.RefreshFriendlyColors()
+                  end },
                 { type = "toggle", label = "Class Colored Names",
                   get = function() return DBVal("friendlyNameClassColor") == true end,
                   set = function(v)
@@ -789,15 +801,15 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                   if sourceCogBtn and sourceCogBtn._euiCogState then sourceCogBtn._euiCogState() end
               end },
             buffFilterDropdown); y = y - h
-        -- "Dispellable By Me" (retail only, off by default): narrows Only Dispellable to your group's dispels.
+        -- "Dispellable By Me" (retail only, off by default): narrows Important and Only Dispellable to your group's dispels.
         if not EllesmereUI._prebuilding and not EllesmereUI.IS_FOREVER then
             EllesmereUI.BuildInlineCog(sourceRow._rightRegion, {
-                disabled = function() return DBVal("npEnemyBuffFilter") ~= "dispellable" end,
-                disabledTooltip = "Requires Enemy Buff Filter set to Only Dispellable", rawTooltip = true,
+                disabled = function() return DBVal("npEnemyBuffFilter") == "showall" end,
+                disabledTooltip = "Requires Enemy Buff Filter set to Important or Only Dispellable", rawTooltip = true,
                 title = "Enemy Buff Filter",
                 rows = {
                     { type = "toggle", label = "Dispellable By Me",
-                      tooltip = "With Only Dispellable, show just the buffs you or your group can dispel, purge or soothe, instead of every dispellable buff.",
+                      tooltip = "With Important or Only Dispellable, count only the buffs you or your group can dispel, purge or soothe as dispellable, instead of every dispellable buff.",
                       get = function() return DBVal("npEnemyBuffDispelByMe") == true end,
                       set = function(v)
                           DB().npEnemyBuffDispelByMe = v or nil

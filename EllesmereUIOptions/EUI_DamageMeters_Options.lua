@@ -1804,7 +1804,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SH_ICON_VIS_ITEMS,
                 function(k) return SHDB()[k] or false end,
                 function(k, v) SHDB()[k] = v; RefreshSH() end)
-            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
@@ -1995,7 +1995,7 @@ initFrame:SetScript("OnEvent", function(self)
                 SH_BAR_VIS_ITEMS,
                 function(k) return SHDB()[k] or false end,
                 function(k, v) SHDB()[k] = v; RefreshSH() end)
-            PP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
+            EllesmereUI.PanelPP.Point(cbDD, "RIGHT", rgn, "RIGHT", -20, 0)
             rgn._control = cbDD
             rgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)

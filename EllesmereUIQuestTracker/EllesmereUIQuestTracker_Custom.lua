@@ -951,6 +951,13 @@ local function ShowMenu(owner, questID)
         end }
     end
     items[#items + 1] = { text = ABANDON_QUEST_ABBREV, noLoc = true, onClick = function() Abandon(questID) end }
+    -- Wowhead Quest Links: the entry Blizzard's tracker menu gets, after a divider
+    -- as there (QuestLinks.lua).
+    if EQT.WowheadQuestOK(questID) then
+        items[#items + 1] = "---"
+        items[#items + 1] = { text = EllesmereUI.L("Wowhead Link"), noLoc = true,
+            onClick = function() EQT.ShowWowheadLink(questID) end }
+    end
     EllesmereUI.ShowContextMenu(owner, items, MENU_OPTS)
 end
 

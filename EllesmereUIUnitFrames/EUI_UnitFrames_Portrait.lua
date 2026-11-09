@@ -1031,7 +1031,7 @@ local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
             -- Dark mode: always the player's own class color.
             local _, classToken = UnitClass("player")
             if classToken then
-                local c = (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classToken]
+                local c = EllesmereUI.GetClassColor(classToken)
                 if c then bR, bG, bB = c.r, c.g, c.b end
             end
         elseif unitToken and UnitExists(unitToken) then
@@ -1039,7 +1039,7 @@ local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
             -- for NPCs, tapped grey).
             local _, classToken = UnitClass(unitToken)
             if UnitIsPlayer(unitToken) and not issecretvalue(classToken) and classToken then
-                local c = (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classToken]
+                local c = EllesmereUI.GetClassColor(classToken)
                 if c then bR, bG, bB = c.r, c.g, c.b end
             elseif UnitIsTapDenied and UnitIsTapDenied(unitToken) then
                 bR, bG, bB = 0.6, 0.6, 0.6
@@ -1057,7 +1057,7 @@ local function ApplyDetachedPortraitShape(backdrop, uSettings, unitToken)
             -- Fallback: player class color.
             local _, classToken = UnitClass("player")
             if classToken then
-                local c = (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[classToken]
+                local c = EllesmereUI.GetClassColor(classToken)
                 if c then bR, bG, bB = c.r, c.g, c.b end
             end
         end
