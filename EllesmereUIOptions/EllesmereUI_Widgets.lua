@@ -405,7 +405,9 @@ EllesmereUI.ResolveDisabledTip = ResolveDisabledTip
 
 -- Disabled-tooltip overlay on a control frame (slider region, toggle, swatch): shows tooltip centered when hovered while disabled.
 local function AddControlDisabledTooltip(controlAnchor, cfg)
-    if not cfg.disabledTooltip or not cfg.disabled then return end
+    -- A locked colorpicker still explains its state even if the caller did
+    -- not supply a more precise requirement.
+    if not cfg.disabled or (not cfg.disabledTooltip and cfg.type ~= "colorpicker") then return end
     local parent = controlAnchor:GetParent()
     local hit = CreateFrame("Frame", nil, parent)
     hit:SetAllPoints(controlAnchor)
@@ -416,6 +418,9 @@ local function AddControlDisabledTooltip(controlAnchor, cfg)
     hit:SetScript("OnEnter", function()
         if cfg.disabled() then
             local tt = ResolveDisabledTip(cfg)
+            if not tt and cfg.type == "colorpicker" then
+                tt = "This color is unavailable with the current settings."
+            end
             if tt then ShowWidgetTooltip(controlAnchor, tt) end
         end
     end)

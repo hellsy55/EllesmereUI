@@ -1053,6 +1053,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             PP.Point(fpsSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = fpsSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, fpsSwatch, "swatch")
 
             -- Class-colour swatch: live player class colour.
             local fpsClassSw, fpsUpdClass = EllesmereUI.BuildColorSwatch(
@@ -1066,6 +1067,7 @@ initFrame:SetScript("OnEvent", function(self)
             fpsClassSw:SetScript("OnClick", function() fpsSetMode("class") end)
             PP.Point(fpsClassSw, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = fpsClassSw
+            EllesmereUI.OrderInlineAddon(leftRgn, fpsClassSw, "swatch")
 
             local fpsTips = { { fpsClassSw, "Class Color" }, { fpsSwatch, "Custom Color" } }
             for _, e in ipairs(fpsTips) do
@@ -1256,6 +1258,7 @@ initFrame:SetScript("OnEvent", function(self)
             local durSwatch, durUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, durSwGet, durSwSet, nil, 20)
             PP.Point(durSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = durSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, durSwatch, "swatch")
 
             -- Disabled overlay for swatch when durability warning is off
             local durSwBlock = CreateFrame("Frame", nil, durSwatch)
@@ -1290,6 +1293,7 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetSize(26, 26)
             eyeBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(leftRgn, eyeBtn, "preview")
             eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, durOff() and 0.15 or 0.4)
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
@@ -1637,6 +1641,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             PP.Point(ssCustom, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = ssCustom
+            EllesmereUI.OrderInlineAddon(leftRgn, ssCustom, "swatch")
 
             -- Class-colour swatch: live player class colour.
             local ssClass, ssUpdClass = EllesmereUI.BuildColorSwatch(
@@ -1650,6 +1655,7 @@ initFrame:SetScript("OnEvent", function(self)
             ssClass:SetScript("OnClick", function() ssSetMode("class") end)
             PP.Point(ssClass, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = ssClass
+            EllesmereUI.OrderInlineAddon(leftRgn, ssClass, "swatch")
 
             -- Multicolored swatch (outermost): the per-stat palette, previewed
             -- by its first hue (crit gold).
@@ -1660,6 +1666,7 @@ initFrame:SetScript("OnEvent", function(self)
             ssMulti:SetScript("OnClick", function() ssSetMode("palette") end)
             PP.Point(ssMulti, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = ssMulti
+            EllesmereUI.OrderInlineAddon(leftRgn, ssMulti, "swatch")
 
             local ssTips = { { ssMulti, "Multicolored" }, { ssClass, "Class Color" }, { ssCustom, "Custom Color" } }
             for _, e in ipairs(ssTips) do
@@ -2199,6 +2206,7 @@ initFrame:SetScript("OnEvent", function(self)
             local chSwatch, chUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, chSwGet, chSwSet, true, 20)
             PP.Point(chSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = chSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, chSwatch, "swatch")
 
             local chSwBlock = CreateFrame("Frame", nil, chSwatch)
             chSwBlock:SetAllPoints()
@@ -2265,6 +2273,7 @@ initFrame:SetScript("OnEvent", function(self)
             local mcSwatch, mcUpdate = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, mcGet, mcSet, true, 20)
             PP.Point(mcSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
             leftRgn._lastInline = mcSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, mcSwatch, "swatch")
 
             local mcBlock = CreateFrame("Frame", nil, mcSwatch)
             mcBlock:SetAllPoints()

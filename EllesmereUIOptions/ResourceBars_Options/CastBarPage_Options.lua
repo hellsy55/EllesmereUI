@@ -718,6 +718,7 @@ function ns.ERB_BuildCastBarPage(pageName, parent, yOffset)
         end
         UpdateBgSwatch()
         EllesmereUI.RegisterWidgetRefresh(UpdateBgSwatch)
+        EllesmereUI.ExplainDisabledSwatch(bgSwatch, function() return bgSwatch._disabledTooltip ~= nil end)
     end
 
     -- Row 3: Bar Texture | Spell Text (cog RESIZE: text size + x/y)

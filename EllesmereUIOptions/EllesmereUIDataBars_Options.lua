@@ -1748,7 +1748,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- their sizing rows).
         y = y - 15
         do
-            local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
+            local EG = EllesmereUI.PANEL_ACCENT
             local BTN_W, BTN_H = 150, 26
             -- On a kept page wrapper the toggle is the page's own frame
             -- (Pool.Owned: the same one every build, hidden by a build with no
@@ -1769,6 +1769,7 @@ initFrame:SetScript("OnEvent", function(self)
                 { key = "auto", label = "Auto Sized" },
                 { key = "even", label = "Even Split" },
             }
+            local selectedBg, selectedLabel
             for mi, m in ipairs(MODES) do
                 local btn = CreateFrame("Button", nil, wrap)
                 btn:SetSize(BTN_W, BTN_H)
@@ -1779,6 +1780,7 @@ initFrame:SetScript("OnEvent", function(self)
                 lbl:SetPoint("CENTER")
                 lbl:SetText(L(m.label))
                 if curMode == m.key then
+                    selectedBg, selectedLabel = bg, lbl
                     bg:SetColorTexture(EG.r, EG.g, EG.b, 0.85)
                     -- A light accent (including white) needs dark text.
                     local lightness = EG.r * 0.299 + EG.g * 0.587 + EG.b * 0.114
@@ -1805,6 +1807,18 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
             end
+            -- Repaint the selected half immediately when Options Panel Accent Color changes.
+            -- The stable wrapper key replaces the callback on page rebuilds.
+            EllesmereUI.RegPanelAccent({ type = "callback", obj = wrap,
+                fn = function(r, g, b)
+                    selectedBg:SetColorTexture(r, g, b, 0.85)
+                    local lightness = r * 0.299 + g * 0.587 + b * 0.114
+                    if lightness > 0.55 then
+                        selectedLabel:SetTextColor(0.08, 0.08, 0.09, 1)
+                    else
+                        selectedLabel:SetTextColor(1, 1, 1, 1)
+                    end
+                end })
             y = y - (BTN_H + 15)
         end
 
@@ -3646,6 +3660,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.RegisterWidgetRefresh(function() updateSwatch(); UpdateState() end)
                 UpdateState()
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             end
 
             if b.type == "gold" and goldTipRow then
@@ -3812,6 +3827,7 @@ initFrame:SetScript("OnEvent", function(self)
                         false, 20)
                     PP.Point(swatch, "RIGHT", rgn._control, "LEFT", -8, 0)
                     rgn._lastInline = swatch
+                    EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                     local block = CreateFrame("Frame", nil, swatch)
                     block:SetAllPoints()
                     block:SetFrameLevel(swatch:GetFrameLevel() + 10)

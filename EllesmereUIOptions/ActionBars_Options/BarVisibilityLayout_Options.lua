@@ -1068,6 +1068,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 local bgSwatch, bgUpdateSwatch = EllesmereUI.BuildColorSwatch(bgRgn, bgRgn:GetFrameLevel() + 5, bgColorGet, bgColorSet, true, 20)
                 PP.Point(bgSwatch, "RIGHT", bgRgn._lastInline or bgRgn._control, "LEFT", -8, 0)
                 bgRgn._lastInline = bgSwatch
+                EllesmereUI.OrderInlineAddon(bgRgn, bgSwatch, "swatch")
                 EllesmereUI.RegisterWidgetRefresh(function()
                     local off = BgDisabled()
                     bgSwatch:SetAlpha(off and 0.15 or 1)

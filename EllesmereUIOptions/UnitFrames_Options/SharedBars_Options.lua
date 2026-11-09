@@ -31,6 +31,7 @@ function ns.UFO_AddAbsorbPreviewEye(region, flag, label)
     eyeBtn:SetFrameLevel(region:GetFrameLevel() + 5)
     EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
     region._lastInline = eyeBtn
+    EllesmereUI.OrderInlineAddon(region, eyeBtn, "preview")
     local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
     eyeTex:SetAllPoints()
     local function RefreshEye()
@@ -299,6 +300,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
         bgClassSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         PP.Point(bgClassSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgClassSw
+        EllesmereUI.OrderInlineAddon(rgn, bgClassSw, "swatch")
         RegisterWidgetRefresh(function()
             bgClassUpdate()
             bgClassSw:SetAlpha(SVal("bgClassColored", false) and 1 or 0.3)
@@ -329,6 +331,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
         bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSw
+        EllesmereUI.OrderInlineAddon(rgn, bgSw, "swatch")
         RegisterWidgetRefresh(function()
             bgSwUpdate()
             bgSw:SetAlpha(SVal("bgClassColored", false) and 0.3 or 1)
@@ -817,6 +820,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 local ltSwatch, ltUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, ltSwGet, ltSwSet, nil, 20)
                 PP.Point(ltSwatch, "RIGHT", ltClassSwatch, "LEFT", -8, 0)
                 leftRgn._lastInline = ltSwatch
+                EllesmereUI.OrderInlineAddon(leftRgn, ltSwatch, "swatch")
                 local ltOrigClick = ltSwatch:GetScript("OnClick")
                 ltSwatch:SetScript("OnClick", function(self, ...)
                     if SVal("leftTextContent", "name") == "none" then return end
@@ -1023,6 +1027,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 local rtSwatch, rtUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, rtSwGet, rtSwSet, nil, 20)
                 PP.Point(rtSwatch, "RIGHT", rtClassSwatch, "LEFT", -8, 0)
                 rightRgn._lastInline = rtSwatch
+                EllesmereUI.OrderInlineAddon(rightRgn, rtSwatch, "swatch")
                 local rtOrigClick = rtSwatch:GetScript("OnClick")
                 rtSwatch:SetScript("OnClick", function(self, ...)
                     if SVal("rightTextContent", "both") == "none" then return end
@@ -1217,6 +1222,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(ctrRgn, ctrRgn:GetFrameLevel() + 5, ctSwGet, ctSwSet, nil, 20)
                 PP.Point(ctSwatch, "RIGHT", ctClassSwatch, "LEFT", -8, 0)
                 ctrRgn._lastInline = ctSwatch
+                EllesmereUI.OrderInlineAddon(ctrRgn, ctSwatch, "swatch")
                 local ctOrigClick = ctSwatch:GetScript("OnClick")
                 ctSwatch:SetScript("OnClick", function(self, ...)
                     if SVal("centerTextContent", "none") == "none" then return end
@@ -1406,6 +1412,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 local etSwatch, etUpdateSwatch = EllesmereUI.BuildColorSwatch(etrRgn, etrRgn:GetFrameLevel() + 5, etSwGet, etSwSet, nil, 20)
                 PP.Point(etSwatch, "RIGHT", etClassSwatch, "LEFT", -8, 0)
                 etrRgn._lastInline = etSwatch
+                EllesmereUI.OrderInlineAddon(etrRgn, etSwatch, "swatch")
                 local etOrigClick = etSwatch:GetScript("OnClick")
                 etSwatch:SetScript("OnClick", function(self, ...)
                     if SVal("extraTextContent", "none") == "none" then return end
@@ -1863,6 +1870,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
         bgPwrSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         PP.Point(bgPwrSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgPwrSw
+        EllesmereUI.OrderInlineAddon(rgn, bgPwrSw, "swatch")
         RegisterWidgetRefresh(function()
             bgPwrUpdate()
             bgPwrSw:SetAlpha(SVal("powerBgPowerColored", false) and 1 or 0.3)
@@ -1893,6 +1901,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
         bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSw
+        EllesmereUI.OrderInlineAddon(rgn, bgSw, "swatch")
         RegisterWidgetRefresh(function()
             bgSwUpdate()
             bgSw:SetAlpha(SVal("powerBgPowerColored", false) and 0.3 or 1)
@@ -2337,6 +2346,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
         end)
         pbSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         rightRgn._lastInline = pbSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, pbSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() updatePBSwatch() end)
     end
 
@@ -2371,6 +2381,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
             rgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
             eyeTex:SetAllPoints()
             local function RefreshCostEye()
@@ -2861,6 +2872,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end, true, 20)
         emptySwatch:SetPoint("RIGHT", ccRgn._lastInline or ccRgn._control, "LEFT", -6, 0)
         ccRgn._lastInline = emptySwatch
+        EllesmereUI.OrderInlineAddon(ccRgn, emptySwatch, "swatch")
         local function UpdateEmptySwatch()
             local crOff = SCPStyle() ~= "modern"
             if crOff then
@@ -3569,11 +3581,15 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local function UpdateAbsorbSwatchVis()
             swatch:SetAlpha(SValSupported("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
         end
         RegisterWidgetRefresh(UpdateAbsorbSwatchVis)
         UpdateAbsorbSwatchVis()
+        EllesmereUI.ExplainDisabledSwatch(swatch,
+            function() return SValSupported("showPlayerAbsorb", "none") == "none" end,
+            "Absorb Style")
     end
     -- Sync icon: Absorb Style + color swatch + cog settings across all frames
     if not EllesmereUI._prebuilding then
@@ -3691,6 +3707,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         -- Blocking overlay: disabled for "none" and the pre-colored
         -- "Large Outlined Stripes" heal styles (their texture is not tinted).
         local swatchBlock = CreateFrame("Frame", nil, swatch)
@@ -3775,6 +3792,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local block = CreateFrame("Frame", nil, swatch)
         block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10)
         block:EnableMouse(true)
@@ -3847,6 +3865,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end, true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local function UpdateAbsorbBarSwatchVis()
             swatch:SetAlpha(SValSupported("absorbBarPosition", "none") == "none" and 0.3 or 1)
         end
@@ -3891,6 +3910,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end, true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local function UpdateHealAbsorbBarSwatchVis()
             swatch:SetAlpha(SValSupported("healAbsorbBarPosition", "none") == "none" and 0.3 or 1)
         end
@@ -3934,6 +3954,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
             end, true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local function RefreshColor()
             swatch:SetAlpha(SValSupported("maxHealthBarPosition", "none") == "none" and 0.3 or 1)
         end
@@ -3970,6 +3991,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         rgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
         eyeTex:SetAllPoints()
         local function RefreshPredEye()
@@ -4005,6 +4027,7 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             swatch:HookScript("OnEnter", function(sw) EllesmereUI.ShowWidgetTooltip(sw, tip) end)
             swatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             local function UpdateVis()

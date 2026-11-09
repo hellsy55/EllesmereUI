@@ -109,6 +109,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 pickable,20)
             PP.Point(sw,"RIGHT",anchor,"LEFT",-8,0)
+            right._lastInline = sw
+            EllesmereUI.OrderInlineAddon(right, sw, "swatch")
             local orig=sw:GetScript("OnClick")
             sw:SetScript("OnClick",function(self)
                 if not pickable or (EllesmereUIDB[prefix.."BorderColorMode"] or "custom")~=mode then
@@ -128,6 +130,10 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdSwatchState)
             UpdSwatchState()
+            if disabledFn then
+                EllesmereUI.ExplainDisabledSwatch(sw, disabledFn,
+                    prefix == "tooltip" and "Reskin Tooltip" or "Reskin Popups and Menus")
+            end
             return sw
         end
         local accent=AddModeSwatch(right._control,"accent","Accent Color",function() local c=EllesmereUI.ELLESMERE_GREEN; return c.r,c.g,c.b,1 end,false)
@@ -314,8 +320,8 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         _,h=W:DualRow(parent,y,
-            {type="colorpicker",text="Button Background",hasAlpha=true,disabled=popupOff,getValue=function() local c=EllesmereUIDB.popupMenuButtonBackgroundColor or {r=.1,g=.1,b=.1,a=.8}; return c.r,c.g,c.b,c.a end,setValue=function(r,g,b,a) EllesmereUIDB.popupMenuButtonBackgroundColor={r=r,g=g,b=b,a=a}; PopupPreviewRepaint() end},
-            {type="multiSwatch",text="Element & Text Color",disabled=popupOff,swatches={
+            {type="colorpicker",text="Button Background",hasAlpha=true,disabled=popupOff,disabledTooltip="Reskin Popups and Menus",getValue=function() local c=EllesmereUIDB.popupMenuButtonBackgroundColor or {r=.1,g=.1,b=.1,a=.8}; return c.r,c.g,c.b,c.a end,setValue=function(r,g,b,a) EllesmereUIDB.popupMenuButtonBackgroundColor={r=r,g=g,b=b,a=a}; PopupPreviewRepaint() end},
+            {type="multiSwatch",text="Element & Text Color",disabled=popupOff,disabledTooltip="Reskin Popups and Menus",swatches={
                 -- Effective mode comes from the skin file's resolver: unset =
                 -- native unless the legacy Accent Colored Elements opt-in is present.
                 -- All four highlights read it so the default state is shown truthfully.
@@ -1117,6 +1123,7 @@ initFrame:SetScript("OnEvent", function(self)
                 false, 20)
             PP.Point(qtSwatch, "RIGHT", timerRgn._lastInline or timerRgn._control, "LEFT", -8, 0)
             timerRgn._lastInline = qtSwatch
+            EllesmereUI.OrderInlineAddon(timerRgn, qtSwatch, "swatch")
             qtSwatch:HookScript("OnEnter", function(self)
                 EllesmereUI.ShowWidgetTooltip(self, "Countdown Text Color")
             end)
@@ -1130,6 +1137,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdQueueTimerState)
             UpdQueueTimerState()
+            EllesmereUI.ExplainDisabledSwatch(qtSwatch, timerOff, "Countdown Timer")
         end
 
         return math.abs(y)
@@ -1256,6 +1264,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
+            EllesmereUI.OrderInlineIcon(rgn, cogBtn, EllesmereUI.PANEL_MORE_ICON)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY"); cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.PANEL_MORE_ICON)
             local function ilvlOn() return EllesmereUIDB and EllesmereUIDB.showItemLevel ~= false end
@@ -2649,6 +2658,7 @@ initFrame:SetScript("OnEvent", function(self)
         end)
         accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         rgn._lastInline = accentSwatch
+        EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
         local function refreshPair()
             updateCustom(); updateAccent()
@@ -4404,6 +4414,7 @@ initFrame:SetScript("OnEvent", function(self)
                 true, 20)
             EllesmereUI.PanelPP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             -- No border to colour at size 0: dimmed and blocked.
             local block = CreateFrame("Frame", nil, swatch)
             block:SetAllPoints()

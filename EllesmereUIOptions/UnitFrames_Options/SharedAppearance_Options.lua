@@ -709,6 +709,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             true, 20)
         PP.Point(borderSwatch, "RIGHT", leftRgn._lastInline or ctrl, "LEFT", -8, 0)
         leftRgn._lastInline = borderSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, borderSwatch, "swatch")
         borderSwatch:SetScript("OnEnter", function()
             EllesmereUI.ShowWidgetTooltip(borderSwatch, "Border")
         end)
@@ -971,6 +972,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end, true, 20)
         hlSwatch:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
         rightRgn._lastInline = hlSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, hlSwatch, "swatch")
         hlSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(hlSwatch, "Highlight") end)
         hlSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -989,6 +991,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 end, false, 20)
             hasSwatch:SetPoint("RIGHT", rightRgn._lastInline, "LEFT", -8, 0)
             rightRgn._lastInline = hasSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, hasSwatch, "swatch")
             hasSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(hasSwatch, "Has Aggro") end)
             hasSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -1005,6 +1008,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 end, false, 20)
             nearSwatch:SetPoint("RIGHT", rightRgn._lastInline, "LEFT", -8, 0)
             rightRgn._lastInline = nearSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, nearSwatch, "swatch")
             nearSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(nearSwatch, "Close to Aggro") end)
             nearSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         end
@@ -2066,6 +2070,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end, true, 20)
         sw:SetPoint("RIGHT", btbRgn._lastInline or btbRgn._control, "LEFT", -12, 0)
         btbRgn._lastInline = sw
+        EllesmereUI.OrderInlineAddon(btbRgn, sw, "swatch")
         -- Disabled state for swatch when text bar is off
         local function UpdateBtbSwatchState()
             local btbOn = SVal("bottomTextBar", false)
@@ -2337,6 +2342,8 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             function() end, nil, 20)
         PP.Point(blClassSwatch, "RIGHT", btbLRgn._lastInline or btbLRgn._control, "LEFT", -8, 0)
+        btbLRgn._lastInline = blClassSwatch
+        EllesmereUI.OrderInlineAddon(btbLRgn, blClassSwatch, "swatch")
         blClassSwatch:SetScript("OnClick", function()
             if blOff() then return end
             SSet("btbLeftClassColor", true); SSet("btbLeftPowerColor", false)
@@ -2354,6 +2361,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
         local blSwatch, blUpdateSwatch = EllesmereUI.BuildColorSwatch(btbLRgn, btbLRgn:GetFrameLevel() + 5, blSwGet, blSwSet, nil, 20)
         PP.Point(blSwatch, "RIGHT", blClassSwatch, "LEFT", -8, 0)
         btbLRgn._lastInline = blSwatch
+        EllesmereUI.OrderInlineAddon(btbLRgn, blSwatch, "swatch")
         local blOrigClick = blSwatch:GetScript("OnClick")
         blSwatch:SetScript("OnClick", function(self, ...)
             if blOff() then return end
@@ -2379,6 +2387,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             function() end, nil, 20)
         PP.Point(blPowerSwatch, "RIGHT", blSwatch, "LEFT", -8, 0)
         btbLRgn._lastInline = blPowerSwatch
+        EllesmereUI.OrderInlineAddon(btbLRgn, blPowerSwatch, "swatch")
         blPowerSwatch:SetScript("OnClick", function()
             if blOff() then return end
             SSet("btbLeftPowerColor", true); SSet("btbLeftClassColor", false)
@@ -2470,6 +2479,8 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             function() end, nil, 20)
         PP.Point(brClassSwatch, "RIGHT", btbRRgn._lastInline or btbRRgn._control, "LEFT", -8, 0)
+        btbRRgn._lastInline = brClassSwatch
+        EllesmereUI.OrderInlineAddon(btbRRgn, brClassSwatch, "swatch")
         brClassSwatch:SetScript("OnClick", function()
             if brOff() then return end
             SSet("btbRightClassColor", true); SSet("btbRightPowerColor", false)
@@ -2487,6 +2498,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
         local brSwatch, brUpdateSwatch = EllesmereUI.BuildColorSwatch(btbRRgn, btbRRgn:GetFrameLevel() + 5, brSwGet, brSwSet, nil, 20)
         PP.Point(brSwatch, "RIGHT", brClassSwatch, "LEFT", -8, 0)
         btbRRgn._lastInline = brSwatch
+        EllesmereUI.OrderInlineAddon(btbRRgn, brSwatch, "swatch")
         local brOrigClick = brSwatch:GetScript("OnClick")
         brSwatch:SetScript("OnClick", function(self, ...)
             if brOff() then return end
@@ -2512,6 +2524,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             function() end, nil, 20)
         PP.Point(brPowerSwatch, "RIGHT", brSwatch, "LEFT", -8, 0)
         btbRRgn._lastInline = brPowerSwatch
+        EllesmereUI.OrderInlineAddon(btbRRgn, brPowerSwatch, "swatch")
         brPowerSwatch:SetScript("OnClick", function()
             if brOff() then return end
             SSet("btbRightPowerColor", true); SSet("btbRightClassColor", false)
@@ -2713,6 +2726,8 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             function() end, nil, 20)
         PP.Point(bcClassSwatch, "RIGHT", btbCRgn._lastInline or btbCRgn._control, "LEFT", -8, 0)
+        btbCRgn._lastInline = bcClassSwatch
+        EllesmereUI.OrderInlineAddon(btbCRgn, bcClassSwatch, "swatch")
         bcClassSwatch:SetScript("OnClick", function()
             if bcOff() then return end
             SSet("btbCenterClassColor", true); SSet("btbCenterPowerColor", false)
@@ -2730,6 +2745,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
         local bcSwatch, bcUpdateSwatch = EllesmereUI.BuildColorSwatch(btbCRgn, btbCRgn:GetFrameLevel() + 5, bcSwGet, bcSwSet, nil, 20)
         PP.Point(bcSwatch, "RIGHT", bcClassSwatch, "LEFT", -8, 0)
         btbCRgn._lastInline = bcSwatch
+        EllesmereUI.OrderInlineAddon(btbCRgn, bcSwatch, "swatch")
         local bcOrigClick = bcSwatch:GetScript("OnClick")
         bcSwatch:SetScript("OnClick", function(self, ...)
             if bcOff() then return end
@@ -2755,6 +2771,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             function() end, nil, 20)
         PP.Point(bcPowerSwatch, "RIGHT", bcSwatch, "LEFT", -8, 0)
         btbCRgn._lastInline = bcPowerSwatch
+        EllesmereUI.OrderInlineAddon(btbCRgn, bcPowerSwatch, "swatch")
         bcPowerSwatch:SetScript("OnClick", function()
             if bcOff() then return end
             SSet("btbCenterPowerColor", true); SSet("btbCenterClassColor", false)
@@ -3014,6 +3031,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
         eyeBtn:SetFrameLevel(ciRgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         ciRgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(ciRgn, eyeBtn, "preview")
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
         eyeTex:SetAllPoints()
         local function RefreshCombatEye()
@@ -3089,11 +3107,26 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
             end, false, 20)
         combatSwatch:SetPoint("RIGHT", ciRgn._lastInline or ciRgn._control, "LEFT", -8, 0)
         ciRgn._lastInline = combatSwatch
+        EllesmereUI.OrderInlineAddon(ciRgn, combatSwatch, "swatch")
         local combatSwatchBlock = CreateFrame("Frame", nil, combatSwatch)
         combatSwatchBlock:SetAllPoints()
         combatSwatchBlock:SetFrameLevel(combatSwatch:GetFrameLevel() + 10)
         combatSwatchBlock:EnableMouse(true)
         combatSwatchBlock:Hide()
+        combatSwatchBlock:SetScript("OnEnter", function(self)
+            local style = SValSupported("combatIndicatorStyle", "class")
+            local colorMode = SValSupported("combatIndicatorColor", "custom")
+            local tip
+            if style == "none" then
+                tip = "Choose a Combat Indicator style other than None to edit its color"
+            elseif style:find("^combat%d") then
+                tip = "This Combat Indicator style uses its own icon colors"
+            elseif colorMode ~= "custom" then
+                tip = "Disable Class Colored in Combat Indicator Settings to edit this color"
+            end
+            if tip then EllesmereUI.ShowWidgetTooltip(self, tip) end
+        end)
+        combatSwatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         local function UpdateSwatchVisibility()
             local colorMode = SValSupported("combatIndicatorColor", "custom")
             local style = SValSupported("combatIndicatorStyle", "class")
@@ -3124,6 +3157,7 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
         eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         rgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
         eyeTex:SetAllPoints()
         local function RefreshEye()

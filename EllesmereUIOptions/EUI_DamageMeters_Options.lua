@@ -148,6 +148,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="colorpicker", text="Accent Color", hasAlpha=false,
               tooltip="Color used by Damage Meters elements that follow the accent, including bars, header text, icons, timer and Spell History.",
               disabled=function() return Cfg("accentColorEnabled") ~= true end,
+              disabledTooltip = "Custom Accent Color",
               getValue=function()
                   local c = Cfg("accentColor")
                   if c then return c.r, c.g, c.b, 1 end
@@ -510,6 +511,7 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.RegisterWidgetRefresh(refreshSwatch)
             EllesmereUI.BlizzStyle.BlockInline("damagemeters", swatch)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         end
         -- Inline dual swatches on Icon Size: right = Custom, left = Accent
         if not EllesmereUI._prebuilding then
@@ -541,6 +543,8 @@ initFrame:SetScript("OnEvent", function(self)
             local dirBtn = CreateFrame("Button", nil, rgn)
             dirBtn:SetSize(26, 26)
             dirBtn:SetPoint("RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            rgn._lastInline = dirBtn
+            EllesmereUI.OrderInlineAddon(rgn, dirBtn, "directions")
             dirBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             dirBtn:SetAlpha(0.4)
             local dirTex = dirBtn:CreateTexture(nil, "OVERLAY")
@@ -565,6 +569,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(customSwatch, "RIGHT", dirBtn, "LEFT", -8, 0)
+            rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
             local origIconClick = customSwatch:GetScript("OnClick")
             customSwatch:SetScript("OnClick", function(self, ...)
                 if Cfg("iconColorUseAccent") then
@@ -592,6 +598,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(accentSwatch, "RIGHT", customSwatch, "LEFT", -8, 0)
+            rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
             accentSwatch:SetScript("OnClick", function()
                 Set("iconColorUseAccent", true)
                 if ns.ApplyIconColor then ns.ApplyIconColor() end
@@ -667,6 +675,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(customSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
             local origHdrTextClick = customSwatch:GetScript("OnClick")
             customSwatch:SetScript("OnClick", function(self, ...)
                 if Cfg("hdrTextUseAccent") ~= false then
@@ -692,6 +702,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(accentSwatch, "RIGHT", customSwatch, "LEFT", -8, 0)
+            rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
             accentSwatch:SetScript("OnClick", function()
                 Set("hdrTextUseAccent", true)
                 ApplyHdr(); EllesmereUI:RefreshPage()
@@ -700,7 +712,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color")
             end)
             accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            rgn._lastInline = accentSwatch
 
             local function refreshHdrText()
                 updateCustom(); updateAccent()
@@ -1315,6 +1326,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(customSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
             local origClick = customSwatch:GetScript("OnClick")
             customSwatch:SetScript("OnClick", function(self, ...)
                 if Cfg("leftTextUseClassColor") then
@@ -1351,6 +1364,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             rgn._lastInline = classSwatch
+            EllesmereUI.OrderInlineAddon(rgn, classSwatch, "swatch")
 
             local function refreshLeft()
                 updateCustom(); updateClass()
@@ -1400,6 +1414,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(customSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
             local origClick = customSwatch:GetScript("OnClick")
             customSwatch:SetScript("OnClick", function(self, ...)
                 if Cfg("rightTextUseClassColor") or Cfg("rightTextUseThreatGradient") then
@@ -1451,6 +1467,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Value gradient: a swatch showing its colour scale, toggled by a click.
             rgn._lastInline = classSwatch
+            EllesmereUI.OrderInlineAddon(rgn, classSwatch, "swatch")
             EllesmereUI.BuildInlineSwatches(rgn, {
                 { tooltip = "Colors each value on a green to red scale.",
                   gradient = { { 0, 1, 0 }, { 1, 1, 0 }, { 1, 0, 0 } },
@@ -2191,6 +2208,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end,
                 false, 20)
             PP.Point(accentSwatch, "RIGHT", customSwatch, "LEFT", -8, 0)
+            rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
             accentSwatch:SetScript("OnClick", function()
                 SHDB().textColorUseAccent = true
                 RefreshSH(); EllesmereUI:RefreshPage()

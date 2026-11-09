@@ -1525,6 +1525,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
         local off = isQuestOff()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch, isQuestOff, "Enable Quest Mob Color")
     end
 
     -- Inline cog on "Neutral & Mini Enemies": "Mini Coloring M+ Only" toggle. On (default) restricts the Mini Enemies color to 5-man dungeons; off applies it everywhere.
@@ -1817,6 +1818,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, dpsNoAggroColorGet, dpsNoAggroColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         LockThreatSwatch(swatch, updateSwatch, isDpsNoAggroDisabled, 'DPS: Show Special "No Aggro" Color')
     end
 
@@ -1903,6 +1905,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, tankAggroColorGet, tankAggroColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         LockThreatSwatch(swatch, updateSwatch, isTankHasAggroDisabled, 'Tank: Show Special "Has Aggro" Color')
     end
 

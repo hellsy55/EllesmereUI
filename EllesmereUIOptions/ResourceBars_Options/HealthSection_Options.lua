@@ -103,6 +103,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         eye:SetPoint("RIGHT", region._lastInline or region._control, "LEFT", -8, 0)
         eye:SetFrameLevel(region:GetFrameLevel() + 5)
         region._lastInline = eye
+        EllesmereUI.OrderInlineAddon(region, eye, "preview")
         local tex = eye:CreateTexture(nil, "OVERLAY")
         tex:SetAllPoints()
         local function RefreshEye()
@@ -276,6 +277,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
             -- Blocked while the style is None, and for the outlined stripes, which carry their own colours.
             local swBlock = CreateFrame("Frame", nil, swatch)
@@ -377,6 +379,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(updateSwatch)
             local block = CreateFrame("Frame", nil, swatch)
             block:SetAllPoints()
@@ -582,6 +585,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 true, 20)
             PP.Point(borderSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = borderSwatch  -- left of the Corner Radius cog
+            EllesmereUI.OrderInlineAddon(rgn, borderSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
             local swBlock = CreateFrame("Frame", nil, borderSwatch)
             swBlock:SetAllPoints()
@@ -860,20 +864,70 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         })
     end
 
+    -- The fill row's Apply to action copies its color, opacity and gradient mode.
+    if ns.ERB_ColorSync then
+        ns.ERB_ColorSync(healthBorderRow._rightRegion, DB, "health", "fillColor",
+            function() RebuildHealth(); SmoothRefresh() end)
+    end
+
+    -- Keep the background alpha slider and color swatch in one option,
+    -- matching the Fill Color row while preserving the existing bgR/G/B/A values.
+    local healthBgRow
+    healthBgRow, h = W:DualRow(parent, y,
+        { type = "slider", text = "Background Color", min = 0, max = 100, step = 1, trackWidth = 120,
+          tooltip = "Opacity of this bar's background.",
+          disabled = healthOff, disabledTooltip = "Health Bar",
+          getValue = function()
+              local c = cfg(); return math.floor(((c and c.bgA) or 0.75) * 100 + 0.5)
+          end,
+          setValue = function(v)
+              local c = cfg(); if not c then return end
+              c.bgA = v / 100; SmoothRefresh(); EllesmereUI:RefreshPage()
+          end },
+        { type="toggle", text="Fade Out of Combat",
+          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshHealth() end }
+    ); y = y - h
+    if not EllesmereUI._prebuilding then
+        EllesmereUI.BuildInlineSwatches(healthBgRow._leftRegion, {
+            { tooltip = "Background Color",
+              getValue = function()
+                  local c = cfg()
+                  return (c and c.bgR) or 0x11/255, (c and c.bgG) or 0x11/255,
+                         (c and c.bgB) or 0x11/255, 1
+              end,
+              setValue = function(r, g, b)
+                  local c = cfg(); if not c then return end
+                  c.bgR, c.bgG, c.bgB = r, g, b
+                  SmoothRefresh(); EllesmereUI:RefreshPage()
+              end },
+        }, { size = 20, disabled = healthOff, disabledTooltip = "Health Bar" })
+    end
+    if ns.ERB_ColorSync then
+        ns.ERB_ColorSync(healthBgRow._leftRegion, DB, "health", "backgroundColor", SmoothRefresh)
+    end
+
     -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Health bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Health Missing shows the bar at its normal opacity while health is below full, a rule-hidden bar and a faded one alike (ns.ERB_MissingWanted / ns.ERB_MissingLiftFloor, same pass).
     -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
     local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
-        { type="toggle", text="Fade Out of Combat",
-          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
-          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshHealth() end },
         { type="slider", text="Fade Opacity", min=0, max=100, step=1,
           disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
           disabledTooltip="Fade Out of Combat",
           getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
-          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshHealth() end }
+          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshHealth() end },
+        { type = "dropdown", text = "Health Text",
+          disabled = healthOff,
+          disabledTooltip = "Health Bar",
+          values = { none = "None", perhp = "Health %", perhpnosign = "Health % (No Sign)", curhpshort = "Health #", curmaxhp = "Health # / Max #", perhpnum = "Health % | #", both = "Health # | %" },
+          order = { "none", "---", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both" },
+          getValue = function() local c = cfg(); return c and c.textFormat or "none" end,
+          setValue = function(v)
+              local c = cfg(); if not c then return end
+              c.textFormat = v; RefreshHealth(); EllesmereUI:RefreshPage()
+          end }
     ); y = y - fadeSyncH
-    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "health", "oocFade", "Fade Out of Combat", SmoothRefresh) end
-    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "health", "oocAlpha", "Fade Opacity", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(healthBgRow._rightRegion, env.DB, "health", "oocFade", "Fade Out of Combat", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "health", "oocAlpha", "Fade Opacity", SmoothRefresh) end
 
     if not EllesmereUI._prebuilding then
         local rgn = healthBorderRow._leftRegion
@@ -909,16 +963,6 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
 
     local healthTextSizeRow
     healthTextSizeRow, h = W:DualRow(parent, y,
-        { type = "dropdown", text = "Health Text",
-          disabled = healthOff,
-          disabledTooltip = "Health Bar",
-          values = { none = "None", perhp = "Health %", perhpnosign = "Health % (No Sign)", curhpshort = "Health #", curmaxhp = "Health # / Max #", perhpnum = "Health % | #", both = "Health # | %" },
-          order = { "none", "---", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both" },
-          getValue = function() local c = cfg(); return c and c.textFormat or "none" end,
-          setValue = function(v)
-              local c = cfg(); if not c then return end
-              c.textFormat = v; RefreshHealth(); EllesmereUI:RefreshPage()
-          end },
         { type = "multiSwatch", text = "Text Color",
           disabled = healthTextDis,
           disabledTooltip = healthTextDisTip,
@@ -967,11 +1011,19 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                   local isClassColored = c and c.textCustomColored == false
                   return isClassColored and 1 or 0.3
               end },
-          } }
+          } },
+        { type = "slider", text = "Text Size", min = 8, max = 24, step = 1,
+          disabled = healthTextDis,
+          disabledTooltip = healthTextDisTip,
+          getValue = function() local c = cfg(); return c and c.textSize or 11 end,
+          setValue = function(v)
+              local c = cfg(); if not c then return end
+              c.textSize = v; RefreshHealth()
+          end }
     );  y = y - h
     -- Health Text inline cog: anchor + x/y offsets
     if not EllesmereUI._prebuilding then
-        local rgn = healthTextSizeRow._leftRegion
+        local rgn = fadeSyncRow._rightRegion
         local cogBtn = EllesmereUI.BuildInlineCog(rgn, {
             disabled = function() local c = cfg(); return c and not c.enabled end,
             disabledTooltip = "Health Bar",
@@ -1003,26 +1055,19 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         AddFormTextBtn(rgn, cogBtn, cfg, RefreshHealth)
     end
 
-    -- Row 5: Text Size | Threshold & Hash Lines
+    -- Keep Text Color next to Text Size, and place thresholds in the final row.
     local healthColorRow
     healthColorRow, h = W:DualRow(parent, y,
-        { type = "slider", text = "Text Size", min = 8, max = 24, step = 1,
-          disabled = healthTextDis,
-          disabledTooltip = healthTextDisTip,
-          getValue = function() local c = cfg(); return c and c.textSize or 11 end,
-          setValue = function(v)
-              local c = cfg(); if not c then return end
-              c.textSize = v; RefreshHealth()
-          end },
-        { type = "label", text = "Threshold & Hash Lines" }
+        { type = "label", text = "Threshold & Hash Lines" },
+        EllesmereUI.BlankRowCfg()
     );  y = y - h
-    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(healthColorRow._leftRegion, env.DB, "health", "textSize",
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(healthTextSizeRow._rightRegion, env.DB, "health", "textSize",
         "Text Size", SmoothRefresh, { "health", "primary" }) end
     -- Threshold & Hash Lines editor: edits the health bar config (multi-spec, with the spec dropdown).
 
     if not EllesmereUI._prebuilding then
     local healthSettingsBtn = BuildThresholdSettingsButton({
-        parentRgn = healthColorRow._rightRegion,
+        parentRgn = healthColorRow._leftRegion,
         getBarData = function() return cfg() end,
         pageParent = parent, pageTopY = _advTop, pageBotY = function() return y end,
         refreshFn = function() RefreshHealth(); SmoothRefresh() end,
@@ -1037,7 +1082,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
 
     -- Bar-wide hash lines (the fallback when the active threshold entry has none of its own).
     BuildHashCog({
-        parentRgn = healthColorRow._rightRegion,
+        parentRgn = healthColorRow._leftRegion,
         anchorTo = healthSettingsBtn,
         getBarData = function() return DB().health end,
         refreshFn = function() RebuildHealth() end,
@@ -1046,7 +1091,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
     end
     -- Thresholds have their own per-spec system, so lock the slot during a Spec Overrides editing session.
     if EllesmereUI.SpecOverrides_AttachEditLock and not EllesmereUI._prebuilding then
-        EllesmereUI.SpecOverrides_AttachEditLock(healthColorRow._rightRegion,
+        EllesmereUI.SpecOverrides_AttachEditLock(healthColorRow._leftRegion,
             "Thresholds have their own per-spec system and can't be edited while editing a spec group")
     end
     end   -- close Health Bar hidden-while-disabled gate

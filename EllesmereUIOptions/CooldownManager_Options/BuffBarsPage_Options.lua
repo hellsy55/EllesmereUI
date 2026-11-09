@@ -3727,6 +3727,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                 true, 20)
             PP.Point(swatch, "RIGHT", region._lastInline or ctrl, "LEFT", -8, 0)
             region._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(region, swatch, "swatch")
 
             local block = CreateFrame("Frame", nil, swatch)
             block:SetAllPoints()
@@ -4843,6 +4844,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                 true, 20)
             PP.Point(threshSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = threshSwatch
+            EllesmereUI.OrderInlineAddon(rgn, threshSwatch, "swatch")
             local threshBlock = CreateFrame("Frame", nil, threshSwatch)
             threshBlock:SetAllPoints(); threshBlock:SetFrameLevel(threshSwatch:GetFrameLevel() + 10)
             threshBlock:EnableMouse(true)

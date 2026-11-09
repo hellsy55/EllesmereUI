@@ -385,6 +385,7 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
         sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Border") end)
         sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         rgn._lastInline = sw
+        EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
         local block = CreateFrame("Frame", nil, sw)
         block:SetAllPoints()
         block:SetFrameLevel(sw:GetFrameLevel() + 10)
@@ -678,6 +679,7 @@ function ns.UF_BossFrameBorderRows(W, parent, y, B, onChange)
         sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Border") end)
         sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         rgn._lastInline = sw
+        EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
         local block = CreateFrame("Frame", nil, sw)
         block:SetAllPoints()
         block:SetFrameLevel(sw:GetFrameLevel() + 10)
@@ -2388,6 +2390,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", anchorTo or rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
+            EllesmereUI.OrderInlineIcon(rgn, cogBtn, iconPath or EllesmereUI.PANEL_MORE_ICON)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             cogBtn:SetAlpha(0.4)
 

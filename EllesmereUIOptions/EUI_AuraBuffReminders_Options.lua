@@ -1571,6 +1571,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end, true, 20)
                 swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 EllesmereUI.RegisterWidgetRefresh(updateSwatch)
             end
         end
@@ -1708,6 +1709,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
 
             -- Disabled overlay for swatch when Show Name is off
             local swatchBlock = CreateFrame("Frame", nil, swatch)
@@ -2638,6 +2640,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end, false, 20)
             swatch:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(leftRgn, swatch, "swatch")
 
             local swatchBlock = CreateFrame("Frame", nil, swatch)
             swatchBlock:SetAllPoints()
@@ -2655,6 +2658,7 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetSize(26, 26)
             eyeBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(leftRgn, eyeBtn, "preview")
             eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")

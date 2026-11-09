@@ -1820,6 +1820,8 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                 function() end,  -- read-only display, no picker
                 false, 20)
             PP.Point(accentSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
             accentSwatch:SetScript("OnClick", function()
                 BD().focusReminderUseAccent = true
                 if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
@@ -1866,6 +1868,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             end)
             customBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             -- Disable both swatches + cog when Focus Text Reminders toggle is off
             local enableBlock = CreateFrame("Frame", nil, customSwatch)
@@ -3210,6 +3213,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             false, 20)
         PP.Point(durSwatch, "RIGHT", leftRgn._lastInline or ctrl, "LEFT", -8, 0)
         leftRgn._lastInline = durSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, durSwatch, "swatch")
 
         local durBlock = CreateFrame("Frame", nil, durSwatch)
         durBlock:SetAllPoints(); durBlock:SetFrameLevel(durSwatch:GetFrameLevel() + 10); durBlock:EnableMouse(true)
@@ -3344,6 +3348,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             false, 20)
         PP.Point(scSwatch, "RIGHT", rightRgn._lastInline or ctrl, "LEFT", -8, 0)
         rightRgn._lastInline = scSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, scSwatch, "swatch")
 
         local scBlock = CreateFrame("Frame", nil, scSwatch)
         scBlock:SetAllPoints(); scBlock:SetFrameLevel(scSwatch:GetFrameLevel() + 10); scBlock:EnableMouse(true)
@@ -3728,6 +3733,9 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                     hasClassColor = true,
                     onChange = function() EllesmereUI:RefreshPage() end,
                     disabled = rotColorOff,
+                    disabledTooltip = function()
+                        return EllesmereUI.DisabledTooltip("Blizzard Default", "disabled")
+                    end,
                     disabledAlpha = 0.15,
                 })
             PP.Point(classSwatch, "RIGHT", colorRgn, "RIGHT", -20, 0)

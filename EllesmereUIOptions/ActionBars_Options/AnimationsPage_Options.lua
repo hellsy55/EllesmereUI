@@ -601,6 +601,7 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
             _procGlowPreview:ClearAllPoints()
             PP.Point(_procGlowPreview, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -12, 0)
             leftRgn._lastInline = _procGlowPreview
+            EllesmereUI.OrderInlineAddon(leftRgn, _procGlowPreview, "preview")
             if _procGlowPreview._icon then
                 local iconTex = GetNthActionButtonIcon(3)
                 _procGlowPreview._icon:SetTexture(iconTex)
@@ -713,6 +714,7 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
             _assistGlowPreview:ClearAllPoints()
             PP.Point(_assistGlowPreview, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = _assistGlowPreview
+            EllesmereUI.OrderInlineAddon(leftRgn, _assistGlowPreview, "preview")
 
             -- Keep animated preview hosts out of the central glow driver while
             -- this page is hidden; restart them from the current values on show.

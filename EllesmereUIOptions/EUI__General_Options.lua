@@ -1596,6 +1596,7 @@ initFrame:SetScript("OnEvent", function(self)
             local tcSwatch, tcUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, tcGet, tcSet, nil, 20)
             PP.Point(tcSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
             rightRgn._lastInline = tcSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, tcSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function()
                 local off = isCustomColorOff()
                 tcSwatch:SetAlpha(off and 0.15 or 1)
@@ -1604,6 +1605,8 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             tcSwatch:SetAlpha(isCustomColorOff() and 0.15 or 1)
             tcSwatch:EnableMouse(not isCustomColorOff())
+            EllesmereUI.ExplainDisabledSwatch(tcSwatch, isCustomColorOff,
+                function() return EllesmereUI.DisabledTooltip("Custom Color Theme") end)
             tcSwatch:SetScript("OnEnter", function(self)
                 if isCustomColorOff() then
                     EllesmereUI.ShowWidgetTooltip(self, "This option is only available for the Custom Color Theme")
@@ -1633,6 +1636,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="colorpicker", text="Options Panel Accent Color", hasAlpha=false,
               tooltip="Accent used by the options panel only, independent of the in-game UI accent.",
               disabled=function() return not EllesmereUI.HasOptionsPanelAccentOverride() end,
+              disabledTooltip = "Custom Options Panel Accent",
               getValue=function()
                   local r, g, b = EllesmereUI.GetOptionsPanelAccentColor()
                   return r, g, b, 1

@@ -2310,10 +2310,12 @@ function ns.OpenUnlockMode()
         local m = movers[autoKey]
         if not m then return end
         local autoFlash = EllesmereUI._unlockAutoSelectFlash
+        local alsoKey = EllesmereUI._unlockAutoSelectAlsoFlashKey
         EllesmereUI._unlockAutoSelectKey = nil
         EllesmereUI._unlockAutoSelectFlash = nil
+        EllesmereUI._unlockAutoSelectAlsoFlashKey = nil
         SelectMover(m)
-        if autoFlash then UM.FlashSelectHighlight(m) end
+        if autoFlash then UM.FlashSelectHighlight(m, alsoKey and movers[alsoKey]) end
     end
 
     -- Grid glitch starts immediately and lasts 0.75s
@@ -2746,6 +2748,7 @@ function ns.OpenUnlockMode()
                 TryAutoSelect()
                 EllesmereUI._unlockAutoSelectKey = nil
                 EllesmereUI._unlockAutoSelectFlash = nil
+                EllesmereUI._unlockAutoSelectAlsoFlashKey = nil
             end)
         end
 

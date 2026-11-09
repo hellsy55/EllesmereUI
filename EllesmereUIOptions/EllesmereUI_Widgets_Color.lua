@@ -972,6 +972,11 @@ local function BuildTrioColorSwatch(parentFrame, baseLevel, opts)
     end
     Update()
     RegisterWidgetRefresh(Update)
+    if opts.disabled and opts.disabledTooltip and EllesmereUI.ExplainDisabledSwatch then
+        EllesmereUI.ExplainDisabledSwatch(customSwatch, opts.disabled, opts.disabledTooltip)
+        EllesmereUI.ExplainDisabledSwatch(defaultSwatch, opts.disabled, opts.disabledTooltip)
+        if classSwatch then EllesmereUI.ExplainDisabledSwatch(classSwatch, opts.disabled, opts.disabledTooltip) end
+    end
 
     return customSwatch, defaultSwatch, classSwatch, Update
 end

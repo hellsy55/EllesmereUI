@@ -401,6 +401,7 @@ function ns.ERB_BuildGCDBarPage(pageName, parent, yOffset)
         end
         UpdateGradientSwatch()
         EllesmereUI.RegisterWidgetRefresh(UpdateGradientSwatch)
+        EllesmereUI.ExplainDisabledSwatch(swatch, function() return swatch._disabledTooltip ~= nil end)
     end
     -- Background color swatch on the Background slider (right region)
     if not EllesmereUI._prebuilding then
@@ -420,6 +421,7 @@ function ns.ERB_BuildGCDBarPage(pageName, parent, yOffset)
         end
         UpdateBgSwatch()
         EllesmereUI.RegisterWidgetRefresh(UpdateBgSwatch)
+        EllesmereUI.ExplainDisabledSwatch(bgSwatch, function() return bgSwatch._disabledTooltip ~= nil end)
     end
 
     -- Row: Bar Texture | Show Spark

@@ -328,6 +328,7 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             rgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
             eyeTex:SetAllPoints()
             local function Off() return Cfg("enabled") == false end
@@ -604,6 +605,7 @@ initFrame:SetScript("OnEvent", function(self)
                 false, 18)
             PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local block = CreateFrame("Frame", nil, swatch)
             block:SetAllPoints()
             block:SetFrameLevel(swatch:GetFrameLevel() + 10)
@@ -654,6 +656,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(accentSwatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
             rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
             -- Custom-colour swatch (to the left of accent): the stored custom colour.
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
@@ -678,6 +681,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(customSwatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             -- Per-swatch hover tooltip (colour name when enabled) + disabled block.
             local function AddBlock(sw, enterTip)

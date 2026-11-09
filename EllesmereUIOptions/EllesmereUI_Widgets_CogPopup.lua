@@ -727,9 +727,8 @@ local function BuildCogPopup(opts)
                     cpSwBlock:EnableMouse(true)
                     cpSwBlock:SetScript("OnEnter", function()
                         local tip = ResolveDisabledTip(row)
-                        if tip and EllesmereUI.ShowWidgetTooltip then
-                            EllesmereUI.ShowWidgetTooltip(cpSwatch, tip)
-                        end
+                        EllesmereUI.ShowWidgetTooltip(cpSwatch,
+                            tip or "This color is unavailable with the current settings.")
                     end)
                     cpSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -823,9 +822,8 @@ local function BuildCogPopup(opts)
                     disTex:SetAllPoints()
                     mswDis:SetScript("OnEnter", function(self)
                         local tip = ResolveDisabledTip(row)
-                        if tip and EllesmereUI.ShowWidgetTooltip then
-                            EllesmereUI.ShowWidgetTooltip(self, tip)
-                        end
+                        EllesmereUI.ShowWidgetTooltip(self,
+                            tip or "This color is unavailable with the current settings.")
                     end)
                     mswDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     local initDis = type(row.disabled) == "function" and row.disabled() or row.disabled

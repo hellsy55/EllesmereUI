@@ -927,6 +927,7 @@ local function BuildMainPage(pageName, parent, yOffset)
             end, true, 20)
         borderSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = borderSwatch
+        EllesmereUI.OrderInlineAddon(rgn, borderSwatch, "swatch")
         borderSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(borderSwatch, "Border") end)
         borderSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         EllesmereUI.RegisterWidgetRefresh(function() updBorder() end)
@@ -1067,6 +1068,7 @@ local function BuildMainPage(pageName, parent, yOffset)
         hoverSwatch:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
         local hoverAnchor = rightRgn._lastInline or rightRgn._control  -- memo: what Hover hangs from
         rightRgn._lastInline = hoverSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, hoverSwatch, "swatch")
         hoverSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(hoverSwatch, "Hover") end)
         hoverSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -1081,6 +1083,7 @@ local function BuildMainPage(pageName, parent, yOffset)
             end, true, 20)
         targetSwatch:SetPoint("RIGHT", rightRgn._lastInline, "LEFT", -8, 0)
         rightRgn._lastInline = targetSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, targetSwatch, "swatch")
         targetSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(targetSwatch, "Target") end)
         targetSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         -- Stock styles: the stock selection ring carries its own colour.

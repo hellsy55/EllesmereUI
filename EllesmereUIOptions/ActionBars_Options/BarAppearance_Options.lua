@@ -346,11 +346,18 @@ local function BuildBarAppearance(parent, y, ctx)
             end, true, 20)
             PP.Point(borderSwatch, "RIGHT", region._control, "LEFT", -12, 0)
             region._lastInline = borderSwatch
+            EllesmereUI.OrderInlineAddon(region, borderSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function()
                 local disabled = BgDisabled() or SVal("bgBorderThickness", "none") == "none"
                 borderSwatch:SetAlpha(disabled and 0.15 or 1)
                 refreshBorder()
             end)
+            EllesmereUI.ExplainDisabledSwatch(borderSwatch,
+                function() return BgDisabled() or SVal("bgBorderThickness", "none") == "none" end,
+                function()
+                    if BgDisabled() then return EllesmereUI.DisabledTooltip("Bar Background") end
+                    return EllesmereUI.DisabledTooltip("Border Thickness above 0")
+                end)
         end
 
         do
@@ -1419,6 +1426,7 @@ local function BuildBarAppearance(parent, y, ctx)
             false, 20)
         PP.Point(sbgSwatch, "RIGHT", rgn._control, "LEFT", -8, 0)
         rgn._lastInline = sbgSwatch
+        EllesmereUI.OrderInlineAddon(rgn, sbgSwatch, "swatch")
         sbgSwatch:SetAlpha(SbgOff() and 0.15 or 1)
         local sbgOrigClick = sbgSwatch:GetScript("OnClick")
         sbgSwatch:SetScript("OnClick", function(self, ...)
@@ -1592,6 +1600,7 @@ local function BuildBarAppearance(parent, y, ctx)
         local rangeSwatch, rangeUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, rangeColorGet, rangeColorSet, false, 20)
         PP.Point(rangeSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
         leftRgn._lastInline = rangeSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, rangeSwatch, "swatch")
 
         local function RangeDisabled()
             return not SGet("outOfRangeColoring")
@@ -1690,6 +1699,7 @@ local function BuildBarAppearance(parent, y, ctx)
             false, 20)
         PP.Point(swatch, "RIGHT", ctrl, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         -- Canonical inline-swatch pattern: auto-disable at 0 opacity (invisible swipe has no visible colour).
         local function SwipeDisabled()
             return (EAB.db.profile.cdSwipeAlpha or 80) == 0
@@ -2178,6 +2188,7 @@ local function BuildBarAppearance(parent, y, ctx)
             false, 20)
         PP.Point(kbSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
         rgn._lastInline = kbSwatch
+        EllesmereUI.OrderInlineAddon(rgn, kbSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() kbUpdateSwatch() end)
     end
 
@@ -2350,6 +2361,7 @@ local function BuildBarAppearance(parent, y, ctx)
             false, 20)
         PP.Point(mcSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
         rgn._lastInline = mcSwatch
+        EllesmereUI.OrderInlineAddon(rgn, mcSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() mcUpdateSwatch() end)
     end
 
@@ -2480,6 +2492,7 @@ local function BuildBarAppearance(parent, y, ctx)
             false, 20)
         PP.Point(ctSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
         rgn._lastInline = ctSwatch
+        EllesmereUI.OrderInlineAddon(rgn, ctSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
     end
 
@@ -2595,6 +2608,7 @@ local function BuildBarAppearance(parent, y, ctx)
             false, 20)
         PP.Point(cdSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
         rgn._lastInline = cdSwatch
+        EllesmereUI.OrderInlineAddon(rgn, cdSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() cdUpdateSwatch() end)
     end
 

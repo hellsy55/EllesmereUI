@@ -650,7 +650,10 @@ function WidgetFactory:DualRow(parent, yOffset, leftCfg, rightCfg)
                     swatchBlock:SetScript("OnEnter", function()
                         local src = (sc.disabledTooltip ~= nil) and sc or cfg
                         local tip = ResolveDisabledTip(src)
-                        if tip then ShowWidgetTooltip(swatch, tip) end
+                        if not tip then
+                            tip = "This color is unavailable with the current settings."
+                        end
+                        ShowWidgetTooltip(swatch, tip)
                     end)
                     swatchBlock:SetScript("OnLeave", function() HideWidgetTooltip() end)
                     local function UpdateSwatchDisabled()
@@ -1042,6 +1045,7 @@ function WidgetFactory:TripleRow(parent, yOffset, leftCfg, midCfg, rightCfg, spl
             local swatch, _updateSwatch = BuildColorSwatch(region, frame:GetFrameLevel() + 2, cfg.getValue, cfg.setValue, cfg.hasAlpha)
             PP.Point(swatch, "RIGHT", region, "RIGHT", -SIDE_PAD, 0)
             controlFrame = swatch
+            AddControlDisabledTooltip(swatch, cfg)
             RegisterWidgetRefresh(function() _updateSwatch(); ApplyDisabledState() end)
             ApplyDisabledState()
 
@@ -1193,12 +1197,12 @@ function WidgetFactory:MultiSwatchRow(parent, yOffset, cfg)
             swatchBlock:SetAllPoints()
             swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
             swatchBlock:EnableMouse(true)
-            if sc.disabledTooltip then
-                swatchBlock:SetScript("OnEnter", function()
-                    ShowWidgetTooltip(swatch, sc.disabledTooltip)
-                end)
-                swatchBlock:SetScript("OnLeave", function() HideWidgetTooltip() end)
-            end
+            swatchBlock:SetScript("OnEnter", function()
+                local tip = sc.disabledTooltip
+                if type(tip) == "function" then tip = tip() end
+                ShowWidgetTooltip(swatch, tip or "This color is unavailable with the current settings.")
+            end)
+            swatchBlock:SetScript("OnLeave", function() HideWidgetTooltip() end)
             if sc.tooltip then  -- normal tooltip while enabled
                 swatch:HookScript("OnEnter", function()
                     ShowWidgetTooltip(swatch, sc.tooltip)

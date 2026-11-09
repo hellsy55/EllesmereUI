@@ -248,9 +248,9 @@ local DEFAULTS = {
             textYOffset = 0,
             textAnchor  = "CENTER",
             barBgR      = 0, barBgG = 0, barBgB = 0, barBgA = 0.5,
-            -- Opt-in gap color (color of the spacing between pips). Off by
-            -- default -> the gap-fill layer is never drawn and the bar is
-            -- unchanged. Only consulted when gapColorEnabled is true.
+            -- The legacy flag now marks an explicit user-selected gap tint.
+            -- Without one the gap is always white, or black in Dark Mode.
+            -- Keep false for existing profiles and do not reset saved colors.
             gapColorEnabled = false,
             gapR        = 0, gapG = 0, gapB = 0, gapA = 1,
             barAlpha    = 1.0,

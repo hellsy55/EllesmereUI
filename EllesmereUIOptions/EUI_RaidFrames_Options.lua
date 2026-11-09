@@ -486,6 +486,7 @@ function ns.RF_BuildPartyTargets(parent, y, W)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         -- Blocking overlay: non-clickable + tooltip unless Fill Color is Custom.
         local block = CreateFrame("Frame", nil, swatch)
         block:SetAllPoints()
@@ -524,6 +525,7 @@ function ns.RF_BuildPartyTargets(parent, y, W)
         bgClassSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         bgClassSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgClassSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgClassSwatch, "swatch")
 
         local bgSwatch = EllesmereUI.BuildColorSwatch(
             rgn, row:GetFrameLevel() + 3,
@@ -548,6 +550,7 @@ function ns.RF_BuildPartyTargets(parent, y, W)
         bgSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
         -- Blocking overlay spans BOTH swatches: Dark Mode has no background.
         local bgBlock = CreateFrame("Frame", nil, rgn)
         bgBlock:SetPoint("TOPLEFT", bgSwatch, "TOPLEFT", 0, 0)

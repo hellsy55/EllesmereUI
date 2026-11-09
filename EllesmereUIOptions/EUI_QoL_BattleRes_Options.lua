@@ -267,6 +267,7 @@ local function AttachPreviewEye(rgn, key, showTip, hideTip, setOwner, owner)
     eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
     EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
     rgn._lastInline = eyeBtn
+    EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
     local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
     eyeTex:SetAllPoints()
     local function RefreshEye()
@@ -480,6 +481,7 @@ _G._EUI_BuildBattleResSection = function(parent, yOffset, W, PP)
         local timerSwatch = MakeInlineTextSwatch("textTimerColor", "Timer Color", rgn._lastInline or rgn._control)
         local countSwatch = MakeInlineTextSwatch("textCountColor", "Count Color", timerSwatch)
         rgn._lastInline = countSwatch
+        EllesmereUI.OrderInlineAddon(rgn, countSwatch, "swatch")
     end
 
     -- Font | Font Outline: text-display-only controls (the icon's duration /
@@ -798,6 +800,7 @@ _G._EUI_BuildBloodlustSection = function(parent, yOffset, W, PP)
             PP.Point(swatch, "RIGHT", readyCog or leftRgn._control, "LEFT", -8, 0)
             -- The leftmost item: the label clamp's bound.
             leftRgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(leftRgn, swatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function()
                 local off = readyOff()
                 swatch:SetAlpha(off and 0.3 or 1)

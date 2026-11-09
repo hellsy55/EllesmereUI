@@ -640,6 +640,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         cogBtn:SetSize(26, 26)
         cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = cogBtn
+        EllesmereUI.OrderInlineIcon(rgn, cogBtn, EllesmereUI.DIRECTIONS_ICON)
         cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         cogBtn:SetAlpha(0.4)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
@@ -703,6 +704,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
     end
 
     -- Dead status text: independent position/offset/size/color from the
@@ -733,6 +735,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         cogBtn:SetSize(26, 26)
         cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = cogBtn
+        EllesmereUI.OrderInlineIcon(rgn, cogBtn, EllesmereUI.DIRECTIONS_ICON)
         cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         cogBtn:SetAlpha(0.4)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
@@ -756,6 +759,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
     end
 
     local leaderPositionValues = {
@@ -907,6 +911,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
     end
 
     -- Ping Marker | Ping Marker Size (+ offset cog). The mark a group member's ping
@@ -987,6 +992,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         end
         if not EllesmereUI._prebuilding then
             local rgn = gnRow._leftRegion
@@ -1280,6 +1286,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             end, false, 20)
         bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
     end
     do
         local rgn = tnbRow2._rightRegion
@@ -1316,6 +1323,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
                 rgn, tnbRow3:GetFrameLevel() + 3, getColor, setColor, false, 20)
             sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = sw
+            EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
             sw._eabOrigClick = sw:GetScript("OnClick")
             sw:SetScript("OnClick", function(self)
                 if SVal("topNameBarTextColorMode", "class") ~= mode then
@@ -1496,6 +1504,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             -- Dimming alone leaves the swatch clickable; this blocks it.
             local swatchBlock = CreateFrame("Frame", nil, swatch)
             swatchBlock:SetAllPoints()
@@ -1950,6 +1959,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         cogBtn:SetSize(26, 26)
         cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = cogBtn
+        EllesmereUI.OrderInlineIcon(rgn, cogBtn, EllesmereUI.PANEL_MORE_ICON)
         cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         cogBtn:SetAlpha(0.4)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
@@ -2115,6 +2125,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         eyeBtn:SetSize(26, 26)
         eyeBtn:SetPoint("RIGHT", rgn._lastInline, "LEFT", -4, 0)
         rgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
         eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
@@ -2273,6 +2284,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             eyeBtn:SetSize(26, 26)
             eyeBtn:SetPoint("RIGHT", rgn._lastInline, "LEFT", -4, 0)
             rgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")

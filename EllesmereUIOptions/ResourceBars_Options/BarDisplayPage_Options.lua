@@ -237,203 +237,57 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
         EllesmereUI.RegisterWidgetRefresh(cbDDRefresh)
     end
 
-    -- Row 2: Dark Mode Class Resource | Background Color. Dark mode applies ONLY to the class
-    -- resource bar (secondary), using the same flat dark fill/bg as Unit Frames / Raid Frames;
-    -- secondary.darkTheme is the single source of truth, health/primary are never darkened.
-    -- Background is shared by Health & Power, plus the class resource bar while Dark Mode is off
-    -- (the label says so). With splitBg on (the cog's "Choose background per bar") the
-    -- per-bar rows below own Health & Power and this row narrows to the class resource bar; it
-    -- stays live in every case, never disabled.
-    local bgLabel = "Background"
-    do
-        local p0 = DB()
-        if p0 and p0.splitBg == true then
-            bgLabel = "Background (Class Resource)"
-        elseif p0 and p0.secondary.darkTheme then
-            bgLabel = "Background (Health & Power)"
-        end
+    -- Row 2: class resource Dark Mode and its independent background color.
+    -- Health and Power backgrounds are configured in their own bar sections.
+    local function classBgOff()
+        local p = DB(); return p and p.secondary.darkTheme == true or false
     end
-    local bgRow
-    bgRow, h = W:DualRow(parent, y,
+    local function classBgTip()
+        return "Unavailable while Class Resource Dark Mode is enabled."
+    end
+    local classBgRow
+    classBgRow, h = W:DualRow(parent, y,
         { type = "toggle", text = "Dark Mode Class Resource",
           getValue = function()
-              local p = DB(); if not p then return false end
-              return p.secondary.darkTheme
+              local p = DB(); return p and p.secondary.darkTheme or false
           end,
           setValue = function(v)
               local p = DB(); if not p then return end
               p.secondary.darkTheme = v
               RebuildClass()
-              -- Full rebuild so the Background label re-renders
-              EllesmereUI:RefreshPage(true)
+              EllesmereUI:RefreshPage()
           end },
-        { type = "slider", text = bgLabel, min = 0, max = 100, step = 1, trackWidth = 120,
+        { type = "slider", text = "Class Resource Background Color", min = 0, max = 100, step = 1,
+          trackWidth = 120,
+          disabled = classBgOff, disabledTooltip = classBgTip, rawTooltip = true,
           getValue = function()
-              local p = DB(); if not p then return 75 end
-              if p.splitBg == true then
-                  return math.floor(((p.secondary.barBgA or 0.5) * 100) + 0.5)
-              end
-              return math.floor(((p.health.bgA or 0.75) * 100) + 0.5)
+              local p = DB(); return math.floor(((p and p.secondary.barBgA) or 0.5) * 100 + 0.5)
           end,
           setValue = function(v)
               local p = DB(); if not p then return end
-              local a = v / 100
-              if p.splitBg == true then
-                  -- Split mode: Health/Power own their keys via the rows below, this row still owns the class resource bar
-                  p.secondary.barBgA = a
-              else
-                  p.health.bgA = a
-                  p.primary.bgA = a
-                  p.secondary.barBgA = a
-              end
-              SmoothRefresh()
-              EllesmereUI:RefreshPage()
+              p.secondary.barBgA = v / 100
+              SmoothRefresh(); EllesmereUI:RefreshPage()
           end }
-    );  y = y - h
-    -- Background inline swatch is color-only: opacity lives in the slider, a view over the same bgA keys.
+    ); y = y - h
     if not EllesmereUI._prebuilding then
-        local rgn = bgRow._rightRegion
-        local ctrl = rgn._control
-
-        -- Split cog. The feature is an options-side VIEW: the bars already read their own keys
-        -- at runtime (health.bg*, primary.bg*, secondary.barBg*) and the unified row just writes
-        -- them in lockstep, so splitting only changes which rows write which keys -- zero runtime
-        -- change, nothing hits the DB unless opted in. splitCogShow MUST be declared BEFORE the
-        -- build so the toggle's set closure (built inside the argument table) captures it as an
-        -- upvalue (assigning on the same line would leave the closure seeing nil). The popup frame
-        -- is built LAZILY on first show, so the closure reaches it via showFn._popupFrame, stamped
-        -- by the show wrapper on first open.
-        local _, splitCogShow
-        _, splitCogShow = EllesmereUI.BuildInlineCog(rgn, {
-            title = "Background",
-            minWidth = 290,
-            rows = {
-                { type = "toggle", label = "Choose background per bar",
-                  get = function()
-                      local p = DB(); return (p and p.splitBg) == true
-                  end,
-                  set = function(v)
-                      local p = DB(); if not p then return end
-                      if v then
-                          p.splitBg = true
-                          -- Close the popup so the newly revealed per-bar rows are visible (frame always exists here, but guard anyway)
-                          local pfr = splitCogShow and splitCogShow._popupFrame
-                          if pfr then pfr:Hide() end
-                      else
-                          -- Split OFF re-unifies from Health (the unified row's read source) so "off" really means one background, not silently diverged bars.
-                          -- Stored false, not nil: profile sync copies only keys that exist.
-                          p.splitBg = false
-                          local hp = p.health
-                          p.primary.bgR, p.primary.bgG, p.primary.bgB, p.primary.bgA =
-                              hp.bgR, hp.bgG, hp.bgB, hp.bgA
-                          p.secondary.barBgR, p.secondary.barBgG, p.secondary.barBgB, p.secondary.barBgA =
-                              hp.bgR, hp.bgG, hp.bgB, hp.bgA
-                          SmoothRefresh()
-                      end
-                      EllesmereUI:RefreshPage(true)
-                  end },
-            },
-        })
-
-        local bgSwatch, bgUpdateSwatch = EllesmereUI.BuildColorSwatch(
-            rgn, bgRow:GetFrameLevel() + 3,
+        local rgn = classBgRow._rightRegion
+        local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+            rgn, classBgRow:GetFrameLevel() + 3,
             function()
                 local p = DB()
-                if p and p.splitBg == true then
-                    return p.secondary.barBgR or 0, p.secondary.barBgG or 0,
-                           p.secondary.barBgB or 0
-                end
-                return (p and p.health.bgR or 0x11/255), (p and p.health.bgG or 0x11/255),
-                       (p and p.health.bgB or 0x11/255)
+                local c = p and p.secondary
+                return (c and c.barBgR) or 0, (c and c.barBgG) or 0, (c and c.barBgB) or 0
             end,
             function(r, g, b)
                 local p = DB(); if not p then return end
-                if p.splitBg == true then
-                    p.secondary.barBgR, p.secondary.barBgG, p.secondary.barBgB = r, g, b
-                else
-                    p.health.bgR, p.health.bgG, p.health.bgB = r, g, b
-                    p.primary.bgR, p.primary.bgG, p.primary.bgB = r, g, b
-                    p.secondary.barBgR, p.secondary.barBgG, p.secondary.barBgB = r, g, b
-                end
-                SmoothRefresh()
-                EllesmereUI:RefreshPage()
-            end,
-            nil, 20)
-        PP.Point(bgSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
-        rgn._lastInline = bgSwatch
-        EllesmereUI.RegisterWidgetRefresh(bgUpdateSwatch)
-    end
-
-    -- Split rows are built ONLY while the split is enabled, so the page is byte-identical for
-    -- everyone else. Health writes health.*, Power writes primary.* only; the class resource's
-    -- barBg* stays with the unified Background row above, which relabels and narrows to those keys.
-    do
-        local p0 = DB()
-        if p0 and p0.splitBg == true then
-            local splitRow
-            splitRow, h = W:DualRow(parent, y,
-                { type = "slider", text = "Health Background", min = 0, max = 100, step = 1, trackWidth = 120,
-                  getValue = function()
-                      local p = DB(); return math.floor(((p and p.health.bgA or 0.75) * 100) + 0.5)
-                  end,
-                  setValue = function(v)
-                      local p = DB(); if not p then return end
-                      p.health.bgA = v / 100
-                      SmoothRefresh()
-                      EllesmereUI:RefreshPage()
-                  end },
-                { type = "slider", text = "Power Background", min = 0, max = 100, step = 1, trackWidth = 120,
-                  getValue = function()
-                      local p = DB(); return math.floor(((p and p.primary.bgA or 0.75) * 100) + 0.5)
-                  end,
-                  setValue = function(v)
-                      local p = DB(); if not p then return end
-                      p.primary.bgA = v / 100
-                      SmoothRefresh()
-                      EllesmereUI:RefreshPage()
-                  end }
-            );  y = y - h
-            if not EllesmereUI._prebuilding then
-                local rgn = splitRow._leftRegion
-                local ctrl = rgn._control
-                local hSwatch, hUpdateSwatch = EllesmereUI.BuildColorSwatch(
-                    rgn, splitRow:GetFrameLevel() + 3,
-                    function()
-                        local p = DB()
-                        return (p and p.health.bgR or 0x11/255), (p and p.health.bgG or 0x11/255),
-                               (p and p.health.bgB or 0x11/255)
-                    end,
-                    function(r, g, b)
-                        local p = DB(); if not p then return end
-                        p.health.bgR, p.health.bgG, p.health.bgB = r, g, b
-                        SmoothRefresh()
-                        EllesmereUI:RefreshPage()
-                    end,
-                    nil, 20)
-                PP.Point(hSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-                EllesmereUI.RegisterWidgetRefresh(hUpdateSwatch)
-            end
-            if not EllesmereUI._prebuilding then
-                local rgn = splitRow._rightRegion
-                local ctrl = rgn._control
-                local pSwatch, pUpdateSwatch = EllesmereUI.BuildColorSwatch(
-                    rgn, splitRow:GetFrameLevel() + 3,
-                    function()
-                        local p = DB()
-                        return (p and p.primary.bgR or 0x11/255), (p and p.primary.bgG or 0x11/255),
-                               (p and p.primary.bgB or 0x11/255)
-                    end,
-                    function(r, g, b)
-                        local p = DB(); if not p then return end
-                        p.primary.bgR, p.primary.bgG, p.primary.bgB = r, g, b
-                        SmoothRefresh()
-                        EllesmereUI:RefreshPage()
-                    end,
-                    nil, 20)
-                PP.Point(pSwatch, "RIGHT", ctrl, "LEFT", -8, 0)
-                EllesmereUI.RegisterWidgetRefresh(pUpdateSwatch)
-            end
-        end
+                p.secondary.barBgR, p.secondary.barBgG, p.secondary.barBgB = r, g, b
+                SmoothRefresh(); EllesmereUI:RefreshPage()
+            end, nil, 20)
+        PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
+        EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+        EllesmereUI.BindDisabledSwatch(swatch, classBgOff, classBgTip)
     end
 
     -- Row 3: Texture | Frame Strata. Each sets all three bars; its cog gives the health and

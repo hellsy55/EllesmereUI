@@ -45,6 +45,14 @@ local CLASSIC_MATCH_KEYS = { "ERB_Health", "ERB_Power", "ERB_ClassResource" }
 -- enabled state, resource identity, spec-specific rules or position.
 local RESOURCE_SYNC_KEYS = { "secondary", "primary", "health" }
 local RESOURCE_SYNC_LABELS = { secondary = "Class Resource", primary = "Power", health = "Health" }
+local RESOURCE_COLOR_KEYS = { "health", "primary" }
+local RESOURCE_FILL_COLOR_FIELDS = { "fillOpacity", "customColored", "fillR", "fillG", "fillB", "fillA",
+    "gradientEnabled", "gradientR", "gradientG", "gradientB", "gradientA", "gradientDir" }
+local RESOURCE_BACKGROUND_COLOR_FIELDS = { "bgR", "bgG", "bgB", "bgA" }
+local function ColorFields(field)
+    if field == "fillColor" then return RESOURCE_FILL_COLOR_FIELDS end
+    if field == "backgroundColor" then return RESOURCE_BACKGROUND_COLOR_FIELDS end
+end
 local RESOURCE_SIZE_KEY = {
     secondary = { height = "pipHeight", width = "pipWidth" },
     primary   = { height = "height", width = "width" },
@@ -77,6 +85,8 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
             t.textSize = Value(src, sourceKey)
         elseif field == "classic" then
             t.stockBorderScale = src.stockBorderScale
+        elseif ColorFields(field) then
+            for _, name in ipairs(ColorFields(field)) do t[name] = src[name] end
         elseif field == "borderStyle" then
             -- A border-style copy matches the existing Apply to All operation.
             for _, key in ipairs({ "borderTexture", "borderTextureOffset", "borderTextureOffsetY",
@@ -99,6 +109,12 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
             -- A toggle exposes its actual state. Scalar/style rows instead
             -- report whether this destination already matches this source.
             if field == "oocFade" then return dst.oocFadeEnabled == true end
+            if ColorFields(field) then
+                for _, name in ipairs(ColorFields(field)) do
+                    if src[name] ~= dst[name] then return "Different" end
+                end
+                return "Matching"
+            end
             if field == "borderStyle" or field == "border" then
                 local fields = field == "borderStyle" and {
                     "borderTexture", "borderTextureOffset", "borderTextureOffsetY",
@@ -118,6 +134,7 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
         getCurrentKey = function() return sourceKey end,
         getElementState = function(key)
             local p = dbFn(); local b = p and p[key]
+            if ColorFields(field) then return b ~= nil end
             return b and b.enabled ~= false or false
         end,
         onApply = function(selected)
@@ -138,6 +155,22 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
             EllesmereUI:RefreshPage(was and ns.ERB_TexturedBars(p) ~= was or false)
         end,
     }
+end
+
+-- Reuse the native Apply to: All / Multiple UI for Health and Power fill/background.
+-- Copy all fields of the selected color setting without changing visibility or other bars.
+function ns.ERB_ColorSync(region, dbFn, sourceKey, field, refresh)
+    if EllesmereUI._prebuilding then return end
+    local otherKey = sourceKey == "health" and "primary" or "health"
+    local multi = ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, RESOURCE_COLOR_KEYS)
+    EllesmereUI.BuildSyncIcon({
+        region = region, alwaysAvailable = true,
+        tooltip = "Apply " .. (field == "fillColor" and "Fill Color" or "Background Color") .. " to the other bar",
+        onClick = function() multi.onApply(RESOURCE_COLOR_KEYS) end,
+        isSynced = function() return multi.getElementOptionState(otherKey) == "Matching" end,
+        flashTargets = function() return { region } end,
+        multiApply = multi,
+    })
 end
 
 -- One simple scalar sync, with destination selection and live status. This
@@ -1220,12 +1253,18 @@ initFrame:SetScript("OnEvent", function(self)
                     _previewFrames.pips[i]:Hide()
                 end
 
-                -- Optional gap-color fill layer (mirrors the live bar)
+                -- Always-active gap-color fill layer (mirrors the live bar)
                 if not pc._gapFills then pc._gapFills = {} end
                 do
                     local pvFills = pc._gapFills
-                    if sp.gapColorEnabled and numPips > 1 then
-                        local gr, gg, gb, ga = sp.gapR or 0, sp.gapG or 0, sp.gapB or 0, sp.gapA or 1
+                    if numPips > 1 then
+                        local gr, gg, gb, ga
+                        if sp.gapColorEnabled then
+                            gr, gg, gb, ga = sp.gapR or 0, sp.gapG or 0, sp.gapB or 0, sp.gapA or 1
+                        else
+                            local v = sp.darkTheme and 0 or 1
+                            gr, gg, gb, ga = v, v, v, 1
+                        end
                         local gn = 0
                         for i = 1, numPips - 1 do
                             local gx = pipX[i] + pipW[i]

@@ -224,6 +224,8 @@ end
 local function BuildStyleExtras(rgn, key)
     EllesmereUI.BuildInlineCog(rgn, {
         icon = EllesmereUI.DIRECTIONS_ICON,
+        -- For these two rows, keep the element options to the left of Directions.
+        orderPriority = (key == "transmog" or key == "upgradeTrack") and 6 or nil,
         disabled = Off, disabledTooltip = REQUIRES,
         title = POSITION_LABELS[key],
         rows = { OffsetRow(key, "X Offset", "offsetX"), OffsetRow(key, "Y Offset", "offsetY") },

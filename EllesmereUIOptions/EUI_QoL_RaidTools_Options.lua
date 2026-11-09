@@ -387,6 +387,9 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "colorpicker", text = "Button Text Color", hasAlpha = false,
               tooltip = "Text color for Raid Tools action, report, role count and corner buttons. Disabled buttons retain their dimming.",
               disabled = function() return Disabled() or Cfg("buttonTextColorEnabled") ~= true end,
+              disabledTooltip = function()
+                  return Disabled() and "Show Raid Tools" or "Custom Button Text Color"
+              end,
               getValue = function()
                   return Cfg("buttonTextR") or 1, Cfg("buttonTextG") or 1,
                          Cfg("buttonTextB") or 1, 1
@@ -718,6 +721,7 @@ initFrame:SetScript("OnEvent", function(self)
                         set=function(v) RoleSet("showRoleForDPS",v) end},
                     {type="colorpicker",label="Tank Text Color",hasAlpha=false,
                         disabled=function() return not RoleGet("roleText") end,
+                        disabledTooltip = "Role Text",
                         get=function()
                             local c=RoleGet("roleTextTankColor")
                             return c.r,c.g,c.b,1
@@ -725,6 +729,7 @@ initFrame:SetScript("OnEvent", function(self)
                         set=function(r,g,b) RoleSet("roleTextTankColor",{r=r,g=g,b=b}) end},
                     {type="colorpicker",label="Healer Text Color",hasAlpha=false,
                         disabled=function() return not RoleGet("roleText") end,
+                        disabledTooltip = "Role Text",
                         get=function()
                             local c=RoleGet("roleTextHealerColor")
                             return c.r,c.g,c.b,1
@@ -732,6 +737,7 @@ initFrame:SetScript("OnEvent", function(self)
                         set=function(r,g,b) RoleSet("roleTextHealerColor",{r=r,g=g,b=b}) end},
                     {type="colorpicker",label="DPS Text Color",hasAlpha=false,
                         disabled=function() return not RoleGet("roleText") end,
+                        disabledTooltip = "Role Text",
                         get=function()
                             local c=RoleGet("roleTextDPSColor")
                             return c.r,c.g,c.b,1
@@ -750,6 +756,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "colorpicker", text = "Accent Color", hasAlpha = false,
               tooltip = "Accent color used by the Invite Tools window. By default it follows the EllesmereUI accent color.",
               disabled = Disabled,
+              disabledTooltip = "Show Raid Tools",
               getValue = function()
                   local c = InviteCfg("AccentColor")
                   if type(c) == "table" and c[1] then return c[1], c[2], c[3], 1 end
@@ -793,6 +800,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "colorpicker", text = "List Background", hasAlpha = true,
               tooltip = "Background color and opacity of the names list inside Invite Tools.",
               disabled = Disabled,
+              disabledTooltip = "Show Raid Tools",
               getValue = function()
                   local c = InviteCfg("ListBgColor")
                   if type(c) == "table" and c[1] then return c[1], c[2], c[3], c[4] or 1 end
@@ -808,6 +816,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "colorpicker", text = "Window Background", hasAlpha = true,
               tooltip = "Background color and opacity of the Invite Tools window.",
               disabled = Disabled,
+              disabledTooltip = "Show Raid Tools",
               getValue = function()
                   local c = InviteCfg("BgColor")
                   if type(c) == "table" and c[1] then return c[1], c[2], c[3], c[4] or 1 end
@@ -1173,6 +1182,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type = "colorpicker", text = "Compact Band Background Color", hasAlpha = false,
               tooltip = "Color of the flat overlay behind the Compact Band's buttons.",
               disabled = CBDisabled,
+              disabledTooltip = "Enable Compact Band",
               getValue = function()
                   return CBCfg("bgR") or 0, CBCfg("bgG") or 0, CBCfg("bgB") or 0, 1
               end,

@@ -500,6 +500,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PPl.Point(accentSwatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
             -- Class-colour swatch (to the left of accent): live player class colour.
             local classSwatch, updateClass = EllesmereUI.BuildColorSwatch(
@@ -519,6 +520,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PPl.Point(classSwatch, "RIGHT", rgn._lastInline, "LEFT", -8, 0)
             rgn._lastInline = classSwatch
+            EllesmereUI.OrderInlineAddon(rgn, classSwatch, "swatch")
 
             -- Custom-colour swatch (outermost): stored custom colour.
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
@@ -554,6 +556,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PPl.Point(customSwatch, "RIGHT", rgn._lastInline, "LEFT", -8, 0)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             accentSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color") end)
             accentSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
@@ -1857,6 +1860,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(accentSwatch, "RIGHT", cbDD, "LEFT", -12, 0)
             rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
             -- Custom swatch (to the left of accent): stored custom colour.
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
@@ -1884,6 +1888,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(customSwatch, "RIGHT", accentSwatch, "LEFT", -8, 0)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             accentSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color") end)
             accentSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)

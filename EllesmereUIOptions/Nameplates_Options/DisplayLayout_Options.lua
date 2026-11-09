@@ -314,6 +314,7 @@ local function BuildDisplayLayout(parent, y, ctx)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, borderColorGet, borderColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         leftRgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(leftRgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = isBorderOff()
             swatch:SetAlpha(off and 0.15 or 1)
@@ -323,6 +324,16 @@ local function BuildDisplayLayout(parent, y, ctx)
         local off = isBorderOff()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch, isBorderOff,
+            function()
+                if EllesmereUI.BlizzStyle.Get("nameplates") then
+                    return EllesmereUI.DisabledTooltip(EllesmereUI.BlizzStyle.Label("nameplates"), "disabled")
+                end
+                if DBVal("customBorderEnabled") then
+                    return EllesmereUI.DisabledTooltip("Custom Border", "disabled")
+                end
+                return EllesmereUI.DisabledTooltip("Show Border")
+            end)
     end
 
     -- Classic WoW UI only: the level, and the icon that replaces it on a
@@ -564,6 +575,7 @@ local function BuildDisplayLayout(parent, y, ctx)
             local cbSwatch, cbUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, cbColGet, cbColSet, true, 20)
             PP.Point(cbSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
             rightRgn._lastInline = cbSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, cbSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
         end
     end
@@ -655,6 +667,7 @@ local function BuildDisplayLayout(parent, y, ctx)
         local cbSwatch, cbUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, cbColorGet, cbColorSet, nil, 20)
         PP.Point(cbSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
         leftRgn._lastInline = cbSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, cbSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
         if ns.NP_BlizzOnly() then EllesmereUI.BlizzStyle.BlockInline("nameplates", cbSwatch) end
     end
@@ -713,6 +726,7 @@ local function BuildDisplayLayout(parent, y, ctx)
         local acSwatch, acUpdateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, acColorGet, acColorSet, nil, 20)
         PP.Point(acSwatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = acSwatch
+        EllesmereUI.OrderInlineAddon(rgn, acSwatch, "swatch")
         local function absorbColorOff() return (DBVal("absorbStyle") or "blizzard") == "blizzard" end
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = absorbColorOff()
@@ -723,6 +737,8 @@ local function BuildDisplayLayout(parent, y, ctx)
         local off0 = absorbColorOff()
         acSwatch:SetAlpha(off0 and 0.15 or 1)
         acSwatch:EnableMouse(not off0)
+        EllesmereUI.ExplainDisabledSwatch(acSwatch, absorbColorOff,
+            function() return EllesmereUI.DisabledTooltip("Blizzard Absorb Style", "disabled") end)
     end
 
     -- Eye icon: toggle absorb preview on the preview nameplate
@@ -734,6 +750,7 @@ local function BuildDisplayLayout(parent, y, ctx)
         eyeBtn:SetSize(26, 26)
         eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
         eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")

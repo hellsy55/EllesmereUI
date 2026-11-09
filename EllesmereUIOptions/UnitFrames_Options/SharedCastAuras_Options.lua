@@ -417,6 +417,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, tooltip) end)
             sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             leftRgn._lastInline = sw
+            EllesmereUI.OrderInlineAddon(leftRgn, sw, "swatch")
             -- Optional disabled gate: grey (0.3) + non-interactive when disabledFn
             -- is true; used by the default-off Interrupt Ready Mid-Cast swatch so
             -- it tracks its enable toggle in the cog.
@@ -429,6 +430,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 end
                 applySwState()
                 EllesmereUI.RegisterWidgetRefresh(applySwState)
+                EllesmereUI.ExplainDisabledSwatch(sw, disabledFn, "Interrupt Ready Mid-Cast")
             end
         end
         if optState.selectedUnit == "target" or optState.selectedUnit == "focus" then
@@ -751,6 +753,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
         local bgSw, bgSwUpdate = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, bgSwGet, bgSwSet, false, 20)
         PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSw
+        EllesmereUI.OrderInlineAddon(rgn, bgSw, "swatch")
         RegisterWidgetRefresh(function() bgSwUpdate() end)
     end
     -- Sync icon: Bar Background (right) -- background color + opacity
@@ -924,6 +927,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 end, true, 20)
             PP.Point(swatch,"RIGHT",rgn._control,"LEFT",-8,0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local blocker=CreateFrame("Frame",nil,swatch)
             blocker:SetAllPoints(); blocker:SetFrameLevel(swatch:GetFrameLevel()+10); blocker:EnableMouse(true)
             blocker:SetScript("OnEnter",function() EllesmereUI.ShowWidgetTooltip(swatch,EllesmereUI.DisabledTooltip(label)) end)
@@ -1137,9 +1141,10 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end, false, 20)
         snSw:SetPoint("RIGHT", snRgn._lastInline or snRgn._control, "LEFT", -8, 0)
         snRgn._lastInline = snSw
+        EllesmereUI.OrderInlineAddon(snRgn, snSw, "swatch")
         EllesmereUI.BindDisabledSwatch(snSw, function()
             return SValSupported("castSpellNameSide", "left") == "none"
-        end)
+        end, "Spell Name")
     end
     -- Inline cog on Duration Size: toggle + X/Y offsets
     if not EllesmereUI._prebuilding then
@@ -1186,10 +1191,11 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end, false, 20)
         dtSw:SetPoint("RIGHT", dtRgn._lastInline or dtRgn._control, "LEFT", -8, 0)
         dtRgn._lastInline = dtSw
+        EllesmereUI.OrderInlineAddon(dtRgn, dtSw, "swatch")
         EllesmereUI.BindDisabledSwatch(dtSw, function()
             return SValSupported("showCastDuration", true) == false
                 or SValSupported("castDurationSide", "right") == "none"
-        end)
+        end, "Duration")
     end
 
     -- Sync icons: Spell Name Size + Color (left) and Duration Size + Color (right)
@@ -1388,11 +1394,20 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end, false, 20)
         trgSw:SetPoint("RIGHT", trgRgn._lastInline or trgRgn._control, "LEFT", -8, 0)
         trgRgn._lastInline = trgSw
+        EllesmereUI.OrderInlineAddon(trgRgn, trgSw, "swatch")
         EllesmereUI.BindDisabledSwatch(trgSw, function()
             return SValSupported("showCastTarget", true) == false
                 or SValSupported("castSpellTargetSide", "right") == "none"
                 or ((optState.selectedUnit == "target" or optState.selectedUnit == "focus")
                     and SValSupported("castCombineNameTarget", false) == true)
+        end, function()
+            if SValSupported("showCastTarget", true) == false then
+                return EllesmereUI.DisabledTooltip("Show Target")
+            end
+            if SValSupported("castSpellTargetSide", "right") == "none" then
+                return EllesmereUI.DisabledTooltip("Target Position")
+            end
+            return EllesmereUI.DisabledTooltip("Combine Name and Target", "disabled")
         end)
     end
 
@@ -2756,6 +2771,7 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
             rgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
             eyeTex:SetAllPoints()
             local function RefreshDispelEye()

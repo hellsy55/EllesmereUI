@@ -353,6 +353,7 @@ initFrame:SetScript("OnEvent", function(self)
                 false, 20)
             PP.Point(bgSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = bgSwatch
+            EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() bgSwatchRefresh() end)
         end
         y = y - h

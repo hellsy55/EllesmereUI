@@ -445,6 +445,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 true, 20)
             PP.Point(borderSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = borderSwatch  -- left of the Corner Radius cog
+            EllesmereUI.OrderInlineAddon(rgn, borderSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
         end
         if not EllesmereUI._prebuilding then
@@ -700,9 +701,8 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
         end
     end
 
-    -- Row: Bar Spacing | Empty Bar Overlay. Empty Bar Overlay exposes bgR/G/B/A, the
-    -- overlay tint on empty pip backgrounds. Bar Spacing's color is opt-in: the inline
-    -- gapColorEnabled toggle activates a gap-only fill layer (gapR/G/B/A).
+    -- Bar Spacing always paints the gap; when there is no custom color its
+    -- theme default is white, or black under Class Resource Dark Mode.
     do
         local classGapRow
         classGapRow, h = W:DualRow(parent, y,
@@ -723,7 +723,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                   c.bgA = v / 100; RefreshClass()
                   EllesmereUI:RefreshPage()
               end });  y = y - h
-        -- Bar Spacing inline enable toggle + gap-color swatch
+        -- Bar Spacing inline color swatch (always available)
         if not EllesmereUI._prebuilding then
             local rgn = classGapRow._leftRegion
             local ctrl = rgn._control
@@ -731,45 +731,25 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 rgn, classGapRow:GetFrameLevel() + 3,
                 function()
                     local c = cfg()
-                    return (c and c.gapR or 0), (c and c.gapG or 0),
-                           (c and c.gapB or 0), (c and c.gapA or 1)
+                    if not c or not c.gapColorEnabled then
+                        local v = (c and c.darkTheme) and 0 or 1
+                        return v, v, v, 1
+                    end
+                    return c.gapR or 0, c.gapG or 0, c.gapB or 0, c.gapA or 1
                 end,
                 function(r, g, b, a)
                     local c = cfg(); if not c then return end
                     c.gapR, c.gapG, c.gapB, c.gapA = r, g, b, a
+                    -- Preserve existing custom colors; the legacy flag is now
+                    -- a custom-color marker, never an enable/disable switch.
+                    c.gapColorEnabled = true
                     SmoothRefresh(); EllesmereUI:RefreshPage()
                 end,
                 true, 20)
             PP.Point(gapSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = gapSwatch
+            EllesmereUI.OrderInlineAddon(rgn, gapSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateGapSwatch() end)
-            local gapBlock = CreateFrame("Frame", nil, gapSwatch)
-            gapBlock:SetAllPoints()
-            gapBlock:SetFrameLevel(gapSwatch:GetFrameLevel() + 10)
-            gapBlock:EnableMouse(true)
-            gapBlock:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(gapSwatch, "Enable the toggle to set a custom gap color")
-            end)
-            gapBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateGapSwatchState()
-                local c = cfg()
-                if c and c.gapColorEnabled then
-                    gapSwatch:SetAlpha(1); gapBlock:Hide()
-                else
-                    gapSwatch:SetAlpha(0.3); gapBlock:Show()
-                end
-            end
-            EllesmereUI.RegisterWidgetRefresh(UpdateGapSwatchState)
-            UpdateGapSwatchState()
-            EllesmereUI.BuildInlineToggle({
-                region = rgn,
-                getValue = function() local c = cfg(); return c and c.gapColorEnabled end,
-                setValue = function(v)
-                    local c = cfg(); if not c then return end
-                    c.gapColorEnabled = v and true or nil
-                    SmoothRefresh(); EllesmereUI:RefreshPage()
-                end,
-            })
         end
         -- Empty Bar Overlay inline color swatch (RGB only)
         if not EllesmereUI._prebuilding then
@@ -1107,6 +1087,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
             false, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local swatchDis = CreateFrame("Frame", nil, swatch)
         swatchDis:SetAllPoints(); swatchDis:SetFrameLevel(swatch:GetFrameLevel() + 10); swatchDis:EnableMouse(true)
         swatchDis:SetScript("OnEnter", function()
@@ -1364,6 +1345,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                     end, true, 20)
                 swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 local swatchBlock = CreateFrame("Frame", nil, swatch)
                 swatchBlock:SetAllPoints()
                 swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
@@ -1437,6 +1419,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                     end, false, 20)
                 swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 local function UpdateEnhSwatchVis()
                     local c = cfg()
                     local off = not (c and c.enabled) or not c.enhanceFiveBar or not _enhSpecOK()

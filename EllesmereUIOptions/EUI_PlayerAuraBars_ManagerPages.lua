@@ -1178,8 +1178,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
-        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.durationShow == false end)
+        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.durationShow == false end, "Show Duration")
     end
     do
         local rgn = dsRow._rightRegion
@@ -1208,8 +1209,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
-        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.stackShow == false end)
+        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.stackShow == false end, "Show Stacks")
     end
 
     return sy
@@ -1494,6 +1496,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
     end
     do
@@ -2066,6 +2069,7 @@ local function BuildFxEffects(frame, sy, cfg, apply)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         end
     end
 

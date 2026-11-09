@@ -638,6 +638,7 @@ local function BuildMovementAlertPage(pageName, parent, yOffset)
             nil, 20)
         PP.Point(dmSwatch, "RIGHT", dmClassSwatch, "LEFT", -8, 0)
         leftRgn._lastInline = dmSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, dmSwatch, "swatch")
         local dmOrigClick = dmSwatch:GetScript("OnClick")
         dmSwatch:SetScript("OnClick", function(self, ...)
             if DMSwatchesDisabled() then return end

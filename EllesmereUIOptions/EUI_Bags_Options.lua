@@ -776,6 +776,7 @@ initFrame:SetScript("OnEvent", function(self)
                         end, false, 20)
                     swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                     rgn._lastInline = swatch
+                    EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                     local swatchBlock = CreateFrame("Frame", nil, swatch)
                     swatchBlock:SetAllPoints()
                     swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)

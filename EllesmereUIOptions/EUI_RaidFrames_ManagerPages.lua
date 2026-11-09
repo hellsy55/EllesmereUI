@@ -113,6 +113,7 @@ function ns.RFO_AuraBorderSettings(parent, y, W, get, set, apply, disabled, disp
             function(r, g, b, a) set("Color", { r=r, g=g, b=b, a=a }); apply() end, true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(refresh)
     end
     local tex = Val("Texture", "solid")
@@ -621,6 +622,7 @@ local function BuildFxEffects(frame, sy, fxOwner)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         end
     end
 
@@ -1038,7 +1040,8 @@ local function BuildBaseDetailDM(frame, fontPath)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
-        EllesmereUI.BindDisabledSwatch(swatch, function() return not p.debuffShowDurText end)
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
+        EllesmereUI.BindDisabledSwatch(swatch, function() return not p.debuffShowDurText end, "Show Duration")
     end
     do
         local rgn = dtRow._rightRegion
@@ -1070,7 +1073,8 @@ local function BuildBaseDetailDM(frame, fontPath)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
-        EllesmereUI.BindDisabledSwatch(swatch, function() return p.debuffShowStacks == false end)
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
+        EllesmereUI.BindDisabledSwatch(swatch, function() return p.debuffShowStacks == false end, "Show Stacks")
     end
 
     -- Row: Tooltips | Show Duration Swipe. The swipe toggle was not in
@@ -1291,7 +1295,8 @@ local function BuildTileDetail(frame, fontPath, t)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
-            EllesmereUI.BindDisabledSwatch(swatch, function() return not TBoolOff("showDurText", "debuffShowDurText") end)
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
+            EllesmereUI.BindDisabledSwatch(swatch, function() return not TBoolOff("showDurText", "debuffShowDurText") end, "Show Duration")
         end
         do
             local rgn = dtRow._rightRegion
@@ -1323,7 +1328,8 @@ local function BuildTileDetail(frame, fontPath, t)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
-            EllesmereUI.BindDisabledSwatch(swatch, function() return not TBoolOn("showStacks", "debuffShowStacks") end)
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
+            EllesmereUI.BindDisabledSwatch(swatch, function() return not TBoolOn("showStacks", "debuffShowStacks") end, "Show Stacks")
         end
 
         -- Row: Tooltips | Show Duration Swipe (base pane parity)
@@ -1396,6 +1402,7 @@ local function BuildTileDetail(frame, fontPath, t)
         -- Label slots have no _control: anchor to the region itself.
         swatch:SetPoint("RIGHT", rgn, "RIGHT", -20, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
     end
 
     if t.type == "bar" then
@@ -1487,6 +1494,7 @@ local function BuildTileDetail(frame, fontPath, t)
                 end, false, 20)
             colorSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = colorSwatch
+            EllesmereUI.OrderInlineAddon(rgn, colorSwatch, "swatch")
         end
         do
             local rgn = barBgRow._rightRegion
@@ -1502,6 +1510,7 @@ local function BuildTileDetail(frame, fontPath, t)
                 end, false, 20)
             bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgSwatch
+            EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
         end
     elseif t.type == "healthcolor" then
         _, hh = W:DualRow(frame, sy,

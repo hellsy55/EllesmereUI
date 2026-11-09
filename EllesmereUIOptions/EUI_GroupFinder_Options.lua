@@ -291,6 +291,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end, false, 20)
                 swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 EUI.RegisterWidgetRefresh(update)
             end
         end
