@@ -29,6 +29,26 @@ end
 -- The header preview's state and builder (ns._MT_Preview), made on the
 -- page's first build.
 local ktPv, ktBuilder
+local ktClickTargets = {}
+local ktClickGlow
+
+local function JumpToKickSetting(key)
+    local target = ktClickTargets[key]
+    local sf = EllesmereUI._scrollFrame
+    if not target or not target.IsVisible or not target:IsVisible() or not sf then return end
+    local child = sf.GetScrollChild and sf:GetScrollChild()
+    local top = target:GetTop()
+    local childTop = child and child:GetTop()
+    if top and childTop then
+        EllesmereUI.SmoothScrollTo(math.max(0, childTop - top - 40))
+        local gen = EllesmereUI._Pool.Gen(target)
+        C_Timer.After(0.15, function()
+            if not target:IsVisible() or EllesmereUI._Pool.Gen(target) ~= gen then return end
+            ktClickGlow = ktClickGlow or EllesmereUI.MakeSettingGlow({ color = EllesmereUI.PANEL_ACCENT })
+            ktClickGlow(target)
+        end)
+    end
+end
 
 -- Every write hands the new settings to the runtime, which restyles the live
 -- icons and bars first; the header sample paints second.
@@ -73,7 +93,18 @@ ns._KT_HeaderBuilder = function(hdr, hdrW)
         ktPv = ns._MT_Preview.NewState()
         ktBuilder = ns._MT_Preview.Builder(ktPv, KT_COLS)
     end
-    return ktBuilder(hdr, hdrW)
+    local height = ktBuilder(hdr, hdrW)
+    if ktPv then
+        for i, key in ipairs({ "bars", "plates" }) do
+            local col = ktPv.cols[i]
+            if col and col.host and not col._clickOverlay then
+                col._clickOverlay = EllesmereUI.CreatePreviewHitOverlay(
+                    col.host, JumpToKickSetting, key, false,
+                    col.host:GetFrameLevel() + 20)
+            end
+        end
+    end
+    return height
 end
 -- A kept page shown again (onPageCacheRestore): the preview paints again.
 ns._KT_RestorePreview = function()
@@ -227,6 +258,8 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
     local y = yOffset
     local _, row, h
 
+    ktClickTargets.bars = nil
+    ktClickTargets.plates = nil
     EllesmereUI:SetContentHeader(ns._KT_HeaderBuilder)
     parent._showRowDivider = true
 
@@ -263,6 +296,9 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
           tooltip="The tracker runs in Mythic and Mythic+ dungeons and arenas only; untick one to turn it off there.",
           values={ __placeholder="..." }, order={ "__placeholder" },
           getValue=function() return "__placeholder" end, setValue=function() end });  y = y - h
+    -- The preview remains navigable to this master switch while disabled.
+    ktClickTargets.bars = row._leftRegion or row
+    ktClickTargets.plates = row._leftRegion or row
     if not EllesmereUI._prebuilding then
         local rgn = row._rightRegion
         if rgn._control then rgn._control:Hide() end
@@ -308,7 +344,9 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
 
     -- The rest of the page exists only while the feature is on.
     if On() then
-        _, h = W:SectionHeader(parent, "NAMEPLATE ICON", y); y = y - h
+        local platesHeader
+        platesHeader, h = W:SectionHeader(parent, "NAMEPLATE ICON", y); y = y - h
+        ktClickTargets.plates = platesHeader
 
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Show on Nameplates",
@@ -423,6 +461,7 @@ ns._KT_BuildPage = function(pageName, parent, yOffset)
         -- whatever Show Bars says: its disabled state explains itself.
         local hdr
         hdr, h = W:SectionHeader(parent, "BARS", y); y = y - h
+        ktClickTargets.bars = hdr
         EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EMT_KickBars", disabled = BarsOff, disabledTooltip = REQ_BARS })
 
         row, h = W:DualRow(parent, y,

@@ -1780,6 +1780,13 @@ initFrame:SetScript("OnEvent", function(self)
                 lbl:SetText(L(m.label))
                 if curMode == m.key then
                     bg:SetColorTexture(EG.r, EG.g, EG.b, 0.85)
+                    -- A light accent (including white) needs dark text.
+                    local lightness = EG.r * 0.299 + EG.g * 0.587 + EG.b * 0.114
+                    if lightness > 0.55 then
+                        lbl:SetTextColor(0.08, 0.08, 0.09, 1)
+                    else
+                        lbl:SetTextColor(1, 1, 1, 1)
+                    end
                 else
                     bg:SetColorTexture(0.10, 0.10, 0.11, 0.85)
                     lbl:SetTextColor(1, 1, 1, 0.55)
@@ -2308,6 +2315,8 @@ initFrame:SetScript("OnEvent", function(self)
                     -- inject these into every text anchor; icons stay put).
                     EllesmereUI.BuildInlineCog(alignRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                         title = "Text Position",
+                        disabled = function() return b.type == "micromenu" and s.hideSocialText == true end,
+                        disabledTooltip = "Enable Text",
                         rows = {
                             { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
                               get = function()

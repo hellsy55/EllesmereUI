@@ -120,15 +120,16 @@ local function BuildBarAppearance(parent, y, ctx)
                 for _, key in ipairs(GROUP_BAR_ORDER) do ApplySpacingTo(key) end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced=function()
+            isSynced=function(targetKey)
                 local spacing = CurrentSpacing(SB())
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     if CurrentSpacing(EAB.db.profile.bars[key]) ~= spacing then return false end
                 end
                 return true
             end,
             flashTargets=function() return { region } end,
             multiApply={
+                compareWithSource = true,
                 getElementState = env.IsBarEnabled,
                 elementKeys=GROUP_BAR_ORDER,
                 elementLabels=SHORT_LABELS,
@@ -193,9 +194,9 @@ local function BuildBarAppearance(parent, y, ctx)
                 for _, key in ipairs(GROUP_BAR_ORDER) do ApplyColorTo(key) end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced=function()
+            isSynced=function(targetKey)
                 local color = SGet("bgColor") or { r=0, g=0, b=0 }
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     local target = EAB.db.profile.bars[key].bgColor or { r=0, g=0, b=0 }
                     if target.r ~= color.r or target.g ~= color.g or target.b ~= color.b then
                         return false
@@ -205,6 +206,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets=function() return { region } end,
             multiApply={
+                compareWithSource = true,
                 getElementState = env.IsBarEnabled,
                 elementKeys=GROUP_BAR_ORDER,
                 elementLabels=SHORT_LABELS,
@@ -232,15 +234,16 @@ local function BuildBarAppearance(parent, y, ctx)
                 for _, key in ipairs(GROUP_BAR_ORDER) do ApplyOpacityTo(key) end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced=function()
+            isSynced=function(targetKey)
                 local opacity = BackgroundOpacity(SB())
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     if BackgroundOpacity(EAB.db.profile.bars[key]) ~= opacity then return false end
                 end
                 return true
             end,
             flashTargets=function() return { region } end,
             multiApply={
+                compareWithSource = true,
                 getElementState = env.IsBarEnabled,
                 elementKeys=GROUP_BAR_ORDER,
                 elementLabels=SHORT_LABELS,
@@ -375,11 +378,11 @@ local function BuildBarAppearance(parent, y, ctx)
                     for _, key in ipairs(GROUP_BAR_ORDER) do ApplySizeTo(key) end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced=function()
+                isSynced=function(targetKey)
                     local thickness = SVal("bgBorderThickness", "none")
                     local thicknessPx = SGet("bgBorderThicknessPx") or false   -- nil and false render alike
                     local color = SGet("bgBorderColor") or { r=0, g=0, b=0, a=1 }
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         local target = EAB.db.profile.bars[key]
                         if (target.bgBorderThickness or "none") ~= thickness then return false end
                         if (target.bgBorderThicknessPx or false) ~= thicknessPx then return false end
@@ -391,6 +394,7 @@ local function BuildBarAppearance(parent, y, ctx)
                 end,
                 flashTargets=function() return { region } end,
                 multiApply={
+                    compareWithSource = true,
                 getElementState = env.IsBarEnabled,
                     elementKeys=GROUP_BAR_ORDER,
                     elementLabels=SHORT_LABELS,
@@ -486,9 +490,9 @@ local function BuildBarAppearance(parent, y, ctx)
                     for _, key in ipairs(GROUP_BAR_ORDER) do ApplyStyleTo(key) end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced=function()
+                isSynced=function(targetKey)
                     local source = SB()
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         local target = EAB.db.profile.bars[key]
                         if (target.bgBorderTexture or "solid") ~= (source.bgBorderTexture or "solid") then return false end
                         if target.bgBorderOffsetX ~= source.bgBorderOffsetX then return false end
@@ -501,6 +505,7 @@ local function BuildBarAppearance(parent, y, ctx)
                 end,
                 flashTargets=function() return { region } end,
                 multiApply={
+                    compareWithSource = true,
                 getElementState = env.IsBarEnabled,
                     elementKeys=GROUP_BAR_ORDER,
                     elementLabels=SHORT_LABELS,
@@ -860,7 +865,7 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local bt = SB().borderTexture or "solid"
                 local ox = SB().borderTextureOffset
                 local oy = SB().borderTextureOffsetY
@@ -868,7 +873,7 @@ local function BuildBarAppearance(parent, y, ctx)
                 local sy = SB().borderTextureShiftY
                 local bh = SB().borderBehind or false
                 local ba = SB().borderAboveEffects or false
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     if (EAB.db.profile.bars[key].borderTexture or "solid") ~= bt then return false end
                     if EAB.db.profile.bars[key].borderTextureOffset ~= ox then return false end
                     if EAB.db.profile.bars[key].borderTextureOffsetY ~= oy then return false end
@@ -881,6 +886,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets = function() return { bsLeftRgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1032,13 +1038,13 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local th = SB().borderThickness or "thin"
                 local thPx = SB().borderThicknessPx or false   -- nil and false render alike
                 local cc = SB().borderClassColor or false
                 local c = SB().borderColor
                 local cr, cg, cb, ca = c and c.r or 0, c and c.g or 0, c and c.b or 0, c and c.a or 1
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     if (EAB.db.profile.bars[key].borderThickness or "thin") ~= th then return false end
                     if (EAB.db.profile.bars[key].borderThicknessPx or false) ~= thPx then return false end
                     if (EAB.db.profile.bars[key].borderClassColor or false) ~= cc then return false end
@@ -1049,6 +1055,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1198,15 +1205,16 @@ local function BuildBarAppearance(parent, y, ctx)
                 SUpdatePreview()
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = SGet("buttonShape") or "none"
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     if (EAB.db.profile.bars[key].buttonShape or "none") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1263,15 +1271,16 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = SB().iconZoom or EAB.db.profile.iconZoom or 5.5
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     if (EAB.db.profile.bars[key].iconZoom or EAB.db.profile.iconZoom or 5.5) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1376,6 +1385,8 @@ local function BuildBarAppearance(parent, y, ctx)
         local rgn = slotBgRow._rightRegion
         EllesmereUI.BuildInlineCog(rgn, { anchorTo = rgn._control,
             title = "One Button Assist Icon",
+            disabled = function() return EAB.db.profile.obaIconEnabled == false end,
+            disabledTooltip = "One Button Assist Icon",
             rows = {
                 { type="slider", label="Icon Outset", min=0, max=30, step=1,
                   get=function() return EAB.db.profile.obaIconOutset or 9 end,
@@ -2075,13 +2086,13 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local s = SB()
                 local sz = s.keybindFontSize or 12
                 local c = s.keybindFontColor
                 local ox = s.keybindOffsetX or 0
                 local oy = s.keybindOffsetY or 0
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     local b = EAB.db.profile.bars[key]
                     if (b.keybindFontSize or 12) ~= sz then return false end
                     if (b.keybindOffsetX or 0) ~= ox then return false end
@@ -2096,6 +2107,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2247,13 +2259,13 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local s = SB()
                 local sz = s.macroFontSize or 12
                 local c = s.macroFontColor
                 local ox = s.macroOffsetX or 0
                 local oy = s.macroOffsetY or 0
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     local b = EAB.db.profile.bars[key]
                     if (b.macroFontSize or 12) ~= sz then return false end
                     if (b.macroOffsetX or 0) ~= ox then return false end
@@ -2268,6 +2280,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2376,13 +2389,13 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local s = SB()
                 local sz = s.countFontSize or 12
                 local c = s.countFontColor
                 local ox = s.countOffsetX or 0
                 local oy = s.countOffsetY or 0
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     local b = EAB.db.profile.bars[key]
                     if (b.countFontSize or 12) ~= sz then return false end
                     if (b.countOffsetX or 0) ~= ox then return false end
@@ -2397,6 +2410,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2492,14 +2506,14 @@ local function BuildBarAppearance(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local s = SB()
                 local sz = s.cooldownFontSize or 12
                 local c = s.cooldownTextColor
                 local ox = s.cooldownTextXOffset or 0
                 local oy = s.cooldownTextYOffset or 0
                 local ft = s.cooldownFontFit or false
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     local b = EAB.db.profile.bars[key]
                     if (b.cooldownFontSize or 12) ~= sz then return false end
                     if (b.cooldownTextXOffset or 0) ~= ox then return false end
@@ -2514,6 +2528,7 @@ local function BuildBarAppearance(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2542,8 +2557,8 @@ local function BuildBarAppearance(parent, y, ctx)
     do
         local rgn = chargesRow._rightRegion
         local ctrl = rgn._control
-        EllesmereUI.BuildInlineCog(rgn, {
-            title = "Cooldown Text",
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
+            title = "Cooldown Text Offsets",
             rows = {
                 { type="slider", label="X Offset", min=-150, max=150, step=1,
                   get=function() return SVal("cooldownTextXOffset", 0) end,

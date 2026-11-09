@@ -746,14 +746,13 @@ initFrame:SetScript("OnEvent", function(self)
                       end }
                 ); y = y - h
 
-                -- Show Item Level's inlines: the cog nearest the control (Show Gear
-                -- Track Rank, live while item levels show: the rank only renders
-                -- beside them), then the Custom Colored swatch left of it.
+                -- Show Item Level: one options cog to the right of the custom
+                -- color swatch. Both disable when Item Icons manages the display.
                 if not EllesmereUI._prebuilding then
                     local rgn = ilvlRow._leftRegion
                     EllesmereUI.BuildInlineCog(rgn, {
-                        disabled = function() return db.profile.showItemlevelInBags == false end,
-                        disabledTooltip = "Show Item Level",
+                        disabled = function() return ItemIconsManaged() or db.profile.showItemlevelInBags == false end,
+                        disabledTooltip = ManagedOr("Show Item Level"), rawTooltip = ItemIconsManaged,
                         title = "Item Level Options",
                         rows = {
                             { type="toggle", label="Show Gear Track Rank",
@@ -795,19 +794,6 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI.RegisterWidgetRefresh(UpdateIlvlSwatch)
                     EllesmereUI.RegisterWidgetRefresh(updateSwatch)
 
-                    EllesmereUI.BuildInlineCog(rgn, {
-                        disabled = function() return ItemIconsManaged() or db.profile.showItemlevelInBags == false end,
-                        disabledTooltip = ManagedOr("Show Item Level"), rawTooltip = ItemIconsManaged,
-                        title = "Item Level Options",
-                        rows = {
-                            { type="toggle", label="Show Gear Track Rank",
-                              get=function() return db.profile.bagShowTrackRank or false end,
-                              set=function(v)
-                                  db.profile.bagShowTrackRank = v
-                                  if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                              end },
-                        },
-                    })
                 end
 
                 -- Show BoE / Warbound Text (+ inline cog: Text Size) | Item Count Text Size
@@ -836,7 +822,7 @@ initFrame:SetScript("OnEvent", function(self)
                       end }
                 ); y = y - h
 
-                -- Inline cog (RESIZE) on Show BoE / Warbound Text: text size
+                -- Inline options cog on Show BoE / Warbound Text: text size
                 -- Skipped during the hidden search pre-build: that pass swaps the
                 -- widget factory for the frameless absorber, so DualRow returns a
                 -- plain table and CreateFrame/SetPoint against its regions throw.
@@ -845,7 +831,6 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Same for every region-chrome block below.
                 if not EllesmereUI._prebuilding then
                     EllesmereUI.BuildInlineCog(bindRow._leftRegion, {
-                        icon = EllesmereUI.RESIZE_ICON, chain = false,
                         disabled = function() return ItemIconsManaged() or not db.profile.bagDisplayBindType end,
                         disabledTooltip = ManagedOr("Show BoE / Warbound Text"), rawTooltip = ItemIconsManaged,
                         title = "BoE / Warbound Text Options",
@@ -886,10 +871,9 @@ initFrame:SetScript("OnEvent", function(self)
                           end }
                     ); y = y - h
 
-                    -- Inline cog (RESIZE) on Show Set Name on Gear: text size
+                    -- Inline options cog on Show Set Name on Gear: text size
                     if not EllesmereUI._prebuilding then
                         EllesmereUI.BuildInlineCog(setNameRow._leftRegion, {
-                            icon = EllesmereUI.RESIZE_ICON, chain = false,
                             disabled = function() return ItemIconsManaged() or db.profile.bagShowSetGearName ~= true end,
                             disabledTooltip = ManagedOr("Show Set Name on Gear"), rawTooltip = ItemIconsManaged,
                             title = "Set Name Text Options",

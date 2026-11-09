@@ -1683,7 +1683,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Show on FPS/MS Hover | Show on Clock Hover
+        -- Show on FPS/MS Hover | Difficulty Position (+ size/offset cog)
         local HOVER_TT_VALUES = { none = "None", lockouts = "Instance Lockouts", vault = "Great Vault" }
         local HOVER_TT_ORDER = { "none", "lockouts", "vault" }
         -- No Great Vault on WoW Forever: the entry is dropped and a saved "vault"
@@ -1692,7 +1692,11 @@ initFrame:SetScript("OnEvent", function(self)
             HOVER_TT_VALUES.vault = nil
             HOVER_TT_ORDER = { "none", "lockouts" }
         end
-        _, h = W:DualRow(parent, y,
+        local function DiffTextOn()
+            local m = MinimapDB(); return (m and m.diffTextEnabled) or false
+        end
+        local diffRow
+        diffRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Show on FPS/MS Hover",
               values = HOVER_TT_VALUES, order = HOVER_TT_ORDER,
               disabled=FpsOff,
@@ -1707,6 +1711,27 @@ initFrame:SetScript("OnEvent", function(self)
                 m.fpsHoverTooltip = v
                 RefreshMinimap()
               end },
+            { type="dropdown", text="Difficulty Position",
+              values = MAP_POS_VALUES, order = MAP_POS_ORDER,
+              disabled=function() return not DiffTextOn() end,
+              disabledTooltip="Show Instance Difficulty as Text",
+              getValue=function() local m = MinimapDB(); return m and m.diffTextPosition or "topLeft" end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.diffTextPosition = v
+                RefreshMinimap()
+              end }
+        );  y = y - h
+        -- Show Instance Difficulty as Text | Show on Clock Hover
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Instance Difficulty as Text",
+              getValue=DiffTextOn,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.diffTextEnabled = v and true or false
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end },
             { type="dropdown", text="Show on Clock Hover",
               values = HOVER_TT_VALUES, order = HOVER_TT_ORDER,
               disabled=function() return ClockMode() == "none" end,
@@ -1719,32 +1744,6 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.clockHoverTooltip = v
-              end }
-        );  y = y - h
-
-        -- Show Instance Difficulty as Text | Difficulty Position (+ size/offset cog)
-        local function DiffTextOn()
-            local m = MinimapDB(); return (m and m.diffTextEnabled) or false
-        end
-        local diffRow
-        diffRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Instance Difficulty as Text",
-              getValue=DiffTextOn,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.diffTextEnabled = v and true or false
-                RefreshMinimap()
-                EllesmereUI:RefreshPage()
-              end },
-            { type="dropdown", text="Difficulty Position",
-              values = MAP_POS_VALUES, order = MAP_POS_ORDER,
-              disabled=function() return not DiffTextOn() end,
-              disabledTooltip="Show Instance Difficulty as Text",
-              getValue=function() local m = MinimapDB(); return m and m.diffTextPosition or "topLeft" end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.diffTextPosition = v
-                RefreshMinimap()
               end }
         );  y = y - h
         -- Inline cog on Difficulty Position for text size + X/Y offset

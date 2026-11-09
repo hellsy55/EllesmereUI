@@ -29,7 +29,7 @@ local KINDS = ns.HEALTH_INDICATORS
 local function StyleOf(cfg, k)
     local style = cfg[k.style]
     if k.show then
-        return cfg[k.show] == true and (style or "striped") or nil
+        return cfg[k.show] == true and style ~= "none" and (style or "striped") or nil
     end
     return (style and style ~= "none") and style or nil
 end
@@ -38,6 +38,7 @@ end
 -- textures ("sm:" SharedMedia keys land there). The live overlays and the
 -- options dropdown preview both resolve through this.
 function ns.HealthIndicatorTex(style)
+    if style == "maxHealthStripes" then return EllesmereUI.MAX_HEALTH_STRIPES_TEX end
     return STYLE_TEX[style] or EllesmereUI.ResolveTexturePath(_G._ERB_BarTextures, style, WHITE)
 end
 
@@ -282,8 +283,7 @@ local function Overlay(key)
     return bar
 end
 
-local function ApplyHealBacking(bar, cfg)
-    local alpha = (cfg.healAbsorbBgOpacity or 0) / 100
+local function ApplyBacking(bar, alpha)
     local bg = bar._bg
     if alpha <= 0 then
         if bg then bg:Hide() end
@@ -362,6 +362,7 @@ function ns.HealthIndicatorsApply(bar, cfg, orientation)
             -- A retexture resets the colour, so the colour goes on after it.
             local style = StyleOf(cfg, k)
             local tiled = TILED[style] == true
+                or (k.key == "maxHealthLoss" and (style == "striped" or style == "maxHealthStripes"))
             local fw = k.key == "absorb" and ov._forward
             if styled[k.key] ~= style then
                 styled[k.key] = style
@@ -388,7 +389,11 @@ function ns.HealthIndicatorsApply(bar, cfg, orientation)
                 fw:SetRotatesTexture(vertical and not tiled)
                 fw:SetStatusBarColor(r, g, b, a)
             end
-            if k.key == "healAbsorb" then ApplyHealBacking(ov, cfg) end
+            if k.key == "healAbsorb" then
+                ApplyBacking(ov, (cfg.healAbsorbBgOpacity or 0) / 100)
+            elseif k.key == "maxHealthLoss" then
+                ApplyBacking(ov, (cfg.maxHealthLossBgOpacity or 0) / 100)
+            end
         elseif bars[k.key] then
             bars[k.key]:Hide()
         end

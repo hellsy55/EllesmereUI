@@ -361,9 +361,9 @@ local function DataBarKit(parent)
             region = region,
             tooltip = tooltip,
             onClick = function() ApplyTo(BORDER_SYNC_KEYS) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = EAB.db.profile.bars[srcKey]
-                for _, k in ipairs(BORDER_SYNC_KEYS) do
+                for _, k in ipairs(targetKey and {targetKey} or BORDER_SYNC_KEYS) do
                     local t = EAB.db.profile.bars[k]
                     if t and not sameFn(t, src) then return false end
                 end
@@ -371,6 +371,7 @@ local function DataBarKit(parent)
             end,
             flashTargets = function() return { region } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys = BORDER_SYNC_KEYS,
                 elementLabels = DATA_BAR_LABELS,

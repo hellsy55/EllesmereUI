@@ -120,8 +120,8 @@ EllesmereUI.PlayWhiteFlash = PlayWhiteFlash
 --      elementLabels = { MainBar = "Bar 1", Bar2 = "Bar 2", ... },
 --      getCurrentKey = function() return selectedBarKey end,
 --      onApply       = function(checkedKeys) ... end,
---      getElementState = function(key) return enabled end, -- optional destination state
---      getElementOptionState = function(key) return enabled end, -- optional setting state
+--      getElementState = function(key) return enabled end, -- optional destination availability
+--      getElementOptionState = function(key) return enabled end, -- optional state of this setting
 --  }
 --  anchorFrame: frame to anchor the dropdown below
 --  flashTargets: optional table or function for PlayWhiteFlash on apply
@@ -422,30 +422,40 @@ local function BuildMultiApplyDropdown(anchorFrame, opts, flashTargets)
     end
     for i = #keys + 1, #rows do rows[i]:Hide() end
 
-    -- Read live profile data, not the checkmarks (those only select targets).
-    -- A nil return means the caller cannot determine a valid state. Never
-    -- report that state as Disabled by guessing a default.
+    -- Selection checkmarks are where to copy; they do not represent a saved
+    -- setting. Prefer the real setting's state, never the parent frame's
+    -- enabled flag as if it described the setting being copied. An availability
+    -- fallback is explicitly named so it cannot be mistaken for that state.
     local lastStatus = {}
     local function UpdateStatuses()
-        local getter = opts.getElementOptionState or opts.getElementState
-        if type(getter) ~= "function" then return end
+        local optionGetter = opts.getElementOptionState
+        local availabilityGetter = opts.getElementState
         for i, key in ipairs(keys) do
-            local row = rows[i]
-            local status = row._status
-            local ok, state = pcall(getter, key)
-            if not ok then state = nil end
-            if state ~= lastStatus[i] then
-                lastStatus[i] = state
-                if state == true then
-                    status:SetText(EllesmereUI.L("Enabled"))
-                    status:SetTextColor(0.30, 0.78, 0.52, 1)
+            local status = rows[i]._status
+            local value, isOption
+            if type(optionGetter) == "function" then
+                local ok, state = pcall(optionGetter, key)
+                if ok then value, isOption = state, true end
+            elseif type(availabilityGetter) == "function" then
+                local ok, state = pcall(availabilityGetter, key)
+                if ok then value, isOption = state, false end
+            end
+            -- The popup is reused; always reset its status, even when the
+            -- current state is unavailable or the getter failed.
+            if value ~= lastStatus[i] or isOption ~= lastStatus[-i] then
+                lastStatus[i], lastStatus[-i] = value, isOption
+                if type(value) == "boolean" and isOption then
+                    status:SetText((value and EllesmereUI.L("Enabled") or EllesmereUI.L("Disabled")))
+                    status:SetTextColor(value and 0.30 or 0.65, value and 0.78 or 0.65, value and 0.52 or 0.65, 1)
                     status:Show()
-                elseif state == false then
-                    status:SetText(EllesmereUI.L("Disabled"))
+                elseif type(value) == "boolean" then
+                    status:SetText(value and "Frame On" or "Frame Off")
                     status:SetTextColor(0.65, 0.65, 0.65, 0.95)
                     status:Show()
-                elseif type(state) == "string" and state ~= "" then
-                    status:SetText(EllesmereUI.L(state))
+                elseif type(value) == "string" and value ~= "" then
+                    -- Preserve meaningful caller-supplied labels (Matching,
+                    -- Different, Blizzard, etc.) without assuming a boolean.
+                    status:SetText(EllesmereUI.L(value))
                     status:SetTextColor(0.75, 0.75, 0.75, 1)
                     status:Show()
                 else
@@ -786,7 +796,19 @@ local function BuildSyncIcon(opts)
     -- ----------------------------------------------------------------
     if multiBtn then
         multiBtn:SetScript("OnClick", function()
-            BuildMultiApplyDropdown(multiBtn, opts.multiApply, opts.flashTargets)
+            local multiOpts = opts.multiApply
+            if multiOpts.compareWithSource and type(opts.isSynced) == "function"
+                and not multiOpts.getElementOptionState then
+                -- The caller's sync predicate accepts a single target key;
+                -- use the exact same normalized comparison as Apply to All.
+                local scoped = {}
+                for k, v in pairs(multiOpts) do scoped[k] = v end
+                scoped.getElementOptionState = function(key)
+                    return opts.isSynced(key) and "Matching" or "Different"
+                end
+                multiOpts = scoped
+            end
+            BuildMultiApplyDropdown(multiBtn, multiOpts, opts.flashTargets)
         end)
         -- The menu hangs from this link and applies this row's setting: when the link
         -- goes (a page pass dresses it again or drops it, the values synced, the panel

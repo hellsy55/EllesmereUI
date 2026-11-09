@@ -141,9 +141,9 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     RefreshPageCycle()
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local src = SB()
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         local dst = EAB.db.profile.bars[key]
                         if not EllesmereUI.VisFullEquals(src, "barVisibility", dst, "barVisibility") then return false end
                         if (src.dragShow or false) ~= (dst.dragShow or false) then return false end
@@ -152,6 +152,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
@@ -313,10 +314,10 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end
                 EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local cur = SB()
                 local v = cur.mouseoverEnabled and 1 or (cur.mouseoverAlpha or 1)
-                for _, key in ipairs(GROUP_BAR_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                     local bs = EAB.db.profile.bars[key]
                     local bv = bs.mouseoverEnabled and 1 or (bs.mouseoverAlpha or 1)
                     if bv ~= v then return false end
@@ -325,6 +326,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -410,9 +412,9 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             EllesmereUI:RefreshPage()
         end
 
-        AdvancedFadeSynced = function()
+        AdvancedFadeSynced = function(targetKey)
             local src = SB()
-            for _, key in ipairs(GROUP_BAR_ORDER) do
+            for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                 local dst = EAB.db.profile.bars[key]
                 if dst and not AdvancedFadeEqual(src, dst) then return false end
             end
@@ -491,7 +493,8 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             isSynced = AdvancedFadeSynced,
             flashTargets = function() return { rgn } end,
             multiApply = {
-                        getElementState = env.IsBarEnabled,
+                compareWithSource = true,
+                getElementState = env.IsBarEnabled,
                 elementKeys   = GROUP_BAR_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return SelectedKey() end,
@@ -663,13 +666,13 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local s = SB()
                     local info = BAR_LOOKUP[SelectedKey()]
                     local btn1 = FirstBarButton(SelectedKey())
                     local v = (s.buttonWidth and s.buttonWidth > 0) and s.buttonWidth
                         or (btn1 and math.floor((btn1:GetWidth() or 36) + 0.5)) or 36
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         local ks = EAB.db.profile.bars[key]
                         local kv = (ks.buttonWidth and ks.buttonWidth > 0) and ks.buttonWidth or v
                         if kv ~= v then return false end
@@ -678,6 +681,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
@@ -712,15 +716,16 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local v = SB().buttonPadding or 2
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         if (EAB.db.profile.bars[key].buttonPadding or 2) ~= v then return false end
                     end
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
@@ -784,15 +789,16 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local v = SB().overrideNumIcons or 12
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         if (EAB.db.profile.bars[key].overrideNumIcons or 12) ~= v then return false end
                     end
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
@@ -822,15 +828,16 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local v = SB().overrideNumRows or 1
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         if (EAB.db.profile.bars[key].overrideNumRows or 1) ~= v then return false end
                     end
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,
@@ -925,15 +932,16 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                         end
                         EllesmereUI:RefreshPage()
                     end,
-                    isSynced = function()
+                    isSynced = function(targetKey)
                         local isHoriz = EAB:GetOrientationForBar(SelectedKey())
-                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                        for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                             if EAB:BarSupportsOrientation(key) and EAB:GetOrientationForBar(key) ~= isHoriz then return false end
                         end
                         return true
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                         elementKeys   = GROUP_BAR_ORDER,
                         elementLabels = SHORT_LABELS,
@@ -980,12 +988,12 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                         end
                         EllesmereUI:RefreshPage()
                     end,
-                    isSynced = function()
+                    isSynced = function(targetKey)
                         local s = SB()
                         local en = s.bgEnabled or false
                         local px = s.bgPadX or 0
                         local py = s.bgPadY or 0
-                        for _, key in ipairs(GROUP_BAR_ORDER) do
+                        for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                             local bs = EAB.db.profile.bars[key]
                             if (bs.bgEnabled or false) ~= en then return false end
                             if (bs.bgPadX or 0) ~= px then return false end
@@ -998,6 +1006,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                         elementKeys   = GROUP_BAR_ORDER,
                         elementLabels = SHORT_LABELS,
@@ -1186,15 +1195,16 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                     end
                     EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local v = SB().frameStrata or "MEDIUM"
-                    for _, key in ipairs(GROUP_BAR_ORDER) do
+                    for _, key in ipairs(targetKey and {targetKey} or GROUP_BAR_ORDER) do
                         if (EAB.db.profile.bars[key].frameStrata or "MEDIUM") ~= v then return false end
                     end
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                         getElementState = env.IsBarEnabled,
                     elementKeys   = GROUP_BAR_ORDER,
                     elementLabels = SHORT_LABELS,

@@ -567,6 +567,9 @@ initFrame:SetScript("OnEvent", function(self)
                     flashTargets = function() return { rgn } end,
                     multiApply = {
                         getElementState = IsBarEnabled,
+                        getElementOptionState = function(key)
+                            return C.Same(key) and "Matching" or "Different"
+                        end,
                         elementKeys   = o.syncKeys,
                         elementLabels = o.syncLabels,
                         getCurrentKey = function() return o.key() end,

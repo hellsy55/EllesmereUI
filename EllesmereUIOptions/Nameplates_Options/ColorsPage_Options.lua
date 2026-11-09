@@ -1369,7 +1369,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- Enemy Types | Modify Out of Combat
     local enemyTypesRow
     enemyTypesRow, h = W:DualRow(parent, y,
-        { type="multiSwatch", text="Enemy Types",
+        { type="multiSwatch", text="Enemy Types", swatchRightInset=32,
           swatches = {
             { tooltip = "Enemies",
               getValue = function() return DBColor("enemyInCombat") end,
@@ -1443,6 +1443,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
             return not v
         end
         EllesmereUI.BuildInlineCog(leftRgn, {
+            anchorTo = leftRgn, relPoint = "RIGHT", gap = 20, chain = false,
             title = "Enemy Colors",
             rows = {
                 { type="toggle", label="Simple Coloring When Not In M+",
@@ -1470,7 +1471,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- Neutral & Mini Enemies | Enable Quest Mob Color
     local neutralMiniRow
     neutralMiniRow, h = W:DualRow(parent, y,
-        { type="multiSwatch", text="Neutral & Mini Enemies",
+        { type="multiSwatch", text="Neutral & Mini Enemies", swatchRightInset=32,
           swatches = {
             { tooltip = "Neutral",
               getValue = function() return DBColor("neutral") end,
@@ -1530,6 +1531,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     if not EllesmereUI._prebuilding then
         local leftRgn = neutralMiniRow._leftRegion
         EllesmereUI.BuildInlineCog(leftRgn, {
+            anchorTo = leftRgn, relPoint = "RIGHT", gap = 20, chain = false,
             title = "Mini Enemies",
             rows = {
                 { type="toggle", label="Mini Coloring M+ Only",
@@ -1710,7 +1712,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- Row 2: Non-Tank Threat (left) ---- DPS: Show Special "No Aggro" Color (right)
     local nonTankRow
     nonTankRow, h = W:DualRow(parent, y,
-        { type="multiSwatch", text="Non-Tank Threat",
+        { type="multiSwatch", text="Non-Tank Threat", swatchRightInset=32,
           disabled=threatNever, disabledTooltip="Show Threat Colors",
           swatches = {
             { tooltip = "Has Aggro",
@@ -1744,6 +1746,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- while the Near Aggro color is active (see EnsureNearAggroGlow).
     if not EllesmereUI._prebuilding then
         EllesmereUI.BuildInlineCog(nonTankRow._leftRegion, {
+            anchorTo = nonTankRow._leftRegion, relPoint = "RIGHT", gap = 20, chain = false,
             disabled = threatNever,
             disabledTooltip = "Show Threat Colors",
             title = "Near Aggro",

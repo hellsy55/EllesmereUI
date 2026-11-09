@@ -4011,6 +4011,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Inline cog on Toggle World Markers: the placed-marker pip opt-out.
         EllesmereUI.BuildInlineCog(wmRow._rightRegion, {
             title = "World Marker Entries",
+            disabled = Disabled,
+            disabledTooltip = "the module",
             rows = {
                 { type="toggle", label="Show Placed-Marker Pips",
                   tooltip="Mark a world marker entry whose marker is on the ground with a small corner square, so you can see whether pressing it places or picks up.",

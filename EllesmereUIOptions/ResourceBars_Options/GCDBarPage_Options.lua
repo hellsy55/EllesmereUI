@@ -170,12 +170,17 @@ function ns.ERB_BuildGCDBarPage(pageName, parent, yOffset)
           tooltip = "Keep the GCD bar visible (sitting empty) when no global cooldown is running, instead of hiding it.",
           disabled = gcdOff, disabledTooltip = "GCD Bar",
           getValue = function() local p = DB(); return p and p.gcdBar.alwaysShow end,
-          setValue = function(v) local p = DB(); if not p then return end; p.gcdBar.alwaysShow = v; RefreshGCD() end }
+          setValue = function(v) local p = DB(); if not p then return end; p.gcdBar.alwaysShow = v; RefreshGCD(); EllesmereUI:RefreshPage() end }
     );  y = y - h
     -- Inline cog on Always Show: idle fill appearance
     if not EllesmereUI._prebuilding then
         EllesmereUI.BuildInlineCog(gcdShowRow._rightRegion, {
             title = "Always Show",
+            disabled = function()
+                local p = DB()
+                return not (p and p.gcdBar.enabled and p.gcdBar.alwaysShow)
+            end,
+            disabledTooltip = function() return gcdOff() and "GCD Bar" or "Always Show" end,
             rows = {
                 { type = "toggle", label = "Show Fill Color When Idle",
                   tooltip = "Show the bar full of its fill color while no global cooldown is running, instead of the background color.",

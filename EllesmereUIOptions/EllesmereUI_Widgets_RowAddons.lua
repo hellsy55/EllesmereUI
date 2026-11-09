@@ -422,6 +422,7 @@ local function BuildInlineCog(rgn, opts)
     local function State(hover)
         local off = opts.disabled and opts.disabled()
         local pf = type(show) == "table" and show._popupFrame
+        if off and pf and pf:IsShown() and pf._owner == btn then pf:Hide() end
         local open = (opts.isOpen and opts.isOpen(btn)) or (pf and pf:IsShown() and pf._owner == btn)
         local hot = open
         if not hot then
@@ -461,6 +462,8 @@ local function BuildInlineCog(rgn, opts)
         if opts.tip then HideWidgetTooltip() end
     end)
     btn:SetScript("OnClick", function(self)
+        -- Re-check immediately; an out-of-date overlay must never open a disabled popup.
+        if opts.disabled and opts.disabled() then State(); return end
         -- A cog clicked while the cog tip is up: the tip has done its job.
         -- Opened once, its dot is gone for good.
         if not paint and not iconOnly then
@@ -1011,6 +1014,18 @@ local function DependentSetValue(pred, fn)
 end
 
 EllesmereUI.BuildInlineToggle    = BuildInlineToggle
+-- A native color swatch beside a disabled master setting follows the same
+-- widget-refresh pass as its row and cog (no polling or new event hooks).
+function EllesmereUI.BindDisabledSwatch(swatch, disabled)
+    local function Update()
+        local off = disabled() and true or false
+        swatch:SetAlpha(off and 0.15 or 1)
+        swatch:EnableMouse(not off)
+    end
+    RegisterWidgetRefresh(Update)
+    Update()
+end
+
 EllesmereUI.BuildInlineCog       = BuildInlineCog
 EllesmereUI.BuildRowLabelMenu    = BuildRowLabelMenu
 EllesmereUI.AttachButtonMenu     = AttachButtonMenu
@@ -1100,6 +1115,13 @@ local function BuildCursorAnchorRow(opts)
     -- Inline cog: X + Y offsets
     BuildInlineCog(row._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
         title = "Cursor Offset",
+        disabled = function()
+            return (opts.disabledFn and opts.disabledFn()) or getData().anchorTo ~= "mouse"
+        end,
+        disabledTooltip = function()
+            if opts.disabledFn and opts.disabledFn() then return opts.disabledTip end
+            return "Anchor to Cursor"
+        end,
         rows = {
             { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,
               get = function() return getData().anchorOffsetX or 0 end,

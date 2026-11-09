@@ -153,9 +153,9 @@ local function MiniSyncWidgetWrapper(W, unitKey)
                         alwaysAvailable = true,
                         region = rgn,
                         tooltip = "Apply " .. name .. " to other Mini Frames",
-                        isSynced = function()
+                        isSynced = function(targetKey)
                             local source = db.profile[unitKey]
-                            for _, target in ipairs(members) do
+                            for _, target in ipairs(targetKey and {targetKey} or members) do
                                 local dest = db.profile[target]
                                 if dest then
                                     for _, k in ipairs(keys) do
@@ -168,6 +168,7 @@ local function MiniSyncWidgetWrapper(W, unitKey)
                         onClick = function() CopyTo(members) end,
                         flashTargets = function() return { rgn } end,
                         multiApply = {
+                            compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                             elementKeys = members,
                             elementLabels = env.SHORT_LABELS,
@@ -3196,6 +3197,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               setValue=function(v)
                   db.profile.boss.showCastTarget = v
                   ReloadAndUpdate()
+                  EllesmereUI:RefreshPage()
               end });  yy = yy - hh
         -- Inline cog on Spell Target: X/Y offsets for the cast target
         -- text. Boss-scoped copies of the shared castbar keys, which the
@@ -3204,6 +3206,8 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(bossTgtRow._rightRegion, {
                 title = "Spell Target",
+                disabled = function() return db.profile.boss.showCastTarget ~= true end,
+                disabledTooltip = "Spell Target",
                 rows = {
                     { type="slider", label="X Offset", min=-300, max=300, step=1,
                       get=function() return db.profile.boss.castSpellTargetX or 0 end,
@@ -3699,6 +3703,8 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             local rgn = castTextRow._leftRegion
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Spell Name",
+                disabled = function() return B.castSpellNameSide == "none" end,
+                disabledTooltip = "Spell Name",
                 rows = {
                     { type="slider", label="Size", min=6, max=20, step=1,
                       get=function() return B.castSpellNameSize or 11 end,
@@ -3716,12 +3722,17 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 function(r, g, b) B.castSpellNameColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
             sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = sw
+            EllesmereUI.BindDisabledSwatch(sw, function() return B.castSpellNameSide == "none" end)
         end
         -- Duration (right): Size/X/Y cog + color swatch
         if not EllesmereUI._prebuilding then
             local rgn = castTextRow._rightRegion
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Duration",
+                disabled = function()
+                    return B.showCastDuration == false or B.castDurationSide == "none"
+                end,
+                disabledTooltip = "Duration",
                 rows = {
                     { type="slider", label="Size", min=6, max=20, step=1,
                       get=function() return B.castDurationSize or 10 end,
@@ -3739,6 +3750,9 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 function(r, g, b) B.castDurationColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
             sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = sw
+            EllesmereUI.BindDisabledSwatch(sw, function()
+                return B.showCastDuration == false or B.castDurationSide == "none"
+            end)
         end
         -- Important Cast Glow closes the standard Cast Bar controls, directly
         -- after Spell Name | Duration. Keep the empty right half as a spacer so

@@ -147,8 +147,14 @@ local function BuildToggleControl(parent, frameLevel, getValue, setValue, opts)
         local _s = setValue
         setValue = function(...)
             local snap = EllesmereUI._SOAttribution(parent)
+            local serial = EllesmereUI._pageRefreshSerial or 0
             _s(...)
             EllesmereUI._NotifySettingWrite(parent, snap)
+            -- Setters that already refresh do not need another pass. Others
+            -- must refresh dependent widgets before the next mouse action.
+            if (EllesmereUI._pageRefreshSerial or 0) == serial then
+                EllesmereUI:RefreshPage()
+            end
         end
     end
     do local _r = setValue; setValue = function(...) _r(...); EllesmereUI._settingsChanged = true end end

@@ -526,6 +526,30 @@ initFrame:SetScript("OnEvent", function(self)
                 },
             })
 
+            -- Inline direction arrows (left of the visibility cog): header icon X/Y position
+            local _, dirShow = EllesmereUI.BuildCogPopup({
+                title = "Icon Position",
+                rows = {
+                    { type = "slider", label = "X Offset", min = -20, max = 20, step = 1,
+                      get = function() return Cfg("hdrIconOffsetX") or 0 end,
+                      set = function(v) Set("hdrIconOffsetX", v); ApplyHdr() end },
+                    { type = "slider", label = "Y Offset", min = -20, max = 20, step = 1,
+                      get = function() return Cfg("hdrIconOffsetY") or 0 end,
+                      set = function(v) Set("hdrIconOffsetY", v); ApplyHdr() end },
+                },
+            })
+            local dirBtn = CreateFrame("Button", nil, rgn)
+            dirBtn:SetSize(26, 26)
+            dirBtn:SetPoint("RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            dirBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            dirBtn:SetAlpha(0.4)
+            local dirTex = dirBtn:CreateTexture(nil, "OVERLAY")
+            dirTex:SetAllPoints()
+            dirTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
+            dirBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
+            dirBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
+            dirBtn:SetScript("OnClick", function(self) dirShow(self) end)
+
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
                 rgn, hdrBorderRow:GetFrameLevel() + 3,
                 function()
@@ -540,7 +564,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUI:RefreshPage()
                 end,
                 false, 20)
-            PP.Point(customSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            PP.Point(customSwatch, "RIGHT", dirBtn, "LEFT", -8, 0)
             local origIconClick = customSwatch:GetScript("OnClick")
             customSwatch:SetScript("OnClick", function(self, ...)
                 if Cfg("iconColorUseAccent") then
@@ -577,41 +601,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color")
             end)
             accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            -- Inline direction arrows (right of the gear): header icon X/Y position
-            local _, dirShow = EllesmereUI.BuildCogPopup({
-                title = "Icon Position",
-                rows = {
-                    { type = "slider", label = "X Offset", min = -20, max = 20, step = 1,
-                      get = function() return Cfg("hdrIconOffsetX") or 0 end,
-                      set = function(v) Set("hdrIconOffsetX", v); ApplyHdr() end },
-                    { type = "slider", label = "Y Offset", min = -20, max = 20, step = 1,
-                      get = function() return Cfg("hdrIconOffsetY") or 0 end,
-                      set = function(v) Set("hdrIconOffsetY", v); ApplyHdr() end },
-                },
-            })
-            local dirBtn = CreateFrame("Button", nil, rgn)
-            dirBtn:SetSize(26, 26)
-            dirBtn:SetPoint("RIGHT", accentSwatch, "LEFT", -8, 0)
-            dirBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
-            dirBtn:SetAlpha(0.4)
-            local dirTex = dirBtn:CreateTexture(nil, "OVERLAY")
-            dirTex:SetAllPoints()
-            dirTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
-            dirBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
-            dirBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
-            dirBtn:SetScript("OnClick", function(self) dirShow(self) end)
-
-            -- Inline cog: icon visibility (left of the direction arrows)
-            EllesmereUI.BuildInlineCog(rgn, {
-                title = "Icon Visibility",
-                rows = {
-                    { type = "toggle", label = "Mouseover Icons",
-                      get = function() return Cfg("hdrMouseoverIcons") or false end,
-                      set = function(v) Set("hdrMouseoverIcons", v); ApplyHdr() end },
-                },
-                anchorTo = dirBtn,
-            })
 
             -- Classic WoW UI paints every header icon with vanilla art that
             -- carries its own colours, and WoW Forever tints the glyphs its
@@ -1543,6 +1532,8 @@ initFrame:SetScript("OnEvent", function(self)
             local satFontValues, satFontOrder = EllesmereUI.BuildFontDropdownData()
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Standalone Timer Settings",
+                disabled = function() return not Cfg("standaloneTimer") end,
+                disabledTooltip = "Standalone Combat Timer",
                 minWidth = 300,
                 rows = {
                     { type = "dropdown", label = "Font",

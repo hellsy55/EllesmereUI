@@ -994,6 +994,14 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
         if applyAll and #keys > 1 then
             opts.multiApply = {
                 getElementState = GetCDMApplyState,
+                getElementOptionState = function(key)
+                    local previous = syncTargetFilter
+                    syncTargetFilter = { [key] = true }
+                    local ok, same = pcall(opts.isSynced)
+                    syncTargetFilter = previous
+                    if not ok then return nil end
+                    return same and "Matching" or "Different"
+                end,
                 elementKeys = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return barKey end,
@@ -1135,24 +1143,48 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                                 elementKeys = members,
                                 elementLabels = labels,
                                 getCurrentKey = function() return barKey end,
-                                getElementOptionState = ({
-                                    ["Bar Background"] = true,
-                                    ["Suppress GCD"] = true,
-                                    ["Only Show Numbers"] = true,
-                                    ["Charges/Stacks Only (No Icon)"] = true,
-                                    ["Hide Charge Count at 0"] = true,
-                                    ["Mirror Key Presses"] = true,
-                                    ["Vertical Orientation"] = true,
-                                    ["Always Show Buffs"] = true,
-                                    ["Keep Buffs in Same Place"] = true,
-                                })[label] and function(key)
+                                getElementOptionState = function(key)
                                     local pp = DB()
                                     if not pp or not pp.cdmBars then return nil end
+                                    local src = BD()
+                                    if not src then return nil end
                                     for _, dest in ipairs(pp.cdmBars.bars) do
-                                        if dest.key == key then return dest[fields[1]] == true end
+                                        if dest.key == key then
+                                            local toggleRows = {
+                                                ["Bar Background"] = true,
+                                                ["Suppress GCD"] = true,
+                                                ["Only Show Numbers"] = true,
+                                                ["Charges/Stacks Only (No Icon)"] = true,
+                                                ["Hide Charge Count at 0"] = true,
+                                                ["Show Tooltip on Hover"] = true,
+                                                ["Show Keybind"] = true,
+                                                ["Mirror Key Presses"] = true,
+                                                ["Vertical Orientation"] = true,
+                                                ["Always Show Buffs"] = true,
+                                                ["Keep Buffs in Same Place"] = true,
+                                            }
+                                            if toggleRows[label] then
+                                                return dest[fields[1]] == true
+                                            end
+                                            for _, field in ipairs(fields) do
+                                                local a, b = src[field], dest[field]
+                                                if type(a) == "table" or type(b) == "table" then
+                                                    if type(a) ~= type(b) then return "Different" end
+                                                    for k, value in pairs(a) do
+                                                        if b[k] ~= value then return "Different" end
+                                                    end
+                                                    for k, value in pairs(b) do
+                                                        if a[k] ~= value then return "Different" end
+                                                    end
+                                                elseif a ~= b then
+                                                    return "Different"
+                                                end
+                                            end
+                                            return "Matching"
+                                        end
                                     end
                                     return nil
-                                end or nil,
+                                end,
                                 onApply = CopyTo,
                             },
                         })

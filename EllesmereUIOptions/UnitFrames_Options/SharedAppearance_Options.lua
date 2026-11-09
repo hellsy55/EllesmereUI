@@ -239,9 +239,9 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             alwaysAvailable = true,
             region  = rgn,
             tooltip = "Apply Visibility to all Frames",
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if not EllesmereUI.VisFullEquals(src, "barVisibility", UNIT_DB_MAP[key](), "barVisibility") then return false end
                 end
                 return true
@@ -257,6 +257,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -320,16 +321,17 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Bar Texture to all Frames",
             onClick = function() ApplyTexTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local g = db.profile.healthBarTexture or "none"
                 local srcTex = UNIT_DB_MAP[optState.selectedUnit]().healthBarTexture or g
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().healthBarTexture or g) ~= srcTex then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -488,7 +490,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local bt = SGet("borderTexture") or "solid"
                 local ox = SGet("borderTextureOffset")
                 local oy = SGet("borderTextureOffsetY")
@@ -496,7 +498,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 local sy = SGet("borderTextureShiftY")
                 local bh = SGet("borderBehind") or false
                 local ps = SGet("borderPowerSeam") == true
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().borderTexture or "solid") ~= bt then return false end
                     if UNIT_DB_MAP[key]().borderTextureOffset ~= ox then return false end
                     if UNIT_DB_MAP[key]().borderTextureOffsetY ~= oy then return false end
@@ -509,6 +511,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { bsLeftRgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -594,13 +597,13 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local bs = SVal("borderSize", 1)
                 local bt = SGet("borderTexture") or "solid"
                 local cr, cm, cj = SVal("cornerRadius", 0), SGet("cornerMask"), SGet("cornerJoinPower")
                 -- Exact sizes compare as rendered (a cleared or stale value equals none).
                 local bpx = EllesmereUI.BorderPx(SGet("borderSizePx"), bs, bt)
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().borderSize or 1) ~= bs then return false end
                     if (UNIT_DB_MAP[key]().borderTexture or "solid") ~= bt then return false end
                     if EllesmereUI.BorderPx(UNIT_DB_MAP[key]().borderSizePx, bs, bt) ~= bpx then return false end
@@ -612,6 +615,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -825,15 +829,16 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Frame Strata to all Frames",
             onClick = function() ApplyStrataTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local cur = CurStrata(optState.selectedUnit)
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if CurStrata(key) ~= cur then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1228,15 +1233,16 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().portraitStyle or "attached"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().portraitStyle or "attached") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1326,15 +1332,16 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().portraitMode or "none"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().portraitMode or "none") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1391,9 +1398,9 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Non-Player Portrait to all Frames",
             onClick = function() ApplyNonPlayer(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local on, v = SVal("portraitNonPlayerOn", false), SVal("portraitNonPlayer", "2d")
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if (d.portraitNonPlayerOn or false) ~= on or (d.portraitNonPlayer or "2d") ~= v then
                         return false
@@ -1403,6 +1410,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1467,15 +1475,16 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().portraitSize or 0
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().portraitSize or 0) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1555,15 +1564,16 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().portraitSide or "left"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().portraitSide or "left") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1744,15 +1754,16 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().detachedPortraitShape or "portrait"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().detachedPortraitShape or "portrait") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1795,12 +1806,12 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local cc = src.detachedPortraitClassColor
                 if cc == nil then cc = true end
                 local bs = src.detachedPortraitBorderSize or 7
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     local dcc = d.detachedPortraitClassColor
                     if dcc == nil then dcc = true end
@@ -1817,6 +1828,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2015,15 +2027,16 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().btbPosition or "bottom"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().btbPosition or "bottom") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2137,15 +2150,16 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().bottomTextBarHeight = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().bottomTextBarHeight or 16
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().bottomTextBarHeight or 16) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2169,15 +2183,16 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().btbWidth = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().btbWidth or 0
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().btbWidth or 0) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2532,10 +2547,10 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local v, fmt = src.btbLeftContent or "none", src.btbLeftCustomFormat or ""
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if (d.btbLeftContent or "none") ~= v then return false end
                     if v == "custom" and (d.btbLeftCustomFormat or "") ~= fmt then return false end
@@ -2544,6 +2559,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2577,10 +2593,10 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local v, fmt = src.btbRightContent or "none", src.btbRightCustomFormat or ""
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if (d.btbRightContent or "none") ~= v then return false end
                     if v == "custom" and (d.btbRightCustomFormat or "") ~= fmt then return false end
@@ -2589,6 +2605,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2796,10 +2813,10 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local v, fmt = src.btbCenterContent or "none", src.btbCenterCustomFormat or ""
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if (d.btbCenterContent or "none") ~= v then return false end
                     if v == "custom" and (d.btbCenterCustomFormat or "") ~= fmt then return false end
@@ -2808,6 +2825,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2961,15 +2979,16 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
                 for _, key in ipairs(ciSyncUnits) do UNIT_DB_MAP[key]().combatIndicatorStyle = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().combatIndicatorStyle or "class"
-                for _, key in ipairs(ciSyncUnits) do
+                for _, key in ipairs(targetKey and {targetKey} or ciSyncUnits) do
                     if (UNIT_DB_MAP[key]().combatIndicatorStyle or "class") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = ciSyncUnits,
                 elementLabels = SHORT_LABELS,
@@ -3212,15 +3231,16 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().raidMarkerSize = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().raidMarkerSize or 28
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().raidMarkerSize or 28) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -3300,15 +3320,16 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
                     for _, unit in ipairs(leaderSyncUnits) do UNIT_DB_MAP[unit]()[key] = v end
                     ReloadAndUpdate(); EllesmereUI:RefreshPage()
                 end,
-                isSynced = function()
+                isSynced = function(targetKey)
                     local v = GetValue(optState.selectedUnit)
-                    for _, unit in ipairs(leaderSyncUnits) do
+                    for _, unit in ipairs(targetKey and {targetKey} or leaderSyncUnits) do
                         if GetValue(unit) ~= v then return false end
                     end
                     return true
                 end,
                 flashTargets = function() return { rgn } end,
                 multiApply = {
+                    compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                     elementKeys = leaderSyncUnits,
                     elementLabels = SHORT_LABELS,
@@ -3572,6 +3593,10 @@ function ns.UFO_BuildExtrasSection(parent, y, ctx)
                     elementLabels = { target = "Target", focus = "Focus" },
                     getCurrentKey = function() return optState.selectedUnit end,
                     getElementState = env.GetUnitApplyState,
+                    getElementOptionState = function(key)
+                        return GetAlpha(key) == GetAlpha(optState.selectedUnit)
+                            and "Matching" or "Different"
+                    end,
                     onApply = CopyAlpha,
                 },
             })

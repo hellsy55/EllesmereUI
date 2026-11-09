@@ -1298,6 +1298,13 @@ function EllesmereUI:ShowInputPopup(opts)
             dimmer:Hide()
             if popup._onCancel then popup._onCancel() end
         end)
+        -- Copy-only callers may dismiss on the C key release, after the edit
+        -- box has handled Ctrl+C. Other input popups keep their normal flow.
+        editBox:SetScript("OnKeyUp", function(_, key)
+            if popup._closeOnCopy and key == "C" and IsControlKeyDown() and not IsAltKeyDown() then
+                dimmer:Hide()
+            end
+        end)
 
         popup._focusInput = function()
             local box = popup._money and popup._moneyBoxes[1] or popup._editBox
@@ -1394,6 +1401,7 @@ function EllesmereUI:ShowInputPopup(opts)
         popup._confirmBtn:SetPoint("BOTTOMLEFT", popup, "BOTTOM", popup._btnGap / 2, popup._btnY)
     end
     popup._selectText = opts.selectText == true
+    popup._closeOnCopy = opts.closeOnCopy == true
     popup._onCancel = opts.onDismiss or opts.onCancel or nil
     popup._onConfirmCb = opts.onConfirm or nil
     -- This show's request: a confirm closes the popup only while it still shows it.

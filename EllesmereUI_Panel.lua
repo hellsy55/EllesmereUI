@@ -4994,6 +4994,7 @@ end
 -- Rebuild the current page content without resetting scroll position
 -- Pass force=true to bypass the fast refresh path (e.g. when widget layout changes).
 function EllesmereUI:RefreshPage(force)
+    EllesmereUI._pageRefreshSerial = (EllesmereUI._pageRefreshSerial or 0) + 1
     if not activeModule or not activePage then return end
     -- Panel hidden: a rebuild here would run buildPage with nothing on screen, firing page-open
     -- side effects (preview flags, placeholder shows) AFTER the OnHide cleanup already cleared

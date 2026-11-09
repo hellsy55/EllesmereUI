@@ -1012,6 +1012,8 @@ local function BuildBaseDetailDM(frame, fontPath)
         local rgn = dtRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Duration Text",
+            disabled = function() return not p.debuffShowDurText end,
+            disabledTooltip = "Show Duration Text",
             rows = {
                 { type = "slider", label = "Text Size", min = 6, max = 26, step = 1,
                   get = function() return p.debuffDurTextSize or 10 end,
@@ -1036,11 +1038,14 @@ local function BuildBaseDetailDM(frame, fontPath)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.BindDisabledSwatch(swatch, function() return not p.debuffShowDurText end)
     end
     do
         local rgn = dtRow._rightRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Stacks Text",
+            disabled = function() return p.debuffShowStacks == false end,
+            disabledTooltip = "Show Stacks",
             rows = {
                 { type = "slider", label = "Text Size", min = 6, max = 26, step = 1,
                   get = function() return p.debuffStacksTextSize or 11 end,
@@ -1065,6 +1070,7 @@ local function BuildBaseDetailDM(frame, fontPath)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.BindDisabledSwatch(swatch, function() return p.debuffShowStacks == false end)
     end
 
     -- Row: Tooltips | Show Duration Swipe. The swipe toggle was not in
@@ -1259,6 +1265,8 @@ local function BuildTileDetail(frame, fontPath, t)
             local rgn = dtRow._leftRegion
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Duration Text",
+                disabled = function() return not TBoolOff("showDurText", "debuffShowDurText") end,
+                disabledTooltip = "Show Duration Text",
                 rows = {
                     { type = "slider", label = "Text Size", min = 6, max = 26, step = 1,
                       get = function() return TEff("durTextSize", "debuffDurTextSize", 10) end,
@@ -1283,11 +1291,14 @@ local function BuildTileDetail(frame, fontPath, t)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.BindDisabledSwatch(swatch, function() return not TBoolOff("showDurText", "debuffShowDurText") end)
         end
         do
             local rgn = dtRow._rightRegion
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Stacks Text",
+                disabled = function() return not TBoolOn("showStacks", "debuffShowStacks") end,
+                disabledTooltip = "Show Stacks",
                 rows = {
                     { type = "slider", label = "Text Size", min = 6, max = 26, step = 1,
                       get = function() return TEff("stacksTextSize", "debuffStacksTextSize", 11) end,
@@ -1312,6 +1323,7 @@ local function BuildTileDetail(frame, fontPath, t)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.BindDisabledSwatch(swatch, function() return not TBoolOn("showStacks", "debuffShowStacks") end)
         end
 
         -- Row: Tooltips | Show Duration Swipe (base pane parity)

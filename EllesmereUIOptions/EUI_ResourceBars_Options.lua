@@ -92,9 +92,29 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
     return {
         elementKeys = targets or RESOURCE_SYNC_KEYS,
         elementLabels = RESOURCE_SYNC_LABELS,
-        getElementOptionState = field == "oocFade" and function(key)
-            local p = dbFn(); return p and p[key] and p[key].oocFadeEnabled == true or false
-        end or nil,
+        getElementOptionState = function(key)
+            local p = dbFn()
+            local src, dst = p and p[sourceKey], p and p[key]
+            if not src or not dst then return nil end
+            -- A toggle exposes its actual state. Scalar/style rows instead
+            -- report whether this destination already matches this source.
+            if field == "oocFade" then return dst.oocFadeEnabled == true end
+            if field == "borderStyle" or field == "border" then
+                local fields = field == "borderStyle" and {
+                    "borderTexture", "borderTextureOffset", "borderTextureOffsetY",
+                    "borderTextureShiftX", "borderTextureShiftY", "borderR", "borderG",
+                    "borderB", "borderA", "borderSize", "borderBehind",
+                } or {
+                    "borderR", "borderG", "borderB", "borderA", "borderSize",
+                    "borderTexture", "cornerRadius", "cornerMask",
+                }
+                for _, name in ipairs(fields) do
+                    if src[name] ~= dst[name] then return "Different" end
+                end
+                return ns.ERB_SameBorderPx(src, dst) and "Matching" or "Different"
+            end
+            return Value(src, sourceKey) == Value(dst, key) and "Matching" or "Different"
+        end,
         getCurrentKey = function() return sourceKey end,
         getElementState = function(key)
             local p = dbFn(); local b = p and p[key]
@@ -315,6 +335,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- Preview Header
     local _previewHeaderBuilder
     local _previewFrames = {}
+    local _healthIndicatorPreview  -- session-only: "absorb", "healAbsorb", or "maxHealthLoss"
     local _previewHintFS
     local _previewScale = 1
     local _previewBuilding = false  -- true while _previewHeaderBuilder is executing
@@ -463,6 +484,68 @@ initFrame:SetScript("OnEvent", function(self)
         tf:SetFrameLevel(bar:GetFrameLevel() + 10)
         bar._text = tf:CreateFontString(nil, "OVERLAY")
         return bar
+    end
+
+    -- Demo a configured health indicator on the header's health bar, without
+    -- changing the player's real absorb amounts or persisted configuration.
+    function PreviewBar.HealthIndicator(bar, cfg)
+        if not bar then return end
+        local tex = bar._indicatorPreviewTex
+        local kind = _healthIndicatorPreview
+        local k
+        if kind and cfg then
+            for _, info in ipairs(ns.HEALTH_INDICATORS) do
+                if info.key == kind then k = info; break end
+            end
+        end
+        local style = k and cfg[k.style]
+        if k and k.show and not cfg[k.show] then k = nil end
+        if not k or style == "none" or (not style and kind ~= "maxHealthLoss") then
+            if tex then
+                tex:Hide()
+                if bar._indicatorPreviewBg then bar._indicatorPreviewBg:Hide() end
+            end
+            return
+        end
+        style = style or "striped"
+        if not tex then
+            tex = bar._sb:CreateTexture(nil, "OVERLAY", nil, 4)
+            bar._indicatorPreviewTex = tex
+            UnsnapTex(tex)
+        end
+        tex:SetTexture(ns.HealthIndicatorTex(style))
+        local tiled = EllesmereUI.ABSORB_TILED_STYLES[style] == true
+            or (kind == "maxHealthLoss" and (style == "striped" or style == "maxHealthStripes"))
+        tex:SetHorizTile(tiled)
+        tex:SetVertTile(tiled)
+        local col = cfg[k.color]
+        local r, g, b, a = k.r, k.g, k.b, k.a or 1
+        if col then r, g, b, a = col.r or r, col.g or g, col.b or b, col.a or a end
+        if k.opacity then a = (cfg[k.opacity] or k.opacityDef) / 100 end
+        if style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then
+            r, g, b = 1, 1, 1
+        end
+        tex:SetVertexColor(r, g, b, a)
+        tex:ClearAllPoints()
+        local sb = bar._sb
+        local w, h = bar:GetWidth(), bar:GetHeight()
+        tex:SetSize(math.max(1, w * (kind == "maxHealthLoss" and 0.20 or 0.25)), math.max(1, h - 2))
+        tex:SetPoint("TOPRIGHT", sb, "TOPRIGHT", 0, -1)
+        tex:Show()
+        local backingAlpha = kind == "maxHealthLoss" and (cfg.maxHealthLossBgOpacity or 0) / 100 or 0
+        if backingAlpha > 0 then
+            local backing = bar._indicatorPreviewBg
+            if not backing then
+                backing = sb:CreateTexture(nil, "OVERLAY", nil, 3)
+                bar._indicatorPreviewBg = backing
+                UnsnapTex(backing)
+                backing:SetAllPoints(tex)
+            end
+            backing:SetColorTexture(0, 0, 0, backingAlpha)
+            backing:Show()
+        elseif bar._indicatorPreviewBg then
+            bar._indicatorPreviewBg:Hide()
+        end
     end
 
     -- A preview whose bar is off: dimmed like the page's greyed controls, and
@@ -1344,7 +1427,12 @@ initFrame:SetScript("OnEvent", function(self)
             local showPower = pb and not pvHidden.power and not PreviewBar.Avail(p, "power")
             local showHealth = hb and not pvHidden.health and not PreviewBar.Avail(p, "health")
             if showPower then PreviewBar.Style(pb, p, p.primary, "power") end
-            if showHealth then PreviewBar.Style(hb, p, p.health, "health") end
+            if showHealth then
+                PreviewBar.Style(hb, p, p.health, "health")
+                PreviewBar.HealthIndicator(hb, p.health)
+            elseif hb and hb._indicatorPreviewTex then
+                hb._indicatorPreviewTex:Hide()
+            end
             if pb then pb:SetShown(showPower and true or false) end
             if hb then hb:SetShown(showHealth and true or false) end
 
@@ -4780,6 +4868,15 @@ initFrame:SetScript("OnEvent", function(self)
         _clickMappings = _clickMappings, _previewHeaderBuilder = _previewHeaderBuilder, CLASSIC_SYNC_KEYS = CLASSIC_SYNC_KEYS,
         CLASSIC_MATCH_KEYS = CLASSIC_MATCH_KEYS, ShuffleCastBarIcons = ShuffleCastBarIcons, UpdateCastBarPreview = UpdateCastBarPreview,
         _castBarPreviewBuilder = _castBarPreviewBuilder, UpdatePreviewHeader = UpdatePreviewHeader, PreviewAvail = PreviewBar.Avail,
+        GetHealthIndicatorPreview = function() return _healthIndicatorPreview end,
+        ToggleHealthIndicatorPreview = function(kind)
+            if _healthIndicatorPreview == kind then
+                _healthIndicatorPreview = nil
+            else
+                _healthIndicatorPreview = kind
+            end
+            UpdatePreviewHeader()
+        end,
         SetDisplayPreviewValues = function(pipCount, fillPct)
             _previewPipCount = pipCount
             _previewBarFillPct = fillPct

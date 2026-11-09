@@ -117,15 +117,16 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().healthHeight or 46
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().healthHeight or 46) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -172,15 +173,16 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().frameWidth or 181
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().frameWidth or 181) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -356,14 +358,14 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Bar Background to all Frames",
             onClick = function() ApplyBgTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local function colEq(a, b)
                     if a == nil and b == nil then return true end
                     if a == nil or b == nil then return false end
                     return a.r == b.r and a.g == b.g and a.b == b.b
                 end
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if not colEq(d.customBgColor, src.customBgColor) then return false end
                     if (d.customBgAlpha or 100) ~= (src.customBgAlpha or 100) then return false end
@@ -373,6 +375,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -419,14 +422,14 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Bar Color to all Frames",
             onClick = function() ApplyColorTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local function colEq(a, b)
                     if a == nil and b == nil then return true end
                     if a == nil or b == nil then return false end
                     return a.r == b.r and a.g == b.g and a.b == b.b
                 end
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if (d.healthClassColored or false) ~= (src.healthClassColored or false) then return false end
                     if not colEq(d.customFillColor, src.customFillColor) then return false end
@@ -442,6 +445,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -573,15 +577,16 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().healthBarOpacity or 90
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().healthBarOpacity or 90) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -674,10 +679,10 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     region  = rgn,
                     tooltip = "Apply Left Text to all Frames",
                     onClick = function() ApplyLeftTextTo(GROUP_UNIT_ORDER) end,
-                    isSynced = function()
+                    isSynced = function(targetKey)
                         local src = UNIT_DB_MAP[optState.selectedUnit]()
                         local v = src.leftTextContent or "name"
-                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                             local d = UNIT_DB_MAP[key]()
                             local expected = ((v == "absorb" or v == "absorbshort" or v == "healabsorb" or v == "healabsorbshort" or v == "group") and key ~= "player") and "none" or v
                             if (d.leftTextContent or "name") ~= expected then return false end
@@ -695,6 +700,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
@@ -882,10 +888,10 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     region  = rgn,
                     tooltip = "Apply Right Text to all Frames",
                     onClick = function() ApplyRightTextTo(GROUP_UNIT_ORDER) end,
-                    isSynced = function()
+                    isSynced = function(targetKey)
                         local src = UNIT_DB_MAP[optState.selectedUnit]()
                         local v = src.rightTextContent or "both"
-                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                             local d = UNIT_DB_MAP[key]()
                             local expected = ((v == "absorb" or v == "absorbshort" or v == "healabsorb" or v == "healabsorbshort" or v == "group") and key ~= "player") and "none" or v
                             if (d.rightTextContent or "both") ~= expected then return false end
@@ -903,6 +909,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
@@ -1081,10 +1088,10 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     region  = rgn,
                     tooltip = "Apply Center Text to all Frames",
                     onClick = function() ApplyCenterTextTo(GROUP_UNIT_ORDER) end,
-                    isSynced = function()
+                    isSynced = function(targetKey)
                         local src = UNIT_DB_MAP[optState.selectedUnit]()
                         local v = src.centerTextContent or "none"
-                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                             local d = UNIT_DB_MAP[key]()
                             local expected = ((v == "absorb" or v == "absorbshort" or v == "healabsorb" or v == "healabsorbshort" or v == "group") and key ~= "player") and "none" or v
                             if (d.centerTextContent or "none") ~= expected then return false end
@@ -1102,6 +1109,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
@@ -1264,10 +1272,10 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     region  = rgn,
                     tooltip = "Apply Extra Text to all Frames",
                     onClick = function() ApplyExtraTextTo(GROUP_UNIT_ORDER) end,
-                    isSynced = function()
+                    isSynced = function(targetKey)
                         local src = UNIT_DB_MAP[optState.selectedUnit]()
                         local v = src.extraTextContent or "none"
-                        for _, key in ipairs(GROUP_UNIT_ORDER) do
+                        for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                             local d = UNIT_DB_MAP[key]()
                             local expected = ((v == "absorb" or v == "absorbshort" or v == "healabsorb" or v == "healabsorbshort" or v == "group") and key ~= "player") and "none" or v
                             if (d.extraTextContent or "none") ~= expected then return false end
@@ -1286,6 +1294,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                     end,
                     flashTargets = function() return { rgn } end,
                     multiApply = {
+                        compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                         elementKeys   = GROUP_UNIT_ORDER,
                         elementLabels = SHORT_LABELS,
@@ -1557,15 +1566,16 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerHeight = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().powerHeight or 6
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().powerHeight or 6) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1604,15 +1614,16 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerPosition = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().powerPosition or "below"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().powerPosition or "below") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1685,10 +1696,10 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local v, fmt = src.powerTextFormat or "perpp", src.powerTextCustomFormat or ""
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if (d.powerTextFormat or "perpp") ~= v then return false end
                     if v == "custom" and (d.powerTextCustomFormat or "") ~= fmt then return false end
@@ -1697,6 +1708,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1728,15 +1740,16 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().powerBarOpacity or 100
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().powerBarOpacity or 100) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1909,14 +1922,14 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Bar Background to all Frames",
             onClick = function() ApplyBgTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local function colEq(a, b)
                     if a == nil and b == nil then return true end
                     if a == nil or b == nil then return false end
                     return a.r == b.r and a.g == b.g and a.b == b.b
                 end
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if not colEq(d.customPowerBgColor, src.customPowerBgColor) then return false end
                     if (d.customPowerBgAlpha or 100) ~= (src.customPowerBgAlpha or 100) then return false end
@@ -1926,6 +1939,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1966,7 +1980,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Bar Color to all Frames",
             onClick = function() ApplyColorTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local function colEq(a, b)
                     if a == nil and b == nil then return true end
@@ -1975,7 +1989,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 end
                 local v = src.powerPercentPowerColor
                 if v == nil then v = true end
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     local ov = d.powerPercentPowerColor
                     if ov == nil then ov = true end
@@ -1990,6 +2004,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2102,15 +2117,16 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().powerPercentText = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().powerPercentText or "none"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().powerPercentText or "none") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2142,15 +2158,16 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().powerPercentTextPowerColor or false
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().powerPercentTextPowerColor or false) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2878,15 +2895,16 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().classPowerStyle or "none"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().classPowerStyle or "none") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -2914,10 +2932,10 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().classPowerClassColor = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().classPowerClassColor
                 if v == nil then v = true end
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local ov = UNIT_DB_MAP[key]().classPowerClassColor
                     if ov == nil then ov = true end
                     if ov ~= v then return false end
@@ -2926,6 +2944,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -3002,15 +3021,16 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().classPowerPosition = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().classPowerPosition or "top"
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().classPowerPosition or "top") ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -3034,15 +3054,16 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().classPowerSize = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().classPowerSize or 8
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().classPowerSize or 8) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -3094,15 +3115,16 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do UNIT_DB_MAP[key]().classPowerSpacing = v end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().classPowerSpacing or 2
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().classPowerSpacing or 2) ~= v then return false end
                 end
                 return true
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -3129,13 +3151,13 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().classPowerBgColor
                 local vr = v and v.r or 0
                 local vg = v and v.g or 0
                 local vb = v and v.b or 0
                 local va = v and v.a or 0.5
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local ov = UNIT_DB_MAP[key]().classPowerBgColor
                     local or_ = ov and ov.r or 0
                     local og = ov and ov.g or 0
@@ -3147,6 +3169,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -3259,12 +3282,17 @@ function ns.UFO_BuildSharedFieldsSync(region, fields, label, currentUnit, refres
             elementKeys = keys, elementLabels = env.SHORT_LABELS,
             getCurrentKey = currentUnit,
             getElementState = env.GetUnitApplyState,
-            getElementOptionState = (#fields == 1) and function(key)
-                local d = data(key)
-                local v = d and d[fields[1]]
-                if type(v) == "boolean" then return v end
-                return nil
-            end or nil,
+            getElementOptionState = function(key)
+                local src, dst = data(currentUnit()), data(key)
+                if not src or not dst then return nil end
+                if #fields == 1 and type(dst[fields[1]]) == "boolean" then
+                    return dst[fields[1]]
+                end
+                for _, field in ipairs(fields) do
+                    if not equal(src[field], dst[field]) then return "Different" end
+                end
+                return "Matching"
+            end,
             onApply = copyTo,
         },
     })
@@ -3558,12 +3586,14 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do CopyAbsorbSync(ABSORB_SYNC_DEFS, optState.selectedUnit, key) end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
-                return AbsorbSyncMatches(ABSORB_SYNC_DEFS, optState.selectedUnit, GROUP_UNIT_ORDER)
+            isSynced = function(targetKey)
+                return AbsorbSyncMatches(ABSORB_SYNC_DEFS, optState.selectedUnit,
+                    targetKey and {targetKey} or GROUP_UNIT_ORDER)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
-                            getElementState = env.GetUnitApplyState,
+                compareWithSource = true,
+                getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3688,12 +3718,14 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do CopyAbsorbSync(HEAL_ABSORB_SYNC_DEFS, optState.selectedUnit, key) end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
-                return AbsorbSyncMatches(HEAL_ABSORB_SYNC_DEFS, optState.selectedUnit, GROUP_UNIT_ORDER)
+            isSynced = function(targetKey)
+                return AbsorbSyncMatches(HEAL_ABSORB_SYNC_DEFS, optState.selectedUnit,
+                    targetKey and {targetKey} or GROUP_UNIT_ORDER)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
-                            getElementState = env.GetUnitApplyState,
+                compareWithSource = true,
+                getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,
@@ -3766,12 +3798,14 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
                 for _, key in ipairs(GROUP_UNIT_ORDER) do CopyAbsorbSync(MAX_HEALTH_SYNC_DEFS, optState.selectedUnit, key) end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
-                return AbsorbSyncMatches(MAX_HEALTH_SYNC_DEFS, optState.selectedUnit, GROUP_UNIT_ORDER)
+            isSynced = function(targetKey)
+                return AbsorbSyncMatches(MAX_HEALTH_SYNC_DEFS, optState.selectedUnit,
+                    targetKey and {targetKey} or GROUP_UNIT_ORDER)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
-                            getElementState = env.GetUnitApplyState,
+                compareWithSource = true,
+                getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
                 getCurrentKey = function() return optState.selectedUnit end,

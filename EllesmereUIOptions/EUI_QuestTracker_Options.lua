@@ -854,11 +854,15 @@ initFrame:SetScript("OnEvent", function(self)
         end
         EllesmereUI.BuildInlineCog(row._leftRegion, {
             title = "Auto Accept Settings",
+            disabled = function() return not Cfg("autoAccept") end,
+            disabledTooltip = "Auto Accept Quests",
             rows = acceptRows,
         })
 
         EllesmereUI.BuildInlineCog(row._rightRegion, {
             title = "Auto Turn In Settings",
+            disabled = function() return not Cfg("autoTurnIn") end,
+            disabledTooltip = "Auto Turn In Quests",
             rows = {
                 { type="toggle", label="Hold Shift to Enable",
                   get=function() return Cfg("autoTurnInShiftEnable") == true end,

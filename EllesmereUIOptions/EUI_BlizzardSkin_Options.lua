@@ -521,12 +521,14 @@ initFrame:SetScript("OnEvent", function(self)
         if not EllesmereUI._prebuilding then
             local leftRgn = ttAnchorRow._leftRegion
             local function ttCursorOff()
-                return not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor)
+                return ttReskinOff() or not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor)
             end
             EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 gap = 9,
                 disabled = ttCursorOff,
-                disabledTooltip = "Anchor to Cursor",
+                disabledTooltip = function()
+                    return ttReskinOff() and "Reskin Tooltip" or "Anchor to Cursor"
+                end,
                 title = "Cursor Tooltip Position",
                 rows = {
                     { type="dropdown", label="Position",
@@ -765,7 +767,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB[key] = v
                 if EllesmereUI._applyTooltipBuffs then EllesmereUI._applyTooltipBuffs() end
             end
-            EllesmereUI.BuildInlineCog(ttStackRow._rightRegion, {
+            EllesmereUI.BuildInlineCog(ttCasterRow._rightRegion, {
                 icon = EllesmereUI.DIRECTIONS_ICON, gap = 9,
                 disabled = ttBuffsOff,
                 disabledTooltip = function()
@@ -4514,8 +4516,10 @@ initFrame:SetScript("OnEvent", function(self)
         speedTextRow, h = W:DualRow(parent, y,
             { type = "toggle", text = "Show Speed Text",
               getValue = function() return EDR_Cfg("speedText") and EDR_Cfg("speedText").enabled ~= false end,
-              setValue = function(v) EDR_SetField("speedText", "enabled", v); EDR_Redraw() end },
+              setValue = function(v) EDR_SetField("speedText", "enabled", v); EDR_Redraw(); EllesmereUI:RefreshPage() end },
             { type = "dropdown", text = "Text Align",
+              disabled = function() return (EDR_Cfg("speedText") or {}).enabled == false end,
+              disabledTooltip = "Show Speed Text",
               values = justifyValues, order = justifyOrder,
               getValue = function() return (EDR_Cfg("speedText") or {}).justify or "CENTER" end,
               setValue = function(v) EDR_SetField("speedText", "justify", v); EDR_Redraw() end }
@@ -4523,6 +4527,8 @@ initFrame:SetScript("OnEvent", function(self)
         if not EllesmereUI._prebuilding then
         EllesmereUI.BuildInlineCog(speedTextRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Speed Text Position",
+            disabled = function() return (EDR_Cfg("speedText") or {}).enabled == false end,
+            disabledTooltip = "Show Speed Text",
             rows = {
                 { type = "slider", label = "Size",     min = 6,    max = 32,  step = 1,
                   get = function() return (EDR_Cfg("speedText") or {}).size    or 12 end,

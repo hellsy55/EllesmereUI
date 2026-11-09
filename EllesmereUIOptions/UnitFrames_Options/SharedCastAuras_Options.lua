@@ -459,9 +459,9 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = GetCastbarHeight()
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local kv
                     if key == "player" then kv = UNIT_DB_MAP[key]().playerCastbarHeight or 20
                     else kv = UNIT_DB_MAP[key]().castbarHeight or 20 end
@@ -471,6 +471,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -773,7 +774,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             region  = rgn,
             tooltip = "Apply Bar Background to all Frames",
             onClick = function() ApplyCastBgTo(GROUP_UNIT_ORDER) end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local src = UNIT_DB_MAP[optState.selectedUnit]()
                 local function colEq(a, b)
                     -- A nil color means "use the hardcoded default (black)", so a
@@ -784,7 +785,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                     local cr, cg, cb = b and b.r or 0, b and b.g or 0, b and b.b or 0
                     return ar == cr and ag == cg and ab == cb
                 end
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     local d = UNIT_DB_MAP[key]()
                     if not colEq(d.castBgColor, src.castBgColor) then return false end
                     if (d.castBgAlpha or 0.5) ~= (src.castBgAlpha or 0.5) then return false end
@@ -793,6 +794,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1036,6 +1038,10 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                         elementLabels = common.elementLabels,
                         getCurrentKey = common.getCurrentKey,
                         getElementState = common.getElementState,
+                        getElementOptionState = function(unit)
+                            return (Data(unit)[durationKey] or 1.5) == (Data(source)[durationKey] or 1.5)
+                                and "Matching" or "Different"
+                        end,
                         onApply = CopyDuration,
                     },
                 })
@@ -1111,6 +1117,8 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
         end
         EllesmereUI.BuildInlineCog(snCogRgn, {
             title = "Spell Name",
+            disabled = function() return SValSupported("castSpellNameSide", "left") == "none" end,
+            disabledTooltip = "Spell Name",
             rows = snCogRows,
         })
     end
@@ -1129,6 +1137,9 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end, false, 20)
         snSw:SetPoint("RIGHT", snRgn._lastInline or snRgn._control, "LEFT", -8, 0)
         snRgn._lastInline = snSw
+        EllesmereUI.BindDisabledSwatch(snSw, function()
+            return SValSupported("castSpellNameSide", "left") == "none"
+        end)
     end
     -- Inline cog on Duration Size: toggle + X/Y offsets
     if not EllesmereUI._prebuilding then
@@ -1152,6 +1163,11 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
         end
         EllesmereUI.BuildInlineCog(dtCogRgn, {
             title = "Duration",
+            disabled = function()
+                return SValSupported("showCastDuration", true) == false
+                    or SValSupported("castDurationSide", "right") == "none"
+            end,
+            disabledTooltip = "Duration",
             rows = dtCogRows,
         })
     end
@@ -1170,6 +1186,10 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end, false, 20)
         dtSw:SetPoint("RIGHT", dtRgn._lastInline or dtRgn._control, "LEFT", -8, 0)
         dtRgn._lastInline = dtSw
+        EllesmereUI.BindDisabledSwatch(dtSw, function()
+            return SValSupported("showCastDuration", true) == false
+                or SValSupported("castDurationSide", "right") == "none"
+        end)
     end
 
     -- Sync icons: Spell Name Size + Color (left) and Duration Size + Color (right)
@@ -1190,11 +1210,11 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().castSpellNameSize or 11
                 local c = UNIT_DB_MAP[optState.selectedUnit]().castSpellNameColor
                 local fit = UNIT_DB_MAP[optState.selectedUnit]().castFitSpellName == true
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().castSpellNameSize or 11) ~= v then return false end
                     if (UNIT_DB_MAP[key]().castFitSpellName == true) ~= fit then return false end
                     local kc = UNIT_DB_MAP[key]().castSpellNameColor
@@ -1206,6 +1226,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1239,10 +1260,10 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().castDurationSize or 10
                 local c = UNIT_DB_MAP[optState.selectedUnit]().castDurationColor
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().castDurationSize or 10) ~= v then return false end
                     local kc = UNIT_DB_MAP[key]().castDurationColor
                     if c and kc then
@@ -1253,6 +1274,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,
@@ -1331,6 +1353,13 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
         local tgCogRgn = castTargetRow._leftRegion
         EllesmereUI.BuildInlineCog(tgCogRgn, {
             title = "Spell Target",
+            disabled = function()
+                return SValSupported("showCastTarget", true) == false
+                    or SValSupported("castSpellTargetSide", "right") == "none"
+                    or ((optState.selectedUnit == "target" or optState.selectedUnit == "focus")
+                        and SValSupported("castCombineNameTarget", false) == true)
+            end,
+            disabledTooltip = "Spell Target",
             rows = {
                 { type="slider", label="Size", min=6, max=20, step=1,
                   get=function() return SValSupported("castSpellTargetSize", 10) end,
@@ -1359,6 +1388,12 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end, false, 20)
         trgSw:SetPoint("RIGHT", trgRgn._lastInline or trgRgn._control, "LEFT", -8, 0)
         trgRgn._lastInline = trgSw
+        EllesmereUI.BindDisabledSwatch(trgSw, function()
+            return SValSupported("showCastTarget", true) == false
+                or SValSupported("castSpellTargetSide", "right") == "none"
+                or ((optState.selectedUnit == "target" or optState.selectedUnit == "focus")
+                    and SValSupported("castCombineNameTarget", false) == true)
+        end)
     end
 
     -- Sync icons: Spell Target Size + Color (left)
@@ -1377,10 +1412,10 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
                 end
                 ReloadAndUpdate(); EllesmereUI:RefreshPage()
             end,
-            isSynced = function()
+            isSynced = function(targetKey)
                 local v = UNIT_DB_MAP[optState.selectedUnit]().castSpellTargetSize or 11
                 local c = UNIT_DB_MAP[optState.selectedUnit]().castSpellTargetColor
-                for _, key in ipairs(GROUP_UNIT_ORDER) do
+                for _, key in ipairs(targetKey and {targetKey} or GROUP_UNIT_ORDER) do
                     if (UNIT_DB_MAP[key]().castSpellTargetSize or 11) ~= v then return false end
                     local kc = UNIT_DB_MAP[key]().castSpellTargetColor
                     if c and kc then
@@ -1391,6 +1426,7 @@ function ns.UFO_BuildCastBarSection(parent, y, ctx)
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
+                compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                 elementKeys   = GROUP_UNIT_ORDER,
                 elementLabels = SHORT_LABELS,

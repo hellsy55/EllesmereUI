@@ -1021,6 +1021,14 @@ local function PabSimpleFieldSync(region, cfg, isBuff, field, default, label)
             elementKeys = keys, elementLabels = labels,
             getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
             getElementState = PabApplyState,
+            getElementOptionState = function(key)
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    if entry.key == key then
+                        return Value(entry.cfg, entry.isBuff) == Value(cfg, isBuff)
+                            and "Matching" or "Different"
+                    end
+                end
+            end,
             onApply = Apply,
         },
     })
@@ -1139,7 +1147,10 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     ); sy = sy - hh
     do
         local rgn = dsRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, { title = "Duration Text", rows = {
+        EllesmereUI.BuildInlineCog(rgn, { title = "Duration Text",
+            disabled = function() return cfg.durationShow == false end,
+            disabledTooltip = "Duration",
+            rows = {
             { type = "slider", label = "Text Size", min = 6, max = 60, step = 1,
               get = function() return cfg.durationTextSize or 11 end,
               set = function(v) cfg.durationTextSize = v; apply() end },
@@ -1168,10 +1179,14 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.durationShow == false end)
     end
     do
         local rgn = dsRow._rightRegion
-        EllesmereUI.BuildInlineCog(rgn, { title = "Stacks Text", rows = {
+        EllesmereUI.BuildInlineCog(rgn, { title = "Stacks Text",
+            disabled = function() return cfg.stackShow == false end,
+            disabledTooltip = "Stacks",
+            rows = {
             { type = "slider", label = "Text Size", min = 6, max = 60, step = 1,
               get = function() return cfg.stackTextSize or 11 end,
               set = function(v) cfg.stackTextSize = v; apply() end },
@@ -1194,6 +1209,7 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.stackShow == false end)
     end
 
     return sy
@@ -1388,6 +1404,23 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             flashTargets = function() return { rgn } end,
             multiApply = {
                 getElementState = PabApplyState,
+                getElementOptionState = function(key)
+                    local texture = cfg.borderTexture or "solid"
+                    for _, entry in ipairs(PabAllBarEntries()) do
+                        if entry.key == key then
+                            local c = entry.cfg
+                            local same = (c.borderTexture or "solid") == texture
+                                and c.borderTextureOffset == cfg.borderTextureOffset
+                                and c.borderTextureOffsetY == cfg.borderTextureOffsetY
+                                and c.borderTextureShiftX == cfg.borderTextureShiftX
+                                and c.borderTextureShiftY == cfg.borderTextureShiftY
+                                and (c.borderBehind == true) == (cfg.borderBehind == true)
+                                and (isBuff or entry.isBuff
+                                    or (c.borderDispelTextured == true) == (cfg.borderDispelTextured == true))
+                            return same and "Matching" or "Different"
+                        end
+                    end
+                end,
                 elementKeys = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1514,6 +1547,20 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             flashTargets = function() return { rgn } end,
             multiApply = {
                 getElementState = PabApplyState,
+                getElementOptionState = function(key)
+                    for _, entry in ipairs(PabAllBarEntries()) do
+                        if entry.key == key then
+                            local c = entry.cfg
+                            local same = (c.borderSize or 1) == (cfg.borderSize or 1)
+                                and (c.borderSizePx or false) == (cfg.borderSizePx or false)
+                                and (c.borderR or 0) == (cfg.borderR or 0)
+                                and (c.borderG or 0) == (cfg.borderG or 0)
+                                and (c.borderB or 0) == (cfg.borderB or 0)
+                                and (c.borderA or 1) == (cfg.borderA or 1)
+                            return same and "Matching" or "Different"
+                        end
+                    end
+                end,
                 elementKeys   = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1668,6 +1715,17 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             flashTargets = function() return { rgn } end,
             multiApply = {
                 getElementState = PabApplyState,
+                getElementOptionState = function(key)
+                    local shape = cfg.iconShape or "none"
+                    for _, entry in ipairs(PabAllBarEntries()) do
+                        if entry.key == key then
+                            local same = (entry.cfg.iconShape or "none") == shape
+                                and (shape ~= "cropped"
+                                    or ns.PAB_CropPercent(entry.cfg) == ns.PAB_CropPercent(cfg))
+                            return same and "Matching" or "Different"
+                        end
+                    end
+                end,
                 elementKeys   = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1702,6 +1760,8 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         local rgn = swipeRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Duration Swipe",
+            disabled = function() return cfg.showSwipe == false end,
+            disabledTooltip = "Show Duration Swipe",
             rows = {
                 -- Default on = the swipe UNCOVERS the icon as time runs out
                 -- (the module's shipped look); off = Blizzard's standard

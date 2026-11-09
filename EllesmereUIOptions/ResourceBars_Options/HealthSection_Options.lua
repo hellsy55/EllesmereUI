@@ -69,10 +69,9 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
     local hiNames = CopyTable(EllesmereUI.ABSORB_STYLE_NAMES)
     local hiOrder = CopyTable(EllesmereUI.ABSORB_STYLE_ORDER)
     local hiHealOrder = CopyTable(EllesmereUI.HEAL_ABSORB_STYLE_ORDER)
-    local hiLossOrder = {}
-    for _, k in ipairs(hiOrder) do
-        if k ~= "none" then hiLossOrder[#hiLossOrder + 1] = k end
-    end
+    local hiLossOrder = CopyTable(hiHealOrder)
+    table.insert(hiLossOrder, 2, "maxHealthStripes")
+    hiNames.maxHealthStripes = "Max Health Stripes"
     do
         local smNames, smSep = _G._ERB_BarTextureNames or {}, false
         for _, k in ipairs(_G._ERB_BarTextureOrder or {}) do
@@ -95,40 +94,46 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         if k and k ~= "---" and k ~= "none" then return ns.HealthIndicatorTex(k) end
     end }
 
-    -- Max health reduction overlay, off by default: its texture and colour are listed while it is on.
-    if not EllesmereUI._prebuilding then
-        local k = ns.HEALTH_INDICATORS[3]
-        local function lossOff() local c = cfg(); return not (c and c[k.show] == true) end
-        EllesmereUI.BuildInlineCog(healthEnableRow._leftRegion, {
-            title = "Max Health Reduction",
-            disabled = healthOff,
-            disabledTooltip = "Health Bar",
-            rows = {
-                { type = "toggle", label = "Show Reduction",
-                  get = function() local c = cfg(); return c and c[k.show] == true end,
-                  set = function(v)
-                      local c = cfg(); if not c then return end
-                      c[k.show] = v or nil; RefreshHealth()
-                  end },
-                { type = "dropdown", label = "Texture", hidden = lossOff,
-                  values = hiNames, order = hiLossOrder,
-                  get = function() local c = cfg(); return c and c[k.style] or "striped" end,
-                  set = function(v)
-                      local c = cfg(); if not c then return end
-                      c[k.style] = v; RefreshHealth()
-                  end },
-                { type = "colorpicker", label = "Color", hasAlpha = true, hidden = lossOff,
-                  get = function()
-                      local c = cfg(); local col = c and c[k.color]
-                      if col then return col.r or k.r, col.g or k.g, col.b or k.b, col.a or k.a end
-                      return k.r, k.g, k.b, k.a
-                  end,
-                  set = function(r, g, b, a)
-                      local c = cfg(); if not c then return end
-                      c[k.color] = { r = r, g = g, b = b, a = a }; RefreshHealth()
-                  end },
-            },
-        })
+    -- Session-only eye previews live on the health bar in the options header.
+    -- The eye is added before the cog so their visible order is cog, eye.
+    local function AddHealthPreviewEye(region, kind, label, isDisabled)
+        if EllesmereUI._prebuilding then return end
+        local eye = CreateFrame("Button", nil, region)
+        eye:SetSize(26, 26)
+        eye:SetPoint("RIGHT", region._lastInline or region._control, "LEFT", -8, 0)
+        eye:SetFrameLevel(region:GetFrameLevel() + 5)
+        region._lastInline = eye
+        local tex = eye:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints()
+        local function RefreshEye()
+            local active = env.GetHealthIndicatorPreview() == kind
+            tex:SetTexture(active and EllesmereUI.EYE_INVISIBLE_ICON or EllesmereUI.EYE_VISIBLE_ICON)
+            eye:SetAlpha((healthOff() or isDisabled()) and 0.3 or 1)
+        end
+        EllesmereUI.RegisterWidgetRefresh(RefreshEye)
+        eye:SetScript("OnClick", function()
+            if healthOff() or isDisabled() then return end
+            env.ToggleHealthIndicatorPreview(kind)
+            RefreshEye()
+            EllesmereUI:RefreshPage()
+        end)
+        eye:SetScript("OnEnter", function(self)
+            EllesmereUI.SetGlyphAlpha(self, 0.7)
+            local tip
+            if healthOff() then tip = EllesmereUI.DisabledTooltip("Health Bar")
+            elseif isDisabled() then tip = EllesmereUI.DisabledTooltip(label .. " Style")
+            else
+                tip = (env.GetHealthIndicatorPreview() == kind and "Hide " or "Show ") .. label .. " preview"
+            end
+            EllesmereUI.ShowWidgetTooltip(self, tip)
+        end)
+        eye:SetScript("OnLeave", function(self)
+            EllesmereUI.SetGlyphAlpha(self, 0.4)
+            EllesmereUI.HideWidgetTooltip()
+        end)
+        EllesmereUI.SetGlyphAlpha(eye, 0.4)
+        RefreshEye()
+        return eye
     end
 
     -- Per-spec health enables live in Spec Overrides: "Show Health Bar" is captured while editing as a group.
@@ -243,6 +248,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                           get = function() return get("absorbGlowLineTexture", "blizzard") end,
                           set = function(v) set("absorbGlowLineTexture", v) end }
                 end
+                AddHealthPreviewEye(rgn, k.key, isHeal and "Heal Absorb" or "Absorb", styleOff)
                 local _, cogShow = EllesmereUI.BuildInlineCog(rgn, {
                     title = isHeal and "Heal Absorb Rendering" or "Absorb Rendering",
                     rows = rows,
@@ -289,6 +295,107 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateSwatchDis)
             UpdateSwatchDis()
+        end
+    end
+
+    -- Max Health Style: use the same palette as Unit Frames. None keeps the
+    -- reduction indicator entirely off; existing Show Reduction profiles remain on.
+    do
+        local k = ns.HEALTH_INDICATORS[3]
+        local function styleOf()
+            local c = cfg()
+            if not (c and c[k.show] == true) then return "none" end
+            return c[k.style] or "striped"
+        end
+        local function styleOff() return styleOf() == "none" end
+        local function colorOf()
+            local c = cfg()
+            return c and c[k.color]
+        end
+        local maxRow
+        maxRow, h = W:DualRow(parent, y,
+            { type = "dropdown", text = "Max Health Style", values = hiNames,
+              order = hiLossOrder,
+              getValue = styleOf,
+              setValue = function(v)
+                  local c = cfg(); if not c then return end
+                  c[k.show] = (v ~= "none") or nil
+                  if v ~= "none" then c[k.style] = v end
+                  RefreshHealth(); EllesmereUI:RefreshPage()
+              end },
+            { type = "slider", text = "Max Health Opacity", min = 0, max = 100, step = 1,
+              disabled = styleOff, disabledTooltip = "Max Health Style",
+              getValue = function()
+                  local col = colorOf()
+                  return math.floor(((col and col.a) or k.a) * 100 + 0.5)
+              end,
+              setValue = function(v)
+                  local c = cfg(); if not c then return end
+                  local col = c[k.color] or { r = k.r, g = k.g, b = k.b }
+                  col.a = v / 100
+                  c[k.color] = col
+                  RefreshHealth()
+              end }
+        ); y = y - h
+        if not EllesmereUI._prebuilding then
+            local rgn = maxRow._leftRegion
+            AddHealthPreviewEye(rgn, k.key, "Max Health", styleOff)
+            EllesmereUI.BuildInlineCog(rgn, {
+                title = "Max Health Rendering",
+                rows = {
+                    { type = "toggle", label = "Show Reduction",
+                      get = function() local c = cfg(); return c and c[k.show] == true end,
+                      set = function(v)
+                          local c = cfg(); if not c then return end
+                          c[k.show] = v or nil
+                          if v and (not c[k.style] or c[k.style] == "none") then c[k.style] = "striped" end
+                          RefreshHealth(); EllesmereUI:RefreshPage()
+                      end },
+                    { type = "slider", label = "Backing Opacity", min = 0, max = 100, step = 1,
+                      disabled = styleOff, disabledTooltip = "Max Health Style",
+                      get = function() local c = cfg(); return c and c.maxHealthLossBgOpacity or 0 end,
+                      set = function(v)
+                          local c = cfg(); if not c then return end
+                          c.maxHealthLossBgOpacity = v
+                          RefreshHealth()
+                      end },
+                },
+            })
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
+                rgn, maxRow:GetFrameLevel() + 3,
+                function()
+                    local col = colorOf()
+                    if col then return col.r or k.r, col.g or k.g, col.b or k.b, 1 end
+                    return k.r, k.g, k.b, 1
+                end,
+                function(r, g, b)
+                    local c = cfg(); if not c then return end
+                    local col = c[k.color] or {}
+                    col.r, col.g, col.b = r, g, b
+                    c[k.color] = col
+                    RefreshHealth()
+                end, false, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+            EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+            local block = CreateFrame("Frame", nil, swatch)
+            block:SetAllPoints()
+            block:SetFrameLevel(swatch:GetFrameLevel() + 10)
+            block:EnableMouse(true)
+            block:SetScript("OnEnter", function()
+                local tip = styleOff() and EllesmereUI.DisabledTooltip("Max Health Style")
+                    or "This style uses its own colors"
+                EllesmereUI.ShowWidgetTooltip(swatch, tip)
+            end)
+            block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+            local function refreshBlock()
+                local st = styleOf()
+                local disabled = st == "none" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR"
+                swatch:SetAlpha(disabled and 0.3 or 1)
+                block:SetShown(disabled)
+            end
+            EllesmereUI.RegisterWidgetRefresh(refreshBlock)
+            refreshBlock()
         end
     end
 
