@@ -1074,6 +1074,7 @@ local function BuildDisplayBars(parent, y, ctx)
             EllesmereUI:RefreshPage()
           end },
         { type="toggle", text="Enable Focus Color",
+          tooltip="Use a separate health-bar color for your focus target instead of its normal enemy color.",
           getValue=function()
             local db = DB()
             if db and db.focusColorEnabled ~= nil then return db.focusColorEnabled end
@@ -1704,7 +1705,7 @@ local function BuildDisplayBars(parent, y, ctx)
     -- Inline cog on Position dropdown (X/Y offset settings)
     if not EllesmereUI._prebuilding then
         local leftRgn = classResourceRow2._leftRegion
-        EllesmereUI.BuildInlineCog(leftRgn, {
+        EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             anchorTo = leftRgn._control,
             disabled = classPowerDisabled,
             disabledTooltip = "Show Class Resource",

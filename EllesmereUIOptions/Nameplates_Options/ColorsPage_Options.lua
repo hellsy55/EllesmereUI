@@ -1786,6 +1786,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
             title = "No Aggro",
             rows = {
                 { type="toggle", label="Override Mini-Boss colors",
+                  tooltip="Give the DPS No Aggro color priority over the normal mini-boss health-bar color.",
                   get=function()
                     local db = DB()
                     if db and db.dpsNoAggroOverrideMiniBoss ~= nil then return db.dpsNoAggroOverrideMiniBoss end
@@ -1793,6 +1794,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
                   end,
                   set=function(v) DB().dpsNoAggroOverrideMiniBoss = v; RefreshAllPlates() end },
                 { type="toggle", label="Override Caster colors",
+                  tooltip="Give the DPS No Aggro color priority over the normal caster health-bar color.",
                   get=function()
                     local db = DB()
                     if db and db.dpsNoAggroOverrideCaster ~= nil then return db.dpsNoAggroOverrideCaster end
@@ -1800,6 +1802,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
                   end,
                   set=function(v) DB().dpsNoAggroOverrideCaster = v; RefreshAllPlates() end },
                 { type="toggle", label="Override Boss colors",
+                  tooltip="Give the DPS No Aggro color priority over the normal boss health-bar color.",
                   get=function()
                     local db = DB()
                     if db and db.dpsNoAggroOverrideBoss ~= nil then return db.dpsNoAggroOverrideBoss end
@@ -1877,6 +1880,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
             title = "Has Aggro",
             rows = {
                 { type="toggle", label="Override Mini-Boss and Caster colors",
+                  tooltip="Give the tank Has Aggro color priority over normal mini-boss and caster health-bar colors.",
                   get=function()
                     local db = DB()
                     if db and db.tankHasAggroOverrideMobType ~= nil then return db.tankHasAggroOverrideMobType end
@@ -1884,6 +1888,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
                   end,
                   set=function(v) DB().tankHasAggroOverrideMobType = v; RefreshAllPlates() end },
                 { type="toggle", label="Override Boss colors",
+                  tooltip="Give the tank Has Aggro color priority over the normal boss health-bar color.",
                   get=function()
                     local db = DB()
                     if db and db.tankHasAggroOverrideBoss ~= nil then return db.tankHasAggroOverrideBoss end

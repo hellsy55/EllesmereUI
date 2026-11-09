@@ -3390,6 +3390,7 @@ initFrame:SetScript("OnEvent", function(self)
             hashLbl:SetPoint("LEFT", hashRow, "LEFT", 0, 0)
             hashRow._lbl2 = hashLbl
             local hashModeRow = { type = "toggle", label = "Position by percent",
+              tooltip="Place threshold markers by percentage of the maximum resource. Turn off to position them by an absolute resource value.",
                 get = function() local ent = CurEntry(); return ((ent and ent.hashMode) or HASH_NIL) == "percent" end,
                 set = function(v)
                     local ent = CurEntry(); if not ent then return end

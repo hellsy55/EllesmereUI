@@ -11245,7 +11245,7 @@ L["Only recolor the fill when more than one boss frame is active at once (a mult
 L["Only show these buffs when you cast them."] = "只有在你施放這些增益效果時才顯示。"
 L["Only show this bar while the tracked buff/cooldown is active. Turn off to keep an empty bar on screen at all times."] = "只有在追蹤的增益效果／冷卻啟用時才顯示此列。關閉則會讓空的長條一直顯示在畫面上。"
 L["Only works for Blizzard's whitelisted healer spell IDs (non-private auras)."] = "僅適用於暴雪白名單中的治療者法術 ID（非私密光環）。"
-L["Opacity of the background overlay. 0 removes it entirely; the 9.0.7 default is 62."] = "背景疊加層的不透明度。0 表示完全移除；9.0.7 版的預設值為 62。"
+L["Opacity of the background overlay. 0 removes it entirely; the default is 62."] = "背景疊加層的不透明度。0 表示完全移除；預設值為 62。"
 L["Open Edit Mode"] = "開啟編輯模式"
 L["Open World Basic Coloring"] = "開放世界基本上色"
 L["Open bags and bank to the OneBag/OneBank view by default instead of categorized views."] = "預設以單一背包／單一銀行檢視開啟背包與銀行，而非分類檢視。"

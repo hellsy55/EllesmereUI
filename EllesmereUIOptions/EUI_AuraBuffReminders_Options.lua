@@ -1931,6 +1931,7 @@ initFrame:SetScript("OnEvent", function(self)
                     disabledTooltip = "Gathering Tracking",
                     rows = {
                         { type="toggle", label="Ignore If Class Tracking Is Active",
+                          tooltip="Do not show a gathering-tracking reminder while a class tracking effect is already active.",
                           get=function() local f = FDB(); return not f or f.gatherClassTrack ~= false end,
                           set=function(v) local f = FDB(); if f then f.gatherClassTrack = v; RefreshAll() end end },
                     },

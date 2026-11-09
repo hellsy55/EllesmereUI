@@ -833,6 +833,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("timerTextSize") or 20 end,
               setValue=function(v) Set("timerTextSize", v); Refresh() end },
             { type="dropdown", text="Timer Format",
+              tooltip="Choose how the timer displays elapsed, remaining, and total dungeon time.",
               disabled=function() return Cfg("enabled") == false end,
               disabledTooltip="the module",
               values=timerDisplayValues,
@@ -864,6 +865,7 @@ initFrame:SetScript("OnEvent", function(self)
                   Refresh(); EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Move Timer Inside Bar",
+              tooltip="Place the timer text inside the timer bar. The In-Bar Timer menu controls its size and bar height.",
               disabled=function() return Cfg("enabled") == false or Cfg("showTimerBar") == false end,
               disabledTooltip=ModuleOr("Show Timer Bar"),
               getValue=function() return Cfg("timerInBar") == true end,
@@ -1150,7 +1152,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return Cfg("objectivesSize") or 12 end,
               setValue=function(v) Set("objectivesSize", v); Refresh() end })
         if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildInlineCog(row._leftRegion, { title = "Boss Position", gap = 6, rows = {
+        EllesmereUI.BuildInlineCog(row._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON, title = "Boss Position", gap = 6, rows = {
             { type="slider", label="Boss X", min=-80, max=80, step=1,
               get=function() return Cfg("objectiveTextOffsetX") or 0 end,
               set=function(v) Set("objectiveTextOffsetX", v); Refresh() end },

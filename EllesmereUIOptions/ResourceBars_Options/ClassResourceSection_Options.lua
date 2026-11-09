@@ -320,7 +320,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.classHeight, ctx.syncRows.powerHeight, ctx.syncRows.healthHeight } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "secondary", "height", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "secondary", "height", SmoothRefresh),
             })
         end
         if not EllesmereUI._prebuilding then
@@ -342,7 +342,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.classWidth, ctx.syncRows.powerWidth, ctx.syncRows.healthWidth } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "secondary", "width", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "secondary", "width", SmoothRefresh),
             })
         end
     end
@@ -368,7 +368,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                   if c.borderSizePx then c.borderSizePx = false end
                   RebuildClass(); EllesmereUI:RefreshPage(true)
               end }),
-            ns.ERB_ClassicBorderRow() and ns.ERB_ClassicBorderSizeCfg(cfg, classOff, "Class Resource", RebuildClass, "ERB_ClassResource") or
+            (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) and ns.ERB_ClassicBorderSizeCfg(cfg, classOff, "Class Resource", RebuildClass, "ERB_ClassResource") or
             EllesmereUI.BlizzStyle.Gate("resourcebars", EllesmereUI.BorderPxSliderCfg({ text = "Border Size",
               disabled = classOff,
               disabledTooltip = "Class Resource",
@@ -404,7 +404,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
             end
         end
         if not ctx.advanced and ctx.syncRows then ctx.syncRows.classBorder = classBsRow._rightRegion end
-        if not EllesmereUI._prebuilding and not ns.ERB_ClassicBorderRow() then
+        if not EllesmereUI._prebuilding and not (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             local rgn = classBsRow._rightRegion
             local ctrl = rgn._control
             -- Corner Radius (EllesmereUI_RoundedCorners.lua): an inline cog on the
@@ -570,13 +570,13 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
             local function UpdateCogVis()
                 local c = cfg()
                 local tex = c and c.borderTexture or "solid"
-                if tex == "solid" or ns.ERB_ClassicBorderRow() then cogBtn:Hide() else cogBtn:Show() end
+                if tex == "solid" or (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then cogBtn:Hide() else cogBtn:Show() end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
             UpdateCogVis()
         end
         -- Cross-bar sync icons: Simple page only
-        if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and ns.ERB_ClassicBorderRow() then
+        if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             ns.ERB_ClassicBorderSync(classBsRow._rightRegion, DB, "secondary", SmoothRefresh,
                 function() return { ctx.syncRows.classBorder, ctx.syncRows.powerBorder, ctx.syncRows.healthBorder } end)
         elseif not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding then
@@ -610,7 +610,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 flashTargets = function() return { classBsRow._leftRegion } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "secondary", "borderStyle", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "secondary", "borderStyle", SmoothRefresh),
             })
             -- Border: right region of the Border Style row
             EllesmereUI.BuildSyncIcon({
@@ -641,7 +641,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.classBorder, ctx.syncRows.powerBorder, ctx.syncRows.healthBorder } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "secondary", "border", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "secondary", "border", SmoothRefresh),
             })
         end
 
@@ -961,7 +961,7 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.classOpacity, ctx.syncRows.powerOpacity, ctx.syncRows.healthOpacity } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "secondary", "opacity", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "secondary", "opacity", SmoothRefresh),
             })
         end
     end
@@ -978,8 +978,8 @@ function ns.ERB_BuildClassResourceSection(parent, y, ctx)
           getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
           setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshClass() end }
     ); y = y - fadeSyncH
-    ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "secondary", "oocFade", "Fade Out of Combat", SmoothRefresh)
-    ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "secondary", "oocAlpha", "Fade Opacity", SmoothRefresh)
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "secondary", "oocFade", "Fade Out of Combat", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "secondary", "oocAlpha", "Fade Opacity", SmoothRefresh) end
 
     -- Resource Text and the Hunter Focus row below touch only the class-resource
     -- (secondary) config. DB() is shadowed in this scope so DB().secondary resolves to

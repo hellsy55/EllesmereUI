@@ -2306,7 +2306,7 @@ initFrame:SetScript("OnEvent", function(self)
                 do
                     -- Text Position cog: offsets the TEXT only (factories
                     -- inject these into every text anchor; icons stay put).
-                    EllesmereUI.BuildInlineCog(alignRow._leftRegion, {
+                    EllesmereUI.BuildInlineCog(alignRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                         title = "Text Position",
                         rows = {
                             { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,
@@ -2334,7 +2334,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Content Position cog (next to Content Scale): offsets
                     -- the WHOLE block content group, text included.
-                    EllesmereUI.BuildInlineCog(alignRow._rightRegion, {
+                    EllesmereUI.BuildInlineCog(alignRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                         title = "Content Position",
                         rows = {
                             { type = "slider", label = "X Offset", min = -50, max = 50, step = 1,

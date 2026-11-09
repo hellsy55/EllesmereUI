@@ -3406,7 +3406,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             -- (ResourceBars "Shift Elements if No Resource" parity).
             if not EllesmereUI._prebuilding then
                 local rgn = shiftRow._rightRegion
-                EllesmereUI.BuildInlineCog(rgn, {
+                EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                     title = "Shift Offset",
                     rows = {
                         { type = "slider", pixel = true, label = "Extra Y Offset", min = -50, max = 50, step = 1,
@@ -3933,6 +3933,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                       end })
                 table.insert(durationRows, 3,
                     { type = "slider", label = "Decimal Threshold", min = 1, max = 120, step = 1,
+                      tooltip="Show decimal places in the remaining-duration timer when it drops below this many seconds.",
                       disabled = function()
                           local bd = SelectedTBB()
                           return not (bd and bd.timerDecimals)
@@ -4788,6 +4789,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                   bd.stackThresholdEnabled = v; RefreshTBB(); EllesmereUI:RefreshPage()
               end },
             { type = "slider", text = "Stack Threshold",
+              tooltip="Change the bar color when the stack count exceeds this value. Multi-threshold mode replaces this single threshold.",
               min = 0, max = 100, step = 1,
               disabled = function()
                   local bd = SelectedTBB()

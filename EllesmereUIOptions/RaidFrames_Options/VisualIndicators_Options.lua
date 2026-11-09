@@ -340,7 +340,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             for _, r in ipairs(EllesmereUI.GlowOptions.PopupRows(MissingGlowDesc(SVal, SWrite), "Glow", true)) do
                 rows[#rows + 1] = r
             end
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Missing Buffs",
                 rows = rows,
                 disabled = function() return not SVal("showMissingBuffs", true) end,
@@ -485,7 +485,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("roleIconSize", v) end });  y = y - h
     if not EllesmereUI._prebuilding then
         local rgn = roleRow2._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Role Icon Offset",
             disabled = RoleAttached,
             disabledTooltip = "Attach Role Icons", requireState = "disabled",
@@ -536,7 +536,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
 
     do
         local rgn = row._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Marker Offset",
             rows = {
                 { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -575,7 +575,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     local readyCheckPositionOrder = EllesmereUI.POSITION_GRID_ORDER
     local rcRow
     rcRow, h = W:DualRow(parent, y,
-        ns.RF_PartyKitGate({ type="dropdown", text="Ready Check / Summon / Rez", values=readyCheckPositionValues, order=readyCheckPositionOrder,
+        ns.RF_PartyKitGate({ type="dropdown", text="Ready Check / Phasing / Rez", values=readyCheckPositionValues, order=readyCheckPositionOrder,
           tooltip="Controls where status icons are displayed. Use the individual settings to choose which icons are shown: Ready Check, Resurrection, Other Phase, or Other Party.",
           getValue=function() return SVal("readyCheckPosition", "center") end,
           setValue=function(v) SSet("readyCheckPosition", v) end }),
@@ -584,9 +584,8 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("readyCheckSize", v) end });  y = y - h
     if not EllesmereUI._prebuilding then
         local rgn = rcRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
-            icon = EllesmereUI.PANEL_MORE_ICON,
-            title = "Ready Check / Summon / Rez",
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
+            title = "Ready Check / Phasing / Rez",
             rows = {
                 { type="toggle", label="Show Ready Check",
                   get=function() return SVal("showReadyCheck", true) end,
@@ -674,7 +673,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("statusTextSize", v) end });  y = y - h
     if not EllesmereUI._prebuilding then
         local rgn = stRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Status Text",
             rows = {
                 { type="toggle", label="Show AFK",
@@ -737,7 +736,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
         cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
         cogBtn:SetAlpha(0.4)
         local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
-        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.PANEL_MORE_ICON)
+        cogTex:SetAllPoints(); cogTex:SetTexture(EllesmereUI.DIRECTIONS_ICON)
         cogBtn:SetScript("OnEnter", function(self) self:SetAlpha(0.7) end)
         cogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
         cogBtn:SetScript("OnClick", function(self) cogShow(self) end)
@@ -803,7 +802,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("leaderIconSize", v) end });  y = y - h
     do
         local rgn = row._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Leader Icon",
             rows = {
                 { type="toggle", label="Show In Combat",
@@ -869,7 +868,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("combatIndicatorSize", v) end });  y = y - h
     if not EllesmereUI._prebuilding then
         local rgn = ciRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Combat Icon",
             rows = {
                 { type="dropdown", label="Style", values=combatStyleValues, order=combatStyleOrder,
@@ -908,48 +907,6 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
-    end
-
-    -- Show Group Numbers | Number Size (+ alpha swatch). Raid only: party has no groups. Size + color also drive the always-on preview group labels; the toggle gates only the real frames.
-    if not optState._partyCtx then
-        local gnRow
-        gnRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Group Numbers",
-              getValue=function() return SVal("showGroupNumbers", false) end,
-              setValue=function(v) SSet("showGroupNumbers", v) end },
-            { type="slider", text="Number Size", min=6, max=30, step=1,
-              getValue=function() return SVal("groupNumberSize", 10) end,
-              setValue=function(v) SSet("groupNumberSize", v) end });  y = y - h
-        if not EllesmereUI._prebuilding then
-            local rgn = gnRow._rightRegion
-            local swatch = EllesmereUI.BuildColorSwatch(
-                rgn, gnRow:GetFrameLevel() + 3,
-                function()
-                    local c = SGet("groupNumberColor")
-                    if c then return c.r, c.g, c.b, c.a or 0.75 end
-                    return 1, 1, 1, 0.75
-                end,
-                function(r, g, b, a)
-                    SWrite("groupNumberColor", { r=r, g=g, b=b, a=a })
-                    ReloadAndUpdate()
-                end, true, 20)
-            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-            rgn._lastInline = swatch
-        end
-        if not EllesmereUI._prebuilding then
-            local rgn = gnRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
-                title = "Group Number Offset",
-                rows = {
-                    { type="slider", label="Offset X", min=-50, max=50, step=1,
-                      get=function() return SVal("groupNumberOffsetX", 0) end,
-                      set=function(v) SSet("groupNumberOffsetX", v) end },
-                    { type="slider", label="Offset Y", min=-50, max=50, step=1,
-                      get=function() return SVal("groupNumberOffsetY", 0) end,
-                      set=function(v) SSet("groupNumberOffsetY", v) end },
-                },
-            })
-        end
     end
 
     -- Ping Marker | Ping Marker Size (+ offset cog). The mark a group member's ping
@@ -992,7 +949,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("pingMarkerSize", v) end });  y = y - h
     if not EllesmereUI._prebuilding then
         local rgn = pingRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Ping Marker Offset",
             rows = {
                 { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -1003,6 +960,48 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
                   set=function(v) SSet("pingMarkerOffsetY", v) end },
             },
         })
+    end
+
+    -- Show Group Numbers | Number Size (+ alpha swatch). Raid only: party has no groups. Size + color also drive the always-on preview group labels; the toggle gates only the real frames.
+    if not optState._partyCtx then
+        local gnRow
+        gnRow, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Group Numbers",
+              getValue=function() return SVal("showGroupNumbers", false) end,
+              setValue=function(v) SSet("showGroupNumbers", v) end },
+            { type="slider", text="Number Size", min=6, max=30, step=1,
+              getValue=function() return SVal("groupNumberSize", 10) end,
+              setValue=function(v) SSet("groupNumberSize", v) end });  y = y - h
+        if not EllesmereUI._prebuilding then
+            local rgn = gnRow._rightRegion
+            local swatch = EllesmereUI.BuildColorSwatch(
+                rgn, gnRow:GetFrameLevel() + 3,
+                function()
+                    local c = SGet("groupNumberColor")
+                    if c then return c.r, c.g, c.b, c.a or 0.75 end
+                    return 1, 1, 1, 0.75
+                end,
+                function(r, g, b, a)
+                    SWrite("groupNumberColor", { r=r, g=g, b=b, a=a })
+                    ReloadAndUpdate()
+                end, true, 20)
+            swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = swatch
+        end
+        if not EllesmereUI._prebuilding then
+            local rgn = gnRow._leftRegion
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
+                title = "Group Number Offset",
+                rows = {
+                    { type="slider", label="Offset X", min=-50, max=50, step=1,
+                      get=function() return SVal("groupNumberOffsetX", 0) end,
+                      set=function(v) SSet("groupNumberOffsetX", v) end },
+                    { type="slider", label="Offset Y", min=-50, max=50, step=1,
+                      get=function() return SVal("groupNumberOffsetY", 0) end,
+                      set=function(v) SSet("groupNumberOffsetY", v) end },
+                },
+            })
+        end
     end
     end   -- close the less-common-indicators collapse wrapper
     -- While expanded the shared link re-renders here in its "Hide ..." form; no-op while collapsed or in party ctx.
@@ -1284,7 +1283,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
     end
     do
         local rgn = tnbRow2._rightRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Text Offset",
             rows = {
                 { type="slider", label="Offset X", min=-50, max=50, step=1,
@@ -1367,7 +1366,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
           setValue=function(v) SSet("roleIconOnNameBar", v); EllesmereUI:RefreshPage() end },
         EllesmereUI.BlankRowCfg());  y = y - h
     if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildInlineCog(tnbRow4._leftRegion, {
+        EllesmereUI.BuildInlineCog(tnbRow4._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Role Icon Position",
             disabled = function() return not SVal("roleIconOnNameBar", false) end,
             disabledTooltip = "Attach Role Icons",
@@ -1726,6 +1725,7 @@ local function BuildVisualIndicators(parent, y, W, onSection, EYE, CustomBorderO
                 title = "Extra Frame Size",
                 rows = {
                     { type="toggle", label="Auto Resize Indicators",
+                      tooltip="Scale indicators and auras with Extra Frame size. Disable to keep their original frame-based scale.",
                       get=function() return XFSet().autoResizeIndicators ~= false end,
                       set=function(v)
                           -- nil = on (additive key, zero migration); false = off.

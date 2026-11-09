@@ -78,7 +78,7 @@ function ns.ERB_BuildSwingTimerPage(pageName, parent, yOffset)
     -- Inline position cog (X/Y + unlock) on Enable, as on the GCD Bar page
     if not EllesmereUI._prebuilding then
         local rgn = enableRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() local p = DB(); return p and not p.swingTimer.enabled end,
             disabledTooltip = ST_TIP,
             title = "Swing Timer Position",
@@ -148,7 +148,7 @@ function ns.ERB_BuildSwingTimerPage(pageName, parent, yOffset)
               get = function() local p = DB(); return p and p.swingTimer[key] or 0 end,
               set = function(v) local p = DB(); if not p then return end; p.swingTimer[key] = v; RefreshST() end }
         end
-        EllesmereUI.BuildInlineCog(stTextRow._rightRegion, {
+        EllesmereUI.BuildInlineCog(stTextRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = stOff, disabledTooltip = ST_TIP,
             title = "Text Position",
             rows = {

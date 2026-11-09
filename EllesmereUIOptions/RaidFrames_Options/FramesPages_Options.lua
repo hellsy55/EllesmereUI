@@ -63,8 +63,10 @@ local function BuildSortByControl(rgn, opts)
         sBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_HA)
         sBrd:SetColor(1, 1, 1, EllesmereUI.DD_BRD_HA)
         sLabel:SetAlpha(EllesmereUI.DD_TXT_HA)
+        EllesmereUI.ShowWidgetTooltip(sortBtn, "Sort frames by group or role, or use FrameSort when its addon is available. In Role mode, drag the roles to set their order; class priority is configured separately.")
     end)
     sortBtn:SetScript("OnLeave", function()
+        EllesmereUI.HideWidgetTooltip()
         sBg:SetColorTexture(EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
         sBrd:SetColor(1, 1, 1, EllesmereUI.DD_BRD_A)
         sLabel:SetAlpha(EllesmereUI.DD_TXT_A)
@@ -717,6 +719,7 @@ local function BuildMainPage(pageName, parent, yOffset)
         -- Auto Resize Icons: checkbox dropdown, pure VIEW (no migration) over autoResizeIndicators ("Indicators & Auras") and autoResizeTrackedBuffs ("Tracked Buffs"). Tracked Buffs defaults on.
         local autoResizeRow
         local autoResizeSlot = { type="dropdown", text="Auto Resize Icons",
+          tooltip="Choose which icons scale with the frame size: Indicators & Auras and Tracked Buffs can be controlled separately.",
             values={ __placeholder = "All" }, order={ "__placeholder" },
             getValue=function() return "__placeholder" end,
             setValue=function() end }
@@ -1264,6 +1267,7 @@ local function BuildMainPage(pageName, parent, yOffset)
               getValue=function() return "__placeholder" end,
               setValue=function() end },
             { type="toggle", text="Merge Groups",
+              tooltip="Combine raid subgroups into a continuous layout. Custom group ordering no longer applies, and merged layouts use restricted growth directions.",
               getValue=function() return SVal("mergeGroups", false) end,
               -- Custom Group Order only applies to separated groups, so a flip that
               -- changes whether it applies rebuilds the Show Groups dropdown.
@@ -1511,7 +1515,7 @@ local function BuildPartyPage(pageName, parent, yOffset)
                 { type="slider", text="Buff Size", min=8, max=40, step=1,
                   getValue=function() return db.profile.partyKitBuffSize or 15 end,
                   setValue=function(v) PSSet("partyKitBuffSize", v) end });  y = y - h
-            EllesmereUI.BuildInlineCog(kitAuraRow._leftRegion, { title = "Debuff Position", rows = {
+            EllesmereUI.BuildInlineCog(kitAuraRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON, title = "Debuff Position", rows = {
                 { type="slider", label="Offset X", min=-100, max=100, step=1,
                   get=function() return db.profile.partyKitDebuffX or 0 end,
                   set=function(v) PSSet("partyKitDebuffX", v) end },
@@ -1521,7 +1525,7 @@ local function BuildPartyPage(pageName, parent, yOffset)
             } })
             -- Horizontal Frames always puts the buffs above each frame
             -- (the next frame sits beside it): the side picks disable.
-            EllesmereUI.BuildInlineCog(kitAuraRow._rightRegion, { title = "Buff Position", rows = {
+            EllesmereUI.BuildInlineCog(kitAuraRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON, title = "Buff Position", rows = {
                 { type="dropdown", label="Anchor",
                   values={ right = "Right of Frame", left = "Left of Frame", above = "Above Frame" },
                   order={ "right", "left", "above" },
@@ -1788,6 +1792,7 @@ local function BuildPartyPage(pageName, parent, yOffset)
     local partyAutoResizeRow
     partyAutoResizeRow, h = W:DualRow(parent, y,
         { type="dropdown", text="Auto Resize Icons",
+          tooltip="Choose which icons scale with the frame size: Indicators & Auras and Tracked Buffs can be controlled separately.",
           values={ __placeholder = "All" }, order={ "__placeholder" },
           getValue=function() return "__placeholder" end,
           setValue=function() end },

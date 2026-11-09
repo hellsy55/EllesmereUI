@@ -772,7 +772,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
         local function heightMatched()
             return EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power")
         end
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function()
                 local p = DB()
                 if not (p and p.primary.enabled and p.primary.expandIfNoResource) then return true end
@@ -801,7 +801,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
     -- Inline reposition cog on "Shift Elements if No Resource": Extra Y Offset
     if not EllesmereUI._prebuilding then
         local rgn = shiftRow._rightRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Shift Offset",
             rows = {
                 { type = "slider", pixel = true, label = "Extra Y Offset", min = -50, max = 50, step = 1,
@@ -851,7 +851,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
     -- Inline reposition cog on "Shift Elements if No Power": Extra Y Offset
     if not EllesmereUI._prebuilding then
         local rgn = shiftRow2._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Shift Offset",
             rows = {
                 { type = "slider", pixel = true, label = "Extra Y Offset", min = -50, max = 50, step = 1,
@@ -1415,7 +1415,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
         -- Inline position cog (X/Y + unlock) on Enable, as on the GCD Bar page
         if not EllesmereUI._prebuilding then
             local rgn = asEnableRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() local p = DB(); return p and not p.arcaneSoul.enabled end,
                 disabledTooltip = AS_TIP,
                 title = "Arcane Soul Position",

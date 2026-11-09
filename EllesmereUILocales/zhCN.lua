@@ -10012,7 +10012,7 @@ L["Off (default): the cast bar fades with real transparency, matching the whole-
 L["Only With Multiple Boss Frames"] = "仅在多个首领框体时"
 L["Only play alerts while in combat."] = "仅在战斗中播放警报。"
 L["Only recolor the fill when more than one boss frame is active at once (a multi-boss phase). With a single boss frame up, it keeps its normal color even while targeted. Off (default) recolors regardless of how many boss frames are active."] = "仅当同时有多个首领框体处于活动状态时（多首领阶段）才重新着色填充。只有单个首领框体时，即使被选中也保持正常颜色。关闭（默认）则无论有多少首领框体处于活动状态都会重新着色。"
-L["Opacity of the background overlay. 0 removes it entirely; the 9.0.7 default is 62."] = "背景遮罩的不透明度。设为0可完全移除；9.0.7版本的默认值为62。"
+L["Opacity of the background overlay. 0 removes it entirely; the default is 62."] = "背景遮罩的不透明度。设为0可完全移除；默认值为62。"
 L["Out-of-range frames darken instead of fading transparent, matching Blizzard's default party/raid frame look. Uses the same Out of Range Alpha % as brightness: 100% = no visible difference in/out of range, 10% = out-of-range frames drop to 10% brightness."] = "超出范围的框体会变暗而非淡化为透明，与暴雪默认的队伍/团队框体效果一致。使用与“范围外不透明度”相同的百分比作为亮度：100% = 范围内外无明显差异，10% = 超出范围的框体亮度降至10%。"
 L["Outline style override for all Blizz UI Enhanced text. EUI Global Outline follows the global Outline Mode setting above."] = "暴雪界面增强文本的轮廓样式覆盖。“EUI全局轮廓”遵循上方的全局轮廓模式设置。"
 L["Overrides Hide Keybind Text while this bar is paged onto the vehicle bar (Action Bar 1 while the player is in a vehicle), so the keybinds stay visible instead of hidden."] = "当此条被切换为载具条（玩家处于载具中时的动作条1）时，覆盖“隐藏快捷键文本”设置，使快捷键保持可见而非隐藏。"

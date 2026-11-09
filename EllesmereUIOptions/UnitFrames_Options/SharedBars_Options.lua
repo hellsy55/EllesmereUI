@@ -1489,7 +1489,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
     -- under a stock style, which places the bar itself)
     if not EllesmereUI._prebuilding then
         local posRgn = sharedPowerRow1._rightRegion
-        EllesmereUI.BuildInlineCog(posRgn, {
+        EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function()
                 if stockPower then return true end
                 local pos = SVal("powerPosition", "below"); return pos ~= "detached_top" and pos ~= "detached_bottom"
@@ -2080,7 +2080,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             values=ns.textStrataValues, order=ns.textStrataOrder,
             get=function() return SVal("powerTextStrata", "inherit") end,
             set=function(v) SSet("powerTextStrata", v) end }
-        EllesmereUI.BuildInlineCog(ppRgn, {
+        EllesmereUI.BuildInlineCog(ppRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() return SVal("powerPercentText", "none") == "none" end,
             disabledTooltip = "This option requires a text position other than none.",
             title = "Text Position",
@@ -2537,7 +2537,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                           end,
                           refreshAlpha = function() return FormPowerColored() and 1 or 0.3 end },
                     })
-                    EllesmereUI.BuildInlineCog(formTextRow._rightRegion, {
+                    EllesmereUI.BuildInlineCog(formTextRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                         disabled = function()
                             return FormVal("foreverFormTextPos", "powerPercentText", "none") == "none"
                         end,
@@ -2969,7 +2969,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     -- Cog on Position for X/Y
     if not EllesmereUI._prebuilding then
         local posRgn = row._leftRegion
-        EllesmereUI.BuildInlineCog(posRgn, {
+        EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() return SCPStyle() ~= "modern" or SValSupported("classPowerPosition", "top") == "above" end,
             disabledTooltip = function() return SCPStyle() ~= "modern" and "This option requires Class Resource to be set to Modern." or "This option requires a dropdown selection other than Above Health Bar" end,
             title = "Class Resource Position",

@@ -1065,12 +1065,14 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     sortRow, hh = W:DualRow(frame, sy,
         {
             type = "dropdown", text = "Sort Method",
+              tooltip="Choose the aura ordering: Default, Expiration, Name, or Important.",
             values = SORT_METHOD_VALUES, order = SORT_METHOD_ORDER,
             getValue = function() return cfg.sortMethod or "Default" end,
             setValue = function(v) cfg.sortMethod = v; apply() end
         },
         {
             type = "dropdown", text = "Sort Direction",
+              tooltip="Reverse the chosen sorting order without changing the sort method.",
             values = SORT_DIR_VALUES, order = SORT_DIR_ORDER,
             getValue = function() return cfg.sortDirection or "Normal" end,
             setValue = function(v) cfg.sortDirection = v; apply() end

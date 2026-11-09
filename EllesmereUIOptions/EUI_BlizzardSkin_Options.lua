@@ -333,6 +333,7 @@ initFrame:SetScript("OnEvent", function(self)
                   })
               end },
             { type="dropdown", text="Show Tooltips",
+              tooltip="Choose when reskinned tooltips appear: always, outside combat, outside boss combat, or never. The settings menu can allow a modifier key to reveal hidden tooltips.",
               disabled=ttReskinOff, disabledTooltip="Reskin Tooltip",
               values={ always="Always", outOfCombat="Out of Combat", outOfBossCombat="Out of Boss Combat", never="Never" },
               order={ "always", "outOfCombat", "outOfBossCombat", "never" },
@@ -421,7 +422,7 @@ initFrame:SetScript("OnEvent", function(self)
             local function ttCursorOff()
                 return not (EllesmereUIDB and EllesmereUIDB.tooltipAnchorCursor)
             end
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 gap = 9,
                 disabled = ttCursorOff,
                 disabledTooltip = "Anchor to Cursor",
@@ -4401,7 +4402,7 @@ initFrame:SetScript("OnEvent", function(self)
               setValue = function(v) EDR_SetField("speedText", "justify", v); EDR_Redraw() end }
         )
         if not EllesmereUI._prebuilding then
-        EllesmereUI.BuildInlineCog(speedTextRow._rightRegion, {
+        EllesmereUI.BuildInlineCog(speedTextRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Speed Text Position",
             rows = {
                 { type = "slider", label = "Size",     min = 6,    max = 32,  step = 1,

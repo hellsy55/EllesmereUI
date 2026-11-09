@@ -963,7 +963,7 @@ local function BuildBaseDetailDM(frame, fontPath)
           setValue = function(v) p.debuffGrowDirection = v; DmApply() end }); sy = sy - hh
     do
         local rgn = posRow2._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Position Offset",
             rows = {
                 { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -1214,7 +1214,7 @@ local function BuildTileDetail(frame, fontPath, t)
               setValue = function(v) TSet("growDirection", v) end }); sy = sy - hh
         do
             local rgn = posRow2._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Position Offset",
                 rows = {
                     { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,
@@ -1405,7 +1405,7 @@ local function BuildTileDetail(frame, fontPath, t)
               setValue = function(v) TSet("position", v) end }); sy = sy - hh
         do
             local rgn = coreRow._rightRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 title = "Position Offset",
                 rows = {
                     { type = "slider", label = "Offset X", min = -50, max = 50, step = 1,

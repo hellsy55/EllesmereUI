@@ -1640,7 +1640,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
         -- Size + X/Y offsets cog on Text Position (right)
         if not EllesmereUI._prebuilding then
             local rgn = pwrTextRow._rightRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() return MVal("powerPercentText", "none") == "none" end,
                 disabledTooltip = "This option requires a text position other than none.",
                 title = "Text Position",
@@ -1987,7 +1987,7 @@ function ns.UFO_BuildPetOptions(W, parent, y)
                   setValue=function(v) P.happinessAlign = v; happyApply() end },
                 EllesmereUI.BlankRowCfg());  yy = yy - hh
             if not EllesmereUI._prebuilding then
-                EllesmereUI.BuildInlineCog(posRow._leftRegion, {
+                EllesmereUI.BuildInlineCog(posRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                     disabled = happyOff, disabledTooltip = "Show Happiness",
                     title = "Happiness Position",
                     rows = {
@@ -2091,11 +2091,11 @@ function ns.UFO_BuildPetOptions(W, parent, y)
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(buffRow._leftRegion, { disabled=buffsOff, disabledTooltip="Buffs Location",
                 title="Buff Settings", rows=ns.UFO_AuraSettingsRows("buff", PGet, PSet, 40, 4) })
-            EllesmereUI.BuildInlineCog(buffRow._rightRegion, { disabled=buffsOff,
+            EllesmereUI.BuildInlineCog(buffRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON, disabled=buffsOff,
                 disabledTooltip="Buffs Location", title="Buff Position", rows=ns.UFO_AuraPositionRows("buff", PGet, PSet) })
             EllesmereUI.BuildInlineCog(debuffRow._leftRegion, { disabled=debuffsOff, disabledTooltip="Debuffs Location",
                 title="Debuff Settings", rows=ns.UFO_AuraSettingsRows("debuff", PGet, PSet, 20, 10) })
-            EllesmereUI.BuildInlineCog(debuffRow._rightRegion, { disabled=debuffsOff,
+            EllesmereUI.BuildInlineCog(debuffRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON, disabled=debuffsOff,
                 disabledTooltip="Debuffs Location", title="Debuff Position", rows=ns.UFO_AuraPositionRows("debuff", PGet, PSet) })
         end
     end
@@ -2330,7 +2330,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         -- writing here makes the simple offset independent. Disabled while None.
         if not EllesmereUI._prebuilding then
             local leftRgn = simpleBuffRow._leftRegion
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() return ns.GetBossSimpleBuffMode(db.profile.boss) == "none" end,
                 disabledTooltip = "Simple Buff Display",
                 title = "Simple Buff Position",
@@ -2473,7 +2473,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         -- independent. Disabled while Simple Debuff Display is None.
         if not EllesmereUI._prebuilding then
             local leftRgn = simpleRow._leftRegion
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            EllesmereUI.BuildInlineCog(leftRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() return ns.GetBossSimpleDebuffMode(db.profile.boss) == "none" end,
                 disabledTooltip = "Simple Debuff Display",
                 title = "Simple Debuff Position",
@@ -2664,7 +2664,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               getValue=function() return db.profile.boss.buffCooldownTextSize or 10 end,
               setValue=function(v) db.profile.boss.buffCooldownTextSize = v; ReloadAndUpdate() end });  yy = yy - hh
         if not EllesmereUI._prebuilding then  -- Directions cog on Buff Size (X/Y cluster offset)
-            EllesmereUI.BuildInlineCog(bossAuraSizeRow._leftRegion, { disabled = bossBuffSizeOff, title = "Buff Position", rows = {
+            EllesmereUI.BuildInlineCog(bossAuraSizeRow._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON, disabled = bossBuffSizeOff, title = "Buff Position", rows = {
                 { type="slider", label="Offset X", min=-200, max=200, step=1,
                   get=function() return db.profile.boss.buffOffsetX or 0 end,
                   set=function(v) db.profile.boss.buffOffsetX = v; ReloadAndUpdate(); if ns.RefreshBossPreviewDebuffs then ns.RefreshBossPreviewDebuffs() end end },
@@ -2994,6 +2994,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     return ns.GetBossSimpleBuffMode(p) == "none" and not p.showBuffs
                 end
                 bossFilterRightSlot = { type="dropdown", text="Boss Buff Filter",
+                  tooltip="Choose which buffs are shown on Boss Frames independently of the Boss Debuff Filter.",
                   disabled=buffFilterOff, disabledTooltip="Buffs", requireState="displayed",
                   values={ __placeholder="..." }, order={ "__placeholder" },
                   getValue=function() return "__placeholder" end, setValue=function() end }
@@ -3559,9 +3560,12 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         end
 
         local function BuildBossCastOutcomeRow(label, enabledKey, durationKey, colorPrefix, fallback, showSourceCog)
+            local description = (enabledKey == "cancelledCastEnabled")
+                and "Briefly keeps the cast bar visible when the unit cancels its spell before completion. This does not mean another unit interrupted it."
+                or "Briefly shows an interrupted cast after another unit stops the spell, with an optional interrupter name."
             local row
             row, hh = Ww:DualRow(pp, yy,
-                { type="toggle", text=label,
+                { type="toggle", text=label, tooltip=description,
                   getValue=function() return B[enabledKey] == true end,
                   setValue=function(v) B[enabledKey]=v and true or false; ReloadAndUpdate(); EllesmereUI:RefreshPage() end },
                 { type="slider", text="Duration", min=0.1, max=3, step=0.1,

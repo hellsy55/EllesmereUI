@@ -1726,7 +1726,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
         -- Inline cog for Nameplate Offset (left)
         if not EllesmereUI._prebuilding then
             local rgn = npRow._leftRegion
-            EllesmereUI.BuildInlineCog(rgn, {
+            EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 anchorTo = rgn._control,
                 title = "Nameplate Offset",
                 rows = {
@@ -3715,6 +3715,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                 accessors = {
                     {
                         type = "dropdown", text = "Rotation Assist Color Mode",
+                          tooltip="Choose whether Rotation Assist highlights use the default color, a custom color, or your class color.",
                         values = { default = "Default", custom = "Custom", class = "Class Color" },
                         order = { "default", "custom", "class" },
                         getValue = function()

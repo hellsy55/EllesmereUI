@@ -1580,7 +1580,7 @@ function ns.UFO_BuildPortraitSection(parent, y, ctx)
     -- Cog on Position for X/Y offsets
     if not EllesmereUI._prebuilding then
         local posRgn = sharedSizePosRow._rightRegion
-        EllesmereUI.BuildInlineCog(posRgn, {
+        EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() return SVal("portraitStyle", "attached") ~= "detached" end,
             disabledTooltip = "This option requires Portrait Mode to be set to Detached.",
             title = "Portrait Position Offsets",
@@ -2076,7 +2076,7 @@ function ns.UFO_BuildTextBarSection(parent, y, ctx)
     -- Cog on Position for X/Y offsets
     if not EllesmereUI._prebuilding then
         local posRgn = sharedBtbToggleRow._rightRegion
-        EllesmereUI.BuildInlineCog(posRgn, {
+        EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() local pos = SVal("btbPosition", "bottom"); return not SVal("bottomTextBar", false) or (pos ~= "detached_top" and pos ~= "detached_bottom") end,
             disabledTooltip = function() return not SVal("bottomTextBar", false) and "Text Bar" or "This option requires a detached position to be active." end,
             title = "Detached Position Offsets",

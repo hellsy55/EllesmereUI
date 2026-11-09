@@ -1850,6 +1850,7 @@ local function BuildBarAppearance(parent, y, ctx)
                   tooltip="Next and previous page, from the keybinds or the paging arrows, skip the pages your other enabled bars use." }
             end
             slots[#slots + 1] = { type="toggle", text="Modifier/Target Paging",
+              tooltip="Switch this bar to configured pages while holding Shift, Ctrl, or Alt, or when targeting friendly or hostile units.",
               getValue=ModTargetOn,
               setValue=EllesmereUI.SectionToggleSetValue(function(v)
                   SSet("modTargetPaging", v and true or false, function(k)
@@ -2123,7 +2124,7 @@ local function BuildBarAppearance(parent, y, ctx)
     do
         local rgn = keybindRow._rightRegion
         local ctrl = rgn._control
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Keybind Text Offsets",
             rows = {
                 { type="dropdown", label="Position",
@@ -2295,7 +2296,7 @@ local function BuildBarAppearance(parent, y, ctx)
     do
         local rgn = macroRow._rightRegion
         local ctrl = rgn._control
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Macro Text Offsets",
             rows = {
                 { type="dropdown", label="Position",
@@ -2424,7 +2425,7 @@ local function BuildBarAppearance(parent, y, ctx)
     do
         local rgn = chargesRow._leftRegion
         local ctrl = rgn._control
-        EllesmereUI.BuildInlineCog(rgn, {
+        EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Charges Text Offsets",
             rows = {
                 { type="dropdown", label="Position",

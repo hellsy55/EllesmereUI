@@ -1769,7 +1769,7 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
     -- Directions cog on Buff Icon Size (X/Y offsets, spacing)
     if not EllesmereUI._prebuilding then
         local rightRgn = sharedAddRow2._rightRegion
-        EllesmereUI.BuildInlineCog(rightRgn, { disabled = BuffDisabled, disabledTooltip = "Buff Display",
+        EllesmereUI.BuildInlineCog(rightRgn, { icon = EllesmereUI.DIRECTIONS_ICON, disabled = BuffDisabled, disabledTooltip = "Buff Display",
             title = "Buff Position",
             rows = ns.UFO_AuraPositionRows("buff", SValSupported, SSetSupported),
         })
@@ -1828,7 +1828,7 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
     -- Directions cog on Buff Stack Size (X/Y offsets)
     if not EllesmereUI._prebuilding then
         local rightRgn = sharedBuffRow2._rightRegion
-        EllesmereUI.BuildInlineCog(rightRgn, { disabled = BuffDisabled, disabledTooltip = "Buff Display",
+        EllesmereUI.BuildInlineCog(rightRgn, { icon = EllesmereUI.DIRECTIONS_ICON, disabled = BuffDisabled, disabledTooltip = "Buff Display",
             title = "Stack Position",
             rows = {
                 { type="dropdown", label="Position",
@@ -1923,7 +1923,7 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
     -- Directions cog on Debuff Icon Size (X/Y offsets, spacing)
     if not EllesmereUI._prebuilding then
         local rightRgn = sharedAddRow3._rightRegion
-        EllesmereUI.BuildInlineCog(rightRgn, { disabled = DebuffDisabled, disabledTooltip = "Debuff Display",
+        EllesmereUI.BuildInlineCog(rightRgn, { icon = EllesmereUI.DIRECTIONS_ICON, disabled = DebuffDisabled, disabledTooltip = "Debuff Display",
             title = "Debuff Position",
             rows = ns.UFO_AuraPositionRows("debuff", SValSupported, SSetSupported),
         })
@@ -1982,7 +1982,7 @@ function ns.UFO_BuildBuffsDebuffsSection(parent, y, ctx)
     -- Directions cog on Debuff Stack Size (X/Y offsets)
     if not EllesmereUI._prebuilding then
         local rightRgn = sharedDebuffRow2._rightRegion
-        EllesmereUI.BuildInlineCog(rightRgn, { disabled = DebuffDisabled, disabledTooltip = "Debuff Display",
+        EllesmereUI.BuildInlineCog(rightRgn, { icon = EllesmereUI.DIRECTIONS_ICON, disabled = DebuffDisabled, disabledTooltip = "Debuff Display",
             title = "Stack Position",
             rows = {
                 { type="dropdown", label="Position",

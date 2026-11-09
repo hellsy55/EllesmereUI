@@ -313,7 +313,7 @@ function ns.RF_BuildPartyPortrait(parent, y, W, PSSet)
           get=function() return PV("partyPortraitCharScale", 100) end,
           set=function(v) PtSet("partyPortraitCharScale", v) end },
     } })
-    EllesmereUI.BuildInlineCog(sizePosRow._rightRegion, { title = "Portrait Position Offsets", rows = {
+    EllesmereUI.BuildInlineCog(sizePosRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON, title = "Portrait Position Offsets", rows = {
         { type="slider", label="X Offset", min=-100, max=100, step=1,
           get=function() return PV("partyPortraitX", 0) end,
           set=function(v) PtSet("partyPortraitX", v) end },
@@ -607,7 +607,7 @@ function ns.RF_BuildPartyTargets(parent, y, W)
               LaySet("partyTargetPosition", (v ~= ns.PT_ShownSide(true)) and v or nil)
           end },
         BLANK());  y = y - h
-    EllesmereUI.BuildInlineCog(row._leftRegion, { title = "Target Position Offsets", rows = {
+    EllesmereUI.BuildInlineCog(row._leftRegion, { icon = EllesmereUI.DIRECTIONS_ICON, title = "Target Position Offsets", rows = {
         { type="slider", label="X Offset", min=-100, max=100, step=1,
           get=function() return PV("partyTargetOffsetX", 0) end,
           set=function(v) LaySet("partyTargetOffsetX", v) end },

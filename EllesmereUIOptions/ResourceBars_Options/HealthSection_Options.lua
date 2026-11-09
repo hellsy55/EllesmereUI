@@ -349,7 +349,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.healthHeight, ctx.syncRows.classHeight, ctx.syncRows.powerHeight } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "health", "height", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "health", "height", SmoothRefresh),
             })
         end
         if not EllesmereUI._prebuilding then
@@ -372,7 +372,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.healthWidth, ctx.syncRows.classWidth, ctx.syncRows.powerWidth } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "health", "width", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "health", "width", SmoothRefresh),
             })
         end
     end
@@ -398,7 +398,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                   if c.borderSizePx then c.borderSizePx = false end
                   RebuildHealth(); EllesmereUI:RefreshPage(true)
               end }),
-            ns.ERB_ClassicBorderRow() and ns.ERB_ClassicBorderSizeCfg(cfg, healthOff, "Health Bar", RebuildHealth, "ERB_Health") or
+            (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) and ns.ERB_ClassicBorderSizeCfg(cfg, healthOff, "Health Bar", RebuildHealth, "ERB_Health") or
             EllesmereUI.BlizzStyle.Gate("resourcebars", EllesmereUI.BorderPxSliderCfg({ text = "Border Size",
               disabled = healthOff,
               disabledTooltip = "Health Bar",
@@ -434,7 +434,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                     EllesmereUI.BlizzStyle.Gate("resourcebars", ocfgR));  y = y - h
             end
         end
-        if not EllesmereUI._prebuilding and not ns.ERB_ClassicBorderRow() then
+        if not EllesmereUI._prebuilding and not (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             local rgn = hpBsRow._rightRegion
             local ctrl = rgn._control
             -- Corner Radius (EllesmereUI_RoundedCorners.lua): an inline cog on the
@@ -529,13 +529,13 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
             local function UpdateCogVis()
                 local c = cfg()
                 local tex = c and c.borderTexture or "solid"
-                if tex == "solid" or ns.ERB_ClassicBorderRow() then cogBtn:Hide() else cogBtn:Show() end
+                if tex == "solid" or (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then cogBtn:Hide() else cogBtn:Show() end
             end
             EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
             UpdateCogVis()
         end
         -- Cross-bar "apply to all" sync icons: Simple only
-        if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and ns.ERB_ClassicBorderRow() then
+        if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             ctx.syncRows.healthBorder = hpBsRow._rightRegion
             ns.ERB_ClassicBorderSync(hpBsRow._rightRegion, DB, "health", SmoothRefresh,
                 function() return { ctx.syncRows.healthBorder, ctx.syncRows.classBorder, ctx.syncRows.powerBorder } end)
@@ -570,7 +570,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 flashTargets = function() return { hpBsRow._leftRegion } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "health", "borderStyle", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "health", "borderStyle", SmoothRefresh),
             })
             EllesmereUI.BuildSyncIcon({
                 region  = hpBsRow._rightRegion,
@@ -600,7 +600,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
                 flashTargets = function() return { ctx.syncRows.healthBorder, ctx.syncRows.classBorder, ctx.syncRows.powerBorder } end,
            
                 alwaysAvailable = true,
-                multiApply = ns.ERB_MultiSync(DB, "health", "border", SmoothRefresh),
+                multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "health", "border", SmoothRefresh),
             })
         end
     end
@@ -749,7 +749,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
             flashTargets = function() return { ctx.syncRows.healthOpacity, ctx.syncRows.classOpacity, ctx.syncRows.powerOpacity } end,
        
             alwaysAvailable = true,
-            multiApply = ns.ERB_MultiSync(DB, "health", "opacity", SmoothRefresh),
+            multiApply = ns.ERB_MultiSync and ns.ERB_MultiSync(DB, "health", "opacity", SmoothRefresh),
         })
     end
 
@@ -765,8 +765,8 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
           getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
           setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshHealth() end }
     ); y = y - fadeSyncH
-    ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "health", "oocFade", "Fade Out of Combat", SmoothRefresh)
-    ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "health", "oocAlpha", "Fade Opacity", SmoothRefresh)
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "health", "oocFade", "Fade Out of Combat", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "health", "oocAlpha", "Fade Opacity", SmoothRefresh) end
 
     if not EllesmereUI._prebuilding then
         local rgn = healthBorderRow._leftRegion
@@ -909,8 +909,8 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
           end },
         { type = "label", text = "Threshold & Hash Lines" }
     );  y = y - h
-    ns.ERB_ScalarSync(healthColorRow._leftRegion, env.DB, "health", "textSize",
-        "Text Size", SmoothRefresh, { "health", "primary" })
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(healthColorRow._leftRegion, env.DB, "health", "textSize",
+        "Text Size", SmoothRefresh, { "health", "primary" }) end
     -- Threshold & Hash Lines editor: edits the health bar config (multi-spec, with the spec dropdown).
 
     if not EllesmereUI._prebuilding then
