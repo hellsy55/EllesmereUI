@@ -1163,7 +1163,6 @@ local function BuildDisplayLayout(parent, y, ctx)
             local refreshList = EllesmereUI._widgetRefreshList
             local firstRefresh = #refreshList + 1
             local SolidTex = EllesmereUI.SolidTex
-            local MakeBorder = EllesmereUI.MakeBorder
             local MakeFont = EllesmereUI.MakeFont
             local BuildSliderCore = EllesmereUI.BuildSliderCore
             local BORDER_COLOR = EllesmereUI.BORDER_COLOR
@@ -1195,7 +1194,7 @@ local function BuildDisplayLayout(parent, y, ctx)
 
             local bg = SolidTex(pf, "BACKGROUND", 0.077, 0.068, 0.058, 0.95)
             bg:SetAllPoints()
-            MakeBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
+            EllesmereUI.MakeRoundedBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15, bg)
 
             local titleFS = MakeFont(pf, 11, "", 1, 1, 1)
             titleFS:SetAlpha(0.7)
@@ -1904,6 +1903,21 @@ local function BuildDisplayLayout(parent, y, ctx)
             { title = "Quest Indicator", hidden = Lacks("quest"),
               rows = { SizeRow("quest"), InstancesRow("quest") } },
             { title = "Quest Objective Text", hidden = Lacks("questtext"), rows = {
+                { type = "toggle", label = "Objective Type Icon",
+                  tooltip = "Shows a sword for kill objectives, a bag for item objectives, and the generic quest icon when the type cannot be matched exactly.",
+                  get = function() return DBVal("showQuestObjectiveTypeIcon") == true end,
+                  set = function(v)
+                      DB().showQuestObjectiveTypeIcon = v
+                      ns.RefreshQuestObjective()
+                      refresh()
+                  end },
+                { type = "slider", label = "Icon Scale", min = 50, max = 200, step = 5,
+                  hidden = function() return DBVal("showQuestObjectiveTypeIcon") ~= true end,
+                  get = function() return DBVal("questObjectiveTypeIconScale") or 100 end,
+                  set = function(v)
+                      DB().questObjectiveTypeIconScale = v
+                      refresh()
+                  end },
                 { type = "slider", label = "Text Size", min = 6, max = 24, step = 1,
                   tooltip = "Size of the quest progress text.",
                   get = function() return ns.NP_QuestTextSize(DB()) end,

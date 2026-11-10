@@ -470,6 +470,35 @@ local function AcquireOverlay()
     return overlay
 end
 
+local function ShowNPCRaidMarker()
+    local fp = FP()
+    return fp and fp.showNPCRaidMarker ~= false
+end
+
+-- SuppressNPCNameplate hides Blizzard's RaidTargetFrame with the UnitFrame,
+-- so the overlay draws its own marker above the name. Like the friendly
+-- plates' marker, it stays hidden while the Raid Marker element is off.
+local function UpdateOverlayRaidIcon(overlay)
+    local idx
+    if ns.GetRaidMarkerPos() ~= "none" then
+        idx = GetRaidTargetIndex(overlay.unit)
+    end
+    -- type() is taint-safe: "nil" / "number" without reading a secret index
+    if type(idx) == "nil" then
+        if overlay.raid then overlay.raid:Hide() end
+        return
+    end
+    if not overlay.raid then
+        overlay.raid = overlay:CreateTexture(nil, "OVERLAY")
+        overlay.raid:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
+        overlay.raid:SetPoint("BOTTOM", overlay.name, "TOP", 0, 2)
+    end
+    SetRaidTargetIconTexture(overlay.raid, idx)
+    local sz = ns.GetRaidMarkerSize()
+    overlay.raid:SetSize(sz, sz)
+    overlay.raid:Show()
+end
+
 local NPC_OVERLAY_FONT_SIZE = 13
 local NPC_OVERLAY_Y_OFFSET = 5  -- positive = lower on screen (closer to character)
 local NPC_OVERLAY_WIDTH = 126   -- word-wrap width
@@ -542,12 +571,18 @@ local function ShowNPCOverlay(nameplate, unit)
         overlay.title:Hide()
     end
     overlay.unit = unit
+    if ShowNPCRaidMarker() then
+        UpdateOverlayRaidIcon(overlay)
+        overlay:RegisterEvent("RAID_TARGET_UPDATE")
+    end
     -- Listen for name updates (server may not have sent the name yet)
     overlay:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
     overlay:SetScript("OnEvent", function(self, event, ...)
         if event == "UNIT_NAME_UPDATE" then
             local updatedName = FormatNPCName(UnitName(self.unit) or "")
             self.name:SetText(updatedName)
+        elseif event == "RAID_TARGET_UPDATE" then
+            UpdateOverlayRaidIcon(self)
         end
     end)
     npcOverlays[nameplate] = overlay
@@ -559,6 +594,7 @@ local function HideNPCOverlay(nameplate)
     overlay:UnregisterAllEvents()
     overlay:Hide()
     overlay.title:Hide()
+    if overlay.raid then overlay.raid:Hide() end
     overlay:SetParent(UIParent)
     overlay:ClearAllPoints()
     overlay.unit = nil
@@ -1556,7 +1592,8 @@ function FriendlyFrame:UpdateRaidIcon()
     local pos = ns.GetRaidMarkerPos()
     if pos == "none" then self.raidFrame:Hide(); return end
     local idx = GetRaidTargetIndex and GetRaidTargetIndex(self.unit)
-    if not idx then self.raidFrame:Hide(); return end
+    -- type() is taint-safe: "nil" / "number" without reading a secret index
+    if type(idx) == "nil" then self.raidFrame:Hide(); return end
     SetRaidTargetIconTexture(self.raid, idx)
     local sz = ns.GetRaidMarkerSize()
     local rmY = ns.GetRaidMarkerYOffset()
