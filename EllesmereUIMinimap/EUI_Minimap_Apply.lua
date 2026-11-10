@@ -77,6 +77,25 @@ local addonButtonPoll = nil
 local _mmKeyHidden
 I.mmKeyHiddenSetters[#I.mmKeyHiddenSetters + 1] = function(v) _mmKeyHidden = v end
 
+-- The zoom pair shares a corner/offset choice; the default stays at the
+-- traditional minimap bottom-right. SetPoint reassertion uses this helper too.
+-- Only our chosen layout points are changed, never the Blizzard click scripts.
+function EBS._ZoomAnchor(button, isIn, minimap)
+    if not button or not minimap then return end
+    local p = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    local c = p and p.zoomPosition
+    local corners = { TOPLEFT = true, TOPRIGHT = true, BOTTOMLEFT = true, BOTTOMRIGHT = true }
+    local anchor = GetFFD(minimap).layoutFrame or minimap
+    button:ClearAllPoints()
+    if c and corners[c] then
+        local y = (p.zoomOffsetY or 0) + (c:find("TOP", 1, true) and -24 or 24) * (isIn and 0 or 1)
+        button:SetPoint(c, anchor, c, p.zoomOffsetX or 0, y)
+    else
+        -- Default original-style stack: Zoom In above Zoom Out, aligned to the right.
+        button:SetPoint("BOTTOMRIGHT", minimap, "BOTTOMRIGHT", 0, isIn and 37 or 11)
+    end
+end
+
 local function ApplyMinimap()
     if TEMP_DISABLED.minimap then return end
     if InCombatLockdown() then QueueApplyAll(); return end
@@ -552,6 +571,8 @@ local function ApplyMinimap()
     local zoomIn = minimap.ZoomIn or _G.MinimapZoomIn
     local zoomOut = minimap.ZoomOut or _G.MinimapZoomOut
     local hideZoom = p.hideZoomButtons
+    local zoomMode = p.blizzardElementMouseover and p.blizzardElementMouseover.zoom
+    local zoomHover = zoomMode == nil or zoomMode == true
     if hideZoom and (zoomIn or zoomOut) and not EBS._hiddenFrame then
         EBS._hiddenFrame = CreateFrame("Frame")
         EBS._hiddenFrame:Hide()
@@ -564,7 +585,7 @@ local function ApplyMinimap()
         zoomIn:EnableMouse(true)
         zoomIn:SetAlpha(1)
         -- Start in Blizzard's between-hovers state (hidden; hover handlers Show/Hide on map enter/leave) so it is not visible from /reload until hovered.
-        zoomIn:SetShown(minimap:IsMouseOver())
+        zoomIn:SetShown(not hideZoom and (not zoomHover or minimap:IsMouseOver()))
         if not GetFFD(zoomIn).hooked then
             hooksecurefunc(zoomIn, "SetPoint", function(self)
                 if GetFFD(self).inHook then return end
@@ -583,7 +604,7 @@ local function ApplyMinimap()
         zoomOut:EnableMouse(true)
         zoomOut:SetAlpha(1)
         -- Same between-hovers start as ZoomIn above
-        zoomOut:SetShown(minimap:IsMouseOver())
+        zoomOut:SetShown(not hideZoom and (not zoomHover or minimap:IsMouseOver()))
         if not GetFFD(zoomOut).hooked then
             hooksecurefunc(zoomOut, "SetPoint", function(self)
                 if GetFFD(self).inHook then return end
@@ -1240,6 +1261,7 @@ local function ApplyMinimap()
     EBS._ApplyExternalEventButton()
     -- Elements linked to the minimap follow a change of its insets.
     EBS._NotifyMinimapExtent()
+    if ns.RefreshBlizzardElementPreviews then ns.RefreshBlizzardElementPreviews() end
 end
 
 -- Blizzard's external event button (a link to an event outside the game,

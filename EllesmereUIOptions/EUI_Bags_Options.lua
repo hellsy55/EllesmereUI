@@ -312,13 +312,72 @@ initFrame:SetScript("OnEvent", function(self)
             ---------------------------------------------------------------------------
             --  LAYOUT
             ---------------------------------------------------------------------------
-            _, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
+            local layoutHdr
+            layoutHdr, h = W:SectionHeader(parent, "LAYOUT", y); y = y - h
+            local BagAnchor = BagsNS.BagAnchor
+            local function AnchorOff() return not BagAnchor.On() end
+            EllesmereUI.BuildSectionUnlockJump(layoutHdr, { key = BagAnchor.KEY, disabled = AnchorOff, disabledTooltip = "Anchor Bag Window" })
+            local function JoinLabels(list)
+                if #list == 0 then return "" end
+                if #list == 1 then return list[1] end
+                if #list == 2 then return list[1] .. " and " .. list[2] end
+                return table.concat(list, ", ", 1, #list - 1) .. ", and " .. list[#list]
+            end
+            local function EnableBagAnchor()
+                local conflicts = {}
+                if db.profile.bagAutoSize == true and not bagList then
+                    conflicts[#conflicts + 1] = "Auto-Size to Fit"
+                end
+                if db.profile.bagAutoExpandHeight == true then
+                    conflicts[#conflicts + 1] = "Auto-Expand Height"
+                end
+                local function Apply()
+                    db.profile.bagAutoSize = false
+                    db.profile.bagAutoExpandHeight = false
+                    BagAnchor.SetOn(true)
+                    ResetAndRefreshBagLayout()
+                    EllesmereUI:RefreshPage()
+                end
+                if #conflicts == 0 then
+                    Apply()
+                    return
+                end
+                EllesmereUI:ShowConfirmPopup({
+                    title = "Anchor Bag Window",
+                    message = EllesmereUI.Lf("Anchor Bag Window manages its own height and turns off these separate options: %s. Continue?", JoinLabels(conflicts)),
+                    confirmText = "Enable",
+                    cancelText = "Cancel",
+                    onConfirm = Apply,
+                })
+            end
 
             -- Bag Style | Default Selected Bag | Window Scale | Frame Strata |
             -- Slot Size | Slot Spacing | Auto-Size to Fit (not in List) |
             -- Background Texture | Background Color | Background Opacity |
             -- Slot Background, two per row
             local layoutSlots = {
+                { type="toggle", text="Anchor Bag Window",
+                  tooltip="Pins the bag window to a corner of the screen and automatically expands its height to fit content. Move its anchor in Unlock Mode. Size Unlocked still permits resizing with the available corner grips.",
+                  getValue=function() return BagAnchor.On() end,
+                  setValue=function(v)
+                      if v then EnableBagAnchor()
+                      else
+                          BagAnchor.SetOn(false)
+                          EllesmereUI:RefreshPage()
+                      end
+                  end },
+                { type="slider", text="Window Scale", min=50, max=150, step=5,
+                  getValue=function() return math.floor((db.profile.bagScale or 1) * 100 + 0.5) end,
+                  setValue=function(v)
+                      db.profile.bagScale = v / 100
+                      local s = v / 100
+                      if _G.EUI_Bags then _G.EUI_Bags:SetScale(s) end
+                      if _G.EUI_BagsReagent then _G.EUI_BagsReagent:SetScale(s) end
+                      if _G.EUI_BagsWindow then _G.EUI_BagsWindow:SetScale(s) end
+                      local bank = _G.EUI_BankFrame
+                      if bank and bank:IsVisible() then bank:SetScale(s) end
+                      if BagAnchor.On() then RelayoutSoon() end
+                  end },
                 { type="dropdown", text="Bag Style",
                   values = { grid="Grid", list="List", compact="Compact" },
                   order  = { "grid", "list", "compact" },
@@ -350,17 +409,6 @@ initFrame:SetScript("OnEvent", function(self)
                           _G.EUI_Bags:RefreshInventory()
                       end
                       EllesmereUI:RefreshPage()
-                  end },
-                { type="slider", text="Window Scale", min=50, max=150, step=5,
-                  getValue=function() return math.floor((db.profile.bagScale or 1) * 100 + 0.5) end,
-                  setValue=function(v)
-                      db.profile.bagScale = v / 100
-                      local s = v / 100
-                      if _G.EUI_Bags then _G.EUI_Bags:SetScale(s) end
-                      if _G.EUI_BagsReagent then _G.EUI_BagsReagent:SetScale(s) end
-                      if _G.EUI_BagsWindow then _G.EUI_BagsWindow:SetScale(s) end
-                      local bank = _G.EUI_BankFrame
-                      if bank and bank:IsVisible() then bank:SetScale(s) end
                   end },
                 -- Unset reads the retired Allow Windows Over Bags (BagFrameStrata)
                 { type="dropdown", text="Frame Strata",
@@ -398,16 +446,22 @@ initFrame:SetScript("OnEvent", function(self)
                   tooltip=(EllesmereUI.IS_FOREVER or db.profile.bagDisplayMode == "compact")
                       and "Grow the bag window (more columns + taller, keeping its shape) so all of the active tab's slots are visible without scrolling. It only grows while open -- switching to a bigger tab enlarges it, smaller tabs keep the size -- and resets when you close the bags."
                       or "Grow the bag window (more columns + taller, keeping its shape) so all of the active tab's slots are visible without scrolling. It only grows while open -- switching to a bigger tab enlarges it, smaller tabs keep the size -- and resets when you close the bags. Never smaller than your normal size.",
+                  disabled=function() return BagAnchor.On() end,
+                  disabledTooltip="Anchor Bag Window controls the bag size; disable it to use Auto-Size to Fit.",
                   getValue=function() return db.profile.bagAutoSize == true end,
                   setValue=function(v)
+                      if BagAnchor.On() then return end
                       db.profile.bagAutoSize = v
                       ResetAndRefreshBagLayout()
                   end }
             end
             layoutSlots[#layoutSlots + 1] = { type="toggle", text="Auto-Expand Height",
                 tooltip="Automatically grow the bag window upwards from its fixed bottom-right corner to fit visible content. Works with Grid, Compact and List. Screen limits retain scrolling if needed; Auto-Size to Fit can also grow the window leftwards.",
-                getValue=function() return db.profile.bagAutoExpandHeight == true end,
+                disabled=function() return BagAnchor.On() end,
+                disabledTooltip="Anchor Bag Window already expands height automatically; disable it to adjust Auto-Expand Height separately.",
+                getValue=function() return BagAnchor.On() or db.profile.bagAutoExpandHeight == true end,
                 setValue=function(v)
+                    if BagAnchor.On() then return end
                     db.profile.bagAutoExpandHeight = v
                     ResetAndRefreshBagLayout()
                 end }
@@ -470,8 +524,26 @@ initFrame:SetScript("OnEvent", function(self)
                     -- the picker fires every frame while dragging: retint, don't re-lay out
                     BagsNS.RetintSlotBackgrounds()
                 end }
+            local anchorRow
             for i = 1, #layoutSlots, 2 do
-                _, h = W:DualRow(parent, y, layoutSlots[i], layoutSlots[i + 1] or EllesmereUI.BlankRowCfg()); y = y - h
+                local row
+                row, h = W:DualRow(parent, y, layoutSlots[i], layoutSlots[i + 1] or EllesmereUI.BlankRowCfg()); y = y - h
+                anchorRow = anchorRow or row
+            end
+            if not EllesmereUI._prebuilding then
+                EllesmereUI.BuildInlineCog(anchorRow._leftRegion, {
+                    title = "Anchor Bag Window",
+                    disabled = AnchorOff,
+                    disabledTooltip = "Anchor Bag Window",
+                    rows = {
+                        { type="dropdown", label="Anchor Corner",
+                          tooltip="The corner of the bag window held in place. The window grows away from it.",
+                          values={ BOTTOMRIGHT="Bottom Right", BOTTOMLEFT="Bottom Left", TOPRIGHT="Top Right", TOPLEFT="Top Left" },
+                          order={ "BOTTOMRIGHT", "BOTTOMLEFT", "TOPRIGHT", "TOPLEFT" },
+                          get=function() return BagAnchor.Corner() end,
+                          set=function(v) BagAnchor.SetCorner(v) end },
+                    },
+                })
             end
 
             ---------------------------------------------------------------------------

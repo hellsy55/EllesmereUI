@@ -481,7 +481,8 @@ local function SyncIndicatorVisibility()
     end
     if _customIndicators.crafting then
         local blizCraft = indicator and indicator.CraftingOrderFrame
-        local hasCraft = blizCraft and blizCraft:IsShown()
+        local mp = EBS.db and EBS.db.profile.minimap
+        local hasCraft = blizCraft and blizCraft:IsShown() and not (mp and mp.hideCraftingOrder)
         _customIndicators.crafting:SetShown(hasCraft or false)
     end
 end
@@ -493,7 +494,16 @@ end
 --  crossing tiny inter-frame gaps doesn't flicker.
 -------------------------------------------------------------------------------
 local _moActive  = false   -- mouseover mode currently engaged
-local _moButtons = {}      -- extra buttons under control this layout
+local _moButtons = {}      -- buttons under control this layout
+local previewOn = {}       -- temporarily visible positioning previews
+local RefreshPreview
+local function BlizzMouseover(p, key)
+    local state = p and p.blizzardElementMouseover
+    local value = state and state[key]
+    -- Zoom was already mouseover-only before this option existed.
+    if value == nil then return key == "zoom" end
+    return value == true
+end
 local _moHooked  = {}      -- frames whose OnEnter/OnLeave we've already hooked
 local _moHideTimer = nil
 
@@ -518,6 +528,7 @@ end
 local function MO_Apply(show)
     local a = show and 1 or 0
     for i = 1, #_moButtons do _moButtons[i]:SetAlpha(a) end
+    if RefreshPreview and next(previewOn) then RefreshPreview() end
 end
 
 local function MO_CancelHide()
@@ -555,6 +566,9 @@ end
 -- Rebuild the managed-button list from profile + hide state, hook minimap/buttons
 -- (once), set initial alpha. Called at the end of every layout so it stays current.
 local function MO_Refresh(p)
+    -- Restore previously managed icons before rebuilding, including controls
+    -- whose mouseover preference was just switched off.
+    for i = 1, #_moButtons do _moButtons[i]:SetAlpha(1) end
     wipe(_moButtons)
     local heb = (p and p.hideExtraBtns) or {}
     if p and p.mouseoverExtraBtns then
@@ -568,6 +582,22 @@ local function MO_Refresh(p)
                 _moButtons[#_moButtons + 1] = btn
             end
         end
+    end
+    -- Blizzard indicator icons are managed individually and independently of
+    -- the existing Mouseover Extra Buttons master toggle.  Suppressed events
+    -- (no mail/order or not in an instance) never become visible here.
+    local ci = _customIndicators
+    local hidden = { tracking = "hideTrackingButton", calendar = "hideGameTime",
+        mail = "hideMail", crafting = "hideCraftingOrder" }
+    for _, key in ipairs({ "tracking", "calendar", "mail", "crafting" }) do
+        if p and not p[hidden[key]] and BlizzMouseover(p, key) and ci[key] then
+            _moButtons[#_moButtons + 1] = ci[key]
+        end
+    end
+    local diff = (MinimapCluster and MinimapCluster.InstanceDifficulty) or _G.MiniMapInstanceDifficulty
+    if p and not p.hideRaidDifficulty and not p.diffTextEnabled
+        and BlizzMouseover(p, "difficulty") and diff then
+        _moButtons[#_moButtons + 1] = diff
     end
     _moActive = (#_moButtons > 0)
     if _moActive then
@@ -795,6 +825,9 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local showBg = p.btnBackgrounds ~= false
     -- Mail Position: "button" = element row; a corner pins it there (as Omnium Folio).
     local mailCorner = MAIL_CORNER_POINTS[p.mailPosition] and p.mailPosition or nil
+    local trackingCorner = MAIL_CORNER_POINTS[p.trackingPosition] and p.trackingPosition or nil
+    local calendarCorner = MAIL_CORNER_POINTS[p.calendarPosition] and p.calendarPosition or nil
+    local craftingCorner = MAIL_CORNER_POINTS[p.craftingPosition] and p.craftingPosition or nil
     -- Resize buttons and update icon aspect ratios
     local inset = 3
     local avail = sz - inset * 2
@@ -833,9 +866,10 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     ResizeIndicator(ci.mail)
     ResizeIndicator(ci.crafting)
     -- Corner-pinned mail renders bare: no black box, just the mail icon
-    if mailCorner and ci.mail and ci.mail._bg then
-        ci.mail._bg:SetShown(false)
-    end
+    if mailCorner and ci.mail and ci.mail._bg then ci.mail._bg:SetShown(false) end
+    if trackingCorner and ci.tracking and ci.tracking._bg then ci.tracking._bg:SetShown(false) end
+    if calendarCorner and ci.calendar and ci.calendar._bg then ci.calendar._bg:SetShown(false) end
+    if craftingCorner and ci.crafting and ci.crafting._bg then ci.crafting._bg:SetShown(false) end
     if flyoutToggle then
         flyoutToggle:SetSize(sz, sz)
         if flyoutToggle._bg then flyoutToggle._bg:SetShown(showBg) end
@@ -884,7 +918,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
         local cs = (p.mapSize or 140) / 140
         local fvBar = blizzHdr._fvBar
         local hs = (p.mapSize or 140) / 198
-        if ci.tracking and not p.hideTrackingButton then
+        if ci.tracking and not p.hideTrackingButton and not trackingCorner then
             if classic then
                 EBS._ClassicRingButton(ci.tracking, nil, ci.tracking._icon)
             elseif fvBar then
@@ -904,10 +938,10 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.tracking:SetPoint("RIGHT", blizzHdr, "LEFT", -2, 0)
             end
             ci.tracking:Show()
-        elseif ci.tracking then
+        elseif ci.tracking and p.hideTrackingButton then
             ci.tracking:Hide()
         end
-        if ci.calendar and not p.hideGameTime then
+        if ci.calendar and not p.hideGameTime and not calendarCorner then
             -- Stock: the clock hangs from the bar's top-right corner.
             ci.calendar:ClearAllPoints()
             if fvBar then
@@ -917,7 +951,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.calendar:SetPoint("TOPLEFT", blizzHdr, "TOPRIGHT", 1, 0)
             end
         end
-        local under = (ci.tracking and ci.tracking:IsShown() and not fvBar) and ci.tracking or nil
+        local under = (ci.tracking and ci.tracking:IsShown() and not fvBar and not trackingCorner) and ci.tracking or nil
         if ci.mail and ci.mail:IsShown() then
             if fvBar then EBS._FvHeaderIndicator(ci.mail, "mail", hs) end
             if classic then
@@ -952,7 +986,7 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 under = ci.mail
             end
         end
-        if ci.crafting and ci.crafting:IsShown() then
+        if ci.crafting and ci.crafting:IsShown() and not craftingCorner then
             if classic then EBS._ClassicRingButton(ci.crafting, nil, ci.crafting._icon) end
             ci.crafting:ClearAllPoints()
             if under then
@@ -961,7 +995,27 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
                 ci.crafting:SetPoint("RIGHT", blizzHdr, "LEFT", -2, 0)
             end
         end
-        if diffFrame then
+        -- Keep a dormant default anchor for hidden mail/order indicators. Their
+        -- preview can then display the real row position without creating an
+        -- artificial notification or reserving room in the live row.
+        if ci.mail and not ci.mail:IsShown() and not mailCorner then
+            ci.mail:ClearAllPoints()
+            if classic then
+                ci.mail:SetPoint("TOPLEFT", minimap, "TOPRIGHT", -9 * cs, -43 * cs)
+            elseif fvBar then
+                ci.mail:SetPoint("TOPLEFT", blizzHdr, "BOTTOMLEFT", 0, 0)
+            elseif under then
+                ci.mail:SetPoint("TOP", under, "BOTTOM", 0, 0)
+            else
+                ci.mail:SetPoint("RIGHT", blizzHdr, "LEFT", -2, 0)
+            end
+        end
+        if ci.crafting and not ci.crafting:IsShown() and not craftingCorner then
+            ci.crafting:ClearAllPoints()
+            if under then ci.crafting:SetPoint("TOP", under, "BOTTOM", 0, 0)
+            else ci.crafting:SetPoint("RIGHT", blizzHdr, "LEFT", -2, 0) end
+        end
+        if diffFrame and not MAIL_CORNER_POINTS[p.difficultyPosition] then
             diffFrame:ClearAllPoints()
             diffFrame:SetPoint("TOPRIGHT", blizzHdr, "BOTTOMRIGHT", 0, 1)
         end
@@ -981,14 +1035,14 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             leftAnchor = btn
         end
 
-        if ci.tracking and not p.hideTrackingButton then
+        if ci.tracking and not p.hideTrackingButton and not trackingCorner then
             PlaceLeft(ci.tracking)
             ci.tracking:Show()
-        elseif ci.tracking then
+        elseif ci.tracking and p.hideTrackingButton then
             ci.tracking:Hide()
         end
 
-        if ci.calendar and not p.hideGameTime then
+        if ci.calendar and not p.hideGameTime and not calendarCorner then
             ci.calendar:ClearAllPoints()
             if clockBg and clockBg:IsShown() then
                 ci.calendar:SetPoint("LEFT", clockBg, "RIGHT", 0, 0)
@@ -1006,8 +1060,18 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             end
         end
 
-        if ci.crafting and ci.crafting:IsShown() then
+        if ci.crafting and ci.crafting:IsShown() and not craftingCorner then
             PlaceLeft(ci.crafting)
+        end
+        if ci.mail and not ci.mail:IsShown() and not mailCorner then
+            local saved = leftAnchor
+            PlaceLeft(ci.mail)
+            leftAnchor = saved
+        end
+        if ci.crafting and not ci.crafting:IsShown() and not craftingCorner then
+            local saved = leftAnchor
+            PlaceLeft(ci.crafting)
+            leftAnchor = saved
         end
 
     else
@@ -1044,14 +1108,14 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             elY = elY + adv * rowMode.dirY
         end
 
-        if ci.tracking and not p.hideTrackingButton then
+        if ci.tracking and not p.hideTrackingButton and not trackingCorner then
             PlaceElement(ci.tracking)
             ci.tracking:Show()
-        elseif ci.tracking then
+        elseif ci.tracking and p.hideTrackingButton then
             ci.tracking:Hide()
         end
 
-        if ci.calendar and not p.hideGameTime then
+        if ci.calendar and not p.hideGameTime and not calendarCorner then
             PlaceElement(ci.calendar)
         end
 
@@ -1066,9 +1130,47 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
             end
         end
 
-        if ci.crafting and ci.crafting:IsShown() then
+        if ci.crafting and ci.crafting:IsShown() and not craftingCorner then
             PlaceElement(ci.crafting)
         end
+        if ci.mail and not ci.mail:IsShown() and not mailCorner then
+            local x, y = elX, elY
+            PlaceElement(ci.mail)
+            elX, elY = x, y
+        end
+        if ci.crafting and not ci.crafting:IsShown() and not craftingCorner then
+            local x, y = elX, elY
+            PlaceElement(ci.crafting)
+            elX, elY = x, y
+        end
+    end
+
+    -- Individually corner-pinned Blizzard indicators stay out of the element row.
+    -- Do not reveal the mail/crafting icons when the game has no pending mail/order.
+    local function PlaceCornerIndicator(btn, corner, x, y)
+        if not btn or not corner then return end
+        -- A corner pin uses the bare indicator artwork, like Mail Position.
+        if (EBS._MinimapClassic() or EBS._fvSquare) and EBS._ClassicRingUndress then
+            EBS._ClassicRingUndress(btn, btn._icon)
+        end
+        if btn._bg then btn._bg:Hide() end
+        btn:ClearAllPoints()
+        btn:SetPoint(corner, mapAnchor, corner, x or 0, y or 0)
+    end
+    if trackingCorner and ci.tracking and not p.hideTrackingButton then
+        ci.tracking:Show()
+        PlaceCornerIndicator(ci.tracking, trackingCorner, p.trackingOffsetX, p.trackingOffsetY)
+    end
+    if calendarCorner and ci.calendar and not p.hideGameTime then
+        PlaceCornerIndicator(ci.calendar, calendarCorner, p.calendarOffsetX, p.calendarOffsetY)
+    end
+    if craftingCorner and ci.crafting then
+        PlaceCornerIndicator(ci.crafting, craftingCorner, p.craftingOffsetX, p.craftingOffsetY)
+    end
+    if diffFrame and MAIL_CORNER_POINTS[p.difficultyPosition] then
+        local corner = p.difficultyPosition
+        diffFrame:ClearAllPoints()
+        diffFrame:SetPoint(corner, mapAnchor, corner, p.difficultyOffsetX or 0, p.difficultyOffsetY or 0)
     end
 
     -- Ungrouped buttons along the button row; the flyout toggle is its first slot.
@@ -1304,10 +1406,10 @@ local function LayoutIndicatorFrames(minimap, p, circleMode)
     local heb = p.hideExtraBtns or {}
     local freeMove = p.freeMoveBtns
     local fmTargets = {}
-    if ci.tracking and not p.hideTrackingButton then fmTargets[#fmTargets + 1] = ci.tracking end
-    if ci.calendar and not p.hideGameTime then fmTargets[#fmTargets + 1] = ci.calendar end
-    if ci.mail then fmTargets[#fmTargets + 1] = ci.mail end
-    if ci.crafting then fmTargets[#fmTargets + 1] = ci.crafting end
+    if ci.tracking and not p.hideTrackingButton and not trackingCorner then fmTargets[#fmTargets + 1] = ci.tracking end
+    if ci.calendar and not p.hideGameTime and not calendarCorner then fmTargets[#fmTargets + 1] = ci.calendar end
+    if ci.mail and not mailCorner then fmTargets[#fmTargets + 1] = ci.mail end
+    if ci.crafting and not craftingCorner then fmTargets[#fmTargets + 1] = ci.crafting end
     if flyoutToggle then fmTargets[#fmTargets + 1] = flyoutToggle end
     if _greatVaultBtn and not heb.greatVault then fmTargets[#fmTargets + 1] = _greatVaultBtn end
     if _portalBtn and not heb.portals then fmTargets[#fmTargets + 1] = _portalBtn end
@@ -1467,9 +1569,10 @@ function EBS._HVHideNow()
         ffd.hvWatcher = nil
     end
     local zi, zo = minimap.ZoomIn, minimap.ZoomOut
-    if zi then zi:Hide() end
-    if zo then zo:Hide() end
     local m2 = EBS.db and EBS.db.profile.minimap
+    local keepZoom = m2 and not m2.hideZoomButtons and not BlizzMouseover(m2, "zoom")
+    if zi then if keepZoom then zi:Show(); zi:SetAlpha(1) else zi:Hide() end end
+    if zo then if keepZoom then zo:Show(); zo:SetAlpha(1) else zo:Hide() end end
     if m2 then
         if GetOmniumFolioMode(m2) == "hover" then
             local b = _G.ExpansionLandingPageMinimapButton
@@ -1626,6 +1729,124 @@ local function ApplyOmniumFolio()
     if not btn:IsShown() and btn.RefreshButton then
         btn:RefreshButton(true)
     end
+end
+
+-------------------------------------------------------------------------------
+-- Session-only visual previews of Blizzard minimap elements.
+-- Never trigger game events or fabricate mail/orders/difficulty state. Instead,
+-- a small non-clickable stand-in follows the real control's layout point while
+-- its real counterpart is absent. Created on demand and hidden on options exit.
+-------------------------------------------------------------------------------
+local previewArt = {}
+local previewNames = {
+    mail = "Mail", crafting = "Crafting Order", difficulty = "Difficulty",
+    zoom = "Zoom", tracking = "Tracking", calendar = "Calendar",
+}
+local previewAtlases = {
+    mail = "UI-HUD-Minimap-Mail-Up",
+    crafting = "UI-HUD-Minimap-CraftingOrder-Up-2x",
+    tracking = "UI-HUD-Minimap-Tracking-Up",
+}
+
+local function PreviewFrame(key, sub)
+    local id = sub and (key .. sub) or key
+    if previewArt[id] then return previewArt[id] end
+    if not Minimap then return end
+    -- UIParent prevents clipped/off-map previews from inheriting a hidden
+    -- indicator's visibility.  The real notification frame remains untouched.
+    local frame = CreateFrame("Frame", nil, UIParent)
+    frame:EnableMouse(false)
+    frame:SetSize(24, 24)
+    frame:SetFrameStrata("HIGH")
+    frame:SetFrameLevel(Minimap:GetFrameLevel() + 20)
+    local shade = frame:CreateTexture(nil, "BACKGROUND")
+    shade:SetAllPoints()
+    shade:SetColorTexture(0.09, 0.09, 0.09, 0.5)
+    local art = frame:CreateTexture(nil, "ARTWORK")
+    art:SetPoint("CENTER")
+    local atlas = previewAtlases[key]
+    if key == "calendar" then atlas = "UI-HUD-Calendar-" .. (tonumber(date("%d")) or 1) .. "-Up" end
+    if atlas then
+        art:SetSize(22, 22)
+        art:SetAtlas(atlas)
+    else
+        local label = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("CENTER")
+        label:SetText(sub or (key == "difficulty" and "D" or "+"))
+        label:SetTextColor(1, 1, 1, 1)
+    end
+    frame:Hide()
+    previewArt[id] = frame
+    return frame
+end
+
+local function SetPreviewAt(key, sub, target)
+    local ghost = PreviewFrame(key, sub)
+    if not ghost then return end
+    if not previewOn[key] or target and target:IsShown() and target:GetAlpha() > 0 then
+        ghost:Hide()
+        return
+    end
+    ghost:ClearAllPoints()
+    -- Mail and Crafting Order are normally hidden.  Position their previews
+    -- from the profile and map corner without depending on a hidden target.
+    local p = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    local cornerKey = { mail = "mailPosition", crafting = "craftingPosition" }
+    local xKey = { mail = "mailOffsetX", crafting = "craftingOffsetX" }
+    local yKey = { mail = "mailOffsetY", crafting = "craftingOffsetY" }
+    local corner = p and cornerKey[key] and p[cornerKey[key]]
+    if corner and MAIL_CORNER_POINTS[corner] and Minimap then
+        local anchor = GetFFD(Minimap).layoutFrame or Minimap
+        ghost:SetPoint(corner, anchor, corner, p[xKey[key]] or 0, p[yKey[key]] or 0)
+    elseif target and target:GetNumPoints() > 0 then
+        ghost:SetPoint("CENTER", target, "CENTER", 0, 0)
+    elseif Minimap then
+        ghost:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", -4, -20)
+    end
+    ghost:Show()
+end
+
+function ns.RefreshBlizzardElementPreviews()
+    if not next(previewOn) then return end
+    local ci = _customIndicators
+    for _, key in ipairs({ "mail", "crafting", "tracking", "calendar" }) do
+        if previewOn[key] then SetPreviewAt(key, nil, ci[key]) end
+    end
+    if previewOn.difficulty then
+        local flag = (MinimapCluster and MinimapCluster.InstanceDifficulty) or _G.MiniMapInstanceDifficulty
+        SetPreviewAt("difficulty", nil, flag)
+    end
+    if previewOn.zoom then
+        local map = Minimap
+        SetPreviewAt("zoom", "+", map and (map.ZoomIn or _G.MinimapZoomIn))
+        SetPreviewAt("zoom", "-", map and (map.ZoomOut or _G.MinimapZoomOut))
+    end
+end
+
+RefreshPreview = ns.RefreshBlizzardElementPreviews
+
+function ns.SetBlizzardElementPreview(key, on)
+    if not previewNames[key] then return end
+    local p = EBS.db and EBS.db.profile and EBS.db.profile.minimap
+    local hidden = {
+        mail = "hideMail", crafting = "hideCraftingOrder",
+        tracking = "hideTrackingButton", calendar = "hideGameTime",
+        difficulty = "hideRaidDifficulty", zoom = "hideZoomButtons",
+    }
+    if not p or p[hidden[key]] or (key == "difficulty" and p.diffTextEnabled) then on = false end
+    previewOn[key] = on and true or nil
+    if not on then
+        for id, frame in pairs(previewArt) do
+            if id == key or key == "zoom" and (id == "zoom+" or id == "zoom-") then frame:Hide() end
+        end
+    else
+        ns.RefreshBlizzardElementPreviews()
+    end
+end
+
+function ns.ClearBlizzardElementPreviews()
+    for key in pairs(previewOn) do previewOn[key] = nil end
+    for _, frame in pairs(previewArt) do frame:Hide() end
 end
 
 I.ApplyOmniumFolio, I.CaptureBlizzardMinimap = ApplyOmniumFolio, CaptureBlizzardMinimap

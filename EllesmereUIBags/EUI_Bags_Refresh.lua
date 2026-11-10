@@ -276,15 +276,30 @@ end
 --  window sizes itself, so neither icon shows)
 -------------------------------------------------------------------------------
 do
--- Art, alphas and the footer text clearance (the lock alone, or the grip with
--- the lock beside it), plus the handlers this block adds: one table keeps the
--- chunk's local count low.
+-- Shared art and handlers for the bag/bank resize grips and size lock.
 local GR = {
     RESIZE = "Interface\\AddOns\\EllesmereUI\\media\\icons\\resize_element.png",
     LOCKED = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-lock-locked.png",
     UNLOCKED = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-lock-unlocked.png",
+    DISC = "Interface\\CharacterFrame\\TempPortraitAlphaMask",
     A = 0.4, HOVER = 0.8, LOCK_INSET = 18, GRIP_INSET = 36,
+    TEXCOORD = {
+        BOTTOMRIGHT = {0, 1, 0, 1}, BOTTOMLEFT = {1, 0, 0, 1},
+        TOPRIGHT = {0, 1, 1, 0}, TOPLEFT = {1, 0, 1, 0},
+    },
+    EXTRA = { "BOTTOMLEFT", "TOPLEFT" },
+    LEFT = { TOPLEFT = true, BOTTOMLEFT = true },
+    TOP = { TOPLEFT = true, TOPRIGHT = true },
+    HIT = { TOPLEFT = {-6, 0, -6, 2}, TOPRIGHT = {0, -6, -6, 3}, BOTTOMLEFT = {-6, 6, 0, -6} },
 }
+
+function GR.Axes(at, pinned)
+    local sx = GR.LEFT[at] == GR.LEFT[pinned] and 0 or (GR.LEFT[at] and -1 or 1)
+    local sy = GR.TOP[at] == GR.TOP[pinned] and 0 or (GR.TOP[at] and -1 or 1)
+    return sx, sy
+end
+
+local function GripRestAlpha(grip) return grip._hoverOnly and 0 or GR.A end
 
 local function GripStop(grip)
     grip:SetScript("OnUpdate", nil)
@@ -293,7 +308,7 @@ local function GripStop(grip)
         grip:GetParent()._resizing = nil
         grip._cfg.finish()
     end
-    grip:SetAlpha(grip:IsMouseOver() and GR.HOVER or GR.A)
+    grip:SetAlpha(grip:IsMouseOver() and GR.HOVER or GripRestAlpha(grip))
 end
 
 local function GripOnUpdate(grip)
@@ -302,19 +317,23 @@ local function GripOnUpdate(grip)
     local cx, cy = GetCursorPosition()
     local es = grip:GetParent():GetEffectiveScale()
     local step = cfg.step
-    local dx = math.floor(cx / es - d.x + 0.5)
-    dx = math.max((cfg.minCols - d.cols) * step, math.min((d.maxCols - d.cols) * step, dx))
-    local cols = d.cols + math.floor(dx / step)
-    local bucket = math.floor(dx / (cfg.relayoutStep or step))
-    local h = math.floor(d.h + (d.y - cy / es) + 0.5)
-    h = math.max(cfg.minH, math.min(d.maxH, h))
+    local dx, h = 0, d.h
+    if d.sx ~= 0 then
+        dx = math.floor((cx / es - d.x) * d.sx + 0.5)
+        dx = math.max((cfg.minCols - d.cols) * step, math.min((d.maxCols - d.cols) * step, dx))
+    end
+    if d.sy ~= 0 then
+        h = math.floor(d.h + (d.y - cy / es) * d.sy + 0.5)
+        h = math.max(cfg.minH, math.min(d.maxH, h))
+    end
     if dx == d.lastDX and h == d.lastH then return end
+    local bucket = math.floor(dx / (cfg.relayoutStep or step))
     local relayout = bucket ~= d.lastBucket
     d.lastDX, d.lastBucket, d.lastH = dx, bucket, h
-    cfg.save(cols, h)
+    cfg.save(d.sx ~= 0 and d.cols + math.floor(dx / step) or nil, d.sy ~= 0 and h or nil)
     if relayout then cfg.finish() end
-    -- After the refresh, which sets the snapped size
-    grip:GetParent():SetSize(d.frameW + dx, h)
+    local frame = grip:GetParent()
+    frame:SetSize(d.sx ~= 0 and d.frameW + dx or frame:GetWidth(), d.sy ~= 0 and h or frame:GetHeight())
 end
 
 local function GripOnMouseDown(grip, button)
@@ -322,29 +341,35 @@ local function GripOnMouseDown(grip, button)
     local frame, cfg = grip:GetParent(), grip._cfg
     local left, top, right, bottom = frame:GetLeft(), frame:GetTop(), frame:GetRight(), frame:GetBottom()
     if not left then return end
-    -- Pin the top-left corner so only the right and bottom edges move
-    frame:ClearAllPoints()
-    frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
-    cfg.savePos(left, top)
+    local corner = cfg.corner and cfg.corner()
+    if not corner then
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+        cfg.savePos(left, top)
+    end
+    local sx, sy = GR.Axes(grip._at, corner or "TOPLEFT")
     local cx, cy = GetCursorPosition()
     local es = frame:GetEffectiveScale()
-    local screenW = UIParent:GetRight() * UIParent:GetEffectiveScale() / es
+    local uiS = UIParent:GetEffectiveScale() / es
+    local roomX = sx > 0 and UIParent:GetRight() * uiS - right or sx < 0 and left or 0
+    local roomY = sy > 0 and bottom or sy < 0 and UIParent:GetTop() * uiS - top or 0
     local cols, h = cfg.getCols(), cfg.getHeight()
     grip._drag = {
         x = cx / es, y = cy / es, cols = cols, h = h, lastBucket = 0, lastDX = 0, lastH = h,
-        frameW = frame:GetWidth(),
-        maxCols = math.max(cols, cols + math.floor((screenW - right) / cfg.step)),
-        maxH = math.max(h, h + math.floor(bottom)),
+        frameW = frame:GetWidth(), sx = sx, sy = sy,
+        maxCols = math.max(cols, cols + math.floor(roomX / cfg.step)),
+        maxH = math.max(h, h + math.floor(roomY)),
     }
     frame._resizing = true
-    -- Keep the hover look while the cursor runs ahead of the snapped edge
     grip:SetAlpha(GR.HOVER)
     grip:SetScript("OnUpdate", GripOnUpdate)
 end
 
 local function GripReset(grip)
     GripStop(grip)
-    grip._cfg.reset()
+    local cfg = grip._cfg
+    local sx, sy = GR.Axes(grip._at, cfg.corner and cfg.corner() or "TOPLEFT")
+    cfg.reset(sx ~= 0, sy ~= 0)
 end
 
 local function GripOnEnter(grip)
@@ -353,12 +378,17 @@ local function GripOnEnter(grip)
 end
 
 function GR.GripOnLeave(grip)
-    if not grip._drag then grip:SetAlpha(GR.A) end
+    if not grip._drag then grip:SetAlpha(GripRestAlpha(grip)) end
     EUI.HideWidgetTooltip()
 end
 
 function GR.LockTooltip(lock)
-    EUI.ShowWidgetTooltip(lock, EllesmereUI.L(lock._cfg.isLocked() and "Locked" or "Unlocked"))
+    local cfg = lock._cfg
+    if cfg.corner and cfg.corner() then
+        EUI.ShowWidgetTooltip(lock, cfg.isLocked() and EllesmereUI.L("Size Locked") or EllesmereUI.L("Size Unlocked"))
+        return
+    end
+    EUI.ShowWidgetTooltip(lock, EllesmereUI.L(cfg.isLocked() and "Locked" or "Unlocked"))
 end
 
 function GR.LockOnEnter(lock)
@@ -391,15 +421,43 @@ function GR.IconButton(frame, w, h, path)
     return b
 end
 
--- The lock always shows (it also holds the window in place); the grip only
--- while unlocked and the window does not size itself. Runs on every refresh,
--- so it repaints only when that state changes.
+function GR.NewGrip(frame, at, rim, box, shade)
+    local br = at == "BOTTOMRIGHT"
+    local size, pad = br and 18 or 14, (br and 2 or 0) + rim
+    local grip = GR.IconButton(frame, size, size, GR.RESIZE)
+    grip._at = at
+    local hit = GR.HIT[at]
+    if hit then grip:SetHitRectInsets(hit[1], hit[2], hit[3], hit[4]) end
+    if br and box then
+        grip:SetPoint("RIGHT", box, "RIGHT", 0, 0)
+    else
+        grip:SetPoint(at, frame, at, GR.LEFT[at] and pad or -pad, GR.TOP[at] and -pad or pad)
+    end
+    grip._icon:SetTexCoord(unpack(GR.TEXCOORD[at]))
+    if shade then
+        local disc = grip:CreateTexture(nil, "BACKGROUND")
+        disc:SetTexture(GR.DISC)
+        disc:SetVertexColor(0, 0, 0, 0.75)
+        disc:SetSize(size + 10, size + 10)
+        disc:SetPoint("CENTER")
+    end
+    grip:SetScript("OnMouseDown", GripOnMouseDown)
+    grip:SetScript("OnMouseUp", GripStop)
+    grip:SetScript("OnDoubleClick", GripReset)
+    grip:SetScript("OnEnter", GripOnEnter)
+    grip:SetScript("OnLeave", GR.GripOnLeave)
+    grip:SetScript("OnHide", GripStop)
+    return grip
+end
+
 function ns.UpdateResizeGrip(frame, cfg)
-    local grip, lock = frame._resizeGrip, frame._lockBtn
+    local lock = frame._lockBtn
     local locked = cfg.isLocked()
     local noGrip = locked or (cfg.hidden and cfg.hidden()) or false
-    if lock and frame._gripCfg == cfg and frame._gripLocked == locked and frame._gripNoGrip == noGrip then return end
-    frame._gripCfg, frame._gripLocked, frame._gripNoGrip = cfg, locked, noGrip
+    local corner = cfg.corner and cfg.corner() or nil
+    if lock and frame._gripCfg == cfg and frame._gripLocked == locked
+        and frame._gripNoGrip == noGrip and frame._gripCorner == corner then return end
+    frame._gripCfg, frame._gripLocked, frame._gripNoGrip, frame._gripCorner = cfg, locked, noGrip, corner
     if not lock then
         lock = GR.IconButton(frame, 13, 17)
         lock:SetScript("OnEnter", GR.LockOnEnter)
@@ -411,26 +469,47 @@ function ns.UpdateResizeGrip(frame, cfg)
     lock._icon:SetTexture(locked and GR.LOCKED or GR.UNLOCKED)
     lock:ClearAllPoints()
     local inset = GR.LOCK_INSET
-    if noGrip then
-        if grip then grip:Hide() end
-        lock:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -4, 4)
-    else
-        if not grip then
-            grip = GR.IconButton(frame, 18, 18, GR.RESIZE)
-            grip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
-            grip:SetScript("OnMouseDown", GripOnMouseDown)
-            grip:SetScript("OnMouseUp", GripStop)
-            grip:SetScript("OnDoubleClick", GripReset)
-            grip:SetScript("OnEnter", GripOnEnter)
-            grip:SetScript("OnLeave", GR.GripOnLeave)
-            -- Window closed mid-drag: end the drag instead of resuming on reopen
-            grip:SetScript("OnHide", GripStop)
-            frame._resizeGrip = grip
-        end
+    local grip, extra = frame._resizeGrip, frame._resizeGrips
+    local rim, box = cfg.rim and cfg.rim() or 0, cfg.lockBox and cfg.lockBox()
+    local showBR = not noGrip and corner ~= "BOTTOMRIGHT"
+    if showBR then
+        if not grip then grip = GR.NewGrip(frame, "BOTTOMRIGHT", rim, box); frame._resizeGrip = grip end
         if not grip._drag then grip._cfg = cfg end
+        local hover = corner ~= nil
+        if grip._hoverOnly ~= hover then
+            grip._hoverOnly = hover
+            grip:SetHitRectInsets(0, hover and -6 or 0, 0, hover and -6 or 0)
+            if not grip._drag then grip:SetAlpha(grip:IsMouseOver() and GR.HOVER or GripRestAlpha(grip)) end
+        end
         grip:Show()
         lock:SetPoint("RIGHT", grip, "LEFT", -2, 0)
         inset = GR.GRIP_INSET
+    else
+        if grip then grip:Hide() end
+        if box then
+            lock:SetPoint("RIGHT", box, "RIGHT", -5, 0)
+            inset = GR.LOCK_INSET + 2
+        else
+            lock:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -4, 4)
+        end
+    end
+    if corner or extra then
+        if not extra then extra = {}; frame._resizeGrips = extra end
+        for _, at in ipairs(GR.EXTRA) do
+            local g = extra[at]
+            if not noGrip and corner and at ~= corner then
+                if not g then
+                    g = GR.NewGrip(frame, at, rim, nil, cfg.shade and cfg.shade(at))
+                    g._hoverOnly = true
+                    g:SetAlpha(0)
+                    extra[at] = g
+                end
+                if not g._drag then g._cfg = cfg end
+                g:Show()
+            elseif g then
+                g:Hide()
+            end
+        end
     end
     lock:Show()
     if frame._gripInset ~= inset then
@@ -445,24 +524,34 @@ local _bagGripCfg = {
     getCols = function() return BP().bagColumns or 12 end,
     getHeight = function() return math.floor(EUI_Bags:GetHeight() + 0.5) end,
     save = function(cols, h)
-        BP().bagColumns, BP().bagHeight = cols, h
+        local p = BP()
+        if cols then p.bagColumns = cols end
+        if h then p.bagHeight = h end
         if EUI_Bags._updateThumb then EUI_Bags._updateThumb() end
     end,
     finish = function() EUI_Bags:RefreshInventory() end,
     savePos = function(left, top)
         BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
     end,
-    reset = function()
+    reset = function(w, h)
         local p = BP()
-        p.bagColumns, p.bagHeight, p.bagListWidth = nil, nil, nil
+        if w ~= false then p.bagColumns, p.bagListWidth = nil, nil end
+        if h ~= false then p.bagHeight = nil end
         EUI_Bags:RefreshInventory()
     end,
     -- The gold display sits in the footer's bottom-right corner
     inset = I.PositionBagMoney,
     isLocked = function() return BP().bagWindowLocked == true end,
     setLocked = function(v) BP().bagWindowLocked = v and true or false end,
-    -- Auto-Size owns the window size
-    hidden = function() return EUI_Bags.AutoSizeOn() or EUI_Bags.ExpandHeightOn() end,
+    -- Anchored height expansion is automatic, but Size Unlocked keeps the
+    -- available corner grips.  A manual height is still the minimum height.
+    hidden = function()
+        return EUI_Bags.AutoSizeOn() or (EUI_Bags.ExpandHeightOn() and not BP().bagAnchor)
+    end,
+    corner = function() return ns.BagAnchor.ActiveCorner() end,
+    rim = function() return ns.BagsForever() and math.floor(ns.ForeverBagSidebarInset(EUI_Bags) + 0.5) or 0 end,
+    lockBox = function() return EUI_Bags.Footer._coinBox end,
+    shade = function(at) return at == "TOPLEFT" and ns.BagsForever() end,
 }
 
 -- List display: free width (rows have no cell grid), saved in pixels. It keeps
@@ -472,7 +561,9 @@ local _bagListGripCfg = setmetatable({
     step = 1, relayoutStep = LIST_PITCH, minCols = 300,
     getCols = function() return BP().bagListWidth or GetColumns() * LIST_PITCH end,
     save = function(w, h)
-        BP().bagListWidth, BP().bagHeight = w, h
+        local p = BP()
+        if w then p.bagListWidth = w end
+        if h then p.bagHeight = h end
         if EUI_Bags._updateThumb then EUI_Bags._updateThumb() end
     end,
 }, { __index = _bagGripCfg })
@@ -533,13 +624,19 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
     local totalW = sidebarW + gridContentW
     local autoSize = EUI_Bags.AutoSizeOn()
     local expandHeight = EUI_Bags.ExpandHeightOn()
+    local roomW, roomH
+    if BP().bagAnchor then roomW, roomH = ns.BagAnchor.Room() end
     if autoSize then
         EUI_Bags._asMaxGridW = math.max(EUI_Bags._asMaxGridW or 0, gridContentW)
-        local right = EUI_Bags:GetRight()
-        if right then
-            -- Re-cap the running maximum if the user moved the bags to a
-            -- narrower location while they were already open.
-            EUI_Bags._asMaxGridW = math.min(EUI_Bags._asMaxGridW, math.max(gridContentW, right - sidebarW - 8))
+        if roomW then
+            EUI_Bags._asMaxGridW = math.min(EUI_Bags._asMaxGridW, math.max(gridContentW, roomW - sidebarW))
+        else
+            local right = EUI_Bags:GetRight()
+            if right then
+                -- Re-cap the running maximum if the user moved the bags to a
+                -- narrower location while they were already open.
+                EUI_Bags._asMaxGridW = math.min(EUI_Bags._asMaxGridW, math.max(gridContentW, right - sidebarW - 8))
+            end
         end
         totalW = sidebarW + EUI_Bags._asMaxGridW
     end
@@ -549,7 +646,8 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
     if autoSize or expandHeight or (EUI.IS_FOREVER and not userH) then
         local sc = EUI_Bags:GetScale(); if not sc or sc <= 0 then sc = 1 end
         local maxH = (UIParent:GetHeight() / sc) * 0.95
-        if autoSize or expandHeight then
+        if roomH then maxH = math.min(maxH, roomH) end
+        if (autoSize or expandHeight) and not roomH then
             -- Leave a small top margin and keep BOTTOMRIGHT fixed. Content
             -- beyond this budget continues to use the existing scroll frame.
             local bottom = EUI_Bags:GetBottom()
@@ -584,10 +682,12 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
             EUI_Bags._asMaxH = math.min(maxH, math.max(EUI_Bags._asMaxH or 0, neededH))
         end
         EUI_Bags:SetWidth(totalW)
-        EUI_Bags:SetHeight(expandHeight and neededH or EUI_Bags._asMaxH)
+        local h = expandHeight and neededH or EUI_Bags._asMaxH
+        EUI_Bags:SetHeight(roomH and math.min(h, roomH) or h)
     else
+        local h = userH or (FIXED_H + currencyFooterH - FOOTER_H)
         EUI_Bags:SetWidth(totalW)
-        EUI_Bags:SetHeight(userH or (FIXED_H + currencyFooterH - FOOTER_H))
+        EUI_Bags:SetHeight(roomH and math.min(h, roomH) or h)
     end
 
     if EUI_Bags.Header and EUI_Bags.Header.itemCount then
@@ -613,6 +713,7 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
     ns.ApplyWindowBackground(EUI_Bags.bg, EUI_Bags.bgOverlay)
     -- View may have changed under a held item (catch layer on / off)
     if EUI_Bags._syncDropTarget and GetCursorInfo() == "item" then EUI_Bags._syncDropTarget() end
+    if ns.BagAnchor.pending then ns.BagAnchor.Laid() end
     ns.UpdateResizeGrip(EUI_Bags, EUI_Bags.IsListMode() and _bagListGripCfg or _bagGripCfg)
     -- the offline bank panel goes over the items (bank picked, or an alt)
     if ns.OfflinePanel then ns.OfflinePanel(sidebarW) end
@@ -1014,11 +1115,15 @@ function EUI_Bags:RefreshInventory()
         local sbW = GetSidebarWidth()
         local sc = EUI_Bags:GetScale(); if not sc or sc <= 0 then sc = 1 end
         local maxGridW = (UIParent:GetWidth() / sc) * 0.95 - sbW - 30
-        -- With BOTTOMRIGHT anchored, usable width ends at the saved right edge.
-        -- Cap new columns there instead of letting screen clamping shift the lock.
-        local right = EUI_Bags:GetRight()
-        if right then maxGridW = math.min(maxGridW, right - sbW - 30 - 8) end
-        local maxCols = math.max(4, math.floor(maxGridW / (SLOT_SIZE + SPACING)))
+        local roomW = BP().bagAnchor and ns.BagAnchor.Room()
+        if roomW then
+            maxGridW = math.min(maxGridW, roomW - sbW - 24 - SCROLLBAR_HIT_W)
+        else
+            -- Unanchored Auto-Size keeps its existing bottom-right limit.
+            local right = EUI_Bags:GetRight()
+            if right then maxGridW = math.min(maxGridW, right - sbW - 30 - 8) end
+        end
+        local maxCols = math.max(roomW and 1 or 4, math.floor(maxGridW / (SLOT_SIZE + SPACING)))
         if ideal < baseCols then ideal = baseCols end
         if ideal > maxCols then ideal = maxCols end
         EUI_Bags._asCols = math.min(maxCols, math.max(EUI_Bags._asCols or baseCols, ideal))

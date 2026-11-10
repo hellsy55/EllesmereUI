@@ -336,12 +336,13 @@ end
 -- Auto-Size to Fit: not offered with the List display (its rows take the
 -- grip-set width), so a value saved under another display stays off there
 function EUI_Bags.AutoSizeOn()
-    return BP().bagAutoSize == true and not EUI_Bags.IsListMode()
+    return BP().bagAnchor ~= true and BP().bagAutoSize == true and not EUI_Bags.IsListMode()
 end
 
--- Unlike Auto-Size, this only changes the height and also works in List.
+-- Anchored bags always grow vertically to fit their visible content.  This
+-- does not change the independent Auto-Expand Height preference when unanchored.
 function EUI_Bags.ExpandHeightOn()
-    return BP().bagAutoExpandHeight == true
+    return BP().bagAnchor == true or BP().bagAutoExpandHeight == true
 end
 
 -- Size automation must preserve the window's bottom-right (the lock corner),
@@ -349,6 +350,7 @@ end
 -- automated sizing is enabled, before changing width or height. The new
 -- anchor is persisted so reloads and subsequent refreshes cannot drift.
 function EUI_Bags:AnchorAutoResizeToBottomRight()
+    if BP().bagAnchor then return end
     if not (self.AutoSizeOn() or self.ExpandHeightOn()) then return end
     local point = self:GetPoint(1)
     if point == "BOTTOMRIGHT" then return end
