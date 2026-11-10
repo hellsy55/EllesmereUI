@@ -153,9 +153,9 @@ local function MiniSyncWidgetWrapper(W, unitKey)
                         alwaysAvailable = true,
                         region = rgn,
                         tooltip = "Apply " .. name .. " to other Mini Frames",
-                        isSynced = function()
+                        isSynced = function(targetKey)
                             local source = db.profile[unitKey]
-                            for _, target in ipairs(members) do
+                            for _, target in ipairs(targetKey and {targetKey} or members) do
                                 local dest = db.profile[target]
                                 if dest then
                                     for _, k in ipairs(keys) do
@@ -168,6 +168,7 @@ local function MiniSyncWidgetWrapper(W, unitKey)
                         onClick = function() CopyTo(members) end,
                         flashTargets = function() return { rgn } end,
                         multiApply = {
+                            compareWithSource = true,
                             getElementState = env.GetUnitApplyState,
                             elementKeys = members,
                             elementLabels = env.SHORT_LABELS,
@@ -348,6 +349,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 end, true, 20)
             hoverSwatch:SetPoint("RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
             rightRgn._lastInline = hoverSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, hoverSwatch, "swatch")
             hoverSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(hoverSwatch, "Hover") end)
             hoverSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -364,6 +366,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 end, true, 20)
             targetSwatch:SetPoint("RIGHT", rightRgn._lastInline, "LEFT", -8, 0)
             rightRgn._lastInline = targetSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, targetSwatch, "swatch")
             targetSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(targetSwatch, "Target") end)
             targetSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -477,6 +480,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 end, false, 20)
             PP.Point(fillSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
             rightRgn._lastInline = fillSwatch
+            EllesmereUI.OrderInlineAddon(rightRgn, fillSwatch, "swatch")
             fillSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(fillSwatch, "Target Fill Color") end)
             fillSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             -- Dim the swatch while the toggle is off (still clickable so the
@@ -650,6 +654,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 fClassSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(fClassSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = fClassSw
+                EllesmereUI.OrderInlineAddon(rgn, fClassSw, "swatch")
                 RegisterWidgetRefresh(function()
                     fClassUpdate()
                     fClassSw:SetAlpha(MVal("healthClassColored", false) and 1 or 0.3)
@@ -682,6 +687,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 fCustomSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(fCustomSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = fCustomSw
+                EllesmereUI.OrderInlineAddon(rgn, fCustomSw, "swatch")
                 RegisterWidgetRefresh(function()
                     fCustomUpdate()
                     fCustomSw:SetAlpha(MVal("healthClassColored", false) and 0.3 or 1)
@@ -709,6 +715,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 bgClassSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(bgClassSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = bgClassSw
+                EllesmereUI.OrderInlineAddon(rgn, bgClassSw, "swatch")
                 RegisterWidgetRefresh(function()
                     bgClassUpdate()
                     bgClassSw:SetAlpha(MVal("bgClassColored", false) and 1 or 0.3)
@@ -738,6 +745,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = bgSw
+                EllesmereUI.OrderInlineAddon(rgn, bgSw, "swatch")
                 RegisterWidgetRefresh(function()
                     bgSwUpdate()
                     bgSw:SetAlpha(MVal("bgClassColored", false) and 0.3 or 1)
@@ -975,6 +983,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
                 PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
                 rgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
                 local origClick = sw:GetScript("OnClick")
                 sw:SetScript("OnClick", function(self, ...)
                     if MVal("leftTextContent", "name") == "none" then return end
@@ -1102,6 +1111,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
                 PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
                 rgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
                 local origClick = sw:GetScript("OnClick")
                 sw:SetScript("OnClick", function(self, ...)
                     if MVal("rightTextContent", "none") == "none" then return end
@@ -1224,6 +1234,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
                 PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
                 rgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
                 local origClick = sw:GetScript("OnClick")
                 sw:SetScript("OnClick", function(self, ...)
                     if MVal("centerTextContent", "none") == "none" then return end
@@ -1351,6 +1362,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                     local sw, swUp = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, swGet, swSet, nil, 20)
                     PP.Point(sw, "RIGHT", classSw, "LEFT", -8, 0)
                     rgn._lastInline = sw
+                    EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
                     local swOrigClick = sw:GetScript("OnClick")
                     sw:SetScript("OnClick", function(self, ...)
                         if MVal("extraTextContent", "none") == "none" then return end
@@ -1449,6 +1461,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             bgPwrSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             PP.Point(bgPwrSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgPwrSw
+            EllesmereUI.OrderInlineAddon(rgn, bgPwrSw, "swatch")
             RegisterWidgetRefresh(function()
                 bgPwrUpdate()
                 bgPwrSw:SetAlpha(MVal("powerBgPowerColored", false) and 1 or 0.3)
@@ -1478,6 +1491,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             bgSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             PP.Point(bgSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = bgSw
+            EllesmereUI.OrderInlineAddon(rgn, bgSw, "swatch")
             RegisterWidgetRefresh(function()
                 bgSwUp()
                 bgSw:SetAlpha(MVal("powerBgPowerColored", false) and 0.3 or 1)
@@ -1504,6 +1518,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             fPwrSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             PP.Point(fPwrSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = fPwrSw
+            EllesmereUI.OrderInlineAddon(rgn, fPwrSw, "swatch")
             RegisterWidgetRefresh(function()
                 fPwrUpdate()
                 fPwrSw:SetAlpha((MVal("powerPercentPowerColor", true) ~= false) and 1 or 0.3)
@@ -1533,6 +1548,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             fSw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             PP.Point(fSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = fSw
+            EllesmereUI.OrderInlineAddon(rgn, fSw, "swatch")
             RegisterWidgetRefresh(function()
                 fSwUp()
                 fSw:SetAlpha((MVal("powerPercentPowerColor", true) ~= false) and 0.3 or 1)
@@ -1604,6 +1620,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 end, false, 20)
             PP.Point(customSw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = customSw
+            EllesmereUI.OrderInlineAddon(rgn, customSw, "swatch")
             local customOrigClick = customSw:GetScript("OnClick")
             customSw:SetScript("OnClick", function(self, ...)
                 if MVal("powerPercentTextPowerColor", false) then
@@ -1624,6 +1641,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
                 function() end, false, 20)
             PP.Point(powerSw, "RIGHT", customSw, "LEFT", -8, 0)
             rgn._lastInline = powerSw
+            EllesmereUI.OrderInlineAddon(rgn, powerSw, "swatch")
             powerSw:SetScript("OnClick", function()
                 settingsTable.powerPercentTextPowerColor = true
                 settingsTable.powerTextColor = nil
@@ -1692,6 +1710,7 @@ local function BuildMiniTextAndSize(W, parent, y, settingsTable, unitKey, enable
             end)
             swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             RegisterWidgetRefresh(updateSwatch)
         end
     end
@@ -2446,8 +2465,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                 rightRgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                 local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                 apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                EllesmereUI.ExplainDisabledSwatch(sw, buffOff, "Simple Buff Display")
             end
             do
                 local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
@@ -2457,8 +2478,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                 rightRgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                 local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                 apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                EllesmereUI.ExplainDisabledSwatch(sw, buffOff, "Simple Buff Display")
             end
         end
         -- (Show Duration toggle lives inside the Duration & Stack cog above.)
@@ -2591,8 +2614,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                 rightRgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                 local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                 apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                EllesmereUI.ExplainDisabledSwatch(sw, debuffOff, "Simple Debuff Display")
             end
             do
                 local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
@@ -2602,8 +2627,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                 rightRgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                 local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                 apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                EllesmereUI.ExplainDisabledSwatch(sw, debuffOff, "Simple Debuff Display")
             end
         end
         -- (Show Duration toggle lives inside the Duration & Stack cog above.)
@@ -2772,8 +2799,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                 rightRgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                 local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                 apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                EllesmereUI.ExplainDisabledSwatch(sw, buffOff, "Buffs Location")
             end
             do
                 local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
@@ -2783,8 +2812,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                 rightRgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                 local function apply() upd(); local o = buffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                 apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                EllesmereUI.ExplainDisabledSwatch(sw, buffOff, "Buffs Location")
             end
         end
         end   -- close buff sizing row hidden-while-None gate
@@ -2909,8 +2940,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                     rightRgn._lastInline = sw
+                    EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                     local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                     apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    EllesmereUI.ExplainDisabledSwatch(sw, debuffOff, "Debuffs Location")
                 end
                 do
                     local sw, upd = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
@@ -2920,8 +2953,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     sw:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     PP.Point(sw, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
                     rightRgn._lastInline = sw
+                    EllesmereUI.OrderInlineAddon(rightRgn, sw, "swatch")
                     local function apply() upd(); local o = debuffOff(); sw:SetAlpha(o and 0.3 or 1); sw:EnableMouse(not o) end
                     apply(); EllesmereUI.RegisterWidgetRefresh(apply)
+                    EllesmereUI.ExplainDisabledSwatch(sw, debuffOff, "Debuffs Location")
                 end
             end
             end   -- close debuff sizing row hidden-while-None gate
@@ -3196,6 +3231,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
               setValue=function(v)
                   db.profile.boss.showCastTarget = v
                   ReloadAndUpdate()
+                  EllesmereUI:RefreshPage()
               end });  yy = yy - hh
         -- Inline cog on Spell Target: X/Y offsets for the cast target
         -- text. Boss-scoped copies of the shared castbar keys, which the
@@ -3204,6 +3240,8 @@ function ns.UFO_BuildBossOptions(W, parent, y)
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(bossTgtRow._rightRegion, {
                 title = "Spell Target",
+                disabled = function() return db.profile.boss.showCastTarget ~= true end,
+                disabledTooltip = "Spell Target",
                 rows = {
                     { type="slider", label="X Offset", min=-300, max=300, step=1,
                       get=function() return db.profile.boss.castSpellTargetX or 0 end,
@@ -3263,6 +3301,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
             rgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
             eyeTex:SetAllPoints()
             local function RefreshBossRaidEye()
@@ -3305,6 +3344,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
+            EllesmereUI.OrderInlineIcon(rgn, cogBtn, iconPath or EllesmereUI.PANEL_MORE_ICON)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
@@ -3442,6 +3482,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, tooltip) end)
                 sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 rgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
                 castColorSwatches[#castColorSwatches + 1] = { sw = sw, enabledAlpha = disabledFn
                     and function() return disabledFn() and 0.3 or 1 end }
                 if disabledFn then
@@ -3453,6 +3494,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                     end
                     Update()
                     EllesmereUI.RegisterWidgetRefresh(Update)
+                    EllesmereUI.ExplainDisabledSwatch(sw, disabledFn, "Interrupt Ready Mid-Cast")
                 end
             end
             AddCastColorSwatch("Interrupt Ready Mid-Cast", "castbarInterruptMidCastColor",
@@ -3563,6 +3605,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             sw:SetScript("OnEnter", function(self) EllesmereUI.ShowWidgetTooltip(self, "Cast Background") end)
             sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             rgn._lastInline = sw
+            EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
         end
 
         -- Boss cast bars use the same shared border for the bar and a
@@ -3626,6 +3669,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 true,20)
             PP.Point(swatch,"RIGHT",rgn._control,"LEFT",-8,0)
             rgn._lastInline=swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local blocker=CreateFrame("Frame",nil,swatch)
             blocker:SetAllPoints(); blocker:SetFrameLevel(swatch:GetFrameLevel()+10); blocker:EnableMouse(true)
             blocker:SetScript("OnEnter",function() EllesmereUI.ShowWidgetTooltip(swatch,EllesmereUI.DisabledTooltip(label)) end)
@@ -3699,6 +3743,8 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             local rgn = castTextRow._leftRegion
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Spell Name",
+                disabled = function() return B.castSpellNameSide == "none" end,
+                disabledTooltip = "Spell Name",
                 rows = {
                     { type="slider", label="Size", min=6, max=20, step=1,
                       get=function() return B.castSpellNameSize or 11 end,
@@ -3716,12 +3762,18 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 function(r, g, b) B.castSpellNameColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
             sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = sw
+            EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
+            EllesmereUI.BindDisabledSwatch(sw, function() return B.castSpellNameSide == "none" end, "Spell Name")
         end
         -- Duration (right): Size/X/Y cog + color swatch
         if not EllesmereUI._prebuilding then
             local rgn = castTextRow._rightRegion
             EllesmereUI.BuildInlineCog(rgn, {
                 title = "Duration",
+                disabled = function()
+                    return B.showCastDuration == false or B.castDurationSide == "none"
+                end,
+                disabledTooltip = "Duration",
                 rows = {
                     { type="slider", label="Size", min=6, max=20, step=1,
                       get=function() return B.castDurationSize or 10 end,
@@ -3739,6 +3791,10 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 function(r, g, b) B.castDurationColor = { r=r, g=g, b=b }; ReloadAndUpdate() end, false, 20)
             sw:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = sw
+            EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
+            EllesmereUI.BindDisabledSwatch(sw, function()
+                return B.showCastDuration == false or B.castDurationSide == "none"
+            end, "Duration")
         end
         -- Important Cast Glow closes the standard Cast Bar controls, directly
         -- after Spell Name | Duration. Keep the empty right half as a spacer so
@@ -3827,6 +3883,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, false, 20)
             PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -12, 0)
             rgn._lastInline = sw
+            EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
             local swBlock = CreateFrame("Frame", nil, sw)
             swBlock:SetAllPoints()
             swBlock:SetFrameLevel(sw:GetFrameLevel() + 10)
@@ -3888,6 +3945,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
+            EllesmereUI.OrderInlineIcon(rgn, cogBtn, EllesmereUI.PANEL_MORE_ICON)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             cogBtn:SetAlpha(0.4)
             local cogTex = cogBtn:CreateTexture(nil, "OVERLAY")
@@ -4063,6 +4121,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function UpdateAbsorbSwatchVis()
                 swatch:SetAlpha(BVal("showPlayerAbsorb", "none") == "none" and 0.3 or 1)
             end
@@ -4138,6 +4197,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local swatchBlock = CreateFrame("Frame", nil, swatch)
             swatchBlock:SetAllPoints()
             swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
@@ -4188,6 +4248,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function RefreshColor()
                 local style = BVal("maxHealthStyle", "none")
                 swatch:SetAlpha((style == "none" or style == "healBlizzModern" or style == "largeOutlinedStripes" or style == "largeOutlinedStripesR") and 0.3 or 1)
@@ -4223,6 +4284,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function UpdateAbsorbBarSwatchVis()
                 swatch:SetAlpha(BVal("absorbBarPosition", "none") == "none" and 0.3 or 1)
             end
@@ -4258,6 +4320,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function UpdateHealAbsorbBarSwatchVis()
                 swatch:SetAlpha(BVal("healAbsorbBarPosition", "none") == "none" and 0.3 or 1)
             end
@@ -4292,6 +4355,7 @@ function ns.UFO_BuildBossOptions(W, parent, y)
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function RefreshColor()
                 swatch:SetAlpha(BVal("maxHealthBarPosition", "none") == "none" and 0.3 or 1)
             end

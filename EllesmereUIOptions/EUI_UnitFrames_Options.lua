@@ -146,7 +146,14 @@ function ns.UF_ClassicCastBorderRow(W, parent, y, getS, key, onChange, sync, mat
             end,
             flashTargets = function() return { rgn } end,
             multiApply = {
-                        getElementState = ns.UFO_GetUnitApplyState,
+                getElementState = ns.UFO_GetUnitApplyState,
+                getElementOptionState = function(unit)
+                    local s = getS()
+                    local dst = sync.db(unit)
+                    if not dst then return nil end
+                    return dst[ns.UF_CastClassicKey(unit)] == (s and s[key])
+                        and "Matching" or "Different"
+                end,
                 elementKeys   = sync.units,
                 elementLabels = sync.labels,
                 getCurrentKey = sync.current,
@@ -378,6 +385,7 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
         sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Border") end)
         sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         rgn._lastInline = sw
+        EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
         local block = CreateFrame("Frame", nil, sw)
         block:SetAllPoints()
         block:SetFrameLevel(sw:GetFrameLevel() + 10)
@@ -430,11 +438,11 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
             for i = 1, #units do EllesmereUI.ReapplyMatchPads(units[i] .. "Castbar") end
             EllesmereUI:RefreshPage()
         end
-        local function StyleSynced()
+        local function StyleSynced(targetKey)
             local src = getS()
             local bt = src.castBorderStyle or "solid"
-            for i = 1, #sync.units do
-                local d = sync.db(sync.units[i])
+            for i = 1, (targetKey and 1 or #sync.units) do
+                local d = sync.db(targetKey or sync.units[i])
                 if d then
                     if (d.castBorderCustom == true) ~= (src.castBorderCustom == true) then return false end
                     if (d.castBorderStyle or "solid") ~= bt then return false end
@@ -445,13 +453,13 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
             end
             return true
         end
-        local function SizeSynced()
+        local function SizeSynced(targetKey)
             local src = getS()
             local bs, bt = src.castBorderSize or 1, src.castBorderStyle or "solid"
             -- Exact sizes compare as rendered (a cleared or stale value equals none).
             local bpx = EllesmereUI.BorderPx(src.castBorderSizePx, bs, bt)
-            for i = 1, #sync.units do
-                local d = sync.db(sync.units[i])
+            for i = 1, (targetKey and 1 or #sync.units) do
+                local d = sync.db(targetKey or sync.units[i])
                 if d then
                     if (d.castBorderCustom == true) ~= (src.castBorderCustom == true) then return false end
                     if (d.castBorderSize or 1) ~= bs then return false end
@@ -470,7 +478,8 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
             isSynced = StyleSynced,
             flashTargets = function() return { lr } end,
             multiApply = {
-                        getElementState = ns.UFO_GetUnitApplyState,
+                compareWithSource = true,
+                getElementState = ns.UFO_GetUnitApplyState,
                 elementKeys   = sync.units,
                 elementLabels = sync.labels,
                 getCurrentKey = sync.current,
@@ -485,7 +494,8 @@ function ns.UF_CastBorderRows(W, parent, y, getS, onChange, matchKey, sync)
             isSynced = SizeSynced,
             flashTargets = function() return { rr } end,
             multiApply = {
-                        getElementState = ns.UFO_GetUnitApplyState,
+                compareWithSource = true,
+                getElementState = ns.UFO_GetUnitApplyState,
                 elementKeys   = sync.units,
                 elementLabels = sync.labels,
                 getCurrentKey = sync.current,
@@ -669,6 +679,7 @@ function ns.UF_BossFrameBorderRows(W, parent, y, B, onChange)
         sw:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(sw, "Border") end)
         sw:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         rgn._lastInline = sw
+        EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
         local block = CreateFrame("Frame", nil, sw)
         block:SetAllPoints()
         block:SetFrameLevel(sw:GetFrameLevel() + 10)
@@ -1681,12 +1692,10 @@ initFrame:SetScript("OnEvent", function(self)
                 PP.Point(pFrame._previewTex, "BOTTOMRIGHT", pFrame, "BOTTOMRIGHT", oR, oB)
             end
         end
-        if pFrame._previewModel then
-            -- 3D models ignore SetClipsChildren, so pin them to the frame bounds.
-            pFrame._previewModel:ClearAllPoints()
-            PP.Point(pFrame._previewModel, "TOPLEFT", pFrame, "TOPLEFT", 0, 0)
-            PP.Point(pFrame._previewModel, "BOTTOMRIGHT", pFrame, "BOTTOMRIGHT", 0, 0)
-        end
+        -- 3D Portrait Below Border: the model inside the ring and under it,
+        -- as on the live portrait; off, it fills the frame over the ring.
+        ns.UF_PortraitShapeModel(pFrame, pFrame._shapeBorderTex, pFrame._previewModel,
+            pFrame._previewMode == "3d" and s.portrait3dBelowBorder == true, shape, rawBorderSize)
 
         -- Outer Ring / Inner Shadow: the live portrait's own helper. A shown
         -- Outer Ring and an unmasked ring below Size 7 reach past the frame,
@@ -2379,6 +2388,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:SetSize(26, 26)
             cogBtn:SetPoint("RIGHT", anchorTo or rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = cogBtn
+            EllesmereUI.OrderInlineIcon(rgn, cogBtn, iconPath or EllesmereUI.PANEL_MORE_ICON)
             cogBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             cogBtn:SetAlpha(0.4)
 

@@ -1702,6 +1702,7 @@ initFrame:SetScript("OnEvent", function(self)
                     true, 20)
                 PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 swatch:SetScript("OnEnter", function()
                     EllesmereUI.ShowWidgetTooltip(swatch, "Active Border Color")
                 end)

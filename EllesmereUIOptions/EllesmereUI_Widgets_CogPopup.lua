@@ -18,7 +18,6 @@ local PoolGen, PoolIsIdle = EllesmereUI._Pool.Gen, EllesmereUI._Pool.IsIdle
 local PP = EllesmereUI.PanelPP
 local SolidTex = EllesmereUI.SolidTex
 local MakeFont = EllesmereUI.MakeFont
-local MakeBorder = EllesmereUI.MakeBorder
 local MakeDropdownArrow = EllesmereUI.MakeDropdownArrow
 local EXPRESSWAY = EllesmereUI.EXPRESSWAY
 local ELLESMERE_GREEN = EllesmereUI.PANEL_ACCENT
@@ -395,7 +394,7 @@ local function BuildCogPopup(opts)
 
         local bg = SolidTex(pf, "BACKGROUND", 0.077, 0.068, 0.058, opts.bgAlpha or 0.95)
         bg:SetAllPoints()
-        MakeBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15, PP)
+        EllesmereUI.MakeRoundedBorder(pf, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15, bg)
 
         local titleFS = MakeFont(pf, TITLE_H, "", 1, 1, 1)
         titleFS:SetAlpha(0.7)
@@ -727,9 +726,8 @@ local function BuildCogPopup(opts)
                     cpSwBlock:EnableMouse(true)
                     cpSwBlock:SetScript("OnEnter", function()
                         local tip = ResolveDisabledTip(row)
-                        if tip and EllesmereUI.ShowWidgetTooltip then
-                            EllesmereUI.ShowWidgetTooltip(cpSwatch, tip)
-                        end
+                        EllesmereUI.ShowWidgetTooltip(cpSwatch,
+                            tip or "This color is unavailable with the current settings.")
                     end)
                     cpSwBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -823,9 +821,8 @@ local function BuildCogPopup(opts)
                     disTex:SetAllPoints()
                     mswDis:SetScript("OnEnter", function(self)
                         local tip = ResolveDisabledTip(row)
-                        if tip and EllesmereUI.ShowWidgetTooltip then
-                            EllesmereUI.ShowWidgetTooltip(self, tip)
-                        end
+                        EllesmereUI.ShowWidgetTooltip(self,
+                            tip or "This color is unavailable with the current settings.")
                     end)
                     mswDis:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                     local initDis = type(row.disabled) == "function" and row.disabled() or row.disabled
@@ -868,6 +865,7 @@ local function BuildCogPopup(opts)
                     saveBtn:SetFrameLevel(pf:GetFrameLevel() + 3)
                     saveBg = SolidTex(saveBtn, "BACKGROUND", EG.r, EG.g, EG.b, 0.85)
                     saveBg:SetAllPoints()
+                    EllesmereUI.RoundBody(saveBtn, saveBg)
                     saveLbl = MakeFont(saveBtn, 10, nil, 1, 1, 1)
                     saveLbl:SetAlpha(0.9)
                     saveLbl:SetText(EllesmereUI.L("Save"))

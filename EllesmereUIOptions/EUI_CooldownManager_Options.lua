@@ -1553,6 +1553,7 @@ initFrame:SetScript("OnEvent", function(self)
                                 -- unless the entry renders Blackout (custom-shaped bars always
                                 -- draw Shape Glow); the Glow Type setter's page refresh re-checks it.
                                 leftRgn._lastInline = eyeBtn
+                                EllesmereUI.OrderInlineAddon(leftRgn, eyeBtn, "preview")
                                 EllesmereUI.BuildInlineCog(leftRgn, {
                                     title = "Blackout",
                                     disabled = function()
@@ -2009,6 +2010,7 @@ initFrame:SetScript("OnEvent", function(self)
                 true, 20)
             PP.Point(kbSwatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = kbSwatch
+            EllesmereUI.OrderInlineAddon(rgn, kbSwatch, "swatch")
 
             local swatchBlock = CreateFrame("Frame", nil, kbSwatch)
             swatchBlock:SetAllPoints()

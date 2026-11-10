@@ -34,6 +34,7 @@ function EQT.ShowWowheadLink(questID)
         confirmText = "Close",
         hideCancel = true,
         selectText = true,
+        closeOnCopy = true,
     })
 end
 

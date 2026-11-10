@@ -508,6 +508,9 @@ function GO.AttachInline(rgn, desc, colorRgn)
         end
         PP.Point(customSw, "RIGHT", classSw, "LEFT", -6, 0)
         PP.Point(defaultSw, "RIGHT", customSw, "LEFT", -6, 0)
+        EllesmereUI.OrderInlineAddon(srgn, classSw, "swatch")
+        EllesmereUI.OrderInlineAddon(srgn, customSw, "swatch")
+        EllesmereUI.OrderInlineAddon(srgn, defaultSw, "swatch")
         srgn._lastInline = defaultSw
         -- An off glow has no color to set: the swatches take no clicks and the
         -- blocker over them explains why. The build and every refresh apply it.

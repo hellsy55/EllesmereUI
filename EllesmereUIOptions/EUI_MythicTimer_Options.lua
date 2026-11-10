@@ -328,6 +328,7 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
             rgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(rgn, eyeBtn, "preview")
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
             eyeTex:SetAllPoints()
             local function Off() return Cfg("enabled") == false end
@@ -604,6 +605,7 @@ initFrame:SetScript("OnEvent", function(self)
                 false, 18)
             PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local block = CreateFrame("Frame", nil, swatch)
             block:SetAllPoints()
             block:SetFrameLevel(swatch:GetFrameLevel() + 10)
@@ -654,6 +656,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(accentSwatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
             rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
             -- Custom-colour swatch (to the left of accent): the stored custom colour.
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
@@ -678,6 +681,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(customSwatch, "RIGHT", rgn._lastInline or rgn._control or rgn, "LEFT", -8, 0)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             -- Per-swatch hover tooltip (colour name when enabled) + disabled block.
             local function AddBlock(sw, enterTip)
@@ -1498,14 +1502,16 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Show Icon",
               disabled=Off, disabledTooltip=REQ,
               getValue=function() local c = TSB(); return not c or c.showIcon ~= false end,
-              setValue=function(v) local c = TSB(); if c then c.showIcon = v and true or false; TSBRefresh() end end },
+              setValue=function(v) local c = TSB(); if c then c.showIcon = v and true or false; TSBRefresh(); EllesmereUI:RefreshPage() end end },
             { type="toggle", text="Show Spell Name",
               disabled=Off, disabledTooltip=REQ,
               getValue=function() local c = TSB(); return not c or c.showSpellName ~= false end,
-              setValue=function(v) local c = TSB(); if c then c.showSpellName = v and true or false; TSBRefresh() end end });  y = y - h
+              setValue=function(v) local c = TSB(); if c then c.showSpellName = v and true or false; TSBRefresh(); EllesmereUI:RefreshPage() end end });  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(row._leftRegion, { tip = "Spell Icon Settings",
                 title = "Spell Icon Settings",
+                disabled = function() local c = TSB(); return Off() or (c and c.showIcon == false) end,
+                disabledTooltip = function() return Off() and REQ or "Show Icon" end,
                 rows = {
                     { type="toggle", label="Icon on Right",
                       tooltip = "Attach the spell icon to the right of the cast bar instead of the left.",
@@ -1519,6 +1525,8 @@ initFrame:SetScript("OnEvent", function(self)
             })
             EllesmereUI.BuildInlineCog(row._rightRegion, { tip = "Spell Name Settings",
                 title = "Spell Name",
+                disabled = function() local c = TSB(); return Off() or (c and c.showSpellName == false) end,
+                disabledTooltip = function() return Off() and REQ or "Show Spell Name" end,
                 rows = {
                     { type="slider", label="Text Size", min=6, max=20, step=1,
                       get=function() local c = TSB(); return (c and c.nameSize) or 10 end,
@@ -1537,15 +1545,17 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Show Cast Timer",
               disabled=Off, disabledTooltip=REQ,
               getValue=function() local c = TSB(); return not c or c.showTimer ~= false end,
-              setValue=function(v) local c = TSB(); if c then c.showTimer = v and true or false; TSBRefresh() end end },
+              setValue=function(v) local c = TSB(); if c then c.showTimer = v and true or false; TSBRefresh(); EllesmereUI:RefreshPage() end end },
             { type="toggle", text="Show Spell Target",
               disabled=Off, disabledTooltip=REQ,
               tooltip="Show who each spell is being cast on, exactly like the nameplate cast bars.",
               getValue=function() local c = TSB(); return not c or c.showTarget ~= false end,
-              setValue=function(v) local c = TSB(); if c then c.showTarget = v and true or false; TSBRefresh() end end });  y = y - h
+              setValue=function(v) local c = TSB(); if c then c.showTarget = v and true or false; TSBRefresh(); EllesmereUI:RefreshPage() end end });  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(row._leftRegion, { tip = "Cast Timer Settings",
                 title = "Cast Timer",
+                disabled = function() local c = TSB(); return Off() or (c and c.showTimer == false) end,
+                disabledTooltip = function() return Off() and REQ or "Show Cast Timer" end,
                 rows = {
                     { type="slider", label="Text Size", min=6, max=20, step=1,
                       get=function() local c = TSB(); return (c and c.timerSize) or 10 end,
@@ -1560,6 +1570,8 @@ initFrame:SetScript("OnEvent", function(self)
             })
             EllesmereUI.BuildInlineCog(row._rightRegion, { tip = "Spell Target Settings",
                 title = "Spell Target",
+                disabled = function() local c = TSB(); return Off() or (c and c.showTarget == false) end,
+                disabledTooltip = function() return Off() and REQ or "Show Spell Target" end,
                 rows = {
                     { type="slider", label="Text Size", min=6, max=20, step=1,
                       get=function() local c = TSB(); return (c and c.targetSize) or 10 end,
@@ -1684,6 +1696,7 @@ initFrame:SetScript("OnEvent", function(self)
                   local c = TSB(); if not c then return end
                   c.oorEnabled = v and true or false
                   TSBRefresh()
+                  EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Show Raid Target Marker",
               disabled=Off, disabledTooltip=REQ,
@@ -1693,11 +1706,14 @@ initFrame:SetScript("OnEvent", function(self)
                   local c = TSB(); if not c then return end
                   c.showRaidMarker = v and true or false
                   TSBRefresh()
+                  EllesmereUI:RefreshPage()
               end });  y = y - h
 
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(row._leftRegion, { tip = "Range Fade Settings",
                 title = "Fade Out of Interrupt Range",
+                disabled = function() local c = TSB(); return Off() or not (c and c.oorEnabled == true) end,
+                disabledTooltip = function() return Off() and REQ or "Fade Out of Interrupt Range" end,
                 rows = {
                     { type="slider", label="Opacity", min=0, max=100, step=5,
                       get=function() local c = TSB(); return math.floor(((c and c.oorAlpha) or 0.45) * 100 + 0.5) end,
@@ -1706,6 +1722,8 @@ initFrame:SetScript("OnEvent", function(self)
             })
             EllesmereUI.BuildInlineCog(row._rightRegion, { tip = "Raid Marker Settings",
                 title = "Raid Target Marker",
+                disabled = function() local c = TSB(); return Off() or not (c and c.showRaidMarker == true) end,
+                disabledTooltip = function() return Off() and REQ or "Show Raid Target Marker" end,
                 rows = {
                     { type="slider", label="Marker Size", min=6, max=30, step=1, pixel=true,
                       get=function() local c = TSB(); return (c and c.raidMarkerSize) or 14 end,
@@ -1746,6 +1764,15 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local function Off() return not On() end
             local REQ = enableLabel
+            local function TargetShown()
+                local c = C()
+                local v = c and c.showTarget
+                if v == nil then
+                    local t = TFB()
+                    v = not t or t.showTarget ~= false
+                end
+                return v
+            end
 
             local hdr
             hdr, h = W:SectionHeader(parent, header, y); y = y - h
@@ -1782,15 +1809,16 @@ initFrame:SetScript("OnEvent", function(self)
                 { type="toggle", text="Show Spell Name",
                   disabled=Off, disabledTooltip=REQ,
                   getValue=function() local c = C(); return not c or c.showSpellName ~= false end,
-                  setValue=function(v) local c = C(); if c then c.showSpellName = v and true or false; TFBRefresh() end end },
+                  setValue=function(v) local c = C(); if c then c.showSpellName = v and true or false; TFBRefresh(); EllesmereUI:RefreshPage() end end },
                 { type="toggle", text="Show Cast Timer",
                   disabled=Off, disabledTooltip=REQ,
                   getValue=function() local c = C(); return not c or c.showTimer ~= false end,
-                  setValue=function(v) local c = C(); if c then c.showTimer = v and true or false; TFBRefresh() end end });  y = y - h
+                  setValue=function(v) local c = C(); if c then c.showTimer = v and true or false; TFBRefresh(); EllesmereUI:RefreshPage() end end });  y = y - h
             if not EllesmereUI._prebuilding then
                 EllesmereUI.BuildInlineCog(row._leftRegion, { tip = "Spell Name Settings",
                     title = "Spell Name",
-                    disabled = Off, disabledTooltip = REQ,
+                    disabled = function() local c = C(); return Off() or (c and c.showSpellName == false) end,
+                    disabledTooltip = function() return Off() and REQ or "Show Spell Name" end,
                     rows = {
                         { type="slider", label="Text Size", min=6, max=22, step=1,
                           get=function() local c = C(); return (c and c.nameSize) or 11 end,
@@ -1799,7 +1827,8 @@ initFrame:SetScript("OnEvent", function(self)
                 })
                 EllesmereUI.BuildInlineCog(row._rightRegion, { tip = "Cast Timer Settings",
                     title = "Cast Timer",
-                    disabled = Off, disabledTooltip = REQ,
+                    disabled = function() local c = C(); return Off() or (c and c.showTimer == false) end,
+                    disabledTooltip = function() return Off() and REQ or "Show Cast Timer" end,
                     rows = {
                         { type="slider", label="Text Size", min=6, max=22, step=1,
                           get=function() local c = C(); return (c and c.timerSize) or 11 end,
@@ -1817,21 +1846,14 @@ initFrame:SetScript("OnEvent", function(self)
                   disabled=Off, disabledTooltip=REQ,
                   tooltip="Show who the spell is being cast on, exactly like the nameplate cast bars.",
                   -- Per bar; an unset bar inherits the former shared toggle.
-                  getValue=function()
-                      local c = C()
-                      local v = c and c.showTarget
-                      if v == nil then
-                          local t = TFB()
-                          v = not t or t.showTarget ~= false
-                      end
-                      return v
-                  end,
-                  setValue=function(v) local c = C(); if c then c.showTarget = v and true or false; TFBRefresh() end end });  y = y - h
+                  getValue=TargetShown,
+                  setValue=function(v) local c = C(); if c then c.showTarget = v and true or false; TFBRefresh(); EllesmereUI:RefreshPage() end end });  y = y - h
             if not EllesmereUI._prebuilding then
                 -- Colors are shared by both bars; only the text size is per bar.
                 EllesmereUI.BuildInlineCog(row._rightRegion, { tip = "Spell Target Settings",
                     title = "Spell Target",
-                    disabled = Off, disabledTooltip = REQ,
+                    disabled = function() return Off() or not TargetShown() end,
+                    disabledTooltip = function() return Off() and REQ or "Show Spell Target" end,
                     rows = {
                         { type="toggle", label="Class Colored Names",
                           get=function() local t = TFB(); return not t or t.targetClassColor ~= false end,
@@ -2006,11 +2028,13 @@ initFrame:SetScript("OnEvent", function(self)
               disabled=SharedOff, disabledTooltip=SHARED_REQ,
               tooltip="Flash the cast bar and show \"Interrupted\" for a moment when the cast is interrupted.",
               getValue=function() local t = TFB(); return not t or t.interruptedFlash ~= false end,
-              setValue=function(v) local t = TFB(); if t then t.interruptedFlash = v and true or false; TFBRefresh() end end },
+              setValue=function(v) local t = TFB(); if t then t.interruptedFlash = v and true or false; TFBRefresh(); EllesmereUI:RefreshPage() end end },
             EllesmereUI.BlankRowCfg());  y = y - h
         if not EllesmereUI._prebuilding then
             EllesmereUI.BuildInlineCog(row._leftRegion, { tip = "Interrupted Flash Settings",
                 title = "Interrupted Flash",
+                disabled = function() local t = TFB(); return SharedOff() or (t and t.interruptedFlash == false) end,
+                disabledTooltip = function() return SharedOff() and SHARED_REQ or "Show Interrupted Flash Effect" end,
                 rows = {
                     { type="colorpicker", label="Flash Color",
                       get=function()

@@ -90,7 +90,7 @@ local function ShowTransformsPopup()
         local bg = popup:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0.077, 0.068, 0.058, 1)
-        EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, PP)
+        EllesmereUI.MakeRoundedBorder(popup, 1, 1, 1, 0.15, bg)
 
         local title = popup:CreateFontString(nil, "OVERLAY")
         title:SetFont(FONT, 22, "")
@@ -179,11 +179,12 @@ local function ShowTransformsPopup()
                 local boxBg = box:CreateTexture(nil, "BACKGROUND")
                 boxBg:SetAllPoints()
                 boxBg:SetColorTexture(0.114, 0.106, 0.099, 1)
-                row._boxBorder = EllesmereUI.MakeBorder(box, 0.4, 0.4, 0.4, 0.6, PP)
+                row._boxBorder = EllesmereUI.MakeRoundedBorder(box, 0.4, 0.4, 0.4, 0.6, boxBg)
                 local check = box:CreateTexture(nil, "ARTWORK")
                 check:SetPoint("TOPLEFT", box, "TOPLEFT", 3, -3)
                 check:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -3, 3)
                 check:SetColorTexture(EG.r, EG.g, EG.b, 1)
+                EllesmereUI.RoundBody(box, check, 1)
                 row._check = check
 
                 local lbl = row:CreateFontString(nil, "OVERLAY")
@@ -213,7 +214,7 @@ local function ShowTransformsPopup()
         local applyBg = applyBtn:CreateTexture(nil, "BACKGROUND")
         applyBg:SetAllPoints()
         applyBg:SetColorTexture(0.077, 0.068, 0.058, 0.92)
-        local applyBrd = EllesmereUI.MakeBorder(applyBtn, EG.r, EG.g, EG.b, 0.9, PP)
+        local applyBrd = EllesmereUI.MakeRoundedBorder(applyBtn, EG.r, EG.g, EG.b, 0.9, applyBg)
         local applyLbl = applyBtn:CreateFontString(nil, "OVERLAY")
         applyLbl:SetFont(FONT, 16, "")
         applyLbl:SetPoint("CENTER")
@@ -1053,6 +1054,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             PP.Point(fpsSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = fpsSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, fpsSwatch, "swatch")
 
             -- Class-colour swatch: live player class colour.
             local fpsClassSw, fpsUpdClass = EllesmereUI.BuildColorSwatch(
@@ -1066,6 +1068,7 @@ initFrame:SetScript("OnEvent", function(self)
             fpsClassSw:SetScript("OnClick", function() fpsSetMode("class") end)
             PP.Point(fpsClassSw, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = fpsClassSw
+            EllesmereUI.OrderInlineAddon(leftRgn, fpsClassSw, "swatch")
 
             local fpsTips = { { fpsClassSw, "Class Color" }, { fpsSwatch, "Custom Color" } }
             for _, e in ipairs(fpsTips) do
@@ -1256,6 +1259,7 @@ initFrame:SetScript("OnEvent", function(self)
             local durSwatch, durUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, durSwGet, durSwSet, nil, 20)
             PP.Point(durSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = durSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, durSwatch, "swatch")
 
             -- Disabled overlay for swatch when durability warning is off
             local durSwBlock = CreateFrame("Frame", nil, durSwatch)
@@ -1290,6 +1294,7 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetSize(26, 26)
             eyeBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = eyeBtn
+            EllesmereUI.OrderInlineAddon(leftRgn, eyeBtn, "preview")
             eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
             EllesmereUI.SetGlyphAlpha(eyeBtn, durOff() and 0.15 or 0.4)
             local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
@@ -1637,6 +1642,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             PP.Point(ssCustom, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = ssCustom
+            EllesmereUI.OrderInlineAddon(leftRgn, ssCustom, "swatch")
 
             -- Class-colour swatch: live player class colour.
             local ssClass, ssUpdClass = EllesmereUI.BuildColorSwatch(
@@ -1650,6 +1656,7 @@ initFrame:SetScript("OnEvent", function(self)
             ssClass:SetScript("OnClick", function() ssSetMode("class") end)
             PP.Point(ssClass, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = ssClass
+            EllesmereUI.OrderInlineAddon(leftRgn, ssClass, "swatch")
 
             -- Multicolored swatch (outermost): the per-stat palette, previewed
             -- by its first hue (crit gold).
@@ -1660,6 +1667,7 @@ initFrame:SetScript("OnEvent", function(self)
             ssMulti:SetScript("OnClick", function() ssSetMode("palette") end)
             PP.Point(ssMulti, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
             leftRgn._lastInline = ssMulti
+            EllesmereUI.OrderInlineAddon(leftRgn, ssMulti, "swatch")
 
             local ssTips = { { ssMulti, "Multicolored" }, { ssClass, "Class Color" }, { ssCustom, "Custom Color" } }
             for _, e in ipairs(ssTips) do
@@ -2199,6 +2207,7 @@ initFrame:SetScript("OnEvent", function(self)
             local chSwatch, chUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, chSwGet, chSwSet, true, 20)
             PP.Point(chSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
             leftRgn._lastInline = chSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, chSwatch, "swatch")
 
             local chSwBlock = CreateFrame("Frame", nil, chSwatch)
             chSwBlock:SetAllPoints()
@@ -2265,6 +2274,7 @@ initFrame:SetScript("OnEvent", function(self)
             local mcSwatch, mcUpdate = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, mcGet, mcSet, true, 20)
             PP.Point(mcSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
             leftRgn._lastInline = mcSwatch
+            EllesmereUI.OrderInlineAddon(leftRgn, mcSwatch, "swatch")
 
             local mcBlock = CreateFrame("Frame", nil, mcSwatch)
             mcBlock:SetAllPoints()
@@ -2291,12 +2301,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         ---------------------------------------------------------------------------
-        --  GROUP FINDER
+        --  GROUP FINDER (INSTANCES on WoW Forever)
         ---------------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "GROUP FINDER", y);  y = y - h
+        _, h = W:SectionHeader(parent, EllesmereUI.IS_FOREVER and "INSTANCES" or "GROUP FINDER", y);  y = y - h
 
         -- Auto Insert Keystone | Announce Instance Reset, then Quick Signup |
-        -- Persistent Signup Note. WoW Forever has no keystones and no premade
+        -- Persistent Signup Note, which Group Finder's settings page mirrors (the
+        -- same account-wide switches). WoW Forever has no keystones and no premade
         -- group list, so only Announce Instance Reset is built there.
         local autoKeyCfg = { type="toggle", text="Auto Insert Keystone",
               tooltip="Automatically inserts your key into the Font of Power.",

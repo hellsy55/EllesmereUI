@@ -353,6 +353,7 @@ initFrame:SetScript("OnEvent", function(self)
                 false, 20)
             PP.Point(bgSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = bgSwatch
+            EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() bgSwatchRefresh() end)
         end
         y = y - h
@@ -678,8 +679,6 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local ApplyWatches, ApplyProgress = EQT.ApplyQuestWatches, EQT.ApplyQuestProgress
-        local StandDown = EQT.QuestToolsStandDown
-        local GAMEPAD_TIP = "This option does not work with the Gamepad interface style."
         -- Quest Log Order is the base sort mode (a saved "default", the retired
         -- Blizzard order mode, reads as it).
         local function SortModeCfg()
@@ -688,10 +687,10 @@ initFrame:SetScript("OnEvent", function(self)
             return m
         end
         -- Section gate: Sort Quests, Filter Quests and Auto Track Zone Quests are
-        -- built only while Experimental Quest Tools is on (and usable); turning
+        -- built only while Experimental Quest Tools is on; turning
         -- it on or off rebuilds the page. The progress rows always show.
         -- The custom tracker needs no switch: it never edits the watch list.
-        local toolsOn = CUSTOM or (Cfg("questWatchExperimental") == true and not StandDown())
+        local toolsOn = CUSTOM or Cfg("questWatchExperimental") == true
         local function FilterRow(key, label)
             return { type="toggle", label=label,
                 get=function() return Cfg(key) or false end,
@@ -700,8 +699,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         local expCfg = { type="toggle", text="Experimental Quest Tools",
               tooltip="Unlocks Sort Quests, Filter Quests and Auto Track Zone Quests.",
-              disabled=function() return CUSTOM or StandDown() end,
-              disabledTooltip=CUSTOM and "Always on with the Custom Quest Tracker." or GAMEPAD_TIP,
+              disabled=function() return CUSTOM end,
+              disabledTooltip="Always on with the Custom Quest Tracker.",
               rawTooltip=CUSTOM or nil,
               getValue=function() return CUSTOM or Cfg("questWatchExperimental") == true end,
               setValue=function(v)
@@ -854,11 +853,15 @@ initFrame:SetScript("OnEvent", function(self)
         end
         EllesmereUI.BuildInlineCog(row._leftRegion, {
             title = "Auto Accept Settings",
+            disabled = function() return not Cfg("autoAccept") end,
+            disabledTooltip = "Auto Accept Quests",
             rows = acceptRows,
         })
 
         EllesmereUI.BuildInlineCog(row._rightRegion, {
             title = "Auto Turn In Settings",
+            disabled = function() return not Cfg("autoTurnIn") end,
+            disabledTooltip = "Auto Turn In Quests",
             rows = {
                 { type="toggle", label="Hold Shift to Enable",
                   get=function() return Cfg("autoTurnInShiftEnable") == true end,

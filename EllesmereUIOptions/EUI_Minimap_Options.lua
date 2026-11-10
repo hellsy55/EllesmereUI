@@ -500,6 +500,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PPl.Point(accentSwatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
             -- Class-colour swatch (to the left of accent): live player class colour.
             local classSwatch, updateClass = EllesmereUI.BuildColorSwatch(
@@ -519,6 +520,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PPl.Point(classSwatch, "RIGHT", rgn._lastInline, "LEFT", -8, 0)
             rgn._lastInline = classSwatch
+            EllesmereUI.OrderInlineAddon(rgn, classSwatch, "swatch")
 
             -- Custom-colour swatch (outermost): stored custom colour.
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(
@@ -554,6 +556,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PPl.Point(customSwatch, "RIGHT", rgn._lastInline, "LEFT", -8, 0)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             accentSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color") end)
             accentSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
@@ -1683,7 +1686,7 @@ initFrame:SetScript("OnEvent", function(self)
             })
         end
 
-        -- Show on FPS/MS Hover | Show on Clock Hover
+        -- Show on FPS/MS Hover | Difficulty Position (+ size/offset cog)
         local HOVER_TT_VALUES = { none = "None", lockouts = "Instance Lockouts", vault = "Great Vault" }
         local HOVER_TT_ORDER = { "none", "lockouts", "vault" }
         -- No Great Vault on WoW Forever: the entry is dropped and a saved "vault"
@@ -1692,7 +1695,11 @@ initFrame:SetScript("OnEvent", function(self)
             HOVER_TT_VALUES.vault = nil
             HOVER_TT_ORDER = { "none", "lockouts" }
         end
-        _, h = W:DualRow(parent, y,
+        local function DiffTextOn()
+            local m = MinimapDB(); return (m and m.diffTextEnabled) or false
+        end
+        local diffRow
+        diffRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Show on FPS/MS Hover",
               values = HOVER_TT_VALUES, order = HOVER_TT_ORDER,
               disabled=FpsOff,
@@ -1707,6 +1714,27 @@ initFrame:SetScript("OnEvent", function(self)
                 m.fpsHoverTooltip = v
                 RefreshMinimap()
               end },
+            { type="dropdown", text="Difficulty Position",
+              values = MAP_POS_VALUES, order = MAP_POS_ORDER,
+              disabled=function() return not DiffTextOn() end,
+              disabledTooltip="Show Instance Difficulty as Text",
+              getValue=function() local m = MinimapDB(); return m and m.diffTextPosition or "topLeft" end,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.diffTextPosition = v
+                RefreshMinimap()
+              end }
+        );  y = y - h
+        -- Show Instance Difficulty as Text | Show on Clock Hover
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Show Instance Difficulty as Text",
+              getValue=DiffTextOn,
+              setValue=function(v)
+                local m = MinimapDB(); if not m then return end
+                m.diffTextEnabled = v and true or false
+                RefreshMinimap()
+                EllesmereUI:RefreshPage()
+              end },
             { type="dropdown", text="Show on Clock Hover",
               values = HOVER_TT_VALUES, order = HOVER_TT_ORDER,
               disabled=function() return ClockMode() == "none" end,
@@ -1719,32 +1747,6 @@ initFrame:SetScript("OnEvent", function(self)
               setValue=function(v)
                 local m = MinimapDB(); if not m then return end
                 m.clockHoverTooltip = v
-              end }
-        );  y = y - h
-
-        -- Show Instance Difficulty as Text | Difficulty Position (+ size/offset cog)
-        local function DiffTextOn()
-            local m = MinimapDB(); return (m and m.diffTextEnabled) or false
-        end
-        local diffRow
-        diffRow, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Instance Difficulty as Text",
-              getValue=DiffTextOn,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.diffTextEnabled = v and true or false
-                RefreshMinimap()
-                EllesmereUI:RefreshPage()
-              end },
-            { type="dropdown", text="Difficulty Position",
-              values = MAP_POS_VALUES, order = MAP_POS_ORDER,
-              disabled=function() return not DiffTextOn() end,
-              disabledTooltip="Show Instance Difficulty as Text",
-              getValue=function() local m = MinimapDB(); return m and m.diffTextPosition or "topLeft" end,
-              setValue=function(v)
-                local m = MinimapDB(); if not m then return end
-                m.diffTextPosition = v
-                RefreshMinimap()
               end }
         );  y = y - h
         -- Inline cog on Difficulty Position for text size + X/Y offset
@@ -1858,6 +1860,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(accentSwatch, "RIGHT", cbDD, "LEFT", -12, 0)
             rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
 
             -- Custom swatch (to the left of accent): stored custom colour.
             local customSwatch, updateCustom = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
@@ -1885,6 +1888,7 @@ initFrame:SetScript("OnEvent", function(self)
             end)
             PP.Point(customSwatch, "RIGHT", accentSwatch, "LEFT", -8, 0)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             accentSwatch:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color") end)
             accentSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)

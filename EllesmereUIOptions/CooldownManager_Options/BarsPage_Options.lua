@@ -94,7 +94,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             popup:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
             popup:EnableMouse(true)
             local bg = popup:CreateTexture(nil, "BACKGROUND"); bg:SetAllPoints(); bg:SetColorTexture(0.077, 0.068, 0.058, 1)
-            EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15, PP)
+            P.brd = EllesmereUI.MakeRoundedBorder(popup, 1, 1, 1, 0.15, bg)
             local titleFs = EllesmereUI.MakeFont(popup, 15, nil, 1, 1, 1, 1)
             titleFs:SetPoint("TOP", popup, "TOP", 0, -14); titleFs:SetText("Sync From")
             local subFs = EllesmereUI.MakeFont(popup, 11, nil, 1, 1, 1, 0.45)
@@ -191,6 +191,8 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             local visH = math.min(listH, MAX_LIST_H)
             P.scroll:SetHeight(visH)
             P.popup:SetHeight(110 + visH)
+            -- Rebuilt while shown (search typing): refit the outline's bottom edge.
+            P.brd:Fit()
             P.scroll:SetVerticalScroll(0)
             if P.updateThumb then P.updateThumb() end
         end
@@ -994,6 +996,14 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
         if applyAll and #keys > 1 then
             opts.multiApply = {
                 getElementState = GetCDMApplyState,
+                getElementOptionState = function(key)
+                    local previous = syncTargetFilter
+                    syncTargetFilter = { [key] = true }
+                    local ok, same = pcall(opts.isSynced)
+                    syncTargetFilter = previous
+                    if not ok then return nil end
+                    return same and "Matching" or "Different"
+                end,
                 elementKeys = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return barKey end,
@@ -1135,24 +1145,48 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                                 elementKeys = members,
                                 elementLabels = labels,
                                 getCurrentKey = function() return barKey end,
-                                getElementOptionState = ({
-                                    ["Bar Background"] = true,
-                                    ["Suppress GCD"] = true,
-                                    ["Only Show Numbers"] = true,
-                                    ["Charges/Stacks Only (No Icon)"] = true,
-                                    ["Hide Charge Count at 0"] = true,
-                                    ["Mirror Key Presses"] = true,
-                                    ["Vertical Orientation"] = true,
-                                    ["Always Show Buffs"] = true,
-                                    ["Keep Buffs in Same Place"] = true,
-                                })[label] and function(key)
+                                getElementOptionState = function(key)
                                     local pp = DB()
                                     if not pp or not pp.cdmBars then return nil end
+                                    local src = BD()
+                                    if not src then return nil end
                                     for _, dest in ipairs(pp.cdmBars.bars) do
-                                        if dest.key == key then return dest[fields[1]] == true end
+                                        if dest.key == key then
+                                            local toggleRows = {
+                                                ["Bar Background"] = true,
+                                                ["Suppress GCD"] = true,
+                                                ["Only Show Numbers"] = true,
+                                                ["Charges/Stacks Only (No Icon)"] = true,
+                                                ["Hide Charge Count at 0"] = true,
+                                                ["Show Tooltip on Hover"] = true,
+                                                ["Show Keybind"] = true,
+                                                ["Mirror Key Presses"] = true,
+                                                ["Vertical Orientation"] = true,
+                                                ["Always Show Buffs"] = true,
+                                                ["Keep Buffs in Same Place"] = true,
+                                            }
+                                            if toggleRows[label] then
+                                                return dest[fields[1]] == true
+                                            end
+                                            for _, field in ipairs(fields) do
+                                                local a, b = src[field], dest[field]
+                                                if type(a) == "table" or type(b) == "table" then
+                                                    if type(a) ~= type(b) then return "Different" end
+                                                    for k, value in pairs(a) do
+                                                        if b[k] ~= value then return "Different" end
+                                                    end
+                                                    for k, value in pairs(b) do
+                                                        if a[k] ~= value then return "Different" end
+                                                    end
+                                                elseif a ~= b then
+                                                    return "Different"
+                                                end
+                                            end
+                                            return "Matching"
+                                        end
                                     end
                                     return nil
-                                end or nil,
+                                end,
                                 onApply = CopyTo,
                             },
                         })
@@ -1788,6 +1822,8 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                 function() end,  -- read-only display, no picker
                 false, 20)
             PP.Point(accentSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+            rgn._lastInline = accentSwatch
+            EllesmereUI.OrderInlineAddon(rgn, accentSwatch, "swatch")
             accentSwatch:SetScript("OnClick", function()
                 BD().focusReminderUseAccent = true
                 if ns.RefreshFocusReminders then ns.RefreshFocusReminders() end
@@ -1834,6 +1870,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             end)
             customBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             rgn._lastInline = customSwatch
+            EllesmereUI.OrderInlineAddon(rgn, customSwatch, "swatch")
 
             -- Disable both swatches + cog when Focus Text Reminders toggle is off
             local enableBlock = CreateFrame("Frame", nil, customSwatch)
@@ -3178,6 +3215,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             false, 20)
         PP.Point(durSwatch, "RIGHT", leftRgn._lastInline or ctrl, "LEFT", -8, 0)
         leftRgn._lastInline = durSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, durSwatch, "swatch")
 
         local durBlock = CreateFrame("Frame", nil, durSwatch)
         durBlock:SetAllPoints(); durBlock:SetFrameLevel(durSwatch:GetFrameLevel() + 10); durBlock:EnableMouse(true)
@@ -3312,6 +3350,7 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
             false, 20)
         PP.Point(scSwatch, "RIGHT", rightRgn._lastInline or ctrl, "LEFT", -8, 0)
         rightRgn._lastInline = scSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, scSwatch, "swatch")
 
         local scBlock = CreateFrame("Frame", nil, scSwatch)
         scBlock:SetAllPoints(); scBlock:SetFrameLevel(scSwatch:GetFrameLevel() + 10); scBlock:EnableMouse(true)
@@ -3696,6 +3735,9 @@ local function BuildCDMBarsPage(pageName, parent, yOffset)
                     hasClassColor = true,
                     onChange = function() EllesmereUI:RefreshPage() end,
                     disabled = rotColorOff,
+                    disabledTooltip = function()
+                        return EllesmereUI.DisabledTooltip("Blizzard Default", "disabled")
+                    end,
                     disabledAlpha = 0.15,
                 })
             PP.Point(classSwatch, "RIGHT", colorRgn, "RIGHT", -20, 0)

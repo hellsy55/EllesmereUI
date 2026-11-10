@@ -274,6 +274,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local castBgSwatch, castBgUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, castBgColorGet, castBgColorSet, nil, 20)
         PP.Point(castBgSwatch, "RIGHT", leftRgn._control, "LEFT", -12, 0)
         leftRgn._lastInline = castBgSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, castBgSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() castBgUpdateSwatch() end)
         if ns.NP_BlizzOnly() then EllesmereUI.BlizzStyle.BlockInline("nameplates", castBgSwatch) end
     end
@@ -292,6 +293,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local cbSwatch, cbUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, castBorderColorGet, castBorderColorSet, nil, 20)
         PP.Point(cbSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
         rightRgn._lastInline = cbSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, cbSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() cbUpdateSwatch() end)
         EllesmereUI.BlizzStyle.BlockInline("nameplates", cbSwatch)
     end
@@ -366,6 +368,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local ctSwatch, ctUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, ctColorGet, ctColorSet, nil, 20)
         PP.Point(ctSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         leftRgn._lastInline = ctSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, ctSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() ctUpdateSwatch() end)
     end
 
@@ -469,6 +472,7 @@ local function BuildDisplayBars(parent, y, ctx)
                 end, nil, 20)
             PP.Point(swatch, "RIGHT", ctrl, "LEFT", -12, 0)
             rightRgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rightRgn, swatch, "swatch")
             swatch:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, "Interrupt Ready Mid-Cast") end)
             swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             EllesmereUI.RegisterWidgetRefresh(function()
@@ -479,6 +483,7 @@ local function BuildDisplayBars(parent, y, ctx)
             end)
             swatch:SetAlpha(midColorOff() and 0.15 or 1)
             swatch:EnableMouse(not midColorOff())
+            EllesmereUI.ExplainDisabledSwatch(swatch, midColorOff, "Tick + Bar")
         end
     end
 
@@ -670,6 +675,7 @@ local function BuildDisplayBars(parent, y, ctx)
                     end, nil, 20)
                 PP.Point(swatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -12, 0)
                 rgn._lastInline = swatch
+                EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 swatch:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, "Interrupted Flash Colour") end)
                 swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
                 -- Blizzard Style uses the stock interrupted fill art, so the flash colour is
@@ -684,6 +690,14 @@ local function BuildDisplayBars(parent, y, ctx)
                     updateSwatch()
                 end)
                 ApplyFlashSwatchState()
+                EllesmereUI.ExplainDisabledSwatch(swatch,
+                    function() return flashOff() or ns.NP_BlizzOnly() end,
+                    function()
+                        if ns.NP_BlizzOnly() then
+                            return EllesmereUI.DisabledTooltip(EllesmereUI.BlizzStyle.Label("nameplates"), "disabled")
+                        end
+                        return EllesmereUI.DisabledTooltip("Show Interrupted Flash Effect")
+                    end)
             end
         end
     end
@@ -870,6 +884,7 @@ local function BuildDisplayBars(parent, y, ctx)
             end, nil, 20)
         PP.Point(swatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         leftRgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(leftRgn, swatch, "swatch")
         -- Tooltip so the swatch's purpose is clear (shown while interactive, i.e. Border Color on).
         swatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(swatch, "Border Color") end)
         swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
@@ -881,6 +896,8 @@ local function BuildDisplayBars(parent, y, ctx)
         end
         EllesmereUI.RegisterWidgetRefresh(refreshTargetBorderSwatch)
         refreshTargetBorderSwatch()
+        EllesmereUI.ExplainDisabledSwatch(swatch,
+            function() return not ns.GetTargetGlowBorderColor() end, "Border Color")
 
         -- Inline Glow Color swatch: edits targetGlowColor (default the signature blue), tints the EUI background glow; dimmed+non-interactive unless EUI Glow is checked.
         local glowSwatch, updateGlowSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5,
@@ -892,6 +909,7 @@ local function BuildDisplayBars(parent, y, ctx)
             end, nil, 20)
         PP.Point(glowSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         leftRgn._lastInline = glowSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, glowSwatch, "swatch")
         glowSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(glowSwatch, "Glow Color") end)
         glowSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         refreshTargetGlowSwatch = function()
@@ -902,6 +920,8 @@ local function BuildDisplayBars(parent, y, ctx)
         end
         EllesmereUI.RegisterWidgetRefresh(refreshTargetGlowSwatch)
         refreshTargetGlowSwatch()
+        EllesmereUI.ExplainDisabledSwatch(glowSwatch,
+            function() return not ns.GetTargetGlowEllesmereUI() end, "EUI Glow")
     end
 
     -- Inline cog (arrow scale), beside the control; the swatches sit left of it
@@ -956,6 +976,8 @@ local function BuildDisplayBars(parent, y, ctx)
                 UpdatePreview(); refreshArrowSwatches()
             end, nil, 20)
         PP.Point(customSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
+        rightRgn._lastInline = customSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, customSwatch, "swatch")
         local origCustomClick = customSwatch:GetScript("OnClick")
         customSwatch:SetScript("OnClick", function(self, ...)
             if arrowOff() then return end
@@ -974,6 +996,7 @@ local function BuildDisplayBars(parent, y, ctx)
             function() end, nil, 20)
         PP.Point(classSwatch, "RIGHT", customSwatch, "LEFT", -8, 0)
         rightRgn._lastInline = classSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, classSwatch, "swatch")
         classSwatch:SetScript("OnClick", function()
             if arrowOff() then return end
             DB().targetArrowClassColor = true
@@ -996,6 +1019,8 @@ local function BuildDisplayBars(parent, y, ctx)
         eyeBtn:SetSize(26, 26)
         eyeBtn:SetPoint("RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
+        leftRgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(leftRgn, eyeBtn, "preview")
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
         eyeTex:SetAllPoints()
@@ -1115,6 +1140,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local off = isTargetColorDisabled()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch, isTargetColorDisabled, "Enable Target Color")
     end
 
     -- Inline Focus Color swatch
@@ -1137,6 +1163,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local off = isFocusColorDisabled()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch, isFocusColorDisabled, "Enable Focus Color")
     end
 
     -- Target Texture ---- Focus Texture
@@ -1242,6 +1269,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, targetTexColorGet, targetTexColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         leftRgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(leftRgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = isTargetTextureNone() or isTargetNoTint()
             swatch:SetAlpha(off and 0.15 or 1)
@@ -1251,6 +1279,12 @@ local function BuildDisplayBars(parent, y, ctx)
         local off = isTargetTextureNone() or isTargetNoTint()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch,
+            function() return isTargetTextureNone() or isTargetNoTint() end,
+            function()
+                if isTargetTextureNone() then return EllesmereUI.DisabledTooltip("a Target Texture") end
+                return EllesmereUI.DisabledTooltip("No Tint", "disabled")
+            end)
     end
 
     -- Inline Focus Texture cog (Opacity + No Tint), beside the control; the swatch sits left of it
@@ -1304,6 +1338,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, focusTexColorGet, focusTexColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
         rightRgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rightRgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = isFocusTextureNone() or isFocusNoTint()
             swatch:SetAlpha(off and 0.15 or 1)
@@ -1313,6 +1348,12 @@ local function BuildDisplayBars(parent, y, ctx)
         local off = isFocusTextureNone() or isFocusNoTint()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch,
+            function() return isFocusTextureNone() or isFocusNoTint() end,
+            function()
+                if isFocusTextureNone() then return EllesmereUI.DisabledTooltip("a Focus Texture") end
+                return EllesmereUI.DisabledTooltip("No Tint", "disabled")
+            end)
     end
 
     -- Target Preview ---- Focus Preview
@@ -1549,6 +1590,7 @@ local function BuildDisplayBars(parent, y, ctx)
             end, nil, 20)
         PP.Point(hvBSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
         rightRgn._lastInline = hvBSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, hvBSwatch, "swatch")
         hvBSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(hvBSwatch, "Border Color") end)
         hvBSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         refreshHoverBorderSwatch = function()
@@ -1559,6 +1601,8 @@ local function BuildDisplayBars(parent, y, ctx)
         end
         EllesmereUI.RegisterWidgetRefresh(refreshHoverBorderSwatch)
         refreshHoverBorderSwatch()
+        EllesmereUI.ExplainDisabledSwatch(hvBSwatch,
+            function() return not ns.GetHoverGlowBorderColor() end, "Border Color")
 
         -- Inline Glow Color swatch: dimmed unless EUI Glow is checked.
         local hvGSwatch, hvUpdateGSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5,
@@ -1569,6 +1613,7 @@ local function BuildDisplayBars(parent, y, ctx)
             end, nil, 20)
         PP.Point(hvGSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
         rightRgn._lastInline = hvGSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, hvGSwatch, "swatch")
         hvGSwatch:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(hvGSwatch, "Glow Color") end)
         hvGSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         refreshHoverGlowSwatch = function()
@@ -1579,6 +1624,8 @@ local function BuildDisplayBars(parent, y, ctx)
         end
         EllesmereUI.RegisterWidgetRefresh(refreshHoverGlowSwatch)
         refreshHoverGlowSwatch()
+        EllesmereUI.ExplainDisabledSwatch(hvGSwatch,
+            function() return not ns.GetHoverGlowEllesmereUI() end, "EUI Glow")
 
         -- Inline Hover Texture cog (Full alpha on empty part of bar), left of the dropdown; disabled while set to None.
         local leftRgn = hoverRow._leftRegion
@@ -1794,6 +1841,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, colorGet, colorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = borderOff()
             swatch:SetAlpha(off and 0.15 or 1)
@@ -1803,6 +1851,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local off = borderOff()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch, borderOff, "Border")
     end
     end   -- close Class Resource hidden-while-disabled gate
 
@@ -1877,6 +1926,7 @@ local function BuildDisplayBars(parent, y, ctx)
             local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(region, region:GetFrameLevel() + 5, colorGet, colorSet, nil, 20)
             PP.Point(swatch, "RIGHT", region._lastInline or region._control, "LEFT", -8, 0)
             region._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(region, swatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
         end
 
@@ -1946,6 +1996,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local asSwatch, asUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, asColorGet, asColorSet, nil, 20)
         PP.Point(asSwatch, "RIGHT", rightRgn._lastInline or rightRgn._control, "LEFT", -8, 0)
         rightRgn._lastInline = asSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, asSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() asUpdateSwatch() end)
         end
     end
@@ -2038,6 +2089,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local snSwatch, snUpdateSwatch = EllesmereUI.BuildColorSwatch(leftRgn, leftRgn:GetFrameLevel() + 5, snColorGet, snColorSet, nil, 20)
         PP.Point(snSwatch, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
         leftRgn._lastInline = snSwatch
+        EllesmereUI.OrderInlineAddon(leftRgn, snSwatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function() snUpdateSwatch() end)
 
         -- RIGHT: Spell Target inline double swatch (custom + class colored)
@@ -2077,6 +2129,8 @@ local function BuildDisplayBars(parent, y, ctx)
         end
         local ccSwatch, ccUpdate = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, ccGet, function() end, nil, 20)
         PP.Point(ccSwatch, "RIGHT", rightRgn._lastInline or ctrl, "LEFT", -8, 0)
+        rightRgn._lastInline = ccSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, ccSwatch, "swatch")
         ccSwatch:SetScript("OnClick", function()
             DB().castTargetClassColor = true
             for _, plate in pairs(plates) do plate:UpdateHealth() end
@@ -2096,6 +2150,7 @@ local function BuildDisplayBars(parent, y, ctx)
         local stSwatch, stUpdate = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, stColorGet, stColorSet, nil, 20)
         PP.Point(stSwatch, "RIGHT", ccSwatch, "LEFT", -9, 0)
         rightRgn._lastInline = stSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, stSwatch, "swatch")
         stSwatch._eabOrigClick = stSwatch:GetScript("OnClick")
         stSwatch:SetScript("OnClick", function(self)
             local db = DB()

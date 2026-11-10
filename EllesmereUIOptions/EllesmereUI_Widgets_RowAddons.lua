@@ -339,6 +339,64 @@ end
 --   0.15 disabled (the button at 0.3). Disabled blocks the click and shows the requirement tooltip. A button that paints its own states, opts.paint(btn, off, hot),
 --   draws opts.icon bare instead, 26 square and with no dot (the unlock jump).
 -- A cog with a dot is the one its region's writes light (the cog notice above; the last such cog built on the region).
+-- Keep every supported inline control in a deterministic order, regardless
+-- of how many are present or in which order a page builds them.  The chain
+-- runs from the host control toward the left, so higher priorities sit closer
+-- to the host (on the right).  Unrelated controls start a new chain.
+local function OrderInlineControl(region, frame, priority, gap, previous)
+    local group = region._euiInlineOrder
+    -- Ignore a second registration before checking the current anchor: the
+    -- frame's own anchor is no longer the left edge of the entire group.
+    if group then
+        for _, item in ipairs(group.items) do
+            if item.frame == frame then return end
+        end
+    end
+    if not group or group.leftmost ~= previous then
+        group = { anchor = previous or region._control or region, items = {} }
+        region._euiInlineOrder = group
+    end
+    local items = group.items
+    items[#items + 1] = { frame = frame, priority = priority,
+        gap = gap or 8, order = #items + 1 }
+    table.sort(items, function(a, b)
+        if a.priority == b.priority then return a.order < b.order end
+        return a.priority > b.priority
+    end)
+    local anchor = group.anchor
+    for _, item in ipairs(items) do
+        item.frame:ClearAllPoints()
+        PP.Point(item.frame, "RIGHT", anchor, "LEFT", -item.gap, 0)
+        anchor = item.frame
+    end
+    group.leftmost = anchor
+    region._lastInline = anchor
+end
+
+-- Register inline glyphs and swatches built directly by module pages.
+-- Only RIGHT-to-LEFT chains are reordered; unrelated/manual layouts keep
+-- their original anchors. A call is safe even for a single control.
+function EllesmereUI.OrderInlineAddon(region, frame, role)
+    if not (region and frame and frame.GetPoint) then return end
+    local priority = role == "swatch" and 0 or role == "preview" and 1
+        or role == "directions" and 2 or role == "resize" and 3
+        or role == "settings" and 4 or role == "more" and 5
+    if priority == nil then return end
+    local point, previous, relativePoint, offset = frame:GetPoint(1)
+    if point ~= "RIGHT" or relativePoint ~= "LEFT" then return end
+    if previous == region then return end
+    OrderInlineControl(region, frame, priority, -offset, previous)
+end
+
+function EllesmereUI.OrderInlineIcon(region, frame, icon)
+    local role = (icon == EllesmereUI.EYE_VISIBLE_ICON or icon == EllesmereUI.EYE_INVISIBLE_ICON) and "preview"
+        or icon == EllesmereUI.DIRECTIONS_ICON and "directions"
+        or icon == EllesmereUI.RESIZE_ICON and "resize"
+        or icon == EllesmereUI.COGS_ICON and "settings"
+        or (icon == nil or icon == EllesmereUI.PANEL_MORE_ICON) and "more"
+    if role then EllesmereUI.OrderInlineAddon(region, frame, role) end
+end
+
 local function BuildInlineCog(rgn, opts)
     if EllesmereUI._prebuilding then return end
     -- A disabled cog with no tooltip of its own explains itself with its host control's requirement.
@@ -352,8 +410,22 @@ local function BuildInlineCog(rgn, opts)
     local h = opts.size or (paint and 26 or 30)
     local btn = CreateFrame("Button", nil, rgn)
     btn:SetSize((paint or iconOnly) and h or math.floor(h * 0.8 + 0.5), h)
-    PP.Point(btn, "RIGHT", opts.anchorTo or (opts.chain ~= false and rgn._lastInline) or rgn._control or rgn, opts.relPoint or "LEFT", -(opts.gap or 8), 0)
+    local previousInline = rgn._lastInline
+    PP.Point(btn, "RIGHT", opts.anchorTo or (opts.chain ~= false and previousInline) or rgn._control or rgn, opts.relPoint or "LEFT", -(opts.gap or 8), 0)
     if opts.chain ~= false then rgn._lastInline = btn end
+    -- Swatch, Preview, Directions, Resize, Settings, More (left to right).
+    -- An unknown icon or a custom anchor remains outside the ordered group.
+    local icon = opts.icon
+    local priority = opts.orderPriority or ((icon == EllesmereUI.EYE_VISIBLE_ICON or icon == EllesmereUI.EYE_INVISIBLE_ICON) and 1
+        or icon == EllesmereUI.DIRECTIONS_ICON and 2
+        or icon == EllesmereUI.RESIZE_ICON and 3
+        or icon == EllesmereUI.COGS_ICON and 4
+        or (icon == nil or icon == EllesmereUI.PANEL_MORE_ICON) and 5)
+    if priority and opts.chain ~= false
+        and (not opts.anchorTo or opts.anchorTo == rgn._control)
+        and (not opts.relPoint or opts.relPoint == "LEFT") then
+        OrderInlineControl(rgn, btn, priority, opts.gap, previousInline)
+    end
     btn:SetFrameLevel(rgn:GetFrameLevel() + 5)
     local tex, L, note, id, hostCfg
     if paint or iconOnly then
@@ -422,6 +494,7 @@ local function BuildInlineCog(rgn, opts)
     local function State(hover)
         local off = opts.disabled and opts.disabled()
         local pf = type(show) == "table" and show._popupFrame
+        if off and pf and pf:IsShown() and pf._owner == btn then pf:Hide() end
         local open = (opts.isOpen and opts.isOpen(btn)) or (pf and pf:IsShown() and pf._owner == btn)
         local hot = open
         if not hot then
@@ -461,6 +534,8 @@ local function BuildInlineCog(rgn, opts)
         if opts.tip then HideWidgetTooltip() end
     end)
     btn:SetScript("OnClick", function(self)
+        -- Re-check immediately; an out-of-date overlay must never open a disabled popup.
+        if opts.disabled and opts.disabled() then State(); return end
         -- A cog clicked while the cog tip is up: the tip has done its job.
         -- Opened once, its dot is gone for good.
         if not paint and not iconOnly then
@@ -550,7 +625,7 @@ end
 -- the panel still shows) plus the auto-select key and the flash flag the end
 -- of the open animation reads. In combat nothing changes and the red chat line
 -- explains. Returns whether the open was requested.
-function EllesmereUI.OpenUnlockModeAt(key)
+function EllesmereUI.OpenUnlockModeAt(key, alsoFlashKey)
     if InCombatLockdown() then
         EllesmereUI.PrintError("Cannot enter Unlock Mode during combat.")
         return false
@@ -561,6 +636,7 @@ function EllesmereUI.OpenUnlockModeAt(key)
     EllesmereUI._unlockReturnPage = EllesmereUI:GetActivePage()
     EllesmereUI._unlockAutoSelectKey = key
     EllesmereUI._unlockAutoSelectFlash = true
+    EllesmereUI._unlockAutoSelectAlsoFlashKey = alsoFlashKey
     C_Timer.After(0, EllesmereUI._openUnlockMode)
     return true
 end
@@ -569,7 +645,8 @@ end
 -- (BuildInlineCog's placement, chain, alphas, tooltip and disabled block) that
 -- wears the unlocked-lock glyph and whose click is OpenUnlockModeAt(opts.key).
 -- opts: key (the unlock element to select: a string, or a function returning
--- it at the click, for a page whose selector picks the element), tooltip
+-- it at the click, for a page whose selector picks the element), alsoFlashKey
+-- (optional second mover to highlight without selecting it), tooltip
 -- ("Move in Unlock Mode"), disabled + disabledTooltip/rawTooltip/requireState,
 -- size, gap, anchorTo, relPoint, chain (as BuildInlineCog). Returns the
 -- button; nil during the search prebuild.
@@ -590,7 +667,9 @@ function EllesmereUI.BuildUnlockJump(rgn, opts)
         show = function()
             local k = key
             if type(k) == "function" then k = k() end
-            if k then EllesmereUI.OpenUnlockModeAt(k) end
+            local also = opts.alsoFlashKey
+            if type(also) == "function" then also = also() end
+            if k then EllesmereUI.OpenUnlockModeAt(k, also) end
         end,
         disabled = opts.disabled, disabledTooltip = opts.disabledTooltip,
         rawTooltip = opts.rawTooltip, requireState = opts.requireState,
@@ -610,7 +689,8 @@ end
 -- first section of that element's settings (owner 2026-10-21): a page whose
 -- selector picks the element (an action bar, a unit frame, a CDM bar) passes
 -- a key FUNCTION that reads the selection, so the click highlights that one.
--- opts: key (string or function), tooltip, disabled + disabledTooltip/
+-- opts: key (string or function), alsoFlashKey (string or function), tooltip,
+-- disabled + disabledTooltip/
 -- rawTooltip/requireState (the element's own enable, where it has one), size
 -- (20). Returns the button; nil during the search prebuild or without a
 -- titled header.
@@ -620,7 +700,7 @@ function EllesmereUI.BuildSectionUnlockJump(hdr, opts)
     if not label then return end
     local size = opts.size or 20
     local btn = EllesmereUI.BuildUnlockJump(hdr, {
-        key = opts.key, tooltip = opts.tooltip,
+        key = opts.key, alsoFlashKey = opts.alsoFlashKey, tooltip = opts.tooltip,
         disabled = opts.disabled, disabledTooltip = opts.disabledTooltip,
         rawTooltip = opts.rawTooltip, requireState = opts.requireState,
         size = size, chain = false, anchorTo = label, relPoint = "RIGHT", gap = 0,
@@ -907,13 +987,12 @@ local function BuildInlineSwatches(region, swatches, opts)
     if EllesmereUI._prebuilding then return end
     opts = opts or {}
     local level = region:GetFrameLevel() + 3
-    local anchorTo = region._lastInline or region._control
     for i = #swatches, 1, -1 do
         local sc = swatches[i]
+        local previousInline = region._lastInline
         local swatch, updateSwatch = BuildColorSwatch(region, level, sc.getValue, sc.setValue, sc.hasAlpha, opts.size or 20)
-        PP.Point(swatch, "RIGHT", anchorTo, "LEFT", -8, 0)
-        anchorTo = swatch
-        region._lastInline = swatch
+        PP.Point(swatch, "RIGHT", previousInline or region._control or region, "LEFT", -8, 0)
+        OrderInlineControl(region, swatch, 0, 8, previousInline)
         if sc.gradient then PaintSwatchGradient(swatch, sc.gradient) end
         if sc.onClick then
             swatch._eabOrigClick = swatch:GetScript("OnClick")
@@ -935,7 +1014,7 @@ local function BuildInlineSwatches(region, swatches, opts)
             swatchBlock:SetScript("OnEnter", function()
                 local src = (sc.disabledTooltip ~= nil) and sc or opts
                 local tip = ResolveDisabledTip(src)
-                if tip then ShowWidgetTooltip(swatch, tip) end
+                ShowWidgetTooltip(swatch, tip or "This color is unavailable with the current settings.")
             end)
             swatchBlock:SetScript("OnLeave", function() HideWidgetTooltip() end)
             local function UpdateSwatchDisabled()
@@ -1011,6 +1090,51 @@ local function DependentSetValue(pred, fn)
 end
 
 EllesmereUI.BuildInlineToggle    = BuildInlineToggle
+-- Give a blocked swatch its own hover target even if its Button has had
+-- mouse input disabled. The overlay is a sibling, so parent mouse state does
+-- not prevent the explanation from appearing. No polling or timers.
+function EllesmereUI.ExplainDisabledSwatch(swatch, disabled, requirement)
+    local parent = swatch:GetParent()
+    local hit = CreateFrame("Frame", nil, parent)
+    hit:SetAllPoints(swatch)
+    hit:SetFrameLevel(swatch:GetFrameLevel() + 10)
+    hit:EnableMouse(true)
+    hit:SetScript("OnEnter", function()
+        if not disabled() then return end
+        local tip = requirement
+        if type(tip) == "function" then
+            tip = tip()  -- a conditional, already formatted requirement
+        elseif tip then
+            tip = EllesmereUI.DisabledTooltip(tip)
+        elseif swatch._disabledTooltip then
+            tip = EllesmereUI.DisabledTooltip(swatch._disabledTooltip)
+        end
+        if tip then ShowWidgetTooltip(swatch, tip) end
+    end)
+    hit:SetScript("OnLeave", HideWidgetTooltip)
+    local function Update()
+        local off = disabled() and true or false
+        if not off and hit:IsShown() then HideWidgetTooltip() end
+        hit:SetShown(off)
+    end
+    RegisterWidgetRefresh(Update)
+    Update()
+    return Update
+end
+
+-- A native color swatch beside a disabled master setting follows the same
+-- widget-refresh pass as its row and cog (no polling or new event hooks).
+function EllesmereUI.BindDisabledSwatch(swatch, disabled, requirement)
+    local function Update()
+        local off = disabled() and true or false
+        swatch:SetAlpha(off and 0.15 or 1)
+        swatch:EnableMouse(not off)
+    end
+    RegisterWidgetRefresh(Update)
+    Update()
+    if requirement then EllesmereUI.ExplainDisabledSwatch(swatch, disabled, requirement) end
+end
+
 EllesmereUI.BuildInlineCog       = BuildInlineCog
 EllesmereUI.BuildRowLabelMenu    = BuildRowLabelMenu
 EllesmereUI.AttachButtonMenu     = AttachButtonMenu
@@ -1100,6 +1224,13 @@ local function BuildCursorAnchorRow(opts)
     -- Inline cog: X + Y offsets
     BuildInlineCog(row._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
         title = "Cursor Offset",
+        disabled = function()
+            return (opts.disabledFn and opts.disabledFn()) or getData().anchorTo ~= "mouse"
+        end,
+        disabledTooltip = function()
+            if opts.disabledFn and opts.disabledFn() then return opts.disabledTip end
+            return "Anchor to Cursor"
+        end,
         rows = {
             { type = "slider", label = "X Offset", min = -125, max = 125, step = 1,
               get = function() return getData().anchorOffsetX or 0 end,

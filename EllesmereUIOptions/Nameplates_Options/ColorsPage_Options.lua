@@ -1369,7 +1369,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- Enemy Types | Modify Out of Combat
     local enemyTypesRow
     enemyTypesRow, h = W:DualRow(parent, y,
-        { type="multiSwatch", text="Enemy Types",
+        { type="multiSwatch", text="Enemy Types", swatchRightInset=32,
           swatches = {
             { tooltip = "Enemies",
               getValue = function() return DBColor("enemyInCombat") end,
@@ -1443,6 +1443,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
             return not v
         end
         EllesmereUI.BuildInlineCog(leftRgn, {
+            anchorTo = leftRgn, relPoint = "RIGHT", gap = 20, chain = false,
             title = "Enemy Colors",
             rows = {
                 { type="toggle", label="Simple Coloring When Not In M+",
@@ -1470,7 +1471,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- Neutral & Mini Enemies | Enable Quest Mob Color
     local neutralMiniRow
     neutralMiniRow, h = W:DualRow(parent, y,
-        { type="multiSwatch", text="Neutral & Mini Enemies",
+        { type="multiSwatch", text="Neutral & Mini Enemies", swatchRightInset=32,
           swatches = {
             { tooltip = "Neutral",
               getValue = function() return DBColor("neutral") end,
@@ -1524,12 +1525,14 @@ local function BuildColorsPage(pageName, parent, yOffset)
         local off = isQuestOff()
         swatch:SetAlpha(off and 0.15 or 1)
         swatch:EnableMouse(not off)
+        EllesmereUI.ExplainDisabledSwatch(swatch, isQuestOff, "Enable Quest Mob Color")
     end
 
     -- Inline cog on "Neutral & Mini Enemies": "Mini Coloring M+ Only" toggle. On (default) restricts the Mini Enemies color to 5-man dungeons; off applies it everywhere.
     if not EllesmereUI._prebuilding then
         local leftRgn = neutralMiniRow._leftRegion
         EllesmereUI.BuildInlineCog(leftRgn, {
+            anchorTo = leftRgn, relPoint = "RIGHT", gap = 20, chain = false,
             title = "Mini Enemies",
             rows = {
                 { type="toggle", label="Mini Coloring M+ Only",
@@ -1546,7 +1549,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
         })
     end
 
-    -- Color Casting Enemies | (blank, last row of the section)
+    -- Color Casting Enemies | Enemy Players Use Enemy Color
     local castingRow
     castingRow, h = W:DualRow(parent, y,
         { type="toggle", text="Color Casting Enemies",
@@ -1557,7 +1560,13 @@ local function BuildColorsPage(pageName, parent, yOffset)
             EllesmereUI:RefreshPage()
           end,
           tooltip="Enemies not colored as Spell Casters take the Interruptible Caster or Uninterruptible Caster color once they cast a spell that can or cannot be interrupted." },
-        EllesmereUI.BlankRowCfg());  y = y - h
+        { type="toggle", text="Enemy Players Use Enemy Color",
+          getValue=function() return DBVal("enemyPlayerEnemyColor") == true end,
+          setValue=function(v)
+            DB().enemyPlayerEnemyColor = v
+            RefreshAllPlates()
+          end,
+          tooltip="Enemy players take the Enemies color instead of their class color." });  y = y - h
 
     -- Inline cog with the mob types each applies to, then the Interruptible / Uninterruptible swatches.
     if not EllesmereUI._prebuilding then
@@ -1710,7 +1719,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- Row 2: Non-Tank Threat (left) ---- DPS: Show Special "No Aggro" Color (right)
     local nonTankRow
     nonTankRow, h = W:DualRow(parent, y,
-        { type="multiSwatch", text="Non-Tank Threat",
+        { type="multiSwatch", text="Non-Tank Threat", swatchRightInset=32,
           disabled=threatNever, disabledTooltip="Show Threat Colors",
           swatches = {
             { tooltip = "Has Aggro",
@@ -1744,6 +1753,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
     -- while the Near Aggro color is active (see EnsureNearAggroGlow).
     if not EllesmereUI._prebuilding then
         EllesmereUI.BuildInlineCog(nonTankRow._leftRegion, {
+            anchorTo = nonTankRow._leftRegion, relPoint = "RIGHT", gap = 20, chain = false,
             disabled = threatNever,
             disabledTooltip = "Show Threat Colors",
             title = "Near Aggro",
@@ -1814,6 +1824,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, dpsNoAggroColorGet, dpsNoAggroColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         LockThreatSwatch(swatch, updateSwatch, isDpsNoAggroDisabled, 'DPS: Show Special "No Aggro" Color')
     end
 
@@ -1900,6 +1911,7 @@ local function BuildColorsPage(pageName, parent, yOffset)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, tankAggroColorGet, tankAggroColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         LockThreatSwatch(swatch, updateSwatch, isTankHasAggroDisabled, 'Tank: Show Special "Has Aggro" Color')
     end
 

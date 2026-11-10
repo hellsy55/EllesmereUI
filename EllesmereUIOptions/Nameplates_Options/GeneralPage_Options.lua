@@ -241,6 +241,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
             function() end, nil, 20)
         PP.Point(classSwatch, "RIGHT", whiteSwatch, "LEFT", -8, 0)
         rightRgn._lastInline = classSwatch
+        EllesmereUI.OrderInlineAddon(rightRgn, classSwatch, "swatch")
         classSwatch:SetScript("OnClick", function()
             if nameOnlyOff() then return end
             ApplyClassColored(true)
@@ -400,6 +401,8 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         -- on the cog button; only the title rows need a gate of their own.
         local function npcCogOff() return npcOff() or nameOnlyOff() end
         local function titleOff() return DBVal("showNPCTitles") == false end
+        -- The overlay's marker follows the Raid Marker element, as the friendly plates' does.
+        local function markerOff() return (DBVal("raidMarkerPos") or defaults.raidMarkerPos) == "none" end
 
         local rgn = npcRow._leftRegion
         local btn = EllesmereUI.BuildInlineCog(rgn, {
@@ -423,6 +426,13 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                     DB().showNPCTitles = v and true or false
                     if ns.RefreshAllNPCOverlays then ns.RefreshAllNPCOverlays() end
                   end },
+                { type = "toggle", label = "Show Raid Marker",
+                  get = function() return DBVal("showNPCRaidMarker") ~= false end,
+                  set = function(v)
+                    DB().showNPCRaidMarker = v and true or false
+                    if ns.RefreshAllNPCOverlays then ns.RefreshAllNPCOverlays() end
+                  end,
+                  disabled = markerOff, disabledTooltip = "Raid Marker" },
                 { type = "slider", label = "Name Size", min = 6, max = 30, step = 1,
                   get = function() return DBVal("friendlyNPCNameSize") or defaults.friendlyNPCNameSize end,
                   set = function(v)
@@ -476,6 +486,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
             end, nil, 20)
         PP.Point(npcSwatch, "RIGHT", btn or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = npcSwatch
+        EllesmereUI.OrderInlineAddon(rgn, npcSwatch, "swatch")
         local origNpcClick = npcSwatch:GetScript("OnClick")
         npcSwatch:SetScript("OnClick", function(self, ...)
             if npcColorOff() then return end
@@ -613,6 +624,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         eyeBtn:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
         EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
         leftRgn._lastInline = eyeBtn
+        EllesmereUI.OrderInlineAddon(leftRgn, eyeBtn, "preview")
         local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
         eyeTex:SetAllPoints()
         local function RefreshEyeIcon()
@@ -1001,6 +1013,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         end)
         swatch:SetAlpha(hashLineOff() and 0.15 or 1)
         swatch:EnableMouse(not hashLineOff())
+        EllesmereUI.ExplainDisabledSwatch(swatch, hashLineOff, "Hash Line")
     end
 
     -- Row 2: Scale Target Nameplate | Non-Target Opacity
@@ -1235,6 +1248,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, rangeColorGet, rangeColorSet, nil, 20)
         PP.Point(swatch, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(function()
             local off = tfRangeOff()
             swatch:SetAlpha(off and 0.15 or 1)
@@ -1243,6 +1257,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         end)
         swatch:SetAlpha(tfRangeOff() and 0.15 or 1)
         swatch:EnableMouse(not tfRangeOff())
+        EllesmereUI.ExplainDisabledSwatch(swatch, tfRangeOff, "Target/Focus Range Text")
     end
 
     _, h = W:Spacer(parent, y, 20);  y = y - h

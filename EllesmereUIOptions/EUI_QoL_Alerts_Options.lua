@@ -48,14 +48,49 @@ local function AlertCogRows(prefix, applyFrame, preview)
     }
 end
 
+-- The shared mover covers Combat, Potion and Talent; group deaths has a
+-- separate mover. The section and its unlock jump reflect all four toggles.
+local function SharedAlertsEnabled()
+    local db = EllesmereUIDB
+    return db and (db.combatAlertEnabled or db.potionAlertEnabled or db.talentAlertEnabled) and true or false
+end
+
+local function GroupDeathEnabled()
+    return EllesmereUIDB and EllesmereUIDB.announceGroupDeaths and true or false
+end
+
+local function AlertsOff()
+    return not SharedAlertsEnabled() and not GroupDeathEnabled()
+end
+
 _G._EUI_BuildAlertsSection = function(parent, yOffset, W, PP)
     local y = yOffset
     local _, h, hdr
 
     hdr, h = W:SectionHeader(parent, "ALERTS", y); y = y - h
-    -- One anchor carries the Combat, Potion Ready and Unspent Talents alerts,
-    -- each with its own enable, so the button has no single requirement.
-    EllesmereUI.BuildSectionUnlockJump(hdr, { key = "EUI_CombatAlert" })
+    local function RefreshHeader()
+        hdr._label:SetAlpha(AlertsOff() and 0.3 or 1)
+    end
+    RefreshHeader()
+    if not EllesmereUI._prebuilding then
+        EllesmereUI.RegisterWidgetRefresh(RefreshHeader)
+    end
+    -- Select the shared Alerts mover when available; otherwise use Group
+    -- Death Alert. When both exist, flash their movers together.
+    EllesmereUI.BuildSectionUnlockJump(hdr, {
+        key = function()
+            if SharedAlertsEnabled() then return "EUI_CombatAlert" end
+            if GroupDeathEnabled() then return "EUI_GroupDeathAlert" end
+        end,
+        alsoFlashKey = function()
+            if SharedAlertsEnabled() and GroupDeathEnabled() then
+                return "EUI_GroupDeathAlert"
+            end
+        end,
+        disabled = AlertsOff,
+        disabledTooltip = "Enable an alert to move its anchor in Unlock Mode",
+        rawTooltip = true,
+    })
 
     local row1
     row1, h = W:DualRow(parent, y,

@@ -13,7 +13,6 @@ EUI_NS = EUI_NS.__euiCoreNS or EUI_NS  -- standalone builds: the core's own tabl
 local PP                  = EllesmereUI.PP
 local PanelPP             = EllesmereUI.PanelPP
 local MakeFont            = EllesmereUI.MakeFont
-local MakeBorder          = EllesmereUI.MakeBorder
 local SolidTex            = EllesmereUI.SolidTex
 local lerp                = EllesmereUI.lerp
 local RegAccent           = EllesmereUI.RegPanelAccent
@@ -3131,7 +3130,7 @@ local function BuildFooter(rightW, rightX)
 
                 local bg = SolidTex(linkPopup, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, 0.97)
                 bg:SetAllPoints()
-                MakeBorder(linkPopup, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
+                EllesmereUI.MakeRoundedBorder(linkPopup, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15, bg)
 
                 local hint = MakeFont(linkPopup, 11, nil, TEXT_SECTION.r, TEXT_SECTION.g, TEXT_SECTION.b, TEXT_SECTION.a)
                 hint:SetPoint("TOP", linkPopup, "TOP", 0, -10)
@@ -4994,6 +4993,7 @@ end
 -- Rebuild the current page content without resetting scroll position
 -- Pass force=true to bypass the fast refresh path (e.g. when widget layout changes).
 function EllesmereUI:RefreshPage(force)
+    EllesmereUI._pageRefreshSerial = (EllesmereUI._pageRefreshSerial or 0) + 1
     if not activeModule or not activePage then return end
     -- Panel hidden: a rebuild here would run buildPage with nothing on screen, firing page-open
     -- side effects (preview flags, placeholder shows) AFTER the OnHide cleanup already cleared

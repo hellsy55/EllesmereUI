@@ -238,6 +238,7 @@ function ns.RFO_BuildTextDisplay(W, parent, y, opts)
                 local sw = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5, getColor, setColor, false, 20)
                 env.PP.Point(sw, "RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
                 rgn._lastInline = sw
+                EllesmereUI.OrderInlineAddon(rgn, sw, "swatch")
                 sw._eabOrigClick = sw:GetScript("OnClick")
                 sw:SetScript("OnClick", function(self)
                     if SVal(modeKey, "custom") ~= mode then

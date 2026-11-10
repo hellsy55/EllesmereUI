@@ -114,6 +114,65 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
         inst:Refresh()
     end
 
+    -- Optional TLEx list: same saved Config rows mirrored by Quickdraw.
+    -- Read only for an opened menu; Group rows have no import text.
+    local function GetTLExEntries()
+        local saved = _G.TalentLoadoutEx
+        if type(saved) ~= "table" then return nil end
+        local _, class = UnitClass("player")
+        local index = C_SpecializationInfo.GetSpecialization()
+        local byClass = class and saved[class]
+        local bySpec = byClass and index and byClass[index]
+        if type(bySpec) ~= "table" then return nil end
+        local result = {}
+        for _, data in ipairs(bySpec) do
+            if type(data) == "table" and type(data.text) == "string"
+                and type(data.name) == "string" and data.name ~= "" then
+                result[#result + 1] = { name = data.name, icon = data.icon, tlex = true }
+            end
+        end
+        return #result > 0 and result or nil
+    end
+
+    -- Use TLEx's registered /tlx command, just as Quickdraw's macro slots do.
+    -- Resolve its actual slash handler instead of guessing a private API name.
+    local function ApplyTLEx(name)
+        if InCombatLockdown() then return false end
+        if not (C_AddOns and C_AddOns.IsAddOnLoaded
+            and C_AddOns.IsAddOnLoaded("TalentLoadoutsEx")) then return false end
+        -- TLEx needs Blizzard's talent parser even when the talent UI is closed.
+        if C_AddOns.LoadAddOn and not C_AddOns.IsAddOnLoaded("Blizzard_PlayerSpells") then
+            C_AddOns.LoadAddOn("Blizzard_PlayerSpells")
+        end
+        for key, handler in pairs(SlashCmdList or {}) do
+            if type(handler) == "function" then
+                for i = 1, 10 do
+                    local command = _G["SLASH_" .. key .. i]
+                    if not command then break end
+                    if type(command) == "string" and command:lower() == "/tlx" then
+                        handler(name)
+                        return true
+                    end
+                end
+            end
+        end
+        if DEFAULT_CHAT_FRAME then
+            DEFAULT_CHAT_FRAME:AddMessage("EllesmereUI DataBars: TalentLoadoutsEx /tlx command is unavailable.")
+        end
+        return false
+    end
+
+    -- Display Blizzard and TLEx loadouts in the same list. The suffix keeps
+    -- duplicate names distinguishable without changing the /tlx argument.
+    local function AppendTLExEntries(entries)
+        local saved = GetTLExEntries()
+        if not saved then return end
+        for _, entry in ipairs(saved) do
+            entry.displayName = entry.name .. " (TLEx)"
+            entries[#entries + 1] = entry
+        end
+    end
+
     -- Per-instance popup pools (lazy). Two spec blocks never fight over the same popup frames.
     local specPool, lootPool, loadoutPool
 
@@ -250,12 +309,16 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
             if not btn._label then btn._label = btn:CreateFontString(nil, "OVERLAY") end
             btn:Show()
             ns.SetFont(btn._label, fontSize)
-            btn._label:SetText(entry.name)
+            btn._label:SetText(entry.displayName or entry.name)
             btn._label:Show()
             btn._label:ClearAllPoints()
             if entry.icon then
-                btn._icon:SetTexture(entry.icon)
-                btn._icon:SetTexCoord(4 / 64, 60 / 64, 4 / 64, 60 / 64)
+                if type(entry.icon) == "string" then
+                    btn._icon:SetAtlas(entry.icon)
+                else
+                    btn._icon:SetTexture(entry.icon)
+                    btn._icon:SetTexCoord(4 / 64, 60 / 64, 4 / 64, 60 / 64)
+                end
                 btn._icon:Show()
                 btn._label:SetPoint("LEFT", btn._icon, "RIGHT", 4, 0)
             else
@@ -264,7 +327,8 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
                 btn._label:SetPoint("LEFT", btn, "LEFT", 0, 0)
             end
 
-            if entry.isActive then btn._label:SetTextColor(ar, ag, ab, 1)
+            if entry.heading then btn._label:SetTextColor(0.65, 0.65, 0.65, 1)
+            elseif entry.isActive then btn._label:SetTextColor(ar, ag, ab, 1)
             else btn._label:SetTextColor(1, 1, 1, 1) end
 
             -- Right-edge arrow (entry.arrow): the active spec row uses it to signal its loadout subnav.
@@ -284,12 +348,13 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
             end
 
             btn:SetScript("OnEnter", function()
-                btn._label:SetTextColor(ar, ag, ab, 1)
+                if not entry.heading then btn._label:SetTextColor(ar, ag, ab, 1) end
                 -- Row hover callback (spec popup: open/close the loadout subnav depending on which row the cursor is on).
                 if entry.onHover then entry.onHover(btn) end
             end)
             btn:SetScript("OnLeave", function()
-                if entry.isActive then btn._label:SetTextColor(ar, ag, ab, 1)
+                if entry.heading then btn._label:SetTextColor(0.65, 0.65, 0.65, 1)
+                elseif entry.isActive then btn._label:SetTextColor(ar, ag, ab, 1)
                 else btn._label:SetTextColor(1, 1, 1, 1) end
             end)
             btn:SetScript("OnClick", function(_, mb)
@@ -297,8 +362,7 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
                 if entry.noClick then return end
                 -- combatClicks: the loot-spec popup's action is combat-legal (unprotected preference call); everything else stays gated.
                 if mb == "LeftButton" and (combatClicks or not InCombatLockdown()) then
-                    onClickEntry(entry)
-                    popup:Hide()
+                    if onClickEntry(entry) ~= false then popup:Hide() end
                 end
             end)
 
@@ -400,8 +464,10 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
                 entries[#entries + 1] = { name = info.name, isActive = (cid == activeConfigID), configID = cid }
             end
         end
+        AppendTLExEntries(entries)
         if #entries == 0 then return end
         local pop = BuildPopup(subnavPool, specButton, nil, entries, function(e)
+            if e.tlex then return ApplyTLEx(e.name) end
             BeginLoadoutSwap(specId, e.configID)
         end, true)
         -- Flyout anchoring: flush against the spec popup's edge, with its
@@ -518,10 +584,12 @@ ns.BlockFactories.spec = function(blockCfg, slot, content, barCtx)
                 entries[#entries + 1] = { name = info.name, isActive = (cid == activeConfigID), configID = cid }
             end
         end
+        AppendTLExEntries(entries)
         -- In lockdown: catcher-free + hover-watch dismissal like the loot popup.
         -- Row clicks stay gated (LoadConfig is blocked); the list is viewable.
         local inCombat = InCombatLockdown()
         BuildPopup(loadoutPool, specButton, L["CHANGE_LOADOUT"], entries, function(e)
+            if e.tlex then return ApplyTLEx(e.name) end
             BeginLoadoutSwap(specId, e.configID)
         end, inCombat)
         if inCombat and hoverWatch then

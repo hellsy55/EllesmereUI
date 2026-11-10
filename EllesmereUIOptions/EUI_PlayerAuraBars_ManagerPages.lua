@@ -1021,6 +1021,14 @@ local function PabSimpleFieldSync(region, cfg, isBuff, field, default, label)
             elementKeys = keys, elementLabels = labels,
             getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
             getElementState = PabApplyState,
+            getElementOptionState = function(key)
+                for _, entry in ipairs(PabAllBarEntries()) do
+                    if entry.key == key then
+                        return Value(entry.cfg, entry.isBuff) == Value(cfg, isBuff)
+                            and "Matching" or "Different"
+                    end
+                end
+            end,
             onApply = Apply,
         },
     })
@@ -1139,7 +1147,10 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
     ); sy = sy - hh
     do
         local rgn = dsRow._leftRegion
-        EllesmereUI.BuildInlineCog(rgn, { title = "Duration Text", rows = {
+        EllesmereUI.BuildInlineCog(rgn, { title = "Duration Text",
+            disabled = function() return cfg.durationShow == false end,
+            disabledTooltip = "Duration",
+            rows = {
             { type = "slider", label = "Text Size", min = 6, max = 60, step = 1,
               get = function() return cfg.durationTextSize or 11 end,
               set = function(v) cfg.durationTextSize = v; apply() end },
@@ -1167,11 +1178,16 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.durationShow == false end, "Show Duration")
     end
     do
         local rgn = dsRow._rightRegion
-        EllesmereUI.BuildInlineCog(rgn, { title = "Stacks Text", rows = {
+        EllesmereUI.BuildInlineCog(rgn, { title = "Stacks Text",
+            disabled = function() return cfg.stackShow == false end,
+            disabledTooltip = "Stacks",
+            rows = {
             { type = "slider", label = "Text Size", min = 6, max = 60, step = 1,
               get = function() return cfg.stackTextSize or 11 end,
               set = function(v) cfg.stackTextSize = v; apply() end },
@@ -1193,7 +1209,9 @@ local function BuildCoreFields(frame, fontPath, sy, cfg, apply, isBuff)
             false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
+        EllesmereUI.BindDisabledSwatch(swatch, function() return cfg.stackShow == false end, "Show Stacks")
     end
 
     return sy
@@ -1388,6 +1406,23 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             flashTargets = function() return { rgn } end,
             multiApply = {
                 getElementState = PabApplyState,
+                getElementOptionState = function(key)
+                    local texture = cfg.borderTexture or "solid"
+                    for _, entry in ipairs(PabAllBarEntries()) do
+                        if entry.key == key then
+                            local c = entry.cfg
+                            local same = (c.borderTexture or "solid") == texture
+                                and c.borderTextureOffset == cfg.borderTextureOffset
+                                and c.borderTextureOffsetY == cfg.borderTextureOffsetY
+                                and c.borderTextureShiftX == cfg.borderTextureShiftX
+                                and c.borderTextureShiftY == cfg.borderTextureShiftY
+                                and (c.borderBehind == true) == (cfg.borderBehind == true)
+                                and (isBuff or entry.isBuff
+                                    or (c.borderDispelTextured == true) == (cfg.borderDispelTextured == true))
+                            return same and "Matching" or "Different"
+                        end
+                    end
+                end,
                 elementKeys = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1461,6 +1496,7 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(updateSwatch)
     end
     do
@@ -1514,6 +1550,20 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             flashTargets = function() return { rgn } end,
             multiApply = {
                 getElementState = PabApplyState,
+                getElementOptionState = function(key)
+                    for _, entry in ipairs(PabAllBarEntries()) do
+                        if entry.key == key then
+                            local c = entry.cfg
+                            local same = (c.borderSize or 1) == (cfg.borderSize or 1)
+                                and (c.borderSizePx or false) == (cfg.borderSizePx or false)
+                                and (c.borderR or 0) == (cfg.borderR or 0)
+                                and (c.borderG or 0) == (cfg.borderG or 0)
+                                and (c.borderB or 0) == (cfg.borderB or 0)
+                                and (c.borderA or 1) == (cfg.borderA or 1)
+                            return same and "Matching" or "Different"
+                        end
+                    end
+                end,
                 elementKeys   = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1668,6 +1718,17 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
             flashTargets = function() return { rgn } end,
             multiApply = {
                 getElementState = PabApplyState,
+                getElementOptionState = function(key)
+                    local shape = cfg.iconShape or "none"
+                    for _, entry in ipairs(PabAllBarEntries()) do
+                        if entry.key == key then
+                            local same = (entry.cfg.iconShape or "none") == shape
+                                and (shape ~= "cropped"
+                                    or ns.PAB_CropPercent(entry.cfg) == ns.PAB_CropPercent(cfg))
+                            return same and "Matching" or "Different"
+                        end
+                    end
+                end,
                 elementKeys   = keys,
                 elementLabels = labels,
                 getCurrentKey = function() return PabBarKeyOf(cfg, isBuff) end,
@@ -1702,6 +1763,8 @@ local function BuildDisplayFields(frame, fontPath, sy, cfg, apply, isBuff)
         local rgn = swipeRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Duration Swipe",
+            disabled = function() return cfg.showSwipe == false end,
+            disabledTooltip = "Show Duration Swipe",
             rows = {
                 -- Default on = the swipe UNCOVERS the icon as time runs out
                 -- (the module's shipped look); off = Blizzard's standard
@@ -2006,6 +2069,7 @@ local function BuildFxEffects(frame, sy, cfg, apply)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         end
     end
 
@@ -2205,6 +2269,7 @@ local function AddNewButton(parentFrame, y, width, label, onClick)
     local addBg = addBtn:CreateTexture(nil, "BACKGROUND")
     addBg:SetAllPoints()
     addBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
+    EllesmereUI.RoundBody(addBtn, addBg)
     local lbl = addBtn:CreateFontString(nil, "OVERLAY")
     -- Drop shadow via the shadow FontObject, primed BEFORE SetFont
     -- (SetShadowOffset alone does not render). Module font, same as the
@@ -2367,7 +2432,7 @@ function ns.PABMP_ShowFilterEditor()
     popup:SetFrameLevel(dimmer:GetFrameLevel() + 10)
     popup:EnableMouse(true)
     local popBg = EllesmereUI.SolidTex(popup, "BACKGROUND", 0.077, 0.068, 0.058, 1); popBg:SetAllPoints()
-    EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.15)
+    EllesmereUI.MakeRoundedBorder(popup, 1, 1, 1, 0.15, popBg)
     if EllesmereUI.GetPopupScale then popup:SetScale(EllesmereUI.GetPopupScale()) end
 
     local title = EllesmereUI.MakeFont(popup, 16, "", 1, 1, 1)
@@ -2443,7 +2508,8 @@ function ns.PABMP_ShowFilterEditor()
     side:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", 0, 0)
     side:SetFrameLevel(popup:GetFrameLevel() + 1)
     local sideBg = EllesmereUI.SolidTex(side, "BACKGROUND", 0, 0, 0, 0.35); sideBg:SetAllPoints()
-    EllesmereUI.MakeBorder(side, 1, 1, 1, 0.10)
+    -- Flush with the popup's bottom-right corner: same shape, rows clipped to it.
+    EllesmereUI.MakeRoundedBorder(side, 1, 1, 1, 0.10, sideBg, nil, true)
 
     local sideScroll = CreateFrame("ScrollFrame", nil, side)
     sideScroll:SetPoint("TOPLEFT", side, "TOPLEFT", 1, -1)
@@ -2736,11 +2802,12 @@ function ns.PABMP_ShowFilterEditor()
         box:SetPoint("LEFT", srow, "LEFT", 6, 0)
         local boxBg = box:CreateTexture(nil, "BACKGROUND")
         boxBg:SetAllPoints(); boxBg:SetColorTexture(0.114, 0.106, 0.099, 1)
-        local boxBrd = EllesmereUI.MakeBorder(box, 0.4, 0.4, 0.4, 0.6)
+        local boxBrd = EllesmereUI.MakeRoundedBorder(box, 0.4, 0.4, 0.4, 0.6, boxBg)
         local chk = box:CreateTexture(nil, "ARTWORK")
         chk:SetPoint("TOPLEFT", box, "TOPLEFT", 2, -2)
         chk:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -2, 2)
         chk:SetColorTexture(eg.r, eg.g, eg.b, 1)
+        EllesmereUI.RoundBody(box, chk, 2)
         local on = sel.spells[id] and true or false
         local ico = srow:CreateTexture(nil, "ARTWORK")
         ico:SetSize(22, 22)
@@ -2873,7 +2940,7 @@ local function ShowAddBarPopup(anchorBtn, kind, fontPath)
         local bg = popup:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0.067, 0.067, 0.067, 0.95)
-        EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.2)
+        EllesmereUI.MakeRoundedBorder(popup, 1, 1, 1, 0.2, bg)
 
         -- Auto-close on outside click, same pattern as DM's Add New popup.
         popup:SetScript("OnShow", function(p2)
@@ -2922,6 +2989,7 @@ local function ShowAddBarPopup(anchorBtn, kind, fontPath)
         local cBg = cBtn:CreateTexture(nil, "BACKGROUND")
         cBg:SetAllPoints()
         cBg:SetColorTexture(accentColor.r, accentColor.g, accentColor.b, 0.8)
+        EllesmereUI.RoundBody(cBtn, cBg)
         local cTx = cBtn:CreateFontString(nil, "OVERLAY")
         cTx:SetPoint("CENTER")
         cTx:SetFont(fontPath, 12, "")

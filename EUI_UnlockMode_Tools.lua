@@ -714,27 +714,28 @@ end
 -- file) can release a selected mover when a ghost is clicked.
 EllesmereUI._DeselectSelectedMover = DeselectMover
 
--- Selection flash: a 2 px accent border over the mover pulsed three times
--- when Unlock Mode opens at an element (the options rows' Move in Unlock Mode
--- button), on one shared driver that is hidden and script-less while idle.
--- It ends at alpha 0, so the selected state's white border and fill stay as
--- SelectMover left them; a selection change, the mover hiding or the session
--- closing ends it early. Accent rather than white: white would vanish over
--- the selected border.
+-- Selection flash: one shared driver pulses the selected mover and, when
+-- requested, a linked mover (e.g. Alerts and Group Death Alert) three times.
+-- A secondary mover is highlighted without changing the primary selection.
+-- The driver remains disabled while idle and stops on selection change/close.
 local FLASH_PERIOD, FLASH_PULSES = 0.4, 3
 local FLASH_DUR = FLASH_PERIOD * FLASH_PULSES
-local flashFrame, flashM, flashT, flashR, flashG, flashB
+local flashFrame, flashM, flashAlsoM, flashT, flashR, flashG, flashB
+
+local function ClearFlash(m)
+    if not m then return end
+    if m._selFlashBrd then m._selFlashBrd:SetColor(flashR, flashG, flashB, 0) end
+    if m._selHl and m._selected then m._selHl:SetAlpha(0.10) end
+end
 
 local function EndFlash()
     if flashFrame then
         flashFrame:SetScript("OnUpdate", nil)
         flashFrame:Hide()
     end
-    local m = flashM
-    flashM = nil
-    if not m then return end
-    m._selFlashBrd:SetColor(flashR, flashG, flashB, 0)
-    if m._selHl and m._selected then m._selHl:SetAlpha(0.10) end
+    ClearFlash(flashM)
+    ClearFlash(flashAlsoM)
+    flashM, flashAlsoM = nil, nil
 end
 
 local function FlashTick(self, dt)
@@ -746,19 +747,36 @@ local function FlashTick(self, dt)
     p = p * p
     m._selFlashBrd:SetColor(flashR, flashG, flashB, p)
     if m._selHl then m._selHl:SetAlpha(0.10 + 0.25 * p) end
+    local also = flashAlsoM
+    if also then
+        if also:IsShown() then
+            also._selFlashBrd:SetColor(flashR, flashG, flashB, p)
+        else
+            ClearFlash(also)
+            flashAlsoM = nil
+        end
+    end
 end
 
-local function FlashSelectHighlight(m)
-    if not m or not m._brd or not m:IsShown() then return end
-    if flashM and flashM ~= m then EndFlash() end
+local function PrepareFlash(m)
     if not m._selFlashBrd then
         m._selFlashBrd = EllesmereUI.MakeBorder(m, 1, 1, 1, 0)
         PP.SetBorderSize(m._selFlashBrd._frame, 2)
     end
-    -- The mover is raised on select, so the border takes its level each flash.
     m._selFlashBrd._frame:SetFrameLevel(m:GetFrameLevel() + 4)
+end
+
+local function FlashSelectHighlight(m, also)
+    if not m or not m._brd or not m:IsShown() then return end
+    if flashM then EndFlash() end
+    PrepareFlash(m)
+    flashM, flashAlsoM = m, nil
+    if also and also ~= m and also._brd and also:IsShown() then
+        PrepareFlash(also)
+        flashAlsoM = also
+    end
     flashR, flashG, flashB = GetAccent()
-    flashM, flashT = m, 0
+    flashT = 0
     if not flashFrame then flashFrame = CreateFrame("Frame") end
     flashFrame:SetScript("OnUpdate", FlashTick)
     flashFrame:Show()

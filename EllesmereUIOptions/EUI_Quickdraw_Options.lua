@@ -1616,7 +1616,7 @@ initFrame:SetScript("OnEvent", function(self)
         local aBg = addBtn:CreateTexture(nil, "BACKGROUND")
         aBg:SetAllPoints()
         aBg:SetColorTexture(ACCENT.r, ACCENT.g, ACCENT.b, 0.20)
-        EllesmereUI.MakeBorder(addBtn, ACCENT.r, ACCENT.g, ACCENT.b, 0.7, EllesmereUI.PP)
+        EllesmereUI.MakeRoundedBorder(addBtn, ACCENT.r, ACCENT.g, ACCENT.b, 0.7, aBg)
         local aTx = EllesmereUI.MakeFont(addBtn, 11, nil, 1, 1, 1, 0.9)
         aTx:SetPoint("CENTER")
         aTx:SetText(EllesmereUI.L("Add"))
@@ -3855,7 +3855,8 @@ initFrame:SetScript("OnEvent", function(self)
                 if origClick then origClick(self2, ...) end
             end)
             customSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(customSwatch, "Custom Color")
+                EllesmereUI.ShowWidgetTooltip(customSwatch, Disabled()
+                    and EllesmereUI.DisabledTooltip("Quickdraw") or "Custom Color")
             end)
             customSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -3876,7 +3877,8 @@ initFrame:SetScript("OnEvent", function(self)
                 Refresh()
             end)
             accentSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(accentSwatch, "Accent Color")
+                EllesmereUI.ShowWidgetTooltip(accentSwatch, Disabled()
+                    and EllesmereUI.DisabledTooltip("Quickdraw") or "Accent Color")
             end)
             accentSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
 
@@ -3903,10 +3905,12 @@ initFrame:SetScript("OnEvent", function(self)
                 Refresh()
             end)
             classSwatch:SetScript("OnEnter", function()
-                EllesmereUI.ShowWidgetTooltip(classSwatch, "Class Color")
+                EllesmereUI.ShowWidgetTooltip(classSwatch, Disabled()
+                    and EllesmereUI.DisabledTooltip("Quickdraw") or "Class Color")
             end)
             classSwatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
             rgn._lastInline = classSwatch
+            EllesmereUI.OrderInlineAddon(rgn, classSwatch, "swatch")
 
             local function refreshSwatches()
                 updateCustom(); updateAccent(); updateClass()
@@ -4011,6 +4015,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Inline cog on Toggle World Markers: the placed-marker pip opt-out.
         EllesmereUI.BuildInlineCog(wmRow._rightRegion, {
             title = "World Marker Entries",
+            disabled = Disabled,
+            disabledTooltip = "the module",
             rows = {
                 { type="toggle", label="Show Placed-Marker Pips",
                   tooltip="Mark a world marker entry whose marker is on the ground with a small corner square, so you can see whether pressing it places or picks up.",

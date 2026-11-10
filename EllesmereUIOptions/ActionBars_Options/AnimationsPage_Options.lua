@@ -461,9 +461,9 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
             UpdatePushedPreview(_pushedPreview)
             EllesmereUI.RegisterWidgetRefresh(function() UpdatePushedPreview(_pushedPreview) end)
 
-            EllesmereUI.BuildInlineCog(leftRgn, {
+            local pushedCog = EllesmereUI.BuildInlineCog(leftRgn, {
                 title = "Pushed Border Settings",
-                anchorTo = _pushedPreview, chain = false,
+                anchorTo = leftRgn._control, chain = false,
                 captureRegion = leftRgn,
                 disabled = function() return (p.pushedTextureType or 2) ~= 5 end,
                 disabledTooltip = "Border Pushed Type",
@@ -484,6 +484,8 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
                       end },
                 },
             })
+            _pushedPreview:ClearAllPoints()
+            PP.Point(_pushedPreview, "RIGHT", pushedCog, "LEFT", -8, 0)
 
             local rightRgn = row._rightRegion
             _highlightPreview = CreatePreviewIcon(rightRgn)
@@ -494,9 +496,9 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
             UpdateHighlightPreview(_highlightPreview)
             EllesmereUI.RegisterWidgetRefresh(function() UpdateHighlightPreview(_highlightPreview) end)
 
-            EllesmereUI.BuildInlineCog(rightRgn, {
+            local highlightCog = EllesmereUI.BuildInlineCog(rightRgn, {
                 title = "Highlight Border Settings",
-                anchorTo = _highlightPreview, chain = false,
+                anchorTo = rightRgn._control, chain = false,
                 captureRegion = rightRgn,
                 disabled = function() return (p.highlightTextureType or 2) ~= 5 end,
                 disabledTooltip = "Border Highlight Type",
@@ -517,6 +519,8 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
                       end },
                 },
             })
+            _highlightPreview:ClearAllPoints()
+            PP.Point(_highlightPreview, "RIGHT", highlightCog, "LEFT", -8, 0)
         end
         y = y - h
 
@@ -597,6 +601,7 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
             _procGlowPreview:ClearAllPoints()
             PP.Point(_procGlowPreview, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -12, 0)
             leftRgn._lastInline = _procGlowPreview
+            EllesmereUI.OrderInlineAddon(leftRgn, _procGlowPreview, "preview")
             if _procGlowPreview._icon then
                 local iconTex = GetNthActionButtonIcon(3)
                 _procGlowPreview._icon:SetTexture(iconTex)
@@ -678,16 +683,14 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
         if not EllesmereUI._prebuilding then
             local leftRgn = assistRow._leftRegion
             _assistGlowPreview = CreatePreviewIcon(leftRgn)
-            _assistGlowPreview:ClearAllPoints()
-            PP.Point(_assistGlowPreview, "RIGHT", leftRgn._control, "LEFT", -12, 0)
+            -- The swatch occupies the slot next to the dropdown; preview stays to its left.
             if _assistGlowPreview._icon then
                 _assistGlowPreview._icon:SetTexture(GetNthActionButtonIcon(4))
                 _assistGlowPreview._icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
             end
 
-            -- The custom glow's colour, chained left of the preview icon; the
-            -- class colour owns it while Use Class Color is on.
-            leftRgn._lastInline = _assistGlowPreview
+            -- Keep the swatch attached directly to the dropdown, rather than
+            -- chaining it to the preview icon. Class color still owns it.
             EllesmereUI.BuildInlineSwatches(leftRgn, {
                 { tooltip = "Assisted Highlight Glow Color", hasAlpha = false,
                   getValue = function()
@@ -708,6 +711,10 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
                 end,
                 rawTooltip = true,
             })
+            _assistGlowPreview:ClearAllPoints()
+            PP.Point(_assistGlowPreview, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
+            leftRgn._lastInline = _assistGlowPreview
+            EllesmereUI.OrderInlineAddon(leftRgn, _assistGlowPreview, "preview")
 
             -- Keep animated preview hosts out of the central glow driver while
             -- this page is hidden; restart them from the current values on show.

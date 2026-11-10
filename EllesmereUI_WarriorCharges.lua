@@ -322,8 +322,8 @@ local function StyleSeparators(H, frame, sp, n)
         H.sepHost:SetAllPoints(H.proxy)
     end
     local sep = sp.sep or {}
-    -- Color: an explicit sep color from the host, else the legacy gap-strip
-    -- chain (explicit gap color > opaque black in dark theme > bar bg color).
+    -- Color: an explicit separator tint from the host, otherwise use the
+    -- gap color chosen in Class Resource, or the white/dark black theme default.
     local r, g, b, a
     if sep.r then
         r, g, b, a = sep.r, sep.g or 0, sep.b or 0, sep.a or 1
@@ -332,7 +332,7 @@ local function StyleSeparators(H, frame, sp, n)
     elseif sp.darkTheme then
         r, g, b, a = 0, 0, 0, 1
     else
-        r, g, b, a = sp.barBgR or 0, sp.barBgG or 0, sp.barBgB or 0, sp.barBgA or 0.5
+        r, g, b, a = 1, 1, 1, 1
     end
     local ori = sp.pipOrientation or "HORIZONTAL"
     local vertical = ori ~= "HORIZONTAL"

@@ -727,11 +727,9 @@ local function CreatePip(parent, w, h, idx, borderSize, borderR, borderG, border
     return pip
 end
 
--- Optional gap-fill layer ("Bar Spacing" color). Opt-in: disabled draws nothing,
--- gaps keep showing the full-bar background; enabled places one texture per
--- inter-pip gap so spacing colors independently of the bar background. Only
--- READS the already-computed pip slot positions, never changes pip sizing or
--- spacing geometry. On ERB.
+-- Gap-fill layer ("Bar Spacing" color). Always draws nonzero inter-pip
+-- gaps with the selected custom tint or the white/dark-black theme default.
+-- Reads the already-computed slots; it does not change pip geometry. On ERB.
 
 -- Per-pip empty-slot backdrop color. At Fill Opacity 100 it's just the Empty Bar
 -- Overlay tint (bgR/G/B/A, dark theme override). Below 100 the full-bar backdrop
@@ -768,12 +766,9 @@ end
 
 function ERB.ApplyGapFills(frame, slots, count, isVertical, isReversed, sp, pipBg)
     local fills = frame._gapFills
-    -- Pip/rune Fill Opacity hides the full-bar backdrop (would tint translucent
-    -- fills from behind), so the gap strips take over in bar-bg color even with
-    -- "Bar Spacing" color disabled. Background on individual pips (pipBg) keeps
-    -- the gaps clear instead: only the "Bar Spacing" color paints them then.
-    local fillOpActive = not pipBg and (sp.fillOpacity or 100) < 100
-    if not ((sp.gapColorEnabled or fillOpActive) and slots and count and count > 1) then
+    -- Always paint nonzero spacing. The retired gapColorEnabled switch now
+    -- identifies an explicitly chosen color so older profiles keep their tint.
+    if not (slots and count and count > 1) then
         if fills then for i = 1, #fills do fills[i]:Hide() end end
         return
     end
@@ -781,10 +776,9 @@ function ERB.ApplyGapFills(frame, slots, count, isVertical, isReversed, sp, pipB
     local r, g, b, a
     if sp.gapColorEnabled then
         r, g, b, a = sp.gapR or 0, sp.gapG or 0, sp.gapB or 0, sp.gapA or 1
-    elseif sp.darkTheme then
-        r, g, b, a = 0, 0, 0, 1
     else
-        r, g, b, a = sp.barBgR or 0, sp.barBgG or 0, sp.barBgB or 0, sp.barBgA or 0.5
+        local v = sp.darkTheme and 0 or 1
+        r, g, b, a = v, v, v, 1
     end
     local n = 0
     for i = 1, count - 1 do

@@ -242,6 +242,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 true, 20)
             PP.Point(borderSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
             rgn._lastInline = borderSwatch  -- left of the Corner Radius cog
+            EllesmereUI.OrderInlineAddon(rgn, borderSwatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
             local swBlock = CreateFrame("Frame", nil, borderSwatch)
             swBlock:SetAllPoints()
@@ -616,20 +617,71 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
         })
     end
 
+    -- The fill row's Apply to action copies its color, opacity and gradient mode.
+    if ns.ERB_ColorSync then
+        ns.ERB_ColorSync(powerBorderRow._rightRegion, DB, "primary", "fillColor",
+            function() RebuildPower(); SmoothRefresh() end)
+    end
+
+    -- Keep the background alpha slider and color swatch in one option,
+    -- matching the Fill Color row while preserving the existing bgR/G/B/A values.
+    local powerBgRow
+    powerBgRow, h = W:DualRow(parent, y,
+        { type = "slider", text = "Background Color", min = 0, max = 100, step = 1, trackWidth = 120,
+          tooltip = "Opacity of this bar's background.",
+          disabled = powerOff, disabledTooltip = powerDisTip,
+          getValue = function()
+              local c = cfg(); return math.floor(((c and c.bgA) or 0.75) * 100 + 0.5)
+          end,
+          setValue = function(v)
+              local c = cfg(); if not c then return end
+              c.bgA = v / 100; SmoothRefresh(); EllesmereUI:RefreshPage()
+          end },
+        { type="toggle", text="Fade Out of Combat",
+          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
+          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshPower() end }
+    ); y = y - h
+    if not EllesmereUI._prebuilding then
+        EllesmereUI.BuildInlineSwatches(powerBgRow._leftRegion, {
+            { tooltip = "Background Color",
+              getValue = function()
+                  local c = cfg()
+                  return (c and c.bgR) or 0x11/255, (c and c.bgG) or 0x11/255,
+                         (c and c.bgB) or 0x11/255, 1
+              end,
+              setValue = function(r, g, b)
+                  local c = cfg(); if not c then return end
+                  c.bgR, c.bgG, c.bgB = r, g, b
+                  SmoothRefresh(); EllesmereUI:RefreshPage()
+              end },
+        }, { size = 20, disabled = powerOff, disabledTooltip = powerDisTip })
+    end
+    if ns.ERB_ColorSync then
+        ns.ERB_ColorSync(powerBgRow._leftRegion, DB, "primary", "backgroundColor", SmoothRefresh)
+    end
+
     -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Power bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Energy / Focus / Mana Missing show the bar at its normal opacity while that resource is below full, a rule-hidden bar and a faded one alike (ns.ERB_MissingWanted / ns.ERB_MissingLiftFloor, same pass); Mana also covers a WoW Forever druid's Mana Bar while Shapeshifted.
     -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
     local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
-        { type="toggle", text="Fade Out of Combat",
-          getValue=function() local c=cfg(); return c and c.oocFadeEnabled == true end,
-          setValue=function(v) local c=cfg(); if not c then return end c.oocFadeEnabled=v; RefreshPower() end },
         { type="slider", text="Fade Opacity", min=0, max=100, step=1,
           disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
           disabledTooltip="Fade Out of Combat",
           getValue=function() local c=cfg(); return math.floor(((c and c.oocAlpha) or 0.5)*100+0.5) end,
-          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshPower() end }
+          setValue=function(v) local c=cfg(); if not c then return end c.oocAlpha=v/100; RefreshPower() end },
+        { type = "dropdown", text = "Power Text",
+          disabled = powerOff,
+          disabledTooltip = powerDisTip,
+          values = { none = "None", smart = "Smart Text", curpp = "Power Value", curmaxpp = "Power Value / Max", perpp = "Power %", both = "Power Value | Power %" },
+          -- WoW Forever lists no Smart Text (EllesmereUI.PowerTextFormat).
+          order = EllesmereUI.PowerTextFormatOrder({ "none", "smart", "curpp", "curmaxpp", "perpp", "both" }),
+          getValue = function() local c = cfg(); return EllesmereUI.PowerTextFormat(c and c.textFormat or "none") end,
+          setValue = function(v)
+              local c = cfg(); if not c then return end
+              c.textFormat = v; RefreshPower(); EllesmereUI:RefreshPage()
+          end }
     ); y = y - fadeSyncH
-    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh) end
-    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._rightRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerBgRow._rightRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh) end
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh) end
 
     if not EllesmereUI._prebuilding then
         local rgn = powerBorderRow._leftRegion
@@ -692,17 +744,6 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
 
     local powerTextSizeRow
     powerTextSizeRow, h = W:DualRow(parent, y,
-        { type = "dropdown", text = "Power Text",
-          disabled = powerOff,
-          disabledTooltip = powerDisTip,
-          values = { none = "None", smart = "Smart Text", curpp = "Power Value", curmaxpp = "Power Value / Max", perpp = "Power %", both = "Power Value | Power %" },
-          -- WoW Forever lists no Smart Text (EllesmereUI.PowerTextFormat).
-          order = EllesmereUI.PowerTextFormatOrder({ "none", "smart", "curpp", "curmaxpp", "perpp", "both" }),
-          getValue = function() local c = cfg(); return EllesmereUI.PowerTextFormat(c and c.textFormat or "none") end,
-          setValue = function(v)
-              local c = cfg(); if not c then return end
-              c.textFormat = v; RefreshPower(); EllesmereUI:RefreshPage()
-          end },
         { type = "multiSwatch", text = "Text Color",
           disabled = powerTextDis,
           disabledTooltip = powerTextDisTip,
@@ -755,12 +796,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                   local isPowerColored = c and c.textCustomColored == false
                   return isPowerColored and 1 or 0.3
               end },
-          } }
-    );  y = y - h
-
-    -- Row 5: Text Size | Threshold & Hash Lines
-    local powerColorRow
-    powerColorRow, h = W:DualRow(parent, y,
+          } },
         { type = "slider", text = "Text Size", min = 8, max = 24, step = 1,
           disabled = powerTextDis,
           disabledTooltip = powerTextDisTip,
@@ -768,14 +804,29 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
           setValue = function(v)
               local c = cfg(); if not c then return end
               c.textSize = v; RefreshPower()
-          end },
-        { type = "label", text = "Threshold & Hash Lines" }
+          end }
     );  y = y - h
-    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerColorRow._leftRegion, env.DB, "primary", "textSize",
+
+    -- Keep Text Color next to Text Size, and place thresholds in the final row.
+    local powerColorRow
+    powerColorRow, h = W:DualRow(parent, y,
+        { type = "label", text = "Threshold & Hash Lines" },
+        { type = "toggle", text = "Boss Health Marker",
+          tooltip = "Shows a vertical marker on your power bar indicating the primary boss's health percentage.",
+          disabled = powerOff,
+          disabledTooltip = powerDisTip,
+          getValue = function() local c = cfg(); return c and c.bossPacingEnabled == true end,
+          setValue = function(v)
+              local c = cfg(); if not c then return end
+              c.bossPacingEnabled = v and true or false
+              RebuildPower()
+          end }
+    );  y = y - h
+    if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerTextSizeRow._rightRegion, env.DB, "primary", "textSize",
         "Text Size", SmoothRefresh, { "health", "primary" }) end
     -- Power Text inline cog: percent sign, anchor, x/y offsets
     if not EllesmereUI._prebuilding then
-        local rgn = powerTextSizeRow._leftRegion
+        local rgn = fadeSyncRow._rightRegion
         local cogBtn = EllesmereUI.BuildInlineCog(rgn, {
             disabled = function() local c = cfg(); return c and not c.enabled end,
             disabledTooltip = "Power Bar",
@@ -814,7 +865,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
     end
     if not EllesmereUI._prebuilding then
     local powerSettingsBtn = BuildThresholdSettingsButton({
-        parentRgn = powerColorRow._rightRegion,
+        parentRgn = powerColorRow._leftRegion,
         getBarData = function() return cfg() end,
         pageParent = parent, pageTopY = _advTop, pageBotY = function() return y end,
         refreshFn = function() RefreshPower(); SmoothRefresh() end,
@@ -845,7 +896,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
 
     -- Bar-wide hash lines (the fallback when the active threshold entry has none of its own).
     BuildHashCog({
-        parentRgn = powerColorRow._rightRegion,
+        parentRgn = powerColorRow._leftRegion,
         anchorTo = powerSettingsBtn,
         getBarData = function() return DB().primary end,
         refreshFn = function() RebuildPower() end,
@@ -854,24 +905,11 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
     end
     -- Thresholds have their own per-spec system, so lock the slot during a Spec Overrides editing session.
     if EllesmereUI.SpecOverrides_AttachEditLock and not EllesmereUI._prebuilding then
-        EllesmereUI.SpecOverrides_AttachEditLock(powerColorRow._rightRegion,
+        EllesmereUI.SpecOverrides_AttachEditLock(powerColorRow._leftRegion,
             "Thresholds have their own per-spec system and can't be edited while editing a spec group")
     end
 
-    -- Boss Health Marker
-    _, h = W:DualRow(parent, y,
-        { type = "toggle", text = "Boss Health Marker",
-          tooltip = "Shows a vertical marker on your power bar indicating the primary boss's health percentage.",
-          disabled = powerOff,
-          disabledTooltip = powerDisTip,
-          getValue = function() local c = cfg(); return c and c.bossPacingEnabled == true end,
-          setValue = function(v)
-              local c = cfg(); if not c then return end
-              c.bossPacingEnabled = v and true or false
-              RebuildPower()
-          end },
-        { type = "label", text = "" }
-    );  y = y - h
+
     end   -- close Power Bar hidden-while-disabled gate
 
     -- Simple page: cover these controls when the current spec overrides Power in Advanced, so edits here aren't silently ignored.

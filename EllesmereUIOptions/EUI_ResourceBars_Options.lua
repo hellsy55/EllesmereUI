@@ -45,6 +45,14 @@ local CLASSIC_MATCH_KEYS = { "ERB_Health", "ERB_Power", "ERB_ClassResource" }
 -- enabled state, resource identity, spec-specific rules or position.
 local RESOURCE_SYNC_KEYS = { "secondary", "primary", "health" }
 local RESOURCE_SYNC_LABELS = { secondary = "Class Resource", primary = "Power", health = "Health" }
+local RESOURCE_COLOR_KEYS = { "health", "primary" }
+local RESOURCE_FILL_COLOR_FIELDS = { "fillOpacity", "customColored", "fillR", "fillG", "fillB", "fillA",
+    "gradientEnabled", "gradientR", "gradientG", "gradientB", "gradientA", "gradientDir" }
+local RESOURCE_BACKGROUND_COLOR_FIELDS = { "bgR", "bgG", "bgB", "bgA" }
+local function ColorFields(field)
+    if field == "fillColor" then return RESOURCE_FILL_COLOR_FIELDS end
+    if field == "backgroundColor" then return RESOURCE_BACKGROUND_COLOR_FIELDS end
+end
 local RESOURCE_SIZE_KEY = {
     secondary = { height = "pipHeight", width = "pipWidth" },
     primary   = { height = "height", width = "width" },
@@ -77,6 +85,8 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
             t.textSize = Value(src, sourceKey)
         elseif field == "classic" then
             t.stockBorderScale = src.stockBorderScale
+        elseif ColorFields(field) then
+            for _, name in ipairs(ColorFields(field)) do t[name] = src[name] end
         elseif field == "borderStyle" then
             -- A border-style copy matches the existing Apply to All operation.
             for _, key in ipairs({ "borderTexture", "borderTextureOffset", "borderTextureOffsetY",
@@ -92,12 +102,39 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
     return {
         elementKeys = targets or RESOURCE_SYNC_KEYS,
         elementLabels = RESOURCE_SYNC_LABELS,
-        getElementOptionState = field == "oocFade" and function(key)
-            local p = dbFn(); return p and p[key] and p[key].oocFadeEnabled == true or false
-        end or nil,
+        getElementOptionState = function(key)
+            local p = dbFn()
+            local src, dst = p and p[sourceKey], p and p[key]
+            if not src or not dst then return nil end
+            -- A toggle exposes its actual state. Scalar/style rows instead
+            -- report whether this destination already matches this source.
+            if field == "oocFade" then return dst.oocFadeEnabled == true end
+            if ColorFields(field) then
+                for _, name in ipairs(ColorFields(field)) do
+                    if src[name] ~= dst[name] then return "Different" end
+                end
+                return "Matching"
+            end
+            if field == "borderStyle" or field == "border" then
+                local fields = field == "borderStyle" and {
+                    "borderTexture", "borderTextureOffset", "borderTextureOffsetY",
+                    "borderTextureShiftX", "borderTextureShiftY", "borderR", "borderG",
+                    "borderB", "borderA", "borderSize", "borderBehind",
+                } or {
+                    "borderR", "borderG", "borderB", "borderA", "borderSize",
+                    "borderTexture", "cornerRadius", "cornerMask",
+                }
+                for _, name in ipairs(fields) do
+                    if src[name] ~= dst[name] then return "Different" end
+                end
+                return ns.ERB_SameBorderPx(src, dst) and "Matching" or "Different"
+            end
+            return Value(src, sourceKey) == Value(dst, key) and "Matching" or "Different"
+        end,
         getCurrentKey = function() return sourceKey end,
         getElementState = function(key)
             local p = dbFn(); local b = p and p[key]
+            if ColorFields(field) then return b ~= nil end
             return b and b.enabled ~= false or false
         end,
         onApply = function(selected)
@@ -118,6 +155,22 @@ function ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, targets)
             EllesmereUI:RefreshPage(was and ns.ERB_TexturedBars(p) ~= was or false)
         end,
     }
+end
+
+-- Reuse the native Apply to: All / Multiple UI for Health and Power fill/background.
+-- Copy all fields of the selected color setting without changing visibility or other bars.
+function ns.ERB_ColorSync(region, dbFn, sourceKey, field, refresh)
+    if EllesmereUI._prebuilding then return end
+    local otherKey = sourceKey == "health" and "primary" or "health"
+    local multi = ns.ERB_MultiSync(dbFn, sourceKey, field, refresh, RESOURCE_COLOR_KEYS)
+    EllesmereUI.BuildSyncIcon({
+        region = region, alwaysAvailable = true,
+        tooltip = "Apply " .. (field == "fillColor" and "Fill Color" or "Background Color") .. " to the other bar",
+        onClick = function() multi.onApply(RESOURCE_COLOR_KEYS) end,
+        isSynced = function() return multi.getElementOptionState(otherKey) == "Matching" end,
+        flashTargets = function() return { region } end,
+        multiApply = multi,
+    })
 end
 
 -- One simple scalar sync, with destination selection and live status. This
@@ -315,6 +368,7 @@ initFrame:SetScript("OnEvent", function(self)
     -- Preview Header
     local _previewHeaderBuilder
     local _previewFrames = {}
+    local _healthIndicatorPreview  -- session-only: "absorb", "healAbsorb", or "maxHealthLoss"
     local _previewHintFS
     local _previewScale = 1
     local _previewBuilding = false  -- true while _previewHeaderBuilder is executing
@@ -463,6 +517,68 @@ initFrame:SetScript("OnEvent", function(self)
         tf:SetFrameLevel(bar:GetFrameLevel() + 10)
         bar._text = tf:CreateFontString(nil, "OVERLAY")
         return bar
+    end
+
+    -- Demo a configured health indicator on the header's health bar, without
+    -- changing the player's real absorb amounts or persisted configuration.
+    function PreviewBar.HealthIndicator(bar, cfg)
+        if not bar then return end
+        local tex = bar._indicatorPreviewTex
+        local kind = _healthIndicatorPreview
+        local k
+        if kind and cfg then
+            for _, info in ipairs(ns.HEALTH_INDICATORS) do
+                if info.key == kind then k = info; break end
+            end
+        end
+        local style = k and cfg[k.style]
+        if k and k.show and not cfg[k.show] then k = nil end
+        if not k or style == "none" or (not style and kind ~= "maxHealthLoss") then
+            if tex then
+                tex:Hide()
+                if bar._indicatorPreviewBg then bar._indicatorPreviewBg:Hide() end
+            end
+            return
+        end
+        style = style or "striped"
+        if not tex then
+            tex = bar._sb:CreateTexture(nil, "OVERLAY", nil, 4)
+            bar._indicatorPreviewTex = tex
+            UnsnapTex(tex)
+        end
+        tex:SetTexture(ns.HealthIndicatorTex(style))
+        local tiled = EllesmereUI.ABSORB_TILED_STYLES[style] == true
+            or (kind == "maxHealthLoss" and (style == "striped" or style == "maxHealthStripes"))
+        tex:SetHorizTile(tiled)
+        tex:SetVertTile(tiled)
+        local col = cfg[k.color]
+        local r, g, b, a = k.r, k.g, k.b, k.a or 1
+        if col then r, g, b, a = col.r or r, col.g or g, col.b or b, col.a or a end
+        if k.opacity then a = (cfg[k.opacity] or k.opacityDef) / 100 end
+        if style == "largeOutlinedStripes" or style == "largeOutlinedStripesR" then
+            r, g, b = 1, 1, 1
+        end
+        tex:SetVertexColor(r, g, b, a)
+        tex:ClearAllPoints()
+        local sb = bar._sb
+        local w, h = bar:GetWidth(), bar:GetHeight()
+        tex:SetSize(math.max(1, w * (kind == "maxHealthLoss" and 0.20 or 0.25)), math.max(1, h - 2))
+        tex:SetPoint("TOPRIGHT", sb, "TOPRIGHT", 0, -1)
+        tex:Show()
+        local backingAlpha = kind == "maxHealthLoss" and (cfg.maxHealthLossBgOpacity or 0) / 100 or 0
+        if backingAlpha > 0 then
+            local backing = bar._indicatorPreviewBg
+            if not backing then
+                backing = sb:CreateTexture(nil, "OVERLAY", nil, 3)
+                bar._indicatorPreviewBg = backing
+                UnsnapTex(backing)
+                backing:SetAllPoints(tex)
+            end
+            backing:SetColorTexture(0, 0, 0, backingAlpha)
+            backing:Show()
+        elseif bar._indicatorPreviewBg then
+            bar._indicatorPreviewBg:Hide()
+        end
     end
 
     -- A preview whose bar is off: dimmed like the page's greyed controls, and
@@ -1137,12 +1253,18 @@ initFrame:SetScript("OnEvent", function(self)
                     _previewFrames.pips[i]:Hide()
                 end
 
-                -- Optional gap-color fill layer (mirrors the live bar)
+                -- Always-active gap-color fill layer (mirrors the live bar)
                 if not pc._gapFills then pc._gapFills = {} end
                 do
                     local pvFills = pc._gapFills
-                    if sp.gapColorEnabled and numPips > 1 then
-                        local gr, gg, gb, ga = sp.gapR or 0, sp.gapG or 0, sp.gapB or 0, sp.gapA or 1
+                    if numPips > 1 then
+                        local gr, gg, gb, ga
+                        if sp.gapColorEnabled then
+                            gr, gg, gb, ga = sp.gapR or 0, sp.gapG or 0, sp.gapB or 0, sp.gapA or 1
+                        else
+                            local v = sp.darkTheme and 0 or 1
+                            gr, gg, gb, ga = v, v, v, 1
+                        end
                         local gn = 0
                         for i = 1, numPips - 1 do
                             local gx = pipX[i] + pipW[i]
@@ -1344,7 +1466,12 @@ initFrame:SetScript("OnEvent", function(self)
             local showPower = pb and not pvHidden.power and not PreviewBar.Avail(p, "power")
             local showHealth = hb and not pvHidden.health and not PreviewBar.Avail(p, "health")
             if showPower then PreviewBar.Style(pb, p, p.primary, "power") end
-            if showHealth then PreviewBar.Style(hb, p, p.health, "health") end
+            if showHealth then
+                PreviewBar.Style(hb, p, p.health, "health")
+                PreviewBar.HealthIndicator(hb, p.health)
+            elseif hb and hb._indicatorPreviewTex then
+                hb._indicatorPreviewTex:Hide()
+            end
             if pb then pb:SetShown(showPower and true or false) end
             if hb then hb:SetShown(showHealth and true or false) end
 
@@ -1946,7 +2073,7 @@ initFrame:SetScript("OnEvent", function(self)
         local bg = bandPopup:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0.077, 0.068, 0.058, 0.97)
-        PP.CreateBorder(bandPopup, 1, 1, 1, 0.18, 1, "BORDER", 7)
+        bandPopup._brd = EllesmereUI.MakeRoundedBorder(bandPopup, 1, 1, 1, 0.18, bg)
 
         local clickCatcher = CreateFrame("Button", nil, bandPopup)
         clickCatcher:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -2065,7 +2192,7 @@ initFrame:SetScript("OnEvent", function(self)
         _bandAddBtn:SetFrameLevel(bandPopup:GetFrameLevel() + 3)
         local abg = EllesmereUI.SolidTex(_bandAddBtn, "BACKGROUND", 0.069, 0.058, 0.047, 0.92)
         abg:SetAllPoints()
-        _bandAddBtn._border = EllesmereUI.MakeBorder(_bandAddBtn, 1, 1, 1, 0.4, PP)
+        _bandAddBtn._border = EllesmereUI.MakeRoundedBorder(_bandAddBtn, 1, 1, 1, 0.4, abg)
         local albl = EllesmereUI.MakeFont(_bandAddBtn, 12, nil, 1, 1, 1)
         albl:SetAlpha(0.5)
         albl:SetPoint("CENTER")
@@ -2249,6 +2376,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local totalH = math.abs(curY) + BAND_PAD
         PP.Size(bandPopup, BAND_POPUP_W, totalH)
+        bandPopup._brd:Fit()
     end
 
     -- params = { getBarData, refreshFn, entryIdx, anchor, countBased, defR/G/B/A }
@@ -2332,7 +2460,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Size(popup, POPUP_W, 200)
             local bg = popup:CreateTexture(nil, "BACKGROUND")
             bg:SetAllPoints(); bg:SetColorTexture(0.077, 0.068, 0.058, 0.97)
-            PP.CreateBorder(popup, 1, 1, 1, 0.18, 1, "BORDER", 7)
+            popup._brd = EllesmereUI.MakeRoundedBorder(popup, 1, 1, 1, 0.18, bg)
 
             -- Insertion line shown while dragging a row; theme accent, matches the raid "Sort By" reorder line
             insLine = popup:CreateTexture(nil, "OVERLAY", nil, 7)
@@ -2382,7 +2510,7 @@ initFrame:SetScript("OnEvent", function(self)
             addBtn:SetFrameLevel(popup:GetFrameLevel() + 3)
             local abg = EllesmereUI.SolidTex(addBtn, "BACKGROUND", 0.069, 0.058, 0.047, 0.92)
             abg:SetAllPoints()
-            addBtn._border = EllesmereUI.MakeBorder(addBtn, 1, 1, 1, 0.4, PP)
+            addBtn._border = EllesmereUI.MakeRoundedBorder(addBtn, 1, 1, 1, 0.4, abg)
             local albl = EllesmereUI.MakeFont(addBtn, 12, nil, 1, 1, 1)
             albl:SetAlpha(0.5); albl:SetPoint("CENTER"); albl:SetText(o.addLabel)
             addBtn:SetScript("OnEnter", function() albl:SetAlpha(0.7); addBtn._border:SetColor(1, 1, 1, 0.6) end)
@@ -2533,6 +2661,7 @@ initFrame:SetScript("OnEvent", function(self)
             PP.Point(addBtn, "TOPLEFT", popup, "TOPLEFT", BAND_PAD, curY)
             curY = curY - 26
             PP.Size(popup, POPUP_W, math.abs(curY) + BAND_PAD)
+            popup._brd:Fit()
         end
 
         -- Runs each frame from the popup's OnUpdate while a grip is held: separates click from
@@ -2627,7 +2756,7 @@ initFrame:SetScript("OnEvent", function(self)
         local bg = btn:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
-        btn._border = EllesmereUI.MakeBorder(btn, 1, 1, 1, 0.08, PP)
+        btn._border = EllesmereUI.MakeRoundedBorder(btn, 1, 1, 1, 0.08, bg)
         local lbl = EllesmereUI.MakeFont(btn, 12, nil, 1, 1, 1)
         lbl:SetAlpha(0.8)
         lbl:SetPoint("CENTER")
@@ -2864,7 +2993,7 @@ initFrame:SetScript("OnEvent", function(self)
         local btnBg = EllesmereUI.SolidTex(settingsBtn, "BACKGROUND",
             EllesmereUI.DD_BG_R, EllesmereUI.DD_BG_G, EllesmereUI.DD_BG_B, EllesmereUI.DD_BG_A)
         btnBg:SetAllPoints()
-        settingsBtn._border = EllesmereUI.MakeBorder(settingsBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, PP)
+        settingsBtn._border = EllesmereUI.MakeRoundedBorder(settingsBtn, 1, 1, 1, EllesmereUI.DD_BRD_A, btnBg)
         local btnLbl = EllesmereUI.MakeFont(settingsBtn, 13, nil, 1, 1, 1)
         btnLbl:SetAlpha(EllesmereUI.DD_TXT_A)
         btnLbl:SetPoint("CENTER")
@@ -3219,7 +3348,8 @@ initFrame:SetScript("OnEvent", function(self)
             local bg = specContainer:CreateTexture(nil, "BACKGROUND")
             bg:SetAllPoints()
             bg:SetColorTexture(0.077, 0.068, 0.058, 0.95)
-            PP.CreateBorder(specContainer, 1, 1, 1, 0.15, 1, "BORDER", 7)
+            -- clip: list rows scrolled to an edge keep the round corners.
+            EllesmereUI.MakeRoundedBorder(specContainer, 1, 1, 1, 0.15, bg, nil, true)
 
             local scrollFrame = CreateFrame("ScrollFrame", nil, specContainer)
             scrollFrame:SetPoint("TOPLEFT", specContainer, "TOPLEFT", 1, -2)
@@ -3251,7 +3381,7 @@ initFrame:SetScript("OnEvent", function(self)
             local dBg = detailC:CreateTexture(nil, "BACKGROUND")
             dBg:SetAllPoints()
             dBg:SetColorTexture(0.077, 0.068, 0.058, 0.95)
-            PP.CreateBorder(detailC, 1, 1, 1, 0.15, 1, "BORDER", 7)
+            EllesmereUI.MakeRoundedBorder(detailC, 1, 1, 1, 0.15, dBg)
             detailC:EnableMouse(true)
 
             local DPAD   = 16
@@ -3911,7 +4041,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local varBg = varBtn:CreateTexture(nil, "BACKGROUND")
                     varBg:SetAllPoints()
                     varBg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
-                    varBtn._border = EllesmereUI.MakeBorder(varBtn, 1, 1, 1, 0.08, PP)
+                    varBtn._border = EllesmereUI.MakeRoundedBorder(varBtn, 1, 1, 1, 0.08, varBg)
                     local varLbl = EllesmereUI.MakeFont(varBtn, 11, nil, 1, 1, 1)
                     varLbl:SetText(EllesmereUI.L("Add Variant"))
                     varLbl:SetAlpha(0.65)
@@ -4780,6 +4910,15 @@ initFrame:SetScript("OnEvent", function(self)
         _clickMappings = _clickMappings, _previewHeaderBuilder = _previewHeaderBuilder, CLASSIC_SYNC_KEYS = CLASSIC_SYNC_KEYS,
         CLASSIC_MATCH_KEYS = CLASSIC_MATCH_KEYS, ShuffleCastBarIcons = ShuffleCastBarIcons, UpdateCastBarPreview = UpdateCastBarPreview,
         _castBarPreviewBuilder = _castBarPreviewBuilder, UpdatePreviewHeader = UpdatePreviewHeader, PreviewAvail = PreviewBar.Avail,
+        GetHealthIndicatorPreview = function() return _healthIndicatorPreview end,
+        ToggleHealthIndicatorPreview = function(kind)
+            if _healthIndicatorPreview == kind then
+                _healthIndicatorPreview = nil
+            else
+                _healthIndicatorPreview = kind
+            end
+            UpdatePreviewHeader()
+        end,
         SetDisplayPreviewValues = function(pipCount, fillPct)
             _previewPipCount = pipCount
             _previewBarFillPct = fillPct

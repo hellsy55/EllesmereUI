@@ -318,6 +318,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         -- Blocking overlay: non-clickable + tooltip unless Fill Color is Custom.
         local block = CreateFrame("Frame", nil, swatch)
         block:SetAllPoints()
@@ -396,6 +397,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
         bgClassSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         bgClassSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgClassSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgClassSwatch, "swatch")
 
         local bgSwatch = EllesmereUI.BuildColorSwatch(
             rgn, row:GetFrameLevel() + 3,
@@ -421,6 +423,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
         bgSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
         -- Blocking overlay spans BOTH swatches: Dark Mode has no background.
         local bgBlock = CreateFrame("Frame", nil, rgn)
         bgBlock:SetPoint("TOPLEFT", bgSwatch, "TOPLEFT", 0, 0)
@@ -474,6 +477,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local function UpdateHealPredSwatchVis()
             swatch:SetAlpha(SVal("healPrediction", false) and 1 or 0.3)
         end
@@ -746,6 +750,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         -- BuildColorSwatch has no disabled state, so a mouse-enabled frame on top eats clicks when the color isn't user-editable (no absorb, or hardcoded-color "Blizzard (Modern)").
         local swatchBlock = CreateFrame("Frame", nil, swatch)
         swatchBlock:SetAllPoints()
@@ -835,6 +840,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             end, true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local function UpdateAbsorbBarSwatchVis()
             swatch:SetAlpha(CurAbsorbBarPos() ~= "none" and 1 or 0.3)
         end
@@ -918,6 +924,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             end, false, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         -- Blocked for "none" and the pre-colored heal styles (healBlizzModern is hardcoded white).
         local swatchBlock = CreateFrame("Frame", nil, swatch)
         swatchBlock:SetAllPoints()
@@ -965,6 +972,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function UpdateHealAbsorbBarSwatchVis()
                 swatch:SetAlpha(CurHealAbsorbBarPos() ~= "none" and 1 or 0.3)
             end
@@ -1051,6 +1059,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
                 end, false, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             -- Blocked for "none" and the pre-colored styles.
             local swatchBlock = CreateFrame("Frame", nil, swatch)
             swatchBlock:SetAllPoints()
@@ -1097,6 +1106,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
                 end, true, 20)
             swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
             rgn._lastInline = swatch
+            EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             local function RefreshColor() swatch:SetAlpha(MaxBarPos() == "none" and 0.3 or 1) end
             EllesmereUI.RegisterWidgetRefresh(RefreshColor); RefreshColor()
         end
@@ -1415,6 +1425,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
             end, true, 20)
         swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = swatch
+        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         local block = CreateFrame("Frame", nil, swatch)
         block:SetAllPoints(); block:SetFrameLevel(swatch:GetFrameLevel() + 10); block:EnableMouse(true)
         block:SetScript("OnEnter", function()
@@ -1465,6 +1476,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
         bgPwrSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         bgPwrSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgPwrSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgPwrSwatch, "swatch")
 
         local bgSwatch = EllesmereUI.BuildColorSwatch(
             rgn, pwBgRow:GetFrameLevel() + 3,
@@ -1490,6 +1502,7 @@ local function BuildVisualBars(parent, y, W, onSection, EYE)
         bgSwatch:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
         bgSwatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
         rgn._lastInline = bgSwatch
+        EllesmereUI.OrderInlineAddon(rgn, bgSwatch, "swatch")
 
         local function UpdatePwBgSwatchVis()
             local pwrOn = SVal("powerBgPowerColored", false)
