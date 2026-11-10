@@ -2056,6 +2056,27 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -------------------------------------------------------------------
+        -- ADDON MANAGER: opt-in, profile-aware addon enable states.
+        -------------------------------------------------------------------
+        local AM = EllesmereUI.AddonManager
+        _, h = W:SectionHeader(parent, "ADDON MANAGER", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Addon Manager",
+              tooltip="Choose which addons are on, by default and per character. Nothing is read or changed while this is off.",
+              getValue=function() local d=AM.Store(); return d ~= nil and d.enabled == true end,
+              setValue=function(v) AM.SetEnabled(v); EllesmereUI:RefreshPage() end },
+            { type="button", text="Open Addon Manager", width=220,
+              onClick=function() AM.Open(true) end }); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Open Addon Manager With",
+              tooltip="Start with account-wide addon defaults or the logged-in character's overrides. Both views remain selectable in the Addon Manager window.",
+              values={ character="Current Character", account="All Characters" },
+              order={ "character", "account" },
+              getValue=AM.GetStartView, setValue=AM.SetStartView },
+            EllesmereUI.BlankRowCfg()); y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
+        -------------------------------------------------------------------
         --  DEVELOPER -- both toggles are duplicated in Quality of Life
         --  (Suppress Lua Errors) and Blizzard Skins+ (Spell ID on Tooltip):
         --  hidden here when BOTH modules are loaded, shown if either is missing so the settings stay reachable.

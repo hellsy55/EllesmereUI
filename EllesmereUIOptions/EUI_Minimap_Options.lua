@@ -1232,40 +1232,156 @@ initFrame:SetScript("OnEvent", function(self)
                 local m = MinimapDB(); if not m then return end
                 m.mailPosition = v
                 RefreshMinimap()
-                EllesmereUI:RefreshPage()
               end }
         );  y = y - h
-        -- Inline offset cog on Mail Position (corner modes only)
+        -- Blizzard elements may be placed in their stock element row or pinned
+        -- to a chosen minimap corner. Empty saved positions preserve the stock
+        -- behavior. The preview eye never changes the live enabled setting.
+        local POSITION_VALUES = { button = "Minimap Button", default = "Default",
+            TOPRIGHT = "Top Right", TOPLEFT = "Top Left",
+            BOTTOMRIGHT = "Bottom Right", BOTTOMLEFT = "Bottom Left" }
+        local CORNER_ORDER = { "TOPRIGHT", "TOPLEFT", "BOTTOMRIGHT", "BOTTOMLEFT" }
+        local previewVisible = parent._mmPreviewVisible or {}
         if not EllesmereUI._prebuilding then
-            local rgn = elRowRow._rightRegion
-            local function mailOff()
+            parent._mmPreviewVisible = previewVisible
+            if not parent._mmBlizzPreviewCleanup then
+                parent._mmBlizzPreviewCleanup = true
+                parent:HookScript("OnHide", function()
+                    wipe(previewVisible)
+                    if ns.ClearBlizzardElementPreviews then ns.ClearBlizzardElementPreviews() end
+                end)
+            end
+        end
+        local function AttachPositionExtras(rgn, info)
+            if EllesmereUI._prebuilding then return end
+            local function IsDisabled()
                 local m = MinimapDB()
-                return not m or m.hideMail or (m.mailPosition or "button") == "button"
+                return not m or m[info.hideKey] == true
+                    or (info.key == "difficulty" and m.diffTextEnabled == true)
             end
             EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
-                disabled = mailOff,
+                disabled = IsDisabled,
                 disabledTooltip = function()
-                    local m = MinimapDB()
-                    return (m and m.hideMail) and "Mail in Show Blizzard Elements" or "a Mail Position corner"
+                    return info.name .. " in Show Blizzard Elements"
                 end,
-                title = "Mail Position",
+                title = info.name .. " Position",
                 rows = {
                     { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
-                      get = function() local m = MinimapDB(); return m and m.mailOffsetX or 0 end,
-                      set = function(v)
-                          local m = MinimapDB(); if not m then return end
-                          m.mailOffsetX = v
-                          RefreshMinimap()
-                      end },
+                      get = function() local m = MinimapDB(); return m and m[info.xKey] or 0 end,
+                      set = function(v) local m = MinimapDB(); if m then m[info.xKey] = v; RefreshMinimap() end end },
                     { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
-                      get = function() local m = MinimapDB(); return m and m.mailOffsetY or 0 end,
+                      get = function() local m = MinimapDB(); return m and m[info.yKey] or 0 end,
+                      set = function(v) local m = MinimapDB(); if m then m[info.yKey] = v; RefreshMinimap() end end },
+                    { type = "toggle", label = "Show on Mouseover",
+                      tooltip = "Only show this Blizzard element while the mouse is over the minimap. Mail, Crafting Order, and Difficulty still require their normal game conditions.",
+                      get = function()
+                          local m = MinimapDB()
+                          local v = m and m.blizzardElementMouseover and m.blizzardElementMouseover[info.key]
+                          if v == nil then return info.key == "zoom" end
+                          return v == true
+                      end,
                       set = function(v)
                           local m = MinimapDB(); if not m then return end
-                          m.mailOffsetY = v
+                          m.blizzardElementMouseover = m.blizzardElementMouseover or {}
+                          m.blizzardElementMouseover[info.key] = v and true or false
                           RefreshMinimap()
                       end },
                 },
             })
+            -- Native EUI preview glyph, sorted left of the direction cog.
+            local eye = CreateFrame("Button", nil, rgn)
+            eye:SetSize(26, 26)
+            eye:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+            rgn._lastInline = eye
+            EllesmereUI.OrderInlineAddon(rgn, eye, "preview")
+            eye:SetFrameLevel(rgn:GetFrameLevel() + 5)
+            local eyeTex = eye:CreateTexture(nil, "OVERLAY")
+            eyeTex:SetAllPoints()
+            local function Paint()
+                local off = IsDisabled()
+                if off and previewVisible[info.key] then
+                    previewVisible[info.key] = nil
+                    if ns.SetBlizzardElementPreview then ns.SetBlizzardElementPreview(info.key, false) end
+                end
+                eyeTex:SetTexture(previewVisible[info.key] and EllesmereUI.EYE_INVISIBLE_ICON
+                    or EllesmereUI.EYE_VISIBLE_ICON)
+                EllesmereUI.SetGlyphAlpha(eye, off and 0.15 or 0.4)
+            end
+            eye:SetScript("OnClick", function()
+                if IsDisabled() then return end
+                previewVisible[info.key] = not previewVisible[info.key] or nil
+                if ns.SetBlizzardElementPreview then
+                    ns.SetBlizzardElementPreview(info.key, previewVisible[info.key] == true)
+                end
+                Paint()
+            end)
+            eye:SetScript("OnEnter", function(self)
+                EllesmereUI.SetGlyphAlpha(self, IsDisabled() and 0.15 or 0.7)
+                EllesmereUI.ShowWidgetTooltip(self, IsDisabled()
+                    and (info.name .. " in Show Blizzard Elements")
+                    or (previewVisible[info.key] and "Hide temporary " or "Preview temporary ") .. info.name .. " position")
+            end)
+            eye:SetScript("OnLeave", function()
+                EllesmereUI.HideWidgetTooltip()
+                Paint()
+            end)
+            EllesmereUI.RegisterWidgetRefresh(Paint)
+            Paint()
+        end
+        local elementPositions = {
+            mail = { key = "mail", name = "Mail", positionKey = "mailPosition", hideKey = "hideMail",
+                xKey = "mailOffsetX", yKey = "mailOffsetY", default = "button" },
+            tracking = { key = "tracking", name = "Tracking", positionKey = "trackingPosition", hideKey = "hideTrackingButton",
+                xKey = "trackingOffsetX", yKey = "trackingOffsetY", default = "button" },
+            calendar = { key = "calendar", name = "Calendar", positionKey = "calendarPosition", hideKey = "hideGameTime",
+                xKey = "calendarOffsetX", yKey = "calendarOffsetY", default = "button" },
+            crafting = { key = "crafting", name = "Crafting Order", positionKey = "craftingPosition", hideKey = "hideCraftingOrder",
+                xKey = "craftingOffsetX", yKey = "craftingOffsetY", default = "button" },
+            difficulty = { key = "difficulty", name = "Difficulty", positionKey = "difficultyPosition", hideKey = "hideRaidDifficulty",
+                xKey = "difficultyOffsetX", yKey = "difficultyOffsetY", default = "default" },
+            zoom = { key = "zoom", name = "Zoom +/- Icons", positionKey = "zoomPosition", hideKey = "hideZoomButtons",
+                xKey = "zoomOffsetX", yKey = "zoomOffsetY", default = "default" },
+        }
+        local function PositionOption(info)
+            return { type = "dropdown", text = info.name .. " Position",
+                tooltip = "Choose the minimap corner for this Blizzard element, or keep its original position. Use the eye to preview it while it is not normally visible.",
+                values = POSITION_VALUES,
+                order = info.default == "button"
+                    and { "button", "TOPRIGHT", "TOPLEFT", "BOTTOMRIGHT", "BOTTOMLEFT" }
+                    or { "default", "TOPRIGHT", "TOPLEFT", "BOTTOMRIGHT", "BOTTOMLEFT" },
+                disabled = function()
+                    local m = MinimapDB()
+                    return not m or m[info.hideKey] == true
+                        or (info.key == "difficulty" and m.diffTextEnabled == true)
+                end,
+                disabledTooltip = info.name .. " in Show Blizzard Elements",
+                getValue = function() local m = MinimapDB(); return m and m[info.positionKey] or info.default end,
+                setValue = function(value)
+                    local m = MinimapDB(); if not m then return end
+                    m[info.positionKey] = value == info.default and nil or value
+                    RefreshMinimap()
+                    end }
+        end
+        AttachPositionExtras(elRowRow._rightRegion, elementPositions.mail)
+        local trackingRow
+        trackingRow, h = W:DualRow(parent, y,
+            PositionOption(elementPositions.tracking), PositionOption(elementPositions.calendar)); y = y - h
+        if not EllesmereUI._prebuilding then
+            AttachPositionExtras(trackingRow._leftRegion, elementPositions.tracking)
+            AttachPositionExtras(trackingRow._rightRegion, elementPositions.calendar)
+        end
+        local craftRow
+        craftRow, h = W:DualRow(parent, y,
+            PositionOption(elementPositions.crafting), PositionOption(elementPositions.difficulty)); y = y - h
+        if not EllesmereUI._prebuilding then
+            AttachPositionExtras(craftRow._leftRegion, elementPositions.crafting)
+            AttachPositionExtras(craftRow._rightRegion, elementPositions.difficulty)
+        end
+        local zoomRow
+        zoomRow, h = W:DualRow(parent, y,
+            PositionOption(elementPositions.zoom), EllesmereUI.BlankRowCfg()); y = y - h
+        if not EllesmereUI._prebuilding then
+            AttachPositionExtras(zoomRow._leftRegion, elementPositions.zoom)
         end
         -- Inline cog on Element Row Position for icon spacing
         if not EllesmereUI._prebuilding then

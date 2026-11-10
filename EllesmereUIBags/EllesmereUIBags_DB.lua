@@ -74,6 +74,8 @@ local BAGS_DEFAULTS = {
         bagBgTexture          = "original", -- shared bags / bank / warbank background texture
         bagWindowLocked       = false,   -- footer lock icon: no resizing or moving
         bankWindowLocked      = false,
+        bagAnchor             = false,
+        bagAnchorCorner       = "BOTTOMRIGHT",
         bagOpenWithCharacter  = false,
         -- bagFrameStrata has no default: unset reads the retired
         -- bagAllowWindowsOverBags (ns.BagFrameStrata)
