@@ -66,7 +66,11 @@ local function Run(text)
     end
 end
 
+local reopenWindow
 local function Open()
+    -- Keep one owned popup for the session, rather than creating a complete
+    -- frame tree on every /euipaste invocation.
+    if reopenWindow then reopenWindow(); return end
     local POPUP_W, POPUP_H = 520, 340
     local FONT = EllesmereUI.EXPRESSWAY
 
@@ -128,9 +132,11 @@ local function Open()
     editBox:SetHeight(1)
 
     local UpdateThumb, scrollTo = EllesmereUI.AttachSmoothScrollbar(sf)
+    local absorber
     dimmer:HookScript("OnHide", function()
         scrollTo(0)
         editBox:ClearFocus()
+        if absorber then absorber.Reset() end
     end)
 
     editBox:SetScript("OnMouseUp", function(self)
@@ -156,7 +162,7 @@ local function Open()
         end)
     end
 
-    local absorber = EllesmereUI.AttachImportPasteAbsorber(editBox)
+    absorber = EllesmereUI.AttachImportPasteAbsorber(editBox)
     local warn = EllesmereUI.MakeFont(popup, 11, "", 1, 0.82, 0.45)
     warn:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", 20, 50)
     warn:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -20, 50)
@@ -214,10 +220,15 @@ local function Open()
         end
     end)
 
-    dimmer:Show()
-    RefreshHeight()
-    RefreshWarning()
-    C_Timer.After(0.05, function() editBox:SetFocus() end)
+    reopenWindow = function()
+        dimmer:Show()
+        RefreshHeight()
+        RefreshWarning()
+        C_Timer.After(0.05, function()
+            if dimmer:IsShown() then editBox:SetFocus() end
+        end)
+    end
+    reopenWindow()
 end
 
 -- The macro is the action bar button: created once, then handed to the cursor to drop on a bar.

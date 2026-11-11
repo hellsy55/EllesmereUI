@@ -1491,14 +1491,24 @@ local function DecorateEntry(entry)
         local declined = appStatus == "declined" or appStatus == "declined_full" or appStatus == "declined_delisted"
         if declined or LockedOut(ai, resultID) then
             entry.Name:SetTextColor(1, 0.25, 0.25)
-        elseif prevResults and not prevResults[resultID] and (appStatus == "none" or appStatus == nil) then
+            fd.nameTinted = true
+        elseif Cfg().greenNewGroups ~= false and prevResults and not prevResults[resultID]
+            and (appStatus == "none" or appStatus == nil) then
             entry.Name:SetTextColor(0.3, 1, 0.3)
+            fd.nameTinted = true
+        elseif fd.nameTinted then
+            entry.Name:SetTextColor(1, 1, 1)
+            fd.nameTinted = nil
         end
+    elseif fd.nameTinted and entry.Name then
+        entry.Name:SetTextColor(1, 1, 1)
+        fd.nameTinted = nil
     end
 
     local enum = entry.DataDisplay and entry.DataDisplay.Enumerate
     local score = info.leaderOverallDungeonScore
-    if Opt("leaderRating") and enum and enum:IsShown() and entry.DataDisplay:IsShown()
+    if SP.categoryID == DUNGEONS and Opt("leaderRating")
+        and enum and enum:IsShown() and entry.DataDisplay:IsShown()
         and type(score) == "number" and not IsSecret(score) and score > 0 then
         local n = ai and ai.maxNumPlayers or 5
         local left = enum.Icons and enum.Icons[math.min(n, #enum.Icons)]
@@ -1547,7 +1557,8 @@ function ns.GFNameColor(resultID, info, ai)
     if IsSecret(appStatus) then return nil end
     local declined = appStatus == "declined" or appStatus == "declined_full" or appStatus == "declined_delisted"
     if declined or LockedOut(ai, resultID) then return 1, 0.25, 0.25 end
-    if prevResults and not prevResults[resultID] and (appStatus == "none" or appStatus == nil) then return 0.3, 1, 0.3 end
+    if Cfg().greenNewGroups ~= false and prevResults and not prevResults[resultID]
+        and (appStatus == "none" or appStatus == nil) then return 0.3, 1, 0.3 end
     return nil
 end
 
@@ -2366,9 +2377,13 @@ end
 -- buttons
 -------------------------------------------------------------------------------
 -- button in the skin's look (WSkin.button); skin off, blizzard's rounded menu button
-local function SkinnedButton(parent, w, h, keepKeys, decorate)
+local function SkinnedButton(parent, w, h, keepKeys, decorate, actionTemplate)
     local stock = not XF.SkinOn()
-    local b = CreateFrame("Button", nil, parent, stock and "UIMenuButtonStretchTemplate" or nil)
+    local template = stock and "UIMenuButtonStretchTemplate" or nil
+    if actionTemplate then
+        template = template and (template .. "," .. actionTemplate) or actionTemplate
+    end
+    local b = CreateFrame("Button", nil, parent, template)
     b:SetSize(w, h)
     b:SetNormalFontObject("GameFontHighlight")
     b:SetHighlightFontObject("GameFontHighlight")
@@ -2469,7 +2484,49 @@ ns.Redecorate = XF.Redecorate  -- for the settings page
 local function SquareEnter(self)
     local d = self.dungeon
     if not d then return end
-    XF.Tip(self, d.name or "?", EllesmereUI.L("Click to toggle"))
+    if Cfg().dungeonTeleport == true then
+        local spellID = self.portalSpell
+        local learned = spellID and IsPlayerSpell and IsPlayerSpell(spellID)
+        local portalTip = spellID and (learned and "Right-click: teleport to dungeon"
+            or "Right-click: teleport not learned") or "Right-click: teleport unavailable"
+        if InCombatLockdown() then portalTip = "Right-click: unavailable in combat" end
+        XF.Tip(self, d.name or "?", "Left-click: toggle filter", portalTip)
+    else
+        XF.Tip(self, d.name or "?", EllesmereUI.L("Click to toggle"))
+    end
+end
+
+-- The shared season list is also used by the portal flyout and /keys.
+-- Resolve from the localized dungeon name without depending on QoL being enabled.
+function XF.DungeonPortal(name)
+    if type(name) ~= "string" then return nil end
+    local wanted = name:lower():gsub("%s*%b()%s*$", "")
+    for _, entry in ipairs(CM.SEASON_PORTALS or XF.EMPTY) do
+        if type(entry.spellID) == "number" then
+            for _, alias in ipairs(entry.names or XF.EMPTY) do
+                if alias:lower() == wanted then return entry end
+            end
+            local localized = GetLFGDungeonInfo and GetLFGDungeonInfo(entry.dungeonID)
+            if type(localized) == "string" and localized:lower() == wanted then return entry end
+        end
+    end
+    return nil
+end
+
+function XF.DungeonPortalSpell(dungeon)
+    if not dungeon then return nil end
+    if dungeon.portalEntry == nil then
+        dungeon.portalEntry = XF.DungeonPortal(dungeon.name)
+    end
+    local entry = dungeon.portalEntry
+    if not entry then return nil end
+    if entry.altSpellIDs then
+        if IsPlayerSpell and IsPlayerSpell(entry.spellID) then return entry.spellID end
+        for _, id in ipairs(entry.altSpellIDs) do
+            if IsPlayerSpell and IsPlayerSpell(id) then return id end
+        end
+    end
+    return entry.spellID
 end
 
 -- dungeon square: a skinned button with the icon inset 1px.
@@ -2490,14 +2547,25 @@ local function MakeSquare(parent)
             mask:SetPoint("BOTTOMRIGHT", btn.Icon, "BOTTOMRIGHT", 3, -3)
             btn.Icon:AddMaskTexture(mask)
         end
-    end)
+    end, Cfg().dungeonTeleport == true and "InsecureActionButtonTemplate" or nil)
     b.icon = b.Icon
     b:SetScript("OnEnter", SquareEnter)
     b:SetScript("OnLeave", XF.Untip)
-    b:SetScript("OnClick", function(self)
-        if self.dungeon then ToggleDungeon(self.dungeon.groupID) end
-        if XF.tipOwner == self then SquareEnter(self) end
-    end)
+    if Cfg().dungeonTeleport == true then
+        b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        b:SetAttribute("useOnKeyDown", false)
+        b:HookScript("OnClick", function(self, button)
+            if button == "LeftButton" then
+                if self.dungeon then ToggleDungeon(self.dungeon.groupID) end
+                if XF.tipOwner == self then SquareEnter(self) end
+            end
+        end)
+    else
+        b:SetScript("OnClick", function(self)
+            if self.dungeon then ToggleDungeon(self.dungeon.groupID) end
+            if XF.tipOwner == self then SquareEnter(self) end
+        end)
+    end
     return b
 end
 
@@ -3299,6 +3367,14 @@ local function LayoutSquares(size, after, show)
         if d and show then
             if not sq then sq = MakeSquare(row); squares[i] = sq end
             sq.dungeon = d
+            if Cfg().dungeonTeleport == true then
+                local spellID = XF.DungeonPortalSpell(d)
+                if sq.portalSpell ~= spellID then
+                    sq.portalSpell = spellID
+                    sq:SetAttribute("*type2", spellID and "spell" or nil)
+                    sq:SetAttribute("*spell2", spellID)
+                end
+            end
             sq:SetSize(size, size)
             sq:ClearAllPoints()
             sq:SetPoint("LEFT", prev, "RIGHT", SQ_GAP, 0)

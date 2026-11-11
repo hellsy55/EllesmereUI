@@ -7,7 +7,12 @@ local EUI = EllesmereUI
 local AM = {}
 EUI.AddonManager = AM
 local CORE = "EllesmereUI"
+local OPTIONS = "EllesmereUIOptions"
 local NONE = Enum.AddOnEnableState.None
+
+-- The core owns this manager; the load-on-demand options addon owns its UI.
+-- Neither may be disabled by the manager, including bulk/profile actions.
+function AM.Protected(name) return name == CORE or name == OPTIONS end
 
 local function Store(create)
     local profile = EUI.GetActiveProfileData()
@@ -77,7 +82,7 @@ function AM.List()
                 categoryShown = declared and declared ~= "" and declared or nil,
                 on = C_AddOns.GetAddOnEnableState(i, guid) > NONE,
                 loaded = C_AddOns.IsAddOnLoaded(i), loadable = loadable,
-                reason = reason, locked = name == CORE,
+                reason = reason, locked = AM.Protected(name),
             }
         end
     end
@@ -89,6 +94,7 @@ function AM.List()
     return out
 end
 function AM.Wanted(name, charKey)
+    if AM.Protected(name) then return true end
     local s = Store()
     if not s then return nil end
     local c = s.chars[charKey]
@@ -98,6 +104,8 @@ function AM.Wanted(name, charKey)
 end
 function AM.Needed(charKey)
     local needed, visiting = {}, {}
+    local guid = UnitGUID("player")
+    local current = charKey == CharKey()
     local function Need(name, by)
         if visiting[name] then return end
         visiting[name] = true
@@ -108,9 +116,16 @@ function AM.Needed(charKey)
             end
         end
     end
+    -- Unmanaged addons keep their native enable state. Their dependencies
+    -- must also remain enabled, not just dependencies of explicitly-on addons.
     for i = 1, C_AddOns.GetNumAddOns() do
         local name = C_AddOns.GetAddOnInfo(i)
-        if name and AM.Wanted(name, charKey) == true then Need(name, name) end
+        if name then
+            local want = AM.Wanted(name, charKey)
+            if want == true or (want == nil and current and C_AddOns.GetAddOnEnableState(i, guid) > NONE) then
+                Need(name, name)
+            end
+        end
     end
     return needed
 end
@@ -131,22 +146,67 @@ function AM.Pending()
     end
     return out
 end
+local function ApplyError(name)
+    if EUI.PrintError then
+        EUI.PrintError("Addon Manager: could not apply " .. name .. "; previous addon states restored where possible.")
+    end
+end
 function AM.ApplyNative()
+    if InCombatLockdown() then ApplyError("changes in combat"); return 0, false end
+    local guid, pending = UnitGUID("player"), AM.Pending()
+    local previous = {}
+    for _, item in ipairs(pending) do
+        if AM.Protected(item.name) and not item.on then
+            ApplyError(item.name)
+            return 0, false
+        end
+        previous[item.name] = C_AddOns.GetAddOnEnableState(item.name, guid) > NONE
+    end
+    -- Native enable-state changes are reversible, but SaveAddOns is not a
+    -- transaction. Check every result and restore the previous states on error.
+    local function Change(name, enabled)
+        local action = enabled and C_AddOns.EnableAddOn or C_AddOns.DisableAddOn
+        local ok = pcall(action, name, guid)
+        return ok and (C_AddOns.GetAddOnEnableState(name, guid) > NONE) == enabled
+    end
+    local function Restore()
+        for i = #pending, 1, -1 do
+            local name = pending[i].name
+            local before = previous[name]
+            if (C_AddOns.GetAddOnEnableState(name, guid) > NONE) ~= before then
+                Change(name, before)
+            end
+        end
+        pcall(C_AddOns.SaveAddOns)
+    end
+    -- Dependencies are generally enabled before their consumers by the
+    -- native API; enable passes before disables avoid a transient missing dep.
+    for _, enabled in ipairs({ true, false }) do
+        for _, item in ipairs(pending) do
+            if item.on == enabled and not Change(item.name, enabled) then
+                Restore()
+                ApplyError(item.name)
+                return 0, false
+            end
+        end
+    end
+    local ok = pcall(C_AddOns.SaveAddOns)
+    if not ok then
+        Restore()
+        ApplyError("addon settings")
+        return 0, false
+    end
     local s = Store()
     if s then s.backup = nil end
-    local guid, pending = UnitGUID("player"), AM.Pending()
-    for _, p in ipairs(pending) do
-        if p.on then C_AddOns.EnableAddOn(p.name, guid)
-        else C_AddOns.DisableAddOn(p.name, guid) end
-    end
-    C_AddOns.SaveAddOns()
-    return #pending
+    return #pending, true
 end
 function AM.SetDefault(name, value)
-    if name ~= CORE then Store(true).defaults[name] = value end
+    if AM.Protected(name) then return end
+    local s = Store(true)
+    if s then s.defaults[name] = value end
 end
 function AM.SetOverride(key, name, value)
-    if name == CORE then return end
+    if AM.Protected(name) then return end
     local s = Store(true)
     local c = s.chars[key]
     if not c then c = { overrides = {} }; s.chars[key] = c end
@@ -164,7 +224,7 @@ function AM.DefaultsFromThisCharacter()
     wipe(s.defaults)
     for i = 1, C_AddOns.GetNumAddOns() do
         local name = C_AddOns.GetAddOnInfo(i)
-        if name and name ~= CORE then
+        if name and not AM.Protected(name) then
             s.defaults[name] = C_AddOns.GetAddOnEnableState(i, guid) > NONE
         end
     end

@@ -825,6 +825,7 @@ local LIVE = {
     counts = function(id) return C_LFGList.GetSearchResultMemberCounts(id) end,
     appStatus = AppStatus,
     signedAt = SignedUpAt,
+    category = function() return SP and SP.categoryID end,
     nameColor = function(id, info, ai) if ns.GFNameColor then return ns.GFNameColor(id, info, ai) end end,
     region = function(id) if ns.RegionTagOf then return ns.RegionTagOf(id) end end,
     art = function(id) return ns.RowArtFor and ns.RowArtFor(id) end,
@@ -931,7 +932,8 @@ local function Fill(r, id, src)
     LineThree(r, id, info, src)
     local Opt = ns.GFOpt or function() return true end
     local score = info.leaderOverallDungeonScore
-    if Opt("leaderRating") and type(score) == "number" and not Secret(score) and score > 0 then
+    if src.category(id) == DUNGEONS and Opt("leaderRating")
+        and type(score) == "number" and not Secret(score) and score > 0 then
         -- raider.io or game colors
         local cr, cg, cb = 1, 1, 1
         if ns.GFRatingColor then cr, cg, cb = ns.GFRatingColor(score) end
@@ -1304,9 +1306,11 @@ local PREVIEW = {
     counts = function(id) return PvCounts(PV[id]) end,
     appStatus = function(id) return PV[id].applied and "applied" or "none" end,
     signedAt = function(id) if PV[id].applied then return GetTime() - 95 end end,
+    category = function(id) return PV[id].dungeon and DUNGEONS or RAIDS end,
     -- the first group reads as new
     nameColor = function(id)
-        if PV[id].new and GFNS.Cfg and GFNS.Cfg().nameColors == true then return 0.3, 1, 0.3 end
+        if PV[id].new and GFNS.Cfg and GFNS.Cfg().nameColors == true
+            and GFNS.Cfg().greenNewGroups ~= false then return 0.3, 1, 0.3 end
     end,
     -- your own realm's tag
     region = function() if ns.RegionTagOfName then return ns.RegionTagOfName(UnitName("player")) end end,
@@ -1444,10 +1448,12 @@ function ns.OwnListPreviewTip(r)
     tip:AddLine(" ")
     local leader = players[1] and players[1].name
     if leader then tip:AddLine(string.format(LFG_LIST_TOOLTIP_LEADER or "Leader: %s", leader)) end
-    local score = info.leaderOverallDungeonScore
-    local col = C_ChallengeMode.GetDungeonScoreRarityColor and C_ChallengeMode.GetDungeonScoreRarityColor(score)
-    local scoreText = col and col:WrapTextInColorCode(score) or tostring(score)
-    tip:AddLine(string.format(DUNGEON_SCORE_LEADER or "Leader's Mythic+ Rating: %s", scoreText))
+    if PV[id].dungeon then
+        local score = info.leaderOverallDungeonScore
+        local col = C_ChallengeMode.GetDungeonScoreRarityColor and C_ChallengeMode.GetDungeonScoreRarityColor(score)
+        local scoreText = col and col:WrapTextInColorCode(score) or tostring(score)
+        tip:AddLine(string.format(DUNGEON_SCORE_LEADER or "Leader's Mythic+ Rating: %s", scoreText))
+    end
     tip:AddLine(string.format(LFG_LIST_TOOLTIP_AGE or "Created %s ago", SecondsToTime(PV[id].age)))
     tip:AddLine(" ")
     if enumerate then

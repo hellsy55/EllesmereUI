@@ -4,7 +4,8 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -------------------------------------------------------------------------------
 local EUI = EllesmereUI
 local AM = EUI.AddonManager
-local CreateFrame = EUI._Pool.CreateFrame
+local Pool = EUI._Pool
+local CreateFrame = Pool.CreateFrame
 local ROW_H, INDENT, PAD = 28, 22, 12
 local ACCOUNT_VIEW = "\001EUI_ACCOUNT_DEFAULTS"
 local state = { query = "", queryRaw = "", folded = {} }
@@ -526,34 +527,50 @@ local function CreateWindow()
     local host = {
         pending = pending, Selected = Selected,
         RefreshApply = function() f.RefreshApply() end,
-        Rebuild = function() f.Rebuild(true) end,
+        Rebuild = function()
+            -- Do not reset pooled rows while their click handler is running.
+            C_Timer.After(0, function() if f:IsShown() then f.Rebuild(true) end end)
+        end,
     }
-    local page, dd
+    local page, ddRegion
     function f.Rebuild(keepSearch)
         local on = Enabled()
         snap()
         cog:SetShown(on); box:SetShown(on); apply:SetShown(on); enableAll:SetShown(on); disableAll:SetShown(on); pending:SetShown(on)
         charLabel:SetShown(on); ddHolder:SetShown(on); off:SetShown(not on)
-        if dd then dd:Hide(); dd:SetParent(nil); dd = nil end
-        if page then page:Hide(); page:SetParent(nil); page = nil end
-        if not on then content:SetHeight(10); pending:SetText(""); f.RefreshApply(); return end
+        if not on then
+            if ddRegion then ddRegion:Hide() end
+            if page then page:Hide() end
+            content:SetHeight(10); pending:SetText(""); f.RefreshApply()
+            return
+        end
         local _, _, chars = Selected()
         local values = {}
         for _, key in ipairs(chars) do
             values[key] = key == ACCOUNT_VIEW and EUI.L("All Characters") or AM.Label(key)
         end
-        dd = EUI.BuildDropdownControl(f, 300, level + 3, values, chars,
+        -- Kept hosts reset their pooled descendants on rebuild. Searching,
+        -- folding and switching characters no longer leave detached UI frames.
+        ddRegion = Pool.Kept(f, "addon-manager-selector", "Frame", ddHolder, nil, nil, true)
+        ddRegion:SetAllPoints(ddHolder)
+        local dd = EUI.BuildDropdownControl(ddRegion, 300, level + 3, values, chars,
             function() return state.sel end,
-            function(key) state.sel = key; f.Rebuild(true) end)
-        dd:SetPoint("TOPRIGHT", ddHolder, "TOPRIGHT", 0, 0)
+            function(key)
+                state.sel = key
+                -- The dropdown's menu is still handling this click.
+                C_Timer.After(0, function() if f:IsShown() then f.Rebuild(true) end end)
+            end)
+        dd:SetPoint("TOPRIGHT", ddRegion, "TOPRIGHT", 0, 0)
+        ddRegion:Show()
         if keepSearch ~= true then box:SetText(state.queryRaw or "") end
         local keep = sf:GetVerticalScroll()
-        page = CreateFrame("Frame", nil, content)
+        page = Pool.Kept(f, "addon-manager-list", "Frame", content, nil, nil, true)
         page:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
         page:SetSize(content:GetWidth(), 10)
         local h = BuildList(page, host)
         page:SetHeight(h)
         content:SetHeight(h)
+        page:Show()
         sf:SetVerticalScroll(math.min(keep, math.max(0, h - sf:GetHeight())))
         if updateThumb then updateThumb() end
         f.RefreshApply()

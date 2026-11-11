@@ -4645,6 +4645,17 @@ function EllesmereUI.AttachImportPasteAbsorber(editBox, onRetry)
         GetText = function()
             return captured or strtrim(editBox:GetText() or "")
         end,
+        -- A kept paste window may begin a new session without carrying a
+        -- previous captured block or an unfinished OnChar buffer forward.
+        Reset = function()
+            editBox:SetScript("OnUpdate", nil)
+            wipe(buf)
+            bufN, lastN, captured = 0, 0, nil
+            editBox:SetMaxBytes(CAP)
+            settingText = true
+            editBox:SetText("")
+            settingText = false
+        end,
     }
 end
 

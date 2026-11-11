@@ -345,5 +345,8 @@ function Anchor.Room()
     local x = (IsLeft(c) and f:GetLeft() or f:GetRight()) * k
     local y = (IsBottom(c) and f:GetBottom() or f:GetTop()) * k
     local w, h = UIParent:GetSize()
-    return (IsLeft(c) and w - x or x) / s, (IsBottom(c) and h - y or y) / s
+    -- Saved Unlock Mode positions may be outside the screen after a UI scale
+    -- or display change. Never pass negative available space to SetHeight.
+    return math.max(1, (IsLeft(c) and w - x or x) / s),
+        math.max(1, (IsBottom(c) and h - y or y) / s)
 end
