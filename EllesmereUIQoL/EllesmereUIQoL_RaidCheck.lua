@@ -113,7 +113,7 @@ local SMALL_SIZE  = 11
 local ICON_SZ     = 18
 local READY_ICON_W = 12   -- the ?/X/V glyph riding the name's left edge
 local AURA_SCAN_LIMIT = 40
-local SWEEP_PERIOD    = 2
+local SWEEP_PERIOD    = 1  -- refresh while visible; no work when hidden
 
 -- Blizzard's own ready-check art: exactly these semantics, guaranteed present,
 -- and no texture of ours to ship. Atlases (matching EllesmereUIRaidFrames'
@@ -134,11 +134,12 @@ local function FontPath()
         or STANDARD_TEXT_FONT
 end
 
-local function MakeText(parent, size)
+local function MakeText(parent, size, flags)
     local fs = parent:CreateFontString(nil, "OVERLAY")
-    fs:SetFont(FontPath(), size, "")
+    flags = flags or ""
+    fs:SetFont(FontPath(), size, flags)
     fs:SetTextColor(1, 1, 1)
-    fonts[#fonts + 1] = { fs = fs, size = size }
+    fonts[#fonts + 1] = { fs = fs, size = size, flags = flags }
     return fs
 end
 
@@ -147,7 +148,7 @@ end
 -- between two ready checks would otherwise never reach it.
 local function ApplyFonts()
     local path = FontPath()
-    for _, e in ipairs(fonts) do e.fs:SetFont(path, e.size, "") end
+    for _, e in ipairs(fonts) do e.fs:SetFont(path, e.size, e.flags) end
 end
 
 -- "Well Fed" has reused the same handful of icons across expansions, so food
@@ -793,7 +794,19 @@ local function SweepBody(unit, out)
             end
         end
         if not iconSecret and icon then
-            if icon == GENERIC_FOOD_DRINK_ICON then out._eating = true end
+            if icon == GENERIC_FOOD_DRINK_ICON then
+                -- Food regeneration is independent of a long-lived Well Fed buff.
+                -- Only use readable expiration times; Midnight may make them secret.
+                out._eating = true
+                if not nameSecret and name then out._eatingName = name end
+                -- Use the exact icon returned by the in-game aura, not art
+                -- substituted by the addon or a manually selected texture.
+                out._eatingIcon = icon
+                if not (issecretvalue and issecretvalue(expires))
+                    and expires and expires > 0 then
+                    out._eatingExpires = expires
+                end
+            end
             for j=1,#ICON_COLS do
                 local def=ICON_COLS[j]
                 if def.icons[icon] then
@@ -801,10 +814,15 @@ local function SweepBody(unit, out)
                     if accepted==nil then unknownIcons=true end
                     if accepted then
                         out[def.key]=true
-                        if not nameSecret and name and def.nameTooltip then
-                            out._names=out._names or {}
-                            out._names[def.key]=out._names[def.key] or name
-                            if not (issecretvalue and issecretvalue(expires)) and expires and expires>0 then
+                        if def.nameTooltip then
+                            if not nameSecret and name then
+                                out._names=out._names or {}
+                                out._names[def.key]=out._names[def.key] or name
+                            end
+                            out._icons = out._icons or {}
+                            out._icons[def.key] = out._icons[def.key] or icon
+                            if not (issecretvalue and issecretvalue(expires))
+                                and expires and expires > 0 then
                                 out._expires=out._expires or {}
                                 out._expires[def.key]=out._expires[def.key] or expires
                             end
@@ -1560,10 +1578,17 @@ local function MakeRow(parent, index)
             -- reads at a glance instead of needing a hover for the tooltip's
             -- countdown.
             if def.key == "flask" or def.key == FOOD_KEY then
-                local durFS = MakeText(r, SMALL_SIZE)
+                local durFS = MakeText(r, SMALL_SIZE,
+                    def.key == FOOD_KEY and "OUTLINE" or "")
                 durFS:SetPoint("CENTER", tex, "CENTER", 0, 0)
                 durFS:SetWidth(CELL_W)
                 durFS:SetJustifyH("CENTER")
+                if def.key == FOOD_KEY then
+                    -- A seconds counter sits over the eating icon, not in its
+                    -- place; the same fontstring serves the existing food timer.
+                    durFS:SetShadowColor(0, 0, 0, 1)
+                    durFS:SetShadowOffset(1, -1)
+                end
                 durFS:Hide()
                 r._cellDur = r._cellDur or {}
                 r._cellDur[c] = durFS
@@ -1628,9 +1653,39 @@ local function MakeRow(parent, index)
                         return
                     end
                     local name = r._auraNames and r._auraNames[def.key]
+                    if def.key == FOOD_KEY and r._eating then
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:ClearLines()
+                        GameTooltip:AddLine(r._eatingName or "Food & Drink", 1, 1, 1)
+                        if r._eatingIcon then
+                            GameTooltip:AddTexture(r._eatingIcon, { width = 18, height = 18 })
+                        end
+                        local eatingRemain = r._eatingExpires and (r._eatingExpires - GetTime())
+                        if eatingRemain and eatingRemain > 0 then
+                            GameTooltip:AddLine(math.ceil(eatingRemain) .. " s remaining", 0.8, 0.8, 0.8)
+                        else
+                            GameTooltip:AddLine("Duration unavailable", 0.8, 0.8, 0.8)
+                        end
+                        if r._foodPresent then
+                            GameTooltip:AddLine(name or ColumnName(def), 1, 1, 1)
+                            local foodIcon = r._auraIcons and r._auraIcons[def.key]
+                            if foodIcon then
+                                GameTooltip:AddTexture(foodIcon, { width = 18, height = 18 })
+                            end
+                            local foodRemain = r._auraExpires and r._auraExpires[def.key]
+                            foodRemain = foodRemain and (foodRemain - GetTime())
+                            if foodRemain and foodRemain > 0 then
+                                GameTooltip:AddLine(math.ceil(foodRemain / 60) .. " min remaining", 0.8, 0.8, 0.8)
+                            else
+                                GameTooltip:AddLine("Duration unavailable", 0.8, 0.8, 0.8)
+                            end
+                        end
+                        GameTooltip:Show()
+                        return
+                    end
                     if not name then return end
                     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    GameTooltip:AddLine(ColumnName(def) .. ": " .. name, 1, 1, 1)
+                    GameTooltip:AddLine(name, 1, 1, 1)
                     -- Recomputed at hover time from the absolute expiration
                     -- timestamp, so the minutes are always accurate to the
                     -- moment the tooltip is actually read, not to whenever
@@ -2125,6 +2180,12 @@ local function Refresh()
     -- width on it, so it can be dropped outright instead -- and then the
     -- remaining columns close ranks.
     local hide = ns.RaidCheckHideInapplicable()
+    local anyEating = false
+    if hide then
+        for _, e in ipairs(roster) do
+            if e.checks._eating then anyEating = true; break end
+        end
+    end
     local visible, slotOf = {}, {}
     for _, def in ipairs(COLUMNS) do
         -- Raid buff columns are an exception to hiding: a group-wide buff
@@ -2132,7 +2193,8 @@ local function Refresh()
         -- or an icon column under restriction, where there is genuinely
         -- nothing to say. Here there is something to say -- "nobody can give
         -- this" -- so the column stays and reads as a red X instead.
-        if answerable[def.key] or not hide or def.class then
+        if answerable[def.key] or not hide or def.class
+            or (def.key == FOOD_KEY and anyEating) then
             visible[#visible + 1] = def.key
             slotOf[def.key] = #visible
         end
@@ -2150,12 +2212,13 @@ local function Refresh()
         local low = EllesmereUI.DURABILITY_LOW
         for _, e in ipairs(roster) do
             for _, def in ipairs(COLUMNS) do
-                if answerable[def.key] then
+                if answerable[def.key] or (def.key == FOOD_KEY and e.checks._eating) then
                     local bad
                     if def.numeric then
                         bad = e.durability ~= nil and e.durability <= low
                     else
                         bad = e.checks[def.key] == false
+                            or (def.key == FOOD_KEY and e.checks._eating)
                     end
                     -- One fault is enough to keep the row; what it is shows in
                     -- the grid.
@@ -2245,6 +2308,7 @@ local function Refresh()
                     cell:Hide()
                     if tex then tex:Hide() end
                     if r._cellHit and r._cellHit[ci] then r._cellHit[ci]:Hide() end
+                    if r._cellDur and r._cellDur[ci] then r._cellDur[ci]:Hide() end
                     if def.key == DURABILITY_KEY then
                         SetSharedBlink(r._name, false, 1)
                         SetSharedBlink(cell, false, 1)
@@ -2329,6 +2393,8 @@ local function Refresh()
                         r._auraNames[def.key] = e.checks._names and e.checks._names[def.key]
                         r._auraExpires = r._auraExpires or {}
                         r._auraExpires[def.key] = e.checks._expires and e.checks._expires[def.key]
+                        r._auraIcons = r._auraIcons or {}
+                        r._auraIcons[def.key] = e.checks._icons and e.checks._icons[def.key]
                     elseif def.key == WENCHANT_KEY then
                         -- Best-effort, see EnchantName -- nil just means no
                         -- tooltip line, same as any other unresolved name.
@@ -2337,12 +2403,29 @@ local function Refresh()
                     end
                     local hit = r._cellHit and r._cellHit[ci]
                     local durFS = r._cellDur and r._cellDur[ci]
-                    if def.key == FOOD_KEY and v == false and e.checks._eating then
-                        cell:SetTexture(GENERIC_FOOD_DRINK_ICON)
+                    if def.key == FOOD_KEY then
+                        r._eating = e.checks._eating
+                        r._eatingName = e.checks._eatingName
+                        r._eatingIcon = e.checks._eatingIcon
+                        r._eatingExpires = e.checks._eatingExpires
+                        r._foodPresent = (v == true)
+                    end
+                    if def.key == FOOD_KEY and e.checks._eating then
+                        cell:SetTexture(e.checks._eatingIcon or GENERIC_FOOD_DRINK_ICON)
                         cell:SetTexCoord(0.08, 0.92, 0.08, 0.92)
                         cell:Show()
-                        if hit then hit:Hide() end
-                        if durFS then durFS:Hide() end
+                        if hit then hit:Show() end
+                        if durFS then
+                            local remain = e.checks._eatingExpires
+                                and (e.checks._eatingExpires - GetTime())
+                            if remain and remain > 0 then
+                                durFS:SetText(math.ceil(remain))
+                                durFS:SetTextColor(1, 1, 1)
+                                durFS:Show()
+                            else
+                                durFS:Hide()
+                            end
+                        end
                     elseif v == true then
                         cell:SetAtlas(ATLAS_OK)
                         cell:Show()

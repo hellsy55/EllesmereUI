@@ -152,6 +152,7 @@ local CHANNEL_TICK_DATA = {
     [47758]   = { ticks = 2, modSpell = 193134, modTicks = 3 },    -- Penance (DPS)
     [373129]  = { ticks = 2, modSpell = 193134, modTicks = 3 },    -- Penance / Dark Reprimand (DPS)
     [400171]  = { ticks = 2, modSpell = 193134, modTicks = 3 },    -- Penance / Dark Reprimand (Heal)
+    [263165]  = { ticks = 3 },                                     -- Void Torrent
     -- Mage
     -- Arcane Missiles: 5 missiles, fenceposted (see the missiles model
     -- above), so only 3 interior marks base. Amplification (236628) adds 2
@@ -173,12 +174,16 @@ local CHANNEL_TICK_DATA = {
     [198590]  = { ticks = 5 },                                     -- Drain Soul
     [755]     = { ticks = 5 },                                     -- Health Funnel
     [234153]  = { ticks = 5 },                                     -- Drain Life
+    [1261153] = { ticks = 4 },                                     -- Malefic Grasp (4s, 1s cadence)
+    [1257052] = { ticks = 3 },                                     -- Dark Harvest (3s, 1s cadence)
     -- Death Knight
     [206931]  = { ticks = 3 },                                     -- Blooddrinker
     -- Monk
     [113656]  = { ticks = 4 },                                     -- Fists of Fury
     [115175]  = { ticks = 12 },                                     -- Soothing Mist
     [443028]  = { ticks = 4 },                                     -- Celestial Conduit
+    [117952]  = { ticks = 4 },                                     -- Crackling Jade Lightning
+    [1250997] = { ticks = 3 },                                     -- Spinning Crane Kick (1.5s, 0.5s cadence)
     -- Racial
     [291944]  = { ticks = 6 },                                     -- Regeneratin (Zandalari)
 }

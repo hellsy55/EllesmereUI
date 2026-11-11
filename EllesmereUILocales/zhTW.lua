@@ -3902,7 +3902,7 @@ L["Shows the Power bar while your energy is below full, even when its Visibility
 L["Shows the Power bar while your focus is below full, even when its Visibility setting hides it."] = "當你的集中值未滿時顯示能量條，即使其「可見性」設定會將其隱藏。"
 L["Shows the Power bar while your mana is below full, even when its Visibility setting hides it."] = "當你的法力未滿時顯示能量條，即使其「可見性」設定會將其隱藏。"
 L["Shows the Power bar, or your shapeshifted mana bar, while your mana is below full, even when its Visibility setting hides it."] = "當你的法力未滿時顯示能量條或你變形後的法力條，即使其「可見性」設定會將其隱藏。"
-L["Shows tick marks on channeled spells. Only supported spells are shown, request missing spells on Discord."] = "在引導法術上顯示刻度標記。只會顯示已支援的法術，缺漏的請到 Discord 提出。"
+L["Shows tick marks on channeled spells. Only supported spells are shown."] = "在引導法術上顯示刻度標記。只會顯示已支援的法術。"
 L["Simple Runes"]                  = "簡易符文"
 L["Single threshold is off while Multi-band is on.\n"] = "啟用多段著色時，單一臨界值會停用。\n"
 L["Single-threshold options don't apply while Multi-band coloring is on."] = "啟用多段著色時，單一臨界值的選項不會生效。"

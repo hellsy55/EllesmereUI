@@ -3752,7 +3752,7 @@ L["Shows saved instance lockouts with boss kill progress on the minimap calendar
 L["Shows the 'Disable Feature' text below the teleport button. When off, the text is hidden and the window is 20px shorter."] = "Affiche le texte « Désactiver la fonction » sous le bouton de téléportation. Désactivé, le texte est masqué et la fenêtre est plus courte de 20px."
 L["Shows the consumable rank (quality) diamond icon on action buttons."] = "Affiche l'icône losange de rang (qualité) des consommables sur les boutons d'action."
 L["Shows the raid target marker icon on boss frames."] = "Affiche l'icône de marqueur de cible de raid sur les cadres de boss."
-L["Shows tick marks on channeled spells. Only supported spells are shown, request missing spells on Discord."] = "Affiche des repères sur les sorts canalisés. Seuls les sorts pris en charge sont affichés, demandez les sorts manquants sur Discord."
+L["Shows tick marks on channeled spells. Only supported spells are shown."] = "Affiche des repères sur les sorts canalisés. Seuls les sorts pris en charge sont affichés."
 L["Shows where your interrupt will be ready during an enemy cast. \"Tick\" marks the exact spot on the cast bar; \"Tick + Bar\" also colours the window during which your interrupt will be available."] = "Affiche où votre interruption sera prête pendant une incantation ennemie. « Tick » marque l'endroit exact sur la barre d'incantation ; « Tick + Barre » colore aussi la fenêtre pendant laquelle votre interruption sera disponible."
 L["Sidebar Icon Size"]          = "Taille des icônes de la barre latérale"
 L["Sidebar Icons"]              = "Icônes de la barre latérale"
