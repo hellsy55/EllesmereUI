@@ -130,6 +130,7 @@ local PT = {
 --  knows the spell or carries the aura, and a recast during a running
 --  channel keeps the outgoing cast's schedule -- see ShowChannelTicks.
 --  modSpell/modTicks: use modTicks if player knows modSpell (talent).
+--  noLastTick: keep regular channel markers without a Last Tick highlight.
 --  Spell IDs verified against Wowhead/Warcraft Wiki; add a row when a spell
 --  reworks or a new channeled spell is added.
 -------------------------------------------------------------------------------
@@ -175,7 +176,7 @@ local CHANNEL_TICK_DATA = {
     [755]     = { ticks = 5 },                                     -- Health Funnel
     [234153]  = { ticks = 5 },                                     -- Drain Life
     [1261153] = { ticks = 4 },                                     -- Malefic Grasp (4s, 1s cadence)
-    [1257052] = { ticks = 3 },                                     -- Dark Harvest (3s, 1s cadence)
+    [1257052] = { ticks = 3, noLastTick = true },                  -- Dark Harvest (3s, 1s cadence)
     -- Death Knight
     [206931]  = { ticks = 3 },                                     -- Blooddrinker
     -- Monk

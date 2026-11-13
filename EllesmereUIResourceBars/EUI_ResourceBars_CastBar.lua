@@ -672,7 +672,8 @@ ShowChannelTicks = function(spellID)
     if not cb.showChannelTicks then return end
 
     local tickData = CHANNEL_TICK_DATA[spellID]
-    local wantTicks = tickData and (cb.showTickMarks or cb.showLastTick)
+    local allowLastTick = tickData and not tickData.noLastTick
+    local wantTicks = tickData and (cb.showTickMarks or (cb.showLastTick and allowLastTick))
 
     -- Nothing to draw: hide stale marks and bail
     if not wantTicks then
@@ -906,10 +907,10 @@ ShowChannelTicks = function(spellID)
                 castBarFrame._ticks[i] = tick
             end
 
-            if not showTickMarks and not isLastTick then
+            if not showTickMarks and (not isLastTick or not allowLastTick) then
                 tick:Hide()
             else
-                local isGold = isLastTick and showLastTick
+                local isGold = isLastTick and showLastTick and allowLastTick
                 local w = isGold and highlightWidth or tickWidth
                 -- The bar drains, so a mark at time-fraction f draws at
                 -- (1 - f) of the width from the left. The center is snapped

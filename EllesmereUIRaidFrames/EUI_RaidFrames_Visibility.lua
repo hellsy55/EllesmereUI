@@ -194,9 +194,8 @@ local function UpdateButtonRange(unit, btn)
         if UnitIsUnit(unit, "player") or not UnitExists(unit) then
             ApplyDarken(btn, false, strength, color)
         elseif not UnitIsConnected(unit) then
-            -- Offline keeps its fixed 80% alpha dim, not the OOR darken --
-            -- same reasoning as the alpha-mode branch below.
-            ApplyRangeAlpha(btn, 0.8)
+            -- Offline frames stay fully opaque, without OOR darkening.
+            ApplyRangeAlpha(btn, 1)
         elseif UnitPhaseReason and UnitPhaseReason(unit) then
             ApplyDarken(btn, true, strength, color)
         elseif UnitIsDeadOrGhost(unit) then
@@ -219,10 +218,9 @@ local function UpdateButtonRange(unit, btn)
     if UnitIsUnit(unit, "player") or not UnitExists(unit) then
         ApplyRangeAlpha(btn, 1)
     elseif not UnitIsConnected(unit) then
-        -- Offline units take a fixed 80% alpha, never the out-of-range fade --
-        -- an offline player isn't "out of range", and a steady alpha reads
-        -- better alongside the offline status tint. Overrides oorAlpha entirely.
-        ApplyRangeAlpha(btn, 0.8)
+        -- Offline is a connection state, not an out-of-range state.
+        -- Preserve full frame opacity while the status tint remains visible.
+        ApplyRangeAlpha(btn, 1)
     elseif UnitPhaseReason and UnitPhaseReason(unit) then
         ApplyRangeAlpha(btn, oorAlpha)
     elseif UnitIsDeadOrGhost(unit) then
