@@ -72,3 +72,5 @@ Before reviewing, editing, integrating, or testing Lua, changing guardrail rules
 
 - Do not compare, index, or do arithmetic on secret values (12.x combat aura and unit data). Pass them straight to the widget API that accepts them.
 - Do not write to protected Blizzard frames or call protected functions from insecure code, and do not do it in combat. Hook with `hooksecurefunc` and keep the work cosmetic.
+- Keep inline cog builders reachable during options prebuilding so search can index their rows. Guard frame work separately and run the guardrail tests after changing the checker.
+- Store per-character data through the character roster helpers in `EllesmereUI.lua`. Use a separate character store only when no roster field can meet the requirement.

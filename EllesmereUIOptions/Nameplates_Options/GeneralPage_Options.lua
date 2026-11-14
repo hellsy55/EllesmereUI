@@ -300,7 +300,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
               end },
             buffFilterDropdown); y = y - h
         -- "Dispellable By Me" (retail only, off by default): narrows Important and Only Dispellable to your group's dispels.
-        if not EllesmereUI._prebuilding and not EllesmereUI.IS_FOREVER then
+        if not EllesmereUI.IS_FOREVER then
             EllesmereUI.BuildInlineCog(sourceRow._rightRegion, {
                 disabled = function() return DBVal("npEnemyBuffFilter") == "showall" end,
                 disabledTooltip = "Requires Enemy Buff Filter set to Important or Only Dispellable", rawTooltip = true,
@@ -491,7 +491,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
               RefreshAllAuras()
           end });  y = y - h
 
-    if not EllesmereUI._prebuilding then
+    do
         local function nameRaidMarkerOff() return DBVal("nameRaidMarkerEnabled") ~= true end
         local rgn = nameRaidMarkerRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
@@ -575,7 +575,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
           end });  y = y - h
 
     -- Inline cog on Range Check: the custom cutoff lives here.
-    if not EllesmereUI._prebuilding then
+    do
         local function customOff()
             return (DBVal("outOfRangeMode") or defaults.outOfRangeMode) ~= "custom"
         end
@@ -723,7 +723,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                   ns.NP_AutoSet(right.id, "enabled", v)
                   EllesmereUI:RefreshPage()
               end }); y = y - h
-        if not EllesmereUI._prebuilding then
+        do
             for _, entry in ipairs({ { left, row._leftRegion }, { right, row._rightRegion } }) do
                 local cat, rgn = entry[1], entry[2]
                 local rows = {}

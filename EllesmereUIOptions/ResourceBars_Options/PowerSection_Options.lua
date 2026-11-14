@@ -201,12 +201,12 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                     EllesmereUI.BlizzStyle.Gate("resourcebars", ocfgR));  y = y - h
             end
         end
-        if not EllesmereUI._prebuilding and not (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
+        if not ns.ERB_ClassicBorderRow() then
             local rgn = pwrBsRow._rightRegion
             local ctrl = rgn._control
             -- Corner Radius (EllesmereUI_RoundedCorners.lua): an inline cog on the
             -- border size control. The stock styles keep the bars square.
-            if not EllesmereUI._prebuilding then
+            do
                 EllesmereUI.BuildInlineCog(pwrBsRow._rightRegion, {
                     title = "Corner Radius", tip = "Corner Radius",
                     disabled = function()
@@ -227,37 +227,39 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                        function(v) local c = cfg(); if not c then return end; c.cornerMask = v; RebuildPower() end),
                 })
             end
-            local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
-                rgn, pwrBsRow:GetFrameLevel() + 3,
-                function()
-                    local c = cfg()
-                    return (c and c.borderR or 0), (c and c.borderG or 0),
-                           (c and c.borderB or 0), (c and c.borderA or 1)
-                end,
-                function(r, g, b, a)
-                    local c = cfg(); if not c then return end
-                    c.borderR, c.borderG, c.borderB, c.borderA = r, g, b, a
-                    SmoothRefresh(); EllesmereUI:RefreshPage()
-                end,
-                true, 20)
-            PP.Point(borderSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
-            rgn._lastInline = borderSwatch  -- left of the Corner Radius cog
-            EllesmereUI.OrderInlineAddon(rgn, borderSwatch, "swatch")
-            EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
-            local swBlock = CreateFrame("Frame", nil, borderSwatch)
-            swBlock:SetAllPoints()
-            swBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
-            swBlock:EnableMouse(true)
-            swBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip(powerDisTip)) end)
-            swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-            local function UpdateBorderSwDis()
-                if powerOff() then borderSwatch:SetAlpha(0.3); swBlock:Show()
-                else borderSwatch:SetAlpha(1); swBlock:Hide() end
+            if not EllesmereUI._prebuilding then
+                local borderSwatch, updateBorderSwatch = EllesmereUI.BuildColorSwatch(
+                    rgn, pwrBsRow:GetFrameLevel() + 3,
+                    function()
+                        local c = cfg()
+                        return (c and c.borderR or 0), (c and c.borderG or 0),
+                               (c and c.borderB or 0), (c and c.borderA or 1)
+                    end,
+                    function(r, g, b, a)
+                        local c = cfg(); if not c then return end
+                        c.borderR, c.borderG, c.borderB, c.borderA = r, g, b, a
+                        SmoothRefresh(); EllesmereUI:RefreshPage()
+                    end,
+                    true, 20)
+                PP.Point(borderSwatch, "RIGHT", rgn._lastInline or ctrl, "LEFT", -8, 0)
+                rgn._lastInline = borderSwatch  -- left of the Corner Radius cog
+                EllesmereUI.OrderInlineAddon(rgn, borderSwatch, "swatch")
+                EllesmereUI.RegisterWidgetRefresh(function() updateBorderSwatch() end)
+                local swBlock = CreateFrame("Frame", nil, borderSwatch)
+                swBlock:SetAllPoints()
+                swBlock:SetFrameLevel(borderSwatch:GetFrameLevel() + 10)
+                swBlock:EnableMouse(true)
+                swBlock:SetScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(borderSwatch, EllesmereUI.DisabledTooltip(powerDisTip)) end)
+                swBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                local function UpdateBorderSwDis()
+                    if powerOff() then borderSwatch:SetAlpha(0.3); swBlock:Show()
+                    else borderSwatch:SetAlpha(1); swBlock:Hide() end
+                end
+                EllesmereUI.RegisterWidgetRefresh(UpdateBorderSwDis)
+                UpdateBorderSwDis()
             end
-            EllesmereUI.RegisterWidgetRefresh(UpdateBorderSwDis)
-            UpdateBorderSwDis()
         end
-        if not EllesmereUI._prebuilding then
+        do
             local rgn = pwrBsRow._leftRegion
             local sepValues, sepOrder = ns.ERB_SeparatorArtValues(true)
             local cogBtn = EllesmereUI.BuildInlineCog(rgn, {
@@ -379,8 +381,10 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                 local tex = c and c.borderTexture or "solid"
                 if tex == "solid" or (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then cogBtn:Hide() else cogBtn:Show() end
             end
-            EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
-            UpdateCogVis()
+            if not EllesmereUI._prebuilding then
+                EllesmereUI.RegisterWidgetRefresh(UpdateCogVis)
+                UpdateCogVis()
+            end
         end
         if not ctx.advanced and ctx.syncRows and not EllesmereUI._prebuilding and (ns.ERB_ClassicBorderRow and ns.ERB_ClassicBorderRow()) then
             ctx.syncRows.powerBorder = pwrBsRow._rightRegion
@@ -475,7 +479,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
               c.fillOpacity = v; RebuildPower()
           end }
     );  y = y - h
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = powerBorderRow._rightRegion
         EllesmereUI.BuildInlineCog(rgn, {
             disabled = function() local c = cfg(); return c and not c.enabled end,
@@ -683,7 +687,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerBgRow._rightRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh) end
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh) end
 
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = powerBorderRow._leftRegion
         local rows = {}
         -- Show When Missing rows for the resources the player's class shows on this bar:
@@ -825,7 +829,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerTextSizeRow._rightRegion, env.DB, "primary", "textSize",
         "Text Size", SmoothRefresh, { "health", "primary" }) end
     -- Power Text inline cog: percent sign, anchor, x/y offsets
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = fadeSyncRow._rightRegion
         local cogBtn = EllesmereUI.BuildInlineCog(rgn, {
             disabled = function() local c = cfg(); return c and not c.enabled end,
@@ -861,10 +865,11 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
                   end },
             },
         })
-        AddFormTextBtn(rgn, cogBtn, cfg, RefreshPower)
+        if not EllesmereUI._prebuilding then AddFormTextBtn(rgn, cogBtn, cfg, RefreshPower) end
     end
+    local powerSettingsBtn
     if not EllesmereUI._prebuilding then
-    local powerSettingsBtn = BuildThresholdSettingsButton({
+    powerSettingsBtn = BuildThresholdSettingsButton({
         parentRgn = powerColorRow._leftRegion,
         getBarData = function() return cfg() end,
         pageParent = parent, pageTopY = _advTop, pageBotY = function() return y end,
@@ -893,6 +898,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
         threshMin = 1, threshMax = 99,
         defaultR = 1.0, defaultG = 0.2, defaultB = 0.2, defaultA = 1,
     })
+    end
 
     -- Bar-wide hash lines (the fallback when the active threshold entry has none of its own).
     BuildHashCog({
@@ -902,7 +908,6 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
         refreshFn = function() RebuildPower() end,
         popupTitle = EllesmereUI.L("Power Bar Hash Lines"),
     })
-    end
     -- Thresholds have their own per-spec system, so lock the slot during a Spec Overrides editing session.
     if EllesmereUI.SpecOverrides_AttachEditLock and not EllesmereUI._prebuilding then
         EllesmereUI.SpecOverrides_AttachEditLock(powerColorRow._leftRegion,
