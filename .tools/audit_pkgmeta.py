@@ -203,12 +203,28 @@ def audit(root, git, powershell, destination, source, retained=()):
         files = {key: output('ls-tree', '-r', '--name-only', ref, env=env).splitlines()
                  for key, ref in refs.items()}
         policy_name = '.tools/toc_policy.json'
-        if policy_name not in files['fork']:
+        mirror = (
+            ff
+            and destination in ('main', 'refs/heads/main')
+            and incoming == output('rev-parse', '--verify', 'refs/remotes/upstream/main^{commit}')
+            and policy_name not in files['fork']
+            and policy_name not in files['proposed']
+        )
+        if policy_name not in files['fork'] and not mirror:
             raise ValueError('Previous fork must provide the central TOC policy')
-        if policy_name not in files['proposed']:
+        if policy_name not in files['proposed'] and not mirror:
             raise ValueError('Proposed snapshot must preserve the central TOC policy')
         classifications, policy_sources = {}, {}
+        if mirror:
+            policy_ref = output('rev-parse', '--verify', 'refs/heads/new-features^{commit}')
+            policy_file = temp / 'retail-toc-policy.json'
+            policy_file.write_bytes(run('show', policy_ref + ':' + policy_name, env=env).stdout)
+            _, mirror_classification = tocs.load_policy(policy_file)
         for key, ref in refs.items():
+            if mirror:
+                classifications[key] = mirror_classification
+                policy_sources[key] = 'new-features@' + policy_ref
+                continue
             # Upstream may predate or not carry this fork's maintained policy.
             # Reuse explicit fork classifications only; unknown paths still fail.
             policy_ref = ref if policy_name in files[key] else fork
@@ -219,7 +235,7 @@ def audit(root, git, powershell, destination, source, retained=()):
         paths = {key: suite_manifests(files[key], classifications[key]) for key in refs}
         proposed_tocs = {p for p in files['proposed'] if p.lower().endswith('.toc')}
         missing = classifications['proposed'].keys() - proposed_tocs
-        if missing:
+        if missing and not mirror:
             raise ValueError('Missing classified proposed manifests: ' + ', '.join(sorted(missing)))
         validate_layout(versions['proposed'], files['proposed'], classifications['proposed'])
         history = output('log', '--format=commit %H', '-p', base + '..' + fork, '--', '.pkgmeta')
