@@ -118,8 +118,14 @@ function Get-EuiPreparedFolders {
                 $reference = ($line -replace '\s+\[.*\]\s*$', '').Trim()
                 if (-not $reference -or $reference.StartsWith('#')) { continue }
                 $parts = $reference.Replace('/', '\').Split('\')
-                foreach ($part in $parts) { Assert-EuiName $part }
-                $file = Join-Path $folder.FullName $reference
+                if ($parts.Count -eq 3 -and $parts[0] -ceq '..' -and
+                    $parts[1] -ceq 'EllesmereUILocales' -and $parts[2] -cmatch '^[a-z]{2}[A-Z]{2}_GameNames\.lua$') {
+                    $localeFolder = Get-EuiChildPath $Staging $parts[1]
+                    $file = Get-EuiChildPath $localeFolder $parts[2]
+                } else {
+                    foreach ($part in $parts) { Assert-EuiName $part }
+                    $file = Join-Path $folder.FullName $reference
+                }
                 if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Incomplete addon '$($folder.Name)': missing '$reference'." }
                 $references++
             }
