@@ -531,7 +531,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if ECHAT.ApplyChatFontSize then ECHAT.ApplyChatFontSize(v) end
                   end })
             -- Cog for Outline Mode
-            if not EllesmereUI._prebuilding then
+            do
                 local rrgn = fontRow._leftRegion
                 local outlineValues = {
                     ["__global"] = { text = "EUI Global Default" },
@@ -919,7 +919,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if ECHAT.ApplySidebarBackground then ECHAT.ApplySidebarBackground() end
               end }))
         -- Cog for Sidebar Visibility
-        if not EllesmereUI._prebuilding then
+        do
             local lrgn = sidebarRow._leftRegion
             EllesmereUI.BuildInlineCog(lrgn, {
                 title = "Sidebar Settings",
@@ -954,7 +954,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if ECHAT.ApplyExtendedBackground then ECHAT.ApplyExtendedBackground() end
                   EllesmereUI:RefreshPage()
               end })
-        if not EllesmereUI._prebuilding then
+        do
             local lrgn = sidebarLayoutRow._rightRegion
             EllesmereUI.BuildInlineCog(lrgn, {
                 disabled = function() return not Cfg("sidebarSeparate") end,
@@ -1084,7 +1084,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if ECHAT.ApplySidebarIcons then ECHAT.ApplySidebarIcons() end
                   EllesmereUI:RefreshPage()
               end })
-        if not EllesmereUI._prebuilding then
+        do
             local lrgn = sizeRow._leftRegion
             EllesmereUI.BuildInlineCog(lrgn, {
                 title = "Icon Settings",
@@ -1230,7 +1230,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
                 EllesmereUI.BlankRowCfg())
             -- Cog on Inner Padding X: Tab Offset X (applies in both tab modes)
-            if not EllesmereUI._prebuilding then
+            do
                 local rrgn = tabSizeRow._leftRegion
                 EllesmereUI.BuildInlineCog(rrgn, {
                     title = "Tab Layout",
@@ -1471,10 +1471,8 @@ initFrame:SetScript("OnEvent", function(self)
                     },
                 })
             end
-            if not EllesmereUI._prebuilding then
             AttachTabBgOpacityCog(tabBgRow._leftRegion, false)
             AttachTabBgOpacityCog(tabBgRow._rightRegion, true)
-            end
             y = y - h
 
             local function UnderlineMode()
@@ -1840,7 +1838,7 @@ initFrame:SetScript("OnEvent", function(self)
             { type="toggle", text="Hide Tooltip on Hover",
               getValue=function() return Cfg("hideTooltipOnHover") or false end,
               setValue=function(v) Set("hideTooltipOnHover", v) end })
-        if not EllesmereUI._prebuilding then
+        do
             local lrgn = histRow._leftRegion
             EllesmereUI.BuildInlineCog(lrgn, {
                 title = "Session History",
@@ -2029,7 +2027,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if ECHAT.ApplyClassColorNames then ECHAT.ApplyClassColorNames(v) end
                   if ECHAT.EngineQueueRebuildAll then ECHAT.EngineQueueRebuildAll() end
               end })
-        if not EllesmereUI._prebuilding then
+        do
             -- Cog: world channels as letters (the old Ge / T / LD / WD / LFG)
             -- instead of their numbers. Dimmed and inert while the toggle is off.
             local lrgn = abbrevRow._leftRegion

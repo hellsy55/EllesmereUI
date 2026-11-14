@@ -44,3 +44,12 @@ __pycache__/
 # A stray working folder: tools of other projects have written to _tools/ here by mistake.
 # Never part of the addon.
 /_tools/
+
+# .tools is the maintainer's own tooling (generators, local test harnesses): not part of the
+# repository. Tracked there is only what the GitHub checks run.
+/.tools/*
+!/.tools/guardrails.py
+!/.tools/extract-locale-keys.sh
+!/.tools/tests/
+/.tools/tests/*
+!/.tools/tests/test_guardrails.py

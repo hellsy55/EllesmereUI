@@ -3395,7 +3395,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
             );  y = y - h
             -- Inline reposition cog on the shift dropdown: Extra Y Offset
             -- (ResourceBars "Shift Elements if No Resource" parity).
-            if not EllesmereUI._prebuilding then
+            do
                 local rgn = shiftRow._rightRegion
                 EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                     title = "Shift Offset",

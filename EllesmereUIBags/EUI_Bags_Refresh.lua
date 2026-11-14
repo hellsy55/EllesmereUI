@@ -271,7 +271,8 @@ end
 --  resets the window to its default size. The footer's right-edge text keeps
 --  clear of whichever icons show (cfg.inset(px)).
 --  cfg: step, relayoutStep (optional, default step), minCols, minH,
---  getCols(), getHeight(), save(cols, h), finish(), savePos(left, top),
+--  getCols(), getHeight(), save(cols, h), finish(), posKey (the profile key
+--  of the window's saved spot),
 --  reset(), inset(px), isLocked(), setLocked(v), hidden() (optional: the
 --  window sizes itself, so neither icon shows)
 -------------------------------------------------------------------------------
@@ -307,6 +308,12 @@ local function GripStop(grip)
         grip._drag = nil
         grip:GetParent()._resizing = nil
         grip._cfg.finish()
+        -- Back to its nearest corner; without Anchor to Nearest Corner the pin
+        -- saved as the drag began stands
+        local cfg = grip._cfg
+        if ns.WindowCornerOn() and not (cfg.corner and cfg.corner()) then
+            ns.SaveWindowCorner(grip:GetParent(), cfg.posKey)
+        end
     end
     grip:SetAlpha(grip:IsMouseOver() and GR.HOVER or GripRestAlpha(grip))
 end
@@ -345,7 +352,7 @@ local function GripOnMouseDown(grip, button)
     if not corner then
         frame:ClearAllPoints()
         frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
-        cfg.savePos(left, top)
+        if not ns.WindowCornerOn() then ns.SaveWindowTopLeft(frame, cfg.posKey) end
     end
     local sx, sy = GR.Axes(grip._at, corner or "TOPLEFT")
     local cx, cy = GetCursorPosition()
@@ -530,9 +537,7 @@ local _bagGripCfg = {
         if EUI_Bags._updateThumb then EUI_Bags._updateThumb() end
     end,
     finish = function() EUI_Bags:RefreshInventory() end,
-    savePos = function(left, top)
-        BP().bagsPosition = { point = "TOPLEFT", relativePoint = "BOTTOMLEFT", x = left, y = top }
-    end,
+    posKey = "bagsPosition",
     reset = function(w, h)
         local p = BP()
         if w ~= false then p.bagColumns, p.bagListWidth = nil, nil end
@@ -615,7 +620,7 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
     end
 
     -- 6. Size frame. Default: fixed height, dynamic width. Auto-size: height grows to fit content
-    -- (no vertical scroll), width follows column count; both track a running max while open (never shrink mid-session), floored at FIXED_H and capped at the screen.
+    -- (no vertical scroll), width follows column count; both track a running max while open (never shrink mid-session, unless Auto-Size's Shrink is on), floored at FIXED_H and capped at the screen (or Auto-Size's Max Height).
     -- WoW Forever, and Auto-Size with the Compact display: height fits the content on that running max, with no FIXED_H floor (see below).
     local FIXED_H = 650
     -- Resize grip height: the whole window, footer inside it (so a footer
@@ -627,7 +632,7 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
     local roomW, roomH
     if BP().bagAnchor then roomW, roomH = ns.BagAnchor.Room() end
     if autoSize then
-        EUI_Bags._asMaxGridW = math.max(EUI_Bags._asMaxGridW or 0, gridContentW)
+        EUI_Bags._asMaxGridW = EUI_Bags.AutoSizeNext(gridContentW, EUI_Bags._asMaxGridW)
         if roomW then
             EUI_Bags._asMaxGridW = math.min(EUI_Bags._asMaxGridW, math.max(gridContentW, roomW - sidebarW))
         else
@@ -644,8 +649,7 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
 
     -- A grip-set height overrides WoW Forever's grow-only content fit (Auto-Size hides the grip)
     if autoSize or expandHeight or (EUI.IS_FOREVER and not userH) then
-        local sc = EUI_Bags:GetScale(); if not sc or sc <= 0 then sc = 1 end
-        local maxH = (UIParent:GetHeight() / sc) * 0.95
+        local maxH, userCap = EUI_Bags.AutoSizeMaxH(not autoSize)
         if roomH then maxH = math.min(maxH, roomH) end
         if (autoSize or expandHeight) and not roomH then
             -- Leave a small top margin and keep BOTTOMRIGHT fixed. Content
@@ -676,10 +680,12 @@ local function FinishRefresh(curY, gridContentW, sidebarW, regularUsed, regularT
             neededH = math.min(math.max(fitH, sbH), maxH)
         else
             -- Cap at the screen first, then floor at FIXED_H so the window is never smaller than normal (even on short screens).
+            -- A Max Height the player set wins over that floor.
             neededH = math.max(FIXED_H, math.min(fitH, maxH))
+            if userCap then neededH = math.min(neededH, maxH) end
         end
         if not expandHeight then
-            EUI_Bags._asMaxH = math.min(maxH, math.max(EUI_Bags._asMaxH or 0, neededH))
+            EUI_Bags._asMaxH = math.min(maxH, EUI_Bags.AutoSizeNext(neededH, EUI_Bags._asMaxH))
         end
         EUI_Bags:SetWidth(totalW)
         local h = expandHeight and neededH or EUI_Bags._asMaxH
@@ -757,7 +763,12 @@ function EUI_Bags:RefreshInventory()
     for bag = 0, 5 do
         local numSlots = C_Container.GetContainerNumSlots(bag)
         local restricted = special and special[bag]
-        if bag == 5 then
+        if bag == 5 and EllesmereUI.IS_FOREVER then
+            -- A special bag in the fifth slot stays out of the header count too.
+            local _, family = C_Container.GetContainerNumFreeSlots(bag)
+            restricted = family and family ~= 0
+        end
+        if bag == 5 and not restricted then
             reagentTotal = numSlots
         elseif not restricted then
             regularTotal = regularTotal + numSlots
@@ -765,7 +776,7 @@ function EUI_Bags:RefreshInventory()
         for slot = 1, numSlots do
             local info = C_Container.GetContainerItemInfo(bag, slot)
             if info then
-                if bag == 5 then
+                if bag == 5 and not restricted then
                     reagentUsed = reagentUsed + 1
                 elseif not restricted then
                     regularUsed = regularUsed + 1
@@ -1078,7 +1089,7 @@ function EUI_Bags:RefreshInventory()
 
     -- Auto-size: pick a column count keeping the window near its base shape (columns grow
     -- ~sqrt of slot count) while fitting the active tab. Grows only, never shrinks while open
-    -- (running max in _asCols, reset on close); HEIGHT follows rendered content up to the screen cap. Decided BEFORE GetColumns() so the grid renders at this count.
+    -- (running max in _asCols, reset on close) unless Auto-Size's Shrink is on; HEIGHT follows rendered content up to the screen cap. Decided BEFORE GetColumns() so the grid renders at this count.
     if EUI_Bags.AutoSizeOn() then
         local baseCols = BP().bagColumns or 12
         -- tuned at the default 38 px pitch, scaled to the current one
@@ -1168,7 +1179,7 @@ function EUI_Bags:RefreshInventory()
         local maxCols = math.max(roomW and 1 or 4, math.floor(maxGridW / (SLOT_SIZE + SPACING)))
         if ideal < baseCols then ideal = baseCols end
         if ideal > maxCols then ideal = maxCols end
-        EUI_Bags._asCols = math.min(maxCols, math.max(EUI_Bags._asCols or baseCols, ideal))
+        EUI_Bags._asCols = math.min(maxCols, EUI_Bags.AutoSizeNext(ideal, EUI_Bags._asCols))
     end
 
     local columns = GetColumns()

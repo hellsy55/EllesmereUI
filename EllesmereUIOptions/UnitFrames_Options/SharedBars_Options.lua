@@ -141,7 +141,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
         })
     end
     -- Reverse Fill cog on Bar Height (left region)
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = sharedSizeRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Health Bar Fill",
@@ -462,7 +462,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
     -- Dynamic Color and Gradient COMPOSE -- Dynamic picks the color from the
     -- unit's health percent, Gradient then runs from that color to the
     -- gradient end color -- so they share one popup rather than fighting.
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = sharedHealthColorRow._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Fill Color Settings",
@@ -614,7 +614,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
               getValue=function() return SVal("blizzShowLevel", true) end,
               setValue=function(v) SSet("blizzShowLevel", v); UpdatePreview(); EllesmereUI:RefreshPage() end },
             EllesmereUI.BlankRowCfg());  y = y - h
-        if not EllesmereUI._prebuilding then
+        do
             EllesmereUI.BuildInlineCog(parent._ufLevelRow._leftRegion, {
                 disabled = function() return not SVal("blizzShowLevel", true) end,
                 disabledTooltip = "This option requires Show Level.",
@@ -713,7 +713,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 })
             end
             -- Cogwheel on Left Text (left region)
-            if not EllesmereUI._prebuilding then
+            do
                 local leftRgn = rgn
                 EllesmereUI.BuildInlineCog(leftRgn, {
                     disabled = function() return SVal("leftTextContent", "name") == "none" end,
@@ -923,7 +923,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 })
             end
             -- Cogwheel on Right Text (right region)
-            if not EllesmereUI._prebuilding then
+            do
                 local rightRgn = rgn
                 EllesmereUI.BuildInlineCog(rightRgn, {
                     disabled = function() return SVal("rightTextContent", "both") == "none" end,
@@ -1124,7 +1124,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 })
             end
             -- Cogwheel on Center Text (left region)
-            if not EllesmereUI._prebuilding then
+            do
                 local ctrRgn = rgn
                 EllesmereUI.BuildInlineCog(ctrRgn, {
                     disabled = function() return SVal("centerTextContent", "none") == "none" end,
@@ -1310,7 +1310,7 @@ function ns.UFO_BuildHealthBarSection(parent, y, ctx)
                 })
             end
             -- Cogwheel on Extra Text (Center row right region): Alignment + Size/X/Y
-            if not EllesmereUI._prebuilding then
+            do
                 local etrRgn = rgn
                 EllesmereUI.BuildInlineCog(etrRgn, {
                     disabled = function() return SVal("extraTextContent", "none") == "none" end,
@@ -1506,7 +1506,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
           end }));  y = y - h
     -- Cog on Position for X/Y offsets + Width (disabled unless detached, and
     -- under a stock style, which places the bar itself)
-    if not EllesmereUI._prebuilding then
+    do
         local posRgn = sharedPowerRow1._rightRegion
         EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function()
@@ -1596,7 +1596,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
         })
     end
     -- Reverse Fill cog on Bar Height or Hide Power Bar (left region)
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = sharedPowerRow1._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Power Bar Fill",
@@ -1680,7 +1680,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             SVal("powerTextFormat", "perpp"), SDB, function() ReloadAndUpdate(); UpdatePreview() end)
     end
     -- Cogwheel on Power Text for Show % toggle
-    if not EllesmereUI._prebuilding then
+    do
         local fmtRgn = sharedPowerRow2._leftRegion
         EllesmereUI.BuildInlineCog(fmtRgn, ns.UFO_PowerTextCog(SVal, SSet,
             { none = true, curpp = true, curmaxpp = true },
@@ -2023,7 +2023,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
         })
     end
     -- Gradient cog on Bar Color (left region)
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = sharedPowerRow3._leftRegion
         EllesmereUI.BuildInlineCog(rgn, {
             title = "Gradient Settings",
@@ -2090,7 +2090,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
               end },
           } });  y = y - h
     -- Cogwheel on Text Position for size + x/y offsets (left of row 4)
-    if not EllesmereUI._prebuilding then
+    do
         local ppRgn = sharedPowerRow4._leftRegion
         local ppRows = {
             { type="slider", label="Size", min=6, max=100, step=1,
@@ -2284,7 +2284,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
         end
     end
     -- Cog for power border shift / layering (left region)
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = sharedPowerBorderRow._leftRegion
         local cogBtn = EllesmereUI.BuildInlineCog(rgn, {
             title = "Power Border Options",
@@ -2314,14 +2314,16 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                   set = function(v) SSet("powerBorderBehind", v); ReloadAndUpdate() end },
             },
         })
-        local function UpdatePBCogVis()
-            local pos = SVal("powerPosition", "below")
-            local isDet = (pos == "detached_top" or pos == "detached_bottom")
-            local tex = SGet("powerBorderStyle") or "solid"
-            if not isDet or tex == "solid" then cogBtn:Hide() else cogBtn:Show() end
+        if not EllesmereUI._prebuilding then
+            local function UpdatePBCogVis()
+                local pos = SVal("powerPosition", "below")
+                local isDet = (pos == "detached_top" or pos == "detached_bottom")
+                local tex = SGet("powerBorderStyle") or "solid"
+                if not isDet or tex == "solid" then cogBtn:Hide() else cogBtn:Show() end
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdatePBCogVis)
+            UpdatePBCogVis()
         end
-        EllesmereUI.RegisterWidgetRefresh(UpdatePBCogVis)
-        UpdatePBCogVis()
     end
     -- Inline swatches on Border Size (right region)
     if not EllesmereUI._prebuilding then
@@ -2471,7 +2473,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
             end
             local FORM_TIP = "Requires Power Type: Mana + Form Power."
             -- Cog: the Form Power bar's offsets.
-            if not EllesmereUI._prebuilding then
+            do
                 EllesmereUI.BuildInlineCog(powerTypeRow._leftRegion, {
                     disabled = NoFormBar,
                     disabledTooltip = FORM_TIP, rawTooltip = true,
@@ -2508,7 +2510,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                     { type="dropdown", text="Form Text Position", values=ppTextValues, order=ppTextOrder,
                       getValue=function() return FormVal("foreverFormTextPos", "powerPercentText", "none") end,
                       setValue=function(v) SetForm("foreverFormTextPos", v) end });  y = y - h
-                if not EllesmereUI._prebuilding then
+                do
                     EllesmereUI.BuildInlineCog(formTextRow._leftRegion, {
                         disabled = function()
                             local fmt = EllesmereUI.PowerTextFormat(FormVal("foreverFormTextFormat", "powerTextFormat", "perpp"))
@@ -2522,6 +2524,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                               set=function(v) SetForm("foreverFormShowPercent", v) end },
                         },
                     })
+                    if not EllesmereUI._prebuilding then
                     -- Text colour: custom, or the form power's colour. Neither set
                     -- follows the power bar's Text Color.
                     local function FormPowerColored()
@@ -2568,6 +2571,7 @@ function ns.UFO_BuildPowerBarSection(parent, y, ctx)
                           end,
                           refreshAlpha = function() return FormPowerColored() and 1 or 0.3 end },
                     })
+                    end
                     EllesmereUI.BuildInlineCog(formTextRow._rightRegion, { icon = EllesmereUI.DIRECTIONS_ICON,
                         disabled = function()
                             return FormVal("foreverFormTextPos", "powerPercentText", "none") == "none"
@@ -3001,7 +3005,7 @@ function ns.UFO_BuildClassResourceSection(parent, y, ctx)
     SApplySupport(row._leftRegion, "classPowerPosition")
     SApplySupport(row._rightRegion, "classPowerSize")
     -- Cog on Position for X/Y
-    if not EllesmereUI._prebuilding then
+    do
         local posRgn = row._leftRegion
         EllesmereUI.BuildInlineCog(posRgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             disabled = function() return SCPStyle() ~= "modern" or SValSupported("classPowerPosition", "top") == "above" end,
@@ -3966,6 +3970,94 @@ function ns.UFO_BuildAbsorbsHealsSection(parent, y, ctx)
         local unit = function() return optState.selectedUnit end
         sync(maxBarRow._leftRegion, { "maxHealthBarPosition" }, "Max Health Bar Position", unit, ReloadAndUpdate)
         sync(maxBarRow._rightRegion, { "maxHealthBarHeight", "maxHealthBarColor" }, "Max Health Bar Height and Color", unit, ReloadAndUpdate)
+    end
+
+    -- Max Health Style (+ eyeball, backing cog, swatch) | Max Health Opacity: Raid Frames
+    -- parity; the overlay is always on the bar's far end. Boss frames use Target's.
+    local maxHealthRow
+    maxHealthRow, h = W:DualRow(parent, y,
+        { type="dropdown", text="Max Health Style", values=absorbStyleValues, order=maxHealthStyleOrder,
+          getValue=function() return SValSupported("maxHealthStyle", "none") end,
+          setValue=function(v) SSetSupported("maxHealthStyle", v); EllesmereUI:RefreshPage() end },
+        { type="slider", text="Max Health Opacity", min=5, max=100, step=1,
+          disabled=function() return SValSupported("maxHealthStyle", "none") == "none" end,
+          disabledTooltip="Max Health Style",
+          getValue=function() return SValSupported("maxHealthOpacity", 100) end,
+          setValue=function(v) SSetSupported("maxHealthOpacity", v) end });  y = y - h
+    SApplySupport(maxHealthRow._leftRegion, "maxHealthStyle")
+    SApplySupport(maxHealthRow._rightRegion, "maxHealthOpacity")
+    -- Inline order as on the Heal Absorb row: the eyeball, the cog, then the swatch.
+    do
+        local rgn = maxHealthRow._leftRegion
+        if not EllesmereUI._prebuilding then
+        -- Eyeball: shows a reduced maximum on the preview (session-only flag).
+        local EYE_VISIBLE   = EllesmereUI.EYE_VISIBLE_ICON
+        local EYE_INVISIBLE = EllesmereUI.EYE_INVISIBLE_ICON
+        local eyeBtn = CreateFrame("Button", nil, rgn)
+        eyeBtn:SetSize(26, 26)
+        eyeBtn:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        eyeBtn:SetFrameLevel(rgn:GetFrameLevel() + 5)
+        EllesmereUI.SetGlyphAlpha(eyeBtn, 0.4)
+        rgn._lastInline = eyeBtn
+        local eyeTex = eyeBtn:CreateTexture(nil, "OVERLAY")
+        eyeTex:SetAllPoints()
+        local function RefreshMaxHealthEye()
+            eyeTex:SetTexture(optState.showMaxHealthPreview and EYE_INVISIBLE or EYE_VISIBLE)
+        end
+        RefreshMaxHealthEye()
+        eyeBtn:SetScript("OnClick", function()
+            optState.showMaxHealthPreview = not optState.showMaxHealthPreview
+            RefreshMaxHealthEye()
+            UpdatePreview()
+        end)
+        eyeBtn:SetScript("OnEnter", function(self)
+            EllesmereUI.SetGlyphAlpha(self, 0.7)
+            EllesmereUI.ShowWidgetTooltip(self, optState.showMaxHealthPreview and "Hide max health preview" or "Show max health preview")
+        end)
+        eyeBtn:SetScript("OnLeave", function(self)
+            EllesmereUI.SetGlyphAlpha(self, 0.4)
+            EllesmereUI.HideWidgetTooltip()
+        end)
+        end
+        EllesmereUI.BuildInlineCog(rgn, {
+            title = "Max Health Rendering",
+            disabled = function() return SValSupported("maxHealthStyle", "none") == "none" end,
+            disabledTooltip = "Max Health Style",
+            rows = {
+                { type="slider", label="Backing Opacity", min=0, max=100, step=1,
+                  get=function() return SValSupported("maxHealthBgOpacity", 100) end,
+                  set=function(v) SSetSupported("maxHealthBgOpacity", v) end },
+            },
+        })
+        if not EllesmereUI._prebuilding then
+        -- Swatch tints the texture; blocked for None and the pre-colored styles.
+        local swatch = EllesmereUI.BuildColorSwatch(
+            rgn, maxHealthRow:GetFrameLevel() + 3,
+            function()
+                local c = SGetSupported("maxHealthColor")
+                if c then return c.r or 0.7, c.g or 0.1, c.b or 0.1, 1 end
+                return 0.7, 0.1, 0.1, 1
+            end,
+            function(r, g, b)
+                UNIT_DB_MAP[optState.selectedUnit]().maxHealthColor = { r=r, g=g, b=b }
+                ReloadAndUpdate(); UpdatePreview()
+            end, false, 20)
+        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+        rgn._lastInline = swatch
+        local swatchBlock = CreateFrame("Frame", nil, swatch)
+        swatchBlock:SetAllPoints()
+        swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+        swatchBlock:EnableMouse(true)
+        swatchBlock:Hide()
+        local function UpdateMaxHealthSwatchVis()
+            local st = SValSupported("maxHealthStyle", "none")
+            local off = (st == "none" or st == "largeOutlinedStripes" or st == "largeOutlinedStripesR")
+            swatch:SetAlpha(off and 0.3 or 1)
+            swatchBlock:SetShown(off)
+        end
+        RegisterWidgetRefresh(UpdateMaxHealthSwatchVis)
+        UpdateMaxHealthSwatchVis()
+        end
     end
 
     -- Row 5: Heal Prediction (+ your / others' color swatches) | Prediction Opacity

@@ -423,7 +423,6 @@ initFrame:SetScript("OnEvent", function(self)
                 setValue=function(v) RGSet(key,v) end }
         end
         local function RGCog(region, title, master, items, minWidth)
-            if EllesmereUI._prebuilding then return end
             local rows={}
             for _,entry in ipairs(items) do
                 local key,label=entry[1],entry[2]
@@ -630,7 +629,7 @@ initFrame:SetScript("OnEvent", function(self)
                 "When an NSRT shared note has a matching Heroic or Mythic header and an invite list, open Raid Groups with a temporary setup ready for manual Apply Groups. Does not save or apply groups automatically."),
             EllesmereUI.BlankRowCfg())
         y=y-h
-        if not EllesmereUI._prebuilding then
+        do
             EllesmereUI.BuildInlineCog(nsrtImportRow._leftRegion,{
                 title="NSRT Note Difficulty",minWidth=300,
                 disabled=function() return not RGGet("nsrtAutoImport") end,
@@ -642,7 +641,7 @@ initFrame:SetScript("OnEvent", function(self)
                     set=function(v) if ns.RaidGroupsNSRTDifficulty then ns.RaidGroupsNSRTDifficulty(v) end end}},
             })
         end
-        if not EllesmereUI._prebuilding then
+        do
             EllesmereUI.BuildInlineCog(scalingRow._rightRegion,{
                 title="Raid Group Window Scaling",minWidth=370,
                 disabled=function() return not RGGet("windowScalingEnabled") end,

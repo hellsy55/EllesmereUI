@@ -49,6 +49,7 @@ local BAGS_DEFAULTS = {
         bagShowRecentClear    = false,
         bagRecentFlash        = false, -- opt-in: brief glow when a recent pickup appears
         bagHideRecentInCategories = false, -- opt-in: recent items only in Recent Items, not regular categories
+        bagRecentNewOnly      = false,   -- Recent Items: only items not carried before (gear, mail, trade always)
         -- Bag Top Bar Icons: the header's Show Bags, Junk Marker, Quick Actions and Sort icons
         bagShowBagsIcon       = true,
         bagShowJunkIcon       = true,    -- the Junk Marker: header coin, Junk category, Sell Junk at merchants

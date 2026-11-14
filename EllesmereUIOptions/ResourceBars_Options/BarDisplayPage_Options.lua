@@ -320,7 +320,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
               p.general.frameStrata = v; SmoothRefresh()
           end }
     );  y = y - h
-    if not EllesmereUI._prebuilding then
+    do
         local function BarTextureRow(label, barKey)
             local v, o = CopyTexDD()
             v.__match = "Match Main Texture"
@@ -481,7 +481,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
     );  y = y - h
     -- Inline scale cog on "Blizzard Class Resource Art". Greyed while the
     -- toggle is off (its setter refreshes the page).
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = blizzArtRow._leftRegion
         local function artOff()
             local p = DB(); return not (p and p.secondary.blizzardClassArt)
@@ -506,7 +506,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
     -- Inline cog on "Border Around All" (stock styles only): the separator
     -- line between the grouped bars. Greyed while the toggle is off (its
     -- setter refreshes the page).
-    if borderAllOn and not EllesmereUI._prebuilding then
+    if borderAllOn then
         local rgn = blizzArtRow._rightRegion
         local function groupOff()
             local p = DB(); return not (p and p.general.classicBorderAll)
@@ -621,7 +621,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
     -- Inline reposition cog on "Expand Power Bar if No Resource": Extra Y Offset.
     -- Greyed whenever the expand cannot apply (the toggle off, the Power Bar
     -- off, or the bar Height Matched), with the toggle's own reasons.
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = shiftRow._leftRegion
         local function heightMatched()
             return EllesmereUI.GetHeightMatchTarget and EllesmereUI.GetHeightMatchTarget("ERB_Power")
@@ -653,7 +653,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
         })
     end
     -- Inline reposition cog on "Shift Elements if No Resource": Extra Y Offset
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = shiftRow._rightRegion
         EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Shift Offset",
@@ -703,7 +703,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
           end }
     );  y = y - h
     -- Inline reposition cog on "Shift Elements if No Power": Extra Y Offset
-    if not EllesmereUI._prebuilding then
+    do
         local rgn = shiftRow2._leftRegion
         EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
             title = "Shift Offset",
@@ -767,7 +767,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
         -- Inline cog on "Border Around All" (stock styles only): the
         -- separator line between the grouped bars. Greyed while the toggle is
         -- off (its setter refreshes the page).
-        if not EllesmereUI._prebuilding then
+        do
             local rgn = borderAllRow._leftRegion
             local function groupOff()
                 local p = DB(); return not (p and p.general.classicBorderAll)
@@ -1057,7 +1057,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
                           t.textFormat = v
                           RefreshFDM(); EllesmereUI:RefreshPage()
                       end }); y = y - h
-                if not EllesmereUI._prebuilding then
+                do
                     -- Placement cog: position, gap, height, offsets
                     EllesmereUI.BuildInlineCog(fdmRow._leftRegion, {
                         disabled = FdmOff,
@@ -1144,51 +1144,53 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
                               end },
                         },
                     })
-                    -- Text colour, left of the text cog: custom colour or the
-                    -- mana colour, like the Power Text swatches.
-                    EllesmereUI.BuildInlineSwatches(fdmRow._rightRegion, {
-                        { tooltip = "Custom Colored",
-                          hasAlpha = true,
-                          getValue = function()
-                              local t = FdmCfg()
-                              if not t then return 1, 1, 1, 1 end
-                              return t.textFillR or 1, t.textFillG or 1, t.textFillB or 1, t.textFillA or 1
-                          end,
-                          setValue = function(r, g, b, a)
-                              local t = FdmCfg(); if not t then return end
-                              t.textFillR, t.textFillG, t.textFillB, t.textFillA = r, g, b, a
-                              RefreshFDM()
-                          end,
-                          onClick = function(self)
-                              local t = FdmCfg(); if not t then return end
-                              if t.textCustomColored == false then
-                                  t.textCustomColored = true; RefreshFDM()
+                    if not EllesmereUI._prebuilding then
+                        -- Text colour, left of the text cog: custom colour or the
+                        -- mana colour, like the Power Text swatches.
+                        EllesmereUI.BuildInlineSwatches(fdmRow._rightRegion, {
+                            { tooltip = "Custom Colored",
+                              hasAlpha = true,
+                              getValue = function()
+                                  local t = FdmCfg()
+                                  if not t then return 1, 1, 1, 1 end
+                                  return t.textFillR or 1, t.textFillG or 1, t.textFillB or 1, t.textFillA or 1
+                              end,
+                              setValue = function(r, g, b, a)
+                                  local t = FdmCfg(); if not t then return end
+                                  t.textFillR, t.textFillG, t.textFillB, t.textFillA = r, g, b, a
+                                  RefreshFDM()
+                              end,
+                              onClick = function(self)
+                                  local t = FdmCfg(); if not t then return end
+                                  if t.textCustomColored == false then
+                                      t.textCustomColored = true; RefreshFDM()
+                                      EllesmereUI:RefreshPage()
+                                      return
+                                  end
+                                  if self._eabOrigClick then self._eabOrigClick(self) end
+                              end,
+                              refreshAlpha = function()
+                                  local t = FdmCfg()
+                                  return (t and t.textCustomColored == false) and 0.3 or 1
+                              end },
+                            { tooltip = "Mana Colored",
+                              getValue = function()
+                                  local pc = _G._ERB_PowerColors and _G._ERB_PowerColors.MANA
+                                  if pc then return pc[1], pc[2], pc[3], 1 end
+                                  return 0x23/255, 0x8F/255, 0xE7/255, 1
+                              end,
+                              setValue = function() end,
+                              onClick = function()
+                                  local t = FdmCfg(); if not t then return end
+                                  t.textCustomColored = false; RefreshFDM()
                                   EllesmereUI:RefreshPage()
-                                  return
-                              end
-                              if self._eabOrigClick then self._eabOrigClick(self) end
-                          end,
-                          refreshAlpha = function()
-                              local t = FdmCfg()
-                              return (t and t.textCustomColored == false) and 0.3 or 1
-                          end },
-                        { tooltip = "Mana Colored",
-                          getValue = function()
-                              local pc = _G._ERB_PowerColors and _G._ERB_PowerColors.MANA
-                              if pc then return pc[1], pc[2], pc[3], 1 end
-                              return 0x23/255, 0x8F/255, 0xE7/255, 1
-                          end,
-                          setValue = function() end,
-                          onClick = function()
-                              local t = FdmCfg(); if not t then return end
-                              t.textCustomColored = false; RefreshFDM()
-                              EllesmereUI:RefreshPage()
-                          end,
-                          refreshAlpha = function()
-                              local t = FdmCfg()
-                              return (t and t.textCustomColored == false) and 1 or 0.3
-                          end },
-                    }, { disabled = FdmTextDis, disabledTooltip = FdmTextDisTip, size = 20 })
+                              end,
+                              refreshAlpha = function()
+                                  local t = FdmCfg()
+                                  return (t and t.textCustomColored == false) and 1 or 0.3
+                              end },
+                        }, { disabled = FdmTextDis, disabledTooltip = FdmTextDisTip, size = 20 })
+                    end
                 end
                 if SCP then
                     local costRow
@@ -1267,7 +1269,7 @@ function ns.ERB_BuildBarDisplayPage(pageName, parent, yOffset)
         );  y = y - h
 
         -- Inline position cog (X/Y + unlock) on Enable, as on the GCD Bar page
-        if not EllesmereUI._prebuilding then
+        do
             local rgn = asEnableRow._leftRegion
             EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = function() local p = DB(); return p and not p.arcaneSoul.enabled end,

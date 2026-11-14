@@ -217,7 +217,7 @@ initFrame:SetScript("OnEvent", function(self)
                               AutoGold.Set("bagAutoGoldAmount", g and math.min(g, 9999999) or nil)
                           end }
                     ); y = y - h
-                    if not EllesmereUI._prebuilding then
+                    do
                         EllesmereUI.BuildInlineCog(goldRow._leftRegion, {
                             title = "Auto Deposit/Withdraw",
                             disabled = function() return not AutoGold.Enabled() end,
@@ -450,6 +450,7 @@ initFrame:SetScript("OnEvent", function(self)
                       if BagAnchor.On() then return end
                       db.profile.bagAutoSize = v
                       ResetAndRefreshBagLayout()
+                      EllesmereUI:RefreshPage()  -- the Auto-Size cog follows it
                   end }
             end
             layoutSlots[#layoutSlots + 1] = { type="toggle", text="Auto-Expand Height",
@@ -521,14 +522,18 @@ initFrame:SetScript("OnEvent", function(self)
                     -- the picker fires every frame while dragging: retint, don't re-lay out
                     BagsNS.RetintSlotBackgrounds()
                 end }
-            local anchorRow
+            -- Each slot's half of its row, by the slot's label: the inline cogs hang on them
+            local slotRgn = {}
             for i = 1, #layoutSlots, 2 do
+                local left, right = layoutSlots[i], layoutSlots[i + 1]
                 local row
-                row, h = W:DualRow(parent, y, layoutSlots[i], layoutSlots[i + 1] or EllesmereUI.BlankRowCfg()); y = y - h
-                anchorRow = anchorRow or row
+                row, h = W:DualRow(parent, y, left, right or EllesmereUI.BlankRowCfg()); y = y - h
+                slotRgn[left.text] = row._leftRegion
+                if right then slotRgn[right.text] = row._rightRegion end
             end
-            if not EllesmereUI._prebuilding then
-                EllesmereUI.BuildInlineCog(anchorRow._leftRegion, {
+
+            do
+                EllesmereUI.BuildInlineCog(slotRgn["Anchor Bag Window"], {
                     title = "Anchor Bag Window",
                     disabled = AnchorOff,
                     disabledTooltip = "Anchor Bag Window",
@@ -539,6 +544,52 @@ initFrame:SetScript("OnEvent", function(self)
                           order={ "BOTTOMRIGHT", "BOTTOMLEFT", "TOPRIGHT", "TOPLEFT" },
                           get=function() return BagAnchor.Corner() end,
                           set=function(v) BagAnchor.SetCorner(v) end },
+                    },
+                })
+            end
+
+            do
+                -- Inline cog on Window Scale: Anchor to Nearest Corner, for the bag
+                -- and bank windows in every display (off unless set).
+                EllesmereUI.BuildInlineCog(slotRgn["Window Scale"], {
+                    title = "Window Options",
+                    rows = {
+                        { type="toggle", label="Anchor to Nearest Corner",
+                          tooltip="The bag and bank windows hold the screen corner nearest them, so they grow and shrink toward it.",
+                          get=function() return db.profile.bagAnchorNearestCorner == true end,
+                          set=function(v)
+                              db.profile.bagAnchorNearestCorner = v and true or nil
+                              BagsNS.WindowCornerChanged()
+                          end },
+                    },
+                })
+            end
+
+            -- Inline cog on Auto-Size to Fit: Shrink (follow the active tab down
+            -- while open) and Max Height, the height cap as a share of the screen.
+            -- Unset keeps the built-in 95% (and, outside WoW Forever and the
+            -- Compact display, the normal-size floor); a set value wins over both.
+            local autoSizeRgn = slotRgn["Auto-Size to Fit"]
+            if autoSizeRgn then
+                EllesmereUI.BuildInlineCog(autoSizeRgn, {
+                    disabled = function() return db.profile.bagAutoSize ~= true end,
+                    disabledTooltip = "Auto-Size to Fit",
+                    title = "Auto-Size Options",
+                    rows = {
+                        { type="toggle", label="Shrink",
+                          tooltip="Also shrink the bag window while it is open, when the active tab needs less room.",
+                          get=function() return db.profile.bagAutoSizeShrink == true end,
+                          set=function(v)
+                              db.profile.bagAutoSizeShrink = v and true or nil
+                              ResetAndRefreshBagLayout()
+                          end },
+                        { type="slider", label="Max Height (% of Screen)", min=30, max=95, step=5,
+                          get=function() return db.profile.bagAutoSizeMaxPct or 95 end,
+                          set=function(v)
+                              -- the top of the range is the built-in cap: nothing saved
+                              db.profile.bagAutoSizeMaxPct = v < 95 and v or nil
+                              RelayoutSoon()  -- the slider fires every step while dragging
+                          end },
                     },
                 })
             end
@@ -570,7 +621,7 @@ initFrame:SetScript("OnEvent", function(self)
             ); y = y - h
 
             -- Inline cog for Show Pinned Items
-            if not EllesmereUI._prebuilding then
+            do
                 EllesmereUI.BuildInlineCog(pinRecRow._leftRegion, {
                     chain = false,
                     disabled = function() return db.profile.bagShowPinnedItems == false end,
@@ -624,7 +675,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
 
             -- Inline cog for Show Recent Items: "Show in OneBag"
-            if not EllesmereUI._prebuilding then
+            do
                 EllesmereUI.BuildInlineCog(pinRecRow._rightRegion, {
                     chain = false,
                     disabled = function() return db.profile.bagShowRecentItems == false end,
@@ -661,6 +712,10 @@ initFrame:SetScript("OnEvent", function(self)
                               db.profile.bagHideRecentInCategories = v
                               if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                           end },
+                        { type="toggle", label="New Items Only",
+                          tooltip="Only lists items you were not already carrying. Gear, mail and trades always list.",
+                          get=function() return db.profile.bagRecentNewOnly == true end,
+                          set=function(v) db.profile.bagRecentNewOnly = v end },
                     },
                 })
             end
@@ -831,7 +886,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Show Item Level: one options cog to the right of the custom
                 -- color swatch. Both disable when Item Icons manages the display.
-                if not EllesmereUI._prebuilding then
+                do
                     local rgn = ilvlRow._leftRegion
                     EllesmereUI.BuildInlineCog(rgn, {
                         disabled = function() return ItemIconsManaged() or db.profile.showItemlevelInBags == false end,
@@ -847,37 +902,38 @@ initFrame:SetScript("OnEvent", function(self)
                         },
                     })
 
-                    local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
-                        function()
-                            local c = db.profile.itemlevelCustomColor
-                            if c then return c.r, c.g, c.b, 1 end
-                            return 1, 1, 1, 1
-                        end,
-                        function(r, g, b)
-                            db.profile.itemlevelCustomColor = { r = r, g = g, b = b }
-                            if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                        end, false, 20)
-                    swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
-                    rgn._lastInline = swatch
-                    EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
-                    local swatchBlock = CreateFrame("Frame", nil, swatch)
-                    swatchBlock:SetAllPoints()
-                    swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
-                    swatchBlock:EnableMouse(true)
-                    swatchBlock:SetScript("OnEnter", function()
-                        EllesmereUI.ShowWidgetTooltip(swatch, ItemIconsManaged() and ITEM_ICONS_TIP
-                            or EllesmereUI.DisabledTooltip("This option requires Show Item Level to be set to Custom Colored"))
-                    end)
-                    swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                    local function UpdateIlvlSwatch()
-                        local off = ItemIconsManaged() or IlvlMode() ~= "custom"
-                        swatch:SetAlpha(off and 0.3 or 1)
-                        swatchBlock:SetShown(off)
+                    if not EllesmereUI._prebuilding then
+                        local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rgn, rgn:GetFrameLevel() + 5,
+                            function()
+                                local c = db.profile.itemlevelCustomColor
+                                if c then return c.r, c.g, c.b, 1 end
+                                return 1, 1, 1, 1
+                            end,
+                            function(r, g, b)
+                                db.profile.itemlevelCustomColor = { r = r, g = g, b = b }
+                                if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                            end, false, 20)
+                        swatch:SetPoint("RIGHT", rgn._lastInline or rgn._control, "LEFT", -8, 0)
+                        rgn._lastInline = swatch
+                        EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
+                        local swatchBlock = CreateFrame("Frame", nil, swatch)
+                        swatchBlock:SetAllPoints()
+                        swatchBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
+                        swatchBlock:EnableMouse(true)
+                        swatchBlock:SetScript("OnEnter", function()
+                            EllesmereUI.ShowWidgetTooltip(swatch, ItemIconsManaged() and ITEM_ICONS_TIP
+                                or EllesmereUI.DisabledTooltip("This option requires Show Item Level to be set to Custom Colored"))
+                        end)
+                        swatchBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
+                        local function UpdateIlvlSwatch()
+                            local off = ItemIconsManaged() or IlvlMode() ~= "custom"
+                            swatch:SetAlpha(off and 0.3 or 1)
+                            swatchBlock:SetShown(off)
+                        end
+                        UpdateIlvlSwatch()
+                        EllesmereUI.RegisterWidgetRefresh(UpdateIlvlSwatch)
+                        EllesmereUI.RegisterWidgetRefresh(updateSwatch)
                     end
-                    UpdateIlvlSwatch()
-                    EllesmereUI.RegisterWidgetRefresh(UpdateIlvlSwatch)
-                    EllesmereUI.RegisterWidgetRefresh(updateSwatch)
-
                 end
 
                 -- Show BoE / Warbound Text (+ inline cog: Text Size) | Item Count Text Size
@@ -913,7 +969,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Nothing is lost from the index -- cog popup rows are not search
                 -- entries, and the host rows were already registered by DualRow.
                 -- Same for every region-chrome block below.
-                if not EllesmereUI._prebuilding then
+                do
                     EllesmereUI.BuildInlineCog(bindRow._leftRegion, {
                         disabled = function() return ItemIconsManaged() or not db.profile.bagDisplayBindType end,
                         disabledTooltip = ManagedOr("Show BoE / Warbound Text"), rawTooltip = ItemIconsManaged,
@@ -956,7 +1012,7 @@ initFrame:SetScript("OnEvent", function(self)
                     ); y = y - h
 
                     -- Inline options cog on Show Set Name on Gear: text size
-                    if not EllesmereUI._prebuilding then
+                    do
                         EllesmereUI.BuildInlineCog(setNameRow._leftRegion, {
                             disabled = function() return ItemIconsManaged() or db.profile.bagShowSetGearName ~= true end,
                             disabledTooltip = ManagedOr("Show Set Name on Gear"), rawTooltip = ItemIconsManaged,
@@ -1115,7 +1171,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Inline cog for Group Gear by Slot: Compact Slot Groups. Grid display
             -- only, so not built for any other Bag Style.
-            if not EllesmereUI._prebuilding and BagDisplayValue() == "grid" then
+            if BagDisplayValue() == "grid" then
                 local function SlotCogState()
                     local dc = db.profile.bagDisabledCategories
                     if dc and dc["Armor"] == true then return true, "Armor" end
@@ -1206,62 +1262,64 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Bag Top Bar Icons dropdown (left side), its Sort Options cog to the left.
             -- The menu order mirrors the header from right (search) to left.
-            if not EllesmereUI._prebuilding then
-                local TOP_BAR_ICONS = {
-                    { key = "bagShowSortIcon", label = "Sort Icon" },
-                    { key = "bagShowBagsIcon", label = "Bags Icon" },
-                    { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
-                    { key = "bagShowJunkIcon", label = "Junk Icon" },
-                }
-                local DEFAULT_ICON_ORDER = {
-                    "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon",
-                }
+            do
                 local leftRgn = iconsRow._leftRegion
-                local iconsDD, iconsDDRefresh = EllesmereUI.BuildReorderCBDropdown(
-                    leftRgn, 210, leftRgn:GetFrameLevel() + 2, TOP_BAR_ICONS,
-                    function(key) return db.profile[key] ~= false end,
-                    function(key, v)
-                        db.profile[key] = v and true or false
-                        local bags = _G.EUI_Bags
-                        if bags and bags.SyncHeaderIcons then
-                            if key == "bagShowJunkIcon" then
-                                -- The Junk category exists only while the Junk Marker is
-                                -- on: rebuild the categories and re-resolve the selected
-                                -- view by stable key
-                                bags.InvalidateSetCategories()
-                                bags:SyncHeaderIcons()
-                                bags:RefreshInventory()
-                                -- An open bank greys (or stops greying) its junk too
-                                local bank = _G.EUI_BankFrame
-                                if bank then bank:RefreshBank() end
-                                -- WoW Forever's Junk Items window lists marked items only while the marker is on
-                                _G.EUI_CategoryManager:OnJunkChanged()
-                            else
-                                bags:SyncHeaderIcons()
-                            end
-                        end
-                        EllesmereUI:RefreshPage()  -- the Sort Options cog follows Sort Icon
-                    end,
-                    {
-                        hint = "Drag to Reorder (right to left)",
-                        grip = true,
-                        openOrder = function()
-                            return db.profile.bagTopBarIconOrder or DEFAULT_ICON_ORDER
-                        end,
-                        setOrder = function(order)
-                            -- A copy becomes the profile-owned SavedVariable. Leave the
-                            -- key absent until the first drag, preserving older layouts.
-                            local saved = {}
-                            for i = 1, #order do saved[i] = order[i] end
-                            db.profile.bagTopBarIconOrder = saved
+                if not EllesmereUI._prebuilding then
+                    local TOP_BAR_ICONS = {
+                        { key = "bagShowSortIcon", label = "Sort Icon" },
+                        { key = "bagShowBagsIcon", label = "Bags Icon" },
+                        { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
+                        { key = "bagShowJunkIcon", label = "Junk Icon" },
+                    }
+                    local DEFAULT_ICON_ORDER = {
+                        "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon",
+                    }
+                    local iconsDD, iconsDDRefresh = EllesmereUI.BuildReorderCBDropdown(
+                        leftRgn, 210, leftRgn:GetFrameLevel() + 2, TOP_BAR_ICONS,
+                        function(key) return db.profile[key] ~= false end,
+                        function(key, v)
+                            db.profile[key] = v and true or false
                             local bags = _G.EUI_Bags
-                            if bags and bags.SyncHeaderIcons then bags:SyncHeaderIcons() end
+                            if bags and bags.SyncHeaderIcons then
+                                if key == "bagShowJunkIcon" then
+                                    -- The Junk category exists only while the Junk Marker is
+                                    -- on: rebuild the categories and re-resolve the selected
+                                    -- view by stable key
+                                    bags.InvalidateSetCategories()
+                                    bags:SyncHeaderIcons()
+                                    bags:RefreshInventory()
+                                    -- An open bank greys (or stops greying) its junk too
+                                    local bank = _G.EUI_BankFrame
+                                    if bank then bank:RefreshBank() end
+                                    -- WoW Forever's Junk Items window lists marked items only while the marker is on
+                                    _G.EUI_CategoryManager:OnJunkChanged()
+                                else
+                                    bags:SyncHeaderIcons()
+                                end
+                            end
+                            EllesmereUI:RefreshPage()  -- the Sort Options cog follows Sort Icon
                         end,
-                    })
-                PP.Point(iconsDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
-                leftRgn._control = iconsDD
-                leftRgn._lastInline = nil
-                EllesmereUI.RegisterWidgetRefresh(iconsDDRefresh)
+                        {
+                            hint = "Drag to Reorder (right to left)",
+                            grip = true,
+                            openOrder = function()
+                                return db.profile.bagTopBarIconOrder or DEFAULT_ICON_ORDER
+                            end,
+                            setOrder = function(order)
+                                -- A copy becomes the profile-owned SavedVariable. Leave the
+                                -- key absent until the first drag, preserving older layouts.
+                                local saved = {}
+                                for i = 1, #order do saved[i] = order[i] end
+                                db.profile.bagTopBarIconOrder = saved
+                                local bags = _G.EUI_Bags
+                                if bags and bags.SyncHeaderIcons then bags:SyncHeaderIcons() end
+                            end,
+                        })
+                    PP.Point(iconsDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
+                    leftRgn._control = iconsDD
+                    leftRgn._lastInline = nil
+                    EllesmereUI.RegisterWidgetRefresh(iconsDDRefresh)
+                end
 
                 EllesmereUI.BuildInlineCog(leftRgn, {
                     disabled = function() return db.profile.bagShowSortIcon == false end,
