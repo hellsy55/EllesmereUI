@@ -673,7 +673,7 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
     if not EllesmereUI._prebuilding then
         local leftRgn = sharedScaleBorderRow._rightRegion
         local ctrl = leftRgn._control
-        local PP = EllesmereUI.PP
+        local PP = EllesmereUI.PanelPP
 
         -- Corner Radius (EllesmereUI_RoundedCorners.lua): an inline cog on the
         -- border size control.
@@ -752,7 +752,6 @@ function ns.UFO_BuildDisplaySection(parent, y, ctx)
         -- reads per element; they differ only in which units the setter fans to.
         local ALL_UNITS  = { "player", "target", "focus", "targettarget", "focustarget", "pet", "boss" }
         local MAIN_UNITS = { "player", "target", "focus", "targettarget", "focustarget", "pet" }
-        local PP = EllesmereUI.PP
         local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
             rgn, 210, rgn:GetFrameLevel() + 2,
             tipItems,
