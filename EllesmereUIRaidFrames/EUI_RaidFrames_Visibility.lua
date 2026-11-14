@@ -194,9 +194,8 @@ local function UpdateButtonRange(unit, btn)
         if UnitIsUnit(unit, "player") or not UnitExists(unit) then
             ApplyDarken(btn, false, strength, color)
         elseif not UnitIsConnected(unit) then
-            -- Offline keeps its fixed 80% alpha dim, not the OOR darken --
-            -- same reasoning as the alpha-mode branch below.
-            ApplyRangeAlpha(btn, 0.8)
+            -- Offline frames stay fully opaque, without OOR darkening.
+            ApplyRangeAlpha(btn, 1)
         elseif UnitPhaseReason and UnitPhaseReason(unit) then
             ApplyDarken(btn, true, strength, color)
         elseif UnitIsDeadOrGhost(unit) then
@@ -219,10 +218,9 @@ local function UpdateButtonRange(unit, btn)
     if UnitIsUnit(unit, "player") or not UnitExists(unit) then
         ApplyRangeAlpha(btn, 1)
     elseif not UnitIsConnected(unit) then
-        -- Offline units take a fixed 80% alpha, never the out-of-range fade --
-        -- an offline player isn't "out of range", and a steady alpha reads
-        -- better alongside the offline status tint. Overrides oorAlpha entirely.
-        ApplyRangeAlpha(btn, 0.8)
+        -- Offline is a connection state, not an out-of-range state.
+        -- Preserve full frame opacity while the status tint remains visible.
+        ApplyRangeAlpha(btn, 1)
     elseif UnitPhaseReason and UnitPhaseReason(unit) then
         ApplyRangeAlpha(btn, oorAlpha)
     elseif UnitIsDeadOrGhost(unit) then
@@ -419,14 +417,23 @@ ns._InArena = function()
     return instanceType == "arena"
 end
 
+-- Small Raid applies outside battlegrounds only: a battleground raid starts
+-- under 10 while players arrive and dips under 10 whenever one leaves.
+ns._SmallRaidOn = function()
+    if db.profile.partySmallRaid ~= true then return false end
+    local _, instanceType = IsInInstance()
+    return instanceType ~= "pvp"
+end
+
 -- Party frames while IsInRaid() is true: arena (the whole team, above) or the
 -- opt-in Small Raid setting, which shows group 1 as party frames and hides
--- every other member while the raid holds fewer than 10 players. Every
+-- every other member while the raid holds fewer than 10 players (outside
+-- battlegrounds: ns._SmallRaidOn). Every
 -- "party or raid frames" decision reads this, never ns._InArena directly;
 -- the group-1 filter itself lives in _LayoutPartyFrames (ns._SmallRaidGroup).
 ns._PartyInRaid = function()
     if ns._InArena() then return true end
-    return db.profile.partySmallRaid == true and IsInRaid() and GetNumGroupMembers() < 10
+    return ns._SmallRaidOn() and IsInRaid() and GetNumGroupMembers() < 10
 end
 
 -- The subgroup the party header is limited to in Small Raid mode; nil in
@@ -461,7 +468,8 @@ end
 -- Small Raid: raid tokens run contiguously from raid1 and exist only in a raid,
 -- so raid10 exists exactly when a raid holds 10 or more members (the
 -- GetNumGroupMembers() < 10 rule); a party never reaches it.
--- Arena has no macro condition: it is taken at the zone-in pass.
+-- Arena and battlegrounds have no macro condition: the mode is taken at the
+-- zone-in pass (an arena's own macros; a battleground's as with Small Raid off).
 ns._RF_VIS_MACROS = {
     raid = {
         group = { [true] = "[@raid1,exists] show; [@party1,exists][group] hide; show", [false] = "[@raid1,exists] show; hide" },
@@ -482,7 +490,7 @@ ns._RFSyncVisDrivers = function()
     if not containerFrame or not pc or InCombatLockdown() then return end
     local s = db.profile
     local M = ns._RF_VIS_MACROS
-    local mode = (ns._InArena() and "arena") or ((s.partySmallRaid == true) and "small") or "group"
+    local mode = (ns._InArena() and "arena") or (ns._SmallRaidOn() and "small") or "group"
     local r = M.raid[mode][s.showWhenSolo and true or false]
     local p = M.party[mode][s.partyShowWhenSolo and true or false]
     if ns._rfRaidVisMacro ~= r then

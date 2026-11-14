@@ -201,19 +201,36 @@ initFrame:SetScript("OnEvent", function(self)
               getValue = function() return ns.OwnListSize("lineSize") end,
               setValue = function(v) ns.SetOwnListSize("lineSize", v) end })
         y = y - h
-        _, h = W:DualRow(parent, y,
+        local colorsRow
+        colorsRow, h = W:DualRow(parent, y,
             { type = "slider", text = "Dungeon / Raid Text Size", min = 8, max = 20, step = 1,
               tooltip = "The dungeon or raid name text size.",
               getValue = function() return ns.OwnListSize("nameSize") end,
               setValue = function(v) ns.SetOwnListSize("nameSize", v) end },
             { type = "toggle", text = "Colored Group Names",
-              tooltip = "Green name when a group is new, Red name when you were declined or instance locked.",
+              tooltip = "Color declined or locked groups red; the cog controls green names for new groups.",
               getValue = function() return ns.Cfg().nameColors == true end,
               setValue = function(v)
                   ns.Cfg().nameColors = v and true or false
                   if ns.Redecorate then ns.Redecorate() end
               end })
         y = y - h
+        if not EUI._prebuilding then
+            EUI.BuildInlineCog(colorsRow._rightRegion, {
+                title = "Colored Group Names",
+                disabled = function() return ns.Cfg().nameColors ~= true end,
+                disabledTooltip = "Colored Group Names",
+                rows = {
+                    { type = "toggle", label = "Green for New Groups",
+                      tooltip = "Color newly found group names green; red names for declined or locked groups are unaffected.",
+                      get = function() return ns.Cfg().greenNewGroups ~= false end,
+                      set = function(v)
+                          ns.Cfg().greenNewGroups = v and true or false
+                          if ns.Redecorate then ns.Redecorate() end
+                      end },
+                },
+            })
+        end
         _, h = W:DualRow(parent, y,
             { type = "slider", text = "Row Height", min = 20, max = 64, step = 1,
               tooltip = "How tall each row is. Lines that no longer fit drop off from the bottom: the playstyle line first, then the dungeon / raid name (its short name then sits ahead of the title) and the leader crown.",
@@ -227,14 +244,15 @@ initFrame:SetScript("OnEvent", function(self)
         -- status color: a checklist, one color each
         local LINE_ITEMS = {
             { key = "lineDelisted",  label = "Delisted", tooltip = "The group was delisted." },
-            { key = "lineAccepted",  label = "Accepted", tooltip = "Applied and waiting, or invited." },
+            { key = "lineSigned",    label = "Signed Up", tooltip = "You applied and are waiting for an answer." },
+            { key = "lineAccepted",  label = "Accepted", tooltip = "The group invited you." },
             { key = "lineCancelled", label = "Canceled", tooltip = "You cancelled the application." },
             { key = "lineDeclined",  label = "Declined", tooltip = "Declined, the group filled, or the application timed out." },
         }
         local lineRow
         lineRow, h = W:DualRow(parent, y,
             -- placeholder, the checklist replaces it
-            { type = "dropdown", text = "Status Effect",
+            { type = "dropdown", text = "Row Highlight",
               tooltip = "Marks the groups you applied to in their status color, with a line under the group or a tinted row.",
               values = { __placeholder = "..." }, order = { "__placeholder" },
               getValue = function() return "__placeholder" end,
@@ -273,13 +291,20 @@ initFrame:SetScript("OnEvent", function(self)
                     set = function(r, g, b) ns.SetOwnListValue(line[5], { r = r, g = g, b = b }) end }
             end
             EUI.BuildInlineCog(rgn, {
-                title = "Status Effect",
+                title = "Row Highlight",
                 rows = {
                     { type = "dropdown", label = "Style",
-                      values = { underline = "Underline", row = "Row Highlight" }, order = { "underline", "row" },
-                      get = function() return ns.OwnListGet("statusStyle") == "row" and "row" or "underline" end,
+                      values = { none = "None", underline = "Underline", row = "Full Row" }, order = { "none", "underline", "row" },
+                      get = function()
+                          local v = ns.OwnListGet("statusStyle")
+                          return (v == "row" or v == "none") and v or "underline"
+                      end,
                       set = function(v) ns.SetOwnListValue("statusStyle", v) end },
                     Picker("lineDelisted", "Delisted Color"),
+                    { type = "slider", label = "Delisted Opacity", min = 0, max = 100, step = 5,
+                      get = function() return tonumber(ns.OwnListGet("delistedOpacity")) or 50 end,
+                      set = function(v) ns.SetOwnListValue("delistedOpacity", v) end },
+                    Picker("lineSigned", "Signed Up Color"),
                     Picker("lineAccepted", "Accepted Color"),
                     Picker("lineCancelled", "Canceled Color"),
                     Picker("lineDeclined", "Declined Color"),
@@ -308,7 +333,7 @@ initFrame:SetScript("OnEvent", function(self)
                 title = "Rating Text",
                 rows = {
                     { type = "slider", label = "Rating Text Size", min = 8, max = 20, step = 1,
-                      tooltip = "The leader's Mythic+ rating beside the role icons.",
+                      tooltip = "The leader's Mythic+ rating beside the role icons in Dungeon searches only.",
                       get = function() return ns.OwnListSize("scoreSize") end,
                       set = function(v) ns.SetOwnListSize("scoreSize", v) end },
                 },
@@ -377,14 +402,19 @@ initFrame:SetScript("OnEvent", function(self)
                   ns.SetOwnListValue("missingIcons", v)
                   if ns.Redecorate then ns.Redecorate() end  -- blizzard's list too
               end },
-            { type = "toggle", text = "Row Art",
-              tooltip = "The instance's art across the left half of each group, fading out to the right.",
-              getValue = function() return ns.Cfg().extraRowArt == true end,
-              setValue = function(v)
-                  ns.Cfg().extraRowArt = v and true or false
-                  if ns.GFRetagRows then ns.GFRetagRows() end
-              end })
+            { type = "dropdown", text = "Raid Role Icons",
+              tooltip = "The tank, healer and damage circles on raid groups.",
+              values = { ellesmere = "EllesmereUI", blizzard = "Blizzard" }, order = { "ellesmere", "blizzard" },
+              getValue = function() return ns.OwnListGet("raidRoleIcons") end,
+              setValue = function(v) ns.SetOwnListValue("raidRoleIcons", v) end })
         y = y - h
+        local rowArtCfg = { type = "toggle", text = "Row Art",
+            tooltip = "The instance's art across the left half of each group, fading out to the right.",
+            getValue = function() return ns.Cfg().extraRowArt == true end,
+            setValue = function(v)
+                ns.Cfg().extraRowArt = v and true or false
+                if ns.GFRetagRows then ns.GFRetagRows() end
+            end }
         local function Shown(key, default)
             local v = ns.Cfg()[key]
             if v == nil then v = ns.DEFAULTS[key] end
@@ -422,7 +452,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
         _, h = W:DualRow(parent, y,
             { type = "toggle", text = "Leader Rating",
-              tooltip = "Shows the group leader's Mythic+ rating next to the role icons.",
+              tooltip = "Shows the group leader's Mythic+ rating next to the role icons in Dungeon searches only.",
               getValue = function() return Shown("leaderRating") end,
               setValue = function(v) SetShown("leaderRating", v) end },
             { type = "toggle", text = "Show Playstyle",
@@ -434,10 +464,12 @@ initFrame:SetScript("OnEvent", function(self)
             tooltip = "Shows each group's note on a line under it; hover the group for the whole note.",
             getValue = function() return ns.OwnListGet("groupNotes") == true end,
             setValue = function(v) ns.SetOwnListValue("groupNotes", v and true or false) end }
+        -- Row Art closes the section, so a blank slot only ever sits in its last row
         if tagsCfg then
-            _, h = W:DualRow(parent, y, tagsCfg, notesCfg)
+            _, h = W:DualRow(parent, y, tagsCfg, notesCfg); y = y - h
+            _, h = W:DualRow(parent, y, rowArtCfg, EUI.BlankRowCfg())
         else
-            _, h = W:DualRow(parent, y, notesCfg, EUI.BlankRowCfg())
+            _, h = W:DualRow(parent, y, notesCfg, rowArtCfg)
         end
         y = y - h
 
@@ -456,6 +488,23 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip = "Each dungeon square shows your best keystone level this season, colored by its score rarity.",
               getValue = function() return ns.Cfg().dungeonScore == true end,
               setValue = function(v) SetSquares("dungeonScore", v) end })
+        y = y - h
+        _, h = W:DualRow(parent, y,
+            { type = "toggle", text = "Right-Click Dungeon Teleport",
+              tooltip = "Right-click a dungeon filter to cast its learned teleport; left-click still toggles the filter. Requires a reload.",
+              getValue = function() return ns.Cfg().dungeonTeleport == true end,
+              setValue = function(v)
+                  v = v and true or false
+                  if v == (ns.Cfg().dungeonTeleport == true) then return end
+                  EUI:ShowConfirmPopup({
+                      title = v and "Enable Dungeon Teleports" or "Disable Dungeon Teleports",
+                      message = "Your UI will reload to update the dungeon filter buttons.",
+                      confirmText = "Reload Now", cancelText = "Cancel", reload = true,
+                      onConfirm = function() ns.Cfg().dungeonTeleport = v end,
+                      onCancel = function() EUI:RefreshPage() end,
+                  })
+              end },
+            EUI.BlankRowCfg())
         y = y - h
 
         -- what Hide Applicant Info hides (the profile's streamer* keys)

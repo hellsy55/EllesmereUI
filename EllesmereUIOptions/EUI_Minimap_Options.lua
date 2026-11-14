@@ -97,7 +97,7 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Visibility row builder (reused across all pages)
     ---------------------------------------------------------------------------
-    local PP = EllesmereUI.PP
+    local PP = EllesmereUI.PanelPP
     -- One control for both halves (see EllesmereUI.BuildVisibilityRow): the mode axes
     -- and the option axes are Show/Hide lanes of the same list now. Storage is
     -- unchanged, so nothing else in this module had to move. The right DualRow slot
@@ -481,7 +481,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- slider. Modes are mutually exclusive: class > accent > custom.
         if not EllesmereUI._prebuilding then
             local rgn = borderRow._rightRegion
-            local PPl = EllesmereUI.PP
+            local PPl = EllesmereUI.PanelPP
 
             -- Accent swatch (nearest the control): live theme accent.
             local accentSwatch, updateAccent = EllesmereUI.BuildColorSwatch(
@@ -742,7 +742,6 @@ initFrame:SetScript("OnEvent", function(self)
                         FullRebuildMinimap()
                     end,
                 })
-            local PP = EllesmereUI.PP
             EllesmereUI.PanelPP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
             leftRgn._lastInline = nil
@@ -838,7 +837,6 @@ initFrame:SetScript("OnEvent", function(self)
                         RefreshMinimap()
                     end,
                 })
-            local PP = EllesmereUI.PP
             EllesmereUI.PanelPP.Point(cbDD, "RIGHT", leftRgn, "RIGHT", -20, 0)
             leftRgn._control = cbDD
             leftRgn._lastInline = nil
@@ -1241,6 +1239,7 @@ initFrame:SetScript("OnEvent", function(self)
             TOPRIGHT = "Top Right", TOPLEFT = "Top Left",
             BOTTOMRIGHT = "Bottom Right", BOTTOMLEFT = "Bottom Left" }
         local CORNER_ORDER = { "TOPRIGHT", "TOPLEFT", "BOTTOMRIGHT", "BOTTOMLEFT" }
+        local POSITION_CORNERS = { TOPRIGHT = true, TOPLEFT = true, BOTTOMRIGHT = true, BOTTOMLEFT = true }
         local previewVisible = parent._mmPreviewVisible or {}
         if not EllesmereUI._prebuilding then
             parent._mmPreviewVisible = previewVisible
@@ -1259,6 +1258,14 @@ initFrame:SetScript("OnEvent", function(self)
                 return not m or m[info.hideKey] == true
                     or (info.key == "difficulty" and m.diffTextEnabled == true)
             end
+            -- In the stock position these values are deliberately unused by
+            -- layout. Keep them saved for the next corner selection, but do
+            -- not present sliders that cannot affect the current position.
+            local function OffsetDisabled()
+                local m = MinimapDB()
+                local at = m and m[info.positionKey]
+                return not m or not POSITION_CORNERS[at]
+            end
             EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = IsDisabled,
                 disabledTooltip = function()
@@ -1267,11 +1274,23 @@ initFrame:SetScript("OnEvent", function(self)
                 title = info.name .. " Position",
                 rows = {
                     { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                      disabled = OffsetDisabled,
+                      disabledTooltip = "Choose a minimap corner to adjust X/Y offsets.",
+                      rawTooltip = true,
                       get = function() local m = MinimapDB(); return m and m[info.xKey] or 0 end,
-                      set = function(v) local m = MinimapDB(); if m then m[info.xKey] = v; RefreshMinimap() end end },
+                      set = function(v)
+                          if OffsetDisabled() then return end
+                          local m = MinimapDB(); if m then m[info.xKey] = v; RefreshMinimap() end
+                      end },
                     { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
+                      disabled = OffsetDisabled,
+                      disabledTooltip = "Choose a minimap corner to adjust X/Y offsets.",
+                      rawTooltip = true,
                       get = function() local m = MinimapDB(); return m and m[info.yKey] or 0 end,
-                      set = function(v) local m = MinimapDB(); if m then m[info.yKey] = v; RefreshMinimap() end end },
+                      set = function(v)
+                          if OffsetDisabled() then return end
+                          local m = MinimapDB(); if m then m[info.yKey] = v; RefreshMinimap() end
+                      end },
                     { type = "toggle", label = "Show on Mouseover",
                       tooltip = "Only show this Blizzard element while the mouse is over the minimap. Mail, Crafting Order, and Difficulty still require their normal game conditions.",
                       get = function()

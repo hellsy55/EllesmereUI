@@ -577,31 +577,43 @@ local function OnEvent(self, event, arg1, ...)
             if event == "UNIT_CONNECTION" then GetFFD(btn)._clsTok = nil end
             UpdateButton(btn)
             -- Connection changes don't fire UNIT_IN_RANGE_UPDATE; re-evaluate
-            -- range so offline units take their fixed alpha and reconnecting
+            -- range so offline units stay fully opaque and reconnecting
             -- units return to the normal out-of-range fade.
             if event == "UNIT_CONNECTION" then ns._UpdateButtonRange(arg1, btn) end
         end
         -- The member's pet frame, when one shows.
         if event == "UNIT_CONNECTION" then ns._PF_OwnerRange(arg1) end
     elseif event == "PARTY_MEMBER_ENABLE" or event == "PARTY_MEMBER_DISABLE" then
-        -- Only status text / health color changes (online/offline). The payload
-        -- names the unit: repaint its button(s) alone. The full sweeps remain the
-        -- fallback for a unit no button maps yet (token shape we do not route).
+        -- Connection edges also refresh frame opacity: offline units must not
+        -- inherit a stale out-of-range fade. Repaint only the affected buttons;
+        -- fall back to the full sweep when no unit mapping exists.
         local btn = arg1 and (unitToButton[arg1] or ns._partyUnitToButton[arg1])
         if btn then
             local pv = GetFFD(btn)._isParty and ns._partyPvActive
-            if not pv and btn:IsVisible() then UpdateButton(btn) end
+            if not pv and btn:IsVisible() then
+                UpdateButton(btn)
+                ns._UpdateButtonRange(arg1, btn)
+            end
             local xf = ns._xfUnitToButton[arg1]
-            if xf and xf:IsVisible() then UpdateButton(xf) end
+            if xf and xf:IsVisible() then
+                UpdateButton(xf)
+                ns._UpdateButtonRange(arg1, xf)
+            end
         else
             for _, b in ipairs(allButtons) do
                 local u = b:GetAttribute("unit")
-                if u and b:IsVisible() then UpdateButton(b) end
+                if u and b:IsVisible() then
+                    UpdateButton(b)
+                    ns._UpdateButtonRange(u, b)
+                end
             end
             if not ns._partyPvActive then
                 for _, b in ipairs(ns._partyAllButtons) do
                     local u = b:GetAttribute("unit")
-                    if u and b:IsVisible() then UpdateButton(b) end
+                    if u and b:IsVisible() then
+                        UpdateButton(b)
+                        ns._UpdateButtonRange(u, b)
+                    end
                 end
             end
         end

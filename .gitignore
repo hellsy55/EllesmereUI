@@ -41,3 +41,6 @@ __pycache__/
 !.tools/tests/test_package_policy.ps1
 !.tools/tests/test_portable_packages.ps1
 !.tools/tests/test_portable_edges.ps1
+# A stray working folder: tools of other projects have written to _tools/ here by mistake.
+# Never part of the addon.
+/_tools/
