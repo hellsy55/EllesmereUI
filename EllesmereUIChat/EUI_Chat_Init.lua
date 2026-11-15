@@ -523,13 +523,25 @@ initFrame:SetScript("OnEvent", function(self)
         -- Also Wake On groups (cfg.idleFadeWake) on top of CHAT_MSG_EVENTS: the
         -- event names, and the chat type ids of lines Blizzard adds with no
         -- event name. With no group checked these stay CHAT_MSG_EVENTS and nil.
+        local combatWakeFrame = CreateFrame("Frame")
+        combatWakeFrame:SetScript("OnEvent", OnActiveMessage)
+        local function UpdateCombatWake(on)
+            local sel = ECHAT.DB().idleFadeWake
+            if on and sel and sel.combat == true then
+                combatWakeFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+            else
+                combatWakeFrame:UnregisterEvent("PLAYER_REGEN_DISABLED")
+            end
+        end
+
         local _wakeEvents, _wakeTypeIDs = CHAT_MSG_EVENTS, nil
         function ECHAT.ApplyIdleFadeWake()
             local sel = ECHAT.DB().idleFadeWake
+            UpdateCombatWake(IsIdleApplicable() and ECHAT.DB().idleFadeEnabled ~= false)
             local events, ids
             if sel then
                 for _, g in ipairs(I.IDLE_WAKE_GROUPS) do
-                    if sel[g.key] then
+                    if sel[g.key] and #g.types > 0 then
                         if not events then
                             events, ids = {}, {}
                             for e in pairs(CHAT_MSG_EVENTS) do events[e] = true end
@@ -560,6 +572,7 @@ initFrame:SetScript("OnEvent", function(self)
             if hit and not wakeFrame:IsShown() and cf:IsShown() then wakeFrame:Show() end
         end
         SetMessageWake = function(on)
+            UpdateCombatWake(on)
             if ECHAT.EngineSetIdleObserver then
                 ECHAT.EngineSetIdleObserver(on and WakeOnChat or nil)
             end

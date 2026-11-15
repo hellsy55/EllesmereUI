@@ -57,6 +57,8 @@ local IDLE_WAKE_GROUPS = {
       types = { "SYSTEM" } },
     { key = "achievements", label = "Achievements",
       types = { "ACHIEVEMENT", "GUILD_ACHIEVEMENT" } },
+    { key = "combat", label = "Combat", types = {} },
+    { key = "pings", label = "Pings", types = { "PING" } },
     { key = "npc", label = "NPC Speech",
       types = { "MONSTER_SAY", "MONSTER_YELL", "MONSTER_EMOTE", "MONSTER_WHISPER",
                 "MONSTER_PARTY", "RAID_BOSS_EMOTE", "RAID_BOSS_WHISPER" } },

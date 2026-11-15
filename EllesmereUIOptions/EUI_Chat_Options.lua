@@ -821,7 +821,7 @@ initFrame:SetScript("OnEvent", function(self)
                   if ECHAT.ResetIdleTimer then ECHAT.ResetIdleTimer() end
               end },
             { type="dropdown", text="Also Wake On",
-              tooltip="Other chat lines that wake a faded chat.",
+              tooltip="Additional chat messages and events that wake faded chat.",
               values={ __placeholder = "..." }, order={ "__placeholder" },
               getValue=function()
                   local t = Cfg("idleFadeWake")
