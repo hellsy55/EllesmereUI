@@ -155,6 +155,7 @@ local function OpenPicker(v, owner)
         items[#items + 1] = { text = Hex(c.class) .. c.name .. "|r", noLoc = true, isActive = shown == c.key,
             onClick = function()
                 v.key = not c.current and c.key or nil
+                v.forceOfflineWarband = nil
                 Rebuild(v)
             end,
             onRemove = not c.current and function() AskForget(c) end or nil,
@@ -201,11 +202,49 @@ local function CreatePickerButton(v, header)
     icon:SetPoint("CENTER")
     icon:SetAlpha(0.8)
 
-    button:SetScript("OnClick", function(self) OpenPicker(v, self) end)
+    -- Bank and Warbank views return to the live character's bags on a
+    -- secondary click; elsewhere the optional Warbank shortcut still applies.
+    local function ShowingOfflineBank()
+        return (v == bagsView and ns.GetSelection() == BANK_VIEW)
+            or (v == bankView and v.mode == "bank")
+    end
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:SetScript("OnClick", function(self, mouseButton)
+        if mouseButton == "RightButton" then
+            if ShowingOfflineBank() then
+                v.key = nil
+                v.viewTab = "bank"
+                v.forceOfflineWarband = nil
+                bagsView.key = nil
+                bagsView.forceOfflineWarband = nil
+                ns.SetSelection(0, nil)
+                if v == bankView then
+                    Rebuild(bankView)
+                    if not EUI_Bags:IsShown() then EUI_Bags:Show() end
+                end
+                Rebuild(bagsView)
+            elseif Offline.Enabled() and Offline.HasWarband()
+                and EllesmereUIDB and EllesmereUIDB.bagOfflineRightClickWarbank then
+                v.key = nil
+                v.viewTab = "warband"
+                v.forceOfflineWarband = (v == bankView)
+                if v == bagsView then ns.SetSelection(BANK_VIEW, nil) end
+                Rebuild(v)
+            end
+        elseif mouseButton == "LeftButton" then
+            OpenPicker(v, self)
+        end
+    end)
     button:SetScript("OnEnter", function(self)
         icon:SetAlpha(1)
         if bg then bg:SetColorTexture(1, 1, 1, 0.14) end
-        EUI.ShowWidgetTooltip(self, EllesmereUI.L("Choose an alt"))
+        local tip = EllesmereUI.L("Choose an alt") .. "\n" .. EllesmereUI.L("Left-click: Choose a character")
+        if ShowingOfflineBank() then
+            tip = tip .. "\n" .. EllesmereUI.L("Right-click: Return to bags")
+        elseif Offline.HasWarband() and EllesmereUIDB and EllesmereUIDB.bagOfflineRightClickWarbank then
+            tip = tip .. "\n" .. EllesmereUI.L("Right-click: Show Bank")
+        end
+        EUI.ShowWidgetTooltip(self, tip)
     end)
     button:SetScript("OnLeave", function()
         icon:SetAlpha(0.8)
@@ -560,7 +599,7 @@ local function Classified(list, bags, src)
     for pos, t in ipairs(type(list) == "table" and list or {}) do
         if type(t) == "table" then
             total = total + (t.size or 0)
-            local inReagent = bags and pos == 6 and reagent
+            local inReagent = bags and pos == 6 and not disabled["Reagent Bag"] and reagent
             for slot, str in pairs(type(t.items) == "table" and t.items or {}) do
                 used = used + 1
                 local id = Offline.ItemID(str)
@@ -1112,14 +1151,15 @@ if EUI_Bank then
             local _, _, _, _, barTop = bar:GetPoint(1)
             if barTop then top = barTop end
         end
-        Place(bankView, AltKey(bankView) and "bank" or nil, left or 0, -(top or -30), bottom or 30)
+        Place(bankView, (AltKey(bankView) or bankView.forceOfflineWarband) and "bank" or nil,
+            left or 0, -(top or -30), bottom or 30)
     end
 
     hooksecurefunc(EUI_Bank, "RefreshBank", SyncBank)
     EUI_Bank:HookScript("OnShow", SyncBank)
     EUI_Bank:HookScript("OnHide", function()
         if EUI_Bank:IsShown() then return end
-        bankView.key, bankView.viewTab = nil, "bank"
+        bankView.key, bankView.viewTab, bankView.forceOfflineWarband = nil, "bank", nil
         if bankView.mode then Place(bankView, nil) end
     end)
     -- the live bank keeps resetting the slot count while an alt's showing
@@ -1140,6 +1180,7 @@ end
 function Offline.SyncButton()
     if not Offline.Enabled() then
         bagsView.key, bankView.key = nil, nil
+        bankView.forceOfflineWarband = nil
         if ns.GetSelection() == BANK_VIEW then I.SetSelectedCategoryIndex(0) end
     end
     if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end

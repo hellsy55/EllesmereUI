@@ -690,6 +690,10 @@ initFrame:SetScript("OnEvent", function(self)
               tooltip=EllesmereUI.IS_FOREVER
                   and "Item tooltips list how many of that item each of your characters has in their bags and bank. Applies to all characters."
                   or "Item tooltips list how many of that item each of your characters has in their bags and bank, plus the warband bank. Applies to all characters." },
+            { key="bagTooltipCurrencyCounts", label="Currency Count",
+              lockedFn=function() return BagOffline() == nil end,
+              lockedTooltip=EllesmereUI.DisabledTooltip("Bags"),
+              tooltip="Currency tooltips show the last saved balance for each character and the total. Warband-wide currencies appear only once. Character balances update when you log in on them." },
             { key="uber", label="Detailed Tooltips" },
         }
         -- Global search sees row labels and tooltips only, so this row's entry,
@@ -746,9 +750,10 @@ initFrame:SetScript("OnEvent", function(self)
                 lrgn, 170, lrgn:GetFrameLevel() + 2, ttExtraItems,
                 function(k)
                     if k == "uber" then return GetCVar("UberTooltips") == "1" end
-                    if k == "bagTooltipCounts" then
+                    if k == "bagTooltipCounts" or k == "bagTooltipCurrencyCounts" then
                         local offline = BagOffline()
-                        return offline and offline.CountsEnabled() or false
+                        if not offline then return false end
+                        return k == "bagTooltipCounts" and offline.CountsEnabled() or offline.CurrencyCountsEnabled()
                     end
                     local v = EllesmereUIDB and EllesmereUIDB[k]
                     if v == nil then return EXTRA_DEFAULTS[k] end
@@ -761,7 +766,7 @@ initFrame:SetScript("OnEvent", function(self)
                         EllesmereUIDB.uberTooltipsManual = true
                         EllesmereUIDB.uberTooltips = v
                         EllesmereUI.SetCVar("UberTooltips", v and "1" or "0", "EllesmereUIBlizzardSkin")
-                    elseif k == "bagTooltipCounts" then
+                    elseif k == "bagTooltipCounts" or k == "bagTooltipCurrencyCounts" then
                         local offline = BagOffline()
                         if offline then offline.Set(k, v) end
                     else

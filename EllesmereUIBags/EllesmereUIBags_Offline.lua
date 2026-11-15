@@ -38,6 +38,7 @@ ns.Offline = Offline
 
 function Offline.Enabled() return Acct().bagOfflineBank == true end
 function Offline.CountsEnabled() return Acct().bagTooltipCounts == true end
+function Offline.CurrencyCountsEnabled() return Acct().bagTooltipCurrencyCounts == true end
 local function Active() return Offline.Enabled() or Offline.CountsEnabled() end
 
 -------------------------------------------------------------------------------
@@ -423,6 +424,7 @@ function Offline.Set(key, on)
     _G.EllesmereUIDB[key] = on and true or nil
     Offline.Sync()
     Offline.SyncTooltip()
+    Offline.SyncCurrency()
     Offline.SyncButton()
 end
 
@@ -550,6 +552,184 @@ function Offline.SyncTooltip()
 end
 
 -------------------------------------------------------------------------------
+--  Tooltip Currency Count: character snapshots + account-wide balance
+--  Shares the existing offline inventory store and character GUIDs. The
+--  currency watcher is inert while the independent option is off.
+-------------------------------------------------------------------------------
+local currencyListening, currencyHooked = false, false
+local currencyRev = 0
+-- Forgetting an alt or resetting the offline store also invalidates every
+-- cached tooltip total, not only the item's inventory view.
+Offline.OnChange(function(what)
+    if what == "forget" then currencyRev = currencyRev + 1 end
+end)
+local currencyLines, currencyLineRev = {}, -1
+local currencyFrame = CreateFrame("Frame")
+local currencyQueued = false
+
+local function CurrencyInfo(id)
+    if type(id) ~= "number" or (issecretvalue and issecretvalue(id)) then return nil end
+    local api = C_CurrencyInfo
+    if not (api and api.GetCurrencyInfo) then return nil end
+    local ok, info = pcall(api.GetCurrencyInfo, id)
+    if not ok or type(info) ~= "table" or info.isHeader then return nil end
+    local n = info.quantity
+    if type(n) ~= "number" or (issecretvalue and issecretvalue(n)) or n < 0 then return nil end
+    return info
+end
+
+-- A currency is saved only from the currently logged-in character. Warband-
+-- wide amounts are stored once, not copied to each character's snapshot.
+local function SnapshotCurrency(id)
+    local info = CurrencyInfo(id)
+    if not info then return end
+    local db = Offline.Store()
+    local shared = info.isAccountWide == true
+    local target
+    if shared then
+        db.warband.currencies = db.warband.currencies or {}
+        target = db.warband.currencies
+    else
+        local c = MyEntry()
+        if not c then return end
+        c.currencies = c.currencies or {}
+        target = c.currencies
+    end
+    local count = info.quantity
+    if target[id] ~= count then
+        target[id] = count
+        currencyRev = currencyRev + 1
+    end
+end
+
+local function SnapshotCurrencies()
+    if not currencyListening then return end
+    local api = C_CurrencyInfo
+    if not api then return end
+    local ids = {}
+    if api.GetCurrencyListSize and api.GetCurrencyListInfo then
+        local ok, count = pcall(api.GetCurrencyListSize)
+        if ok and type(count) == "number" then
+            for i = 1, math.min(count, 2000) do
+                local good, info = pcall(api.GetCurrencyListInfo, i)
+                if good and type(info) == "table" and not info.isHeader then
+                    local id = info.currencyID or info.currencyTypesID
+                    if type(id) == "number" and not (issecretvalue and issecretvalue(id)) then ids[id] = true end
+                end
+            end
+        end
+    end
+    -- Also refresh previously saved currencies, including ones hidden in the
+    -- currency list or moved under a collapsed category.
+    local db = Offline.Store()
+    local me = Offline.Char(OwnKey())
+    if me and type(me.currencies) == "table" then
+        for id in pairs(me.currencies) do ids[id] = true end
+    end
+    if type(db.warband.currencies) == "table" then
+        for id in pairs(db.warband.currencies) do ids[id] = true end
+    end
+    for id in pairs(ids) do SnapshotCurrency(id) end
+end
+
+local function QueueCurrencyScan()
+    if not currencyListening or currencyQueued then return end
+    currencyQueued = true
+    C_Timer.After(0.2, function()
+        currencyQueued = false
+        if currencyListening then SnapshotCurrencies() end
+    end)
+end
+currencyFrame:SetScript("OnEvent", function(_, event, id)
+    if not currencyListening then return end
+    if event == "CURRENCY_DISPLAY_UPDATE" and type(id) == "number"
+        and not (issecretvalue and issecretvalue(id)) then
+        SnapshotCurrency(id)
+    end
+    QueueCurrencyScan()
+end)
+
+local currencyNameCounts = {}
+local function BuildCurrencyLines(id)
+    local db = Offline.Store()
+    local info = CurrencyInfo(id)
+    local shared = (info and info.isAccountWide == true)
+    if shared then
+        local saved = db.warband.currencies and db.warband.currencies[id]
+        local n = info and info.quantity or saved
+        if not n or n <= 0 then return false end
+        return {
+            { EUI.L("Warband"), n, 0.4, 0.78, 1 },
+            { EUI.L("Total"), n, 1, 0.82, 0, total = true },
+        }
+    end
+    local lines, total = {}, 0
+    wipe(currencyNameCounts)
+    for _, c in pairs(db.chars) do
+        if type(c) == "table" and type(c.currencies) == "table"
+            and type(c.currencies[id]) == "number" and c.currencies[id] > 0 and c.name then
+            currencyNameCounts[c.name] = (currencyNameCounts[c.name] or 0) + 1
+        end
+    end
+    for _, c in pairs(db.chars) do
+        local n = type(c) == "table" and type(c.currencies) == "table" and c.currencies[id]
+        if type(n) == "number" and n > 0 then
+            local name = c.name or "?"
+            if (currencyNameCounts[name] or 0) > 1 and c.realm and c.realm ~= "" then
+                name = name .. "-" .. c.realm
+            end
+            lines[#lines + 1] = { ClassHex(c.class) .. name .. "|r", n, 1, 1, 1, n = n }
+            total = total + n
+        end
+    end
+    if total <= 0 then return false end
+    table.sort(lines, function(a, b) return a.n > b.n end)
+    lines[#lines + 1] = { EUI.L("Total"), total, 1, 0.82, 0, total = true }
+    return lines
+end
+
+local function OnCurrencyTooltip(tooltip, data)
+    if not currencyListening or not Offline.CurrencyCountsEnabled() then return end
+    if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
+    if tooltip.IsForbidden and tooltip:IsForbidden() then return end
+    local id = data and data.id
+    if type(id) ~= "number" or (issecretvalue and issecretvalue(id)) then return end
+    -- Always capture the current character's amount before showing offline
+    -- rows, so changes made since the last currency event are reflected.
+    SnapshotCurrency(id)
+    if currencyLineRev ~= currencyRev then wipe(currencyLines); currencyLineRev = currencyRev end
+    local lines = currencyLines[id]
+    if lines == nil then lines = BuildCurrencyLines(id); currencyLines[id] = lines end
+    if not lines then return end
+    tooltip:AddLine(" ")
+    for _, line in ipairs(lines) do
+        tooltip:AddDoubleLine(line[1], line[2], line[3], line[4], line[5],
+            line.total and 1 or 0.8, line.total and 1 or 0.8, line.total and 1 or 0.8)
+    end
+end
+
+function Offline.SyncCurrency()
+    local on = Offline.CurrencyCountsEnabled() and C_CurrencyInfo ~= nil
+    if on ~= currencyListening then
+        currencyListening = on
+        if on then
+            currencyFrame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+            currencyFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+            QueueCurrencyScan()
+            -- The currency list may not be ready on the first login frame.
+            C_Timer.After(3, function() if currencyListening then SnapshotCurrencies() end end)
+        else
+            currencyFrame:UnregisterAllEvents()
+        end
+    end
+    if on and not currencyHooked and TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall
+        and Enum and Enum.TooltipDataType and Enum.TooltipDataType.Currency then
+        currencyHooked = true
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Currency, OnCurrencyTooltip)
+    end
+end
+
+-------------------------------------------------------------------------------
 --  login
 -------------------------------------------------------------------------------
 local boot = CreateFrame("Frame")
@@ -560,4 +740,5 @@ boot:SetScript("OnEvent", function(self)
     if Active() or _G.EllesmereUIBagsInventoryDB ~= nil then Offline.Store() end
     Offline.Sync()
     Offline.SyncTooltip()
+    Offline.SyncCurrency()
 end)

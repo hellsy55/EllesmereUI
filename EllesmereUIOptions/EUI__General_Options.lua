@@ -25,6 +25,8 @@ local PAGE_GAMEPAD     = "Gamepad"   -- controller settings page; body lives in 
 local PAGE_STYLE       = "Style"     -- per-module EllesmereUI / Blizzard Style page; body lives in EUI_Style_Options.lua
 local PAGE_COLORS      = "Colors"    -- the color half of the old "Fonts & Colors" page
 local PAGE_NUMBERS     = "Numbers"   -- Number Format page; body lives in EUI_NumberFormat_Options.lua
+local PAGE_TICKS       = "Health Ticks"       -- body lives in EUI_HealthTicks_Options.lua
+local PAGE_ANIM        = "Health Animations"  -- body lives in EUI_HealthAnimations_Options.lua
 local PAGE_PROFILES    = "Profiles"
 local PAGE_PRESETS     = "Presets"   -- navigation tab over the presets subpage of the profiles page
 local PAGE_WHATSNEW    = "Patch Notes"
@@ -2214,6 +2216,34 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
+        -- Shared nickname source selection uses the account-wide Raid Groups
+        -- database. It does not change other addons' provider settings.
+        _, h = W:SectionHeader(parent, "NICKNAMES", y); y = y - h
+        _, h = W:DualRow(parent, y,
+            { type="toggle", text="Use Raid Groups Nicknames",
+              tooltip="Use only the nicknames saved in Raid Groups across EUI. Unknown characters keep their real names; NSRT, TimelineReminders and other nickname providers are ignored for display. Off uses existing provider settings.",
+              getValue=function() return EllesmereUI.UseRaidGroupsNicknameSource() end,
+              setValue=function(v)
+                  if not EllesmereUIDB then EllesmereUIDB={} end
+                  EllesmereUIDB.useRaidGroupsNicknameSource=v and true or nil
+                  if EllesmereUI.RefreshRaidGroupsNicknameDisplays then
+                      EllesmereUI.RefreshRaidGroupsNicknameDisplays(true)
+                  end
+              end },
+            { type="button", text="Open Nicknames", width=210,
+              disabled=function()
+                  local qol=EllesmereUI._ModuleNS and EllesmereUI._ModuleNS["EllesmereUIQoL"]
+                  return not (qol and qol.ShowRaidGroupsNicknamesWindow)
+              end,
+              disabledTooltip="Raid Groups is unavailable",
+              onClick=function()
+                  local qol=EllesmereUI._ModuleNS and EllesmereUI._ModuleNS["EllesmereUIQoL"]
+                  if qol and qol.ShowRaidGroupsNicknamesWindow then
+                      qol.ShowRaidGroupsNicknamesWindow()
+                  end
+              end }); y = y - h
+        _, h = W:Spacer(parent, y, 20); y = y - h
+
         -- The options search box: results picked often rank higher.
         _, h = W:SectionHeader(parent, "SEARCH", y);  y = y - h
         _, h = W:DualRow(parent, y,
@@ -2334,8 +2364,8 @@ initFrame:SetScript("OnEvent", function(self)
         EllesmereUI._EndRootRender("profilesRoot")
     end
 
-    -- Profiles and Patch Notes are their own sidebar pages (registered below), so Global Settings owns General + Style + Fonts + Textures + Glows + Colors + Numbers (Style second, beside General), plus Gamepad while a module it configures is loaded.
-    local globalPages = { PAGE_GENERAL, PAGE_STYLE, PAGE_FONTS, PAGE_TEXTURES, PAGE_GLOWS, PAGE_COLORS, PAGE_NUMBERS }
+    -- Profiles and Patch Notes are their own sidebar pages (registered below), so Global Settings owns General + Style + Fonts + Textures + Glows + Colors + Numbers + Health Ticks + Health Animations (Style second, beside General), plus Gamepad while a module it configures is loaded.
+    local globalPages = { PAGE_GENERAL, PAGE_STYLE, PAGE_FONTS, PAGE_TEXTURES, PAGE_GLOWS, PAGE_COLORS, PAGE_NUMBERS, PAGE_TICKS, PAGE_ANIM }
     if EllesmereUI.ModuleNS("EllesmereUIActionBars") or EllesmereUI.ModuleNS("EllesmereUIUnitFrames")
        or EllesmereUI.ModuleNS("EllesmereUIResourceBars") then
         globalPages[#globalPages + 1] = PAGE_GAMEPAD
@@ -2362,6 +2392,10 @@ initFrame:SetScript("OnEvent", function(self)
                     return _G._EUI_BuildGamepadPage and _G._EUI_BuildGamepadPage(pageName, parent, yOffset)
                 elseif pageName == PAGE_NUMBERS then
                     return _G._EUI_BuildNumberFormatPage and _G._EUI_BuildNumberFormatPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_TICKS then
+                    return _G._EUI_BuildHealthTicksPage and _G._EUI_BuildHealthTicksPage(pageName, parent, yOffset)
+                elseif pageName == PAGE_ANIM then
+                    return _G._EUI_BuildHealthAnimationsPage and _G._EUI_BuildHealthAnimationsPage(pageName, parent, yOffset)
                 elseif pageName == PAGE_STYLE then
                     return _G._EUI_BuildStylePage and _G._EUI_BuildStylePage(pageName, parent, yOffset)
                 elseif pageName == PAGE_COLORS then
@@ -2387,6 +2421,10 @@ initFrame:SetScript("OnEvent", function(self)
                 return _G._EUI_BuildGamepadPage and _G._EUI_BuildGamepadPage(pageName, parent, yOffset)
             elseif pageName == PAGE_NUMBERS then
                 return _G._EUI_BuildNumberFormatPage and _G._EUI_BuildNumberFormatPage(pageName, parent, yOffset)
+            elseif pageName == PAGE_TICKS then
+                return _G._EUI_BuildHealthTicksPage and _G._EUI_BuildHealthTicksPage(pageName, parent, yOffset)
+            elseif pageName == PAGE_ANIM then
+                return _G._EUI_BuildHealthAnimationsPage and _G._EUI_BuildHealthAnimationsPage(pageName, parent, yOffset)
             elseif pageName == PAGE_STYLE then
                 return _G._EUI_BuildStylePage and _G._EUI_BuildStylePage(pageName, parent, yOffset)
             elseif pageName == PAGE_COLORS then
@@ -2403,6 +2441,12 @@ initFrame:SetScript("OnEvent", function(self)
             if pageName == PAGE_NUMBERS and _G._EUI_NumberFormatHeaderBuilder then
                 return _G._EUI_NumberFormatHeaderBuilder()
             end
+            if pageName == PAGE_TICKS and _G._EUI_HealthTicksHeaderBuilder then
+                return _G._EUI_HealthTicksHeaderBuilder()
+            end
+            if pageName == PAGE_ANIM and _G._EUI_HealthAnimationsHeaderBuilder then
+                return _G._EUI_HealthAnimationsHeaderBuilder()
+            end
             return nil
         end,
         getPrebuildVariants = function(pageName)
@@ -2415,6 +2459,12 @@ initFrame:SetScript("OnEvent", function(self)
             -- The cached header's preview may predate a profile switch.
             if pageName == PAGE_NUMBERS and _G._EUI_NumberFormatRefreshHeader then
                 _G._EUI_NumberFormatRefreshHeader()
+            end
+            if pageName == PAGE_TICKS and _G._EUI_HealthTicksRefreshHeader then
+                _G._EUI_HealthTicksRefreshHeader()
+            end
+            if pageName == PAGE_ANIM and _G._EUI_HealthAnimationsRefreshHeader then
+                _G._EUI_HealthAnimationsRefreshHeader()
             end
             if pageName == PAGE_GLOWS then
                 -- Glow sites bind per-bar and per-spec tables at build time (CDM bars,

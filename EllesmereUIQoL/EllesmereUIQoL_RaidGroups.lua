@@ -571,6 +571,7 @@ local function RenameNicknameGroup(id,nickname,manual,source,changedCharacter)
         Notice(LF("Nickname collision: %s changed %s to %s; %s already uses that nickname.",
             changedCharacter,previous,nickname,existingOwner),"nickname")
     end
+    if RGStyle.NotifyNicknameDisplays then RGStyle.NotifyNicknameDisplays() end
     return true
 end
 local function StoreNickname(name,nickname,manual,source,confirmed)
@@ -614,6 +615,7 @@ local function StoreNickname(name,nickname,manual,source,confirmed)
             rec.nickname=nickname
             rec.manual=true
             -- Leave old group metadata intact; linked alts stay together.
+            if RGStyle.NotifyNicknameDisplays then RGStyle.NotifyNicknameDisplays() end
             return true
         end
         return RenameNicknameGroup(rec.groupId,nickname,manual,source,FullName(name))
@@ -630,6 +632,7 @@ local function StoreNickname(name,nickname,manual,source,confirmed)
     local id=(not ambiguous and uniqueID) or NewNicknameGroup(nickname,manual,source)
     data.nicknames[key]={name=FullName(name),nickname=nickname,groupId=id,manual=manual or false}
     if manual then data.suppressed[key]=nil end
+    if RGStyle.NotifyNicknameDisplays then RGStyle.NotifyNicknameDisplays() end
     return true
 end
 -- Old setup snapshots are legacy input only. Character-Realm in setup.slots is
@@ -656,6 +659,45 @@ local function SavedNickname(name)
     local group=data.nicknameGroups[rec.groupId]
     return (group and group.nickname) or rec.nickname
 end
+-- Read only the saved Raid Groups nickname database. Missing characters must
+-- retain their original names; no other addon supplies a fallback in this mode.
+function EllesmereUI.RaidGroupsNicknameForName(name)
+    if not data or not SafeText(name) then return nil end
+    return SafeText(SavedNickname(name))
+end
+-- Match external nicknames against the same case-insensitive, accent-aware
+-- normalization the Raid Groups editor uses for its own nickname groups.
+function EllesmereUI.RaidGroupsNicknamesMatch(a,b)
+    if a==nil or b==nil then return a==b end
+    if not SafeText(a) or not SafeText(b) then return false end
+    return RGStyle.UTF8Casefold(Trim(a))==RGStyle.UTF8Casefold(Trim(b))
+end
+function EllesmereUI.RaidGroupsNicknameForUnit(unit)
+    if not data or not unit then return nil end
+    local player=UnitIsPlayer and UnitIsPlayer(unit)
+    if (issecretvalue and issecretvalue(player)) or player == false then return nil end
+    local name,realm
+    if UnitFullName then name,realm=UnitFullName(unit) end
+    if not SafeText(name) then name,realm=UnitName(unit) end
+    if not SafeText(name) then return nil end
+    if SafeText(realm) and realm~="" and not name:find("-",1,true) then
+        name=name.."-"..realm:gsub("%s+","")
+    end
+    return EllesmereUI.RaidGroupsNicknameForName(name)
+end
+-- Repaint the nickname-bearing EUI surfaces without a reload. Only work when
+-- the local source is on; provider callbacks keep their current off-mode path.
+function RGStyle.NotifyNicknameDisplays(force)
+    if not force and not EllesmereUI.UseRaidGroupsNicknameSource() then return end
+    local modules=EllesmereUI._ModuleNS
+    local raid=modules and modules["EllesmereUIRaidFrames"]
+    if raid and raid.RefreshAllNames then raid.RefreshAllNames() end
+    local unit=modules and modules["EllesmereUIUnitFrames"]
+    if unit and unit.RefreshAllUnitNames then unit.RefreshAllUnitNames() end
+    if ns.RefreshRaidCheckNames then ns.RefreshRaidCheckNames() end
+    if _G._EMT_StandaloneRefresh then _G._EMT_StandaloneRefresh() end
+end
+EllesmereUI.RefreshRaidGroupsNicknameDisplays=RGStyle.NotifyNicknameDisplays
 -- Resolve chat labels from the persistent nickname database, independently of
 -- the editor's Show Nicknames display toggle. Name-change/unshare notices use
 -- the real Character-Realm identity explicitly and do not call this helper.
@@ -1521,16 +1563,84 @@ local function Panel(name, width, height)
     end)
     RGStyle.panels[name]=f
     RGStyle.ApplyPanelScale(f)
-    local close = CreateFrame("Button", nil, f)
-    close:SetSize(21,21)
-    close:SetPoint("TOPRIGHT", -7,-7)
-    local l = Text(close, 16, "x"); l:SetPoint("CENTER")
-    local hover = close:CreateTexture(nil,"HIGHLIGHT")
-    hover:SetColorTexture(1,1,1,.1)
-    hover:SetAllPoints(close)
-    close:SetScript("OnClick",function() f:Hide() end)
+    -- The main editor and its compact view use a single +/- toggle at this
+    -- location; auxiliary Raid Groups panels keep their regular close button.
+    if name~="EllesmereUIRaidGroupsWindow" and name~="EllesmereUIRaidGroupsMiniWindow" then
+        local close = CreateFrame("Button", nil, f)
+        f._rgCloseButton = close
+        close:SetSize(21,21)
+        close:SetPoint("TOPRIGHT", -7,-7)
+        local l = Text(close, 16, "x"); l:SetPoint("CENTER")
+        f._rgCloseLabel = l
+        local hover = close:CreateTexture(nil,"HIGHLIGHT")
+        hover:SetColorTexture(1,1,1,.1)
+        hover:SetAllPoints(close)
+        close:SetScript("OnClick",function() f:Hide() end)
+    end
     return f
 end
+
+-- Match the former X hitbox exactly. Use the same solid strokes for both
+-- states so their visible size and baseline never depend on font metrics.
+local function MainWindowSizeToggle(parent, expanding, onClick)
+    local toggle=CreateFrame("Button",nil,parent)
+    toggle:SetSize(21,21)
+    -- The compact title is vertically centered in a 40px row. Align the +
+    -- hitbox to that center instead of the higher, old close-button baseline.
+    toggle:SetPoint("TOPRIGHT",parent,"TOPRIGHT",-7,expanding and -11 or -7)
+    toggle:SetFrameLevel(parent:GetFrameLevel()+1)
+    local horizontal=toggle:CreateTexture(nil,"OVERLAY")
+    horizontal:SetColorTexture(1,1,1,.95)
+    horizontal:SetSize(11,2)
+    horizontal:SetPoint("CENTER",toggle,"CENTER",0,0)
+    if expanding then
+        local vertical=toggle:CreateTexture(nil,"OVERLAY")
+        vertical:SetColorTexture(1,1,1,.95)
+        vertical:SetSize(2,11)
+        vertical:SetPoint("CENTER",toggle,"CENTER",0,0)
+    end
+    local hover=toggle:CreateTexture(nil,"HIGHLIGHT")
+    hover:SetColorTexture(1,1,1,.1)
+    hover:SetAllPoints(toggle)
+    toggle:SetScript("OnEnter",function(self)
+        EllesmereUI.ShowWidgetTooltip(self,expanding and "Expand Raid Groups" or "Minimize Raid Groups")
+    end)
+    toggle:SetScript("OnLeave",function() EllesmereUI.HideWidgetTooltip() end)
+    toggle:SetScript("OnClick",onClick)
+    parent._rgSizeToggle=toggle
+    return toggle
+end
+
+-- The title itself is a small interactive target. A click toggles the
+-- main/mini view, while dragging it moves the same panel as the background.
+-- Only the title is covered; right-clicking empty panel space still closes it.
+local function MainTitleToggle(parent, title, onClick)
+    local hit=CreateFrame("Button",nil,parent)
+    hit:SetSize(math.max(110,title:GetStringWidth()+10),24)
+    hit:SetPoint("CENTER",title,"CENTER",0,0)
+    hit:SetFrameLevel(parent:GetFrameLevel()+2)
+    hit:RegisterForClicks("LeftButtonUp")
+    hit:RegisterForDrag("LeftButton")
+    hit:SetScript("OnMouseDown",function(self,button)
+        if button=="LeftButton" then self._titleDragged=false end
+    end)
+    hit:SetScript("OnClick",function(self)
+        if self._titleDragged then self._titleDragged=nil; return end
+        onClick()
+    end)
+    hit:SetScript("OnDragStart",function(self)
+        self._titleDragged=true
+        if parent.Raise then parent:Raise() end
+        parent:StartMoving()
+    end)
+    hit:SetScript("OnDragStop",function(self)
+        local finish=parent:GetScript("OnDragStop")
+        if finish then finish(parent) else parent:StopMovingOrSizing() end
+    end)
+    parent._rgTitleToggle=hit
+    return hit
+end
+
 local function Button(parent, title, w, h, action)
     local b = CreateFrame("Button",nil,parent)
     b:SetSize(w or 98,h or 23)
@@ -2581,6 +2691,7 @@ local function ShowBackupWindow()
                 if Refresh then Refresh() end
                 if RefreshSetups then RefreshSetups() end
                 if RefreshNicknames then RefreshNicknames() end
+                RGStyle.NotifyNicknameDisplays()
                 Notice("Raid Groups backup restored.","success")
             end)
         end):SetPoint("BOTTOMRIGHT",-14,13)
@@ -5006,6 +5117,7 @@ function RGStyle.RenameStoredCharacter(oldKey,entered)
     if previewWindow and previewWindow:IsShown() and previewWindow._render then
         previewWindow._render()
     end
+    RGStyle.NotifyNicknameDisplays()
     return true
 end
 local function AddNickname()
@@ -5075,6 +5187,7 @@ local function DeleteNicknameGroup(name)
         end
         data.nicknameGroups[id]=nil
         nickCollapsed[id]=nil
+        RGStyle.NotifyNicknameDisplays()
         RefreshNicknames();Refresh()
     end)
 end
@@ -5171,6 +5284,7 @@ local function EnsureNickWindow()
                     data.suppressed[r.key]=true
                     data.nicknames[r.key]=nil
                     -- Keep the nickname group available for future characters.
+                    RGStyle.NotifyNicknameDisplays()
                     RefreshNicknames();Refresh()
                 end)
             end
@@ -5234,6 +5348,7 @@ function RefreshNicknames()
     end
 end
 local function ShowNickWindow()
+    if not data then Defaults() end
     EnsureNickWindow()
     RGStyle.LearnNicknameClasses()
     RefreshNicknames()
@@ -5246,6 +5361,11 @@ local function ShowNickWindow()
             C_GuildInfo.GuildRoster()
         elseif GuildRoster then GuildRoster() end
     end
+end
+-- Global Settings opens this same manager instead of introducing a parallel
+-- nickname editor or a second SavedVariables store.
+function ns.ShowRaidGroupsNicknamesWindow()
+    ShowNickWindow()
 end
 
 -------------------------------------------------------------------------------
@@ -5949,6 +6069,55 @@ function ns._BuildRaidGroupsMainSlots()
     dragGhost:Hide()
 
 end
+-- The mini view has its own frame, like the main EUI options panel. Keeping
+-- it separate leaves every child and scroll state of the full editor intact.
+function RGStyle.MatchPanelTopLeft(target,source)
+    local left,top=source:GetLeft(),source:GetTop()
+    if not left or not top then return end
+    local scale=source:GetEffectiveScale()/UIParent:GetEffectiveScale()
+    target:ClearAllPoints()
+    target:SetPoint("TOPLEFT",UIParent,"BOTTOMLEFT",left*scale,top*scale)
+end
+function RGStyle.RestoreMainWindow()
+    local mini=RGStyle.mainMini
+    if not mini or not mini:IsShown() then return end
+    RGStyle.MatchPanelTopLeft(win,mini)
+    mini:Hide()
+    win:Show()
+    ApplyFonts()
+    if Refresh then Refresh() end
+end
+function RGStyle.MinimizeMainWindow()
+    if not win or not win:IsShown() then return end
+    if not RGStyle.mainMini then
+        local mini=Panel("EllesmereUIRaidGroupsMiniWindow",242,40)
+        mini._raidGroupsScaleKey="main"
+        RGStyle.ApplyPanelScale(mini,"main")
+        local title=Text(mini,13,"Raid Groups")
+        title:SetPoint("LEFT",mini,"LEFT",12,0)
+        -- Title click restores; dragging the title still moves the compact bar.
+        MainTitleToggle(mini,title,RGStyle.RestoreMainWindow)
+        -- Only + is shown here; the panel background still closes on right click.
+        MainWindowSizeToggle(mini,true,RGStyle.RestoreMainWindow)
+        mini:SetScript("OnDragStop",function(self)
+            self:StopMovingOrSizing()
+            local p=P()
+            if p then
+                local left,top=self:GetLeft(),self:GetTop()
+                if left and top then
+                    local scale=self:GetEffectiveScale()/UIParent:GetEffectiveScale()
+                    p.pos={point="TOPLEFT",relPoint="BOTTOMLEFT",x=left*scale,y=top*scale}
+                end
+            end
+        end)
+        RGStyle.mainMini=mini
+    end
+    local mini=RGStyle.mainMini
+    RGStyle.ApplyPanelScale(mini,"main")
+    RGStyle.MatchPanelTopLeft(mini,win)
+    win:Hide()
+    mini:Show()
+end
 local function EnsureMainWindow()
     if win then return end
     win=Panel("EllesmereUIRaidGroupsWindow",914,453)
@@ -5966,6 +6135,10 @@ local function EnsureMainWindow()
     local title=Text(win,15,"Raid Groups")
     title:SetTextColor(ar,ag,ab)
     title:SetPoint("TOPLEFT",14,-13)
+    -- Title click minimizes; the drag path remains the same as the panel's.
+    MainTitleToggle(win,title,RGStyle.MinimizeMainWindow)
+    -- Only - is shown in the expanded view, at the former X position.
+    MainWindowSizeToggle(win,false,RGStyle.MinimizeMainWindow)
     EllesmereUI.RegAccent({type="callback",fn=function()
         title:SetTextColor(EllesmereUI.GetAccentColor())
         SetChoiceButtonState(exactButton,false,not (data and data.exactPositions),true)
@@ -6113,6 +6286,10 @@ function ns.ShowRaidGroupsWindow()
     if not data then Defaults() end
     EnsureMainWindow()
     if win:IsShown() then win:Hide(); return end
+    if RGStyle.mainMini and RGStyle.mainMini:IsShown() then
+        RGStyle.RestoreMainWindow()
+        return
+    end
     ns.ApplyRaidGroupsScale()
     win:ClearAllPoints()
     local p=P()
@@ -6274,9 +6451,9 @@ events:SetScript("OnEvent",function(self,event,addonName)
     end
     if event=="PLAYER_REGEN_DISABLED" then
         if applyState then StopApply();WarnCombat(true) end
-        -- Dismiss every Raid Groups-owned panel only on the combat transition.
-        -- The frames remain insecure and may be opened again during combat.
-        -- Keep both editors' underlying data: hiding is not Cancel/Reset.
+        -- Only the main Raid Groups editor (or its compact mini view) stays
+        -- visible. Auxiliary editors/popups retain their original combat close
+        -- behavior, without destroying pending nickname or setup edits.
         if previewWindow and previewWindow:IsShown() and previewDraftState then
             RGStyle.previewSuspendedForCombat=true
         end
@@ -6292,7 +6469,7 @@ events:SetScript("OnEvent",function(self,event,addonName)
         for _,panel in pairs(RGStyle.panels) do
             if panel:IsShown() then
                 panel:StopMovingOrSizing()
-                panel:Hide()
+                if panel~=win and panel~=RGStyle.mainMini then panel:Hide() end
             end
         end
         return

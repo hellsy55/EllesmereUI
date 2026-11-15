@@ -11,6 +11,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  No options: always on, movable only via unlock mode.
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
+if EllesmereUI.IS_FOREVER then return end -- Prey Hunts are Midnight content
 
 local defaults = { profile = { preyBar = { pos = nil, size = nil } } }
 local db = EllesmereUI.Lite.NewDB("EllesmereUIQoLDB", defaults)
@@ -321,6 +322,15 @@ local function SetPreview(on)
     end
 end
 
+local function SetIconSize(v)
+    local pp = EllesmereUI.PP
+    P().size = math.max(24, pp and pp.Snap(v) or math.floor(v + 0.5))
+    ApplyLayout()
+    if EllesmereUI._unlockActive and EllesmereUI.RepositionBarToMover then
+        EllesmereUI.RepositionBarToMover("EUI_PreyBar")
+    end
+end
+
 local function RegisterUnlock()
     if not (EllesmereUI.RegisterUnlockElements and EllesmereUI.MakeUnlockElement) then return end
     local MK = EllesmereUI.MakeUnlockElement
@@ -332,25 +342,17 @@ local function RegisterUnlock()
             group = "Quality of Life",
             order = 602,
             linkedDimensions = true, -- always square; one drag handle drives both
+            singleSize = true, -- one Size box, no MATCH buttons
             noMatchSource = true, -- single Size value only; no separate width/height match targets
             isHidden = function() return false end,
             getFrame = function() return BuildFrame() end,
             getSize  = function() return GetIconSize(), GetIconSize() end,
-            setWidth = function(_, w)
-                P().size = math.max(24, math.floor(w + 0.5))
-                ApplyLayout()
-            end,
-            setHeight = function(_, h)
-                P().size = math.max(24, math.floor(h + 0.5))
-                ApplyLayout()
-            end,
-            savePos = function()
-                local f = BuildFrame()
-                if not f:GetCenter() then return end
-                local cx, cy = f:GetCenter()
-                local upX, upY = UIParent:GetCenter()
-                local ratio = (f:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
-                P().pos = { centerX = cx * ratio - upX, centerY = cy * ratio - upY }
+            setWidth = function(_, w) SetIconSize(w) end,
+            setHeight = function(_, h) SetIconSize(h) end,
+            -- The mover already supplies CENTER-relative coordinates; reading
+            -- the live preview during Cancel would save the wrong position.
+            savePos = function(_, point, relPoint, x, y)
+                P().pos = { centerX = x, centerY = y }
             end,
             loadPos = function()
                 local pos = P().pos

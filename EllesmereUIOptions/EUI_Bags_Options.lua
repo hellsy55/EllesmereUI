@@ -236,7 +236,8 @@ initFrame:SetScript("OnEvent", function(self)
                 local Offline = BagsNS and BagsNS.Offline
                 if Offline then
                     _, h = W:SectionHeader(parent, "OFFLINE BANK", y); y = y - h
-                    _, h = W:DualRow(parent, y,
+                    local offlineRow
+                    offlineRow, h = W:DualRow(parent, y,
                         { type="toggle", text="Offline Bank",
                           tooltip=EllesmereUI.IS_FOREVER
                               and "Saves each character's bags and bank when you see them. Use the person button by the bags or bank title to see another character's bags or bank, and Bank in the bags sidebar for their bank, from anywhere. Applies to all characters."
@@ -247,6 +248,22 @@ initFrame:SetScript("OnEvent", function(self)
                         -- are switched in Blizzard Skins+ > Tooltips & Menus > Tooltip Extras.
                         EllesmereUI.BlankRowCfg()
                     ); y = y - h
+                    if not EllesmereUI.IS_FOREVER then
+                        EllesmereUI.BuildInlineCog(offlineRow._leftRegion, {
+                            title = "Offline Bank",
+                            disabled = function() return not Offline.Enabled() end,
+                            disabledTooltip = "Offline Bank",
+                            rows = {
+                                { type="toggle", label="Right-click Choose an Alt: Warbank",
+                                  tooltip="Right-click the Choose an Alt button on the bags or bank window to view the saved account Warbank without visiting a banker.",
+                                  get=function() return EllesmereUIDB and EllesmereUIDB.bagOfflineRightClickWarbank == true end,
+                                  set=function(v)
+                                      if not EllesmereUIDB then EllesmereUIDB = {} end
+                                      EllesmereUIDB.bagOfflineRightClickWarbank = v and true or nil
+                                  end },
+                            },
+                        })
+                    end
                 end
 
                 _, h = W:Spacer(parent, y, 20); y = y - h
@@ -744,7 +761,7 @@ initFrame:SetScript("OnEvent", function(self)
                         for ci, cat in ipairs(cats) do
                             -- isEquipSet excluded: per-character keys, governed by the split toggle instead
                             -- isVirtual excluded: runtime-only, its addon owns it (a saved key would outlive it)
-                            if not cat.isCatchAll and not cat.isPinned and not cat.isRecent and not cat.isReagentBag and not cat.isSpecialBag and not cat.isEquipSet and not cat.isVirtual then
+                            if not cat.isCatchAll and not cat.isPinned and not cat.isRecent and not cat.isSpecialBag and not cat.isEquipSet and not cat.isVirtual then
                                 catItems[#catItems + 1] = { key = cat._defaultName, label = cat.name }
                             end
                         end
@@ -1554,8 +1571,21 @@ initFrame:SetScript("OnEvent", function(self)
             AutoWindowsDropdown(autoRow._leftRegion, "bagAutoOpenWindows")
             AutoWindowsDropdown(autoRow._rightRegion, "bagAutoCloseWindows")
 
-            -- Slot Count Format | Separate Reagent Slots
-            _, h = W:DualRow(parent, y,
+            -- Slot Count Format | Reagent Bag Icon
+            local reagentBadgeValues, reagentBadgeOrder = { none = "None" }, { "none" }
+            local badges = EllesmereUI.BAG_REAGENT_BADGES
+            if badges then
+                reagentBadgeOrder = badges.order
+                for key, s in pairs(badges.styles) do reagentBadgeValues[key] = s.label end
+                reagentBadgeValues._menuOpts = {
+                    iconAtlas = function(key)
+                        local s = badges.styles[key]
+                        return s and s.atlas
+                    end,
+                }
+            end
+            local reagentBadgeRow
+            reagentBadgeRow, h = W:DualRow(parent, y,
                 { type="dropdown", text="Slot Count Format",
                   tooltip="Show used or free inventory slots.",
                   values={ used_total="Used / Total", free_total="Free / Total", free="Free" },
@@ -1568,14 +1598,65 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagSlotCountFormat = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
-                EllesmereUI.IS_FOREVER and EllesmereUI.BlankRowCfg() or { type="toggle", text="Separate Reagent Slots",
-                  tooltip="Show reagent bag slots on a separate line.",
-                  getValue=function() return db.profile.bagSeparateReagentSlots == true end,
+                { type="dropdown", text="Reagent Bag Icon",
+                  tooltip="Marks items in the reagent bag with the chosen icon, except in the Reagent Bag sections. While an icon is chosen, Merge Duplicate Items keeps reagent bag stacks apart from stacks in other bags.",
+                  values=reagentBadgeValues, order=reagentBadgeOrder,
+                  getValue=function()
+                      local v = db.profile.bagReagentBadge
+                      return reagentBadgeValues[v] and v or "none"
+                  end,
                   setValue=function(v)
-                      db.profile.bagSeparateReagentSlots = v
+                      db.profile.bagReagentBadge = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                      EllesmereUI:RefreshPage()  -- the cog's disabled state
                   end }
             ); y = y - h
+
+            -- Inline cog on Reagent Bag Icon: the size of the badge
+            if badges then
+                EllesmereUI.BuildInlineCog(reagentBadgeRow._rightRegion, {
+                    disabled = function()
+                        local v = db.profile.bagReagentBadge
+                        return not (v and badges.styles[v])
+                    end,
+                    disabledTooltip = "Reagent Bag Icon",
+                    title = "Reagent Bag Icon Options",
+                    rows = {
+                        { type="slider", label="Size", min=8, max=24, step=1,
+                          get=function() return db.profile.bagReagentBadgeSize or 12 end,
+                          set=function(v)
+                              db.profile.bagReagentBadgeSize = v
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                          end },
+                        { type="slider", label="Offset X", min=-30, max=30, step=1,
+                          get=function() return db.profile.bagReagentBadgeOffsetX or 0 end,
+                          set=function(v)
+                              db.profile.bagReagentBadgeOffsetX = v
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                          end },
+                        { type="slider", label="Offset Y", min=-30, max=30, step=1,
+                          get=function() return db.profile.bagReagentBadgeOffsetY or 0 end,
+                          set=function(v)
+                              db.profile.bagReagentBadgeOffsetY = v
+                              if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                          end },
+                    },
+                })
+            end
+
+            -- Separate Reagent Slots
+            if not EllesmereUI.IS_FOREVER then
+                _, h = W:DualRow(parent, y,
+                    { type="toggle", text="Separate Reagent Slots",
+                      tooltip="Show reagent bag slots on a separate line.",
+                      getValue=function() return db.profile.bagSeparateReagentSlots == true end,
+                      setValue=function(v)
+                          db.profile.bagSeparateReagentSlots = v
+                          if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
+                      end },
+                    EllesmereUI.BlankRowCfg()
+                ); y = y - h
+            end
 
             _, h = W:Spacer(parent, y, 20); y = y - h
             return math.abs(y)

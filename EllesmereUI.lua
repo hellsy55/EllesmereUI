@@ -1654,6 +1654,12 @@ end
 
 -- Plays one catalogue path: a file path, a SoundKit id (1 = silent), or a
 -- FileDataID when isFile is set (a number the catalogue cannot tell apart).
+-- Select the Raid Groups account-wide nickname list instead of external providers.
+-- Off by default: an absent key preserves all existing provider precedence.
+function EllesmereUI.UseRaidGroupsNicknameSource()
+    return EllesmereUIDB and EllesmereUIDB.useRaidGroupsNicknameSource == true or false
+end
+
 function EllesmereUI.PlaySoundPath(path, isFile)
     if type(path) == "number" then
         if isFile then
@@ -1664,6 +1670,17 @@ function EllesmereUI.PlaySoundPath(path, isFile)
     elseif path then
         PlaySoundFile(path, "Master")
     end
+end
+
+-- C_VoiceChat.SpeakText uses (voiceID, text, rate, volume, overlap) on 12.x.
+-- Keep Movement Alert's established rate, volume, and overlap values.
+function EllesmereUI.SpeakText(text, voiceID, volume)
+    local voiceChat = C_VoiceChat
+    if not (voiceChat and voiceChat.SpeakText) or type(text) ~= "string" or text == "" then
+        return false
+    end
+    local ok = pcall(voiceChat.SpeakText, voiceID or 0, text, 1, volume or 100, true)
+    return ok
 end
 
 -- Statusbar texture catalogue: same contract as the sound catalogue above.
@@ -2833,6 +2850,7 @@ end
 -- opts: step (45), thumbMin (30), width (4), rightInset (2), topInset (4), bottomInset (topInset),
 -- trackParent (sf), level (2, above trackParent), trackAlpha (0.02), thumbAlpha (0.27),
 -- child (range = child height - sf height, else SafeScrollRange), onScroll(v), thumb (false = wheel only),
+-- maxScroll (optional function returning the exact scroll range, overriding child),
 -- panelWheel (true: a surface inside the options panel, where Shift + wheel scales the panel instead),
 -- passWheel (true: while there is nothing to scroll, the wheel goes on to the options page; a surface inside a page).
 -- Returns UpdateThumb, ScrollTo(v) (immediate: stops the lerp, clamps, syncs the thumb).
@@ -2842,8 +2860,10 @@ end
 function EllesmereUI.AttachSmoothScrollbar(sf, opts)
     opts = opts or {}
     local step, child, onScroll = opts.step or 45, opts.child, opts.onScroll
+    local customRange = opts.maxScroll
     local Pool = POOL
     local function MaxScroll()
+        if customRange then return math.max(0, customRange() or 0) end
         if child then return math.max(0, child:GetHeight() - sf:GetHeight()) end
         return EllesmereUI.SafeScrollRange(sf)
     end
@@ -3147,6 +3167,9 @@ function EllesmereUI.MakeUnlockElement(opts)
         linkedKeys    = opts.linkedKeys,
         noResize          = opts.noResize,
         linkedDimensions  = opts.linkedDimensions,
+        -- singleSize: a linkedDimensions element edited by one Size box in the cog,
+        -- with no width/height MATCH buttons of its own.
+        singleSize        = opts.singleSize,
         -- noInitHook: self-positioning element; ApplySavedPositions /
         -- NotifyElementResized (EUI_UnlockMode) must not re-apply its stored position.
         noInitHook        = opts.noInitHook,

@@ -2399,7 +2399,21 @@ local function BuildContent()
     tabBar:SetFrameLevel(clickArea:GetFrameLevel() + 4)
 
     tabBar._tabButtons = {}
+    EllesmereUI._tabOffset = 0
     EllesmereUI._tabBar = tabBar
+
+    -- Clip only the page tabs; the right-aligned search/overrides toolbar must
+    -- stay outside the clipped viewport and never overlap the tab labels.
+    local tabViewport = CreateFrame("Frame", nil, tabBar)
+    tabViewport:SetSize(rightW, TAB_BAR_H)
+    tabViewport:SetPoint("BOTTOMLEFT", tabBar, "BOTTOMLEFT", 0, 0)
+    tabViewport:SetClipsChildren(true)
+    tabViewport:EnableMouseWheel(true)
+    tabBar._tabViewport = tabViewport
+    local tabContent = CreateFrame("Frame", nil, tabViewport)
+    tabContent:SetSize(rightW, TAB_BAR_H)
+    tabContent:SetPoint("BOTTOMLEFT", tabViewport, "BOTTOMLEFT")
+    tabBar._tabContent = tabContent
 
     -----------------------------------------------------------------------
     --  Content header  (optional non-scrolling region above the scroll area)
@@ -3311,9 +3325,148 @@ end
 
 -- Tab buttons are pooled by position (tabBar._tabPool) and re-labelled for each
 -- module; tabBar._tabButtons lists the ones in use, in order.
+-- Show a navigation arrow only on an edge with hidden tabs. When every tab
+-- fits, the strip does not reserve arrow space or capture mouse-wheel input.
+-- Search and Spec Overrides remain outside the clipped tab viewport.
+local TAB_ARROW_W = 22
+-- The tab bar starts 9 pixels before the module header. The arrow must stay
+-- inside the header's left edge, even after tabs have been scrolled left.
+-- Reserve this inset only while the left arrow is actually visible.
+local TAB_LEFT_SAFE_INSET = CONTENT_PAD
+local TAB_SCROLL_STEP = 130
+local TAB_SCROLL_EPSILON = 0.5
+
+local function SetTabOffset(value)
+    if not tabBar or not tabBar._tabContent then return end
+    local maximum = tabBar._tabMaxOffset or 0
+    local offset = math.max(0, math.min(maximum, value or 0))
+    tabBar._tabOffset = offset
+
+    local overflow = tabBar._tabOverflow == true
+    -- Do not show a left arrow merely because the leading empty margin moved.
+    -- It appears only after the first actual tab begins to be clipped.
+    local firstTab = tabBar._tabButtons[1]
+    local firstX = firstTab and firstTab._tabX or CONTENT_PAD
+    local hasLeft = overflow and offset > firstX + TAB_SCROLL_EPSILON
+    local hasRight = overflow and offset < maximum - TAB_SCROLL_EPSILON
+    local leftPad = hasLeft and (TAB_LEFT_SAFE_INSET + TAB_ARROW_W) or 0
+    local rightPad = hasRight and TAB_ARROW_W or 0
+    local space = tabBar._tabAvailableWidth or 0
+    local viewport = tabBar._tabViewport
+    viewport:ClearAllPoints()
+    viewport:SetPoint("BOTTOMLEFT", tabBar, "BOTTOMLEFT", leftPad, 0)
+    viewport:SetSize(math.max(70, space - leftPad - rightPad), TAB_BAR_H)
+
+    local content = tabBar._tabContent
+    content:ClearAllPoints()
+    content:SetPoint("BOTTOMLEFT", viewport, "BOTTOMLEFT", -offset, 0)
+
+    if overflow and not tabBar._tabLeftArrow then
+        -- LayoutTabOverflow creates the controls before calling SetTabOffset.
+        return
+    end
+    if tabBar._tabLeftArrow then
+        local leftArrow, rightArrow = tabBar._tabLeftArrow, tabBar._tabRightArrow
+        leftArrow:ClearAllPoints()
+        leftArrow:SetPoint("BOTTOMLEFT", tabBar, "BOTTOMLEFT", TAB_LEFT_SAFE_INSET, 0)
+        leftArrow:SetShown(hasLeft)
+        rightArrow:ClearAllPoints()
+        rightArrow:SetPoint("BOTTOMLEFT", tabBar, "BOTTOMLEFT", space - TAB_ARROW_W, 0)
+        rightArrow:SetShown(hasRight)
+    end
+end
+
+local function ScrollTabWheel(_, delta)
+    if not tabBar or not tabBar._tabOverflow then return end
+    SetTabOffset((tabBar._tabOffset or 0) - delta * 90)
+end
+
+local function EnsureTabScrollControls()
+    if tabBar._tabLeftArrow then return end
+    local function Arrow(glyph, direction)
+        local btn = CreateFrame("Button", nil, tabBar)
+        btn:SetSize(TAB_ARROW_W, TAB_BAR_H)
+        btn:SetFrameLevel(tabBar:GetFrameLevel() + 4)
+        local label = MakeFont(btn, 19, nil, 1, 1, 1, 0.9)
+        label:SetText(glyph)
+        label:SetPoint("CENTER", 0, 0)
+        btn:SetScript("OnEnter", function() label:SetTextColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1) end)
+        btn:SetScript("OnLeave", function() label:SetTextColor(1, 1, 1, 0.9) end)
+        btn:SetScript("OnClick", function()
+            if tabBar._tabOverflow then
+                SetTabOffset((tabBar._tabOffset or 0) + TAB_SCROLL_STEP * direction)
+            end
+        end)
+        btn:SetScript("OnMouseWheel", ScrollTabWheel)
+        btn:EnableMouseWheel(true)
+        btn:Hide()
+        return btn
+    end
+    tabBar._tabLeftArrow = Arrow("<", -1)
+    tabBar._tabRightArrow = Arrow(">", 1)
+end
+
+local function LayoutTabOverflow()
+    if not tabBar or not tabBar._tabViewport then return end
+    local buttons = tabBar._tabButtons
+    local contentWidth = CONTENT_PAD
+    for _, b in ipairs(buttons) do
+        -- Only real tabs count: trailing padding must not create fake overflow.
+        contentWidth = math.max(contentWidth, (b._tabX or 0) + b:GetWidth())
+    end
+    local searchVisible = tabBar._searchFrame and tabBar._searchFrame:IsShown()
+    local specVisible = tabBar._specOvBtn and tabBar._specOvBtn:IsShown()
+    local reserved = searchVisible and (228 + (specVisible and 36 or 0)) or 12
+    local space = math.max(100, tabBar:GetWidth() - reserved)
+    -- The only reason to enable arrows/wheel scrolling is actual tab overflow.
+    local overflow = #buttons > 0 and contentWidth > space + TAB_SCROLL_EPSILON
+    tabBar._tabOverflow = overflow
+    tabBar._tabAvailableWidth = space
+    tabBar._tabContent:SetWidth(math.max(contentWidth, space))
+    -- At the two endpoints exactly one arrow is shown; in the middle both
+    -- appear only when tabs are clipped on both sides. No slider is created.
+    -- At the far right the LEFT arrow owns its safe inset as well as its
+    -- button width. Include both when computing the last reachable position,
+    -- otherwise the final tab can remain clipped at the right endpoint.
+    tabBar._tabMaxOffset = overflow and math.max(0,
+        contentWidth - (space - TAB_LEFT_SAFE_INSET - TAB_ARROW_W)) or 0
+    if overflow then EnsureTabScrollControls() end
+    tabBar._tabViewport:EnableMouseWheel(overflow)
+    for _, b in ipairs(buttons) do b:EnableMouseWheel(overflow) end
+    SetTabOffset(overflow and (tabBar._tabOffset or 0) or 0)
+end
+
+local function RevealSelectedTab()
+    if not tabBar or not tabBar._tabOverflow then return end
+    for _, b in ipairs(tabBar._tabButtons) do
+        if b._name == activePage then
+            -- The available width changes by one arrow at the endpoints.
+            -- Check twice so a newly revealed left arrow cannot clip the
+            -- selected tab when the viewport becomes narrower.
+            for _ = 1, 2 do
+                local offset = tabBar._tabOffset or 0
+                local viewWidth = tabBar._tabViewport:GetWidth()
+                if b._tabX < offset + 4 then
+                    SetTabOffset(b._tabX - 4)
+                elseif b._tabX + b:GetWidth() > offset + viewWidth - 4 then
+                    SetTabOffset(b._tabX + b:GetWidth() - viewWidth + 4)
+                else
+                    break
+                end
+            end
+            break
+        end
+    end
+end
+
 ClearTabs = function()
     for _, btn in ipairs(tabBar._tabButtons) do btn:Hide() end
     wipe(tabBar._tabButtons)
+    tabBar._tabOffset = 0
+    tabBar._tabMaxOffset = 0
+    tabBar._tabOverflow = false
+    tabBar._lastAutoTab = nil
+    LayoutTabOverflow()
 end
 
 CreateTabButton = function(index, name)
@@ -3321,7 +3474,7 @@ CreateTabButton = function(index, name)
     if not pool then pool = {}; tabBar._tabPool = pool end
     local btn = pool[index]
     if not btn then
-        btn = CreateFrame("Button", nil, tabBar)
+        btn = CreateFrame("Button", nil, tabBar._tabContent)
         btn:SetHeight(TAB_BAR_H)
         btn:SetFrameLevel(tabBar:GetFrameLevel() + 1)
 
@@ -3354,6 +3507,8 @@ CreateTabButton = function(index, name)
         btn:SetScript("OnClick", function(self)
             if not self._disabled then EllesmereUI:SelectPage(self._name) end
         end)
+        btn:EnableMouseWheel(false)
+        btn:SetScript("OnMouseWheel", ScrollTabWheel)
         pool[index] = btn
     end
 
@@ -3386,7 +3541,8 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
     local xOff = CONTENT_PAD
     for i, name in ipairs(pageNames) do
         local btn = CreateTabButton(i, name)
-        btn:SetPoint("BOTTOMLEFT", tabBar, "BOTTOMLEFT", xOff, 0)
+        btn:SetPoint("BOTTOMLEFT", tabBar._tabContent, "BOTTOMLEFT", xOff, 0)
+        btn._tabX = xOff
         xOff = xOff + btn:GetWidth() + 6
         tabBar._tabButtons[i] = btn
         -- Disable tab if in disabledPages list
@@ -3509,6 +3665,8 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
         -- Conditional Overrides has no toolbar button: its cards render as a second section in the spec popup.
     end
     tabBar._searchFrame:Show()
+    tabBar._tabViewport:SetScript("OnMouseWheel", ScrollTabWheel)
+    tabBar._updateTabLayout = LayoutTabOverflow
     -- Clear search text when tabs are rebuilt (module switch)
     if tabBar._searchBox:GetText() ~= "" then
         tabBar._searchBox:SetText("")
@@ -3523,13 +3681,20 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
             b:SetWidth(tw + 30)
             if b._underline then b._underline:SetWidth(tw + 14) end
             b:ClearAllPoints()
-            b:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", x, 0)
+            b:SetPoint("BOTTOMLEFT", self._tabContent, "BOTTOMLEFT", x, 0)
+            b._tabX = x
             x = x + b:GetWidth() + 6
         end
+        LayoutTabOverflow()
+        RevealSelectedTab()
     end)
 end
 
 UpdateTabHighlight = function(selectedName)
+    if tabBar._lastAutoTab ~= selectedName then
+        tabBar._lastAutoTab = selectedName
+        RevealSelectedTab()
+    end
     for _, btn in ipairs(tabBar._tabButtons) do
         if btn._disabled then
             -- disabled tab: keep dimmed, no underline
@@ -5251,6 +5416,7 @@ function EllesmereUI:SelectModule(folderName)
         if tabBar._specOvBtn then
             tabBar._specOvBtn:SetShown(core)
         end
+        if tabBar._updateTabLayout then tabBar._updateTabLayout() end
     end
     local savedPage = _lastPagePerModule[folderName]
     -- Validate saved page still exists in this module's page list

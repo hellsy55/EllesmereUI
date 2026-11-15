@@ -14,8 +14,13 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  written by an addon. The pin is placed by Blizzard's worldmap link
 --  handler, on the player's own click.
 -------------------------------------------------------------------------------
--- Off by default and reload-gated: while off, nothing below runs.
-if not (EllesmereUIDB and EllesmereUIDB.waypointCmd and EllesmereUIDB.waypointCmd.enabled == true) then return end
+-- The read-only link parser is shared with EUI Paste. When /way is disabled,
+-- the slash command and arrival tracking remain inert, but Paste may still
+-- print links for commands handled by another addon (or by no addon).
+local waypointEnabled = EllesmereUIDB and EllesmereUIDB.waypointCmd
+    and EllesmereUIDB.waypointCmd.enabled == true
+local pasteEnabled = EllesmereUIDB and EllesmereUIDB.pasteCommands == true
+if not (waypointEnabled or pasteEnabled) then return end
 
 local ns  = select(2, ...)
 local EUI = EllesmereUI
@@ -28,7 +33,7 @@ local function Hint(msg) Say(CC.DIM .. msg .. "|r") end
 -- The hand-placed pin option, read live (the options cog writes it).
 local function ManualArrival()
     local cfg = EllesmereUIDB.waypointCmd
-    return cfg ~= nil and cfg.manualArrival == true
+    return waypointEnabled and cfg ~= nil and cfg.manualArrival == true
 end
 
 local function MapLabel(mapID)
@@ -267,16 +272,18 @@ local function OnArrival()
 end
 ev:SetScript("OnEvent", OnArrival)
 
-local function ShowDestinations(dests)
-    listed, announced = dests, nil
-    for i, dest in ipairs(dests) do
-        Say(LinkLine(dest, #dests > 1 and i))
+local function ShowDestinations(dests, linksOnly, silent)
+    if not linksOnly then listed, announced = dests, nil end
+    if not silent then
+        for i, dest in ipairs(dests) do
+            Say(LinkLine(dest, #dests > 1 and i))
+        end
+        if not hintedClick then
+            hintedClick = true
+            Hint(EllesmereUI.L("Click a link to place the pin, then click the pin on the map to track it."))
+        end
     end
-    if not hintedClick then
-        hintedClick = true
-        Hint(EllesmereUI.L("Click a link to place the pin, then click the pin on the map to track it."))
-    end
-    SyncArrival()
+    if not linksOnly then SyncArrival() end
 end
 
 -------------------------------------------------------------------------------
@@ -316,11 +323,12 @@ local slashName = "/euiway"  -- "/way" once registered under it
 
 -- Several destinations in one line: separated by ";" or pasted back to back
 -- ("/way A /way B").
-local function HandleWay(msg)
+local function HandleWay(msg, linksOnly, silent, quietInvalid)
     msg = strtrim(msg or "")
     local word = msg:lower()
     if word == "clear" or word == "reset" or word == "remove" then
-        -- Stops waiting for the list; the pin itself stays the player's to remove.
+        -- Link-only Paste must never clear an active route.
+        if linksOnly then return end
         listed = nil
         SyncArrival()
         Hint(EllesmereUI.L("To remove the pin, ctrl-click it on the world map."))
@@ -329,12 +337,15 @@ local function HandleWay(msg)
     msg = msg:gsub("/[Ee][Uu][Ii][Ww][Aa][Yy]%f[%s%z]", ";"):gsub("/[Ww][Aa][Yy]%f[%s%z]", ";")
     local specs = {}
     for part in msg:gmatch("[^;]+") do
-        specs[#specs + 1] = ParseOne(part)
+        local spec = ParseOne(part)
+        if spec then specs[#specs + 1] = spec end
     end
     -- The usage line only when nothing parsed: a destination that parsed and
     -- then failed has printed its own reason.
     if #specs == 0 then
-        Say(EllesmereUI.L("Usage:") .. " " .. slashName .. " [#mapID | zone] x y [description] [; ...]")
+        if not quietInvalid then
+            Say(EllesmereUI.L("Usage:") .. " " .. slashName .. " [#mapID | zone] x y [description] [; ...]")
+        end
         return
     end
     local dests = {}
@@ -353,9 +364,31 @@ local function HandleWay(msg)
             end
         end
     end
-    if #dests > 0 then ShowDestinations(dests) end
+    if #dests > 0 then ShowDestinations(dests, linksOnly, silent) end
 end
-ns.WaypointHandle = HandleWay  -- the paste window hands it a whole list in one call
+-- Paste can display one independent Blizzard worldmap link per valid /way
+-- even when the command belongs to TomTom or another addon. This read-only
+-- entrypoint never changes a live arrival list or user waypoint.
+ns.WaypointPasteLinks = function(msg) return HandleWay(msg, true) end
+-- A slash command owned by Waypoint UI or TomTom never reaches the EUI
+-- /way handler. Paste installs a post-hook on that owner when enabled, so
+-- independently clickable native map links can still be printed for direct
+-- chat commands without replacing or modifying the owner's waypoint action.
+-- Paste suppresses the post-hook while it invokes the external handler itself,
+-- then prints the whole pasted set exactly once in the original order.
+ns.WaypointChatLinks = function(msg)
+    if ns._pasteWaypointRunning then return end
+    return HandleWay(msg, true, false, true)
+end
+-- Slash handlers receive (msg, editBox). Never let that second argument act
+-- as the read-only flag: only the dedicated Paste entrypoint sets it.
+local function SlashWay(msg) return HandleWay(msg, false) end
+if waypointEnabled then
+    ns.WaypointHandle = SlashWay
+    -- The Paste window registers the route without printing twice; afterward
+    -- its read-only pass prints all accepted links in original input order.
+    ns.WaypointPasteRoute = function(msg) return HandleWay(msg, false, true) end
+end
 
 -------------------------------------------------------------------------------
 --  Slash commands, one frame after the loading screen, so a /way another
@@ -376,13 +409,14 @@ local function SlashTaken(cmd)
     return false
 end
 
-C_Timer.After(0, function()
-    SLASH_EUIWAY1 = "/euiway"
-    if not SlashTaken("/way") then
-        SLASH_EUIWAY2 = "/way"
-        slashName = "/way"
-    end
-    SlashCmdList.EUIWAY = HandleWay
-end)
-
-SyncArrival()
+if waypointEnabled then
+    C_Timer.After(0, function()
+        SLASH_EUIWAY1 = "/euiway"
+        if not SlashTaken("/way") then
+            SLASH_EUIWAY2 = "/way"
+            slashName = "/way"
+        end
+        SlashCmdList.EUIWAY = SlashWay
+    end)
+    SyncArrival()
+end
