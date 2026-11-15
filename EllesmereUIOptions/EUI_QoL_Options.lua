@@ -1651,71 +1651,6 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 PP.Point(ssCustom, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
                 leftRgn._lastInline = ssCustom
-
-                -- Class-colour swatch: live player class colour.
-                local ssClass, ssUpdClass = EllesmereUI.BuildColorSwatch(
-                    leftRgn, leftRgn:GetFrameLevel() + 5,
-                    function()
-                        local cc = EllesmereUI.GetClassColor(select(2, UnitClass("player")))
-                        if cc then return cc.r, cc.g, cc.b end
-                        return 1, 1, 1
-                    end,
-                    function() end, nil, 20)
-                ssClass:SetScript("OnClick", function() ssSetMode("class") end)
-                PP.Point(ssClass, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
-                leftRgn._lastInline = ssClass
-
-                -- Multicolored swatch (outermost): the per-stat palette, previewed
-                -- by its first hue (crit gold).
-                local ssMulti, ssUpdMulti = EllesmereUI.BuildColorSwatch(
-                    leftRgn, leftRgn:GetFrameLevel() + 5,
-                    function() return 1, 209 / 255, 0 end,
-                    function() end, nil, 20)
-                ssMulti:SetScript("OnClick", function() ssSetMode("palette") end)
-                PP.Point(ssMulti, "RIGHT", leftRgn._lastInline, "LEFT", -8, 0)
-                leftRgn._lastInline = ssMulti
-
-                local ssTips = { { ssMulti, "Multicolored" }, { ssClass, "Class Color" }, { ssCustom, "Custom Color" } }
-                for _, e in ipairs(ssTips) do
-                    e[1]:HookScript("OnEnter", function() EllesmereUI.ShowWidgetTooltip(e[1], e[2]) end)
-                    e[1]:HookScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                end
-
-                -- Blocking overlays while Secondary Stat Display is off (shown from
-                -- the single refresh below, like the swatch alphas).
-                local ssBlocks = {}
-                for _, e in ipairs(ssTips) do
-                    local sw = e[1]
-                    local block = CreateFrame("Frame", nil, sw)
-                    block:SetAllPoints()
-                    block:SetFrameLevel(sw:GetFrameLevel() + 10)
-                    block:EnableMouse(true)
-                    block:SetScript("OnEnter", function()
-                        EllesmereUI.ShowWidgetTooltip(sw, EllesmereUI.DisabledTooltip("Secondary Stat Display"))
-                    end)
-                    block:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                    ssBlocks[#ssBlocks + 1] = block
-                end
-
-                -- While the display is off every swatch dims flat; while on, the
-                -- active mode is bright and the others dimmed. One refresh owns
-                -- both, plus the swatch fills (class color changes, custom picks).
-                ssUpdateState = function()
-                    if ssUpdCustom then ssUpdCustom() end
-                    if ssUpdClass then ssUpdClass() end
-                    if ssUpdMulti then ssUpdMulti() end
-                    local off = statsOff()
-                    for _, block in ipairs(ssBlocks) do block:SetShown(off) end
-                    local m = not off and ssMode() or nil
-                    ssMulti:SetAlpha(m == "palette" and 1 or 0.3)
-                    ssClass:SetAlpha(m == "class" and 1 or 0.3)
-                    ssCustom:SetAlpha(m == "custom" and 1 or 0.3)
-                end
-                EllesmereUI.RegisterWidgetRefresh(ssUpdateState)
-                ssUpdateState()
-            end
-                PP.Point(ssCustom, "RIGHT", leftRgn._lastInline or leftRgn._control, "LEFT", -8, 0)
-                leftRgn._lastInline = ssCustom
                 EllesmereUI.OrderInlineAddon(leftRgn, ssCustom, "swatch")
 
                 -- Class-colour swatch: live player class colour.
@@ -1781,6 +1716,7 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 EllesmereUI.RegisterWidgetRefresh(ssUpdateState)
                 ssUpdateState()
+            end
         end
 
         -- Row 4: Rested Indicator (left; mirrored in the Unit Frames player
