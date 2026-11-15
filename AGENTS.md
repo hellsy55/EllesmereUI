@@ -31,6 +31,10 @@ In Local and Cloud, read instructions from the verified checkout. Read each rout
 - For a GitHub PR URL with a request to implement, apply, port, or evaluate it, including `implement PR <link>` and `implementar PR <link>`, use [eui-implement-pr](.agents/skills/eui-implement-pr/SKILL.md). That skill validates the repository before any further action.
 - During an update, load [eui-libs](.agents/skills/eui-libs/SKILL.md) for an explicit library-check request, or after an upstream library-change trigger and the user's choice to check. Load [eui-install](.agents/skills/eui-install/SKILL.md) only at the install-menu stage in confirmed `local_windows`. In confirmed `cloud`, skip the physical installation checkpoint entirely and complete the applicable delivery and report. Read detailed references only when that stage needs them.
 
+## Local incremental ZIP delivery
+
+For EUI changes delivered for in-game testing or manual commit, read and follow [incremental ZIP delivery](.agents/references/incremental-zip-delivery.md) before building or recommending an artifact. The reference owns purpose selection, cumulative scope, branch-specific bases, packaging, and operational compatibility. Ordinary branch synchronization and the local install menu retain their existing workflows.
+
 ## Delegation
 
 Handle routine work in the main chat without delegation: Git status, clean merges, already-current results, script execution, library checks with no pending updates, authorized installs, and simple diffs or stats. Do not parallelize by default. Request one project `deep_reviewer` only when an independent read-only review is likely to change a consequential decision: a nontrivial conflict, large or ambiguous PR, possible loss of local customizations, multi-module change, difficult regression, or genuinely uncertain library impact. Prefer the main agent when it is sufficient; subagents consume extra tokens. Wait for the review before recommending a human choice. Never let delegation bypass a human checkpoint.
