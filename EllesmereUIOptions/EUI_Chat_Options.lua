@@ -64,6 +64,29 @@ initFrame:SetScript("OnEvent", function(self)
             local defaults = lf.Settings.DefaultOptions or {}
             local L = lf.Locale or {}
 
+            -- Empty or missing translated Loot Feed descriptions must not leave
+            -- blank hover hints. rawget avoids the locale table's placeholder
+            -- metatable for unknown keys, and preserves valid translations.
+            local lootTooltipFallbacks = {
+                PANEL_OPTION_ENABLE_REMIX_MODE_TOOLTIP = "Use a separate Loot Feed profile for Remix characters instead of the standard character profile.",
+                PANEL_OPTION_DEBOUNCE_TOOLTIP = "Wait this many seconds before sending grouped loot messages to the chat window. Set to 0 for immediate output.",
+                PANEL_OPTION_DEBOUNCE_INCOMBAT_TOOLTIP = "Keep the Loot Feed output timer running during combat. When disabled, the timer pauses until combat ends.",
+                PANEL_OPTION_SHORTEN_PLAYER_NAMES_TOOLTIP = "Hide realm suffixes from player names displayed by Loot Feed.",
+                PANEL_OPTION_ICON_TRIM_TOOLTIP = "Crop this many pixels from the edges of item and currency icons.",
+                PANEL_OPTION_ITEM_COUNT_USES_TOOLTIP = "Count remaining charges or uses of an item instead of its stack quantity when applicable.",
+                PANEL_OPTION_ITEM_TIER_TOOLTIP = "Display the crafting quality tier of crafted items in Loot Feed messages.",
+                PANEL_OPTION_ITEM_TIER_AS_TEXT_TOOLTIP = "Use a text tier indicator rather than stars.",
+                PANEL_OPTION_ENABLED_GROUPS_TOOLTIP = "Choose message groups that Loot Feed formats. A selected group is removed from Ignored groups. Groups in neither list keep Blizzard chat output.",
+                PANEL_OPTION_IGNORED_GROUPS_TOOLTIP = "Choose message groups that Loot Feed suppresses. A selected group is removed from Enabled groups. Groups in neither list keep Blizzard chat output.",
+            }
+            local function LootTooltip(key)
+                local translated = rawget(L, key)
+                if type(translated) == "string" and translated:find("%S") then
+                    return translated
+                end
+                return lootTooltipFallbacks[key]
+            end
+
             local function NotifySettingChanged(key, value, oldValue)
                 local eventFrame = lf.EventFrame
                 if eventFrame and eventFrame.OnSettingsChanged then
@@ -87,6 +110,7 @@ initFrame:SetScript("OnEvent", function(self)
             local function NumberSlider(key, text, tooltip, minValue, maxValue, step, dependant, pixel)
                 return {
                     type = "slider", text = text, tooltip = tooltip,
+                    tooltipOnControl = tooltip ~= nil,
                     min = minValue, max = maxValue, step = step or 1, pixel = pixel,
                     getValue = function()
                         local value = db[key]
@@ -113,7 +137,7 @@ initFrame:SetScript("OnEvent", function(self)
             if lf.Utils and lf.Utils.GetTimerunningSeasonID and lf.Utils.GetTimerunningSeasonID() then
                 remixCfg = {
                     type = "toggle", text = L.PANEL_OPTION_ENABLE_REMIX_MODE or "Use Remix Profile",
-                    tooltip = L.PANEL_OPTION_ENABLE_REMIX_MODE_TOOLTIP,
+                    tooltip = LootTooltip("PANEL_OPTION_ENABLE_REMIX_MODE_TOOLTIP"),
                     getValue = function() return db.EnableRemixMode ~= false end,
                     setValue = function(v) SetLF("EnableRemixMode", v) end,
                     disabled = LFDisabled,
@@ -169,22 +193,22 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "dropdown", text = L.PANEL_OPTION_CHATFRAME or "Active Chat Frame",
-                  tooltip = L.PANEL_OPTION_CHATFRAME_TOOLTIP,
+                  tooltip = nil,
                   values = chatValues, order = chatOrder,
                   getValue = function() return db.ChatFrame or defaults.ChatFrame or "ChatFrame1" end,
                   setValue = function(v) SetLF("ChatFrame", v) end,
                   disabled = LFDisabled },
-                NumberSlider("Debounce", L.PANEL_OPTION_DEBOUNCE or "Output Interval", L.PANEL_OPTION_DEBOUNCE_TOOLTIP, 0, 30, 1))
+                NumberSlider("Debounce", L.PANEL_OPTION_DEBOUNCE or "Output Interval", LootTooltip("PANEL_OPTION_DEBOUNCE_TOOLTIP"), 0, 30, 1))
             y = y - h
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_DEBOUNCE_INCOMBAT or "Output during Combat",
-                  tooltip = L.PANEL_OPTION_DEBOUNCE_INCOMBAT_TOOLTIP,
+                  tooltip = LootTooltip("PANEL_OPTION_DEBOUNCE_INCOMBAT_TOOLTIP"),
                   getValue = function() return db.DebounceInCombat ~= false end,
                   setValue = function(v) SetLF("DebounceInCombat", v) end,
                   disabled = LFDisabled },
                 { type = "toggle", text = L.PANEL_OPTION_ENABLE_TOOLTIPS or "Enable Hover Tooltips",
-                  tooltip = L.PANEL_OPTION_ENABLE_TOOLTIPS_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.EnableTooltips ~= false end,
                   setValue = function(v) SetLF("EnableTooltips", v) end,
                   disabled = LFDisabled })
@@ -194,12 +218,12 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_SHORTEN_PLAYER_NAMES or "Short Player names",
-                  tooltip = L.PANEL_OPTION_SHORTEN_PLAYER_NAMES_TOOLTIP,
+                  tooltip = LootTooltip("PANEL_OPTION_SHORTEN_PLAYER_NAMES_TOOLTIP"),
                   getValue = function() return db.ShortenPlayerNames ~= false end,
                   setValue = function(v) SetLF("ShortenPlayerNames", v) end,
                   disabled = LFDisabled },
                 { type = "toggle", text = L.PANEL_OPTION_SHORTEN_FACTION_NAMES or "Short Faction names",
-                  tooltip = L.PANEL_OPTION_SHORTEN_FACTION_NAMES_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ShortenFactionNames ~= false end,
                   setValue = function(v)
                       SetLF("ShortenFactionNames", v)
@@ -209,13 +233,13 @@ initFrame:SetScript("OnEvent", function(self)
             y = y - h
 
             _, h = W:DualRow(parent, y,
-                NumberSlider("ShortenFactionNamesLength", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH or "Short Faction name length", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH_TOOLTIP, 1, 50, 1,
+                NumberSlider("ShortenFactionNamesLength", L.PANEL_OPTION_SHORTEN_FACTION_NAMES_LENGTH or "Short Faction name length", nil, 1, 50, 1,
                     function() return db.ShortenFactionNames ~= false end),
-                NumberSlider("IconSize", L.PANEL_OPTION_ICON_SIZE or "Icon Size", L.PANEL_OPTION_ICON_SIZE_TOOLTIP, 1, 64, 1, nil, true))
+                NumberSlider("IconSize", L.PANEL_OPTION_ICON_SIZE or "Icon Size", nil, 1, 64, 1, nil, true))
             y = y - h
 
             _, h = W:DualRow(parent, y,
-                NumberSlider("IconTrim", L.PANEL_OPTION_ICON_TRIM or "Icon Trim", L.PANEL_OPTION_ICON_TRIM_TOOLTIP, 0, 50, 1),
+                NumberSlider("IconTrim", L.PANEL_OPTION_ICON_TRIM or "Icon Trim", LootTooltip("PANEL_OPTION_ICON_TRIM_TOOLTIP"), 0, 50, 1),
                 EllesmereUI.BlankRowCfg())
             y = y - h
 
@@ -223,7 +247,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT or "Show Item Count",
-                  tooltip = L.PANEL_OPTION_ITEM_COUNT_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ItemCount == true end,
                   setValue = function(v)
                       SetLF("ItemCount", v)
@@ -231,7 +255,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end,
                   disabled = LFDisabled },
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_BANK or "Count Bank items",
-                  tooltip = L.PANEL_OPTION_ITEM_COUNT_BANK_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ItemCountBank ~= false end,
                   setValue = function(v) SetLF("ItemCountBank", v) end,
                   disabled = function() return LFDisabled() or db.ItemCount ~= true end })
@@ -239,12 +263,12 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_USES or "Count Charges on items",
-                  tooltip = L.PANEL_OPTION_ITEM_COUNT_USES_TOOLTIP,
+                  tooltip = LootTooltip("PANEL_OPTION_ITEM_COUNT_USES_TOOLTIP"),
                   getValue = function() return db.ItemCountUses ~= false end,
                   setValue = function(v) SetLF("ItemCountUses", v) end,
                   disabled = function() return LFDisabled() or db.ItemCount ~= true end },
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_REAGENT_BANK or "Count Reagent Bank items",
-                  tooltip = L.PANEL_OPTION_ITEM_COUNT_REAGENT_BANK_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ItemCountReagentBank ~= false end,
                   setValue = function(v) SetLF("ItemCountReagentBank", v) end,
                   disabled = function() return LFDisabled() or db.ItemCount ~= true end })
@@ -252,12 +276,12 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_COUNT_CURRENCY or "Count Currency totals",
-                  tooltip = L.PANEL_OPTION_ITEM_COUNT_CURRENCY_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ItemCountCurrency ~= false end,
                   setValue = function(v) SetLF("ItemCountCurrency", v) end,
                   disabled = function() return LFDisabled() or db.ItemCount ~= true end },
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_LEVEL or "Add Item Level",
-                  tooltip = L.PANEL_OPTION_ITEM_LEVEL_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ItemLevel ~= false end,
                   setValue = function(v)
                       SetLF("ItemLevel", v)
@@ -268,12 +292,12 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_LEVEL_EQUIP_ONLY or "Show for equipment only",
-                  tooltip = L.PANEL_OPTION_ITEM_LEVEL_EQUIP_ONLY_TOOLTIP,
+                  tooltip = nil,
                   getValue = function() return db.ItemLevelEquipmentOnly ~= false end,
                   setValue = function(v) SetLF("ItemLevelEquipmentOnly", v) end,
                   disabled = function() return LFDisabled() or db.ItemLevel == false end },
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_TIER or "Add Tier Indicator",
-                  tooltip = L.PANEL_OPTION_ITEM_TIER_TOOLTIP,
+                  tooltip = LootTooltip("PANEL_OPTION_ITEM_TIER_TOOLTIP"),
                   getValue = function() return db.ItemTier ~= false end,
                   setValue = function(v)
                       SetLF("ItemTier", v)
@@ -284,7 +308,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             _, h = W:DualRow(parent, y,
                 { type = "toggle", text = L.PANEL_OPTION_ITEM_TIER_AS_TEXT or "Show as text",
-                  tooltip = L.PANEL_OPTION_ITEM_TIER_AS_TEXT_TOOLTIP,
+                  tooltip = LootTooltip("PANEL_OPTION_ITEM_TIER_AS_TEXT_TOOLTIP"),
                   getValue = function() return db.ItemTierAsText ~= false end,
                   setValue = function(v) SetLF("ItemTierAsText", v) end,
                   disabled = function() return LFDisabled() or db.ItemTier == false end },
@@ -310,9 +334,9 @@ initFrame:SetScript("OnEvent", function(self)
                 groupItems[#groupItems + 1] = { key = group, label = PrettyGroup(group) }
             end
 
-            local enabledGroupsTooltip = L.PANEL_OPTION_ENABLED_GROUPS_TOOLTIP
+            local enabledGroupsTooltip = LootTooltip("PANEL_OPTION_ENABLED_GROUPS_TOOLTIP")
                 or "Select message groups Loot Feed should process and format. Selecting a group here removes it from Ignored groups. Groups selected in neither list use Blizzard's original chat output."
-            local ignoredGroupsTooltip = L.PANEL_OPTION_IGNORED_GROUPS_TOOLTIP
+            local ignoredGroupsTooltip = LootTooltip("PANEL_OPTION_IGNORED_GROUPS_TOOLTIP")
                 or "Select message groups Loot Feed should suppress from chat. Selecting a group here removes it from Enabled groups. Groups selected in neither list use Blizzard's original chat output."
 
             local groupRow
@@ -2060,6 +2084,34 @@ initFrame:SetScript("OnEvent", function(self)
               end },
             EllesmereUI.BlankRowCfg())
         y = y - h
+
+        -- Row 5: Flyout Auto Close (+ cog: Time) for the sidebar's M+ Portals flyout. No
+        -- portals on WoW Forever, so no row there.
+        if not EllesmereUI.IS_FOREVER then
+            local autoCloseRow
+            autoCloseRow, h = W:DualRow(parent, y,
+                { type="toggle", text="Flyout Auto Close",
+                  tooltip="Closes the M+ Portals flyout once the mouse has left it for the set time.",
+                  getValue=function() return Cfg("portalAutoClose") == true end,
+                  setValue=function(v)
+                      Set("portalAutoClose", v)
+                      EllesmereUI:RefreshPage()
+                  end },
+                EllesmereUI.BlankRowCfg())
+            do
+                EllesmereUI.BuildInlineCog(autoCloseRow._leftRegion, {
+                    disabled = function() return Cfg("portalAutoClose") ~= true end,
+                    disabledTooltip = "Flyout Auto Close",
+                    title = "Flyout Auto Close",
+                    rows = {
+                        { type="slider", label="Time (s)", min = 0, max = 10, step = 1,
+                          get=function() return Cfg("portalAutoCloseTime") or 3 end,
+                          set=function(v) Set("portalAutoCloseTime", v) end },
+                    },
+                })
+            end
+            y = y - h
+        end
 
         end -- isChat
 

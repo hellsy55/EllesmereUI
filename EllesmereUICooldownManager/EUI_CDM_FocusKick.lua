@@ -283,6 +283,90 @@ ns.FOCUSKICK_SOUND_PATHS = FOCUSKICK_SOUND_PATHS
 ns.FOCUSKICK_SOUND_NAMES = FOCUSKICK_SOUND_NAMES
 ns.FOCUSKICK_SOUND_ORDER = FOCUSKICK_SOUND_ORDER
 
+-- TTS uses a reserved value in the existing sound key fields.
+function ns.AudioTextField(soundField)
+    if soundField == "buffActiveSoundKey" then return "buffActiveTtsText" end
+    if soundField == "buffLostSoundKey" then return "buffLostTtsText" end
+    if soundField == "buffStackGainSoundKey" then return "buffStackGainTtsText" end
+    if soundField == "cdReadySoundKey" then return "cdReadyTtsText" end
+end
+
+function ns.EffectiveAudioKey(settings, soundField)
+    if not settings then return nil end
+    local key = settings[soundField]
+    if not key or key == "none" then return nil end
+    if key == "__tts" then return "__tts" end
+    return key
+end
+
+function ns.AudioSelectionChoice(settings, soundField)
+    local key = ns.EffectiveAudioKey(settings, soundField)
+    return key == "__tts" and "tts" or key or "none"
+end
+
+function ns.SetAudioSelectionChoice(settings, soundField, value, noneValue)
+    local stored = value
+    if value == "tts" then stored = "__tts"
+    elseif value == "none" then stored = noneValue end
+    if settings[soundField] ~= stored then
+        settings[soundField] = stored
+        ns._cdmAudioRevision = (ns._cdmAudioRevision or 0) + 1
+    end
+    if value and value ~= "none" then
+        if soundField == "cdReadySoundKey" then
+            ns._cdmAnyCdReadySound = true
+        elseif soundField ~= "buffStackGainSoundKey" then
+            ns._cdmAnyBuffSound = true
+        end
+    end
+end
+
+function ns.PlayAudioCue(key, text, spellID, event, voiceOverride, volumeOverride)
+    if key == "__tts" then
+        local speech = EllesmereUI.ResolveCDMAudioText(text, spellID, event)
+        return ns.SpeakTTS(speech, voiceOverride, volumeOverride)
+    end
+    local path = FOCUSKICK_SOUND_PATHS[key]
+    if path then return PlaySoundFile(path, "Master") end
+    return false
+end
+
+-- Read the active profile on each playback so profile switches take effect
+-- immediately without caching settings in the event path.
+function ns.GetTTSSettings()
+    local profile = ns.ECME and ns.ECME.db and ns.ECME.db.profile
+    return (profile and profile.ttsVoiceID) or 0,
+        (profile and profile.ttsVolume) or 100
+end
+
+function ns.SpeakTTS(text, voiceOverride, volumeOverride)
+    local voiceID, volume = ns.GetTTSSettings()
+    return EllesmereUI.SpeakText(text, voiceOverride or voiceID, volumeOverride or volume)
+end
+
+function EllesmereUI.ResolveCDMAudioText(text, spellID, event)
+    if type(text) == "string" and not text:match("^%s*$") then return text end
+    return EllesmereUI.DefaultCDMAudioText(spellID, event)
+end
+
+function EllesmereUI.DefaultCDMAudioText(spellID, event)
+    local info
+    if type(spellID) == "number" and spellID > 0
+       and C_Spell and C_Spell.GetSpellInfo then
+        local ok, value = pcall(C_Spell.GetSpellInfo, spellID)
+        if ok then info = value end
+    end
+    local name = info and info.name
+    local suffix = event == "stack" and EllesmereUI.L("stack increased")
+        or event == "ready" and EllesmereUI.L("ready")
+        or event == "gain" and EllesmereUI.L("active")
+        or event == "loss" and EllesmereUI.L("expired") or ""
+    return name and (name .. " " .. suffix) or (event == "stack"
+        and EllesmereUI.L("Buff stack increased") or event == "ready"
+        and EllesmereUI.L("Cooldown ready") or event == "loss"
+        and EllesmereUI.L("Buff expired") or EllesmereUI.L("Buff active"))
+end
+
 -- Focus-cast sound trigger. When the focus target starts a cast and the user's selected interrupt
 -- is off cooldown, play the configured sound. One single proxy registered with RegisterUnitEvent on "focus" -- the token follows focus changes automatically.
 local _focusCastProxy
@@ -435,12 +519,9 @@ ns.EnsureFocusCastProxy = EnsureFocusCastProxy
 -- the end of the frame rather than played on the spot: some auras are reapplied by REPLACING
 -- the instance instead of refreshing it, and Blizzard checks its removed-alert triggers before
 -- the item frames adopt the new instance, so the drop edge fires while the buff is still up.
--- Death and Decay does this on every entry into the circle, cueing a loss at the moment the
--- buff was GAINED. Both alerts for a replacement fire inside the SAME CooldownViewerMixin
--- :OnUnitAura call -- confirmed live to be indistinguishable from a genuine same-tick
--- drop+reproc (e.g. Prismatic Bolt consumed by a cast and reprocced by Salvo), so only the
--- loss cue is cancelled on a pair. A real gain always plays, even on a replacement, rather
--- than silently eating the reported case with no way to tell the two apart.
+-- A loss and gain with the same canonical spell id are paired only when both arrive
+-- before the same pending-edge flush. A later-frame gain cannot cancel a loss already
+-- flushed; this preserves genuine loss alerts without delaying every loss.
 do
     local _soundHooked = setmetatable({}, { __mode = "k" })
     -- Edges seen this frame: [spellID] = sound key, or false for "edge happened,
@@ -448,6 +529,10 @@ do
     -- whose gain has no sound (the usual setup -- loss cue only) never pairs.
     local _pendGain = {}
     local _pendLoss = {}
+    local _pendGainText = {}
+    local _pendLossText = {}
+    local _pendGainRevision = {}
+    local _pendLossRevision = {}
     local _flushQueued = false
     local _pendStamp = 0                 -- GetTime() of the frame the pending edges belong to
     -- Overlap guard, NOT an edge filter: two cues for the same spell and edge closer
@@ -456,7 +541,6 @@ do
     local _soundThrottle = {}            -- [spellID] = last GetTime() (gain)
     local _soundThrottleLost = {}        -- [spellID] = last GetTime() (loss)
     local SOUND_MIN_GAP = 0.3
-
     -- Setting key for one edge, nil = silent. A frame the CDM decorates answers
     -- from its own settings first. A Tracked Bars frame then asks its tracking
     -- bar before FindBuffSoundKey, whose bar tier answers for every spell no
@@ -466,40 +550,49 @@ do
     -- icon frame asks the tracking bars last.
     local function PickBuffSoundKey(ss, sid, field, f)
         local k = ss and ss[field]
+        local textField = ns.AudioTextField(field)
+        local text = k == "__tts" and ss and textField and ss[textField]
         if not k then
             local tbbOn = ns._tbbAnyBuffSound
             local bv = tbbOn and f and _G.BuffBarCooldownViewer
             local barFrame = bv and f.viewerFrame == bv
             local owned
             if barFrame then
-                k = ns.FindTBBSoundKey(f, sid, field)
+                k, text = ns.FindTBBSoundKey(f, sid, field)
                 owned = k == false
             end
-            if not k and not owned then k = ns.FindBuffSoundKey(sid, field) end
-            if not k and tbbOn and not barFrame then k = ns.FindTBBSoundKey(f, sid, field) end
+            if not k and not owned then
+                k, text = ns.FindBuffSoundKey(sid, field)
+            end
+            if k == false then return nil end
+            if not k and tbbOn and not barFrame then
+                k, text = ns.FindTBBSoundKey(f, sid, field)
+            end
+            if k == false then return nil end
         end
         if not k or k == "none" then return nil end
-        return k
+        return k, text
     end
 
-    local function PlayThrottled(key, sid, throttle)
+    local function PlayThrottled(key, sid, throttle, text, gainEdge, spellID)
         if not key then return end
         local now = GetTime()
         local last = throttle[sid]
         if last and (now - last) < SOUND_MIN_GAP then return end
         throttle[sid] = now
-        local path = FOCUSKICK_SOUND_PATHS[key]
-        if path then PlaySoundFile(path, "Master") end
+        ns.PlayAudioCue(key, text, spellID or (type(sid) == "number" and sid or nil),
+            gainEdge and "gain" or "loss")
     end
 
     -- Edge entry point for Tracking Bars' self-timed presets (Bloodlust, Time
     -- Spiral, potions). They never fire a Blizzard aura alert, so their own timer
     -- start/stop hands the cue here: same loading-screen suppression, same 0.3s
     -- overlap guard (id is a "tbb:<preset>" string, clear of spell ids).
-    function ns.PlayBuffSoundEdge(key, id, gainEdge)
+    function ns.PlayBuffSoundEdge(key, id, gainEdge, text, spellID)
         if not key or key == "none" then return end
         if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then return end
-        PlayThrottled(key, id, gainEdge and _soundThrottle or _soundThrottleLost)
+        PlayThrottled(key, id, gainEdge and _soundThrottle or _soundThrottleLost,
+            text, gainEdge, spellID)
     end
 
     local function FlushBuffEdges()
@@ -521,11 +614,23 @@ do
             -- the gain loop below instead of being cancelled here too.
             local paired = _pendGain[sid] ~= nil
             _pendLoss[sid] = nil
-            if not paired then PlayThrottled(key, sid, _soundThrottleLost) end
+            local text = _pendLossText[sid]
+            _pendLossText[sid] = nil
+            local revision = _pendLossRevision[sid]
+            _pendLossRevision[sid] = nil
+            if not paired and revision == ns._cdmAudioRevision then
+                PlayThrottled(key, sid, _soundThrottleLost, text, false)
+            end
         end
         for sid, key in pairs(_pendGain) do
             _pendGain[sid] = nil
-            PlayThrottled(key, sid, _soundThrottle)
+            local text = _pendGainText[sid]
+            _pendGainText[sid] = nil
+            local revision = _pendGainRevision[sid]
+            _pendGainRevision[sid] = nil
+            if revision == ns._cdmAudioRevision then
+                PlayThrottled(key, sid, _soundThrottle, text, true)
+            end
         end
     end
 
@@ -549,8 +654,14 @@ do
         end
         -- A silent edge still has to be recorded so it can cancel its partner, but only
         -- when the OTHER edge has a cue -- so the second lookup runs only on that path.
-        local key = PickBuffSoundKey(ss, sid, gainEdge and "buffActiveSoundKey" or "buffLostSoundKey", f)
-        if not key and not PickBuffSoundKey(ss, sid, gainEdge and "buffLostSoundKey" or "buffActiveSoundKey", f) then
+        local field = gainEdge and "buffActiveSoundKey" or "buffLostSoundKey"
+        local key, text = PickBuffSoundKey(ss, sid, field, f)
+        local otherKey
+        if not key then
+            otherKey = PickBuffSoundKey(ss, sid,
+                gainEdge and "buffLostSoundKey" or "buffActiveSoundKey", f)
+        end
+        if not key and not otherKey then
             return
         end
         -- A new frame closes the previous batch: pairing must never reach across the
@@ -562,8 +673,12 @@ do
         end
         if gainEdge then
             _pendGain[sid] = key or false
+            _pendGainText[sid] = text
+            _pendGainRevision[sid] = ns._cdmAudioRevision
         else
             _pendLoss[sid] = key or false
+            _pendLossText[sid] = text
+            _pendLossRevision[sid] = ns._cdmAudioRevision
         end
         if not _flushQueued then
             _flushQueued = true
@@ -592,27 +707,91 @@ do
     end
 end
 
--- Per-buff "Audio on Buff Stack Gain". Unlike apply/remove edge hooks, the
--- stack delta is a secret in protected encounters: let Blizzard's native
--- ApplicationsIncreased trigger detect it. Keep registrations outside the
--- frames, keyed by a clean canonical spellID, and update only on options edits
--- and CDM rebuilds (never on UNIT_AURA or a combat-hot icon update).
+-- Per-buff "Audio on Buff Stack Gain". Native audio registrations track
+-- protected aura stacks without reading secret applications. Non-secret auras
+-- can additionally use opt-in TTS; restricted auras remain native-sound-only.
+-- The TTS watcher exists only while at least one stack-TTS cue is configured.
 do
-    local registered = {}    -- [spellID] = { id = auraSoundID, path = soundFileName }
+    local registered = {} -- [spellID] = { id = auraSoundID, path = soundFileName }
+    local ttsWanted = {}  -- [spellID] = custom TTS text; only public auras can dispatch
+    local stackCounts = {}
+    local lastSpeech = {}
+    local watcher
     local pending = false
+
     local function RefreshPendingStackSounds()
         if pending and ns.RefreshBuffStackSounds then ns.RefreshBuffStackSounds() end
     end
 
     local function CleanID(v)
         if issecretvalue and issecretvalue(v) then return nil end
-        if type(v) ~= "number" or v <= 0 then return nil end
+        v = tonumber(v)
+        if not v or v <= 0 or v ~= math.floor(v) then return nil end
         return v
     end
 
+    local function CurrentApplications(sid)
+        local api = C_UnitAuras
+        if not (api and api.GetPlayerAuraBySpellID) then return nil end
+        local ok, aura = pcall(api.GetPlayerAuraBySpellID, sid)
+        if not ok then return nil end
+        if issecretvalue and issecretvalue(aura) then return nil end
+        if not aura then return 0 end
+        local readOK, applications = pcall(function() return aura.applications end)
+        if not readOK then return nil end
+        if issecretvalue and issecretvalue(applications) then return nil end
+        if type(applications) ~= "number" then return nil end
+        return applications
+    end
+
+    local function OnStackAura(_, _, unit)
+        if unit ~= "player" then return end
+        if ns._cdmSoundSuppressed and ns._cdmSoundSuppressed() then
+            -- Do not announce re-applied auras while zoning/login settles.
+            for sid in pairs(ttsWanted) do stackCounts[sid] = CurrentApplications(sid) end
+            return
+        end
+        local now = GetTime()
+        for sid, message in pairs(ttsWanted) do
+            local count = CurrentApplications(sid)
+            if count ~= nil then
+                local old = stackCounts[sid]
+                if old and old > 0 and count > old
+                   and (not lastSpeech[sid] or now - lastSpeech[sid] >= 0.3) then
+                    lastSpeech[sid] = now
+                    ns.PlayAudioCue("__tts", message, sid, "stack")
+                end
+                stackCounts[sid] = count
+            else
+                -- Never compare, branch on, or store a secret aura count.
+                stackCounts[sid] = nil
+            end
+        end
+    end
+
+    local function SetStackTTS(wanted)
+        local any = false
+        for sid in pairs(ttsWanted) do ttsWanted[sid] = nil end
+        for sid, text in pairs(wanted) do
+            ttsWanted[sid] = text
+            any = true
+            stackCounts[sid] = CurrentApplications(sid) -- prime; no spurious first cue
+        end
+        for sid in pairs(stackCounts) do
+            if ttsWanted[sid] == nil then stackCounts[sid] = nil end
+        end
+        if not any then
+            if watcher then watcher:UnregisterEvent("UNIT_AURA") end
+            return
+        end
+        if not watcher then
+            watcher = CreateFrame("Frame")
+            watcher:SetScript("OnEvent", OnStackAura)
+        end
+        watcher:RegisterUnitEvent("UNIT_AURA", "player")
+    end
+
     function ns.RefreshBuffStackSounds()
-        -- The native API restricts changes in combat. Reconcile afterwards,
-        -- including both removals and changes of the selected sound.
         if InCombatLockdown() then
             pending = true
             ns.CombatQueue.Defer("CDMBuffStackSounds", RefreshPendingStackSounds)
@@ -625,44 +804,76 @@ do
         pending = false
 
         local wanted = {}
-        local p = ECME.db and ECME.db.profile
+        local wantedText = {}
+        local p = ECME and ECME.db and ECME.db.profile
         local specKey = ns.GetActiveSpecKey and ns.GetActiveSpecKey()
         if p and p.cdmBars and p.cdmBars.enabled and specKey and specKey ~= "0" then
             local profiles = ns.GetActiveSpecProfiles and ns.GetActiveSpecProfiles()
             local prof = profiles and profiles[specKey]
             local settings = prof and prof.spellSettingsBuff
-            local function AddWanted(sid, key)
+            local function SetWanted(sid, key, text)
                 sid = CleanID(sid)
-                if not sid or not key or key == "none" or key == false then return end
-                local path = FOCUSKICK_SOUND_PATHS[key]
-                if path then wanted[sid] = path end
-            end
-
-            -- Explicit per-spell settings continue to work before the viewer's
-            -- frame has been created. Unknown/custom negative IDs are excluded.
-            if settings then
-                for sid, ss in pairs(settings) do
-                    if type(ss) == "table" then
-                        AddWanted(sid, rawget(ss, "buffStackGainSoundKey"))
+                if not sid then return end
+                if key == "__tts" then
+                    wanted[sid] = nil
+                    wantedText[sid] = type(text) == "string" and text or false
+                elseif not key or key == "none" or key == false then
+                    wanted[sid] = nil
+                    wantedText[sid] = nil
+                else
+                    local path = FOCUSKICK_SOUND_PATHS[key]
+                    if path then
+                        wanted[sid] = path
+                        wantedText[sid] = nil
                     end
                 end
             end
-            -- Include inherited Apply-to-Bar sounds for the live Blizzard
-            -- buff-viewer catalog (the default buffs bar has no assigned list).
-            -- A cooldownID-keyed override can deliberately block that tier.
+
+            if settings then
+                for sid, ss in pairs(settings) do
+                    if type(ss) == "table" then
+                        local v = rawget(ss, "buffStackGainSoundKey")
+                        if v ~= nil then SetWanted(sid, v, rawget(ss, "buffStackGainTtsText")) end
+                    end
+                end
+            end
             if ns.EnumerateCDMViewerSpells then
                 for _, entry in ipairs(ns.EnumerateCDMViewerSpells(true)) do
                     local sid = CleanID(entry.sid)
                     if sid then
                         local own = settings and entry.cdID and settings["c" .. entry.cdID]
                         local v = own and rawget(own, "buffStackGainSoundKey")
+                        local text = own and rawget(own, "buffStackGainTtsText")
                         if v == nil then
-                            v = ns.FindBuffSoundKey and ns.FindBuffSoundKey(sid, "buffStackGainSoundKey")
+                            if ns.FindBuffSoundKey then
+                                v, text = ns.FindBuffSoundKey(sid, "buffStackGainSoundKey")
+                            end
                         end
-                        if v == false or v == "none" then
-                            wanted[sid] = nil
-                        else
-                            AddWanted(sid, v)
+                        if v ~= nil then SetWanted(sid, v, text) end
+                    end
+                end
+            end
+
+            -- Tracking Bars override the same spell's stack audio only when
+            -- explicitly configured. Self-timed presets and cooldown bars have
+            -- no ApplicationsIncreased aura trigger and are ignored.
+            if not p.cdmBars.useBlizzardBuffBars then
+                local tbb = prof and prof.trackedBuffBars
+                local bars = tbb and tbb.bars
+                if bars then
+                    for _, cfg in ipairs(bars) do
+                        if cfg.enabled ~= false and not cfg.popularKey
+                            and cfg.trackType ~= "cooldown" then
+                            local key = cfg.buffStackGainSoundKey
+                            if key ~= nil then
+                                local text = cfg.buffStackGainTtsText
+                                SetWanted(cfg.spellID, key, text)
+                                if type(cfg.assignedSpells) == "table" then
+                                    for _, sid in ipairs(cfg.assignedSpells) do
+                                        SetWanted(sid, key, text)
+                                    end
+                                end
+                            end
                         end
                     end
                 end
@@ -670,7 +881,6 @@ do
         end
         for sid, old in pairs(registered) do
             if wanted[sid] ~= old.path then
-                -- Do not drop our handle if Blizzard rejects removal.
                 local ok = pcall(api.RemoveAuraSound, old.id)
                 if ok then registered[sid] = nil end
             end
@@ -685,6 +895,7 @@ do
                 if ok and id then registered[sid] = { id = id, path = path } end
             end
         end
+        SetStackTTS(wantedText)
     end
 end
 

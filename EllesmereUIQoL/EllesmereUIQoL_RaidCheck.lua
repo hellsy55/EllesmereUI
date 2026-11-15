@@ -473,6 +473,11 @@ local function RaidCheckDisplayName(unit)
         return EllesmereUI.WithSurname(name, surname)
     end
 
+    if EllesmereUI.UseRaidGroupsNicknameSource() then
+        return (EllesmereUI.RaidGroupsNicknameForUnit
+            and EllesmereUI.RaidGroupsNicknameForUnit(unit))
+            or EllesmereUI.WithSurname(name, surname)
+    end
     local nameSecret = issecretvalue and issecretvalue(name)
     local display
 
@@ -2597,6 +2602,9 @@ end
 --  writes with one, so the slice name and the profile walk never leave here.
 -------------------------------------------------------------------------------
 
+function ns.RefreshRaidCheckNames()
+    if win and win:IsShown() then Refresh() end
+end
 function ns.ApplyRaidCheckScale()
     if not win then return end
     -- SetScale is a protected call on this window (see ShowRaidCheck's own

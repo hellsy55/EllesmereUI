@@ -554,6 +554,69 @@ ns.RF_NAME_WIDTH_FRACTION = 1.0
 -- NSAPI:GetName self-gates on its global nicknames toggle AND that checkbox and returns the short
 -- name when unset, falling through to the next source. Every source gates itself entirely (no
 -- EUI-side toggle); pcall keeps a misbehaving external API from breaking name rendering.
+-- Only the optional Raid Groups consistency marker needs this separate lookup.
+-- Keep the selected Raid Groups nickname as the visible name; never substitute
+-- another addon's text. The first usable external provider follows the same
+-- precedence as ordinary name rendering. No lookup occurs with the option off.
+function ns.RF_SharedNicknameForComparison(unit, rawName)
+    if type(rawName)~="string" or rawName=="" or
+        (issecretvalue and issecretvalue(rawName)) then return nil end
+    local player=UnitIsPlayer(unit)
+    if issecretvalue and issecretvalue(player) then return nil end
+    if player~=true then return nil end
+    local function Candidate(value, explicit)
+        if type(value)~="string" or (issecretvalue and issecretvalue(value)) or value=="" then return nil end
+        -- Most providers return the character name when no alias is set.
+        if not explicit and (value==rawName or
+            (Ambiguate and value==Ambiguate(rawName,"short"))) then return nil end
+        return value
+    end
+    if NSAPI and NSAPI.GetName then
+        local ok, value=pcall(NSAPI.GetName, NSAPI, rawName, "EUI")
+        if ok then
+            local nick=Candidate(value)
+            if nick then return nick end
+        end
+    end
+    if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
+        local ok,value,handled=pcall(EasyNicknameAPI.GetNicknameForUnitForSurface,unit,"raidFrames")
+        if ok and handled==true then
+            -- A handled Character Name selection is not a shared nickname.
+            return Candidate(value)
+        end
+    end
+    local TR=TimelineReminders
+    if TR and TR.GetNickname and TR.HasNickname and TR.NicknamesEnabledForAddOn then
+        local okGate,enabled=pcall(TR.NicknamesEnabledForAddOn,TR,ns.NICK_ADDON)
+        if okGate and enabled then
+            local okHas,has=pcall(TR.HasNickname,TR,unit)
+            if okHas and has then
+                local ok,value=pcall(TR.GetNickname,TR,unit)
+                if ok then return Candidate(value,true) end
+            end
+        end
+    end
+    if LiquidAPI and LiquidAPI.GetNicknameForEllesmereUI then
+        local ok,value=pcall(LiquidAPI.GetNicknameForEllesmereUI,rawName)
+        if ok then
+            local nick=Candidate(value)
+            if nick then return nick end
+        end
+    end
+    if ns._rgaNick and RG_UnitName then
+        local ok,value=pcall(RG_UnitName,unit)
+        if ok then
+            local nick=Candidate(value)
+            if nick then return nick end
+        end
+    end
+    if ns._customNames and ns._customNames.UnitName then
+        local ok,value=pcall(ns._customNames.UnitName,unit)
+        if ok then return Candidate(value) end
+    end
+    return nil
+end
+
 -- fmt: a tag's Name Format modifier in place of the setting (ns.RF_FormatName).
 local function ResolveDisplayName(unit, applyCap, s, fmt)
     local name, surname = UnitName(unit)
@@ -569,6 +632,24 @@ local function ResolveDisplayName(unit, applyCap, s, fmt)
         return raw
     end
     local display
+    if EllesmereUI.UseRaidGroupsNicknameSource() then
+        display=EllesmereUI.RaidGroupsNicknameForUnit
+            and EllesmereUI.RaidGroupsNicknameForUnit(unit)
+        local localNickname=display
+        local sharedNickname=ns.RF_SharedNicknameForComparison(unit,name)
+        local differs=EllesmereUI.RaidGroupsNicknamesMatch
+            and (localNickname~=nil or sharedNickname~=nil)
+            and not EllesmereUI.RaidGroupsNicknamesMatch(localNickname,sharedNickname)
+        if not display then
+            if Ambiguate then name=Ambiguate(name,"short") end
+            display=ns.RF_FormatName(EllesmereUI.WithSurname(name,surname),s,fmt,unit)
+        end
+        if applyCap then display=ns.CapName(display,s) end
+        -- Append before the FontString is colored, so the marker inherits its
+        -- existing class/custom/accent color on party, raid and Top Name Bars.
+        if differs then display=display.."*" end
+        return display
+    end
     if NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
         if ok and type(dn) == "string"

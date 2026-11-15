@@ -934,6 +934,8 @@ local function RepointAllDBs(profileName)
     EllesmereUI.RefreshDarkMode()
     -- Number Format is per-profile too: drop the resolved configs and redraw.
     if EllesmereUI.RefreshNumberFormat then EllesmereUI.RefreshNumberFormat() end
+    -- Refresh per-profile health bars after profile change.
+    if EllesmereUI.HealthBars then EllesmereUI.HealthBars.Refresh(true) end
     -- Sidebar sync icons key off the ACTIVE profile's group membership;
     -- re-evaluate them on every repoint (switch/create/delete/rename/import)
     if EllesmereUI._syncRefreshFns then
@@ -1068,6 +1070,8 @@ function EllesmereUI.SnapshotAllAddons()
     -- Dark Mode palette + darken amounts (always the active profile's own).
     data.darkMode = DeepCopy(EllesmereUI.GetDarkModeDB())
     data.numberFormat = DeepCopy(EllesmereUI.GetNumberFormatDB())
+    if EllesmereUI.GetHealthTicksDB then data.healthTicks = DeepCopy(EllesmereUI.GetHealthTicksDB()) end
+    if EllesmereUI.GetHealthAnimationsDB then data.healthAnimations = DeepCopy(EllesmereUI.GetHealthAnimationsDB()) end
     -- Spec Overrides ride with the profile (freshen the current spec's stored
     -- values from live first so exports never lag recent edits).
     if EllesmereUI.SpecOverrides_HarvestCurrent then
@@ -2341,6 +2345,8 @@ function EllesmereUI.ExportProfile(profileName, includedFolders, includeLayout, 
         exportData.customColors = nil
         exportData.darkMode     = nil
         exportData.numberFormat = nil
+        exportData.healthTicks = nil
+        exportData.healthAnimations = nil
         exportData.euiAccent    = nil
         exportData.uiScale      = nil
     end
@@ -3521,6 +3527,16 @@ function EllesmereUI.ImportProfile(importStr, profileName)
             merged._migrations = merged._migrations or {}
             merged._migrations.number_format_force_english_units_v1 = true
             merged._migrations.number_format_uf_value_decimals_v1 = true
+        end
+        if imported.healthTicks then
+            merged.healthTicks = DeepCopy(imported.healthTicks)
+        elseif imported.fonts then
+            merged.healthTicks = nil
+        end
+        if imported.healthAnimations then
+            merged.healthAnimations = DeepCopy(imported.healthAnimations)
+        elseif imported.fonts then
+            merged.healthAnimations = nil
         end
         -- Override stores: ALL-OR-NOTHING (2026-07-20 redesign; the old per-folder
         -- value merge in SpecOverrides_MergeImportedStores is retired and must not be
@@ -4707,7 +4723,21 @@ local function BuildStringPopup(title, subtitle, readOnly, onConfirm, confirmLab
     editBox:SetPoint("TOPRIGHT",    sc, "TOPRIGHT",   -14, 0)
     editBox:SetHeight(1)  -- grows with content
 
-    local UpdateThumb, scrollTo = EllesmereUI.AttachSmoothScrollbar(sf)
+    -- A raw-paste editor can be briefly measured before the popup has size.
+    -- Use the actual content and a 1px tolerance, never a transient Blizzard
+    -- ScrollFrame range: an empty or fully visible block needs no scrollbar.
+    local pasteRange
+    if rawPaste then
+        pasteRange = function()
+            if editBox:GetText() == "" then return 0 end
+            local visible = sf:GetHeight()
+            if visible <= 0 then return 0 end
+            local extra = sc:GetHeight() - visible
+            return extra > 1 and extra or 0
+        end
+    end
+    local UpdateThumb, scrollTo = EllesmereUI.AttachSmoothScrollbar(sf,
+        rawPaste and { maxScroll = pasteRange } or nil)
 
     -- Reset on hide
     dimmer:HookScript("OnHide", function()
@@ -4740,23 +4770,24 @@ local function BuildStringPopup(title, subtitle, readOnly, onConfirm, confirmLab
         end)
     end
 
-    -- Resize scroll child to fit editbox content
+    -- Resize after the frame has been laid out, then immediately synchronize
+    -- its thumb. Also refresh on show for kept /euipaste windows that reopen.
     local function RefreshHeight()
         C_Timer.After(0.01, function()
+            if not dimmer:IsShown() then return end
+            local sfH = sf:GetHeight()
+            if sfH <= 0 then return end
             local lineH = (editBox.GetLineHeight and editBox:GetLineHeight()) or 14
-            local h = editBox:GetNumLines() * lineH
-            local sfH = sf:GetHeight() or 100
-            -- Only grow scroll child beyond the visible area when content is taller
-            if h <= sfH then
-                sc:SetHeight(sfH)
-                editBox:SetHeight(sfH)
-            else
-                sc:SetHeight(h + 4)
-                editBox:SetHeight(h + 4)
-            end
-            UpdateThumb()
+            local content = editBox:GetText()
+            local h = ((content ~= "" and editBox:GetNumLines()) or 1) * lineH
+            local fit = h <= sfH + 1
+            local newH = fit and sfH or (h + 4)
+            sc:SetHeight(newH)
+            editBox:SetHeight(newH)
+            if fit then scrollTo(0) else UpdateThumb() end
         end)
     end
+    dimmer:HookScript("OnShow", RefreshHeight)
     editBox:SetScript("OnTextChanged", function(self, userInput)
         if readOnly and userInput then
             self:SetText(self._readOnly or ""); self:HighlightText()
@@ -4959,21 +4990,22 @@ function EllesmereUI:ShowImportPopup(onImport, title, subtitle, opts)
     opts = opts or {}
     local key = opts.rawPaste and opts.keep
     local kept = key and keptImportPopups[key]
-    local dimmer, editBox
+    local dimmer, editBox, refreshHeight
     if kept then
-        dimmer, editBox = kept.dimmer, kept.editBox
+        dimmer, editBox, refreshHeight = kept.dimmer, kept.editBox, kept.refreshHeight
         editBox:SetText("")
     else
-        dimmer, editBox = BuildStringPopup(
+        dimmer, editBox, refreshHeight = BuildStringPopup(
             title or "Import Profile",
             subtitle or "Paste an EllesmereUI profile string below",
             false,
             function(str) if onImport then onImport(str) end end,
             opts.confirmLabel or "Import", opts.rawPaste)
-        if key then keptImportPopups[key] = { dimmer = dimmer, editBox = editBox } end
+        if key then keptImportPopups[key] = { dimmer = dimmer, editBox = editBox, refreshHeight = refreshHeight } end
     end
 
     dimmer:Show()
+    if opts.rawPaste and refreshHeight then refreshHeight() end
     C_Timer.After(0.05, function() editBox:SetFocus() end)
 end
 

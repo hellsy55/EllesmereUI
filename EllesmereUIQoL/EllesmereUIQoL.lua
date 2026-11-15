@@ -35,6 +35,10 @@ function ns.ResolveNicknameForUnit(unit)
     if not UnitIsPlayer(unit) then return name end
 
     local fallback = EllesmereUI.WithSurname(name, surname)
+    if EllesmereUI.UseRaidGroupsNicknameSource() then
+        return (EllesmereUI.RaidGroupsNicknameForUnit
+            and EllesmereUI.RaidGroupsNicknameForUnit(unit)) or fallback
+    end
     local nameSecret = issecretvalue and issecretvalue(name)
     local display
 
@@ -104,6 +108,10 @@ end
 function ns.GetNicknameForName(name)
     if type(name) ~= "string" or name == "" then return nil end
     if issecretvalue and issecretvalue(name) then return nil end
+    if EllesmereUI.UseRaidGroupsNicknameSource() then
+        return EllesmereUI.RaidGroupsNicknameForName
+            and EllesmereUI.RaidGroupsNicknameForName(name)
+    end
 
     if NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
@@ -179,6 +187,8 @@ qolFrame:SetScript("OnEvent", function(self)
     if EllesmereUI._applyUpgradeTooltips then EllesmereUI._applyUpgradeTooltips() end
     -- Item Icons (EllesmereUIQoL_ItemIcons.lua): nothing is hooked while off.
     ns.ItemIcons_Apply()
+    -- Dialog Keys (EllesmereUIQoL_DialogKeys.lua): nothing is built while off.
+    if EllesmereUIDB.dialogKeys and EllesmereUI._applyDialogKeys then EllesmereUI._applyDialogKeys() end
 
     ---------------------------------------------------------------------------
     -- Bonus roll confirmation. Addon-owned overlays intercept Roll/Pass clicks;

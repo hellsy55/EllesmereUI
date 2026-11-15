@@ -589,6 +589,11 @@ function ns.ResolveUnitNickname(unit)
     if db and db.profile and db.profile.showNicknames == false then
         return EllesmereUI.WithSurname(name, surname)
     end
+    if EllesmereUI.UseRaidGroupsNicknameSource() then
+        return (EllesmereUI.RaidGroupsNicknameForUnit
+            and EllesmereUI.RaidGroupsNicknameForUnit(unit))
+            or EllesmereUI.WithSurname(name, surname)
+    end
     -- MethodInternal's surface choice is authoritative for known Method players,
     -- including Character Name (which deliberately equals the raw name).
     if EasyNicknameAPI and EasyNicknameAPI.GetNicknameForUnitForSurface then
