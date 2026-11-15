@@ -58,6 +58,9 @@ local function PickValue(p, now)
 end
 local function PickKey(e)
     if e.kind == "page" then return "\2" .. e.module .. "\1" .. e.page end
+    if e.kind == "patchNote" then
+        return "\3" .. e.note.version .. "\1" .. e.note.kind .. "\1" .. e.note.label
+    end
     local key = e.module .. "\1" .. e.page .. "\1" .. e.label
     if e.host or e.cogTitle then key = key .. "\1" .. (e.host or "") .. "\1" .. (e.cogTitle or "") end
     if e.cogSection then key = key .. "\1" .. e.cogSection end
@@ -239,6 +242,8 @@ local function FuzzyScore(haystack, needle)
 
     return (score * 100) / span -- density: tighter matches for the same needle score higher
 end
+-- The two search fields use the same bounded fuzzy matcher.
+EllesmereUI._FuzzySearchScore = FuzzyScore
 
 -- Tiers, best first: label exact, label plural-stem exact, tooltip exact,
 -- tooltip stem, label fuzzy, tooltip fuzzy. A tier always outranks the one
@@ -614,6 +619,8 @@ local function SearchIndex(query, maxResults)
     -- One scoring pass over both indexes. With a module filter active, only
     -- those modules' entries are considered, matched against the remainder
     -- of the query; a BARE module name (or name prefix) lists pages.
+    -- Static patch-note data is read only when searching; the feed is never
+    -- rendered off-screen just to populate this index.
     local function ScorePass(folderSet, n)
         local scored = {}
         -- "stats" also finds "stat" as a near-exact hit, one tier down.
@@ -645,6 +652,29 @@ local function SearchIndex(query, maxResults)
         end
         Consider(_searchIndex)
         Consider(_coarseCandidates)
+        if n ~= "" and (not folderSet or folderSet["_EUIPatchNotes"])
+           and EllesmereUI._SearchPatchNotes then
+            for _, match in ipairs(EllesmereUI._SearchPatchNotes(n)) do
+                local data = match.data
+                local e = data._globalEntry
+                if not e then
+                    e = {
+                        kind = "patchNote", note = data,
+                        module = "_EUIPatchNotes", page = "Patch Notes",
+                        label = data.label, lLabel = data.lLabel,
+                        order = data.pi,
+                    }
+                    data._globalEntry = e
+                end
+                -- Keep the original global-search relevance tiers: matches
+                -- in a note title outrank body/description matches.
+                local rank = TIER + math.min(5 * TIER - 1,
+                    math.floor(math.max(0, match.score) * 1.5))
+                scored[#scored + 1] = {
+                    entry = e, score = rank, exact = data.title:lower() == n,
+                }
+            end
+        end
         return scored
     end
 
@@ -738,19 +768,24 @@ local function SearchIndex(query, maxResults)
     local slotOf = { p = {}, s = {}, o = {} }
     for _, sc in ipairs(scored) do
         local e = sc.entry
-        local kind = e.kind == "page" and "p" or (e.isSection and "s" or "o")
-        local text = kind == "p" and e.lPage or e.lLabel
-        local i = slotOf[kind][text]
-        if i then
-            local g = out[i]
-            if not g.isGroup then
-                g = setmetatable({ isGroup = true, members = { g } }, { __index = g })
-                out[i] = g
+        if e.kind == "patchNote" then
+            -- Retain separate destinations even when entries share a label.
+            if #out < maxResults then out[#out + 1] = e end
+        else
+            local kind = e.kind == "page" and "p" or (e.isSection and "s" or "o")
+            local text = kind == "p" and e.lPage or e.lLabel
+            local i = slotOf[kind][text]
+            if i then
+                local g = out[i]
+                if not g.isGroup then
+                    g = setmetatable({ isGroup = true, members = { g } }, { __index = g })
+                    out[i] = g
+                end
+                if #g.members < MAX_GROUP_MEMBERS then g.members[#g.members + 1] = e end
+            elseif #out < maxResults then
+                out[#out + 1] = e
+                slotOf[kind][text] = #out
             end
-            if #g.members < MAX_GROUP_MEMBERS then g.members[#g.members + 1] = e end
-        elseif #out < maxResults then
-            out[#out + 1] = e
-            slotOf[kind][text] = #out
         end
     end
     return out
@@ -1369,6 +1404,15 @@ local function TitleCaseSection(s)
 end
 
 local function JumpToResult(entry, sidebarSearchBox)
+    if entry.kind == "patchNote" then
+        if EllesmereUI._NavigateToPatchNote
+           and EllesmereUI._NavigateToPatchNote(entry.note) then
+            RecordPick(entry)
+            if popup then popup:Hide() end
+            if sidebarSearchBox then sidebarSearchBox:SetText("") end
+        end
+        return
+    end
     RecordPick(entry)
     -- Coarse (whole-page) results have no single option to highlight -- just land on
     -- the page. Fine-grained option/section results scroll to and glow the specific
@@ -1519,7 +1563,11 @@ local function EnsureSearchUI()
 
     -- The label and breadcrumb of one result row.
     local function EntryText(entry, accentHex)
-        if entry.kind == "page" then
+        if entry.kind == "patchNote" then
+            local note = entry.note
+            return accentHex .. note.category .. ":|r " .. note.label,
+                "v" .. note.version .. " " .. JoinBreadcrumb(EllesmereUI.L("Patch Notes"), note.module)
+        elseif entry.kind == "page" then
             -- Coarse whole-page result: prefixed like sections so it
             -- reads as "go to this page", not a specific option on it.
             return accentHex .. EllesmereUI.L("Page") .. ":|r " .. entry.displayLabel, entry.moduleLabel
