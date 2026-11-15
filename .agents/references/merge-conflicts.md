@@ -9,4 +9,10 @@ b) Local: keep the current branch version (`main` or `new-features` in Sync A, o
 c) Combine: propose a concrete combination when technically feasible.
 d) Abort: abort the merge; nothing is applied to that branch.
 
-Mark exactly one option label with `(recommended)` at its end, based on preserving useful behavior with the fewest lost changes. Wait for the user's choice. For a), b), or c), apply only that choice, `git add`, show the required staged review, commit with the required English message and no AI signature, and push `origin <matching branch>`. For d), run `git merge --abort` and report that nothing changed on that branch. If `main` is unexpectedly divergent, use this procedure against `upstream/main` before proceeding with Retail.
+### After the user chooses
+
+A Combine choice authorizes resolving every conflict in that integration, including semantic adaptations necessary to preserve fork behavior and incorporate compatible incoming changes. Apply explicit per-feature exceptions as instructed. Treat file groups and internal review batches as progress, and continue in the same task without another continuation command. Ask for a decision only when a material functional ambiguity, an unauthorized risk, or an unsafe or irreconcilable outcome prevents proceeding. Preserve the unresolved state and report the precise technical blocker and pending work if a real execution limit prevents completion.
+
+For a), b), or c), finish the authorized resolution, stage the intended paths and verify that native `git ls-files -u` succeeds and returns no entries. Review the integrated behavior and run the applicable packaging, manifest and technical checks. Present the required staged views, complete diff, summary, and exact proposed English commit message. Wait for explicit approval at the commit checkpoint and publish only to the named destination when authorized. An earlier conflict choice does not approve either operation.
+
+Mark exactly one option label with `(recommended)` at its end, based on preserving useful behavior with the fewest lost changes. Wait for the user's choice. For d), run `git merge --abort` and report that nothing changed on that branch. If `main` is unexpectedly divergent, use this procedure against `upstream/main` before proceeding with Retail.

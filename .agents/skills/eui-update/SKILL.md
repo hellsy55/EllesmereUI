@@ -9,6 +9,14 @@ Follow the mode routed from `AGENTS.md`: Retail runs Sync A; PTR runs Sync A the
 
 For PTR-only requests, retain the Sync A prerequisite but do not infer authorization to update Retail. Establish read-only whether Sync A would change Retail (including fast-forward from origin or publication). If so and that scope is not already explicitly authorized in the current conversation, explain the prerequisite and request explicit authorization before mutation; pause until authorized. Reuse existing authorization without asking again. If Retail needs no change, continue normally to Sync B. Do not silently skip required Retail synchronization or merge upstream directly into PTR. Retail and Both requests authorize their normal synchronization scopes; all existing human checkpoints still apply.
 
+## Continuity across checkpoints
+
+Keep the selected mode, frozen refs and runtimes, approved decisions, completed stages, pending checks, and next checkpoint in task context across replies and context compaction. After an approval or other required choice, resume at that checkpoint and continue until the next genuine blocker or required human decision. Follow the [conflict procedure](../../references/merge-conflicts.md) through validation and staged review after an authorized resolution.
+
+In Both mode, after authorized Retail publication proceed directly to prepare and validate PTR. Obtain its own approval when it needs a commit and continue after that approval to publication and the single local install checkpoint. A follow-up fix or feature within the active Both task inherits both destinations unless the user narrows or replaces the scope. Integrate a shared change into Retail first and carry it to PTR through Sync B with its own validation and approvals. If the change was already published to PTR first, apply the reviewed change to Retail with the normal separate approval and account for the existing PTR implementation when reconciling ancestry. Never rewrite published commits. Report both branch outcomes and any pending installation before calling the task complete.
+
+When a follow-up includes local ZIP delivery, apply the [incremental ZIP workflow](../../references/incremental-zip-delivery.md) to each applicable branch and retain its own verified delivery base.
+
 ## Compact preflight and fetch
 
 At workflow entry, initialize or reuse the root and environment in the shared [maintenance context](../../references/python-runtime.md). Resolve and freeze `python_runtime` before the first mutation or Python helper, whichever comes first; discover optional capabilities only when needed and cache them. Preflight failure ends the workflow before any branch changes or install checkpoint. All Python helpers below use its frozen `python_runtime`, including any accepted library stage; do not repeat environment, root, runtime, or capability discovery between stages or branches.
