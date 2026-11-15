@@ -1,7 +1,7 @@
 # Cloud update delivery
 
-Load this reference only when a Cloud prompt explicitly requests it after the
-user selects a workflow that executes an update. Read it before the first
+Load this reference for a normal EUI update in confirmed Codex Cloud. Read it
+and [incremental ZIP delivery](incremental-zip-delivery.md) before the first
 modification of any installable target to capture its initial state. This is an
 additional delivery layer: it never replaces, changes, or bypasses
 [AGENTS.md](../../AGENTS.md) or the [update skill](../skills/eui-update/SKILL.md).
@@ -14,7 +14,7 @@ Do not load physical installation instructions, show a menu, ask for local WoW
 destinations, or run physical installation or line-ending fixes.
 If that workflow fails or pauses for approval or a decision, the update remains
 pending; do not generate final artifacts early. Options that do not execute an
-update do not automatically receive an installer or update summary.
+update do not automatically receive ZIPs or an update summary.
 
 ## Immutable delivery base
 
@@ -26,33 +26,44 @@ workflow, but never replace the installable base.
 
 For EUI, Retail is `new-features`; PTR is `12.1.7-PTR-features`. Compare each
 selected branch's initial state with its final state. In Both mode, capture both
-bases before any modification and produce two independent installers, one Retail
-and one PTR. Never mix Retail and PTR in one ZIP.
+bases before any modification and validate each branch independently. Never mix
+Retail and PTR in one ZIP.
 
-## Incremental installer
+## Incremental ZIPs
 
-Only after the normal workflow has actually completed, calculate the net diff
-from each recorded installable base to its final installable state. Package only
-the final contents of changed installed-addon files, including new files needed
-by the final result. Exclude files identical to the base, unchanged files,
-temporary files, tests, operational scripts/helpers, Codex/Cloud tooling,
-operational documentation, and packaging artifacts outside the installed addon.
-Never package a full distribution or include whole modules/addons merely to
-complete it.
+Apply the purpose selection, naming, delta, manifest and verification rules in
+[incremental ZIP delivery](incremental-zip-delivery.md). After the workflow
+completes, build separate `*_installer.zip` and `*_commit.zip` artifacts for each
+selected branch by default when both purposes have eligible operations. Honor
+explicit single-purpose requests. Use the complete cumulative net delta from
+each frozen base to its final state, omitting reverted changes. Skip each
+purpose with no eligible operations, including no-ops. A deletion-only delta
+is eligible.
 
-Structure each ZIP exactly for extraction over `Interface/AddOns`: main-addon
-files belong under `EllesmereUI/...`; sibling addons/modules retain their real
-folders, such as `EllesmereUI_RaidFrames/...`, `EllesmereUI_CooldownManager/...`,
-and `EllesmereUIOptions/...`. Do not add an outer suite folder. Use a filename
-ending in `_installer.zip`, preferably containing a reliable final addon version;
-otherwise use the final short SHA. Do not install, extract, or copy the ZIP into
-the WoW folder. If the final state requires removals, list the paths separately
-in Portuguese as manual deletions; do not attempt to encode deletions in the ZIP.
+- Installer paths are relative to `Interface/AddOns`. Compare the distributed
+  base and final trees using the maintained EUI packaging policy and helper.
+  Write the v1 ZIP comment manifest with runtime removals in
+  `installer_deleted_files`.
+- Commit paths are relative to the verified Git root. Write the v2 ZIP comment
+  manifest with Git removals in `deleted_files`, `file_protection` for every
+  operation, the exact target branch, the verified full Git base and the
+  required raw SHA-256 hashes. Include matching `config_protection` with
+  canonical hashes when the shared contract requires it.
+
+On Cloud Linux, use available compatible tools, such as native Git and Python 3
+standard-library ZIP, JSON and hashing support. Verify the same archive and
+manifest contracts independently, including exact inventory, CRC, paths,
+deletions, base and final hashes, and branch routing. The local Windows paths
+and PowerShell applicators are environment-specific. Report applicator and
+destination Git checks as inconclusive when they cannot be verified in Cloud.
+If the base, required protection or archive contract cannot be established,
+report the limitation and withhold the affected ZIP. Keep any independently
+validated artifact for the other purpose.
 
 ## Update summary
 
-For each installer, write an English summary covering the complete net functional
-diff from its initial base to its final state, not just the last commit. Include
+For each branch with a delivered ZIP, write an English summary covering the
+complete net functional diff from its initial base to its final state. Include
 final runtime code, behavior, UI, content, data, functional configuration, and
 compatibility changes. Include libraries only when their actually distributed
 runtime content changed. Omit reverted intermediate changes, workflow details,
@@ -77,10 +88,10 @@ Preserve normal Codex artifact delivery. After each final ZIP produced by a
 workflow loading this reference is complete and validated, upload that exact
 local file using the official Google Drive plugin/connector to `EUI`
 (`1h6YGWoHsGcxPwTyoGrfSYQFeGaur8tvb`) under `Codex Artifacts`. This shared rule
-applies to all final ZIPs, including independent Retail and PTR installers.
-Upload only nonempty ZIPs containing valid packaged files; if none are produced,
-skip Drive delivery. Do not regenerate ZIPs for Drive or add artificial entries
-for deletions; the existing packaging and manual-deletion rules still apply.
+applies to all final installer and commit ZIPs for Retail and PTR.
+Upload only validated ZIPs with eligible payload entries or manifest deletions.
+If none are produced, skip Drive delivery. Use the exact validated archives
+and keep deletion-only archives free of artificial payload entries.
 Do not introduce external tools, dependencies, manual OAuth, API keys, or secrets.
 
 After every upload, read the uploaded file's metadata again through the connector
@@ -106,9 +117,10 @@ separately, including when no ZIP was produced. Report in Portuguese:
 - Initial and final subjects with their respective short SHAs. Link only
   verified published commits, including any additional commits shown.
 - For each validated ZIP, give the actual artifact download link when
-  available, filename, packaged file count, and required manual deletion paths
-  (or none). Confirm that it contains only the final net diff. If no ZIP was
-  produced, report that status and any required manual deletions.
+  available, filename, packaged file count, manifest deletion paths (or none),
+  and the verification status required by incremental ZIP delivery. Confirm
+  that it contains only the final net diff. If a ZIP was skipped or withheld,
+  report the purpose and reason.
 - State that physical installation was skipped in Cloud.
 - For each ZIP with attempted Drive delivery: filename, local size, local SHA-256
   (reuse an existing hash or calculate it when inexpensive), `Google Drive: OK`
