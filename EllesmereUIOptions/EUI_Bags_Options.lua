@@ -603,7 +603,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             do
                 -- Inline cog on Window Scale: Anchor to Nearest Corner, for the bag
-                -- and bank windows in every display (off unless set).
+                -- and bank windows in every display (on unless turned off).
                 EllesmereUI.BuildInlineCog(slotRgn["Window Scale"], {
                     title = "Window Options",
                     rows = {
@@ -792,12 +792,12 @@ initFrame:SetScript("OnEvent", function(self)
                 -- list follows split-mode toggles and set changes without a page rebuild.
                 local function BuildCatItems()
                     local catItems = {}
-                    if _G.EUI_CategoryManager then
-                        local cats = _G.EUI_CategoryManager:GetCategories()
-                        for ci, cat in ipairs(cats) do
-                            -- isEquipSet excluded: per-character keys, governed by the split toggle instead
-                            -- isVirtual excluded: runtime-only, its addon owns it (a saved key would outlive it)
-                            if not cat.isCatchAll and not cat.isPinned and not cat.isRecent and not cat.isSpecialBag and not cat.isEquipSet and not cat.isVirtual then
+                    local mgr = _G.EUI_CategoryManager
+                    if mgr then
+                        -- The categories that can be turned off (the sidebar's Delete
+                        -- turns off the same default ones)
+                        for _, cat in ipairs(mgr:GetCategories()) do
+                            if mgr:CanDisableCategory(cat) then
                                 catItems[#catItems + 1] = { key = cat._defaultName, label = cat.name }
                             end
                         end
@@ -1324,12 +1324,18 @@ initFrame:SetScript("OnEvent", function(self)
                         { key = "bagShowQuickIcon", label = "Quick Actions Icon" },
                         { key = "bagShowJunkIcon", label = "Junk Icon" },
                     }
+                    if EllesmereUI.IS_FOREVER then
+                        TOP_BAR_ICONS[#TOP_BAR_ICONS + 1] = { key = "bagShowKeyringIcon", label = "Keyring Icon" }
+                    end
                     local DEFAULT_ICON_ORDER = {
-                        "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon",
+                        "bagShowSortIcon", "bagShowBagsIcon", "bagShowQuickIcon", "bagShowJunkIcon", "bagShowKeyringIcon",
                     }
                     local iconsDD, iconsDDRefresh = EllesmereUI.BuildReorderCBDropdown(
                         leftRgn, 210, leftRgn:GetFrameLevel() + 2, TOP_BAR_ICONS,
-                        function(key) return db.profile[key] ~= false end,
+                        function(key)
+                            if key == "bagShowKeyringIcon" then return db.profile[key] == true end
+                            return db.profile[key] ~= false
+                        end,
                         function(key, v)
                             db.profile[key] = v and true or false
                             local bags = _G.EUI_Bags

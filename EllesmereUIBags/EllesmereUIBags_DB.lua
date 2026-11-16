@@ -50,11 +50,12 @@ local BAGS_DEFAULTS = {
         bagRecentFlash        = false, -- opt-in: brief glow when a recent pickup appears
         bagHideRecentInCategories = false, -- opt-in: recent items only in Recent Items, not regular categories
         bagRecentNewOnly      = false,   -- Recent Items: only items not carried before (gear, mail, trade always)
-        -- Bag Top Bar Icons: the header's Show Bags, Junk Marker, Quick Actions and Sort icons
+        -- Bag Top Bar Icons: the header's Show Bags, Junk Marker, Quick Actions, Sort and Keyring icons
         bagShowBagsIcon       = true,
         bagShowJunkIcon       = true,    -- the Junk Marker: header coin, Junk category, Sell Junk at merchants
         bagShowQuickIcon      = false,   -- Quick Actions: dim all but items a spell works on; click or Alt-click casts it
         bagShowSortIcon       = true,
+        bagShowKeyringIcon    = false,   -- WoW Forever only: opens the keyring above the icon
         bagSortToBottom       = false,
         -- Show Coins: the coins the gold summary shows, "gold" | "silver" (gold and silver) |
         -- "copper" (all three); Gold and Silver on WoW Forever
