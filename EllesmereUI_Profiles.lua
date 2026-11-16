@@ -1392,9 +1392,8 @@ local REFRESH_ADDON_STEPS = {
         end
     end,
     -- Cursor (style + position), Crosshair, Self Combat Text, Item Icons, and
-    -- the QoL extras (FPS counter + Secondary Stats -- one call for both: the
-    -- FPS readout may be drawn by the Secondary Stats block, so the two owners
-    -- re-evaluate together).
+    -- the QoL extras (FPS counter + Secondary Stats re-evaluate together;
+    -- Target Distance, alerts and Durability Warning follow the profile too).
     function()
         if _G._ECL_Apply then _G._ECL_Apply() end
         if _G._ECL_ApplyTrail then _G._ECL_ApplyTrail() end
@@ -1409,6 +1408,13 @@ local REFRESH_ADDON_STEPS = {
         elseif EllesmereUI._applySecondaryStats then
             EllesmereUI._applySecondaryStats()
         end
+        if EllesmereUI._applyTargetDistance then EllesmereUI._applyTargetDistance() end
+        if EllesmereUI._applyCombatAlert then EllesmereUI._applyCombatAlert() end
+        if EllesmereUI._applyPotionAlert then EllesmereUI._applyPotionAlert() end
+        if EllesmereUI._applyTalentAlert then EllesmereUI._applyTalentAlert() end
+        if EllesmereUI._applyAnnounceGroupDeaths then EllesmereUI._applyAnnounceGroupDeaths() end
+        if EllesmereUI._applyGroupDeathAlert then EllesmereUI._applyGroupDeathAlert() end
+        if EllesmereUI._syncDurWarnEvents then EllesmereUI._syncDurWarnEvents() end
     end,
     -- QoL Battle Res and Bloodlust (enable state, visibility, position;
     -- neither exists on WoW Forever)
@@ -1426,7 +1432,11 @@ local REFRESH_ADDON_STEPS = {
     -- ActionBars (style + layout + position)
     function() if _G._EAB_Apply then _G._EAB_Apply() end end,
     -- UnitFrames (style + layout + position)
-    function() if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end end,
+    function()
+        if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
+        -- The Rested Indicator follows profiles (EUI_UnitFrames_Init.lua).
+        if EllesmereUI._applyRestedIndicator then EllesmereUI._applyRestedIndicator() end
+    end,
     -- Raid Frames + Party Frames (style + layout + size; positions re-applied
     -- by the tail)
     function() if _G._ERF_RefreshAll then _G._ERF_RefreshAll() end end,

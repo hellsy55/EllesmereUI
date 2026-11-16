@@ -11,7 +11,6 @@
       "paths": [
         "EllesmereUIFriends/EllesmereUIFriends.toc",
         "EllesmereUIGroupFinder/EllesmereUIGroupFinder.toc",
-        "EllesmereUILoadoutManager/EllesmereUILoadoutManager.toc",
         "EllesmereUIMythicTimer/EllesmereUIMythicTimer.toc",
         "EllesmereUISimpleLootCouncil/EllesmereUISimpleLootCouncil.toc"
       ]
@@ -35,6 +34,7 @@
         "EllesmereUICooldownManager/EllesmereUICooldownManager.toc",
         "EllesmereUIDamageMeters/EllesmereUIDamageMeters.toc",
         "EllesmereUIDataBars/EllesmereUIDataBars.toc",
+        "EllesmereUILoadoutManager/EllesmereUILoadoutManager.toc",
         "EllesmereUILocales/EllesmereUILocales.toc",
         "EllesmereUIMinimap/EllesmereUIMinimap.toc",
         "EllesmereUINameplates/EllesmereUINameplates.toc",
