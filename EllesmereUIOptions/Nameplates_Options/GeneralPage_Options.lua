@@ -703,9 +703,14 @@ local function BuildGeneralPage(pageName, parent, yOffset)
         { id="always", label="Always Show Nameplates",
           tooltip="Automatically change the Always Show Nameplates setting based on your location. Combat rules take priority while enabled." },
     }
-    local areas = { { "party", "In Dungeons" }, { "raid", "In Raids" },
-        { "arena", "In Arena / Battlegrounds" }, { "cities", "In Major Cities" },
-        { "world", "In Open World" } }
+    local areas = { { "party", "In Dungeons" } }
+    if not EllesmereUI.IS_FOREVER then
+        areas[#areas + 1] = { "delve", "In Delves" }
+    end
+    areas[#areas + 1] = { "raid", "In Raids" }
+    areas[#areas + 1] = { "arena", "In Arena / Battlegrounds" }
+    areas[#areas + 1] = { "cities", "In Major Cities" }
+    areas[#areas + 1] = { "world", "In Open World" }
     for i = 3, 6 do modes[i].items = areas end
     for i = 1, #modes, 2 do
         local left, right = modes[i], modes[i + 1]
