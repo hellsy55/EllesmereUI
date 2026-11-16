@@ -54,6 +54,7 @@ local MO_Evaluate
 
 -- Calendar invite alert: defined below BuildCustomIndicators, which calls them.
 local SyncCalendarInvites, DismissCalendarInvites
+local SyncIndicatorVisibility
 
 -- The Great Vault and M+ Portal buttons, built in BuildCustomIndicators.
 local _greatVaultBtn = nil
@@ -462,7 +463,68 @@ DismissCalendarInvites = function()
     if cal then SetInviteShown(cal, false) end
 end
 
-local function SyncIndicatorVisibility()
+-- Mail alert is opt-in and event-driven; when disabled it owns no registered
+-- events, active animations or timers. An existing unread-mail state is not
+-- retriggered by unrelated minimap relayouts.
+local mailPulseEvents, mailPulseAnim, mailPulseTimer
+local mailWasPresent = false
+
+local function StopMailPulse()
+    if mailPulseTimer then
+        mailPulseTimer:Cancel()
+        mailPulseTimer = nil
+    end
+    if mailPulseAnim then mailPulseAnim:Stop() end
+    local btn = _customIndicators.mail
+    if btn and btn._icon then btn._icon:SetAlpha(1) end
+end
+
+local function SyncMailPulse(hasMail, mp)
+    local btn = _customIndicators.mail
+    local enabled = btn and mp and mp.mailBlinkEnabled == true and not mp.hideMail
+    if not enabled then
+        if mailPulseEvents then mailPulseEvents:UnregisterAllEvents() end
+        StopMailPulse()
+        mailWasPresent = false
+        return
+    end
+    if not mailPulseEvents then
+        mailPulseEvents = CreateFrame("Frame")
+        mailPulseEvents:SetScript("OnEvent", function() SyncIndicatorVisibility() end)
+    end
+    if not mailPulseEvents:IsEventRegistered("UPDATE_PENDING_MAIL") then
+        mailPulseEvents:RegisterEvent("UPDATE_PENDING_MAIL")
+        mailPulseEvents:RegisterEvent("MAIL_INBOX_UPDATE")
+    end
+    if hasMail and not mailWasPresent then
+        StopMailPulse()
+        if not mailPulseAnim and btn._icon then
+            mailPulseAnim = btn._icon:CreateAnimationGroup()
+            mailPulseAnim:SetLooping("BOUNCE")
+            local fade = mailPulseAnim:CreateAnimation("Alpha")
+            fade:SetFromAlpha(1)
+            fade:SetToAlpha(0.2)
+            fade:SetDuration(0.45)
+            fade:SetSmoothing("IN_OUT")
+        end
+        if mailPulseAnim then
+            mailPulseAnim:Play()
+            local seconds = tonumber(mp.mailBlinkSeconds) or 10
+            seconds = math.max(5, math.min(61, seconds))
+            if seconds <= 60 then
+                mailPulseTimer = C_Timer.NewTimer(seconds, function()
+                    mailPulseTimer = nil
+                    if mailPulseAnim then mailPulseAnim:Stop() end
+                end)
+            end
+        end
+    elseif not hasMail then
+        StopMailPulse()
+    end
+    mailWasPresent = hasMail
+end
+
+SyncIndicatorVisibility = function()
     SyncCalendarInvites()
     local indicator = MinimapCluster and MinimapCluster.IndicatorFrame
     if _customIndicators.mail then
@@ -478,6 +540,7 @@ local function SyncIndicatorVisibility()
             hasMail = false
         end
         _customIndicators.mail:SetShown(hasMail)
+        SyncMailPulse(hasMail, mp)
     end
     if _customIndicators.crafting then
         local blizCraft = indicator and indicator.CraftingOrderFrame

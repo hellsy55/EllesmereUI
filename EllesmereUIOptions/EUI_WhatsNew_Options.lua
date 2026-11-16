@@ -5,7 +5,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 -- host are reset and dressed again by the next build instead of made anew;
 -- elsewhere this is CreateFrame.
 local CreateFrame = EllesmereUI._Pool.CreateFrame
-local PoolKeep, PoolGen = EllesmereUI._Pool.Keep, EllesmereUI._Pool.Gen
+local PoolKeep, PoolGen, PoolKept = EllesmereUI._Pool.Keep, EllesmereUI._Pool.Gen, EllesmereUI._Pool.Kept
 
 -- An accent-coloured piece repaints itself (paint(r, g, b)) when the accent
 -- changes. Keyed by the piece: the page pool forgets the entry when it resets
@@ -649,13 +649,17 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
 
     patchSearchIndex = GetPatchSearchIndex()
 
-    -- A dedicated entry field, sharing its index and navigation with the
-    -- suite-wide search while keeping its own popup and keyboard controls.
-    local SEARCH_W, SEARCH_H = 230, 29
-    local searchFrame = CreateFrame("Frame", nil, parent)
+    -- Use the same header slot as the other modules' search fields while
+    -- preserving the Patch Notes-specific results and keyboard navigation.
+    -- The kept root reuses its children across page rebuilds; the panel shell
+    -- hides it when another module is selected.
+    local tabBar = EllesmereUI._tabBar
+    local SEARCH_W, SEARCH_H = 210, 28
+    local searchFrame = PoolKept(tabBar, "PatchNotesSearch", "Frame", tabBar)
     PP.Size(searchFrame, SEARCH_W, SEARCH_H)
-    PP.Point(searchFrame, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 29)
-    searchFrame:SetFrameLevel(parent:GetFrameLevel() + 9)
+    PP.Point(searchFrame, "RIGHT", tabBar, "RIGHT", -10, 2)
+    searchFrame:SetFrameLevel(tabBar:GetFrameLevel() + 2)
+    tabBar._patchNotesSearchFrame = searchFrame
     local searchBg = searchFrame:CreateTexture(nil, "BACKGROUND")
     searchBg:SetAllPoints()
     searchBg:SetColorTexture(EllesmereUI.SL_INPUT_R, EllesmereUI.SL_INPUT_G,
@@ -676,7 +680,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     edit:SetMaxLetters(100)
     local placeholder = MakeFont(searchFrame, 12, nil, 1, 1, 1, 0.35)
     PP.Point(placeholder, "LEFT", searchFrame, "LEFT", 29, 0)
-    placeholder:SetText(EllesmereUI.L("Patch Notes"))
+    placeholder:SetText("Search Patch Notes")
     local clear = CreateFrame("Button", nil, searchFrame)
     PP.Size(clear, 20, 20)
     PP.Point(clear, "RIGHT", searchFrame, "RIGHT", -4, 0)
@@ -686,7 +690,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     PP.Point(clearLabel, "CENTER", clear, "CENTER", 0, 0)
     clearLabel:SetText("x")
 
-    local popup = CreateFrame("Frame", nil, parent)
+    local popup = CreateFrame("Frame", nil, searchFrame)
     PP.Size(popup, 390, 8 + PATCH_SEARCH_ROWS * PATCH_SEARCH_ROW_STEP)
     PP.Point(popup, "TOPRIGHT", searchFrame, "BOTTOMRIGHT", 0, -5)
     popup:SetFrameLevel(searchFrame:GetFrameLevel() + 3)
@@ -872,15 +876,17 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     end)
     clear:SetScript("OnEnter", function() clearLabel:SetAlpha(1) end)
     clear:SetScript("OnLeave", function() clearLabel:SetAlpha(0.45) end)
+    tabBar._patchNotesSearchBox = edit
     edit:SetText(patchSearchQuery)
+    searchFrame:Show()
+    if tabBar._updateTabLayout then tabBar._updateTabLayout() end
 
-    -- Keep the helper copy left-aligned under the page title. The reminder now
-    -- takes the top-right slot and the dedicated patch-note search moves below it.
-    y = y - 18
+    -- Match the upstream Patch Notes layout: the hint stays centered above
+    -- the cards, and the reminder stays on the same row at the right.
+    y = y - 20
     local hint = MakeFont(parent, 14, nil, 1, 1, 1, 0.5)
-    PP.Point(hint, "TOPLEFT", parent, "TOPLEFT", PAD, y)
-    hint:SetWidth(math.max(180, totalW - SEARCH_W - 16))
-    hint:SetJustifyH("LEFT")
+    PP.Point(hint, "TOP", parent, "TOP", 0, y)
+    hint:SetJustifyH("CENTER")
     hint:SetText (EllesmereUI.L("Click any new feature to go directly to the setting"))
 
     -- "New Patch Reminder Dot" opt-out for the pulsing sidebar dot shown when the account version increases (Patch Notes button in EllesmereUI.lua).
@@ -903,7 +909,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         PP.Point(lbl, "LEFT", box, "RIGHT", 7, 0)
         lbl:SetText(EllesmereUI.L("New Patch Reminder Dot"))
         row:SetSize(BOX + 10 + (lbl:GetStringWidth() or 130), 20)
-        PP.Point(row, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 5)
+        PP.Point(row, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y + 2)
         local function Paint()
             local on = not (EllesmereUIDB and EllesmereUIDB.patchDotDisabled)
             check:SetShown(on)
@@ -932,10 +938,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         end)
     end
 
-    searchFrame:ClearAllPoints()
-    PP.Point(searchFrame, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 29)
-
-    y = y - math.max(64, math.ceil(hint:GetStringHeight() or 14) + 40)
+    y = y - math.ceil(hint:GetStringHeight() or 14) - 20
 
     -- A patch card's content sits inset from the card's edges.
     local INSET = 16

@@ -1317,46 +1317,81 @@ initFrame:SetScript("OnEvent", function(self)
                 local at = m and m[info.positionKey]
                 return not m or not POSITION_CORNERS[at]
             end
+            local rows = {
+                { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
+                  disabled = OffsetDisabled,
+                  disabledTooltip = "Choose a minimap corner to adjust X/Y offsets.",
+                  rawTooltip = true,
+                  get = function() local m = MinimapDB(); return m and m[info.xKey] or 0 end,
+                  set = function(v)
+                      if OffsetDisabled() then return end
+                      local m = MinimapDB(); if m then m[info.xKey] = v; RefreshMinimap() end
+                  end },
+                { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
+                  disabled = OffsetDisabled,
+                  disabledTooltip = "Choose a minimap corner to adjust X/Y offsets.",
+                  rawTooltip = true,
+                  get = function() local m = MinimapDB(); return m and m[info.yKey] or 0 end,
+                  set = function(v)
+                      if OffsetDisabled() then return end
+                      local m = MinimapDB(); if m then m[info.yKey] = v; RefreshMinimap() end
+                  end },
+                { type = "toggle", label = "Show on Mouseover",
+                  tooltip = "Only show this Blizzard element while the mouse is over the minimap. Mail, Crafting Order, and Difficulty still require their normal game conditions.",
+                  get = function()
+                      local m = MinimapDB()
+                      local v = m and m.blizzardElementMouseover and m.blizzardElementMouseover[info.key]
+                      if v == nil then return info.key == "zoom" end
+                      return v == true
+                  end,
+                  set = function(v)
+                      local m = MinimapDB(); if not m then return end
+                      m.blizzardElementMouseover = m.blizzardElementMouseover or {}
+                      m.blizzardElementMouseover[info.key] = v and true or false
+                      RefreshMinimap()
+                  end },
+            }
+            if info.key == "mail" then
+                rows[#rows + 1] = {
+                    type = "toggle", label = "Blink on New Mail",
+                    tooltip = "Blink the minimap mail icon when new mail becomes available.",
+                    get = function()
+                        local m = MinimapDB()
+                        return m and m.mailBlinkEnabled == true
+                    end,
+                    set = function(v)
+                        local m = MinimapDB(); if not m then return end
+                        m.mailBlinkEnabled = v and true or false
+                        RefreshMinimap()
+                    end,
+                }
+                rows[#rows + 1] = {
+                    type = "slider", label = "Blink Seconds (61 = Forever)",
+                    min = 5, max = 61, step = 1,
+                    tooltip = "Set 5 to 60 seconds, or move past 60 (61) to blink indefinitely until the mail is cleared.",
+                    disabled = function()
+                        local m = MinimapDB()
+                        return not m or m.mailBlinkEnabled ~= true
+                    end,
+                    disabledTooltip = "Enable Blink on New Mail first.",
+                    get = function()
+                        local m = MinimapDB()
+                        local v = m and tonumber(m.mailBlinkSeconds) or 10
+                        return math.max(5, math.min(61, math.floor(v)))
+                    end,
+                    set = function(v)
+                        local m = MinimapDB(); if not m then return end
+                        m.mailBlinkSeconds = math.max(5, math.min(61, math.floor(v)))
+                    end,
+                }
+            end
             EllesmereUI.BuildInlineCog(rgn, { icon = EllesmereUI.DIRECTIONS_ICON,
                 disabled = IsDisabled,
                 disabledTooltip = function()
                     return info.name .. " in Show Blizzard Elements"
                 end,
                 title = info.name .. " Position",
-                rows = {
-                    { type = "slider", label = "X Offset", min = -100, max = 100, step = 1,
-                      disabled = OffsetDisabled,
-                      disabledTooltip = "Choose a minimap corner to adjust X/Y offsets.",
-                      rawTooltip = true,
-                      get = function() local m = MinimapDB(); return m and m[info.xKey] or 0 end,
-                      set = function(v)
-                          if OffsetDisabled() then return end
-                          local m = MinimapDB(); if m then m[info.xKey] = v; RefreshMinimap() end
-                      end },
-                    { type = "slider", label = "Y Offset", min = -500, max = 500, step = 1,
-                      disabled = OffsetDisabled,
-                      disabledTooltip = "Choose a minimap corner to adjust X/Y offsets.",
-                      rawTooltip = true,
-                      get = function() local m = MinimapDB(); return m and m[info.yKey] or 0 end,
-                      set = function(v)
-                          if OffsetDisabled() then return end
-                          local m = MinimapDB(); if m then m[info.yKey] = v; RefreshMinimap() end
-                      end },
-                    { type = "toggle", label = "Show on Mouseover",
-                      tooltip = "Only show this Blizzard element while the mouse is over the minimap. Mail, Crafting Order, and Difficulty still require their normal game conditions.",
-                      get = function()
-                          local m = MinimapDB()
-                          local v = m and m.blizzardElementMouseover and m.blizzardElementMouseover[info.key]
-                          if v == nil then return info.key == "zoom" end
-                          return v == true
-                      end,
-                      set = function(v)
-                          local m = MinimapDB(); if not m then return end
-                          m.blizzardElementMouseover = m.blizzardElementMouseover or {}
-                          m.blizzardElementMouseover[info.key] = v and true or false
-                          RefreshMinimap()
-                      end },
-                },
+                rows = rows,
             })
             if EllesmereUI._prebuilding then return end
             -- Native EUI preview glyph, sorted left of the direction cog.
