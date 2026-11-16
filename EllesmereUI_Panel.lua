@@ -1490,8 +1490,10 @@ local function BuildSidebar()
         -- (EllesmereUI_GlobalSearch.lua) lists matches without reshuffling the nav.
     end)
 
-    -- Addon scroll area sits below the search bar
-    local ADDON_NAV_TOP = ORIG_ADDON_NAV_TOP - SB_TOTAL
+    -- Reserve a short strip below Search Features for the scroll-up arrow.
+    -- Keep the viewport bottom fixed so the lower navigation is unaffected.
+    local ADDON_UP_ARROW_RESERVE = 22
+    local ADDON_NAV_TOP = ORIG_ADDON_NAV_TOP - SB_TOTAL - ADDON_UP_ARROW_RESERVE
 
     -----------------------------------------------------------------------
     --  Scrollable addon nav container
@@ -1502,7 +1504,8 @@ local function BuildSidebar()
     -- +30 = 20px viewport bonus plus 10px offsetting the SB_TOP_PAD bump, so growing the
     -- search-bar padding cannot shrink the viewport. ARROW_RESERVE = strip for the arrow.
     local ADDON_ARROW_RESERVE   = 24
-    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30 - ADDON_ARROW_RESERVE
+    local ADDON_SCROLL_H        = ADDON_VISIBLE_ROWS * NAV_ROW_H - SB_TOTAL + 30
+        - ADDON_ARROW_RESERVE - ADDON_UP_ARROW_RESERVE
     local ADDON_SCROLL_STEP     = 60   -- match the main content scroll
     local ADDON_SMOOTH_SPEED    = 12   -- match the main content scroll
 
@@ -1538,49 +1541,51 @@ local function BuildSidebar()
     addonThumb:SetWidth(3)
     addonThumb:SetHeight(40)
 
-    -- Scroll-to-bottom arrow below the viewport: dims at the bottom (or when the list
-    -- does not scroll), click animates down. OnClick is wired below, once the
-    -- smooth-scroll state locals exist. Alpha tiers live on the frame (ours to write).
-    local arrowBtn = CreateFrame("Button", nil, sidebar)
-    arrowBtn:SetSize(22, 19)
-    arrowBtn:SetPoint("TOP", addonScrollFrame, "BOTTOM", 0, -5)
-    arrowBtn:SetFrameLevel(sidebar:GetFrameLevel() + 5)
-    arrowBtn:SetHitRectInsets(-12, -12, -6, -8)
-    arrowBtn._aEnabled, arrowBtn._aDisabled, arrowBtn._aHover = 0.7, 0.2, 1.0
-    arrowBtn._atBottom = false
-    do
-        local t = arrowBtn:CreateTexture(nil, "ARTWORK")
-        t:SetTexture(ICONS_PATH .. "eui-arrow-down3.png")
-        t:SetAllPoints()
+    -- Both navigation arrows use the same art as the header's horizontal arrows.
+    -- The upper control lives directly below Search Features; the lower one
+    -- retains its existing location. Neither captures input at its endpoint.
+    local function ScrollArrow(texture, point, relative, relativePoint, y)
+        local button = CreateFrame("Button", nil, sidebar)
+        button:SetSize(22, 19)
+        button:SetPoint(point, relative, relativePoint, 0, y)
+        button:SetFrameLevel(sidebar:GetFrameLevel() + 5)
+        button:SetHitRectInsets(-12, -12, -5, -5)
+        local art = button:CreateTexture(nil, "ARTWORK")
+        art:SetTexture(ICONS_PATH .. texture)
+        art:SetAllPoints()
+        button:SetAlpha(0.7)
+        button:SetScript("OnEnter", function(self) self:SetAlpha(1) end)
+        button:SetScript("OnLeave", function(self) self:SetAlpha(0.7) end)
+        button:Hide()
+        return button
     end
-    arrowBtn:SetAlpha(arrowBtn._aEnabled)
-    arrowBtn:SetScript("OnEnter", function(self)
-        if not self._atBottom then self:SetAlpha(self._aHover) end
-    end)
-    arrowBtn:SetScript("OnLeave", function(self)
-        self:SetAlpha(self._atBottom and self._aDisabled or self._aEnabled)
-    end)
+    local upArrowBtn = ScrollArrow("eui-arrow-up3.png", "BOTTOM", addonScrollFrame, "TOP", 4)
+    local arrowBtn = ScrollArrow("eui-arrow-down3.png", "TOP", addonScrollFrame, "BOTTOM", -5)
+    EllesmereUI._addonScrollUpArrow = upArrowBtn
     EllesmereUI._addonScrollArrow = arrowBtn
 
+    -- Wheel and arrow navigation settle on whole effective pixels. Use that
+    -- same endpoint for arrow visibility; the raw ScrollFrame range may have
+    -- a fractional last pixel and otherwise keep the down arrow visible.
+    local function AddonMaxScroll()
+        local maximum = EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        local scale = addonScrollFrame:GetEffectiveScale()
+        if scale and scale > 0 then
+            return math.floor(maximum * scale + 0.000001) / scale
+        end
+        return maximum
+    end
+
     local function UpdateAddonThumb()
-        local maxScroll = EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        local maxScroll = AddonMaxScroll()
         -- A shorter list (a group collapsed) pulls the offset back into range.
         if (tonumber(addonScrollFrame:GetVerticalScroll()) or 0) > maxScroll then
             addonScrollFrame:SetVerticalScroll(math.max(0, maxScroll))
         end
-        -- Arrow state: dimmed when nothing is below. Runs before the no-scroll return.
-        do
-            local cur = tonumber(addonScrollFrame:GetVerticalScroll()) or 0
-            local atBottom = (maxScroll <= 0.5) or (cur >= maxScroll - 0.5)
-            arrowBtn._atBottom = atBottom
-            if atBottom then
-                arrowBtn:SetAlpha(arrowBtn._aDisabled)
-            elseif arrowBtn:IsMouseOver() then
-                arrowBtn:SetAlpha(arrowBtn._aHover)
-            else
-                arrowBtn:SetAlpha(arrowBtn._aEnabled)
-            end
-        end
+        -- Hide each arrow when no further content exists in its direction.
+        local cur = tonumber(addonScrollFrame:GetVerticalScroll()) or 0
+        upArrowBtn:SetShown(maxScroll > 0.5 and cur > 0.5)
+        arrowBtn:SetShown(maxScroll > 0.5 and cur < maxScroll - 0.5)
         if maxScroll <= 0 then
             addonTrack:Hide()
             return
@@ -1607,10 +1612,9 @@ local function BuildSidebar()
     -- positions and the rasterizer picks different pixels per frame: 1px scroll jitter.
     addonSmoothFrame:SetScript("OnUpdate", function(_, elapsed)
         local cur = addonScrollFrame:GetVerticalScroll()
-        local maxScroll = EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        local maxScroll = AddonMaxScroll()
         local scale = addonScrollFrame:GetEffectiveScale()
-        -- Snap max down to a pixel boundary so target can't exceed it.
-        maxScroll = math.floor(maxScroll * scale) / scale
+        -- The shared endpoint is already snapped to an effective pixel.
         addonScrollTarget = math.max(0, math.min(maxScroll, addonScrollTarget))
         local diff = addonScrollTarget - cur
         if math.abs(diff) < 0.3 then
@@ -1634,10 +1638,9 @@ local function BuildSidebar()
 
     addonScrollFrame:SetScript("OnMouseWheel", function(self, delta)
         if EllesmereUI._ShiftWheelScale(delta) then return end
-        local maxScroll = EllesmereUI.SafeScrollRange(self) or 0
+        local maxScroll = AddonMaxScroll()
         if maxScroll <= 0 then return end
         local scale = self:GetEffectiveScale()
-        maxScroll = math.floor(maxScroll * scale) / scale
         local base = addonIsSmoothing and addonScrollTarget or self:GetVerticalScroll()
         local target = math.max(0, math.min(maxScroll, base - delta * ADDON_SCROLL_STEP))
         -- Snap the resting target to a pixel boundary so settlement lands on an integer row offset.
@@ -1650,33 +1653,61 @@ local function BuildSidebar()
     end)
     addonScrollFrame:SetScript("OnScrollRangeChanged", UpdateAddonThumb)
     addonScrollFrame:HookScript("OnSizeChanged", UpdateAddonThumb)
-    -- Controller cursor: it scrolls the list itself to reach a row, so the thumb
-    -- follows (the lerp already paints its own frames).
-    if EllesmereUI.PadCP() then
-        addonScrollFrame:HookScript("OnVerticalScroll", function()
-            if not addonIsSmoothing and not addonTrack:GetScript("OnUpdate") then UpdateAddonThumb() end
-        end)
-    end
+    -- Keep arrows and thumb current after controller or other direct scrolls.
+    -- The animated wheel and track already repaint their own intermediate frames.
+    addonScrollFrame:HookScript("OnVerticalScroll", function()
+        if not addonIsSmoothing and not addonTrack:GetScript("OnUpdate") then UpdateAddonThumb() end
+    end)
 
-    -- Arrow click: smooth-animate to the bottom, reusing the wheel's scroll state.
-    arrowBtn:SetScript("OnClick", function()
-        local maxScroll = EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+    -- Click either arrow to move smoothly to that endpoint.
+    local function ScrollToEnd(bottom)
+        local maxScroll = AddonMaxScroll()
         if maxScroll <= 0 then return end
-        local scale = addonScrollFrame:GetEffectiveScale()
-        maxScroll = math.floor(maxScroll * scale) / scale
-        addonScrollTarget = maxScroll
+        addonScrollTarget = bottom and maxScroll or 0
         if not addonIsSmoothing then
             addonIsSmoothing = true
             addonSmoothFrame:Show()
         end
-    end)
+    end
+    upArrowBtn:SetScript("OnClick", function() ScrollToEnd(false) end)
+    arrowBtn:SetScript("OnClick", function() ScrollToEnd(true) end)
+
+    -- A content-option click can bring an entirely clipped selected module back
+    -- into view. Manual sidebar wheel/arrow/track navigation stays untouched.
+    EUI_NS.RestoreSelectedSidebarOnOptionClick = function()
+        local btn = sidebarButtons[activeModule]
+        if not btn or not btn:IsShown() or not addonScrollFrame:IsShown() then return end
+        local parent = btn:GetParent()
+        while parent and parent ~= addonScrollChild do parent = parent:GetParent() end
+        if parent ~= addonScrollChild then return end  -- fixed top-level pages
+        local top, bottom = btn:GetTop(), btn:GetBottom()
+        local viewTop, viewBottom = addonScrollFrame:GetTop(), addonScrollFrame:GetBottom()
+        if not (top and bottom and viewTop and viewBottom) then return end
+        local cur = addonScrollFrame:GetVerticalScroll()
+        local target
+        if bottom >= viewTop then
+            target = cur - (top - viewTop) - 4
+        elseif top <= viewBottom then
+            target = cur + (viewBottom - bottom) + 4
+        else
+            return  -- at least part of the selection is visible
+        end
+        local scale = addonScrollFrame:GetEffectiveScale()
+        target = math.max(0, math.min(AddonMaxScroll(), target))
+        if scale and scale > 0 then
+            target = math.floor(target * scale + 0.5) / scale
+        end
+        addonScrollTarget = math.max(0, math.min(AddonMaxScroll(), target))
+        addonIsSmoothing = true
+        addonSmoothFrame:Show()
+    end
 
     -- Click/drag the scrollbar track: a click jumps to that position, holding drags.
     -- The visible track is 3px, so a wider invisible hit rect is added.
     addonTrack:EnableMouse(true)
     addonTrack:SetHitRectInsets(-8, -2, 0, 0)
     local function _scrollToCursor()
-        local maxScroll = EllesmereUI.SafeScrollRange(addonScrollFrame) or 0
+        local maxScroll = AddonMaxScroll()
         if maxScroll <= 0 then return end
         local trackH = addonTrack:GetHeight()
         local thumbH = addonThumb:GetHeight()
@@ -2534,6 +2565,8 @@ local function BuildContent()
     scrollHitArea:RegisterForDrag("LeftButton")
     scrollHitArea:SetScript("OnDragStart", function() end)
     scrollHitArea:SetScript("OnDragStop", function() end)
+    scrollFrame._optionScrollTrack = scrollTrack
+    scrollFrame._optionScrollHitArea = scrollHitArea
 
     local thumbTex = SolidTex(scrollThumb, "ARTWORK", 1, 1, 1, 0.27)
     thumbTex:SetAllPoints()
@@ -3299,6 +3332,7 @@ local function CreateMainFrame()
     BuildSidebar()
     local rightW, rightX = BuildContent()
     BuildFooter(rightW, rightX)
+    EUI_NS.SetupOptionClickNavigation()
 
     return mainFrame
 end
@@ -3348,7 +3382,6 @@ local TAB_ARROW_W = 22
 -- inside the header's left edge, even after tabs have been scrolled left.
 -- Reserve this inset only while the left arrow is actually visible.
 local TAB_LEFT_SAFE_INSET = CONTENT_PAD
-local TAB_SCROLL_STEP = 130
 local TAB_SCROLL_EPSILON = 0.5
 
 local function SetTabOffset(value)
@@ -3391,25 +3424,75 @@ local function SetTabOffset(value)
     end
 end
 
+-- Match the sidebar's 12x eased scroll and effective-pixel snapping.  The
+-- frame updates only while a transition is active; new wheel input extends
+-- the pending target rather than interrupting the current animation.
+local function SmoothTabTo(value)
+    if not tabBar or not tabBar._tabOverflow then return end
+    local maximum = tabBar._tabMaxOffset or 0
+    local scale = tabBar:GetEffectiveScale()
+    local target = math.max(0, math.min(maximum, value or 0))
+    if scale and scale > 0 then
+        target = math.min(maximum, math.floor(target * scale + 0.5) / scale)
+    end
+    tabBar._tabScrollTarget = target
+    if not tabBar._tabSmoothFrame then
+        local animator = CreateFrame("Frame")
+        animator:Hide()
+        animator:SetScript("OnUpdate", function(self, elapsed)
+            if not tabBar or not tabBar:IsShown() or not tabBar._tabOverflow then
+                self:Hide()
+                return
+            end
+            local maxOffset = tabBar._tabMaxOffset or 0
+            local cur = tabBar._tabOffset or 0
+            local dest = math.max(0, math.min(maxOffset, tabBar._tabScrollTarget or 0))
+            local diff = dest - cur
+            if math.abs(diff) < 0.3 then
+                SetTabOffset(dest)
+                self:Hide()
+                return
+            end
+            local nextOffset = cur + diff * math.min(1, 12 * elapsed)
+            local pixelScale = tabBar:GetEffectiveScale()
+            if pixelScale and pixelScale > 0 then
+                if diff > 0 then
+                    nextOffset = math.ceil(nextOffset * pixelScale) / pixelScale
+                else
+                    nextOffset = math.floor(nextOffset * pixelScale) / pixelScale
+                end
+            end
+            SetTabOffset(nextOffset)
+        end)
+        tabBar._tabSmoothFrame = animator
+    end
+    tabBar._tabSmoothFrame:Show()
+end
+
 local function ScrollTabWheel(_, delta)
     if not tabBar or not tabBar._tabOverflow then return end
-    SetTabOffset((tabBar._tabOffset or 0) - delta * 90)
+    local moving = tabBar._tabSmoothFrame and tabBar._tabSmoothFrame:IsShown()
+    local base = moving and tabBar._tabScrollTarget or (tabBar._tabOffset or 0)
+    SmoothTabTo(base - delta * 90)
 end
 
 local function EnsureTabScrollControls()
     if tabBar._tabLeftArrow then return end
-    local function Arrow(glyph, direction)
+    local function Arrow(texture, direction)
         local btn = CreateFrame("Button", nil, tabBar)
         btn:SetSize(TAB_ARROW_W, TAB_BAR_H)
         btn:SetFrameLevel(tabBar:GetFrameLevel() + 4)
-        local label = MakeFont(btn, 19, nil, 1, 1, 1, 0.9)
-        label:SetText(glyph)
-        label:SetPoint("CENTER", 0, 0)
-        btn:SetScript("OnEnter", function() label:SetTextColor(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1) end)
-        btn:SetScript("OnLeave", function() label:SetTextColor(1, 1, 1, 0.9) end)
+        local art = btn:CreateTexture(nil, "ARTWORK")
+        art:SetTexture(ICONS_PATH .. texture)
+        art:SetSize(19, 19)
+        art:SetPoint("CENTER", 0, 0)
+        art:SetAlpha(0.7)
+        btn:SetScript("OnEnter", function() art:SetAlpha(1) end)
+        btn:SetScript("OnLeave", function() art:SetAlpha(0.7) end)
         btn:SetScript("OnClick", function()
             if tabBar._tabOverflow then
-                SetTabOffset((tabBar._tabOffset or 0) + TAB_SCROLL_STEP * direction)
+                -- One click reaches the endpoint with the sidebar's smooth motion.
+                SmoothTabTo(direction < 0 and 0 or (tabBar._tabMaxOffset or 0))
             end
         end)
         btn:SetScript("OnMouseWheel", ScrollTabWheel)
@@ -3417,8 +3500,8 @@ local function EnsureTabScrollControls()
         btn:Hide()
         return btn
     end
-    tabBar._tabLeftArrow = Arrow("<", -1)
-    tabBar._tabRightArrow = Arrow(">", 1)
+    tabBar._tabLeftArrow = Arrow("eui-arrow-left.png", -1)
+    tabBar._tabRightArrow = Arrow("eui-arrow-right.png", 1)
 end
 
 local function LayoutTabOverflow()
@@ -3429,7 +3512,8 @@ local function LayoutTabOverflow()
         -- Only real tabs count: trailing padding must not create fake overflow.
         contentWidth = math.max(contentWidth, (b._tabX or 0) + b:GetWidth())
     end
-    local searchVisible = tabBar._searchFrame and tabBar._searchFrame:IsShown()
+    local searchVisible = (tabBar._searchFrame and tabBar._searchFrame:IsShown())
+        or (tabBar._patchNotesSearchFrame and tabBar._patchNotesSearchFrame:IsShown())
     local specVisible = tabBar._specOvBtn and tabBar._specOvBtn:IsShown()
     local reserved = searchVisible and (228 + (specVisible and 36 or 0)) or 12
     local space = math.max(100, tabBar:GetWidth() - reserved)
@@ -3448,11 +3532,19 @@ local function LayoutTabOverflow()
     if overflow then EnsureTabScrollControls() end
     tabBar._tabViewport:EnableMouseWheel(overflow)
     for _, b in ipairs(buttons) do b:EnableMouseWheel(overflow) end
+    if not overflow and tabBar._tabSmoothFrame then
+        tabBar._tabSmoothFrame:Hide()
+        tabBar._tabScrollTarget = 0
+    elseif overflow and tabBar._tabSmoothFrame and tabBar._tabSmoothFrame:IsShown() then
+        tabBar._tabScrollTarget = math.min(tabBar._tabScrollTarget or 0, tabBar._tabMaxOffset)
+    end
     SetTabOffset(overflow and (tabBar._tabOffset or 0) or 0)
 end
 
 local function RevealSelectedTab()
     if not tabBar or not tabBar._tabOverflow then return end
+    -- Selecting a tab explicitly takes precedence over a wheel/arrow animation.
+    if tabBar._tabSmoothFrame then tabBar._tabSmoothFrame:Hide() end
     for _, b in ipairs(tabBar._tabButtons) do
         if b._name == activePage then
             -- The available width changes by one arrow at the endpoints.
@@ -3474,7 +3566,30 @@ local function RevealSelectedTab()
     end
 end
 
+-- Only an option click (not a wheel movement, mouse motion or blank-page click)
+-- can bring a fully hidden selected tab back using the header's smooth scroll.
+function EUI_NS.RestoreSelectedTabOnOptionClick()
+    if not tabBar or not tabBar._tabOverflow then return end
+    local offset = tabBar._tabOffset or 0
+    local visibleWidth = tabBar._tabViewport:GetWidth()
+    for _, btn in ipairs(tabBar._tabButtons) do
+        if btn._name == activePage then
+            local left, right = btn._tabX, btn._tabX + btn:GetWidth()
+            if right <= offset + TAB_SCROLL_EPSILON then
+                SmoothTabTo(left - 4)
+            elseif left >= offset + visibleWidth - TAB_SCROLL_EPSILON then
+                -- The left arrow can narrow the viewport as the animation runs.
+                SmoothTabTo(right - visibleWidth + TAB_LEFT_SAFE_INSET + TAB_ARROW_W + 4)
+            end
+            return
+        end
+    end
+end
+
 ClearTabs = function()
+    -- A module switch must not let the old module's animation move new tabs.
+    if tabBar._tabSmoothFrame then tabBar._tabSmoothFrame:Hide() end
+    tabBar._tabScrollTarget = 0
     for _, btn in ipairs(tabBar._tabButtons) do btn:Hide() end
     wipe(tabBar._tabButtons)
     tabBar._tabOffset = 0
@@ -3684,7 +3799,7 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
         end
         -- Conditional Overrides has no toolbar button: its cards render as a second section in the spec popup.
     end
-    tabBar._searchFrame:Show()
+    tabBar._searchFrame:SetShown(activeModule ~= "_EUIPatchNotes")
     tabBar._tabViewport:SetScript("OnMouseWheel", ScrollTabWheel)
     tabBar._updateTabLayout = LayoutTabOverflow
     -- Clear search text when tabs are rebuilt (module switch)
@@ -3725,6 +3840,52 @@ UpdateTabHighlight = function(selectedName)
             btn._label:SetTextColor(TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
             btn._underline:Hide()
         end
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Restore selected navigation only after clicks on active page controls.
+--  This observer exists only while the options window is open. The ancestor
+--  walk ignores blank content and the content scrollbar's drag targets.
+-------------------------------------------------------------------------------
+do
+    function EUI_NS.SetupOptionClickNavigation()
+        local watcher = CreateFrame("Frame")
+        watcher:SetScript("OnEvent", function()
+            if not mainFrame:IsShown() or EllesmereUI._panelCollapsed then return end
+            if not (scrollFrame and activeModule and activePage) then return end
+            if not (scrollFrame:IsMouseOver() or (contentHeaderFrame:IsShown()
+                and contentHeaderFrame:IsMouseOver())) then return end
+            local foci = GetMouseFoci and GetMouseFoci()
+            local focus = foci and foci[1]
+            local isControl = false
+            while focus do
+                if focus == scrollFrame._optionScrollTrack
+                    or focus == scrollFrame._optionScrollHitArea then return end
+                if focus == scrollFrame or focus == contentHeaderFrame then
+                    if not isControl then return end
+                    if EUI_NS.RestoreSelectedSidebarOnOptionClick then
+                        EUI_NS.RestoreSelectedSidebarOnOptionClick()
+                    end
+                    EUI_NS.RestoreSelectedTabOnOptionClick()
+                    return
+                end
+                if focus.IsObjectType and (focus:IsObjectType("Button")
+                    or focus:IsObjectType("EditBox") or focus:IsObjectType("Slider")) then
+                    isControl = true
+                elseif focus.GetScript and (focus:GetScript("OnMouseDown")
+                    or focus:GetScript("OnMouseUp")) then
+                    isControl = true
+                end
+                focus = focus.GetParent and focus:GetParent()
+            end
+        end)
+        mainFrame:HookScript("OnShow", function()
+            watcher:RegisterEvent("GLOBAL_MOUSE_DOWN")
+        end)
+        mainFrame:HookScript("OnHide", function()
+            watcher:UnregisterEvent("GLOBAL_MOUSE_DOWN")
+        end)
     end
 end
 
@@ -5421,7 +5582,15 @@ function EllesmereUI:SelectModule(folderName)
     if tabBar then
         local core = config._euiCore == true
         if tabBar._searchFrame then
-            tabBar._searchFrame:SetShown(core or folderName == EllesmereUI.GLOBAL_KEY)
+            tabBar._searchFrame:SetShown((core or folderName == EllesmereUI.GLOBAL_KEY)
+                and folderName ~= "_EUIPatchNotes")
+        end
+        if tabBar._patchNotesSearchFrame then
+            local isPatchNotes = folderName == "_EUIPatchNotes"
+            if not isPatchNotes and tabBar._patchNotesSearchBox then
+                tabBar._patchNotesSearchBox:ClearFocus()
+            end
+            tabBar._patchNotesSearchFrame:SetShown(isPatchNotes)
         end
         if tabBar._specOvBtn then
             tabBar._specOvBtn:SetShown(core)
