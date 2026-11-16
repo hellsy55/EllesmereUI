@@ -29,13 +29,13 @@ local function CleanNickname(v)
     return v
 end
 
-function ns.ResolveNicknameForUnit(unit)
+function ns.ResolveNicknameForUnit(unit, ignoreRaidGroups)
     local name, surname = UnitName(unit)
     if not name then return nil end
     if not UnitIsPlayer(unit) then return name end
 
     local fallback = EllesmereUI.WithSurname(name, surname)
-    if EllesmereUI.UseRaidGroupsNicknameSource() then
+    if not ignoreRaidGroups and EllesmereUI.UseRaidGroupsNicknameSource() then
         return (EllesmereUI.RaidGroupsNicknameForUnit
             and EllesmereUI.RaidGroupsNicknameForUnit(unit)) or fallback
     end
@@ -92,11 +92,11 @@ end
 -- Returns nil unless a provider actually changed the visible character name.
 -- Useful where the existing non-nickname label (for example a Battle.net
 -- account name) must remain intact when no nickname is available.
-function ns.GetNicknameForUnit(unit)
+function ns.GetNicknameForUnit(unit, ignoreRaidGroups)
     local name, surname = UnitName(unit)
     if not name or (issecretvalue and issecretvalue(name)) then return nil end
     local fallback = EllesmereUI.WithSurname(name, surname)
-    local display = ns.ResolveNicknameForUnit(unit)
+    local display = ns.ResolveNicknameForUnit(unit, ignoreRaidGroups)
     display = CleanNickname(display)
     if not display or display == name or display == fallback then return nil end
     return display

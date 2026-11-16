@@ -999,12 +999,13 @@ local function UpdateNameOnlyText(nameFS)
     local mode = GetBelowNameMode()
     local isPlayer = UnitIsPlayer(unit)
 
-    local want
-    if ModeHasTitle(mode) and isPlayer then want = GetTitledName(unit) end
+    local nick=isPlayer and ns.NP_RaidGroupsName(unit)
+    local want=nick
+    if not want and ModeHasTitle(mode) and isPlayer then want = GetTitledName(unit) end
     if not want then want = EllesmereUI.WithSurname(UnitName(unit)) end
     if not want or (issecretvalue and issecretvalue(want)) then return end
-    -- The friendly Name Format, while one is saved (players only).
-    if isPlayer and FriendlyNameFormat() then
+    -- A saved nickname is a display label; only format ordinary names.
+    if isPlayer and not nick and FriendlyNameFormat() then
         want = FormatFriendlyName(unit, want, ModeHasTitle(mode))
     end
     -- Name Color's Custom colour (players only): round the name, inside the
@@ -1673,13 +1674,15 @@ function FriendlyFrame:UpdateName()
     local fmt = FriendlyNameFormat()
     local showLevel = ShowFriendlyLevel()
     local showGroup = ShowFriendlyGroupBrackets()
-    local isPlayer = (hasTitle or fmt or showLevel or showGroup) and UnitIsPlayer(unit)
-    local unitName
-    if hasTitle and isPlayer then
+    local isPlayer = (hasTitle or fmt or showLevel or showGroup
+        or EllesmereUI.UseRaidGroupsNicknameSource()) and UnitIsPlayer(unit)
+    local nick=isPlayer and ns.NP_RaidGroupsName(unit)
+    local unitName=nick
+    if not unitName and hasTitle and isPlayer then
         unitName = GetTitledName(unit)
     end
     if not unitName then unitName = EllesmereUI.WithSurname(UnitName(unit)) end
-    if fmt and isPlayer and unitName then
+    if fmt and isPlayer and not nick and unitName then
         unitName = FormatFriendlyName(unit, unitName, hasTitle)
     end
     local gKind = (showGroup and isPlayer) and GetUnitGroupBracketKind(unit) or nil
@@ -2153,6 +2156,18 @@ end
 
 -- Live-apply a Subtitle Text setting change (mode / size / color) from the
 -- options panel, in whichever friendly mode is active.
+-- Event-driven refresh for both private friendly-plate mode and Blizzard
+-- friendly name-only mode (GetNamePlates omits the latter).
+function ns.RefreshRaidGroupsNames()
+    for _,plate in pairs(ns.plates or {}) do
+        if plate.UpdateName then plate:UpdateName() end
+    end
+    for _,plate in pairs(friendlyPlates) do
+        if plate.UpdateName then plate:UpdateName() end
+    end
+    SweepPlayerSubText()
+end
+
 function ns.RefreshFriendlyBelowName()
     -- Size / font / slug: the subtitle family on every built sub text.
     ApplySubtitleFont()

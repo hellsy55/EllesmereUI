@@ -621,17 +621,9 @@ end
 local function ResolveDisplayName(unit, applyCap, s, fmt)
     local name, surname = UnitName(unit)
     name = name or ""
-    -- Per-module toggle: provider settings remain untouched, but Raid Frames can
-    -- independently opt out and always show the character name. Default ON keeps
-    -- existing profiles behaving exactly as they did before this toggle existed.
-    if db and db.profile and db.profile.showNicknames == false then
-        if Ambiguate then name = Ambiguate(name, "short") end
-        local raw = EllesmereUI.WithSurname(name, surname)
-        if ns.RF_FormatName then raw = ns.RF_FormatName(raw, s, fmt, unit) end
-        if applyCap then raw = ns.CapName(raw, s) end
-        return raw
-    end
     local display
+    -- The suite-wide Raid Groups source takes precedence over external
+    -- provider switches, including this module's per-provider opt-out.
     if EllesmereUI.UseRaidGroupsNicknameSource() then
         display=EllesmereUI.RaidGroupsNicknameForUnit
             and EllesmereUI.RaidGroupsNicknameForUnit(unit)
@@ -647,8 +639,20 @@ local function ResolveDisplayName(unit, applyCap, s, fmt)
         if applyCap then display=ns.CapName(display,s) end
         -- Append before the FontString is colored, so the marker inherits its
         -- existing class/custom/accent color on party, raid and Top Name Bars.
-        if differs then display=display.."*" end
+        local own=UnitIsUnit(unit,"player")
+        if differs and not (issecretvalue and issecretvalue(own)) and not own then
+            display=display.."*"
+        end
         return display
+    end
+    -- This opt-out still controls the normal external providers when the
+    -- suite-wide Raid Groups source is disabled.
+    if db and db.profile and db.profile.showNicknames == false then
+        if Ambiguate then name = Ambiguate(name, "short") end
+        local raw = EllesmereUI.WithSurname(name, surname)
+        if ns.RF_FormatName then raw = ns.RF_FormatName(raw, s, fmt, unit) end
+        if applyCap then raw = ns.CapName(raw, s) end
+        return raw
     end
     if NSAPI and NSAPI.GetName then
         local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")

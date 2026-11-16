@@ -672,18 +672,32 @@ function EllesmereUI.RaidGroupsNicknamesMatch(a,b)
     if not SafeText(a) or not SafeText(b) then return false end
     return RGStyle.UTF8Casefold(Trim(a))==RGStyle.UTF8Casefold(Trim(b))
 end
-function EllesmereUI.RaidGroupsNicknameForUnit(unit)
-    if not data or not unit then return nil end
+-- Resolve a player's persistent Character-Realm identity once for both
+-- display and party/raid learning. Do not inspect secret unit information.
+function RGStyle.UnitIdentity(unit)
+    if not unit then return nil end
     local player=UnitIsPlayer and UnitIsPlayer(unit)
     if (issecretvalue and issecretvalue(player)) or player == false then return nil end
     local name,realm
     if UnitFullName then name,realm=UnitFullName(unit) end
     if not SafeText(name) then name,realm=UnitName(unit) end
     if not SafeText(name) then return nil end
+    -- Some unit tokens omit the realm in UnitFullName while UnitName still
+    -- supplies it. Never resolve a cross-realm player against our home realm.
+    if not EllesmereUI.IS_FOREVER and (not SafeText(realm) or realm=="") then
+        local unitName,unitRealm=UnitName(unit)
+        if SafeText(unitRealm) and unitRealm~="" then realm=unitRealm end
+        if SafeText(unitName) and unitName:find("-",1,true) then name=unitName end
+    end
     if SafeText(realm) and realm~="" and not name:find("-",1,true) then
         name=name.."-"..realm:gsub("%s+","")
     end
-    return EllesmereUI.RaidGroupsNicknameForName(name)
+    return name
+end
+function EllesmereUI.RaidGroupsNicknameForUnit(unit)
+    if not data then return nil end
+    local name=RGStyle.UnitIdentity(unit)
+    return name and EllesmereUI.RaidGroupsNicknameForName(name)
 end
 -- Repaint the nickname-bearing EUI surfaces without a reload. Only work when
 -- the local source is on; provider callbacks keep their current off-mode path.
@@ -694,6 +708,10 @@ function RGStyle.NotifyNicknameDisplays(force)
     if raid and raid.RefreshAllNames then raid.RefreshAllNames() end
     local unit=modules and modules["EllesmereUIUnitFrames"]
     if unit and unit.RefreshAllUnitNames then unit.RefreshAllUnitNames() end
+    local nameplates=modules and modules["EllesmereUINameplates"]
+    if nameplates and nameplates.RefreshRaidGroupsNames then nameplates.RefreshRaidGroupsNames() end
+    local meters=modules and modules["EllesmereUIDamageMeters"]
+    if meters and meters.RefreshMeter then meters.RefreshMeter() end
     if ns.RefreshRaidCheckNames then ns.RefreshRaidCheckNames() end
     if _G._EMT_StandaloneRefresh then _G._EMT_StandaloneRefresh() end
 end
@@ -734,7 +752,9 @@ end
 local function RememberFromUnit(unit, realName)
     if not Enabled("nicknameLearning") or not Enabled("nicknameRosterLearn")
         or not ns.GetNicknameForUnit or not data then return end
-    local ok, nick = pcall(ns.GetNicknameForUnit, unit)
+    -- Learning must read the provider even when display is pinned to the
+    -- saved Raid Groups list; otherwise missing characters never get learned.
+    local ok, nick = pcall(ns.GetNicknameForUnit, unit, true)
     if ok and nick and SafeText(nick) then StoreNickname(realName, nick, false, "Provider", false) end
 end
 -- Store class information only when a Blizzard roster supplies a verified
@@ -772,7 +792,19 @@ function RGStyle.LearnNicknameClasses()
 end
 local function Roster()
     rosterByKey, rosterSorted = {}, {}
-    if not IsInRaid() then return end
+    if not IsInRaid() then
+        -- Party groups and the local character need nickname learning too;
+        -- only the raid roster editor itself stays raid-only.
+        local partyCount=IsInGroup() and 4 or 0
+        for i=0,partyCount do
+            local unit=i==0 and "player" or ("party"..i)
+            if UnitExists(unit) then
+                local name=RGStyle.UnitIdentity(unit)
+                if name then RememberFromUnit(unit,name) end
+            end
+        end
+        return
+    end
     local count = GetNumGroupMembers() or 0
     for i = 1, SLOT_COUNT do
         local name, rank, group, _, _, class, _, online = GetRaidRosterInfo(i)
@@ -6709,6 +6741,11 @@ boot:SetScript("OnEvent",function(self)
     end)
     -- Current draft is intentionally session-local. Named setups are persisted.
     Roster()
+    -- Other modules may have painted names before this SavedVariables database
+    -- was initialized. Repaint once after all PLAYER_LOGIN listeners finish.
+    if EllesmereUI.UseRaidGroupsNicknameSource() then
+        C_Timer.After(0,RGStyle.NotifyNicknameDisplays)
+    end
 end)
 local events=CreateFrame("Frame")
 events:RegisterEvent("GROUP_ROSTER_UPDATE")
