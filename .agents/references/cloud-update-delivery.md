@@ -2,9 +2,12 @@
 
 Load this reference for a normal EUI update in confirmed Codex Cloud. Read it
 and [incremental ZIP delivery](incremental-zip-delivery.md) before the first
-modification of any installable target to capture its initial state. This is an
-additional delivery layer: it never replaces, changes, or bypasses
-[AGENTS.md](../../AGENTS.md) or the [update skill](../skills/eui-update/SKILL.md).
+modification of any installable target to capture its initial state. For normal
+Cloud updates, the incremental delivery reference supplies only the shared
+installer v1 manifest, safety and validation contracts. Its incremental ZIP
+and v2 commit ZIP rules apply to Local delivery and other workflows that
+explicitly require them. This delivery layer preserves
+[AGENTS.md](../../AGENTS.md) and the [update skill](../skills/eui-update/SKILL.md).
 Checkpoints, conflicts, approvals, merge semantics, libraries, and publication
 remain governed by the normal project workflow. Use the frozen `cloud`
 environment from the shared maintenance context. The physical installation
@@ -29,36 +32,45 @@ selected branch's initial state with its final state. In Both mode, capture both
 bases before any modification and validate each branch independently. Never mix
 Retail and PTR in one ZIP.
 
-## Incremental ZIPs
+## Complete installer ZIPs
 
-Apply the purpose selection, naming, delta, manifest and verification rules in
-[incremental ZIP delivery](incremental-zip-delivery.md). After the workflow
-completes, build separate `*_installer.zip` and `*_commit.zip` artifacts for each
-selected branch by default when both purposes have eligible operations. Honor
-explicit single-purpose requests. Use the complete cumulative net delta from
-each frozen base to its final state, omitting reverted changes. Skip each
-purpose with no eligible operations, including no-ops. A deletion-only delta
-is eligible.
+Deliver one complete installer ZIP for each selected branch with an eligible
+distributed delta. Use `EllesmereUI_<description>_installer.zip` for Retail and
+`EllesmereUI_<description>_PTR_installer.zip` for PTR. Normal Cloud updates
+produce no commit ZIPs. Git commits and pushes follow the normal workflow.
 
-- Installer paths are relative to `Interface/AddOns`. Compare the distributed
-  base and final trees using the maintained EUI packaging policy and helper.
-  Write the v1 ZIP comment manifest with runtime removals in
-  `installer_deleted_files`.
-- Commit paths are relative to the verified Git root. Write the v2 ZIP comment
-  manifest with Git removals in `deleted_files`, `file_protection` for every
-  operation, the exact target branch, the verified full Git base and the
-  required raw SHA-256 hashes. Include matching `config_protection` with
-  canonical hashes when the shared contract requires it.
+Compare each immutable base and final branch state under the maintained
+[snapshot packaging policy](../../.tools/install/README.md), with the
+[TOC policy](toc-compatibility.md) for that branch. Net distributed additions,
+byte changes and removals determine eligibility, runtime deletions and the
+functional summary. Deletion-only changes qualify. Skip no-ops and changes
+limited to operational files. Withhold delivery and report an invalid or empty
+final distribution.
 
-On Cloud Linux, use available compatible tools, such as native Git and Python 3
-standard-library ZIP, JSON and hashing support. Verify the same archive and
-manifest contracts independently, including exact inventory, CRC, paths,
-deletions, base and final hashes, and branch routing. The local Windows paths
-and PowerShell applicators are environment-specific. Report applicator and
-destination Git checks as inconclusive when they cannot be verified in Cloud.
-If the base, required protection or archive contract cannot be established,
-report the limitation and withhold the affected ZIP. Keep any independently
-validated artifact for the other purpose.
+Package every file in the validated final distribution, including unchanged
+runtime files, modules, assets and vendored libraries required for a clean
+installation. Apply the literal `.pkgmeta` ignores, moves and distribution
+exclusions. Keep addon folders as siblings directly under `Interface/AddOns`,
+with archive paths relative to that directory. Validate manifests and their
+file references, and preserve final file bytes. Exclude repository metadata,
+tooling, backups and nested archives.
+
+Store compact UTF-8 JSON in the native ZIP/EOCD comment using the installer
+contract in the incremental delivery reference: `schema_version: 1`,
+`repository: "EllesmereUI"`, an empty `deleted_files` array, and exact
+base-to-final distributed removals in `installer_deleted_files` (empty when
+none). Use only installer metadata and respect the 65,535-byte comment limit.
+
+Use compatible Cloud tools such as native Git and the Python 3 standard
+library. PowerShell is not required to generate the ZIP. The independent
+[packaging integration gate](packaging-integration.md) and its audit requirements
+still apply. Reopen each ZIP and verify CRC, exact inventory and SHA-256 against
+the full final distribution, EOCD schema, exact removals, structural and TOC
+compatibility, and Retail/PTR routing. Reject unsafe paths, links, case-folded
+duplicates, file/parent collisions and overlaps with removals. Report static
+contract checks separately from Windows applicator tests and mark unverified
+applicator or destination checks inconclusive. Withhold any ZIP whose base,
+distribution or archive contract cannot be verified.
 
 ## Update summary
 
@@ -88,10 +100,8 @@ Preserve normal Codex artifact delivery. After each final ZIP produced by a
 workflow loading this reference is complete and validated, upload that exact
 local file using the official Google Drive plugin/connector to `EUI`
 (`1h6YGWoHsGcxPwTyoGrfSYQFeGaur8tvb`) under `Codex Artifacts`. This shared rule
-applies to all final installer and commit ZIPs for Retail and PTR.
-Upload only validated ZIPs with eligible payload entries or manifest deletions.
-If none are produced, skip Drive delivery. Use the exact validated archives
-and keep deletion-only archives free of artificial payload entries.
+applies to all final installer ZIPs for Retail and PTR.
+If none are produced, skip Drive delivery.
 Do not introduce external tools, dependencies, manual OAuth, API keys, or secrets.
 
 After every upload, read the uploaded file's metadata again through the connector
@@ -118,9 +128,9 @@ separately, including when no ZIP was produced. Report in Portuguese:
   verified published commits, including any additional commits shown.
 - For each validated ZIP, give the actual artifact download link when
   available, filename, packaged file count, manifest deletion paths (or none),
-  and the verification status required by incremental ZIP delivery. Confirm
-  that it contains only the final net diff. If a ZIP was skipped or withheld,
-  report the purpose and reason.
+  and the installer verification status. Confirm that it contains the complete
+  final installable distribution. If a ZIP was skipped or withheld, report
+  the reason.
 - State that physical installation was skipped in Cloud.
 - For each ZIP with attempted Drive delivery: filename, local size, local SHA-256
   (reuse an existing hash or calculate it when inexpensive), `Google Drive: OK`

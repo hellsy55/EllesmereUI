@@ -27,6 +27,10 @@ Before any checkout or merge, compare ancestry. If the planned sync needs a new 
 
 After the single successful fetch, retain a compact per-sync record: source/destination refs and SHAs, ancestry, and incoming count. Only if incoming exists, add the merge base, changed paths/name-status, and overlap yes/no. `merge-base --is-ancestor` exit 0 proves ancestry, exit 1 means non-ancestry, and any other exit is an error; missing refs, failed fetches, and failed comparisons must never become no-op results. A no-op skips full integration diffs, semantic review, merge, and sync commits, but still validates manifests before publication and proceeds to the mode's remaining stages and checkpoints. A manifest repair follows the controlled correction path below. Refresh only facts affected by an actual mutation; do not fetch again without a specific reason that invalidates the snapshot.
 
+In confirmed Cloud, read [Cloud delivery](../../references/cloud-update-delivery.md)
+and capture the immutable bases of all selected delivery branches before any
+branch mutation.
+
 ## Sync A: Retail from upstream
 
 Immediately after fetch, before modifying any branch (including `main` or fast-forwarding Retail from origin), run `<python_runtime> .tools/release_target.py`. Read its JSON and freeze `release_target` to the returned full `release_target` SHA for this execution. The helper scans fetched `upstream/main` in topological order and selects the first commit whose subject begins with the case-insensitive word `release` (the project's subjects are `Release v<version>`). It checks subjects only, not commit bodies or tags, and verifies ancestry. On failure or no identifiable release, stop before any branch mutation, explain the error, and never fall back to upstream HEAD or a tag. Use the same frozen SHA in every Retail upstream decision, incoming range, merge, risk review, and library classification.
