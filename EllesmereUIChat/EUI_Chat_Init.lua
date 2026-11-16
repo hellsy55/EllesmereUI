@@ -431,6 +431,11 @@ initFrame:SetScript("OnEvent", function(self)
         local _idleMouseOver = false
         local SetMessageWake  -- with OnActiveMessage below
 
+        local function CombatWakeActive()
+            local wake = ECHAT.DB().idleFadeWake
+            return wake and wake.combat == true and InCombatLockdown()
+        end
+
         local function IsIdleApplicable()
             local cfg = ECHAT.DB()
             local vis = cfg.visibility or "always"
@@ -438,7 +443,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         local function StartIdleFade()
-            if ECHAT.DB().idleFadeEnabled == false then return end
+            if ECHAT.DB().idleFadeEnabled == false or CombatWakeActive() then return end
             if _idleFadeActive then return end
             SetIdleFadeActive(true)
             ECHAT.SetIdleFadeAlpha(GetIdleFadeAlpha())
@@ -468,16 +473,18 @@ initFrame:SetScript("OnEvent", function(self)
             CancelIdleFade()
             local cfg = ECHAT.DB()
             local on = IsIdleApplicable() and cfg.idleFadeEnabled ~= false
-            -- Chat lines wake the fade only while it can run: nothing per line otherwise.
-            SetMessageWake(on)
-            if not on then return end
+            -- Combat wake suspends idle fade for the entire combat, not just
+            -- the first delay. Chat messages need no fade observer meanwhile.
+            local suspended = on and CombatWakeActive()
+            SetMessageWake(on, not suspended)
+            if not on or suspended then return end
             local delay = cfg.idleFadeDelay or 15
             idleTimer = C_Timer.NewTimer(delay, StartIdleFade)
         end
 
         -- Visibility fully hid the chat: fade now and drop the leftover delay.
         function ECHAT.StartIdleFadeNow()
-            if not IsIdleApplicable() then return end
+            if not IsIdleApplicable() or CombatWakeActive() then return end
             if idleTimer then
                 idleTimer:Cancel()
                 idleTimer = nil
@@ -524,13 +531,18 @@ initFrame:SetScript("OnEvent", function(self)
         -- event names, and the chat type ids of lines Blizzard adds with no
         -- event name. With no group checked these stay CHAT_MSG_EVENTS and nil.
         local combatWakeFrame = CreateFrame("Frame")
-        combatWakeFrame:SetScript("OnEvent", OnActiveMessage)
+        combatWakeFrame:SetScript("OnEvent", function()
+            -- Enter: restore full alpha and cancel the timer. Leave: start a
+            -- fresh inactivity delay before fading can resume.
+            ECHAT.ResetIdleTimer()
+        end)
         local function UpdateCombatWake(on)
             local sel = ECHAT.DB().idleFadeWake
             if on and sel and sel.combat == true then
                 combatWakeFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+                combatWakeFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
             else
-                combatWakeFrame:UnregisterEvent("PLAYER_REGEN_DISABLED")
+                combatWakeFrame:UnregisterAllEvents()
             end
         end
 
@@ -555,6 +567,8 @@ initFrame:SetScript("OnEvent", function(self)
                 end
             end
             _wakeEvents, _wakeTypeIDs = events or CHAT_MSG_EVENTS, ids
+            -- Also handles enabling/disabling Combat while already fighting.
+            ECHAT.ResetIdleTimer()
         end
 
         -- A line that does not wake ends at the table lookup: the frame is
@@ -571,10 +585,12 @@ initFrame:SetScript("OnEvent", function(self)
             end
             if hit and not wakeFrame:IsShown() and cf:IsShown() then wakeFrame:Show() end
         end
-        SetMessageWake = function(on)
+        SetMessageWake = function(on, observeChat)
+            -- Keep the combat-exit listener armed even while chat-line
+            -- observation is suspended during combat.
             UpdateCombatWake(on)
             if ECHAT.EngineSetIdleObserver then
-                ECHAT.EngineSetIdleObserver(on and WakeOnChat or nil)
+                ECHAT.EngineSetIdleObserver(on and observeChat ~= false and WakeOnChat or nil)
             end
         end
 

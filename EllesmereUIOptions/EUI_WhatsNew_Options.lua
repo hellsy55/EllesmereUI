@@ -26,6 +26,123 @@ end
 --  session (the newest starts open).
 -------------------------------------------------------------------------------
 local whatsNewOpen = {}
+-- Both searches share one client-filtered index, including collapsed releases.
+local patchSearchIndex, patchSearchSource, patchSearchQuery, patchSearchPending = nil, nil, "", nil
+local PATCH_SEARCH_ROWS = 7
+local PATCH_SEARCH_ROW_H, PATCH_SEARCH_ROW_STEP = 38, 39
+
+local function PatchEntryApplies(e)
+    if EllesmereUI.IS_FOREVER then
+        return not e.retail and not e.patch
+    end
+    return not e.forever
+end
+
+local function BuildPatchSearchIndex(patches)
+    local index = {}
+    for pi, patch in ipairs(patches) do
+        local version = tostring(patch.version or pi)
+        local function Add(e, kind, category)
+            if not PatchEntryApplies(e) then return end
+            local title = e.title or e.text or ""
+            local desc = e.desc or ""
+            local module = e.module or "EllesmereUI"
+            local localizedTitle = EllesmereUI.L(title) or title
+            local localizedDesc = EllesmereUI.L(desc) or desc
+            local localizedModule = EllesmereUI.L(module) or module
+            local words = table.concat({ title, desc, module, localizedTitle,
+                localizedDesc, localizedModule, category, version }, " "):lower()
+            index[#index + 1] = {
+                entry = e, patch = patch, key = patch.version or pi,
+                kind = kind, version = version, title = localizedTitle,
+                module = localizedModule, category = category,
+                label = kind == "patch" and ("EllesmereUI " .. version)
+                    or (localizedModule .. ": " .. localizedTitle),
+                lLabel = (module .. " " .. title .. " " .. localizedModule .. " " .. localizedTitle):lower(),
+                searchable = words, pi = pi,
+            }
+        end
+        -- Version searches can land on the release header itself.
+        Add(patch, "patch", EllesmereUI.L("Patch Notes"))
+        for _, e in ipairs(patch.heroes or {}) do
+            Add(e, "hero", EllesmereUI.L("Major Features"))
+        end
+        for _, e in ipairs(patch.features or {}) do
+            Add(e, "feature", EllesmereUI.L("Additional Features"))
+        end
+        for _, e in ipairs(patch.fixes or {}) do
+            Add(e, "fix", EllesmereUI.L("Bug Fixes"))
+        end
+    end
+    return index
+end
+
+local function SearchPatchNotes(index, query)
+    local needle = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    if needle == "" then return {} end
+    local results = {}
+    for _, r in ipairs(index) do
+        local p = r.lLabel:find(needle, 1, true)
+        local all = r.searchable:find(needle, 1, true)
+        local score
+        if p then
+            score = 30000 - p * 10 + math.min(200, #needle * 5)
+        elseif all then
+            score = 20000 - all
+        else
+            -- Match multi-word searches where the terms occur in different
+            -- parts of the note, or a compact fuzzy label as global search does.
+            local words, found = 0, true
+            for word in needle:gmatch("%S+") do
+                words = words + 1
+                if not r.searchable:find(word, 1, true) then found = false; break end
+            end
+            if found and words > 1 then score = 10000 end
+            if not score and EllesmereUI._FuzzySearchScore and #needle >= 3 then
+                local fuzzy = EllesmereUI._FuzzySearchScore(r.lLabel, needle)
+                if fuzzy then score = math.min(9000, fuzzy) end
+            end
+        end
+        if score then results[#results + 1] = { data = r, score = score } end
+    end
+    table.sort(results, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        if a.data.pi ~= b.data.pi then return a.data.pi < b.data.pi end
+        return a.data.label < b.data.label
+    end)
+    return results
+end
+local function GetPatchSearchIndex()
+    local patches = EllesmereUI._WHATSNEW_PATCHES
+    if not patches or #patches == 0 then return {} end
+    if patchSearchSource ~= patches then
+        patchSearchIndex = BuildPatchSearchIndex(patches)
+        patchSearchSource = patches
+    end
+    return patchSearchIndex
+end
+
+-- The global search calls this only when a query is entered. No hidden page
+-- builds, per-frame polling or additional event registrations are required.
+function EllesmereUI._SearchPatchNotes(query)
+    return SearchPatchNotes(GetPatchSearchIndex(), query)
+end
+
+-- One navigation path for local and global results. The page may be cached,
+-- so force a build AFTER selecting the destination to recreate its targets.
+function EllesmereUI._NavigateToPatchNote(data)
+    if not data or not data.entry or not PatchEntryApplies(data.entry) then return false end
+    if not EllesmereUI:GetModuleTitle("_EUIPatchNotes") then return false end
+    EllesmereUI:SelectModule("_EUIPatchNotes")
+    EllesmereUI:SelectPage("Patch Notes")
+    if EllesmereUI:GetActiveModule() ~= "_EUIPatchNotes"
+       or EllesmereUI:GetActivePage() ~= "Patch Notes" then return false end
+    whatsNewOpen[data.key] = true
+    patchSearchPending = data
+    EllesmereUI:RefreshPage(true)
+    return true
+end
+
 local NOTES_ICON = "Interface\\AddOns\\EllesmereUI\\media\\icons\\sidebar\\notes-off.png"
 -- The EUI Legends sidebar module (LEGENDS_KEY in EUI__General_Options.lua).
 local LEGENDS_KEY = "_EUILegends"
@@ -43,6 +160,10 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     local y = yOffset
     local totalW = parent:GetWidth() - PAD * 2
     local CARD_GAP = 14
+    local targetFrames = {}
+    local function Remember(e, frame, cy)
+        if e and frame then targetFrames[e] = { frame = frame, y = cy } end
+    end
 
     -- Display prefix: "Module: " on every entry, and "WoW Forever - " in the
     -- Forever theme's bronze ahead of it on entries flagged `forever = true`
@@ -139,6 +260,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         else
             card:EnableMouse(false)
         end
+        return card
     end
 
     -- Tier 1b: full-width banner hero (entry.banner = true), styled after our
@@ -253,7 +375,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         else
             card:EnableMouse(false)
         end
-        return bh
+        return bh, card
     end
 
     -- Tier 1a: full-width VIDEO banner (entry.videoBanner = true) -- the biggest
@@ -395,7 +517,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         local dh = math.ceil(descFs:GetStringHeight() or 14)
         local bh = 22 + 12 + 8 + 30 + 10 + dh + 16 + 36 + 8 + 11 + 22
         PP.Size(card, w, bh)
-        return bh
+        return bh, card
     end
 
     -- Tier 2: clickable small listing -- title + subtitle, no card chrome, faint row highlight on hover.
@@ -436,7 +558,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         else
             row:EnableMouse(false)
         end
-        return ROW_H
+        return ROW_H, row
     end
 
     -- Tier 3: a plain bug-fix line (bullet + wrapping text, not clickable),
@@ -452,7 +574,15 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         fs:SetJustifyH("LEFT"); fs:SetWordWrap(true)
         fs:SetText(text or "")
         local th = fs:GetStringHeight() or 14
-        return math.max(22, math.ceil(th) + 8)
+        local height = math.max(22, math.ceil(th) + 8)
+        -- Fixes have no native clickable row. A lightweight non-mouse target
+        -- provides exactly the area that the panel highlight can outline.
+        local target = CreateFrame("Frame", nil, host)
+        PP.Size(target, parent:GetWidth() - x - rightInset, height)
+        PP.Point(target, "TOPLEFT", parent, "TOPLEFT", x, cy)
+        target:SetFrameLevel(host:GetFrameLevel() + 1)
+        target:EnableMouse(false)
+        return height, target
     end
 
     -- A patch's closing thank-you (patch.thanks): its "contributors" word is a
@@ -517,11 +647,240 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         return math.abs(y) + 60
     end
 
-    -- Intro hint: centered, with 20px of breathing room above and below.
-    y = y - 20
+    patchSearchIndex = GetPatchSearchIndex()
+
+    -- A dedicated entry field, sharing its index and navigation with the
+    -- suite-wide search while keeping its own popup and keyboard controls.
+    local SEARCH_W, SEARCH_H = 230, 29
+    local searchFrame = CreateFrame("Frame", nil, parent)
+    PP.Size(searchFrame, SEARCH_W, SEARCH_H)
+    PP.Point(searchFrame, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 29)
+    searchFrame:SetFrameLevel(parent:GetFrameLevel() + 9)
+    local searchBg = searchFrame:CreateTexture(nil, "BACKGROUND")
+    searchBg:SetAllPoints()
+    searchBg:SetColorTexture(EllesmereUI.SL_INPUT_R, EllesmereUI.SL_INPUT_G,
+        EllesmereUI.SL_INPUT_B, EllesmereUI.SL_INPUT_A + 0.10)
+    local searchBorder = EllesmereUI.MakeRoundedBorder(searchFrame,
+        EllesmereUI.BORDER_R, EllesmereUI.BORDER_G, EllesmereUI.BORDER_B, 0.10, searchBg)
+    local glass = searchFrame:CreateTexture(nil, "ARTWORK")
+    PP.Size(glass, 15, 15)
+    PP.Point(glass, "LEFT", searchFrame, "LEFT", 8, 0)
+    glass:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+    glass:SetAlpha(0.55)
+    local edit = CreateFrame("EditBox", nil, searchFrame)
+    edit:SetAllPoints()
+    edit:SetAutoFocus(false)
+    edit:SetFont(EllesmereUI.EXPRESSWAY, 13, "")
+    edit:SetTextColor(1, 1, 1, 1)
+    edit:SetTextInsets(28, 25, 0, 0)
+    edit:SetMaxLetters(100)
+    local placeholder = MakeFont(searchFrame, 12, nil, 1, 1, 1, 0.35)
+    PP.Point(placeholder, "LEFT", searchFrame, "LEFT", 29, 0)
+    placeholder:SetText(EllesmereUI.L("Patch Notes"))
+    local clear = CreateFrame("Button", nil, searchFrame)
+    PP.Size(clear, 20, 20)
+    PP.Point(clear, "RIGHT", searchFrame, "RIGHT", -4, 0)
+    clear:SetFrameLevel(edit:GetFrameLevel() + 2)
+    clear:Hide()
+    local clearLabel = MakeFont(clear, 15, nil, 1, 1, 1, 0.45)
+    PP.Point(clearLabel, "CENTER", clear, "CENTER", 0, 0)
+    clearLabel:SetText("x")
+
+    local popup = CreateFrame("Frame", nil, parent)
+    PP.Size(popup, 390, 8 + PATCH_SEARCH_ROWS * PATCH_SEARCH_ROW_STEP)
+    PP.Point(popup, "TOPRIGHT", searchFrame, "BOTTOMRIGHT", 0, -5)
+    popup:SetFrameLevel(searchFrame:GetFrameLevel() + 3)
+    local popBg = popup:CreateTexture(nil, "BACKGROUND")
+    popBg:SetAllPoints()
+    popBg:SetColorTexture(0.07, 0.065, 0.06, 0.98)
+    EllesmereUI.MakeRoundedBorder(popup, 1, 1, 1, 0.18, popBg)
+    popup:EnableMouseWheel(true)
+    popup:Hide()
+
+    local matches, matchOffset, selected = {}, 0, 1
+    local rows = {}
+    for i = 1, PATCH_SEARCH_ROWS do
+        local row = CreateFrame("Button", nil, popup)
+        PP.Size(row, 382, PATCH_SEARCH_ROW_H)
+        PP.Point(row, "TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * PATCH_SEARCH_ROW_STEP)
+        row:SetFrameLevel(popup:GetFrameLevel() + 1)
+        local hover = row:CreateTexture(nil, "BACKGROUND")
+        hover:SetAllPoints()
+        local title = MakeFont(row, 14, nil, 1, 1, 1, 0.88)
+        PP.Point(title, "LEFT", row, "LEFT", 8, 8)
+        title:SetWidth(315)
+        title:SetJustifyH("LEFT")
+        title:SetWordWrap(false)
+        local version = MakeFont(row, 11, nil, EG.r, EG.g, EG.b, 0.9)
+        OnAccent(version, function(r, g, b) version:SetTextColor(r, g, b, 0.9) end)
+        PP.Point(version, "TOPRIGHT", row, "TOPRIGHT", -6, -5)
+        local sub = MakeFont(row, 12, nil, 1, 1, 1, 0.42)
+        PP.Point(sub, "LEFT", row, "LEFT", 8, -9)
+        sub:SetWidth(362)
+        sub:SetJustifyH("LEFT")
+        sub:SetWordWrap(false)
+        if i == 2 then
+            OnAccent(title, function(r, g, b)
+                if row._isGlobalLink then title:SetTextColor(r, g, b, 1) end
+            end)
+        end
+        rows[i] = { frame = row, title = title, sub = sub, version = version, hover = hover }
+    end
+
+    local pageGen = PoolGen(parent)
+    local function PageStillCurrent()
+        return PoolGen(parent) == pageGen and parent:IsVisible()
+            and EllesmereUI:GetActiveModule() == "_EUIPatchNotes"
+    end
+    local function JumpToEntry(data)
+        if not PageStillCurrent() then return end
+        local target = targetFrames[data.entry]
+        if not target then return end
+        local scroll = EllesmereUI._scrollFrame
+        if not scroll then return end
+        local scrollTo = math.max(0, -target.y - 44)
+        EllesmereUI.SmoothScrollTo(scrollTo)
+        local frame, gen = target.frame, PoolGen(target.frame)
+        C_Timer.After(0.23, function()
+            if not PageStillCurrent() or PoolGen(frame) ~= gen then return end
+            local hl = EllesmereUI.GetSearchHighlight()
+            EllesmereUI.PlaySearchHighlight(hl, frame)
+        end)
+    end
+    local function Activate(data)
+        if not data then return end
+        popup:Hide()
+        edit:ClearFocus()
+        EllesmereUI._NavigateToPatchNote(data)
+    end
+    local function SearchAllModules()
+        local q = edit:GetText()
+        local sb = EllesmereUI._sidebarSearchBox
+        if not sb or not q:match("%S") then return end
+        -- Match the inline module search handoff: restore this page before
+        -- passing the same query to the sidebar's global results.
+        edit:SetText("")
+        edit:ClearFocus()
+        popup:Hide()
+        sb:SetText(q)
+        sb:SetFocus()
+        sb:SetCursorPosition(#q)
+    end
+    local function RenderResults()
+        local empty = #matches == 0 and patchSearchQuery:match("%S") ~= nil
+        local n = empty and 2 or math.min(PATCH_SEARCH_ROWS, #matches)
+        for i, row in ipairs(rows) do
+            local match = matches[i + matchOffset]
+            row.frame._isGlobalLink = empty and i == 2
+            row.title:SetTextColor(1, 1, 1, 0.88)
+            if empty and i == 1 then
+                local safe = patchSearchQuery:gsub("|", "||")
+                row.title:SetText(EllesmereUI.Lf("No results for %s", string.char(34) .. safe .. string.char(34)))
+                row.sub:SetText("")
+                row.version:SetText("")
+                row.hover:SetColorTexture(0, 0, 0, 0)
+                row.frame:SetScript("OnClick", nil)
+                row.frame:SetScript("OnEnter", nil)
+                row.frame:SetScript("OnLeave", nil)
+                row.frame:Show()
+            elseif empty and i == 2 then
+                row.title:SetText(EllesmereUI.L("Search all modules"))
+                row.title:SetTextColor(EG.r, EG.g, EG.b, 1)
+                row.sub:SetText("")
+                row.version:SetText(">")
+                row.hover:SetColorTexture(1, 1, 1, 0)
+                row.frame:SetScript("OnClick", SearchAllModules)
+                row.frame:SetScript("OnEnter", function()
+                    row.hover:SetColorTexture(1, 1, 1, 0.13)
+                end)
+                row.frame:SetScript("OnLeave", function()
+                    row.hover:SetColorTexture(1, 1, 1, 0)
+                end)
+                row.frame:Show()
+            elseif i <= n and match then
+                local data = match.data
+                row.title:SetText(data.kind == "patch" and ("EllesmereUI " .. data.version) or data.label)
+                row.version:SetText("v" .. data.version)
+                row.sub:SetText(data.category .. (data.kind == "patch" and "" or ("  -  " .. data.module)))
+                row.hover:SetColorTexture(1, 1, 1, i + matchOffset == selected and 0.09 or 0)
+                row.frame:SetScript("OnClick", function() Activate(data) end)
+                row.frame:SetScript("OnEnter", function() row.hover:SetColorTexture(1, 1, 1, 0.13) end)
+                row.frame:SetScript("OnLeave", function()
+                    row.hover:SetColorTexture(1, 1, 1, i + matchOffset == selected and 0.09 or 0)
+                end)
+                row.frame:Show()
+            else
+                row.frame:Hide()
+            end
+        end
+        if n > 0 and edit:HasFocus() then
+            popup:SetHeight(8 + n * PATCH_SEARCH_ROW_STEP)
+            popup:Show()
+        else
+            popup:Hide()
+        end
+    end
+    local function SelectResult(index)
+        selected = math.max(1, math.min(#matches, index))
+        if selected <= matchOffset then matchOffset = selected - 1 end
+        if selected > matchOffset + PATCH_SEARCH_ROWS then
+            matchOffset = selected - PATCH_SEARCH_ROWS
+        end
+        RenderResults()
+    end
+    popup:SetScript("OnMouseWheel", function(_, delta)
+        if #matches == 0 then return end
+        SelectResult(selected - delta)
+    end)
+    edit:SetScript("OnTextChanged", function(self)
+        patchSearchQuery = self:GetText() or ""
+        matches = EllesmereUI._SearchPatchNotes(patchSearchQuery)
+        matchOffset, selected = 0, 1
+        placeholder:SetShown(patchSearchQuery == "")
+        clear:SetShown(patchSearchQuery ~= "")
+        RenderResults()
+    end)
+    edit:SetScript("OnEditFocusGained", function()
+        searchBorder:SetColor(EllesmereUI.BORDER_R, EllesmereUI.BORDER_G, EllesmereUI.BORDER_B, 0.18)
+        RenderResults()
+    end)
+    edit:SetScript("OnEditFocusLost", function()
+        searchBorder:SetColor(EllesmereUI.BORDER_R, EllesmereUI.BORDER_G, EllesmereUI.BORDER_B, 0.10)
+        -- Let a result's mouse-up activate before dismissing the popup.
+        C_Timer.After(0.10, function()
+            if PageStillCurrent() and not edit:HasFocus() then popup:Hide() end
+        end)
+    end)
+    edit:SetScript("OnKeyDown", function(_, key)
+        if key == "DOWN" then SelectResult(selected + 1)
+        elseif key == "UP" then SelectResult(selected - 1) end
+    end)
+    edit:SetScript("OnEnterPressed", function(self)
+        if matches[selected] then
+            Activate(matches[selected].data)
+        elseif #matches == 0 and patchSearchQuery:match("%S") then
+            SearchAllModules()
+        end
+        self:ClearFocus()
+    end)
+    edit:SetScript("OnEscapePressed", function(self)
+        if self:GetText() ~= "" then self:SetText("") else self:ClearFocus(); popup:Hide() end
+    end)
+    clear:SetScript("OnClick", function()
+        edit:SetText("")
+        edit:SetFocus()
+    end)
+    clear:SetScript("OnEnter", function() clearLabel:SetAlpha(1) end)
+    clear:SetScript("OnLeave", function() clearLabel:SetAlpha(0.45) end)
+    edit:SetText(patchSearchQuery)
+
+    -- Keep the helper copy left-aligned under the page title. The reminder now
+    -- takes the top-right slot and the dedicated patch-note search moves below it.
+    y = y - 18
     local hint = MakeFont(parent, 14, nil, 1, 1, 1, 0.5)
-    PP.Point(hint, "TOP", parent, "TOP", 0, y)
-    hint:SetJustifyH("CENTER")
+    PP.Point(hint, "TOPLEFT", parent, "TOPLEFT", PAD, y)
+    hint:SetWidth(math.max(180, totalW - SEARCH_W - 16))
+    hint:SetJustifyH("LEFT")
     hint:SetText (EllesmereUI.L("Click any new feature to go directly to the setting"))
 
     -- "New Patch Reminder Dot" opt-out for the pulsing sidebar dot shown when the account version increases (Patch Notes button in EllesmereUI.lua).
@@ -544,7 +903,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         PP.Point(lbl, "LEFT", box, "RIGHT", 7, 0)
         lbl:SetText(EllesmereUI.L("New Patch Reminder Dot"))
         row:SetSize(BOX + 10 + (lbl:GetStringWidth() or 130), 20)
-        PP.Point(row, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y + 2)
+        PP.Point(row, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 5)
         local function Paint()
             local on = not (EllesmereUIDB and EllesmereUIDB.patchDotDisabled)
             check:SetShown(on)
@@ -573,7 +932,10 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         end)
     end
 
-    y = y - math.ceil(hint:GetStringHeight() or 14) - 20
+    searchFrame:ClearAllPoints()
+    PP.Point(searchFrame, "TOPRIGHT", parent, "TOPRIGHT", -PAD, y - 29)
+
+    y = y - math.max(64, math.ceil(hint:GetStringHeight() or 14) + 40)
 
     -- A patch card's content sits inset from the card's edges.
     local INSET = 16
@@ -599,15 +961,17 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
             for _, hero in ipairs(heroes) do
                 if hero.videoBanner then
                     if col == 1 then cy = cy - CARD_H - CARD_GAP; col = 0 end
-                    local bh = MakeVideoBannerCard(innerX, cy, innerW, hero)
+                    local bh, card = MakeVideoBannerCard(innerX, cy, innerW, hero)
+                    Remember(hero, card, cy)
                     cy = cy - bh - CARD_GAP
                 elseif hero.banner then
                     if col == 1 then cy = cy - CARD_H - CARD_GAP; col = 0 end
-                    local bh = MakeBannerCard(innerX, cy, innerW, hero)
+                    local bh, card = MakeBannerCard(innerX, cy, innerW, hero)
+                    Remember(hero, card, cy)
                     cy = cy - bh - CARD_GAP
                 else
                     local cx = innerX + col * (cardW + CARD_GAP)
-                    MakeHeroCard(cx, cy, cardW, CARD_H, hero)
+                    Remember(hero, MakeHeroCard(cx, cy, cardW, CARD_H, hero), cy)
                     col = col + 1
                     if col == 2 then cy = cy - CARD_H - CARD_GAP; col = 0 end
                 end
@@ -622,7 +986,9 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
             cy = cy - TierHeader(host, innerX, cy, innerW, EllesmereUI.L("ADDITIONAL FEATURES"))
             cy = cy - 5  -- extra spacing below the divider
             for _, f in ipairs(feats) do
-                local rh = MakeListing(innerX, cy, innerW, f); cy = cy - rh
+                local rh, row = MakeListing(innerX, cy, innerW, f)
+                Remember(f, row, cy)
+                cy = cy - rh
             end
             cy = cy - 6
         end
@@ -635,7 +1001,10 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
                 cy = cy - 10  -- extra spacing below the divider
             end
             for _, fx in ipairs(fixes) do
-                local fh = MakeFixLine(host, innerX, PAD + INSET, cy, PrefixOf(fx) .. (EllesmereUI.L(fx.text) or "")); cy = cy - fh
+                local fh, row = MakeFixLine(host, innerX, PAD + INSET, cy,
+                    PrefixOf(fx) .. (EllesmereUI.L(fx.text) or ""))
+                Remember(fx, row, cy)
+                cy = cy - fh
             end
         end
         if patch.thanks then
@@ -647,7 +1016,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
 
     -- One card per patch, newest first: the newest starts open. Show only the
     -- newest MAX_PATCHES entries; older ones may stay in the data table unshown.
-    local MAX_PATCHES = 10
+    local MAX_PATCHES = #patches
     local shown = math.min(#patches, MAX_PATCHES)
     local newestKey = patches[1].version or 1
     if whatsNewOpen[newestKey] == nil then whatsNewOpen[newestKey] = true end
@@ -668,6 +1037,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
             desc = table.concat(parts, "    "),
             buildContent = function(_, cy) return BuildPatchContent(patch, cy) end }
         local newest = pi == 1
+        local cardY = y
         y = EllesmereUI.BuildModuleCard(parent, y, W, tile, {
             enabled = true, expanded = whatsNewOpen, descW = 560, noSearch = true,
             glyph = function(hdr)
@@ -683,6 +1053,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
                     icon:SetVertexColor(1, 1, 1, 0.45)
                 end
             end })
+        Remember(patch, tile._hdr, cardY)
         -- "Latest" beside the newest card's title (its description hangs off the title).
         if newest then
             local _, title = tile._descFS:GetPoint(1)
@@ -695,6 +1066,11 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         end
     end
 
+    if patchSearchPending then
+        local result = patchSearchPending
+        patchSearchPending = nil
+        C_Timer.After(0.05, function() JumpToEntry(result) end)
+    end
     return math.abs(y) + 20
 end
 

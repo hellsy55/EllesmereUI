@@ -128,13 +128,21 @@ function EAB_VTABLE.Hover.SkyridingOverrideAlpha(barKey, s)
     end
 end
 
+-- Whether the open spellbook or macro panel holds this mouseover bar up (Show
+-- When Spellbook Is Open): every fade-out of the bar waits for the panel to
+-- close, which empties the set before it fades the bars out.
+function EAB_VTABLE.Hover.SpellbookHolds(barKey)
+    local held = _gridState._sbMoForced
+    return held ~= nil and held[barKey] == true
+end
+
 function EAB_VTABLE.Hover.RefreshCustomFadeBar(barKey, animate, force)
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if not EAB_VTABLE.Hover.AdvancedFadeEnabled(s) then return false end
 
     -- Temporary surfacing modes remain authoritative over alpha rules.
     local spellbookForced = (_gridState._sbNeverForced and _gridState._sbNeverForced[barKey])
-        or (_gridState._sbMoForced and _gridState._sbMoForced[barKey])
+        or EAB_VTABLE.Hover.SpellbookHolds(barKey)
     local myslotForced = EAB.db and EAB.db.profile and EAB.db.profile._myslotVisBackup
     if _gridState.shown or _dragState.visible or _quickKeybindState.open
         or spellbookForced or myslotForced then
@@ -365,6 +373,8 @@ end
 
 function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
+    -- Spellbook/macro panel surfacing holds the bar up until the panel closes.
+    if EAB_VTABLE.Hover.SpellbookHolds(barKey) then return end
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
     if s and s.mouseoverEnabled and state and state.fadeDir ~= "out" then
         -- Fade back to the bar's RESTING alpha, not a hardcoded 0: under Any a passing
@@ -652,7 +662,7 @@ function EAB:RefreshMouseover(onlyHoverGated)
                     -- used to be safe by accident (the function only ran on settings
                     -- changes); it now also runs on combat/group/mount edges, where
                     -- repainting would yank a hovered bar invisible mid-hover.
-                    if not (state and state.isHovered) then
+                    if not (state and state.isHovered) and not EAB_VTABLE.Hover.SpellbookHolds(key) then
                         if s.visShowSkyriding and ((EAB_VTABLE.IsSkyriding and EAB_VTABLE.IsSkyriding())
                             or (key == "MainBar" and EAB_VTABLE.IsInVehicleBar and EAB_VTABLE.IsInVehicleBar())) then
                             -- Skip the fade-to-0 while airborne on a skyriding mount, or

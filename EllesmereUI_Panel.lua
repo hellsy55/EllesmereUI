@@ -62,6 +62,21 @@ local headerFrame, tabBar, scrollFrame, scrollChild, footerFrame, contentHeaderF
 local sidebarButtons = {}
 EUI_NS.sidebarButtons = sidebarButtons
 local activeModule, activePage
+
+-- Reuse the inline search empty-state link's global-search handoff for Enter.
+-- Clearing the inline query first restores its filtered page and cancels debounce.
+local function SearchAllModulesFromInline()
+    local box = tabBar and tabBar._searchBox
+    local query = box and box:GetText() or ""
+    local sidebarSearch = EllesmereUI._sidebarSearchBox
+    if not sidebarSearch or not query:match("%S") then return false end
+    box:SetText("")
+    box:ClearFocus()
+    sidebarSearch:SetText(query)
+    sidebarSearch:SetFocus()
+    sidebarSearch:SetCursorPosition(#query)
+    return true
+end
 local _lastPagePerModule = {}
 local scrollTarget = 0
 local isSmoothing = false
@@ -3646,6 +3661,11 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
         end)
 
         editBox:SetScript("OnEnterPressed", function(self)
+            local query = self:GetText() or ""
+            -- Match the empty-state link: Enter opens global search only when
+            -- this page has no matching section or setting.
+            if query:match("%S") and EllesmereUI:ApplyInlineSearch(query, true) == 0
+               and SearchAllModulesFromInline() then return end
             self:ClearFocus()
         end)
 
@@ -4058,19 +4078,7 @@ do
             link:SetAlpha(0.8)
             link:SetScript("OnEnter", function() link:SetAlpha(1) end)
             link:SetScript("OnLeave", function() link:SetAlpha(0.8) end)
-            link:SetScript("OnClick", function()
-                local box = tabBar and tabBar._searchBox
-                local q = box and box:GetText() or ""
-                -- Clear this box first: it restores the page and cancels its
-                -- debounce; then the sidebar search takes over the query.
-                if box then box:SetText(""); box:ClearFocus() end
-                local sb = EllesmereUI._sidebarSearchBox
-                if sb and q ~= "" then
-                    sb:SetText(q)
-                    sb:SetFocus()
-                    sb:SetCursorPosition(#q)
-                end
-            end)
+            link:SetScript("OnClick", SearchAllModulesFromInline)
         end
         local q = query:gsub("||", "|"):gsub("|", "||")
         hint._text:SetText(EllesmereUI.Lf("No results for %s", "\"" .. q .. "\""))
@@ -4407,6 +4415,8 @@ function EllesmereUI:ApplyInlineSearch(query, skipHighlights)
     -- Mark this page as currently search-filtered so it is reliably restored when
     -- shown again, even if the search box was cleared on a tab/module switch.
     cached._searchFiltered = true
+    -- Enter rechecks the current query, bypassing the half-second debounce.
+    return #visibleSections + #visibleOrphans
 end
 
 -------------------------------------------------------------------------------

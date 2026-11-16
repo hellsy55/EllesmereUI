@@ -58,7 +58,7 @@ local dirty, selectedSetup, chosenExtra, dragFrom, dragGhost, dragTarget = false
 local dirtyLabel, extrasLabel, applyButton, keepButton, listModeButton, exactButton, mainHelp
 local editorButtons, unlistedButtons, splitButtons = {}, {}, {}
 local rosterByKey, rosterSorted = {}, {}
-local applyState, updatePending, lastRosterSignature = nil, false, nil
+local applyState, updatePending, applySchedule = nil, false, {token=0}
 local extraOffset, setupOffset, nickOffset, listGuild = 0, 0, 0, false
 local firstDraftLoaded = false
 local undoStack, UNDO_LIMIT = {}, 20
@@ -895,18 +895,35 @@ local function Membership(source)
     end
     return names
 end
--- Remember explicitly pinned Character-Realm identities before replacing a
--- composition. Preferences affect only runtime Guest matching; imported setup
--- contents and persistent nickname/guest records are never rewritten.
-function RGStyle.CapturePinnedGuestPreferences()
+-- Pinned identities can be ordered independently of their draft seats. The
+-- optional manual priority survives a temporary setup load but is never saved
+-- into a setup or the account-wide nickname records.
+function RGStyle.PinnedGuestOrder()
     local pins,seen={},{}
-    for i=1,SLOT_COUNT do
-        local name=draftPinned[i] and draft[i]
+    local function Add(name)
         local key=name and name~="GUEST" and name~=RGStyle.SETUP_GUEST and Canonical(name)
         if key and not seen[key] then
             pins[#pins+1]=key
             seen[key]=true
         end
+    end
+    if RGStyle.pinnedGuestOrderEdited then
+        for _,key in ipairs(RGStyle.importPinnedGuestPreferences or {}) do Add(key) end
+    end
+    for i=1,SLOT_COUNT do if draftPinned[i] then Add(draft[i]) end end
+    if not RGStyle.pinnedGuestOrderEdited then
+        for _,key in ipairs(RGStyle.importPinnedGuestPreferences or {}) do Add(key) end
+    end
+    return pins
+end
+-- Remember explicitly pinned Character-Realm identities before replacing a
+-- composition. Preferences affect only runtime Guest matching; imported setup
+-- contents and persistent nickname/guest records are never rewritten.
+function RGStyle.CapturePinnedGuestPreferences()
+    local pins,seen={},{}
+    for _,key in ipairs(RGStyle.PinnedGuestOrder()) do
+        pins[#pins+1]=key
+        seen[key]=true
     end
     -- Explicit pins added in an open Apply Preview are not yet in the editor.
     -- Carry those identities into the next imported composition as well.
@@ -916,9 +933,6 @@ function RGStyle.CapturePinnedGuestPreferences()
             local key=name and Canonical(name)
             if key and not seen[key] then pins[#pins+1]=key;seen[key]=true end
         end
-    end
-    for _,key in ipairs(RGStyle.importPinnedGuestPreferences or {}) do
-        if not seen[key] then pins[#pins+1]=key;seen[key]=true end
     end
     RGStyle.importPinnedGuestPreferences=pins
 end
@@ -1089,6 +1103,7 @@ function RGStyle.CaptureDraftSnapshot()
     return {draft=CopyDraft(draft),pinned=CopyPinned(draftPinned),
         nsrtDraftName=RGStyle.nsrtDraftName,
         importedPinned=RGStyle.CopyPinnedPreferences(RGStyle.importPinnedGuestPreferences),
+        pinnedOrderEdited=RGStyle.pinnedGuestOrderEdited,
         normalGuests=CopyPinned(draftGuest),
         emptyPinned=CopyPinned(RGStyle.emptyPinnedDraft),selected=selected,
         exclusions=CopyKeys(removedGuestKeys),
@@ -1102,6 +1117,7 @@ function RGStyle.RestoreDraftSnapshot(snapshot)
     draft=CopyDraft(snapshot.draft)
     draftPinned=CopyPinned(snapshot.pinned)
     RGStyle.importPinnedGuestPreferences=RGStyle.CopyPinnedPreferences(snapshot.importedPinned)
+    RGStyle.pinnedGuestOrderEdited=snapshot.pinnedOrderEdited or false
     draftGuest=CopyPinned(snapshot.normalGuests)
     RGStyle.emptyPinnedDraft=CopyPinned(snapshot.emptyPinned)
     removedGuestKeys=CopyKeys(snapshot.exclusions)
@@ -1249,6 +1265,7 @@ local function FromRoster(skipUndo)
     RGStyle.emptyPinnedDraft={}
     removedGuestKeys={}
     RGStyle.importPinnedGuestPreferences=nil
+    RGStyle.pinnedGuestOrderEdited=false
     selectedSetup = nil
     RGStyle.setupLoadToggle=nil
     SaveEdit()
@@ -1347,6 +1364,7 @@ RGStyle.windowNames={
     EllesmereUIRaidGroupSplit="split",
     EllesmereUIRaidGroupBackup="backup",
     EllesmereUIRaidGroupInput="prompt",
+    EllesmereUIRaidGroupPinnedOrder="pinnedOrder",
 }
 function RGStyle.WindowScaleValue(key)
     local p=P()
@@ -2685,6 +2703,7 @@ local function ShowBackupWindow()
                 data.keepChanges=restored.keepChanges
                 selectedSetup=nil;draft={};draftPinned={};draftGuest={};RGStyle.emptyPinnedDraft={};removedGuestKeys={};dirty=false;undoStack={}
                 RGStyle.importPinnedGuestPreferences=nil
+                RGStyle.pinnedGuestOrderEdited=false
                 RGStyle.setupLoadToggle=nil
                 if previewWindow then previewWindow:Hide() end
                 if applyState then StopApply("Group application cancelled: data restored.") end
@@ -2859,6 +2878,10 @@ end
 -------------------------------------------------------------------------------
 StopApply=function(reason)
     applyState = nil
+    -- Cancel scheduled callbacks from this Apply before a new one can start.
+    applySchedule.token=applySchedule.token+1
+    updatePending=false
+    applySchedule.due=nil
     if applyButton then
         applyButton._lbl:SetText(L("Apply Groups"))
         ColorBlueButton(applyButton,true)
@@ -2871,17 +2894,16 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
     Roster()
     local wanted, order = {}, {}
     local assignedGuests = GuestAssignments(source, fixedGuestNames, excluded)
-    local seen,groupSeats,ignoredSeats = {},{},{}
+    local seen, ignored = {}, {}
+    -- Ignored characters are not assigned by the saved setup. Instead, keep
+    -- them together after all other actual raid members, in a stable order.
     for _,member in ipairs(rosterSorted) do
-        groupSeats[member.group]=(groupSeats[member.group] or 0)+1
         if RGStyle.IsArrangementIgnored(member.key) then
-            local seat=groupSeats[member.group]
-            ignoredSeats[(member.group-1)*GROUP_SIZE+seat]=true
-            wanted[member.key]={group=member.group,seat=seat,ignored=true}
-            order[#order+1]=member.key
+            ignored[#ignored+1]=member
             seen[member.key]=true
         end
     end
+    table.sort(ignored,function(a,b) return a.key<b.key end)
     for i=1,SLOT_COUNT do
         local v = source[i]
         local item = (v=="GUEST" or v==RGStyle.SETUP_GUEST) and assignedGuests[i]
@@ -2892,27 +2914,30 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
             seen[item.key] = true
         end
     end
-    -- Pinned Empty is a planner reservation, not an actual WoW raid slot.
-    -- Reserve the corresponding subgroup *capacity* by providing concrete
-    -- destinations to raid members not named by the saved composition.
+    -- Pinned Empty and unresolved Setup Guest reservations must survive
+    -- reflow. A saved seat occupied by an ignored character is available
+    -- to the ordinary roster; the saved setup itself remains unchanged.
     local reservedEmpty=CopyPinned(emptyPinned)
     for i=1,SLOT_COUNT do
         if source[i]==RGStyle.SETUP_GUEST and not assignedGuests[i] then
             reservedEmpty[i]=true
         end
     end
-    if not next(reservedEmpty) then return wanted,order,assignedGuests,{} end
+    if not next(reservedEmpty) and #ignored==0 then return wanted,order,assignedGuests,{} end
     local free, lastPinnedGroup, extras = {},0,{}
     for g=1,NUM_GROUPS do
         free[g]={}
         for n=1,GROUP_SIZE do
             local i=(g-1)*GROUP_SIZE+n
+            local v=source[i]
+            local ignoredSource=v and v~="GUEST" and v~=RGStyle.SETUP_GUEST
+                and RGStyle.IsArrangementIgnored(Canonical(v))
             if reservedEmpty[i] then
                 lastPinnedGroup=math.max(lastPinnedGroup,g)
-                if source[i] and source[i]~=RGStyle.SETUP_GUEST then
+                if v and v~=RGStyle.SETUP_GUEST and not ignoredSource then
                     return wanted,order,assignedGuests,extras,"Pinned Empty conflicts with an occupied planned slot."
                 end
-            elseif not source[i] and not ignoredSeats[i] then
+            elseif not v or ignoredSource then
                 free[g][#free[g]+1]=n
             end
         end
@@ -2946,6 +2971,95 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
             end
         end
     end
+    if #ignored>0 then
+        -- A full raid has no spare seats after its last planned member. Free
+        -- the tail by moving only its non-ignored occupants into earlier gaps
+        -- (normally the original ignored seats), without editing any setup.
+        local occupied,eligible,anchor,groupSeats={},{},0,{}
+        for key,target in pairs(wanted) do
+            local i=(target.group-1)*GROUP_SIZE+target.seat
+            occupied[i]=key
+            anchor=math.max(anchor,i)
+        end
+        for _,member in ipairs(rosterSorted) do
+            groupSeats[member.group]=(groupSeats[member.group] or 0)+1
+            if RGStyle.IsArrangementIgnored(member.key) then
+                anchor=math.max(anchor,(member.group-1)*GROUP_SIZE+groupSeats[member.group])
+            end
+        end
+        for i=1,SLOT_COUNT do
+            local v=source[i]
+            local isIgnored=v and v~="GUEST" and v~=RGStyle.SETUP_GUEST
+                and RGStyle.IsArrangementIgnored(Canonical(v))
+            if isIgnored then anchor=math.max(anchor,i) end
+            eligible[i]=not reservedEmpty[i] and
+                (not v or isIgnored or assignedGuests[i] or (v~="GUEST" and
+                    v~=RGStyle.SETUP_GUEST and rosterByKey[Canonical(v)]~=nil))
+        end
+        -- Prefer a dedicated trailing subgroup when room is available. This
+        -- keeps ignored players visibly last even if WoW reorders members
+        -- inside a subgroup (which cannot be guaranteed by SetRaidSubgroup).
+        local tail={}
+        local lastNormalGroup=0
+        for _,target in pairs(wanted) do
+            lastNormalGroup=math.max(lastNormalGroup,target.group)
+        end
+        local dedicated={}
+        for i=lastNormalGroup*GROUP_SIZE+1,SLOT_COUNT do
+            if eligible[i] and not occupied[i] then
+                dedicated[#dedicated+1]=i
+                if #dedicated==#ignored then break end
+            end
+        end
+        if #dedicated==#ignored then tail=dedicated end
+        local function FindTail(limit)
+            local positions={}
+            for i=limit,1,-1 do
+                if eligible[i] then
+                    table.insert(positions,1,i)
+                    if #positions==#ignored then return positions end
+                end
+            end
+        end
+        if #tail==0 then tail=FindTail(anchor) end
+        if not tail then tail=FindTail(SLOT_COUNT) end
+        if not tail then
+            return wanted,order,assignedGuests,extras,
+                "Ignore Arrangement: not enough available positions for all ignored players."
+        end
+        local tailSet={}
+        for _,i in ipairs(tail) do tailSet[i]=true end
+        for _,i in ipairs(tail) do
+            local key=occupied[i]
+            if key then
+                local destination
+                for j=1,tail[1]-1 do
+                    if eligible[j] and not occupied[j] and not tailSet[j] then
+                        destination=j
+                        break
+                    end
+                end
+                if not destination then
+                    return wanted,order,assignedGuests,extras,
+                        "Ignore Arrangement: the final raid seats cannot be freed without changing reserved setup slots."
+                end
+                local target=wanted[key]
+                target.group=math.floor((destination-1)/GROUP_SIZE)+1
+                target.seat=(destination-1)%GROUP_SIZE+1
+                extras[key]=target
+                occupied[destination]=key
+                occupied[i]=nil
+            end
+        end
+        for n,member in ipairs(ignored) do
+            local i=tail[n]
+            local target={group=math.floor((i-1)/GROUP_SIZE)+1,
+                seat=(i-1)%GROUP_SIZE+1,ignoredTail=true}
+            wanted[member.key]=target
+            order[#order+1]=member.key
+            extras[member.key]=target
+        end
+    end
     return wanted,order,assignedGuests,extras
 end
 -- The current raid leader may be pinned to the first roster position of a
@@ -2959,7 +3073,7 @@ local function AutomaticShiftLeader(wanted, silent, emptyPinned)
     end
     if not leader then return end
     local planned=wanted[leader.key]
-    if not planned or planned.seat==1 or planned.extra or planned.ignored then return end
+    if not planned or planned.seat==1 or planned.extra or planned.ignoredTail then return end
     -- A visual Pinned Empty slot must never be repurposed by leader shifting.
     if emptyPinned and emptyPinned[(planned.group-1)*GROUP_SIZE+1] then return end
 
@@ -2990,7 +3104,7 @@ local function AutomaticShiftLeader(wanted, silent, emptyPinned)
     -- A local shift inside the planned group: existing seats 1..N-1 move one
     -- place down; the leader occupies seat 1. No persisted table is touched.
     for key,slot in pairs(wanted) do
-        if key~=leader.key and not slot.ignored and slot.group==targetGroup and slot.seat<plannedSeat then
+        if key~=leader.key and slot.group==targetGroup and slot.seat<plannedSeat then
             slot.seat=slot.seat+1
         end
     end
@@ -3083,7 +3197,11 @@ local function BuildApplyPlan(source,fixedGuestNames,skipAutoEmpty,excluded,empt
     end
     for _,member in ipairs(rosterSorted) do
         if RGStyle.IsArrangementIgnored(member.key) then
-            lines[#lines+1]=LF("Ignore Arrangement: %s stays in Group %d (current raid position, best effort).",member.name,member.group)
+            local target=wanted[member.key]
+            if target then
+                lines[#lines+1]=LF("Ignore Arrangement: %s will be placed at the end (Group %d, seat %d; seat order best effort).",
+                    member.name,target.group,target.seat)
+            end
         end
     end
     for _,name in ipairs(ambiguous) do
@@ -3165,6 +3283,7 @@ local function NewPreviewModel()
     model.genericPinnedSeats={}
     model.normalGuests={}
     model.absentNames={}
+    model.ignoredFlags={}
     for i=1,SLOT_COUNT do
         -- The resolved opening plan includes automatically reserved empty seats.
         -- A previously pinned Guest is a fixed Character-Realm in the setup.
@@ -3175,13 +3294,59 @@ local function NewPreviewModel()
         if v==RGStyle.SETUP_GUEST then model.genericPinnedSeats[i]=true end
         if v and not anonymous and draftPinned[i] then model.pinnedGuests[i]=true end
         if v and not anonymous and draftGuest[i] then model.normalGuests[i]=true end
-        if info and not assigned[info.key] then
+        if info and RGStyle.IsArrangementIgnored(info.key) then
+            model.ignoredFlags[info.key]={pinned=model.pinnedGuests[i],normal=model.normalGuests[i]}
+            model.pinnedGuests[i]=nil
+            model.normalGuests[i]=nil
+        end
+        if info and not assigned[info.key] and not RGStyle.IsArrangementIgnored(info.key) then
             model.seats[i]=info.name
             assigned[info.key]=true
-        elseif v and not anonymous then
+        elseif v and not anonymous and not (info and RGStyle.IsArrangementIgnored(info.key)) then
             model.absentNames[i]=v
         end
     end
+    -- Ignored members have a temporary tail target, even when the source
+    -- setup names them in earlier seats. Show the actual intended arrangement
+    -- in the visual preview; keep the saved source and its flags untouched.
+    if plan.wanted then
+        local hasIgnored=false
+        for _,member in ipairs(rosterSorted) do
+            if RGStyle.IsArrangementIgnored(member.key) then hasIgnored=true;break end
+        end
+        if hasIgnored and not plan.blockedReason then
+            local memberFlags=model.ignoredFlags
+            for i=1,SLOT_COUNT do
+                local name=model.seats[i]
+                local key=name and Canonical(name)
+                if key and rosterByKey[key] then
+                    memberFlags[key]={guest=model.guestSeats[i],pinned=model.pinnedGuests[i],
+                        generic=model.genericPinnedSeats[i],normal=model.normalGuests[i]}
+                    model.seats[i]=nil
+                    model.guestSeats[i]=nil
+                    model.pinnedGuests[i]=nil
+                    model.genericPinnedSeats[i]=nil
+                    model.normalGuests[i]=nil
+                end
+            end
+            for key,target in pairs(plan.wanted) do
+                local member=rosterByKey[key]
+                if member then
+                    local i=(target.group-1)*GROUP_SIZE+target.seat
+                    model.seats[i]=member.name
+                    local flags=memberFlags[key]
+                    if flags then
+                        model.guestSeats[i]=flags.guest
+                        model.pinnedGuests[i]=flags.pinned
+                        model.genericPinnedSeats[i]=flags.generic
+                        model.normalGuests[i]=flags.normal
+                    end
+                    assigned[key]=true
+                end
+            end
+        end
+    end
+    model.ignoredFlags=nil
     -- Model unlisted members at their capacity-safe target when the setup
     -- contains Pinned Empty seats, never filling a visibly reserved vacancy.
     for _,m in ipairs(rosterSorted) do
@@ -4178,11 +4343,21 @@ function ns.ShowRaidGroupsPreviewWindow()
     end
     RequestPreview()
 end
-local function QueueApply()
-    if not applyState or updatePending then return end
-    updatePending = true
-    C_Timer.After(.55,function()
-        updatePending = false
+-- Keep the normal 550 ms retry for delayed/rejected server changes.
+-- A confirmed GROUP_ROSTER_UPDATE may bring the next step forward safely.
+local function QueueApply(delay)
+    if not applyState then return end
+    delay=delay or .55
+    local due=GetTime()+delay
+    if updatePending and applySchedule.due and applySchedule.due<=due then return end
+    applySchedule.token=applySchedule.token+1
+    local token=applySchedule.token
+    updatePending=true
+    applySchedule.due=due
+    C_Timer.After(delay,function()
+        if token~=applySchedule.token then return end
+        updatePending=false
+        applySchedule.due=nil
         if applyState then ProcessApply() end
     end)
 end
@@ -4267,18 +4442,17 @@ function ProcessApply()
         state.attemptedExact={}
         state.lastOperation=nil
         state.lastActors=nil
+        state.expectedMove=nil
         state.unchanged=0
         state.steps=0
         state.rosterPauseSignature=nil
         state.rosterPauseSince=nil
         local actionable=false
-        for _,target in pairs(state.wanted) do
-            if not target.ignored then actionable=true;break end
-        end
+        for _ in pairs(state.wanted) do actionable=true;break end
         state.waitingForPlannedMember=not actionable
         if not actionable then
             -- Keep the confirmed Apply alive without polling until a planned
-            -- player is available again; ignored members alone are not targets.
+            -- player is available again.
             Notice("Apply Groups is waiting for a planned raid member to join.")
             return
         end
@@ -4293,6 +4467,7 @@ function ProcessApply()
             state.unchanged=0
         end
         state.lastOperation=nil
+        state.expectedMove=nil
     end
     if state.unchanged >= 4 or state.steps >= 90 then
         StopApply("Group application stopped: raid roster is not accepting group changes"..
@@ -4309,9 +4484,7 @@ function ProcessApply()
     if state.bridgeCycle then
         local cycle=state.bridgeCycle
         local a,b,c=rosterByKey[cycle.a],rosterByKey[cycle.b],rosterByKey[cycle.c]
-        if not a or not b or not c or a.rank==2 or b.rank==2 or c.rank==2 or
-            RGStyle.IsArrangementIgnored(cycle.a) or RGStyle.IsArrangementIgnored(cycle.b) or
-            RGStyle.IsArrangementIgnored(cycle.c) then
+        if not a or not b or not c or a.rank==2 or b.rank==2 or c.rank==2 then
             local issues={}
             for _,entry in ipairs({{cycle.a,cycle.aName},{cycle.b,cycle.bName},{cycle.c,cycle.cName}}) do
                 local member=rosterByKey[entry[1]]
@@ -4319,8 +4492,6 @@ function ProcessApply()
                     issues[#issues+1]=entry[2].." (unavailable)"
                 elseif member.rank==2 then
                     issues[#issues+1]=entry[2].." (now raid leader)"
-                elseif RGStyle.IsArrangementIgnored(entry[1]) then
-                    issues[#issues+1]=entry[2].." (Ignore Arrangement)"
                 end
             end
             StopApply("Exact Positions stopped: bridge player(s): "..table.concat(issues,", ")..".")
@@ -4350,9 +4521,11 @@ function ProcessApply()
             return
         end
         if left and right then
-            state.steps=state.steps+1
             state.lastOperation=signature
             state.lastActors=left.name.." and "..right.name
+            state.steps=state.steps+1
+            state.lastMoveAt=GetTime()
+            state.expectedMove={[left.key]=right.group,[right.key]=left.group}
             SwapRaidSubgroup(left.index,right.index)
             cycle.stage=cycle.stage+1
             cycle.waits=0
@@ -4363,7 +4536,7 @@ function ProcessApply()
     local wrong, needGroup
     for _,k in ipairs(state.order) do
         local m, want = rosterByKey[k], state.wanted[k]
-        if m and want and not want.ignored and m.group ~= want.group then wrong=m; needGroup=want.group; break end
+        if m and want and m.group ~= want.group then wrong=m; needGroup=want.group; break end
     end
     if wrong then
         local partner
@@ -4371,6 +4544,8 @@ function ProcessApply()
             state.lastOperation=signature
             state.lastActors=wrong.name.." (Group "..wrong.group.." -> "..needGroup..")"
             state.steps=state.steps+1
+            state.lastMoveAt=GetTime()
+            state.expectedMove={[wrong.key]=needGroup}
             SetRaidSubgroup(wrong.index,needGroup)
             QueueApply()
             return
@@ -4380,13 +4555,12 @@ function ProcessApply()
         for _,m in ipairs(rosterSorted) do
             if m.group == needGroup and m.key ~= wrong.key then
                 local expected = state.wanted[m.key]
-                if not RGStyle.IsArrangementIgnored(m.key) and expected and expected.group ~= m.group then partner=m;break end
+                if expected and expected.group ~= m.group then partner=m;break end
             end
         end
         if not partner then
             for _,m in ipairs(rosterSorted) do
-                if m.group == needGroup and not RGStyle.IsArrangementIgnored(m.key) and
-                    not state.wanted[m.key] then partner=m;break end
+                if m.group == needGroup and not state.wanted[m.key] then partner=m;break end
             end
         end
         if not partner then
@@ -4401,6 +4575,8 @@ function ProcessApply()
         state.lastOperation=signature
         state.lastActors=wrong.name.." and "..partner.name
         state.steps=state.steps+1
+        state.lastMoveAt=GetTime()
+        state.expectedMove={[wrong.key]=partner.group,[partner.key]=wrong.group}
         SwapRaidSubgroup(wrong.index,partner.index)
         QueueApply()
         return
@@ -4414,7 +4590,7 @@ function ProcessApply()
             currentSeat[m.group]=currentSeat[m.group]+1
             local want=state.wanted[m.key]
             local actual=currentSeat[m.group]
-            if want and not want.ignored and actual~=want.seat and m.rank~=2 then
+            if want and actual~=want.seat and m.rank~=2 then
                 local attempt=m.key..":"..want.group..":"..want.seat
                 if not state.attemptedExact[attempt] then
                     local occupant,bridge
@@ -4423,13 +4599,11 @@ function ProcessApply()
                         if x.group==m.group then
                             pos=pos+1
                             if pos==want.seat then occupant=x end
-                        elseif not bridge and x.rank~=2 and
-                            not RGStyle.IsArrangementIgnored(x.key) then
+                        elseif not bridge and x.rank~=2 then
                             bridge=x
                         end
                     end
-                    if occupant and bridge and occupant.rank~=2 and occupant.key~=m.key and
-                        not RGStyle.IsArrangementIgnored(occupant.key) then
+                    if occupant and bridge and occupant.rank~=2 and occupant.key~=m.key then
                         state.attemptedExact[attempt]=true
                         state.bridgeCycle={a=m.key,b=occupant.key,c=bridge.key,
                             aName=m.name,bName=occupant.name,cName=bridge.name,
@@ -4450,7 +4624,7 @@ function ProcessApply()
         for _,m in ipairs(rosterSorted) do
             seen[m.group]=(seen[m.group] or 0)+1
             local want=state.wanted[m.key]
-            if want and not want.ignored and (m.group~=want.group or seen[m.group]~=want.seat) then
+            if want and (m.group~=want.group or seen[m.group]~=want.seat) then
                 unsatisfied[#unsatisfied+1]=m.name.." (G"..m.group.."/"..seen[m.group]..
                     " instead of G"..want.group.."/"..want.seat..")"
             end
@@ -4470,7 +4644,7 @@ function ProcessApply()
         for _,m in ipairs(rosterSorted) do
             seen[m.group]=(seen[m.group] or 0)+1
             local wanted=state.wanted[m.key]
-            if wanted and not wanted.ignored and (wanted.group~=m.group or wanted.seat~=seen[m.group]) then
+            if wanted and (wanted.group~=m.group or wanted.seat~=seen[m.group]) then
                 unsatisfied=unsatisfied+1
             end
         end
@@ -5891,7 +6065,8 @@ function Refresh()
         rec.button:SetShown(Enabled("editorTools") and Enabled(rec.option))
     end
     -- Layout active controls consecutively, without changing panel dimensions.
-    local x,row,spacing,maxWidth=14,0,6,886
+    local x,row,spacing,maxWidth=14,0,
+        (Enabled("guestFeatures") and #RGStyle.PinnedGuestOrder()>1) and 4 or 6,886
     for _,entry in ipairs(footerControls) do
         local visible=not entry.visible or entry.visible()
         entry.button:SetShown(visible)
@@ -5903,7 +6078,115 @@ function Refresh()
             x=x+w+spacing
         end
     end
+    if RGStyle.pinnedOrderWindow and RGStyle.pinnedOrderWindow:IsShown() and
+        RGStyle.pinnedOrderWindow._refresh then RGStyle.pinnedOrderWindow:_refresh() end
     RefreshExtras()
+end
+function RGStyle.MovePinnedGuestPriority(index,direction)
+    if applyState then Notice("Cannot reorder Pinned Guests during Apply Groups.");return end
+    if previewWindow and previewWindow:IsShown() then
+        Notice("Close Apply Preview before reordering Pinned Guests.");return
+    end
+    local pins=RGStyle.PinnedGuestOrder()
+    local target=index+direction
+    if index<1 or index>#pins or target<1 or target>#pins then return end
+    PushUndo()
+    pins[index],pins[target]=pins[target],pins[index]
+    RGStyle.importPinnedGuestPreferences=pins
+    RGStyle.pinnedGuestOrderEdited=true
+    -- Only planning state changes. Leave saved setups, live raid and any
+    -- explicitly edited preview untouched until a fresh Preview/Apply.
+    if Refresh then Refresh() end
+end
+-- Reorder pinned identities for the next temporary setup without editing its
+-- stored seats. The same preferences are used by NSRT and saved setup imports.
+-- Build the UI only when requested; no events or per-frame updates are needed.
+function RGStyle.ShowPinnedGuestOrderWindow()
+    if previewWindow and previewWindow:IsShown() then
+        Notice("Close Apply Preview before reordering Pinned Guests.");return
+    end
+    local pins=RGStyle.PinnedGuestOrder()
+    if #pins<2 then Notice("At least two Pinned Guests are needed to change their order.");return end
+    local panel=RGStyle.pinnedOrderWindow
+    if not panel then
+        panel=Panel("EllesmereUIRaidGroupPinnedOrder",515,455)
+        RGStyle.pinnedOrderWindow=panel
+        Text(panel,14,"Pinned Guest Order"):SetPoint("TOPLEFT",15,-12)
+        local help=Text(panel,10,"Move guests up or down before loading or applying a temporary setup.")
+        help:SetPoint("TOPLEFT",15,-43)
+        help:SetWidth(480)
+        help:SetJustifyH("LEFT")
+        panel._rows={}
+        panel._offset=0
+        for n=1,12 do
+            local row=CreateFrame("Frame",nil,panel)
+            row:SetSize(481,25)
+            row:SetPoint("TOPLEFT",16,-76-(n-1)*26)
+            local label=Text(row,11)
+            label:SetPoint("LEFT",4,0)
+            label:SetWidth(362)
+            label:SetJustifyH("LEFT")
+            row._label=label
+            local up=Button(row,"Up",48,23,function(self)
+                RGStyle.MovePinnedGuestPriority(self._orderIndex,-1)
+            end)
+            up:SetPoint("RIGHT",row,"RIGHT",-55,0)
+            row._up=up
+            local down=Button(row,"Down",49,23,function(self)
+                RGStyle.MovePinnedGuestPriority(self._orderIndex,1)
+            end)
+            down:SetPoint("RIGHT",row,"RIGHT",0,0)
+            row._down=down
+            panel._rows[n]=row
+        end
+        local page=Text(panel,10)
+        page:SetPoint("BOTTOM",0,46)
+        panel._page=page
+        local previous=Button(panel,"Previous",84,25,function()
+            panel._offset=math.max(0,panel._offset-12)
+            panel:_refresh()
+        end)
+        previous:SetPoint("BOTTOMLEFT",16,13)
+        panel._previous=previous
+        local nextPage=Button(panel,"Next",84,25,function()
+            panel._offset=panel._offset+12
+            panel:_refresh()
+        end)
+        nextPage:SetPoint("LEFT",previous,"RIGHT",7,0)
+        panel._next=nextPage
+        local done=Button(panel,"Done",91,25,function() panel:Hide() end)
+        done:SetPoint("BOTTOMRIGHT",-16,13)
+        panel._refresh=function(self)
+            local current=RGStyle.PinnedGuestOrder()
+            local total=#current
+            self._offset=math.max(0,math.min(self._offset,math.floor(math.max(0,total-1)/12)*12))
+            for rowIndex,row in ipairs(self._rows) do
+                local i=self._offset+rowIndex
+                local key=current[i]
+                row:SetShown(key~=nil)
+                if key then
+                    local member=rosterByKey[key]
+                    row._label:SetText(i..". "..(member and Display(member.name,member.unit) or key))
+                    row._label:SetTextColor(member and .94 or .62,member and .94 or .67,member and .94 or .70)
+                    row._up._orderIndex=i
+                    row._down._orderIndex=i
+                    row._up:SetEnabled(i>1)
+                    row._down:SetEnabled(i<total)
+                    row._up:SetAlpha(i>1 and 1 or .4)
+                    row._down:SetAlpha(i<total and 1 or .4)
+                end
+            end
+            self._previous:SetEnabled(self._offset>0)
+            self._next:SetEnabled(self._offset+12<total)
+            self._previous:SetAlpha(self._offset>0 and 1 or .4)
+            self._next:SetAlpha(self._offset+12<total and 1 or .4)
+            self._page:SetText(string.format("%d-%d / %d",total>0 and self._offset+1 or 0,
+                math.min(self._offset+12,total),total))
+        end
+    end
+    panel:_refresh()
+    RGStyle.ApplyPanelScale(panel,"pinnedOrder")
+    panel:Show()
 end
 -- Build the repeated group slot widgets separately to respect WoW Lua 5.1's
 -- 60-upvalue limit on individual functions (the main initializer grew beyond it).
@@ -6034,7 +6317,7 @@ function ns._BuildRaidGroupsMainSlots()
                     if self._member then
                         GameTooltip:AddLine(LF("Roster: %s",self._member.name), .7,.8,.8)
                         if RGStyle.IsArrangementIgnored(self._member.key) then
-                            GameTooltip:AddLine(L("Ignore Arrangement: stays in its current raid subgroup during Apply."),.45,.95,.8)
+                            GameTooltip:AddLine(L("Ignore Arrangement: placed after arranged players during Apply (exact seat is best effort)."),.45,.95,.8)
                         end
                     end
                     if self._value and self._value~="GUEST" and draftPinned[self._seat] then
@@ -6243,6 +6526,8 @@ local function EnsureMainWindow()
     ColorBlueButton(applyButton,true)
     local previewButton=AddFooterButton("Preview Apply Groups",159,RequestPreview)
     ColorBlueButton(previewButton)
+    AddFooterButton("Pinned Order",115,RGStyle.ShowPinnedGuestOrderWindow,
+        function() return Enabled("guestFeatures") and #RGStyle.PinnedGuestOrder()>1 end)
     local setupManagerButton=AddFooterButton("Raid Group Setup",132,ShowSetupWindow)
     SetChoiceButtonState(setupManagerButton,true,false,true)
     AddFooterButton("Nicknames",103,ShowNickWindow)
@@ -6262,7 +6547,7 @@ local function EnsureMainWindow()
     exact._lbl:SetText(L(data.exactPositions and "Exact Positions: ON" or "Exact Positions: OFF"))
     SetChoiceButtonState(exact,false,not data.exactPositions,true)
     local clearButton=AddFooterButton("Clear Draft",101,function()
-        PushUndo(); draft={};draftPinned={};draftGuest={};RGStyle.emptyPinnedDraft={};removedGuestKeys={};selectedSetup=nil;RGStyle.setupLoadToggle=nil;RGStyle.importPinnedGuestPreferences=nil;SaveEdit()
+        PushUndo(); draft={};draftPinned={};draftGuest={};RGStyle.emptyPinnedDraft={};removedGuestKeys={};selectedSetup=nil;RGStyle.setupLoadToggle=nil;RGStyle.importPinnedGuestPreferences=nil;RGStyle.pinnedGuestOrderEdited=false;SaveEdit()
     end,function() return Enabled("editorTools") and Enabled("editorClearDraft") end)
     editorButtons[#editorButtons+1]={button=clearButton,option="editorClearDraft"}
     AddFooterButton("Undo Draft",97,UndoDraft)
@@ -6484,7 +6769,22 @@ events:SetScript("OnEvent",function(self,event,addonName)
             -- While paused, every roster/leader event restarts the quiet
             -- interval; planned subgroup swaps are not paused in normal mode.
             if applyState.rosterPauseSince then applyState.rosterPauseSince=GetTime() end
-            QueueApply()
+            -- Fast path only after the expected target groups are observable.
+            -- Preserve a 200 ms minimum gap to avoid flooding the raid roster.
+            local confirmed=event=="GROUP_ROSTER_UPDATE" and applyState.expectedMove
+                and not applyState.rosterPauseSince
+                and #rosterSorted==(GetNumGroupMembers() or 0)
+            if confirmed then
+                for key,group in pairs(applyState.expectedMove) do
+                    local member=rosterByKey[key]
+                    if not member or member.group~=group then confirmed=false;break end
+                end
+            end
+            if confirmed then
+                QueueApply(math.max(0,.20-(GetTime()-applyState.lastMoveAt)))
+            else
+                QueueApply()
+            end
         end
     end
     if win and win:IsShown() then Refresh() end

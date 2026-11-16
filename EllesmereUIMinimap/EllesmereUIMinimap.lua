@@ -138,6 +138,7 @@ local defaults = {
             flyoutGrowDir        = "auto",   -- Grow Tooltip/Popup: auto/up/down/left/right
             flyoutAutoClose      = false,    -- Flyout Auto Close (Addon Compartment, M+ Portals)
             flyoutAutoCloseTime  = 3,        -- its delay in seconds once the mouse leaves
+            flyoutAsList         = false,    -- flyout as a one-column list with button names
             elementRowPosition   = "tlDown", -- tlDown = original corner + direction
             elementRowSpacing    = 0,
             elementRowDistance   = 0,
