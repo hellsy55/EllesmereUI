@@ -1565,7 +1565,10 @@ local function EnsureSearchUI()
     local function EntryText(entry, accentHex)
         if entry.kind == "patchNote" then
             local note = entry.note
-            return accentHex .. note.category .. ":|r " .. note.label,
+            -- Release rows already show the version in the right-hand badge;
+            -- do not repeat it in the white primary label.
+            local title = note.kind == "patch" and note.module or note.label
+            return accentHex .. note.category .. ":|r " .. title,
                 "v" .. note.version .. " " .. JoinBreadcrumb(EllesmereUI.L("Patch Notes"), note.module)
         elseif entry.kind == "page" then
             -- Coarse whole-page result: prefixed like sections so it
@@ -1745,6 +1748,10 @@ local function EnsureSearchUI()
     -- HookScript adds to the box's existing handlers rather than replacing
     -- them, so the sidebar addon/page filtering it already does keeps working.
     sidebarSearchBox:HookScript("OnTextChanged", RunSearch)
+    -- Reopen the existing results when a previously dismissed query regains focus.
+    sidebarSearchBox:HookScript("OnEditFocusGained", function()
+        if sidebarSearchBox:GetText():match("%S") then RunSearch(true) end
+    end)
     sidebarSearchBox:HookScript("OnEnterPressed", function() Activate(selIdx) end)
     local function Step(d)
         local n = #display

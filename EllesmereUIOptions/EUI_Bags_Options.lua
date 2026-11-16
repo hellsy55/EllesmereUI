@@ -232,6 +232,42 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
 
+                if not EllesmereUI.IS_FOREVER then
+                    _, h = W:SectionHeader(parent, "WARBAND ITEMS", y); y = y - h
+                    local autoItemsRow
+                    autoItemsRow, h = W:DualRow(parent, y,
+                        { type="toggle", text="Auto Deposit Warbound Items",
+                          tooltip="Deposit eligible Warbound items once when visiting the Warbank. Click the three dots to exclude item IDs. Without exclusions, uses Blizzard's bulk deposit; with exclusions, transfers allowed items individually and may not use Blizzard's automatic tab routing.",
+                          getValue=function() return db.profile.bankAutoDepositWarbound == true end,
+                          setValue=function(v)
+                              db.profile.bankAutoDepositWarbound = v and true or false
+                              EllesmereUI:RefreshPage()
+                          end },
+                        EllesmereUI.BlankRowCfg()
+                    ); y = y - h
+                    EllesmereUI.BuildInlineCog(autoItemsRow._leftRegion, {
+                        title = "Auto Deposit Exclusions",
+                        disabled = function() return db.profile.bankAutoDepositWarbound ~= true end,
+                        disabledTooltip = "Enable Auto Deposit Warbound Items first.",
+                        show = function()
+                            EllesmereUI.ShowTrackedAurasPopup({
+                                itemMode = true,
+                                eyebrow = "WARBAND BANK",
+                                title = "Auto Deposit Exclusions",
+                                subtitle = "Excluded item IDs stay in your bags during automatic Warbank deposits.",
+                                fontPath = EllesmereUI.GetFontPath("bags"),
+                                excludeGet = function()
+                                    if type(db.profile.bankAutoDepositWarboundExclusions) ~= "table" then
+                                        db.profile.bankAutoDepositWarboundExclusions = {}
+                                    end
+                                    return db.profile.bankAutoDepositWarboundExclusions
+                                end,
+                                excludePrompt = "Enter the item ID to keep in your bags.",
+                            })
+                        end,
+                    })
+                end
+
                 -- offline bank. account-wide, like the data it saves
                 local Offline = BagsNS and BagsNS.Offline
                 if Offline then

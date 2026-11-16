@@ -30,6 +30,7 @@ local POPUPS = {}
 --     showAll = { label, get, set }        (optional header toggle)
 --     copyFrom = { label, choices = { {key=,label=}, ... }, apply(key) }
 --                                          (optional header copy row)
+--     itemMode = true, excludeGet = map accessor (one full-width item ID list)
 --     includeMine = { anyGet } | { mineGet }  (optional: INCLUDED rows carry a MINE tag.
 --                                          anyGet(): entries default to your own casts,
 --                                          the map holds any-caster OPT-OUTS (boss);
@@ -52,6 +53,7 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
     -- The panel's pixel helper, like every popup scaled by GetPopupScale:
     -- the real-UI-scale PP lands 1px borders on fractional pixels here.
     local PP = EllesmereUI.PanelPP or EllesmereUI.PP
+    local itemMode = opts.itemMode == true
     local fontPath = opts.fontPath or EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
     local ppScale = (EllesmereUI.GetPopupScale()) or 1
     local EG = EllesmereUI.PANEL_ACCENT
@@ -297,8 +299,9 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
     vdiv:SetPoint("TOP", panel, "TOP", 0, secY - 8)
     vdiv:SetPoint("BOTTOM", panel, "BOTTOM", 0, 62)
     vdiv:SetColorTexture(1, 1, 1, 0.08)
+    vdiv:SetShown(not itemMode)
 
-    local COL_W = 228
+    local COL_W = itemMode and 472 or 228
     -- withMine: the caller's includeMine descriptor (INCLUDED column only). Two
     -- polarities: anyGet() = entries default to Only My Casts and the map holds
     -- any-caster OPT-OUTS; mineGet() = entries default to any caster and the map
@@ -341,7 +344,7 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
         al:SetFont(fontPath, 12, "")
         al:SetPoint("CENTER")
         al:SetTextColor(EG.r, EG.g, EG.b, 0.7)
-        al:SetText(EllesmereUI.L("Add Spell ID"))
+        al:SetText(EllesmereUI.L(itemMode and "Add Item ID" or "Add Spell ID"))
         addBtn:SetScript("OnEnter", function()
             al:SetTextColor(EG.r, EG.g, EG.b, 1)
             if abrd and abrd.SetColor then abrd:SetColor(EG.r, EG.g, EG.b, 0.8) end
@@ -373,7 +376,13 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
             local list = listFn() or {}
             local sorted = {}
             for id, v in pairs(list) do
-                local nm = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                local nm
+                if itemMode then
+                    nm = (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id))
+                        or (GetItemInfo and GetItemInfo(id))
+                else
+                    nm = C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                end
                 sorted[#sorted + 1] = { id = id, on = v == true, name = nm or tostring(id) }
             end
             table.sort(sorted, function(a, b) return a.name < b.name end)
@@ -454,7 +463,8 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                     end)
                     row:SetScript("OnEnter", function(self)
                         self.hl:SetColorTexture(1, 1, 1, 0.04)
-                        EllesmereUI.ShowWidgetTooltip(self, "|T" .. tostring(self._iconTexture) .. ":16:16|t  " .. self._name .. "\nSpell ID: " .. tostring(self._id), { justify = "LEFT" })
+                        EllesmereUI.ShowWidgetTooltip(self, "|T" .. tostring(self._iconTexture) .. ":16:16|t  " .. self._name
+                            .. (itemMode and "\nItem ID: " or "\nSpell ID: ") .. tostring(self._id), { justify = "LEFT" })
                     end)
                     row:SetScript("OnLeave", function(self)
                         self.hl:SetColorTexture(1, 1, 1, 0)
@@ -465,7 +475,12 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
                 local entry = sorted[i]
                 row._id = entry.id
                 row._name = entry.name
-                local tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.id)
+                local tex
+                if itemMode then
+                    tex = C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(entry.id)
+                else
+                    tex = C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(entry.id)
+                end
                 row._iconTexture = tex or 134400
                 row.icon:SetTexture(row._iconTexture)
                 row.name:SetText(entry.name .. " |cff808080(" .. entry.id .. ")|r")
@@ -514,16 +529,21 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
         end
         addBtn:SetScript("OnClick", function()
             EllesmereUI:ShowInputPopup({
-                title = EllesmereUI.L("Add Spell ID"),
+                title = EllesmereUI.L(itemMode and "Add Item ID" or "Add Spell ID"),
                 message = promptText,
                 confirmText = EllesmereUI.L("Add"),
                 cancelText = EllesmereUI.L("Cancel"),
                 onConfirm = function(text)
                     local id = tonumber(text or "")
+                    if itemMode and (not text or not text:match("^%d+$") or not id
+                        or id < 1 or id > 2147483647 or id % 1 ~= 0) then
+                        EllesmereUI.PrintError("Invalid item ID: " .. tostring(text or ""))
+                        return
+                    end
                     local list = id and listFn()
                     if list then
-                        -- One list per spell: adding here removes it from the opposite list.
-                        local other = otherFn()
+                        -- For spell columns, adding to one list removes the other.
+                        local other = otherFn and otherFn()
                         if other then other[id] = nil end
                         if opts.onAdd then opts.onAdd(id) end
                         list[id] = true
@@ -536,17 +556,19 @@ function EllesmereUI.ShowTrackedAurasPopup(opts)
         return RefreshList
     end
 
-    local refreshInc = MakeSpellColumn(24, "INCLUDED DEBUFFS",
-        EllesmereUI.L(opts.includePrompt or "Enter the spell ID to always show."),
-        opts.includeGet,
-        opts.excludeGet,
-        opts.includeMine)
-    local refreshEx = MakeSpellColumn(268, "EXCLUDED DEBUFFS",
+    local refreshInc
+    if not itemMode then
+        refreshInc = MakeSpellColumn(24, "INCLUDED DEBUFFS",
+            EllesmereUI.L(opts.includePrompt or "Enter the spell ID to always show."),
+            opts.includeGet, opts.excludeGet, opts.includeMine)
+    end
+    local refreshEx = MakeSpellColumn(itemMode and 24 or 268,
+        itemMode and "EXCLUDED WARBAND ITEMS" or "EXCLUDED DEBUFFS",
         EllesmereUI.L(opts.excludePrompt or "Enter the spell ID to exclude."),
-        opts.excludeGet,
-        opts.includeGet)
+        opts.excludeGet, opts.includeGet)
     RefreshBoth = function()
-        refreshInc(); refreshEx()
+        if refreshInc then refreshInc() end
+        refreshEx()
     end
 
     -- Done (announcement popup's primary action: green border and label, brighten on hover). Everything applies live, so Done = close.

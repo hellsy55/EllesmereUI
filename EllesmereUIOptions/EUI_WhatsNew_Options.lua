@@ -29,6 +29,7 @@ local whatsNewOpen = {}
 -- Both searches share one client-filtered index, including collapsed releases.
 local patchSearchIndex, patchSearchSource, patchSearchQuery, patchSearchPending = nil, nil, "", nil
 local PATCH_SEARCH_ROWS = 7
+local PATCH_SEARCH_ROW_H, PATCH_SEARCH_ROW_STEP = 38, 39
 
 local function PatchEntryApplies(e)
     if EllesmereUI.IS_FOREVER then
@@ -686,7 +687,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     clearLabel:SetText("x")
 
     local popup = CreateFrame("Frame", nil, parent)
-    PP.Size(popup, 390, 8 + PATCH_SEARCH_ROWS * 43)
+    PP.Size(popup, 390, 8 + PATCH_SEARCH_ROWS * PATCH_SEARCH_ROW_STEP)
     PP.Point(popup, "TOPRIGHT", searchFrame, "BOTTOMRIGHT", 0, -5)
     popup:SetFrameLevel(searchFrame:GetFrameLevel() + 3)
     local popBg = popup:CreateTexture(nil, "BACKGROUND")
@@ -700,22 +701,22 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
     local rows = {}
     for i = 1, PATCH_SEARCH_ROWS do
         local row = CreateFrame("Button", nil, popup)
-        PP.Size(row, 382, 42)
-        PP.Point(row, "TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * 43)
+        PP.Size(row, 382, PATCH_SEARCH_ROW_H)
+        PP.Point(row, "TOPLEFT", popup, "TOPLEFT", 4, -4 - (i - 1) * PATCH_SEARCH_ROW_STEP)
         row:SetFrameLevel(popup:GetFrameLevel() + 1)
         local hover = row:CreateTexture(nil, "BACKGROUND")
         hover:SetAllPoints()
-        local title = MakeFont(row, 12, nil, 1, 1, 1, 0.88)
-        PP.Point(title, "TOPLEFT", row, "TOPLEFT", 8, -5)
+        local title = MakeFont(row, 14, nil, 1, 1, 1, 0.88)
+        PP.Point(title, "LEFT", row, "LEFT", 8, 8)
         title:SetWidth(315)
         title:SetJustifyH("LEFT")
         title:SetWordWrap(false)
         local version = MakeFont(row, 11, nil, EG.r, EG.g, EG.b, 0.9)
         OnAccent(version, function(r, g, b) version:SetTextColor(r, g, b, 0.9) end)
-        PP.Point(version, "TOPRIGHT", row, "TOPRIGHT", -6, -6)
-        local sub = MakeFont(row, 10, nil, 1, 1, 1, 0.42)
-        PP.Point(sub, "TOPLEFT", title, "BOTTOMLEFT", 0, -2)
-        sub:SetWidth(315)
+        PP.Point(version, "TOPRIGHT", row, "TOPRIGHT", -6, -5)
+        local sub = MakeFont(row, 12, nil, 1, 1, 1, 0.42)
+        PP.Point(sub, "LEFT", row, "LEFT", 8, -9)
+        sub:SetWidth(362)
         sub:SetJustifyH("LEFT")
         sub:SetWordWrap(false)
         if i == 2 then
@@ -813,7 +814,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
             end
         end
         if n > 0 and edit:HasFocus() then
-            popup:SetHeight(8 + n * 43)
+            popup:SetHeight(8 + n * PATCH_SEARCH_ROW_STEP)
             popup:Show()
         else
             popup:Hide()

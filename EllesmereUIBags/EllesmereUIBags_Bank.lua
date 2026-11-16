@@ -42,6 +42,7 @@ local SCROLLBAR_HIT_W = 16
 local _selectedView = 0   -- 0 = All Bank Tabs, -1 = OneBank, -2 = All Warbank, -3 = OneWarbank, >0 = tab index
 local _allTabs = {}        -- populated on bank open: { bagID, name, isWarband, numSlots, icon, depositFlags }
 local _warbandOnly = false -- true when opened via portable warbank (AccountBanker interaction)
+local _autoDepositWarboundPending = false -- one attempt per bank visit, only when enabled
 -- Category sidebar selection. nil = a normal view/tab is showing; otherwise
 -- { group = "<group name>" } or { key = "<category _defaultName>", detail = "<bucket label>" }.
 -- Keyed by _defaultName rather than list index so a drag-reorder in the bags
@@ -1500,6 +1501,155 @@ function EUI_Bank:QueueTransfer(srcBag, srcSlot)
     end
 end
 
+-------------------------------------------------------------------------------
+--  Warbound auto-deposit exclusions
+--  Blizzard's bulk deposit has no per-item filter. Use a sequential, scoped
+--  manual bank transfer only when a profile contains excluded item IDs.
+-------------------------------------------------------------------------------
+local _selectiveWarboundDeposit
+local function StopSelectiveWarboundDeposit()
+    _selectiveWarboundDeposit = nil
+end
+
+-- Restrict the manual path to Warbound / Warbound-until-equipped items.
+-- C_Bank.IsItemAllowedInBankType alone also accepts ordinary reagents.
+-- On some clients an account-bound item can report a legacy bind type;
+-- the conjunction of IsBound and account-bank eligibility covers it.
+local function IsWarboundDepositItem(info, loc)
+    if not (info and info.itemID and C_Item.DoesItemExist(loc)
+        and C_Bank.IsItemAllowedInBankType(Enum.BankType.Account, loc)) then return false end
+    if C_Item.IsBoundToAccountUntilEquip(loc) then return true end
+    local itemInfo = info.hyperlink or info.itemID
+    local bindType = select(14, GetItemInfo(itemInfo))
+    if bindType == Enum.ItemBind.ToWoWAccount
+        or bindType == Enum.ItemBind.ToBnetAccount
+        or bindType == Enum.ItemBind.ToBnetAccountUntilEquipped then return true end
+    return C_Item.IsBound(loc) == true
+end
+
+-- Only merge when the destination has room for the ENTIRE source stack: no
+-- partial cursor stack can be left stranded if another free slot is missing.
+local function FindSelectiveWarbankSlot(info)
+    local maxStack = C_Item.GetItemMaxStackSizeByID(info.itemID) or 1
+    if maxStack > 1 then
+        for _, tab in ipairs(_allTabs) do
+            if tab.isWarband then
+                for slot = 1, (C_Container.GetContainerNumSlots(tab.bagID) or 0) do
+                    local other = C_Container.GetContainerItemInfo(tab.bagID, slot)
+                    if other and other.itemID == info.itemID and not other.isLocked
+                        and other.stackCount + (info.stackCount or 1) <= maxStack then
+                        return tab.bagID, slot
+                    end
+                end
+            end
+        end
+    end
+    for _, tab in ipairs(_allTabs) do
+        if tab.isWarband then
+            for slot = 1, (C_Container.GetContainerNumSlots(tab.bagID) or 0) do
+                if not C_Container.GetContainerItemInfo(tab.bagID, slot) then
+                    return tab.bagID, slot
+                end
+            end
+        end
+    end
+end
+
+local function SelectiveWarboundStep(state)
+    if _selectiveWarboundDeposit ~= state then return end
+    if not EUI_Bank:IsVisible() or InCombatLockdown()
+        or BP().bankAutoDepositWarbound ~= true
+        or not C_Bank.CanViewBank(Enum.BankType.Account) then
+        StopSelectiveWarboundDeposit()
+        return
+    end
+    -- Never disturb a cursor item carried by the player or another addon.
+    if CursorHasItem() then
+        StopSelectiveWarboundDeposit()
+        return
+    end
+    if state.waiting then
+        local pending = state.waiting
+        local current = C_Container.GetContainerItemInfo(pending.bag, pending.slot)
+        if current and current.itemID == pending.id
+            and (current.stackCount or 1) >= pending.count
+            and state.retries < 8 then
+            state.retries = state.retries + 1
+            C_Timer.After(0.2, function() SelectiveWarboundStep(state) end)
+            return
+        end
+        state.waiting = nil
+        state.retries = 0
+    end
+
+    local exclusions = BP().bankAutoDepositWarboundExclusions
+    for index = state.index, #state.items do
+        state.index = index + 1
+        local entry = state.items[index]
+        local info = C_Container.GetContainerItemInfo(entry.bag, entry.slot)
+        if info and info.itemID == entry.id and not info.isLocked
+            and not (type(exclusions) == "table" and exclusions[entry.id] == true) then
+            local loc = ItemLocation:CreateFromBagAndSlot(entry.bag, entry.slot)
+            if IsWarboundDepositItem(info, loc) then
+                local dstBag, dstSlot = FindSelectiveWarbankSlot(info)
+                if dstBag then
+                    -- Recheck the destination immediately before picking up.
+                    local dst = C_Container.GetContainerItemInfo(dstBag, dstSlot)
+                    if not dst or (dst.itemID == info.itemID and not dst.isLocked
+                        and dst.stackCount + (info.stackCount or 1)
+                            <= (C_Item.GetItemMaxStackSizeByID(info.itemID) or 1)) then
+                        state.waiting = { bag=entry.bag, slot=entry.slot,
+                            id=entry.id, count=info.stackCount or 1 }
+                        C_Container.PickupContainerItem(entry.bag, entry.slot)
+                        if CursorHasItem() then
+                            C_Container.PickupContainerItem(dstBag, dstSlot)
+                        end
+                        if CursorHasItem() then
+                            -- A rejected transfer should not carry a cursor item
+                            -- into the next operation or displace another item.
+                            ClearCursor()
+                            StopSelectiveWarboundDeposit()
+                            return
+                        end
+                        C_Timer.After(0.2, function() SelectiveWarboundStep(state) end)
+                        return
+                    end
+                end
+            end
+        end
+    end
+    StopSelectiveWarboundDeposit()
+end
+
+local function StartSelectiveWarboundDeposit()
+    if _selectiveWarboundDeposit then return end
+    local exclusions = BP().bankAutoDepositWarboundExclusions
+    local hasExclusions = false
+    if type(exclusions) == "table" then
+        for _, excluded in pairs(exclusions) do
+            if excluded == true then hasExclusions = true; break end
+        end
+    end
+    if not hasExclusions then
+        C_Bank.AutoDepositItemsIntoBank(Enum.BankType.Account)
+        return
+    end
+    if CursorHasItem() then return end
+    local items = {}
+    for bag = 0, 5 do
+        for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID and exclusions[info.itemID] ~= true then
+                items[#items + 1] = { bag=bag, slot=slot, id=info.itemID }
+            end
+        end
+    end
+    if #items == 0 then return end
+    local state = { items=items, index=1, retries=0 }
+    _selectiveWarboundDeposit = state
+    SelectiveWarboundStep(state)
+end
+
 -- A slot or row skipped in combat is filled by one refresh at combat end
 -- (RefreshBank returns while the bank is closed).
 local function RetryBankRefresh() EUI_Bank:RefreshBank() end
@@ -2600,6 +2750,21 @@ function EUI_Bank:RefreshBank()
     end
     EUI_Bank:UpdateDepositButton(isWarbandView)
 
+    -- Deposit only on the first usable Warbank view during this visit. The
+    -- existing Blizzard operation handles Warbound eligibility and tab filters.
+    if _autoDepositWarboundPending and isWarbandView and BP().bankAutoDepositWarbound == true
+        and not EUI.IS_FOREVER and C_Bank.CanViewBank(Enum.BankType.Account)
+        and C_Bank.DoesBankTypeSupportAutoDeposit(Enum.BankType.Account) then
+        local hasWarbandTab = false
+        for _, tab in ipairs(_allTabs) do
+            if tab.isWarband then hasWarbandTab = true; break end
+        end
+        if hasWarbandTab then
+            _autoDepositWarboundPending = false
+            StartSelectiveWarboundDeposit()
+        end
+    end
+
     -- Set scroll child height from layout
     child:SetHeight(math.abs(curY) + 10)
 
@@ -3562,6 +3727,7 @@ eventFrame:RegisterEvent("SKILL_LINES_CHANGED")
 if EUI.IS_FOREVER then eventFrame:RegisterEvent("BAG_CONTAINER_UPDATE") end
 eventFrame:SetScript("OnEvent", function(_, event)
     if event == "BANKFRAME_OPENED" then
+        _autoDepositWarboundPending = BP().bankAutoDepositWarbound == true and not EUI.IS_FOREVER
         -- WoW Forever's Gamepad interface style at login: Blizzard's bank
         -- (left in place) carries the D-pad navigation; ours stays closed.
         if ns.PadUIStandDown() then return end
@@ -3647,6 +3813,8 @@ eventFrame:SetScript("OnEvent", function(_, event)
         end)
 
     elseif event == "BANKFRAME_CLOSED" then
+        _autoDepositWarboundPending = false
+        StopSelectiveWarboundDeposit()
         if ns.PadUIStandDown() then return end  -- Forever Gamepad style: ours never opened
         _warbandOnly = false
         _lastTSMBankType = nil
