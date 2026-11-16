@@ -1403,13 +1403,12 @@ local function TitleCaseSection(s)
     end))
 end
 
-local function JumpToResult(entry, sidebarSearchBox)
+local function JumpToResult(entry)
     if entry.kind == "patchNote" then
         if EllesmereUI._NavigateToPatchNote
            and EllesmereUI._NavigateToPatchNote(entry.note) then
             RecordPick(entry)
             if popup then popup:Hide() end
-            if sidebarSearchBox then sidebarSearchBox:SetText("") end
         end
         return
     end
@@ -1427,7 +1426,7 @@ local function JumpToResult(entry, sidebarSearchBox)
     -- just means no scroll/glow happens -- the page is left exactly as the player
     -- already had it, not blanked out.
     if entry.kind == "page" or not entry.section then
-        EllesmereUI:SelectModule(entry.module)
+        EllesmereUI:SelectModule(entry.module, entry.page)
         EllesmereUI:SelectPage(entry.page)
     else
         -- Some pages (CDM Bars, Action Bars Display, Unit Frames) show
@@ -1454,7 +1453,6 @@ local function JumpToResult(entry, sidebarSearchBox)
         C_Timer.After(0.25, function() EllesmereUI.MarkSearchCog(key) end)
     end
     if popup then popup:Hide() end
-    if sidebarSearchBox then sidebarSearchBox:SetText("") end
 end
 
 local function EnsureSearchUI()
@@ -1671,7 +1669,7 @@ local function EnsureSearchUI()
         local item = display[i]
         if not item then return end
         local entry = item.entry
-        if not entry.isGroup then return JumpToResult(entry, sidebarSearchBox) end
+        if not entry.isGroup then return JumpToResult(entry) end
         expanded = expanded ~= entry and entry or nil
         BuildDisplay()
         for k, it in ipairs(display) do

@@ -570,7 +570,12 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
         searchEdit:SetAutoFocus(false)
         searchEdit:SetMaxLetters(30)
         -- Text at the row labels' x (rows sit 1 unit in, labels 10 into a row).
-        searchEdit:SetTextInsets(10, 10, 0, 0)
+        searchEdit:SetTextInsets(28, 10, 0, 0)
+        local searchGlass = searchEdit:CreateTexture(nil, "ARTWORK")
+        searchGlass:SetSize(15, 15)
+        searchGlass:SetPoint("LEFT", searchEdit, "LEFT", 8, 0)
+        searchGlass:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+        searchGlass:SetAlpha(0.55)
         local sDiv = searchEdit:CreateTexture(nil, "ARTWORK")
         sDiv:SetHeight(1)
         sDiv:SetPoint("BOTTOMLEFT", searchEdit, "BOTTOMLEFT", 0, 0)
@@ -579,7 +584,7 @@ local function BuildDropdownMenu(ddBtn, menuW, order, values, getValue, setValue
         searchPlaceholder = searchEdit:CreateFontString(nil, "OVERLAY")
         searchPlaceholder:SetFont(fontPath, 11, "")
         searchPlaceholder:SetTextColor(0.5, 0.5, 0.5, 0.6)
-        searchPlaceholder:SetPoint("LEFT", searchEdit, "LEFT", 10, 0)
+        searchPlaceholder:SetPoint("LEFT", searchEdit, "LEFT", 29, 0)
         searchPlaceholder:SetText(EllesmereUI.L("Search..."))
         searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     end
