@@ -688,8 +688,8 @@ initFrame:SetScript("OnEvent", function(self)
             { key="bagTooltipCounts", label="Item Counts", lockedFn=function() return BagOffline() == nil end,
               lockedTooltip=EllesmereUI.DisabledTooltip("Bags"),
               tooltip=EllesmereUI.IS_FOREVER
-                  and "Item tooltips list how many of that item each of your characters has in their bags and bank. Applies to all characters."
-                  or "Item tooltips list how many of that item each of your characters has in their bags and bank, plus the warband bank. Applies to all characters." },
+                  and "Item tooltips show how many max-level characters have this item in their bags and bank. Applies to all max-level characters."
+                  or "Item tooltips show item counts for max-level characters in their bags and bank, plus the warband bank. Applies to all max-level characters." },
             { key="bagTooltipCurrencyCounts", label="Currency Count",
               lockedFn=function() return BagOffline() == nil end,
               lockedTooltip=EllesmereUI.DisabledTooltip("Bags"),
@@ -778,6 +778,33 @@ initFrame:SetScript("OnEvent", function(self)
             lrgn._control = extrasDD
             lrgn._lastInline = nil
             EllesmereUI.RegisterWidgetRefresh(extrasRefresh)
+        end
+
+        -- Item Counts options belong to the same Tooltip Extras region and
+        -- are inaccessible until Bags' account-wide Item Counts is enabled.
+        do
+            local lrgn = ttExtrasRow._leftRegion
+            EllesmereUI.BuildInlineCog(lrgn, {
+                anchorTo = lrgn._control,
+                disabled = function()
+                    local offline = BagOffline()
+                    return not (offline and offline.CountsEnabled())
+                end,
+                disabledTooltip = "Item Counts",
+                tip = "When enabled, counts match item bonus IDs, suffix, context and modifiers instead of only the item ID.",
+                title = "Item Counts",
+                rows = {
+                    { type="toggle", label="Match Item Bonus IDs",
+                      get=function()
+                          local offline = BagOffline()
+                          return offline and offline.BonusIDsEnabled() or false
+                      end,
+                      set=function(v)
+                          local offline = BagOffline()
+                          if offline then offline.SetBonusIDs(v) end
+                      end },
+                },
+            })
         end
 
         -- "Use Modifier" cog on Spell ID on Tooltip (right region): the spell/item
@@ -5110,6 +5137,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- settings: turning it on makes Bags save inventories, which a
                 -- shared profile must not switch on for another account.
                 EllesmereUIDB.bagTooltipCounts = nil
+                EllesmereUIDB.bagTooltipBonusIDs = nil
                 EllesmereUIDB.tooltipShowBuffs = nil
                 EllesmereUIDB.tooltipBuffPosition = nil
                 EllesmereUIDB.tooltipBuffSize = nil

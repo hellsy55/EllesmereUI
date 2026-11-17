@@ -38,6 +38,7 @@ ns.Offline = Offline
 
 function Offline.Enabled() return Acct().bagOfflineBank == true end
 function Offline.CountsEnabled() return Acct().bagTooltipCounts == true end
+function Offline.BonusIDsEnabled() return Acct().bagTooltipBonusIDs == true end
 function Offline.CurrencyCountsEnabled() return Acct().bagTooltipCurrencyCounts == true end
 local function Active() return Offline.Enabled() or Offline.CountsEnabled() end
 
@@ -59,6 +60,46 @@ local function ItemID(s)
     return tonumber(id)
 end
 Offline.ItemID = ItemID
+
+-- Stable item variant: suffix, item context, bonus IDs and modifier pairs.
+-- Ignore enchantments, gems, unique IDs and link level, which can differ
+-- between links for otherwise identical gear. A malformed bonus block is
+-- never matched to an item with a known variant.
+local function VariantKey(s)
+    if type(s) ~= "string" then return nil end
+    local payload = s:match("^item:([^|]+)") or s:match("|Hitem:([^|]+)|h")
+    if not payload then return nil end
+    local fields = {}
+    for part in (payload .. ":"):gmatch("(.-):") do fields[#fields + 1] = part end
+    local id = tonumber(fields[1])
+    if not id then return nil end
+    local count = tonumber(fields[13]) or 0
+    if count < 0 or count > 100 or count % 1 ~= 0 or #fields < 13 + count then return nil end
+    local bonuses = {}
+    for i = 14, 13 + count do
+        local bonus = tonumber(fields[i])
+        if not bonus then return nil end
+        bonuses[#bonuses + 1] = bonus
+    end
+    table.sort(bonuses)
+    local modifierStart = 14 + count
+    local modifierCount = tonumber(fields[modifierStart]) or 0
+    if modifierCount < 0 or modifierCount > 100 or modifierCount % 1 ~= 0
+        or #fields < modifierStart + modifierCount * 2 then return nil end
+    local modifiers = {}
+    for i = 1, modifierCount * 2 do
+        local modifier = tonumber(fields[modifierStart + i])
+        if not modifier then return nil end
+        modifiers[#modifiers + 1] = modifier
+    end
+    return table.concat({ id, tonumber(fields[7]) or 0, tonumber(fields[12]) or 0,
+        count, table.concat(bonuses, ","), modifierCount, table.concat(modifiers, ",") }, ":")
+end
+
+local function CountKey(s)
+    if Offline.BonusIDsEnabled() then return VariantKey(s) end
+    return ItemID(s)
+end
 
 -------------------------------------------------------------------------------
 --  store
@@ -179,7 +220,9 @@ local function MyEntry()
         local first, surname = (UnitNameUnmodified or UnitName)("player")
         name = EUI.WithSurname(first, surname, true)
     end
+    local oldLevel = c.level
     c.name, c.realm, c.class, c.level = name, EUI.RealmGroupName(), class, UnitLevel("player")
+    if oldLevel ~= c.level then Changed("level") end
     -- a rename keeps the guid: its old entry goes and the bank moves over (the
     -- bags save again at once). a new character under a reused name has another
     -- guid and starts empty. a realm transfer gets a new guid too, so its old
@@ -355,6 +398,13 @@ ev:SetScript("OnEvent", function(_, event, arg)
         end
     elseif event == "BAG_UPDATE_DELAYED" then
         Queue(true, false)
+    elseif event == "PLAYER_LEVEL_UP" then
+        -- Update eligibility even when leveling does not change bag contents.
+        local c = Offline.Store().chars[OwnKey()]
+        if c and type(arg) == "number" and c.level ~= arg then
+            c.level = arg
+            Changed("level")
+        end
     elseif event == "BAG_CONTAINER_UPDATE" then
         MarkAll(BAGS)
         Queue(true, false)
@@ -391,10 +441,17 @@ local EVENTS = { "BAG_UPDATE_DELAYED", "BAG_UPDATE", "BAG_CONTAINER_UPDATE",
     "PLAYER_INTERACTION_MANAGER_FRAME_SHOW", "PLAYER_INTERACTION_MANAGER_FRAME_HIDE",
     "BANK_TABS_CHANGED", "BANK_TAB_SETTINGS_UPDATED" }
 
-local listening = false
+local listening, levelListening = false, false
 local IndexSoon  -- below
 function Offline.Sync()
     local on = Active()
+    -- Track level changes only while item counts are enabled, even when the
+    -- independent offline bank viewer keeps the inventory watcher running.
+    local counts = Offline.CountsEnabled()
+    if counts ~= levelListening then
+        levelListening = counts
+        if counts then ev:RegisterEvent("PLAYER_LEVEL_UP") else ev:UnregisterEvent("PLAYER_LEVEL_UP") end
+    end
     if on == listening then return end
     listening = on
     for _, e in ipairs(EVENTS) do
@@ -419,6 +476,13 @@ function Offline.Wipe()
 end
 
 -- an options toggle: key is bagOfflineBank or bagTooltipCounts
+function Offline.SetBonusIDs(on)
+    if not _G.EllesmereUIDB then return end
+    _G.EllesmereUIDB.bagTooltipBonusIDs = on and true or nil
+    index = nil
+    Changed("tooltip")
+end
+
 function Offline.Set(key, on)
     if not _G.EllesmereUIDB then return end
     _G.EllesmereUIDB[key] = on and true or nil
@@ -431,12 +495,12 @@ end
 -------------------------------------------------------------------------------
 --  tooltip item counts
 -------------------------------------------------------------------------------
--- index: chars[itemID][key] = { bags, bank }, warband[itemID].n
+-- index: chars[countKey][key] = { bags, bank }, warband[countKey].n
 -- sign -1 takes a container back out (rows that hit zero go away)
 local function AddContainer(t, into, field, owner, sign)
     if type(t) ~= "table" or type(t.items) ~= "table" then return end
     for slot, s in pairs(t.items) do
-        local id = ItemID(s)
+        local id = CountKey(s)
         if id then
             local n = ((t.counts and t.counts[slot]) or 1) * sign
             local row = into[id]
@@ -484,7 +548,24 @@ IndexSoon = function()
     C_Timer.After(3, function() if listening and Offline.CountsEnabled() then Index() end end)
 end
 
--- finished lines per item id, until the next write
+-- Finished lines per item key, until the next write.
+-- Only max-level characters contribute to item counts; warband bank is global.
+local function MaxCharacterLevel()
+    local cap
+    if EUI.IS_FOREVER then
+        cap = GetMaxPlayerLevel and GetMaxPlayerLevel()
+    else
+        cap = GetMaxLevelForLatestExpansion and GetMaxLevelForLatestExpansion()
+    end
+    if type(cap) ~= "number" or cap <= 0 then
+        cap = GetMaxPlayerLevel and GetMaxPlayerLevel()
+    end
+    return type(cap) == "number" and cap > 0 and cap or nil
+end
+local function MaxLevelCharacter(c, cap)
+    return c and cap and type(c.level) == "number" and c.level >= cap
+end
+
 local lineCache, lineRev = {}, -1
 local sameName = {}
 local function BuildLines(id)
@@ -492,16 +573,17 @@ local function BuildLines(id)
     local row, war = idx.chars[id], idx.warband[id]
     if not row and not (war and war.n) then return false end
     local db, lines, total = Offline.Store(), {}, 0
+    local cap = MaxCharacterLevel()
     -- two characters of one name (other realms) get their realm added
     wipe(sameName)
     for key in pairs(row or _emptyP) do
         local c = db.chars[key]
-        if c and c.name then sameName[c.name] = (sameName[c.name] or 0) + 1 end
+        if MaxLevelCharacter(c, cap) and c.name then sameName[c.name] = (sameName[c.name] or 0) + 1 end
     end
     for key, e in pairs(row or _emptyP) do
         local c = db.chars[key]
         local n = e.bags + e.bank
-        if c and n > 0 then
+        if MaxLevelCharacter(c, cap) and n > 0 then
             local parts = {}
             if e.bags > 0 then parts[#parts + 1] = EllesmereUI.Lf("Bags %1$d", e.bags) end
             if e.bank > 0 then parts[#parts + 1] = EllesmereUI.Lf("Bank %1$d", e.bank) end
@@ -516,6 +598,7 @@ local function BuildLines(id)
         total = total + war.n
         lines[#lines + 1] = { EllesmereUI.L("Warband Bank"), war.n, 0.4, 0.78, 1 }
     end
+    if #lines == 0 then return false end
     if #lines > 1 then lines[#lines + 1] = { EllesmereUI.L("Total"), total, 1, 0.82, 0, total = true } end
     return lines
 end
@@ -526,9 +609,20 @@ local function OnItemTooltip(tooltip, data)
     if tooltip:IsForbidden() then return end
     local id = data and data.id
     if type(id) ~= "number" or (issecretvalue and issecretvalue(id)) then return end
+    local key = id
+    if Offline.BonusIDsEnabled() then
+        local link = data and data.hyperlink
+        if (issecretvalue and issecretvalue(link)) or type(link) ~= "string" then
+            local ok, _, itemLink = pcall(tooltip.GetItem, tooltip)
+            link = ok and itemLink or nil
+        end
+        if (issecretvalue and issecretvalue(link)) or type(link) ~= "string" then return end
+        key = VariantKey(link)
+        if not key or ItemID(link) ~= id then return end
+    end
     if lineRev ~= rev then wipe(lineCache); lineRev = rev end
-    local lines = lineCache[id]
-    if lines == nil then lines = BuildLines(id); lineCache[id] = lines end
+    local lines = lineCache[key]
+    if lines == nil then lines = BuildLines(key); lineCache[key] = lines end
     if not lines then return end
     tooltip:AddLine(" ")
     for _, l in ipairs(lines) do
