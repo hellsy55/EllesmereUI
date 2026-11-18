@@ -28,6 +28,7 @@ local BAGS_DEFAULTS = {
 		itemlevelIgnoreTrackColor = false,
         bagHideEmptyCategories = true,
         bagCollapsibleCategories = false, -- opt-in: click category headers to collapse their contents
+        bagCategorizeReagents = false,
         bagSplitSetGearBySet  = false,
         bagShowSetGearName    = false,
         bagSetNameFontSize    = 9,
@@ -50,6 +51,7 @@ local BAGS_DEFAULTS = {
         bagRecentFlash        = false, -- opt-in: brief glow when a recent pickup appears
         bagHideRecentInCategories = false, -- opt-in: recent items only in Recent Items, not regular categories
         bagRecentNewOnly      = false,   -- Recent Items: only items not carried before (gear, mail, trade always)
+        bagRecentShowGained   = false,   -- Recent Items: one entry per stackable with the amount picked up
         -- Bag Top Bar Icons: the header's Show Bags, Junk Marker, Quick Actions, Sort and Keyring icons
         bagShowBagsIcon       = true,
         bagShowJunkIcon       = true,    -- the Junk Marker: header coin, Junk category, Sell Junk at merchants

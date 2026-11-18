@@ -595,13 +595,13 @@ local _asking = false
 -- Classify a single item. Returns category index (1-based) or nil for empty slots.
 -- bag/slot are needed for C_Container.GetContainerItemQuestInfo; quality is
 -- optional (resolved from the link when nil)
-function CategoryManager:ClassifyItem(itemLink, itemID, bag, slot, quality)
+function CategoryManager:ClassifyItem(itemLink, itemID, bag, slot, quality, separateReagentBag)
     if not itemLink then return nil end
 
     local cats = self:GetCategories()
 
-    -- Reagent bag items go to the Reagent Bag category unless it is off
-    if bag == 5 and not (BP().bagDisabledCategories or _emptyP)["Reagent Bag"] then
+    if bag == 5 and (separateReagentBag or BP().bagCategorizeReagents ~= true)
+        and not (BP().bagDisabledCategories or _emptyP)["Reagent Bag"] then
         for i, cat in ipairs(cats) do
             if cat.isReagentBag then return i end
         end
@@ -746,11 +746,12 @@ end
 
 -- Classify all items and return counts per category + total.
 -- Each item in the array gets a .categoryIndex field set.
+-- Physical sorting can keep the reagent bag in its own category.
 -- Reusable tables for ClassifyAll (wiped each call, avoids per-refresh allocation)
 local _claCounts = {}
 local _claDisabledIdxSet = {}
 
-function CategoryManager:ClassifyAll(items)
+function CategoryManager:ClassifyAll(items, separateReagentBag)
     BuildSetGearLookup()
     _classifySpecial = ns.SpecialBags()
     local cats = self:GetCategories()
@@ -801,7 +802,8 @@ function CategoryManager:ClassifyAll(items)
     local stampNames = BP().bagShowSetGearName == true
     for _, data in ipairs(items) do
         if data.info and data.itemLink then
-            local idx = self:ClassifyItem(data.itemLink, data.info.itemID, data.bag, data.slot, data.info.quality)
+            local idx = self:ClassifyItem(data.itemLink, data.info.itemID,
+                data.bag, data.slot, data.info.quality, separateReagentBag)
             if stampNames then
                 local sid = _setGearLookup[data.bag * 1000 + data.slot]
                 data._setName = sid and _setNames[sid] or nil
@@ -897,8 +899,13 @@ end
 function CategoryManager:AddToGroup(catIndex, groupName)
     local cats = self:GetCategories()
     if not cats[catIndex] or not groupName then return end
+    -- A hand-named or built-in group keeps its name; the new member takes the flag
+    local custom = self:IsGroupNameCustom(groupName)
     cats[catIndex].groupName = groupName
-    self:RegenerateGroupName(groupName)
+    cats[catIndex].groupNameCustom = custom or nil
+    if not custom then
+        self:RegenerateGroupName(groupName)
+    end
     self:SaveState()
 end
 
@@ -953,11 +960,16 @@ function CategoryManager:GroupDisplayName(groupName)
     return groupName
 end
 
--- Check if the group name was manually customized by the user.
+-- Check if the group name was manually customized by the user, or is a
+-- member's built-in group (WoW Forever's Adventure Prep comes from
+-- defaultGroupName alone on a profile the default-groups seed never reached).
 function CategoryManager:IsGroupNameCustom(groupName)
     local cats = self:GetCategories()
     for _, cat in ipairs(cats) do
-        if cat.groupName == groupName and cat.groupNameCustom then return true end
+        if cat.groupName == groupName
+            and (cat.groupNameCustom or cat.defaultGroupName == groupName) then
+            return true
+        end
     end
     return false
 end
@@ -1312,11 +1324,10 @@ end
 --    def.classify  function(itemLink, itemID, bag, slot, quality) -> true to
 --                  claim the item. bag and slot are nil for another character's
 --                  items; quality may be nil. The first claim by order wins.
---  Items the user filed or marked, junk (grey items while the Junk Marker is
---  on), special bag items and, while the Reagent Bag category is on, reagent
---  bag items are not offered to providers. A change repaints the bags once,
---  on the next frame. A provider cannot register, unregister or ask for a
---  repaint from inside its own classify call.
+--  Filed and marked items, junk (grey items while the Junk Marker is on), and
+--  items in separate reagent or special bag categories skip providers. A
+--  change repaints the bags once, on the next frame. A provider cannot register,
+--  unregister or ask for a repaint from inside its own classify call.
 -------------------------------------------------------------------------------
 -- One repaint for every change made in a frame: a request shows a hidden frame
 -- whose next update hides it, then repaints the bags and an open bank. bagsOnly:

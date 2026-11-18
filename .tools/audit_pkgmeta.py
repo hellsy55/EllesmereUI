@@ -160,12 +160,16 @@ def merge_candidate(result):
     return fields[0].decode('ascii'), sorted(set(conflicts))
 
 
-def audit(root, git, powershell, destination, source, retained=()):
+def audit(root, git, powershell, destination, source, retained=(), historical_policy=None):
     def run(*args, env=None, allowed=(0,)):
         return command([git, '-C', str(root), *args], root, env, allowed)
     def output(*args, **kwargs):
         return run(*args, **kwargs).stdout.decode('utf-8').strip()
     fork = output('rev-parse', '--verify', destination + '^{commit}')
+    if historical_policy:
+        historical_policy = output('rev-parse', '--verify', historical_policy + '^{commit}')
+        if run('merge-base', '--is-ancestor', historical_policy, fork, allowed=(0, 1)).returncode:
+            raise ValueError('Historical TOC policy must come from the destination history')
     incoming = output('rev-parse', '--verify', source + '^{commit}')
     bases = output('merge-base', '--all', fork, incoming).splitlines()
     if len(bases) != 1:
@@ -227,8 +231,13 @@ def audit(root, git, powershell, destination, source, retained=()):
                 continue
             # Upstream may predate or not carry this fork's maintained policy.
             # Reuse explicit fork classifications only; unknown paths still fail.
-            policy_ref = ref if policy_name in files[key] else fork
-            policy_sources[key] = key if policy_ref == ref else 'fork (policy absent in this version)'
+            if policy_name in files[key]:
+                policy_ref, policy_sources[key] = ref, key
+            elif key == 'base' and historical_policy:
+                policy_ref = historical_policy
+                policy_sources[key] = 'historical destination@' + historical_policy
+            else:
+                policy_ref, policy_sources[key] = fork, 'fork (policy absent in this version)'
             policy_file = temp / (key + '-toc-policy.json')
             policy_file.write_bytes(run('show', policy_ref + ':' + policy_name, env=env).stdout)
             _, classifications[key] = tocs.load_policy(policy_file)
@@ -266,6 +275,7 @@ def main():
     parser.add_argument('--report', type=Path, help='New report file outside the checkout')
     parser.add_argument('--verify-report', type=Path, help='Check integrated .pkgmeta against the audited candidate')
     parser.add_argument('--retain-ignore', action='append', default=[])
+    parser.add_argument('--historical-policy', help='Destination ancestor supplying the TOC policy for a base that lacks it')
     args = parser.parse_args()
     try:
         if args.verify_report:
@@ -279,7 +289,8 @@ def main():
             raise ValueError('--git, --destination and --source are required for an audit')
         if not Path(args.git).is_absolute() or not Path(args.git).is_file():
             raise ValueError('Native Git must be an existing absolute path')
-        report = audit(args.root.resolve(), args.git, args.powershell, args.destination, args.source, args.retain_ignore)
+        report = audit(args.root.resolve(), args.git, args.powershell, args.destination, args.source,
+                       args.retain_ignore, args.historical_policy)
         text = json.dumps(report, indent=2)
         if args.report:
             if args.report.resolve().is_relative_to(args.root.resolve()):

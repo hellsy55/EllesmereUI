@@ -828,8 +828,8 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                           if not EllesmereUIDB then EllesmereUIDB = {} end
                           EllesmereUIDB.spellIDModifier = v
-                          -- Modifier choice gates the engine-side combat
-                          -- aura-ID CVar (12.1; no-op on retail).
+                          -- The engine's aura ID line follows the held key: re-sync the
+                          -- CVar and the key watcher.
                           if EllesmereUI.SyncAuraSpellIDCVar then EllesmereUI.SyncAuraSpellIDCVar() end
                       end },
                     { type="toggle", label="Show Icon ID",
