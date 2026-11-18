@@ -7,6 +7,15 @@ run the read-only gate with the frozen native Git executable and Python runtime:
 <python_runtime> -B .tools/audit_pkgmeta.py --git <absolute-native-git> --destination <destination-ref> --source <frozen-incoming-sha> --report <new-report-outside-checkout>
 ```
 
+The audit selects Windows PowerShell 5.1 from the Windows system directory or
+PowerShell 7 from `pwsh` on PATH on Linux (including Codex Cloud). It resolves
+and probes the executable before starting the audit. Use
+`--powershell <executable>` to override discovery with a compatible executable.
+A missing or incompatible executable blocks the audit. Provision PowerShell 7
+and expose `pwsh` on PATH in the persistent Codex Cloud environment setup so
+future sessions can run the audit without an override. Updates never install
+PowerShell.
+
 For Sync A, incoming is exclusively the frozen eligible release SHA; never use
 mirrored main or post-release HEAD. For Sync B, incoming is full new-features.
 Run before checkout/fast-forward/merge of the affected destination. The gate
