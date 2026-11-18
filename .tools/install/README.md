@@ -47,6 +47,12 @@ and ChatGPT delivery documents are unchanged by this work.
 
 `audit_pkgmeta.py` calls the same parser through `read-pkgmeta.ps1`. Supply a
 validated absolute native Git path, destination and the frozen incoming SHA.
+The audit uses Windows filename restrictions on every host, including when
+reading historical snapshots. The audit defaults to Windows PowerShell 5.1 on
+Windows and resolves PowerShell 7 from pwsh on PATH on Linux. An explicit
+--powershell executable overrides discovery and must pass the platform check.
+CI runs the same audit suite on both runtimes. This coverage applies to the
+tested audit cases and does not establish equivalence of the full runtimes.
 Retail uses only its eligible release SHA; PTR uses full Retail. The gate uses
 Git's merge base and merge-tree candidate in a disposable object store, or the
 incoming tree for fast-forward. It does not merge, edit refs, stage or resolve

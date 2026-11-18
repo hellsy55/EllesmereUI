@@ -1,8 +1,9 @@
 # Shared safety checks for installation and subsequent line-ending repair (PowerShell 5.1).
 function Assert-EuiName {
     param([string]$Name)
+    # Apply Windows filename rules on every host, including Linux audits.
     if ([string]::IsNullOrWhiteSpace($Name) -or $Name -in @('.', '..') -or
-        $Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+        $Name -match '[\x00-\x1F"<>|:*?/\\]' -or
         $Name -ne $Name.TrimEnd(' ', '.') -or
         $Name -match '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])($|\.)') {
         throw "Unsafe Windows file name: '$Name'."

@@ -1,8 +1,6 @@
 """Audit semantics and native Git previews in disposable repositories."""
 import copy
 import json
-import importlib.util
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,9 +13,43 @@ sys.path.insert(0, str(ROOT / '.tools'))
 import audit_pkgmeta as audit
 
 GIT = shutil.which('git')
-PS = shutil.which('powershell')
+PS = shutil.which('powershell.exe' if sys.platform == 'win32' else 'pwsh')
 META = {'package-as': 'EllesmereUI', 'ignore': ['Held'], 'move-folders': {},
         'externals': {}, 'enable-nolib-creation': 'no'}
+
+
+def setUpModule():
+    if not GIT or not PS:
+        raise RuntimeError('Native Git and Windows PowerShell 5.1 or Linux pwsh are required')
+
+
+class WindowsNames(unittest.TestCase):
+    def test_windows_filename_rules(self):
+        script = r"""
+$ErrorActionPreference = 'Stop'
+. ./.tools/install/eui-install-safety.ps1
+$codes = @(0..31) + @(34, 42, 47, 58, 60, 62, 63, 92, 124)
+if ($env:OS -eq 'Windows_NT') {
+    $native = @([IO.Path]::GetInvalidFileNameChars() | ForEach-Object { [int]$_ } | Sort-Object)
+    if (Compare-Object $codes $native) { throw 'Fixture differs from the Windows invalid-character set.' }
+}
+$invalid = @($codes | ForEach-Object { 'before' + [char]$_ + 'after' })
+$invalid += @('', ' ', '.', '..', 'folder.', 'folder ', 'CON', 'prn.txt',
+              'AUX', 'nul.zip', 'COM1', 'com9.txt', 'LPT1', 'lpt9.txt')
+foreach ($name in $invalid) {
+    try { Assert-EuiName $name }
+    catch {
+        if ($_.Exception.Message -notlike 'Unsafe Windows file name:*') { throw }
+        continue
+    }
+    throw ('Accepted invalid name with code units: ' + (($name.ToCharArray() | ForEach-Object { [int]$_ }) -join ','))
+}
+foreach ($name in @('EllesmereUI', 'two words', '.gitignore', 'COM10', 'LPT0', ('x' + [char]127))) {
+    Assert-EuiName $name
+}
+"""
+        audit.command([PS, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                       '-Command', script], ROOT)
 
 
 class Semantics(unittest.TestCase):
@@ -104,7 +136,6 @@ class Semantics(unittest.TestCase):
                 audit.merge_candidate(subprocess.CompletedProcess([], 1, data))
 
 
-@unittest.skipUnless(GIT and PS, 'Native Git and Windows PowerShell are required')
 class GitPreview(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='eui-git-audit-test-')
@@ -167,8 +198,52 @@ class GitPreview(unittest.TestCase):
         self.commit('Incoming')
         self.git('switch', 'retail')
 
+    def audit_cli(self, *args):
+        return subprocess.run(
+            [sys.executable, '-B', str(ROOT / '.tools/audit_pkgmeta.py'),
+             '--root', str(self.root), '--git', str(Path(GIT).resolve()),
+             '--destination', 'retail', '--source', 'incoming', *args],
+            capture_output=True, shell=False)
+
+    def test_cli_selects_default_and_accepts_explicit_powershell(self):
+        self.incoming(self.meta.replace('  - Held', '  - Existing'))
+        for args in ((), ('--powershell', PS)):
+            with self.subTest(args=args):
+                result = self.audit_cli(*args)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual(json.loads(result.stdout)['status'], 'safe')
+
+    def test_cli_rejects_missing_and_incompatible_overrides_before_noop(self):
+        for executable, error in ((self.root / 'missing-shell.exe', b'executable not found'),
+                                  (sys.executable, b'required at')):
+            with self.subTest(executable=executable):
+                result = self.audit_cli('--powershell', str(executable))
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(error, result.stderr)
+                self.assertFalse(result.stdout)
+
     def test_noop(self):
         self.assertEqual(self.invoke()['status'], 'no-op')
+
+    def test_invalid_incoming_package_name(self):
+        self.incoming(self.meta.replace('package-as: EllesmereUI', 'package-as: Bad<Name'))
+        with self.assertRaisesRegex(ValueError, "Unsafe Windows file name: 'Bad<Name'"):
+            self.invoke()
+
+    def test_invalid_historical_package_name_despite_valid_proposal(self):
+        self.write('.pkgmeta', self.meta.replace('package-as: EllesmereUI', 'package-as: Bad<Name'))
+        self.commit('Historical invalid package name')
+        self.git('branch', '-f', 'incoming', 'HEAD')
+        self.incoming(self.meta)
+        with self.assertRaisesRegex(ValueError, "Unsafe Windows file name: 'Bad<Name'"):
+            self.invoke()
+
+    def test_invalid_nested_package_path_components(self):
+        for path in ('Libs/../Child', 'Libs//Child', 'Libs/AUX.txt', 'Libs/Child.'):
+            with self.subTest(path=path):
+                self.incoming(self.meta + f'  - {path}\n')
+                with self.assertRaisesRegex(ValueError, 'Unsafe Windows file name'):
+                    self.invoke()
 
     def test_fast_forward_removal(self):
         self.incoming(self.meta.replace('  - Held\n', ''))

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,35 @@ def command(argv, cwd, env=None, allowed=(0,)):
         raise ValueError(f'Command failed ({result.returncode}): {argv!r}\n' +
                          result.stdout.decode('utf-8', 'replace') + result.stderr.decode('utf-8', 'replace'))
     return result
+
+
+def resolve_powershell(override=None):
+    windows = sys.platform == 'win32'
+    required = 'Windows PowerShell 5.1' if windows else 'PowerShell 7 (pwsh)'
+    if override is not None:
+        candidate = shutil.which(override)
+    elif windows:
+        candidate = Path(os.environ.get('SystemRoot', r'C:\Windows')) / (
+            'System32/WindowsPowerShell/v1.0/powershell.exe')
+    else:
+        candidate = shutil.which('pwsh')
+    if not candidate or not Path(candidate).is_file():
+        raise ValueError(f'{required} executable not found: {override or required}')
+
+    executable = str(Path(candidate).resolve(strict=True))
+    probe = ("'{0}:{1}.{2}' -f $PSVersionTable.PSEdition, "
+             "$PSVersionTable.PSVersion.Major, $PSVersionTable.PSVersion.Minor")
+    try:
+        result = subprocess.run([executable, '-NoProfile', '-NonInteractive', '-Command', probe],
+                                capture_output=True, timeout=15, shell=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f'Cannot run {required} at {executable}: {exc}') from exc
+    version = result.stdout.strip()
+    expected = rb'Desktop:5\.1' if windows else rb'Core:7\.\d+'
+    if result.returncode or not re.fullmatch(expected, version):
+        raise ValueError(f'{required} required at {executable}; probe returned '
+                         f'{result.returncode} with version {version!r}')
+    return executable
 
 
 def flatten(value, prefix=''):
@@ -269,7 +299,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--git', help='Validated absolute native Git executable')
-    parser.add_argument('--powershell', default=r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe')
+    parser.add_argument('--powershell', help='Override the PowerShell executable selected for this platform')
     parser.add_argument('--destination')
     parser.add_argument('--source', help='Frozen eligible release SHA, Retail ref, or fetched origin ref')
     parser.add_argument('--report', type=Path, help='New report file outside the checkout')
@@ -289,7 +319,8 @@ def main():
             raise ValueError('--git, --destination and --source are required for an audit')
         if not Path(args.git).is_absolute() or not Path(args.git).is_file():
             raise ValueError('Native Git must be an existing absolute path')
-        report = audit(args.root.resolve(), args.git, args.powershell, args.destination, args.source,
+        powershell = resolve_powershell(args.powershell)
+        report = audit(args.root.resolve(), args.git, powershell, args.destination, args.source,
                        args.retain_ignore, args.historical_policy)
         text = json.dumps(report, indent=2)
         if args.report:
