@@ -892,7 +892,7 @@ initFrame:SetScript("OnEvent", function(self)
                   end }
             ); y = y - h
 
-            -- Hide Sidebar Icons When Collapsed
+            -- Hide Sidebar Icons When Collapsed | Categorize Reagent Bag Items
             _, h = W:DualRow(parent, y,
                 { type="toggle", text="Hide Sidebar Icons When Collapsed",
                   tooltip="Hides a collapsed sidebar; its expand arrow sits by the Inventory title.",
@@ -901,18 +901,13 @@ initFrame:SetScript("OnEvent", function(self)
                       db.profile.bagHideSidebarIconsCollapsed = v and true or false
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
                   end },
-                EllesmereUI.BlankRowCfg()
-            ); y = y - h
-
-            _, h = W:DualRow(parent, y,
                 { type="toggle", text="Categorize Reagent Bag Items",
                   tooltip="Files reagent bag items under their item categories, in All Items and on the category tabs. The Reagent Bag entry still lists the bag.",
                   getValue=function() return db.profile.bagCategorizeReagents == true end,
                   setValue=function(v)
                       db.profile.bagCategorizeReagents = v
                       if _G.EUI_Bags and _G.EUI_Bags.RefreshInventory then _G.EUI_Bags:RefreshInventory() end
-                  end },
-                EllesmereUI.BlankRowCfg()
+                  end }
             ); y = y - h
 
             if anyGrid then
