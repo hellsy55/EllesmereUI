@@ -128,18 +128,25 @@ function EllesmereUI._SearchPatchNotes(query)
     return SearchPatchNotes(GetPatchSearchIndex(), query)
 end
 
--- One navigation path for local and global results. The page may be cached,
--- so force a build AFTER selecting the destination to recreate its targets.
+-- One navigation path for local and global results. Expand before selecting
+-- the page so even a cold build includes the requested entry. A cached page
+-- needs a forced rebuild; a newly built page already scheduled its jump, and
+-- rebuilding it again would invalidate the target frame before the jump.
 function EllesmereUI._NavigateToPatchNote(data)
     if not data or not data.entry or not PatchEntryApplies(data.entry) then return false end
     if not EllesmereUI:GetModuleTitle("_EUIPatchNotes") then return false end
+    whatsNewOpen[data.key] = true
+    patchSearchPending = data
     EllesmereUI:SelectModule("_EUIPatchNotes")
     EllesmereUI:SelectPage("Patch Notes")
     if EllesmereUI:GetActiveModule() ~= "_EUIPatchNotes"
-       or EllesmereUI:GetActivePage() ~= "Patch Notes" then return false end
-    whatsNewOpen[data.key] = true
-    patchSearchPending = data
-    EllesmereUI:RefreshPage(true)
+       or EllesmereUI:GetActivePage() ~= "Patch Notes" then
+        if patchSearchPending == data then patchSearchPending = nil end
+        return false
+    end
+    if patchSearchPending == data then
+        EllesmereUI:RefreshPage(true)
+    end
     return true
 end
 

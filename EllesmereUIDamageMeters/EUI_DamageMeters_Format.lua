@@ -246,6 +246,29 @@ end
 local ShortName = EUI.ShortName
 local function StripRealm(name, src, attacker)
     if not name then return "Unknown" end
+    if EUI.UseRaidGroupsNicknameSource() and (src or attacker) then
+        local nick
+        if src then
+            local own=src.isLocalPlayer
+            if own ~= nil and not (issecretvalue and issecretvalue(own)) and own == true then
+                nick=EUI.RaidGroupsNicknameForUnit and EUI.RaidGroupsNicknameForUnit("player")
+            end
+        end
+        if not nick and not (issecretvalue and issecretvalue(name)) then
+            local player
+            if src then
+                local cls=src.classFilename
+                player=cls ~= nil and cls ~= "" and src.sourceCreatureID == nil and not src.threatPet
+            else
+                local cls=attacker.class
+                player=cls ~= nil and cls ~= "" and not attacker.isPet and not attacker.isMob
+            end
+            if player and EUI.RaidGroupsNicknameForName then
+                nick=EUI.RaidGroupsNicknameForName(name)
+            end
+        end
+        if nick then return nick end
+    end
     if Ambiguate then name = Ambiguate(name, "short") or name end
     local mode = (src or attacker) and DB().nameFormat
     if not mode then return name end

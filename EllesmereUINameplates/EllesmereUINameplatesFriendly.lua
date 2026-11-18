@@ -999,12 +999,13 @@ local function UpdateNameOnlyText(nameFS)
     local mode = GetBelowNameMode()
     local isPlayer = UnitIsPlayer(unit)
 
-    local want
-    if ModeHasTitle(mode) and isPlayer then want = GetTitledName(unit) end
+    local nick=isPlayer and ns.NP_RaidGroupsName(unit)
+    local want=nick
+    if not want and ModeHasTitle(mode) and isPlayer then want = GetTitledName(unit) end
     if not want then want = EllesmereUI.WithSurname(UnitName(unit)) end
     if not want or (issecretvalue and issecretvalue(want)) then return end
-    -- The friendly Name Format, while one is saved (players only).
-    if isPlayer and FriendlyNameFormat() then
+    -- A saved nickname is a display label; only format ordinary names.
+    if isPlayer and not nick and FriendlyNameFormat() then
         want = FormatFriendlyName(unit, want, ModeHasTitle(mode))
     end
     -- Name Color's Custom colour (players only): round the name, inside the
@@ -1673,13 +1674,15 @@ function FriendlyFrame:UpdateName()
     local fmt = FriendlyNameFormat()
     local showLevel = ShowFriendlyLevel()
     local showGroup = ShowFriendlyGroupBrackets()
-    local isPlayer = (hasTitle or fmt or showLevel or showGroup) and UnitIsPlayer(unit)
-    local unitName
-    if hasTitle and isPlayer then
+    local isPlayer = (hasTitle or fmt or showLevel or showGroup
+        or EllesmereUI.UseRaidGroupsNicknameSource()) and UnitIsPlayer(unit)
+    local nick=isPlayer and ns.NP_RaidGroupsName(unit)
+    local unitName=nick
+    if not unitName and hasTitle and isPlayer then
         unitName = GetTitledName(unit)
     end
     if not unitName then unitName = EllesmereUI.WithSurname(UnitName(unit)) end
-    if fmt and isPlayer and unitName then
+    if fmt and isPlayer and not nick and unitName then
         unitName = FormatFriendlyName(unit, unitName, hasTitle)
     end
     local gKind = (showGroup and isPlayer) and GetUnitGroupBracketKind(unit) or nil
@@ -2098,21 +2101,41 @@ end
 -- repaints the names whose bracket changed and the bars whose tint changed, and
 -- leaves every other plate alone. The event is registered only while one of the
 -- two can show: `armed` is 1 for the brackets plus 2 for the tint.
+-- The tint also follows the member's PvP flag (lighter blue off, lighter green on),
+-- and the flag moves without a roster change: while the tint can show, UNIT_FACTION
+-- marks the tinted plate it names, and the same next-frame pass repaints it. A pass
+-- with only such marks repaints the marked plates alone; the whole roster is read
+-- again only after a roster event.
 do
     local groupEv, armed
+    local rosterDirty = false
+    local factionDirty = {}
     local function Flush(self)
         self:Hide()
         local brackets, tint = armed == 1 or armed == 3, armed >= 2
         local fp = tint and FP()
+        if not rosterDirty then
+            if tint then
+                for unit in pairs(factionDirty) do
+                    local plate = friendlyPlates[unit]
+                    if plate then PaintFriendlyColors(plate, unit, fp) end
+                end
+            end
+            wipe(factionDirty)
+            return
+        end
+        rosterDirty = false
         for unit, plate in pairs(friendlyPlates) do
             if brackets then
                 local kind = UnitIsPlayer(unit) and GetUnitGroupBracketKind(unit) or nil
                 if kind ~= plate._grpKind then plate:UpdateName() end
             end
-            if tint and ((UnitIsPlayer(unit) and InMyGroup(unit)) and true or false) ~= (plate._grpTint == true) then
+            if tint and (factionDirty[unit]
+                or ((UnitIsPlayer(unit) and InMyGroup(unit)) and true or false) ~= (plate._grpTint == true)) then
                 PaintFriendlyColors(plate, unit, fp)
             end
         end
+        wipe(factionDirty)
         if not brackets then return end
         local pending = ns.pendingUnits
         if not pending then return end
@@ -2137,22 +2160,55 @@ do
         if want == 0 then
             groupEv:UnregisterAllEvents()
             groupEv:Hide()
+            rosterDirty = false
+            wipe(factionDirty)
             return
         end
-        -- already listening: a pass that is waiting for its frame runs with the new set
-        if was ~= 0 then return end
         if not groupEv then
             groupEv = CreateFrame("Frame")
             groupEv:Hide()
-            groupEv:SetScript("OnEvent", function(self) self:Show() end)
+            groupEv:SetScript("OnEvent", function(self, event, unit)
+                if event == "UNIT_FACTION" then
+                    -- only a tinted full plate can go stale
+                    local plate = unit and friendlyPlates[unit]
+                    if not (plate and plate._grpTint) then return end
+                    factionDirty[unit] = true
+                else
+                    rosterDirty = true
+                end
+                self:Show()
+            end)
             groupEv:SetScript("OnUpdate", Flush)
         end
+        -- the PvP flag event follows the tint alone, registered or dropped only when that changes
+        if (want >= 2) ~= (was >= 2) then
+            if want >= 2 then
+                groupEv:RegisterEvent("UNIT_FACTION")
+            else
+                groupEv:UnregisterEvent("UNIT_FACTION")
+                wipe(factionDirty)
+            end
+        end
+        -- already listening: a pass that is waiting for its frame runs with the new set
+        if was ~= 0 then return end
         groupEv:RegisterEvent("GROUP_ROSTER_UPDATE")
     end
 end
 
 -- Live-apply a Subtitle Text setting change (mode / size / color) from the
 -- options panel, in whichever friendly mode is active.
+-- Event-driven refresh for both private friendly-plate mode and Blizzard
+-- friendly name-only mode (GetNamePlates omits the latter).
+function ns.RefreshRaidGroupsNames()
+    for _,plate in pairs(ns.plates or {}) do
+        if plate.UpdateName then plate:UpdateName() end
+    end
+    for _,plate in pairs(friendlyPlates) do
+        if plate.UpdateName then plate:UpdateName() end
+    end
+    SweepPlayerSubText()
+end
+
 function ns.RefreshFriendlyBelowName()
     -- Size / font / slug: the subtitle family on every built sub text.
     ApplySubtitleFont()

@@ -775,6 +775,20 @@ do
     end
 end
 
+-- Raid Groups nickname text is an already formatted display label, so it must
+-- not be shortened by a name-slot formatter. Unknown units keep the old path.
+function ns.NP_RaidGroupsName(unit)
+    if not (EllesmereUI.UseRaidGroupsNicknameSource
+        and EllesmereUI.UseRaidGroupsNicknameSource()) then return nil end
+    return EllesmereUI.RaidGroupsNicknameForUnit
+        and EllesmereUI.RaidGroupsNicknameForUnit(unit)
+end
+function ns.NP_DisplayName(unit, slotKey)
+    local nick=ns.NP_RaidGroupsName(unit)
+    if nick then return nick end
+    return ns.NP_FormatName(EllesmereUI.WithSurname(UnitName(unit)),slotKey,unit)
+end
+
 -- Estimate pixel width of health text per element. Actual rendered widths are
 -- unreadable (secret values), so use flat worst-case pixel assumptions.
 local HEALTH_TEXT_PADDING = 10  -- safety margin in px
@@ -811,15 +825,15 @@ do
     ns.NP_CustomFSKey = FS_KEY
     -- The unit's name as the name slot writes it (the slot's Name Format).
     local function Name(u, slotKey)
-        local name = EllesmereUI.WithSurname(UnitName(u))
-        if type(name) == "nil" then return "" end
-        return ns.NP_FormatName(name, slotKey, u)
+        return ns.NP_DisplayName(u, slotKey) or ""
     end
     -- Tag modifiers shape the plain name. They do not also apply the slot's Name Format.
     -- [name:last] and [target:last] show nothing for your own unit while your name is
     -- your first name alone (OwnSurnameHidden: WoW Forever, Blizzard's My Surname off).
     local function Shaped(mode)
         return function(u)
+            local nick=ns.NP_RaidGroupsName(u)
+            if nick then return nick end
             if mode == "last" and EllesmereUI.OwnSurnameHidden(u) then return "" end
             local name = EllesmereUI.WithSurname(UnitName(u))
             if type(name) == "nil" then return "" end

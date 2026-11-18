@@ -373,7 +373,7 @@ local function DisplayName(name, unit)
     end
     local nick
     if unit and ns.GetNicknameForUnit then nick = ns.GetNicknameForUnit(unit) end
-    if not nick and ns.GetNicknameForName then nick = ns.GetNicknameForName(ShortName(name)) end
+    if not nick and ns.GetNicknameForName then nick = ns.GetNicknameForName(name) end
     return nick or name
 end
 

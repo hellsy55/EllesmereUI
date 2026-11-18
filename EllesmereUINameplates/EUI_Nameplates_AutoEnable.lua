@@ -14,10 +14,10 @@ local defaults = {
         enemyCombat = true, enemyOOC = true, friendlyCombat = true, friendlyOOC = true,
         healthCombat = false, healthOOC = false, alwaysCombat = true, alwaysOOC = true },
     raidParty = { enabled = false, pets = true, totems = true },
-    friendly = { enabled = false, party = false, raid = false, arena = true, cities = true, world = false },
-    enemy = { enabled = false, party = true, raid = true, arena = true, cities = true, world = true },
-    stacking = { enabled = false, party = true, raid = true, arena = true, cities = true, world = true },
-    always = { enabled = false, party = true, raid = true, arena = true, cities = true, world = true },
+    friendly = { enabled = false, party = false, delve = false, raid = false, arena = true, cities = true, world = false },
+    enemy = { enabled = false, party = true, delve = true, raid = true, arena = true, cities = true, world = true },
+    stacking = { enabled = false, party = true, delve = true, raid = true, arena = true, cities = true, world = true },
+    always = { enabled = false, party = true, delve = true, raid = true, arena = true, cities = true, world = true },
 }
 ns.NP_AutoDefaults = defaults
 local owned = {}
@@ -30,7 +30,11 @@ local function Value(category, option)
     local p = Profile()
     local t = p and p.autoEnable and p.autoEnable[category]
     local v = t and t[option]
-    if v == nil then return defaults[category][option] end
+    if v == nil then
+        -- Keep existing dungeon behavior in delves until explicitly configured.
+        if option == "delve" then return Value(category, "party") end
+        return defaults[category][option]
+    end
     return v == true
 end
 ns.NP_AutoValue = Value
@@ -55,7 +59,7 @@ end
 
 local function Area()
     local _, kind, difficulty = GetInstanceInfo()
-    if difficulty == 208 then kind = "party" end
+    if difficulty == 208 then return "delve" end
     if kind == "party" or kind == "raid" then return kind end
     if kind == "arena" or kind == "pvp" then return "arena" end
     return IsResting() and "cities" or "world"
@@ -102,7 +106,7 @@ function ns.ApplyAutoNameplates()
     end
     -- The raid/party special case is deliberately additive: no pet/totem
     -- override outside instances, and the ordinary EUI pet preference wins.
-    if (area == "party" or area == "raid") and Value("raidParty", "enabled") then
+    if (area == "party" or area == "raid" or area == "delve") and Value("raidParty", "enabled") then
         if Value("raidParty", "pets") then desired.nameplateShowEnemyPets = false end
         if Value("raidParty", "totems") then desired.nameplateShowEnemyTotems = false end
     end

@@ -544,8 +544,8 @@ local function StyleOwnedCountText(icon, barKey, fs, ss)
     fs:SetPoint(scPoint, txOverlay or icon, scPoint, scX, scY)
 end
 
-function ns.StyleCustomChargeText(icon, barKey)
-    StyleOwnedCountText(icon, barKey, icon and icon._castCountText)
+function ns.StyleCustomChargeText(icon, barKey, countText)
+    StyleOwnedCountText(icon, barKey, countText or (icon and icon._castCountText))
 end
 
 function ns.StyleNativeItemZeroText(icon, barKey)
@@ -969,6 +969,8 @@ local function RefreshCDMIconAppearance(barKey)
         if icon._castCountText then
             ns.StyleCustomChargeText(icon, barKey)
         end
+        -- Per-spell Buff Stacks text (EUI_CDM_CdBuffStacks.lua), same settings.
+        if ns.CdBuffStacksRestyle then ns.CdBuffStacksRestyle(icon, barKey) end
 
         -- Update keybind text style
         if kbText then

@@ -82,9 +82,8 @@ function NameplateFrame:UpdateName()
     -- write (RefreshNamePosition hides it).
     local slot = ns.FindNameSlot()
     local el = slot and GetTextSlot(slot) or "enemyName"
-    local name = EllesmereUI.WithSurname(UnitName(unit))
+    local name = ns.NP_DisplayName(unit, slot)
     if type(name) == "string" then
-        name = ns.NP_FormatName(name, slot, unit)  -- the slot's Name Format
         ns.SetNameElementText(self.name, el, name, unit, slot)
         -- Debuff coloring's Color Name copies follow the text (RefreshNamePosition
         -- passes it on too).
@@ -440,8 +439,10 @@ function NameplateFrame:UpdateFaction(artOnly)
             f:SetFrameStrata(ns.GetSlotRaiseStrata(slot) and "HIGH" or "MEDIUM")
             f:SetFrameLevel(self.health:GetFrameLevel() + 2)
             f:Hide()
+            -- The frame is the slot box; the art sits centred in it at its own
+            -- proportions (EllesmereUI.FitFactionArt below).
             self.faction = f:CreateTexture(nil, "ARTWORK")
-            self.faction:SetAllPoints()
+            self.faction:SetPoint("CENTER")
             self.factionFrame = f
         end
     elseif self._factionEv then
@@ -482,6 +483,7 @@ function NameplateFrame:UpdateFaction(artOnly)
     local sz = ns.NP_GetFactionIconSize()
     self.factionFrame._npSz = sz
     PP.Size(self.factionFrame, sz, sz)
+    EllesmereUI.FitFactionArt(self.faction, sz)
     -- "Rare/Quest + Faction" with an indicator showing too (the elite/rare mark, else
     -- the quest icon): the faction badge stacks behind it, overlapping by 40% of the
     -- icon's current size (the indicators are a frame level above, so they draw on

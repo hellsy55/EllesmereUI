@@ -14,7 +14,7 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  shared with Cursor/BattleRes/Bloodlust: each NewDB merges its own defaults
 --  into the SAME profile table, repointed by the profile system on swap.
 -------------------------------------------------------------------------------
-if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue and EllesmereUI.SetFramePlacer and EllesmereUI.RAID_PREP_IDS and EllesmereUI.AbbrevDungeon and EllesmereUI.GetUpgradeTrack and EllesmereUI.GetCraftedTrackColor and EllesmereUI.UPGRADE_TRACK_COLORS and EllesmereUI.BindLabel and EllesmereUI.ParseKeystoneLink and EllesmereUI.ItemLevelRGB and EllesmereUI.JUNK_BADGE and EllesmereUI.SetFontFamily and EllesmereUI.CharData) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Shifter's loot windows use the parent's frame placer; Raid Buff Check reads the parent's buff lists)
+if not (EllesmereUI and EllesmereUI._ModuleNS and EllesmereUI.NewCombatQueue and EllesmereUI.SetFramePlacer and EllesmereUI.RAID_PREP_IDS and EllesmereUI.AbbrevDungeon and EllesmereUI.GetUpgradeTrack and EllesmereUI.GetCraftedTrackColor and EllesmereUI.UPGRADE_TRACK_COLORS and EllesmereUI.BindLabel and EllesmereUI.ParseKeystoneLink and EllesmereUI.ItemLevelRGB and EllesmereUI.JUNK_BADGE and EllesmereUI.SetFontFamily and EllesmereUI.CharData and EllesmereUI.IsZeroValue and EllesmereUI.PlainString and EllesmereUI.IsSecret) then EUI_CLIENT_BLOCKED = true; return end -- stale-parent guard: a partially updated install (old parent, new child) goes dormant via the line-1 failsafe instead of erroring (the Shifter's loot windows use the parent's frame placer; Raid Buff Check reads the parent's buff lists)
 local QOL_ADDON_NAME, ns = ...
 EllesmereUI._ModuleNS["EllesmereUIQoL"] = ns  -- LOD options files read this module ns via the registry
 ns.CombatQueue = EllesmereUI.NewCombatQueue(CreateFrame("Frame"))
@@ -29,13 +29,13 @@ local function CleanNickname(v)
     return v
 end
 
-function ns.ResolveNicknameForUnit(unit)
+function ns.ResolveNicknameForUnit(unit, ignoreRaidGroups)
     local name, surname = UnitName(unit)
     if not name then return nil end
     if not UnitIsPlayer(unit) then return name end
 
     local fallback = EllesmereUI.WithSurname(name, surname)
-    if EllesmereUI.UseRaidGroupsNicknameSource() then
+    if not ignoreRaidGroups and EllesmereUI.UseRaidGroupsNicknameSource() then
         return (EllesmereUI.RaidGroupsNicknameForUnit
             and EllesmereUI.RaidGroupsNicknameForUnit(unit)) or fallback
     end
@@ -92,11 +92,11 @@ end
 -- Returns nil unless a provider actually changed the visible character name.
 -- Useful where the existing non-nickname label (for example a Battle.net
 -- account name) must remain intact when no nickname is available.
-function ns.GetNicknameForUnit(unit)
+function ns.GetNicknameForUnit(unit, ignoreRaidGroups)
     local name, surname = UnitName(unit)
     if not name or (issecretvalue and issecretvalue(name)) then return nil end
     local fallback = EllesmereUI.WithSurname(name, surname)
-    local display = ns.ResolveNicknameForUnit(unit)
+    local display = ns.ResolveNicknameForUnit(unit, ignoreRaidGroups)
     display = CleanNickname(display)
     if not display or display == name or display == fallback then return nil end
     return display

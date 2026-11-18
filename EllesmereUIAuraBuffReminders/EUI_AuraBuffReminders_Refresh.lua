@@ -871,10 +871,23 @@ function EABR.FvSleepingBagOwned()
     return owned
 end
 
+-- Whether an Arcane Censer is in the bags: counted once and kept until a bag
+-- change, a loading screen or a stand-down, as the Sleeping Bag is.
+function EABR.FvCenserOwned()
+    local owned = EABR._fvCenser
+    if owned == nil then
+        owned = (C_Item.GetItemCount(EABR.ARCANE_CENSER_ITEM) or 0) > 0
+        EABR._fvCenser = owned
+    end
+    return owned
+end
+
 -- WoW Forever collector: the Camp Benefits campfire buff, the Sleeping Bag's
 -- Well-Rested buff (missing or under its full stacks, or inside its cog's Show
 -- Below minutes of running out, then with the countdown; while a Cozy Sleeping
--- Bag is in the bags below max level: EABR.FvSleepingBagOwned), Well Fed (any food
+-- Bag is in the bags below max level: EABR.FvSleepingBagOwned), the Arcane
+-- Censer's Magical Awareness (in dungeons, while a censer is in the bags:
+-- EABR.FvCenserOwned), Well Fed (any food
 -- buff: the shared Well Fed name, or one of EABR.FOOD_BUFFS), the gathering
 -- and Find Treasure trackers, a Mage's armors (EABR.CollectMageArmor), the
 -- class buffs (EABR.CollectClassBuffs), the weapon buffs
@@ -885,8 +898,8 @@ end
 -- show their Show Below minutes before running out, with a countdown (FvNeeds
 -- arms the one-shot duration refresh for that moment). A custom ID counts as up while any
 -- spell of its rank family is (EABR.ForeverFamily). Entries are display-only
--- textures carrying the spell for the tooltip, except the Sleeping Bag, the two
--- trackers, the mage armors, the class buffs, the weapon buffs, the spell
+-- textures carrying the spell for the tooltip, except the Sleeping Bag, the
+-- Arcane Censer, the two trackers, the mage armors, the class buffs, the weapon buffs, the spell
 -- groups and the custom spells the character knows, whose click casts the spell
 -- or uses the item; presence goes through PlayerHasAuraByID. The section shows
 -- nothing in combat (its Where to Show offers no In Combat entry: always
@@ -905,11 +918,25 @@ function EABR.CollectForever(missing, inInstance, inPvP)
     EABR.FvSyncWeaponEvents(shows and fo.weapon == true or false)
     local wantBag = shows and fo.sleepingBag == true and not inPvP
     local sleepBag = wantBag and EABR.FvSleepingBagOwned()
-    -- No bag yet below max level: a light watcher hears one arrive, unless
-    -- Weapon Buffs' bag listener (below) already hears every bag change.
+    -- The Arcane Censer, in dungeons only: its buff is read first, and the
+    -- censer is counted only while the buff is missing (counted again the
+    -- next time it goes missing), so a dungeon run with the buff up costs no
+    -- bag work at all.
+    local censerIDs = EABR._fvCenserIDs
+    if not censerIDs then censerIDs = { EABR.ARCANE_CENSER_BUFF }; EABR._fvCenserIDs = censerIDs end
+    local wantCenser = shows and fo.arcaneCenser == true and EllesmereUI.IsInDungeon()
+    local censerMissing = wantCenser and not PlayerHasAuraByID(censerIDs)
+        and not (EllesmereUI.AuraKit.AurasRestricted() and not EABR.FvRanksReadable(censerIDs))
+    if wantCenser and not censerMissing then EABR._fvCenser = nil end
+    local censer = censerMissing and EABR.FvCenserOwned() or false
+    -- The shared bag listener: Weapon Buffs, an owned Sleeping Bag, an owned
+    -- censer whose buff is missing. With none of those, a light watcher hears
+    -- a missing Sleeping Bag (below max level) or censer arrive.
+    local bagListen = shows and (fo.weapon == true or sleepBag or censer) or false
     EABR.FvSyncSleepBagWatch(wantBag and not sleepBag and not EABR._fvMaxLevel
-        and fo.weapon ~= true or false)
-    EABR.FvSyncBagEvent(shows and (fo.weapon == true or sleepBag) or false)
+        and not bagListen or false)
+    EABR.FvSyncCenserWatch(censerMissing and not censer and not bagListen or false)
+    EABR.FvSyncBagEvent(bagListen)
     local watchPickerSpells = shows and PickerEnabled() or false
     if watchPickerSpells ~= (EABR._fvPickerSpellEvents or false) then
         EABR.FvSyncPickerSpellEvents(watchPickerSpells)
@@ -960,6 +987,17 @@ function EABR.CollectForever(missing, inInstance, inPvP)
             e.cat = "forever"; e.dismissKey = "forever:sleepingbag"
             missing[#missing+1] = e
         end
+    end
+    -- Arcane Censer: its buff missing and a censer in the bags (read above);
+    -- the click uses the censer.
+    if censer then
+        local item = EABR.ARCANE_CENSER_ITEM
+        local e = AcquireEntry()
+        e.mode = "item"; e.itemID = item
+        e.texture = C_Item.GetItemIconByID(item) or Tex(EABR.ARCANE_CENSER_BUFF)
+        e.label = EllesmereUI.L("Censer")
+        e.cat = "forever"; e.dismissKey = "forever:censer"
+        missing[#missing+1] = e
     end
     -- Gathering tracking: shown while no tracker is up and the player knows
     -- one; the button casts the first one known. The aura read goes first, so
@@ -1060,7 +1098,9 @@ function EABR.CollectForever(missing, inInstance, inPvP)
     for i = 1, #custom do
         local id = custom[i]
         local off = classOff and classOff[id]
-        if not (off and off[class] == false) then
+        -- A custom Magical Awareness stands down while the Arcane Censer
+        -- reminder shows for it.
+        if not (censer and id == EABR.ARCANE_CENSER_BUFF) and not (off and off[class] == false) then
             local name = SpellName(id)
             if not (coveredIDs and (coveredIDs[id] or (name and coveredNames[name]))) then
                 local fam = EABR.ForeverFamily(id)
@@ -1304,9 +1344,11 @@ function EABR.FvStandDown()
     EABR.FvSyncWeaponEvents(false)
     EABR.FvSyncBagEvent(false)
     -- Bag changes go unheard while the section stands down (resting in a city,
-    -- for one): the Sleeping Bag is counted again when it is back.
+    -- for one): the Sleeping Bag and the Arcane Censer are counted again when
+    -- it is back.
     EABR.FvSyncSleepBagWatch(false)
-    EABR._fvSleepBag = nil
+    EABR.FvSyncCenserWatch(false)
+    EABR._fvSleepBag, EABR._fvCenser = nil, nil
     if EABR._fvPickerSpellEvents then EABR.FvSyncPickerSpellEvents(false) end
     if EABR.ValidateOpenPicker then EABR.ValidateOpenPicker() end
     if EABR._durationTimer then

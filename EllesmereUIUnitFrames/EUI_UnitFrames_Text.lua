@@ -583,16 +583,15 @@ function ns.ResolveUnitNickname(unit)
     if not UnitIsPlayer(unit) then return name end
     local nameSecret = issecretvalue and issecretvalue(name)
     local display
-    -- Per-module toggle (Unit Frames > Display, default ON). It gates EVERY
-    -- provider, including MethodInternal, so turning nicknames off here always
-    -- means character names on Unit Frames without affecting any other module.
-    if db and db.profile and db.profile.showNicknames == false then
-        return EllesmereUI.WithSurname(name, surname)
-    end
+    -- Suite-wide Raid Groups nicknames override the external-provider toggle.
     if EllesmereUI.UseRaidGroupsNicknameSource() then
         return (EllesmereUI.RaidGroupsNicknameForUnit
             and EllesmereUI.RaidGroupsNicknameForUnit(unit))
             or EllesmereUI.WithSurname(name, surname)
+    end
+    -- The per-module toggle gates the normal external nickname providers only.
+    if db and db.profile and db.profile.showNicknames == false then
+        return EllesmereUI.WithSurname(name, surname)
     end
     -- MethodInternal's surface choice is authoritative for known Method players,
     -- including Character Name (which deliberately equals the raw name).

@@ -77,7 +77,6 @@ local function SearchAllModulesFromInline()
     sidebarSearch:SetCursorPosition(#query)
     return true
 end
-local _lastPagePerModule = {}
 local scrollTarget = 0
 local isSmoothing = false
 local smoothFrame
@@ -1438,16 +1437,21 @@ local function BuildSidebar()
     local sbBrd = EllesmereUI.MakeRoundedBorder(sidebarSearchFrame,
         EllesmereUI.BORDER_R, EllesmereUI.BORDER_G, EllesmereUI.BORDER_B, 0.10, sbBg)
 
+    local sbGlass = sidebarSearchFrame:CreateTexture(nil, "ARTWORK")
+    sbGlass:SetSize(15, 15)
+    sbGlass:SetPoint("LEFT", sidebarSearchFrame, "LEFT", 8, 0)
+    sbGlass:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+    sbGlass:SetAlpha(0.55)
     local sbEdit = CreateFrame("EditBox", nil, sidebarSearchFrame)
     sbEdit:SetAllPoints()
     sbEdit:SetAutoFocus(false)
     sbEdit:SetFont(EllesmereUI.EXPRESSWAY, 13, "")
     sbEdit:SetTextColor(1, 1, 1, 1)
-    sbEdit:SetTextInsets(10, 24, 0, 0)
+    sbEdit:SetTextInsets(28, 24, 0, 0)
     sbEdit:SetMaxLetters(40)
 
     local sbPlaceholder = MakeFont(sidebarSearchFrame, 12, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, 0.3)
-    sbPlaceholder:SetPoint("LEFT", sidebarSearchFrame, "LEFT", 10, 0)
+    sbPlaceholder:SetPoint("LEFT", sidebarSearchFrame, "LEFT", 29, 0)
     sbPlaceholder:SetText(EllesmereUI.L("Search Features..."))
 
     local sbClearBtn = CreateFrame("Button", nil, sidebarSearchFrame)
@@ -1684,13 +1688,17 @@ local function BuildSidebar()
         local viewTop, viewBottom = addonScrollFrame:GetTop(), addonScrollFrame:GetBottom()
         if not (top and bottom and viewTop and viewBottom) then return end
         local cur = addonScrollFrame:GetVerticalScroll()
+        -- A wheel/arrow animation can still be moving when the option is clicked.
+        -- Check where its selected row will land, not only where it is now.
+        local base = addonIsSmoothing and addonScrollTarget or cur
+        local pending = base - cur
         local target
-        if bottom >= viewTop then
-            target = cur - (top - viewTop) - 4
-        elseif top <= viewBottom then
-            target = cur + (viewBottom - bottom) + 4
+        if bottom + pending >= viewTop then
+            target = base - (top + pending - viewTop) - 4
+        elseif top + pending <= viewBottom then
+            target = base + (viewBottom - bottom - pending) + 4
         else
-            return  -- at least part of the selection is visible
+            return  -- selection will remain at least partly visible
         end
         local scale = addonScrollFrame:GetEffectiveScale()
         target = math.max(0, math.min(AddonMaxScroll(), target))
@@ -3635,7 +3643,14 @@ CreateTabButton = function(index, name)
             end
         end)
         btn:SetScript("OnClick", function(self)
-            if not self._disabled then EllesmereUI:SelectPage(self._name) end
+            if self._disabled then return end
+            local previousModule, previousPage = activeModule, activePage
+            EllesmereUI:SelectPage(self._name)
+            -- Header tab changes should reveal a fully hidden selected sidebar row.
+            if activeModule == previousModule and activePage ~= previousPage
+                and EUI_NS.RestoreSelectedSidebarOnOptionClick then
+                EUI_NS.RestoreSelectedSidebarOnOptionClick()
+            end
         end)
         btn:EnableMouseWheel(false)
         btn:SetScript("OnMouseWheel", ScrollTabWheel)
@@ -3699,16 +3714,21 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
         searchBg:SetAllPoints()
         local searchBrd = EllesmereUI.MakeRoundedBorder(searchFrame, STYLE.BORDER_R, STYLE.BORDER_G, STYLE.BORDER_B, 0.10, searchBg)
 
+        local searchGlass = searchFrame:CreateTexture(nil, "ARTWORK")
+        searchGlass:SetSize(15, 15)
+        searchGlass:SetPoint("LEFT", searchFrame, "LEFT", 8, 0)
+        searchGlass:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+        searchGlass:SetAlpha(0.55)
         local editBox = CreateFrame("EditBox", nil, searchFrame)
         editBox:SetAllPoints()
         editBox:SetAutoFocus(false)
         editBox:SetFont(EllesmereUI.EXPRESSWAY, 13, "")
         editBox:SetTextColor(STYLE.TEXT_WHITE_R, STYLE.TEXT_WHITE_G, STYLE.TEXT_WHITE_B, 1)
-        editBox:SetTextInsets(10, 24, 0, 0)
+        editBox:SetTextInsets(28, 24, 0, 0)
         editBox:SetMaxLetters(40)
 
         local placeholder = MakeFont(searchFrame, 12, nil, STYLE.TEXT_DIM_R, STYLE.TEXT_DIM_G, STYLE.TEXT_DIM_B, 0.3)
-        placeholder:SetPoint("LEFT", searchFrame, "LEFT", 10, 0)
+        placeholder:SetPoint("LEFT", searchFrame, "LEFT", 29, 0)
         placeholder:SetText(EllesmereUI.L("Search Module Settings..."))
 
         -- Clear button (X) on right side -- frame level above editBox so clicks register
@@ -3854,30 +3874,37 @@ do
         watcher:SetScript("OnEvent", function()
             if not mainFrame:IsShown() or EllesmereUI._panelCollapsed then return end
             if not (scrollFrame and activeModule and activePage) then return end
-            if not (scrollFrame:IsMouseOver() or (contentHeaderFrame:IsShown()
-                and contentHeaderFrame:IsMouseOver())) then return end
+            -- Propagating mouse regions can place an overlay before the actual
+            -- control in GetMouseFoci(). Check each focus by ancestry rather
+            -- than requiring the topmost region to be in the content frame.
             local foci = GetMouseFoci and GetMouseFoci()
-            local focus = foci and foci[1]
-            local isControl = false
-            while focus do
-                if focus == scrollFrame._optionScrollTrack
-                    or focus == scrollFrame._optionScrollHitArea then return end
-                if focus == scrollFrame or focus == contentHeaderFrame then
-                    if not isControl then return end
-                    if EUI_NS.RestoreSelectedSidebarOnOptionClick then
-                        EUI_NS.RestoreSelectedSidebarOnOptionClick()
+            if not foci then return end
+            for _, region in ipairs(foci) do
+                local focus = region
+                local isControl = false
+                while focus do
+                    if focus == scrollFrame._optionScrollTrack
+                        or focus == scrollFrame._optionScrollHitArea then return end
+                    if focus == scrollFrame or focus == contentHeaderFrame then
+                        if isControl then
+                            if EUI_NS.RestoreSelectedSidebarOnOptionClick then
+                                EUI_NS.RestoreSelectedSidebarOnOptionClick()
+                            end
+                            EUI_NS.RestoreSelectedTabOnOptionClick()
+                            return
+                        end
+                        break
                     end
-                    EUI_NS.RestoreSelectedTabOnOptionClick()
-                    return
+                    if focus.IsObjectType and (focus:IsObjectType("Button")
+                        or focus:IsObjectType("CheckButton")
+                        or focus:IsObjectType("EditBox") or focus:IsObjectType("Slider")) then
+                        isControl = true
+                    elseif focus.GetScript and (focus:GetScript("OnMouseDown")
+                        or focus:GetScript("OnMouseUp")) then
+                        isControl = true
+                    end
+                    focus = focus.GetParent and focus:GetParent()
                 end
-                if focus.IsObjectType and (focus:IsObjectType("Button")
-                    or focus:IsObjectType("EditBox") or focus:IsObjectType("Slider")) then
-                    isControl = true
-                elseif focus.GetScript and (focus:GetScript("OnMouseDown")
-                    or focus:GetScript("OnMouseUp")) then
-                    isControl = true
-                end
-                focus = focus.GetParent and focus:GetParent()
             end
         end)
         mainFrame:HookScript("OnShow", function()
@@ -4095,7 +4122,7 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
     end) then return end
 
     self:Show()
-    self:SelectModule(moduleName)
+    self:SelectModule(moduleName, pageName)
     self:SelectPage(pageName)
 
     -- Switch dropdown AFTER the page is loaded, then force a full rebuild.
@@ -4760,7 +4787,6 @@ do
         EllesmereUIBags = true,
         EllesmereUIDataBars = true,
         EllesmereUIQuickdraw = true,
-        EllesmereUILoadoutManager = true,
         EllesmereUIGroupFinder = true,
         EllesmereUIForeverEssentials = true,
         EllesmereUISimpleLootCouncil = true,
@@ -5176,16 +5202,13 @@ function EllesmereUI:SelectPage(pageName)
     if pageName == activePage then return end
 
     -- A link tab (config.pageLinks[pageName] = { module =, page = }) opens another
-    -- module's page instead of one of its own. Nothing here changes, so coming
-    -- back lands on the page that was open.
+    -- module's specific page instead of one of its own.
     local links = modules[activeModule].pageLinks
     local link = links and links[pageName]
     if link then
         if modules[link.module] then
-            -- SelectModule opens a module on its last page: make that the target,
-            -- so the module's previous page is never built on the way.
-            _lastPagePerModule[link.module] = link.page
-            self:SelectModule(link.module)
+            -- Go directly to the linked page, without building the first tab.
+            self:SelectModule(link.module, link.page)
             if activePage ~= link.page then self:SelectPage(link.page) end
         end
         return
@@ -5241,7 +5264,6 @@ function EllesmereUI:SelectPage(pageName)
     end
 
     activePage = pageName
-    _lastPagePerModule[activeModule] = pageName
     UpdateTabHighlight(pageName)
     -- A page that draws its own layout over the scroll frame (a manager page,
     -- config.noSearchPages) has nothing the inline search can filter: the box
@@ -5449,7 +5471,8 @@ end
 --  Reset EUI Module Settings (Global Settings): the suite's module resets
 --  in one menu, each behind the typed confirm. A module's config may set
 --  resetScope ("account": settings every profile shares, "character": this
---  character's own; default: the current profile) and resetMessage (a
+--  character's own; default: the current profile), resetDisclaimer (its own
+--  scope line, for a module whose settings mix those) and resetMessage (a
 --  string, or a function returning one, in place of the standard question).
 --  The reset runs as RequestReload's pre-reload work, as Reset ALL's wipe does.
 -------------------------------------------------------------------------------
@@ -5468,7 +5491,7 @@ local function ConfirmModuleReset(key, name)
     EllesmereUI:ShowConfirmPopup({
         title         = title,
         message       = msg or EllesmereUI.Lf("Are you sure you want to reset all %1$s settings to their defaults? This will reload your UI.", name),
-        disclaimer    = EllesmereUI.L(RESET_SCOPE_TEXT[config.resetScope] or RESET_SCOPE_TEXT.profile),
+        disclaimer    = EllesmereUI.L(config.resetDisclaimer or RESET_SCOPE_TEXT[config.resetScope] or RESET_SCOPE_TEXT.profile),
         typeToConfirm = "Confirm",
         confirmText   = "Reset & Reload",
         cancelText    = "Cancel",
@@ -5505,7 +5528,7 @@ function EllesmereUI._ShowModuleResetMenu(anchor, onAll)
     EllesmereUI.ShowContextMenu(anchor, items, { below = true, scaleToAnchor = true })
 end
 
-function EllesmereUI:SelectModule(folderName)
+function EllesmereUI:SelectModule(folderName, requestedPage)
     if not modules[folderName] then return end
     -- The panel is not always built when we get here: on the session's first
     -- open the first-open split (see _SplitFirstOpen) makes Show()/Toggle()
@@ -5597,15 +5620,14 @@ function EllesmereUI:SelectModule(folderName)
         end
         if tabBar._updateTabLayout then tabBar._updateTabLayout() end
     end
-    local savedPage = _lastPagePerModule[folderName]
-    -- Validate saved page still exists in this module's page list
-    local validPage = nil
-    if savedPage and config.pages then
+    -- Sidebar module switches always start at the first tab. Explicit links
+    -- may request another valid page without briefly building the first.
+    local targetPage = config.pages and config.pages[1]
+    if requestedPage and config.pages then
         for _, p in ipairs(config.pages) do
-            if p == savedPage then validPage = savedPage; break end
+            if p == requestedPage then targetPage = p; break end
         end
     end
-    local targetPage = validPage or (config.pages and config.pages[1])
     -- Clear activePage so SelectPage doesn't bail when the target page
     -- has the same name as the previous module's page (e.g. both have "General").
     activePage = nil
@@ -6033,7 +6055,7 @@ do
 end
 
 -- Open the panel with a specific addon's tab selected
-function EllesmereUI:ShowModule(folderName)
+function EllesmereUI:ShowModule(folderName, pageName)
     if InCombatLockdown() then
         EllesmereUI.PrintError("Cannot open options during combat.")
         return
@@ -6041,14 +6063,17 @@ function EllesmereUI:ShowModule(folderName)
     if self._openPending then return end
     -- First-open split (see _SplitFirstOpen): the combat check above stays in
     -- the click execution; the deferred re-invoke re-checks it harmlessly.
-    if self:_SplitFirstOpen(function() EllesmereUI:ShowModule(folderName) end) then return end
+    if self:_SplitFirstOpen(function() EllesmereUI:ShowModule(folderName, pageName) end) then return end
     CreateMainFrame()
     RefreshSidebarStates()
     mainFrame:Show()
     if self._panelCollapsed then self._SetPanelCollapsed(false) end
     ShowSidebarUnlockTip()
     if modules[folderName] then
-        self:SelectModule(folderName)
+        self:SelectModule(folderName, pageName)
+        if pageName and activeModule == folderName and activePage ~= pageName then
+            self:SelectPage(pageName)
+        end
     end
 end
 
@@ -6339,10 +6364,8 @@ do
                 if p == pageName then valid = true; break end
             end
             if not valid then return false end
-            -- SelectModule opens the module on its last page.
-            _lastPagePerModule[key] = pageName
         end
-        EllesmereUI:ShowModule(key)
+        EllesmereUI:ShowModule(key, pageName)
         -- Already on this module: SelectModule was a no-op, switch the page here.
         if pageName and activeModule == key and activePage ~= pageName
            and mainFrame and mainFrame:IsShown() then

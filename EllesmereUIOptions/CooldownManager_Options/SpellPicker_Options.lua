@@ -636,6 +636,7 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                     cdStateGlowStyle = true, cdStateGlowAlpha = true,
                     reverseSwipe = true, hideCDSwipe = true, stanceBarHide = true,
                     activeSwipeReverse = true,
+                    showSwingTimer = true,
                     thresholdSeconds = true, thresholdDecimals = true,
                     thresholdColorEnabled = true, thresholdColorR = true,
                     thresholdColorG = true, thresholdColorB = true,
@@ -1892,6 +1893,17 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                     end
                     AB.STANCE_BAR_ITEMS = items
                 end
+                -- Swing Timer single-select (WoW Forever, on-next-swing attacks),
+                -- shared by the regular-spell (ss) and custom spell (cas) menus:
+                -- the weapon swing as a swipe on the icon. Runtime, and the test
+                -- for such a spell, in EUI_CDM_ForeverSwingSweep.lua; nil elsewhere.
+                if ns.CDM_IsSwingSweepSpell then
+                    AB.SWING_SWEEP_ITEMS = {
+                        { val = nil,  label = "Off" },
+                        { val = true, label = "Show Swing Timer",
+                          tooltip = "Shows your weapon swing as a cooldown swipe on this icon, starting again on every swing." },
+                    }
+                end
 
                 -- Track open subnavs on the menu frame so OnUpdate can see them
 
@@ -2480,7 +2492,12 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                             searchEdit:SetJustifyH("LEFT")
                             searchEdit:SetAutoFocus(false)
                             searchEdit:SetMaxLetters(30)
-                            searchEdit:SetTextInsets(4, 4, 0, 0)
+                            searchEdit:SetTextInsets(28, 4, 0, 0)
+                            local searchGlass = searchEdit:CreateTexture(nil, "ARTWORK")
+                            searchGlass:SetSize(15, 15)
+                            searchGlass:SetPoint("LEFT", searchEdit, "LEFT", 8, 0)
+                            searchGlass:SetTexture("Interface\\Common\\UI-Searchbox-Icon")
+                            searchGlass:SetAlpha(0.55)
                             local seBg = searchEdit:CreateTexture(nil, "BACKGROUND")
                             seBg:SetAllPoints()
                             seBg:SetColorTexture(0, 0, 0, 0.4)
@@ -2488,7 +2505,7 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                             local sePh = searchEdit:CreateFontString(nil, "OVERLAY")
                             sePh:SetFont(FONT_PATH, 11, "")
                             sePh:SetTextColor(0.5, 0.5, 0.5, 0.6)
-                            sePh:SetPoint("LEFT", searchEdit, "LEFT", 4, 0)
+                            sePh:SetPoint("LEFT", searchEdit, "LEFT", 29, 0)
                             sePh:SetText(EllesmereUI.L("Search..."))
                             searchEdit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
                             searchEdit:SetScript("OnHide", function(self) self:ClearFocus() end)
@@ -4053,6 +4070,25 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                                         t.hideCDSwipe = (v == "hide") or false
                                     end } })
 
+                    -- Swing Timer (custom spell): as on the regular-spell menu, stored in
+                    -- customActiveStates.
+                    if AB.SWING_SWEEP_ITEMS and ns.CDM_IsSwingSweepSpell(spellID) then
+                        MakeSubnavRow("Swing Timer", AB.SWING_SWEEP_ITEMS,
+                            function() return cas.showSwingTimer or nil end,
+                            function(v)
+                                SetCasOwn("showSwingTimer", v)
+                                if v then ns._cdmAnySwingSweep = true end
+                                ns.CDM_SwingSweepSync()
+                            end,
+                            function() return not cas.showSwingTimer end,
+                            nil,
+                            { apply = { keys = { "showSwingTimer" },
+                                        write = function(t, v)
+                                            t.showSwingTimer = v or false
+                                            if v then ns._cdmAnySwingSweep = true end
+                                        end } })
+                    end
+
                     -- Stance Bar (preset/custom): as on the regular-spell menu, stored in
                     -- customActiveStates; the Fake-Active engine runs it.
                     if AB.STANCE_BAR_ITEMS then
@@ -4838,6 +4874,27 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                                     t.hideCDSwipe = (v == "hide") or false
                                 end } })
 
+                -- 4b1. Swing Timer (per-spell, WoW Forever on-next-swing attacks): the
+                -- weapon swing as a swipe on the icon, which has no cooldown to show.
+                -- Runtime in EUI_CDM_ForeverSwingSweep.lua, gated by ns._cdmAnySwingSweep.
+                if AB.SWING_SWEEP_ITEMS and ns.CDM_IsSwingSweepSpell(spellID) then
+                    MakeSubnavRow("Swing Timer", AB.SWING_SWEEP_ITEMS,
+                        function() return ss.showSwingTimer or nil end,
+                        function(v)
+                            EnsureSS()
+                            SetOwn("showSwingTimer", v)
+                            if v then ns._cdmAnySwingSweep = true end
+                            ns.CDM_SwingSweepSync()
+                        end,
+                        function() return not ss.showSwingTimer end,
+                        nil,
+                        { apply = { keys = { "showSwingTimer" },
+                                    write = function(t, v)
+                                        t.showSwingTimer = v or false
+                                        if v then ns._cdmAnySwingSweep = true end
+                                    end } })
+                end
+
                 -- 4b2. Stance Bar (per-spell, classes with stance bar pages): hidden in or
                 -- outside one of the class's paging stances, for keys that cast something
                 -- else on that page. Runtime in EllesmereUICdmStanceBar.lua, gated by
@@ -4857,6 +4914,41 @@ local function ShowSpellPicker(anchorFrame, barKey, slotIndex, excludeSet, onSel
                                     write = function(t, v)
                                         t.stanceBarHide = v or false
                                         if v then ns._cdmAnyStanceBar = true end
+                                    end } })
+                end
+
+                -- 4b3. Buff Stacks (per-spell, eligible spells only, default on): the
+                -- stack count of the spell's own buff on this cooldown icon, mirrored from
+                -- its item in Blizzard's buff viewers. Eligible: selfAura, no charges, and
+                -- the spell is in Blizzard's buff catalogue (ns.CdBuffStacksEligible).
+                -- Off saves false; unset is on. The menu's values are nil (on) and "off":
+                -- MakeSubnavRow reads a false getter as nil, so a false item never shows
+                -- selected. Runtime in EUI_CDM_CdBuffStacks.lua.
+                local bsKey = (type(spellID) == "string" and anchorFrame and anchorFrame._previewSpellID) or spellID
+                if ns.CdBuffStacksEligible and (ns.CdBuffStacksEligible(spellID) or ns.CdBuffStacksEligible(bsKey)) then
+                    local BUFF_STACKS_ITEMS = {
+                        { val = nil, label = "Show Buff Stacks",
+                          tooltip = "Shows this spell's buff stacks on the icon while Blizzard's Cooldown Manager displays that buff." },
+                        { val = "off", label = "Off" },
+                    }
+                    MakeSubnavRow("Buff Stacks", BUFF_STACKS_ITEMS,
+                        function() return ss.showBuffStacks == false and "off" or nil end,
+                        function(v)
+                            EnsureSS()
+                            if v ~= "off" then
+                                SetOwn("showBuffStacks", nil)
+                                -- A bar tier set to Off would turn the cleared key back to false.
+                                if ss.showBuffStacks == false then ss.showBuffStacks = true end
+                            else
+                                ss.showBuffStacks = false
+                            end
+                            if ns.QueueReanchor then ns.QueueReanchor() end
+                        end,
+                        function() return ss.showBuffStacks ~= false end,
+                        nil,
+                        { apply = { keys = { "showBuffStacks" },
+                                    write = function(t, v)
+                                        t.showBuffStacks = v ~= "off"
                                     end } })
                 end
 
