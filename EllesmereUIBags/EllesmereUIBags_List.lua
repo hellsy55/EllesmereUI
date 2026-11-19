@@ -20,6 +20,7 @@ local function BP() return (EUI._bagsDB and EUI._bagsDB.profile) or _emptyP end
 
 local ROW_H, ICON_SIZE, COL_GAP = 24, 20, 6
 local function RowH() return BP().bagListRowHeight or ROW_H end
+local function IconSize() return math.min(ICON_SIZE, RowH() - 4) end
 local COLHDR_H = 20
 local SECTION_H, SUBSECTION_H = 22, 18
 local ROUND_MASK = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
@@ -753,7 +754,7 @@ local function RenderRow(btn, data, cols, rowW, x, y, stripe, dim, reagentSectio
         local cx, cw = _colX[id], _colW[id]
         if id == "icon" then
             local icon = btn._lvIcon
-            local isz = math.min(ICON_SIZE, RowH() - 4)
+            local isz = IconSize()
             icon:SetSize(isz, isz)
             icon:ClearAllPoints()
             icon:SetPoint("LEFT", btn, "LEFT", cx, 0)
@@ -839,7 +840,11 @@ local function RenderRow(btn, data, cols, rowW, x, y, stripe, dim, reagentSectio
     end
     btn._textOverlay:SetShown(btn._lvIcon:IsShown())
     if reagentBadgeOn or btn._reagentBadge then
-        ns.PaintReagentBadge(btn, reagentBadgeOn and data.bag == 5 and not reagentSection, btn._lvIcon, 10 / 12)
+        -- only while the icon column shows (the badge sits on the row icon); a Recent Items
+        -- picked-up entry stands for every stack of its item, in any bag: no badge
+        ns.PaintReagentBadge(btn, reagentBadgeOn and data.bag == 5 and not data._recentGained
+            and not reagentSection and btn._lvIcon:IsShown(),
+            btn._lvIcon, IconSize())
     end
     EUI_Bags.RunItemOverlays(btn, data)
     -- Tooltip requery after the slot re-assignment (see RenderButton)
@@ -1168,9 +1173,11 @@ function ns.RenderListView(items, opts)
             s._line:SetPoint("RIGHT", ns.ShowRecentClearButton(s), "LEFT", -6, 0)
         end
         y = y - h
-        -- Reagent Bag sections: OneBag / MultiBag bag sections (bag 5 only in its own) and the category
-        local reag = (slotView and b.key ~= "pinned" and b.key ~= "recent")
-            or (not slotView and type(b.key) == "number" and cats[b.key] and cats[b.key].isReagentBag)
+        -- Reagent Bag sections: the Reagent Bag tab (reagentView), OneBag / MultiBag
+        -- bag sections (bag 5 only in its own) and the category
+        local reag = reagentBadgeOn and (opts.reagentView ~= nil
+            or (slotView and b.key ~= "pinned" and b.key ~= "recent")
+            or (not slotView and not view and type(b.key) == "number" and cats[b.key] and cats[b.key].isReagentBag))
         table.sort(b.subList, SubCompare)
         for _, sl in ipairs(b.subList) do
             if collapsed then break end
