@@ -259,11 +259,11 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Loadout Manager" } or nil,
             },
             {
-                -- The Reagent Bag Icon row of CATEGORIES on the Bags page (both clients).
+                -- The Reagent Bag Icon row of EXTRAS on the Bags page (both clients).
                 module = "Bags",
                 title  = "Reagent Bag Icon",
                 desc   = "Items in the reagent bag can wear a small icon of your choice, so they stand out among the same items from your other bags; off by default",
-                nav    = { module = "EllesmereUIBags", page = "Bags", section = "CATEGORIES", highlight = "Reagent Bag Icon" },
+                nav    = { module = "EllesmereUIBags", page = "Bags", section = "EXTRAS", highlight = "Reagent Bag Icon" },
             },
         },
         fixes = {
