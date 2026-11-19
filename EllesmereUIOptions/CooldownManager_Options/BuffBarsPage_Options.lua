@@ -3762,9 +3762,10 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
 
         -- When a text element claims a position, evict any other text already there so
         -- labels never overlap. Compares EFFECTIVE (rendered) positions: name text never
-        -- renders on vertical bars, so its stored slot must not evict anything there.
+        -- renders on vertical bars, so its stored slot neither evicts nor is evicted there.
         EvictTBBTextConflicts = function(bd, changedKey, newPos)
             if newPos == "none" then return end
+            if changedKey == "namePosition" and bd.verticalOrientation then return end
             local function resolvePos(key)
                 if key == "namePosition" and bd.verticalOrientation then return "none" end
                 local v = bd[key]
@@ -3975,6 +3976,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     local pos = bd.namePosition or ((bd.showName ~= false) and "left" or "none")
                     local tbb = ns.GetTrackedBuffBars()
                     for _, b in ipairs(tbb.bars or {}) do
+                        EvictTBBTextConflicts(b, "namePosition", pos)
                         b.namePosition = pos
                         b.showName = (pos ~= "none")
                     end
@@ -4064,6 +4066,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     local pos = bd.timerPosition or (bd.showTimer and "right" or "none")
                     local tbb = ns.GetTrackedBuffBars()
                     for _, b in ipairs(tbb.bars or {}) do
+                        EvictTBBTextConflicts(b, "timerPosition", pos)
                         b.timerPosition = pos
                         b.showTimer = (pos ~= "none")
                     end
@@ -4157,7 +4160,10 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                     local bd = SelectedTBB(); if not bd then return end
                     local pos = bd.stacksPosition or "center"
                     local tbb = ns.GetTrackedBuffBars()
-                    for _, b in ipairs(tbb.bars or {}) do b.stacksPosition = pos end
+                    for _, b in ipairs(tbb.bars or {}) do
+                        EvictTBBTextConflicts(b, "stacksPosition", pos)
+                        b.stacksPosition = pos
+                    end
                     RefreshTBB(); EllesmereUI:RefreshPage()
                 end,
            
@@ -4667,7 +4673,7 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
         -- Row 1: Pandemic Glow (dropdown + swatch + cog + sync) | Stack Based
         -- Bar (buff bars only; page rebuilds on selection change, so cd/utility
         -- bars get a blank slot). Stack Based Bar is inert until Max Stacks is
-        -- enabled below.
+        -- enabled below. WoW Forever (ns.CDM_NO_PANDEMIC): Stack Based Bar alone.
         do
             -- Shared glow controls over the bar's pandemic keys (the Glows page's
             -- Tracked Buff Bar descriptor, resolving the selected bar).
@@ -4688,34 +4694,36 @@ local function InitBuffBarsPage(PP, DB, Refresh, FONT_PATH, GetCDMOptOutline, Ga
                 rightSlot = EllesmereUI.BlankRowCfg()
             end
 
-            -- WoW Forever: the same row is the Anti-Clip Glow (EUI_CDM_ForeverAntiClip.lua).
-            local antiClip = ns.CDM_ANTI_CLIP
-            local tbbPanRow
-            tbbPanRow, h = W:DualRow(parent, y, GO.DropdownSpec(tbbDesc, antiClip and "Anti-Clip Glow" or "Pandemic Glow",
-                antiClip and "Show a glow on the bar when casting the spell next, after your current cast or global cooldown, won't clip it, or it has 1.5 seconds or less left"
-                    or "Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)"), rightSlot);  y = y - h
-            GO.AttachInline(tbbPanRow._leftRegion, tbbDesc)
+            if ns.CDM_NO_PANDEMIC then
+                if rightSlot.type ~= "label" then
+                    _, h = W:DualRow(parent, y, rightSlot, EllesmereUI.BlankRowCfg());  y = y - h
+                end
+            else
+                local tbbPanRow
+                tbbPanRow, h = W:DualRow(parent, y, GO.DropdownSpec(tbbDesc, "Pandemic Glow",
+                    "Show a glow on the bar when the remaining duration is in the pandemic window (last 30%)"), rightSlot);  y = y - h
+                GO.AttachInline(tbbPanRow._leftRegion, tbbDesc)
 
-            -- Apply All
-            if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
-                EllesmereUI.BuildSyncIcon({
-                    region = tbbPanRow._leftRegion,
-                    tooltip = antiClip and "Apply this glow's look to all CDM bars and other tracking bars. A surface that can't show a style uses its closest match."
-                        or "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
-                    isSynced = function()
-                        local src = SelectedTBB(); if not src then return true end
-                        return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
-                    end,
-                    onClick = function()
-                        local src = SelectedTBB(); if not src then return end
-                        EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
-                        RefreshTBB()
-                    end,
-               
-                    alwaysAvailable = true,
-                    multiApply = EllesmereUI.PandemicMultiApply({ skipTbbBar = SelectedTBB() },
-                        function() return EllesmereUI.PandemicPayloadFromRectBar(SelectedTBB()) end, function() RefreshTBB() end),
-                })
+                -- Apply All
+                if EllesmereUI.BuildSyncIcon and EllesmereUI.ApplyPandemicGlowToAll then
+                    EllesmereUI.BuildSyncIcon({
+                        region = tbbPanRow._leftRegion,
+                        tooltip = "Apply this pandemic glow to Nameplates, all CDM bars, and other tracking bars. A surface that can't show a style uses its closest match.",
+                        isSynced = function()
+                            local src = SelectedTBB(); if not src then return true end
+                            return EllesmereUI.IsPandemicGlowSyncedToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                        end,
+                        onClick = function()
+                            local src = SelectedTBB(); if not src then return end
+                            EllesmereUI.ApplyPandemicGlowToAll(EllesmereUI.PandemicPayloadFromRectBar(src), { skipTbbBar = src })
+                            RefreshTBB()
+                        end,
+
+                        alwaysAvailable = true,
+                        multiApply = EllesmereUI.PandemicMultiApply({ skipTbbBar = SelectedTBB() },
+                            function() return EllesmereUI.PandemicPayloadFromRectBar(SelectedTBB()) end, function() RefreshTBB() end),
+                    })
+                end
             end
         end
 

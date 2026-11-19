@@ -245,29 +245,46 @@ local function OnPaletteUpdate(_, elapsed)
     liveView:AdvanceSlam(now)
 end
 
--- Only while a menu contains context-dependent icons, watch the same
--- usability events mounts already used plus group/raid permission changes.
--- This is visual-only; secure marker attributes are never modified in combat.
-local usabilityWatch
-local DYNAMIC_TINT_EVENTS = { "MOUNT_JOURNAL_USABILITY_CHANGED", "MINIMAP_UPDATE_ZOOM",
-                              "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
-                              "GROUP_ROSTER_UPDATE", "PARTY_LEADER_CHANGED" }
-local function SyncDynamicTintWatch(on)
-    if on and not usabilityWatch then
-        usabilityWatch = CreateFrame("Frame")
-        usabilityWatch:SetScript("OnEvent", function()
+-- The tint's events (see PaletteView:RefreshTints), registered only while a
+-- live menu with a tinted entry is up; ns.Open and ns.Close, every close's
+-- path, sync it, and the frame is made the first time such a menu opens. The
+-- first two are the mount area (the journal, a doorway); CONTROL_LOST/GAINED
+-- bracket a flight path. Group events track marker permissions. A combat
+-- or flight edge brings several in one frame: an event only
+-- shows the hidden frame, whose next OnUpdate hides it and re-reads once,
+-- after the frame's events (combat lockdown has begun by then).
+local tintWatch
+local TINT_WATCH_EVENTS = { "MOUNT_JOURNAL_USABILITY_CHANGED", "MINIMAP_UPDATE_ZOOM",
+                            "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+                            "PLAYER_CONTROL_LOST", "PLAYER_CONTROL_GAINED",
+                            "PLAYER_MOUNT_DISPLAY_CHANGED",
+                            "GROUP_ROSTER_UPDATE", "PARTY_LEADER_CHANGED" }
+local function SyncTintWatch(on)
+    if on and not tintWatch then
+        tintWatch = CreateFrame("Frame")
+        tintWatch:Hide()
+        tintWatch:SetScript("OnEvent", tintWatch.Show)
+        tintWatch:SetScript("OnUpdate", function(self)
+            self:Hide()
             if liveView and liveView:GetFrame():IsShown() then
-                liveView:RefreshDynamicTints()
+                liveView:RefreshTints()
             end
         end)
     end
-    if not usabilityWatch then return end
-    for i = 1, #DYNAMIC_TINT_EVENTS do
+    if not tintWatch then return end
+    -- A close drops a re-read still waiting for its frame.
+    if not on then tintWatch:Hide() end
+    for i = 1, #TINT_WATCH_EVENTS do
         if on then
-            usabilityWatch:RegisterEvent(DYNAMIC_TINT_EVENTS[i])
+            tintWatch:RegisterEvent(TINT_WATCH_EVENTS[i])
         else
-            usabilityWatch:UnregisterEvent(DYNAMIC_TINT_EVENTS[i])
+            tintWatch:UnregisterEvent(TINT_WATCH_EVENTS[i])
         end
+    end
+    if on then
+        tintWatch:RegisterUnitEvent("UNIT_FLAGS", "player")
+    else
+        tintWatch:UnregisterEvent("UNIT_FLAGS")
     end
 end
 
@@ -354,7 +371,7 @@ function ns.Open(paletteIndex)
     UpdatePaletteAlpha()
     palette:SetScript("OnUpdate", OnPaletteUpdate)
     palette:Show()
-    SyncDynamicTintWatch(liveView:HasDynamicTintCells())
+    SyncTintWatch(liveView:HasTintCells())
 end
 
 -- ESCAPE belongs to the game menu again. The release snippet drops this binding
@@ -389,7 +406,7 @@ function ns.Close()
     end
     palette:SetScript("OnUpdate", nil)
     palette:Hide()
-    SyncDynamicTintWatch(false)
+    SyncTintWatch(false)
     ReleaseSecureState(liveView:GetPaletteIndex())
     ReleaseEscape()
     -- Both, always together. fanVisual left behind at the strip's last centre

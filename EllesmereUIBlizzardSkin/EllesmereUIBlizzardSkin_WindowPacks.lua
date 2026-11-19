@@ -15039,7 +15039,7 @@ function FC.Trinket(cc)
     EllesmereUI.PP.CreateBorder(edge, 0, 0, 0, 1, 1, "OVERLAY", 7)
     d.fcEdge = edge
     hooksecurefunc(cc.Icon, "SetTexture", function(_, file) edge:SetShown(type(file) ~= "nil") end)
-    edge:SetShown(type(cc.Icon:GetTexture()) ~= "nil")
+    edge:SetShown(type((cc.Icon:GetTexture())) ~= "nil")
 end
 
 function FC.SkinPet(pet, unit)

@@ -235,8 +235,8 @@ ns.ReadReagentBadge = ReadReagentBadge  -- shared with EllesmereUIBags_List.lua
 
 -- Reagent Bag Icon badge, top-right of anchor (default btn), 3px past the corner like
 -- the Junk coin; created on first show. show needs a ReadReagentBadge pass that
--- returned true. scale: the List view's smaller icon column (10 of the grid's 12).
-local function PaintReagentBadge(btn, show, anchor, scale)
+-- returned true. iconSize caps the badge in the List view's smaller icon column.
+local function PaintReagentBadge(btn, show, anchor, iconSize)
     local badge = btn._reagentBadge
     if show then
         if not badge then
@@ -252,7 +252,10 @@ local function PaintReagentBadge(btn, show, anchor, scale)
             badge:ClearAllPoints()
             badge:SetPoint("TOPRIGHT", target, "TOPRIGHT", offsetX, offsetY)
         end
-        local size = scale and math.floor(badgeSize * scale + 0.5) or badgeSize
+        local size = badgeSize
+        if iconSize then
+            size = math.min(math.floor(badgeSize * 10 / 12 + 0.5), math.floor(iconSize * 0.6))
+        end
         if badge._size ~= size then
             badge._size = size
             badge:SetSize(size, size)
@@ -374,7 +377,8 @@ local function RenderButton(btn, data, _, col, row, startX, currentY, _, interac
         PaintJunkState(btn, data.info, markerJunk)
         if badgeStyle or btn._reagentBadge then
             -- The OneBag / MultiBag bag sections (interactiveEmpties) hold bag 5 only in their Reagent Bag section
-            PaintReagentBadge(btn, badgeStyle and data.bag == 5 and not (reagentSection or interactiveEmpties))
+            PaintReagentBadge(btn, badgeStyle and data.bag == 5 and not data._recentGained
+                and not (reagentSection or interactiveEmpties))
         end
 
         -- Search misses, and a pinned item in a OneBag / MultiBag bag section

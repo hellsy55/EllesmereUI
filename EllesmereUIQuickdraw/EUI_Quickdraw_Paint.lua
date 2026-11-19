@@ -26,6 +26,8 @@ local EnsurePalette, MAX_PALETTES, MAX_SLOTS = I.EnsurePalette, I.MAX_PALETTES, 
 local PA, ReadPalette, SelectColor, CycleNext = I.PA, I.ReadPalette, I.SelectColor, I.CycleNext
 local WORLD_MARKER_ENGINE, Rez, SlotCooldown = I.WORLD_MARKER_ENGINE, I.Rez, I.SlotCooldown
 local SlotCount, SlotDisplay, SlotUsability = I.SlotCount, I.SlotDisplay, I.SlotUsability
+-- Does this cell carry a tint a live menu re-reads on events (RefreshTints)?
+local HasTint = I.SlotHasTint
 local UsableSlots, ApplyIconCrop = I.UsableSlots, I.ApplyIconCrop
 local ApplySlotVisual, PaletteView = I.ApplySlotVisual, I.PaletteView
 local RefreshFonts, secureButtons = I.RefreshFonts, I.secureButtons
@@ -64,17 +66,6 @@ local function HasLiveIcon(slot)
     return slot.kind == "macro" or slot.kind == "dynamicrez"
 end
 
--- The icon tint of mounts and markers can change while a latched menu is
--- open (zone/combat changes, group changes, raid promotions). Track only
--- these cells for event-driven refreshes; all other usability is painted on
--- open. The settings preview explicitly disables usability coloring.
-local function HasDynamicTint(slot)
-    local k = slot and slot.kind
-    return k == "mount" or k == "lastmount" or k == "randommount"
-        or k == "worldmarker" or k == "cycleworldmarker"
-        or k == "raidtarget" or k == "cycleraidtarget" or k == "clearmarkers"
-end
-
 local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLabel,
                          iconSize, showUsability)
     w.isPlaceholder = placeholder
@@ -82,9 +73,10 @@ local function PaintCell(w, slot, placeholder, showLabels, showCooldowns, wantLa
     -- Read once per paint, which is once per open: range and resources do move
     -- while a palette is up, but a hold lasts a fraction of a second and a tint
     -- that changed under a settled hand would read as a flicker rather than as
-    -- information. Mounts and markers are the exceptions: where you can
-    -- mount or mark changes on zone/combat and group/raid role events, and a
-    -- latched menu should follow it. ApplySlotVisual handles the tint.
+    -- information. Discrete state changes are the exception (RefreshTints):
+    -- combat, a flight path, a doorway for mounts. Such a re-read takes the
+    -- whole answer as it stands, range and resources included. ApplySlotVisual
+    -- colours it.
     w.usability = (showUsability and not placeholder) and SlotUsability(slot) or nil
 
     local icon, name = SlotDisplay(slot)
@@ -301,11 +293,11 @@ function PaletteView:Layout(paletteIndex)
     if not pending then pending = {}; self._pendingCells = pending end
     for k = #pending, 1, -1 do pending[k] = nil end
 
-    -- The mount and marker cells whose availability changes on game events.
-    -- No entries when the tint is switched off for this Action Menu.
-    local dynamicTintCells = self._dynamicTintCells
-    if not dynamicTintCells then dynamicTintCells = {}; self._dynamicTintCells = dynamicTintCells end
-    for k = #dynamicTintCells, 1, -1 do dynamicTintCells[k] = nil end
+    -- The tinted cells, collected the same way, for the tint a live menu
+    -- re-reads on events (see RefreshTints). None while the tint is off.
+    local tintCells = self._tintCells
+    if not tintCells then tintCells = {}; self._tintCells = tintCells end
+    for k = #tintCells, 1, -1 do tintCells[k] = nil end
 
     for i = 1, shown do
         local w = self.widgets[i]
@@ -335,7 +327,7 @@ function PaletteView:Layout(paletteIndex)
         -- company, and testing the stored array would collect the wrong cells.
         if HasLiveIcon(slots[i]) then liveCells[#liveCells + 1] = i end
         if ns.WarmSlot(slots[i]) then pending[#pending + 1] = i end
-        if showUsability and HasDynamicTint(slots[i]) then dynamicTintCells[#dynamicTintCells + 1] = i end
+        if showUsability and HasTint(slots[i]) then tintCells[#tintCells + 1] = i end
         w:Show()
     end
 
@@ -372,8 +364,8 @@ function PaletteView:Layout(paletteIndex)
                 if ns.WarmSlot(c.slots[j]) then
                     pending[#pending + 1] = cells
                 end
-                if showUsability and HasDynamicTint(c.slots[j]) then
-                    dynamicTintCells[#dynamicTintCells + 1] = cells
+                if showUsability and HasTint(c.slots[j]) then
+                    tintCells[#tintCells + 1] = cells
                 end
                 -- Hidden until its own claim is opened -- see UpdateNestShown.
                 w:Hide()
@@ -719,10 +711,10 @@ function PaletteView:AdvanceLiveIcons()
     end
 end
 
--- Recheck mount and marker usability after game events (group changes, raid
--- permissions, combat/zone changes). Only repaint entries with a new tint.
-function PaletteView:RefreshDynamicTints()
-    local cells = self._dynamicTintCells
+-- The cells' tint, re-read by the tint watch in EUI_Quickdraw_Live.lua on
+-- combat, flight path and mount-area changes. Repaints only changed cells.
+function PaletteView:RefreshTints()
+    local cells = self._tintCells
     if not cells or #cells == 0 then return end
     for k = 1, #cells do
         local index = cells[k]
@@ -738,9 +730,9 @@ function PaletteView:RefreshDynamicTints()
     end
 end
 
--- Whether the last live layout needs the event-driven tint watcher.
-function PaletteView:HasDynamicTintCells()
-    local cells = self._dynamicTintCells
+-- Whether the last layout drew a tinted entry.
+function PaletteView:HasTintCells()
+    local cells = self._tintCells
     return cells ~= nil and #cells > 0
 end
 
