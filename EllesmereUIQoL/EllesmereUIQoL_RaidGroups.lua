@@ -1000,8 +1000,8 @@ local function GuestCandidates(source,excluded)
 end
 
 -- Only use this expansion when preparing a fresh Apply or opening a Preview.
--- It never writes to the editable draft or a saved setup. The earliest empty
--- positions (such as Group 4 seats 4-5) are used before later empty groups.
+-- It never writes to the editable draft or a saved setup. Unlisted automatic
+-- Guests fill Group 8 first, then earlier groups if Group 8 has no room.
 local function AutoGuestSource(source,excluded,emptyPinned)
     local expanded=CopyDraft(source)
     if not Enabled("guestAutoEmptySeats") then return expanded end
@@ -1010,11 +1010,14 @@ local function AutoGuestSource(source,excluded,emptyPinned)
         if expanded[i]=="GUEST" or expanded[i]==RGStyle.SETUP_GUEST then count=count-1 end
     end
     if count>0 then
-        for i=1,SLOT_COUNT do
-            if not expanded[i] and not (emptyPinned and emptyPinned[i]) then
-                expanded[i]="GUEST"
-                count=count-1
-                if count==0 then break end
+        for g=NUM_GROUPS,1,-1 do
+            for n=1,GROUP_SIZE do
+                local i=(g-1)*GROUP_SIZE+n
+                if not expanded[i] and not (emptyPinned and emptyPinned[i]) then
+                    expanded[i]="GUEST"
+                    count=count-1
+                    if count==0 then return expanded end
+                end
             end
         end
     end
@@ -2946,17 +2949,26 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
             seen[item.key] = true
         end
     end
-    -- Pinned Empty and unresolved Setup Guest reservations must survive
-    -- reflow. A saved seat occupied by an ignored character is available
-    -- to the ordinary roster; the saved setup itself remains unchanged.
+    -- Respect Pinned Empty and unfilled Setup Guest reservations. An ignored
+    -- character's saved seat is only a temporary vacancy; the setup is intact.
     local reservedEmpty=CopyPinned(emptyPinned)
     for i=1,SLOT_COUNT do
         if source[i]==RGStyle.SETUP_GUEST and not assignedGuests[i] then
             reservedEmpty[i]=true
         end
     end
-    if not next(reservedEmpty) and #ignored==0 then return wanted,order,assignedGuests,{} end
-    local free, lastPinnedGroup, extras = {},0,{}
+    -- Find the last subgroup explicitly occupied by the note. Temporary
+    -- automatic Guest slots do not extend the arranged roster's group range.
+    -- Ignored identities also do not reserve their original setup groups.
+    local lastArrangedGroup=0
+    for i=1,SLOT_COUNT do
+        local v=source[i]
+        if v and v~="GUEST" and (v==RGStyle.SETUP_GUEST or
+            not RGStyle.IsArrangementIgnored(Canonical(v))) then
+            lastArrangedGroup=math.floor((i-1)/GROUP_SIZE)+1
+        end
+    end
+    local free,extras={},{}
     for g=1,NUM_GROUPS do
         free[g]={}
         for n=1,GROUP_SIZE do
@@ -2965,131 +2977,60 @@ local function TargetGroups(source, fixedGuestNames, excluded, emptyPinned)
             local ignoredSource=v and v~="GUEST" and v~=RGStyle.SETUP_GUEST
                 and RGStyle.IsArrangementIgnored(Canonical(v))
             if reservedEmpty[i] then
-                lastPinnedGroup=math.max(lastPinnedGroup,g)
                 if v and v~=RGStyle.SETUP_GUEST and not ignoredSource then
                     return wanted,order,assignedGuests,extras,"Pinned Empty conflicts with an occupied planned slot."
                 end
-            elseif not v or ignoredSource then
+            elseif not v or ignoredSource or (v=="GUEST" and not assignedGuests[i]) then
+                -- An unfilled normal Guest seat is replaceable, unlike a
+                -- protected Setup Guest reservation.
                 free[g][#free[g]+1]=n
             end
         end
     end
-    local function PlaceExtra(member,group)
+    local function PlaceExtra(member,group,atEnd)
         local seats=free[group]
         if #seats==0 then return false end
-        local seat=table.remove(seats,1)
-        wanted[member.key]={group=group,seat=seat,extra=true}
+        local seat=table.remove(seats,atEnd and #seats or 1)
+        wanted[member.key]={group=group,seat=seat,extra=true,ignoredTail=atEnd or nil}
         order[#order+1]=member.key
         extras[member.key]=wanted[member.key]
         return true
     end
+    -- Players absent from the note (including Unlisted members) should be
+    -- in Group 8 whenever there is capacity. Keep explicitly assigned Guest
+    -- seats where the setup put them; never overwrite a protected reservation.
     for _,member in ipairs(rosterSorted) do
         if not seen[member.key] then
-            local placed=PlaceExtra(member,member.group)
-            if not placed then
-                -- Prefer groups following the final deliberately vacant group.
-                for g=lastPinnedGroup+1,NUM_GROUPS do
-                    if PlaceExtra(member,g) then placed=true;break end
-                end
-            end
-            if not placed then
-                for g=1,NUM_GROUPS do
-                    if g~=member.group and PlaceExtra(member,g) then placed=true;break end
-                end
+            local placed=false
+            for g=NUM_GROUPS,1,-1 do
+                if PlaceExtra(member,g) then placed=true;break end
             end
             if not placed then
                 return wanted,order,assignedGuests,extras,
-                    "Not enough free group capacity to preserve Pinned Empty and unfilled Pinned Guest (Setup) seats."
+                    "Not enough free group capacity to preserve the setup's reserved seats."
             end
         end
     end
-    if #ignored>0 then
-        -- A full raid has no spare seats after its last planned member. Free
-        -- the tail by moving only its non-ignored occupants into earlier gaps
-        -- (normally the original ignored seats), without editing any setup.
-        local occupied,eligible,anchor,groupSeats={},{},0,{}
-        for key,target in pairs(wanted) do
-            local i=(target.group-1)*GROUP_SIZE+target.seat
-            occupied[i]=key
-            anchor=math.max(anchor,i)
+    -- Ignored characters prefer the next subgroup AFTER the groups occupied
+    -- by the note (G5 when G1-G4 are arranged). Fill forward from there,
+    -- leaving holes in earlier arranged groups untouched whenever possible.
+    -- When later groups are full, use earlier free seats as a capacity-safe
+    -- fallback rather than omitting actual raid members. Seat order is best
+    -- effort because SetRaidSubgroup cannot guarantee it.
+    local firstIgnoredGroup=math.min(lastArrangedGroup+1,NUM_GROUPS)
+    for _,member in ipairs(ignored) do
+        local placed=false
+        for g=firstIgnoredGroup,NUM_GROUPS do
+            if PlaceExtra(member,g,true) then placed=true;break end
         end
-        for _,member in ipairs(rosterSorted) do
-            groupSeats[member.group]=(groupSeats[member.group] or 0)+1
-            if RGStyle.IsArrangementIgnored(member.key) then
-                anchor=math.max(anchor,(member.group-1)*GROUP_SIZE+groupSeats[member.group])
+        if not placed then
+            for g=1,firstIgnoredGroup-1 do
+                if PlaceExtra(member,g,true) then placed=true;break end
             end
         end
-        for i=1,SLOT_COUNT do
-            local v=source[i]
-            local isIgnored=v and v~="GUEST" and v~=RGStyle.SETUP_GUEST
-                and RGStyle.IsArrangementIgnored(Canonical(v))
-            if isIgnored then anchor=math.max(anchor,i) end
-            eligible[i]=not reservedEmpty[i] and
-                (not v or isIgnored or assignedGuests[i] or (v~="GUEST" and
-                    v~=RGStyle.SETUP_GUEST and rosterByKey[Canonical(v)]~=nil))
-        end
-        -- Prefer a dedicated trailing subgroup when room is available. This
-        -- keeps ignored players visibly last even if WoW reorders members
-        -- inside a subgroup (which cannot be guaranteed by SetRaidSubgroup).
-        local tail={}
-        local lastNormalGroup=0
-        for _,target in pairs(wanted) do
-            lastNormalGroup=math.max(lastNormalGroup,target.group)
-        end
-        local dedicated={}
-        for i=lastNormalGroup*GROUP_SIZE+1,SLOT_COUNT do
-            if eligible[i] and not occupied[i] then
-                dedicated[#dedicated+1]=i
-                if #dedicated==#ignored then break end
-            end
-        end
-        if #dedicated==#ignored then tail=dedicated end
-        local function FindTail(limit)
-            local positions={}
-            for i=limit,1,-1 do
-                if eligible[i] then
-                    table.insert(positions,1,i)
-                    if #positions==#ignored then return positions end
-                end
-            end
-        end
-        if #tail==0 then tail=FindTail(anchor) end
-        if not tail then tail=FindTail(SLOT_COUNT) end
-        if not tail then
+        if not placed then
             return wanted,order,assignedGuests,extras,
                 "Ignore Arrangement: not enough available positions for all ignored players."
-        end
-        local tailSet={}
-        for _,i in ipairs(tail) do tailSet[i]=true end
-        for _,i in ipairs(tail) do
-            local key=occupied[i]
-            if key then
-                local destination
-                for j=1,tail[1]-1 do
-                    if eligible[j] and not occupied[j] and not tailSet[j] then
-                        destination=j
-                        break
-                    end
-                end
-                if not destination then
-                    return wanted,order,assignedGuests,extras,
-                        "Ignore Arrangement: the final raid seats cannot be freed without changing reserved setup slots."
-                end
-                local target=wanted[key]
-                target.group=math.floor((destination-1)/GROUP_SIZE)+1
-                target.seat=(destination-1)%GROUP_SIZE+1
-                extras[key]=target
-                occupied[destination]=key
-                occupied[i]=nil
-            end
-        end
-        for n,member in ipairs(ignored) do
-            local i=tail[n]
-            local target={group=math.floor((i-1)/GROUP_SIZE)+1,
-                seat=(i-1)%GROUP_SIZE+1,ignoredTail=true}
-            wanted[member.key]=target
-            order[#order+1]=member.key
-            extras[member.key]=target
         end
     end
     return wanted,order,assignedGuests,extras
@@ -3338,15 +3279,19 @@ local function NewPreviewModel()
             model.absentNames[i]=v
         end
     end
-    -- Ignored members have a temporary tail target, even when the source
-    -- setup names them in earlier seats. Show the actual intended arrangement
-    -- in the visual preview; keep the saved source and its flags untouched.
+    -- Apply the temporary target layout to the preview when ignored members
+    -- or extra players need relocating; never edit the saved setup itself.
     if plan.wanted then
-        local hasIgnored=false
+        local relocate=false
         for _,member in ipairs(rosterSorted) do
-            if RGStyle.IsArrangementIgnored(member.key) then hasIgnored=true;break end
+            if RGStyle.IsArrangementIgnored(member.key) then relocate=true;break end
         end
-        if hasIgnored and not plan.blockedReason then
+        if not relocate and plan.extraTargets then
+            for _,target in pairs(plan.extraTargets) do
+                if target then relocate=true;break end
+            end
+        end
+        if relocate and not plan.blockedReason then
             local memberFlags=model.ignoredFlags
             for i=1,SLOT_COUNT do
                 local name=model.seats[i]

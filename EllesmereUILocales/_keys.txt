@@ -1390,7 +1390,7 @@ Rename Profile
 Renown
 Repaired all items for %s
 Replace with Buff
-Reports normal Food and Hearty Food.
+Reports Hearty Food only.
 Reposition freely with
 Reposition this element with Shift+Click and Drag.
 Reposition this element within Blizzard Edit Mode
