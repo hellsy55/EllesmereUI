@@ -41,11 +41,61 @@ Report the latest release subject and short SHA, and the helper's count of post-
 
 For `new-features`, first compare the local ref with fetched `origin/new-features`. Before fast-forwarding from origin, check whether `git rev-list new-features..origin/new-features` contains any SHA from `git rev-list <release_target>..upstream/main`; if so, stop for a human branch decision rather than automatically importing excluded upstream commits through origin. Fast-forward a behind local ref otherwise; stop on divergence for a human choice. Preserve existing Retail commits, including fork features/fixes after the release; do not reset or rewrite the branch to the release SHA. Before merging, record `base = git merge-base new-features <release_target>` and the exact incoming upstream range `base..<release_target>`. Count incoming commits with `git rev-list --count new-features..<release_target>`. Use `git merge-base --is-ancestor <release_target> new-features` for already-current status. If the release is already an ancestor of Retail, skip the upstream merge, create no upstream sync commit, and report that Retail is already current with the latest upstream release; still run the manifest checkpoint. Otherwise check out Retail, fast-forward to the release SHA if possible, or use `git merge --no-commit <release_target>` when a merge commit is required. Run the manifest checkpoint before staged review and the approved commit. Stop on a real conflict and read [merge conflicts](../../references/merge-conflicts.md); never resolve before the user's choice. Push Retail only after the checkpoint, and only if its ref changed or its remote is behind. Never merge `upstream/main` HEAD into Retail or use its ahead/behind counts to declare a Retail update available.
 
+### Patch Notes release dates
+
+When an upstream fast-forward is possible, compare the destination and frozen
+release Patch Notes during the read-only preflight. New versions or historical
+dates that need restoration can require a correction commit. Resolve the Lua
+compiler before the first branch mutation when either case applies.
+
+In Local and Cloud, capture the Retail Patch Notes versions and existing
+`releaseDate` values before integrating the frozen upstream release. After
+integration and any approved conflict resolution, with no unmerged paths,
+complete this step before the manifest checkpoint, final validation, staged
+review, or publication. Use
+`EllesmereUIOptions/EUI__General_Options.lua` and inspect only the records of
+`EllesmereUI._WHATSNEW_PATCHES`. Compare exact version strings with the
+pre-integration Retail tree to identify every newly incorporated version.
+Include the first record, displayed as Latest, under the same rules.
+
+Reuse the official [Patch Notes](https://ellesmereui.com/patch-notes) evidence
+from the impact review. If the static page lacks the entries, inspect the
+rendered page. Match each new version to the date displayed on its own entry,
+keeping the version and source date in the update record. A leading display
+`v` may be ignored; do not equate different version strings. Convert the displayed
+calendar date without a timezone shift to `DD/MM/YYYY`. Verify both the exact
+ASCII shape `[0-9]{2}/[0-9]{2}/[0-9]{4}` and calendar validity with the frozen
+Python runtime. If incoming content already supplies a date for a new version,
+verify it against the site and use the confirmed official value.
+
+Preserve previously confirmed dates verbatim for historical records still in
+the table, restoring any that were dropped or changed by integration. Leave
+unrelated historical records and Patch Notes content untouched. If a version
+has no unambiguous official date, record the version and why confirmation
+failed, leave its date unset, and stop for the user's decision to wait or
+explicitly proceed with that version undated. Commit and publication retain
+their separate checkpoints. Never infer dates from Git, tags, GitHub Releases,
+CurseForge, nearby entries, or the current date.
+
+Review the final version-to-date mapping and verify that repeating the step
+with the same inputs requires no further edits. A Retail source-ancestry no-op
+does not query the site or backfill historical dates. For an explicitly
+requested date correction, apply the same source and validation rules. Include
+date edits in the pending merge commit, or in the approved correction commit
+if an upstream fast-forward leaves date edits. Include the edited Lua in
+guardrails and run the locale key check before staged review. Report any
+approved undated versions in the final update report.
+
 ## Sync B: PTR from Retail
 
 Compare `12.1.7-PTR-features` with fetched `origin/12.1.7-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip the merge but still run the manifest checkpoint. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`. Run the manifest checkpoint for PTR on the integrated tree before staged review and the approved commit; Retail Interface values must not survive this checkpoint. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only after the checkpoint, and only if its ref changed or its remote is behind. PTR mode never touches the Retail install folder or performs a Retail library check.
 
 Always compare and merge the full `new-features` ref into PTR, never the upstream release SHA. In PTR and Both modes, continue to Sync B even when Sync A has no new release or is a Retail no-op: Retail-only features/fixes still propagate normally. The release limit applies only to upstream entering Retail.
+
+When the incoming Retail delta touches What's New, verify that the integrated
+PTR records retain Retail's confirmed dates by exact version and preserve
+PTR-only customizations. Resolve disagreements through the existing impact
+and conflict procedures. Sync B uses Retail's dates and does not query the site.
 
 ## Packaging integration gate (before any incoming branch mutation)
 
