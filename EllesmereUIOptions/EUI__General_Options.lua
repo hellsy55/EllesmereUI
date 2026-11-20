@@ -239,6 +239,7 @@ end
 EllesmereUI._WHATSNEW_PATCHES = {
     {
         version = "9.9.1",
+        releaseDate = "19/11/2026",
         thanks = true,
         heroes = {
             {
@@ -327,6 +328,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.9",
+        releaseDate = "19/11/2026",
         thanks = true,
         features = {
             {
@@ -382,6 +384,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.9",
+        releaseDate = "18/11/2026",
         thanks = true,
         heroes = {
             {
@@ -591,6 +594,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.8",
+        releaseDate = "16/11/2026",
         mini = true,
         features = {
             {
@@ -615,6 +619,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.7",
+        releaseDate = "15/11/2026",
         thanks = true,
         features = {
             {
@@ -733,6 +738,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.6",
+        releaseDate = "14/11/2026",
         thanks = true,
         features = {
             {
@@ -861,6 +867,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.5",
+        releaseDate = "14/11/2026",
         thanks = true,
         features = {
             {
@@ -1069,6 +1076,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.4",
+        releaseDate = "10/11/2026",
         thanks = true,
         features = {
             {
@@ -1206,6 +1214,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.3",
+        releaseDate = "08/11/2026",
         thanks = true,
         features = {
             {
@@ -1297,6 +1306,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.8.2",
+        releaseDate = "08/11/2026",
         mini = true,
         features = {
             {
