@@ -151,6 +151,7 @@ local CHAT_DEFAULTS = {
             classColorNames = true,
             classColorSystem = true,
             hideLearnedSpellMessages = false,
+            classColorChatter = true,  -- the sender's name keeps the game's class colors (read ~= false)
             hideSidebarBg = false,
             sidebarIconScale = 1.0,
             sidebarIconSpacing = 10,
@@ -781,6 +782,7 @@ end
 -- module never writes the per-type storage (SetChatColorNameByClass) in
 -- either direction.
 function ECHAT.ApplyClassColorNames(on)
+    ECHAT._ccnApplied = on == true
     if ECHAT.EngineSetClassColorNames then
         ECHAT.EngineSetClassColorNames(on == true)
     end
@@ -804,6 +806,29 @@ end
 function ECHAT.ApplyHideLearnedSpells(on)
     if ECHAT.EngineSetHideLearnedSpells then
         ECHAT.EngineSetHideLearnedSpells(on == true)
+    end
+end
+
+-- Class-colored SENDER names (Name of Chatter, classColorChatter, on unless
+-- false). On, the game's own class coloring stands, untouched. Off holds the
+-- game's chatClassColorOverride at "1" (never class colored, whatever the
+-- per-chat-type settings say), and on again hands back the value it found,
+-- kept account-wide like the CVar (EllesmereUIDB.chatClassColorWas; the
+-- recorder in EllesmereUI_Uninstall.lua puts it back with the module off or
+-- at Uninstall). The game reads the CVar per line, so only new lines change.
+local CHATTER_CVAR = "chatClassColorOverride"
+function ECHAT.ApplyChatterClassColor()
+    local db = EllesmereUIDB
+    if not db then return end
+    local cfg = ECHAT.DB()
+    local cur = C_CVar.GetCVar(CHATTER_CVAR)
+    if cfg and cfg.classColorChatter == false then
+        if db.chatClassColorWas == nil then db.chatClassColorWas = cur or false end
+        if cur and cur ~= "1" then EllesmereUI.HoldCVar(CHATTER_CVAR, "1", "EllesmereUIChat") end
+    elseif db.chatClassColorWas ~= nil then
+        local was = db.chatClassColorWas
+        db.chatClassColorWas = nil
+        if was and cur ~= was then EllesmereUI.ReleaseCVar(CHATTER_CVAR, was, "EllesmereUIChat") end
     end
 end
 

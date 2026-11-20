@@ -529,9 +529,8 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
 
     -- Tier 2: clickable small listing -- title + subtitle, no card chrome, faint row highlight on hover.
     local function MakeListing(x, cy, w, entry)
-        local ROW_H = 48
         local row = CreateFrame("Button", nil, parent)
-        PP.Size(row, w, ROW_H)
+        PP.Size(row, w, 38)
         PP.Point(row, "TOPLEFT", parent, "TOPLEFT", x, cy)
         row:SetFrameLevel(parent:GetFrameLevel() + 2)
 
@@ -548,8 +547,15 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         local subFs = MakeFont(row, 11, nil, 1, 1, 1, 0.4)
         PP.Point(subFs, "TOPLEFT", titleFs, "BOTTOMLEFT", 0, -4)
         PP.Point(subFs, "RIGHT", row, "RIGHT", -10, 0)
-        subFs:SetJustifyH("LEFT"); subFs:SetWordWrap(false)
+        subFs:SetJustifyH("LEFT"); subFs:SetWordWrap(true)
         subFs:SetText(EllesmereUI.L(entry.desc) or "")
+
+        -- Match the hit area and hover fill to the rendered text. Keep equal
+        -- top/bottom padding, and grow naturally for wrapped descriptions.
+        local titleH = math.max(14, math.ceil(titleFs:GetStringHeight() or 14))
+        local subH = math.max(12, math.ceil(subFs:GetStringHeight() or 12))
+        local rowH = 5 + titleH + 4 + subH + 5
+        PP.Size(row, w, rowH)
 
         -- Clickable only with a nav target (see MakeHeroCard); else static.
         if entry.onClick or NavTarget(entry.nav) then
@@ -565,7 +571,7 @@ function EllesmereUI._BuildWhatsNewPage(pageName, parent, yOffset)
         else
             row:EnableMouse(false)
         end
-        return ROW_H, row
+        return rowH, row
     end
 
     -- Tier 3: a plain bug-fix line (bullet + wrapping text, not clickable),

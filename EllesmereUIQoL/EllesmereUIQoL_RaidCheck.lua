@@ -274,10 +274,9 @@ local FOOD_KEY       = "food"
 local WENCHANT_KEY   = "wenchant"
 local VANTUS_KEY     = "vantus"
 
--- Flask/Food only: once the aura has this many minutes or less left, the
--- grid cell shows the countdown instead of a plain checkmark (Refresh
--- below), and the chat report calls it out too (BooleanReportLine below).
-local LOW_DURATION_THRESHOLD_MIN = 5
+-- Flask, Food and Rune: show the remaining minutes from ten minutes
+-- downward, and call out low duration in the corresponding reports.
+local LOW_DURATION_THRESHOLD_MIN = 10
 local MSG_REPORT     = "rc"    -- a client describing itself
 local MSG_QUERY      = "rcq"   -- someone asking the group to describe itself
 
@@ -1172,7 +1171,7 @@ local function BooleanReportLine(key)
     local answerable = { [key] = true }
     local missing,unknown = {},{}
     local now = GetTime()
-    local trackDuration = key == "flask" or key == FOOD_KEY
+    local trackDuration = key == "flask" or key == FOOD_KEY or key == "rune"
     for _, e in ipairs(roster) do
         local checks = UnitChecks(e.unit, answerable, restricted)
         if checks[key] == false then
@@ -1246,8 +1245,8 @@ local function DurabilityReportLine()
     return title .. ": " .. table.concat(parts, ", ")
 end
 
--- Hearty Food has its own report alongside ordinary Food, including when
--- the Food button is clicked and in the middle-click report-all sequence.
+-- Only Hearty Food is reported, including when the Food button is clicked
+-- and in the middle-click report-all sequence.
 -- It checks the aura-name prefix ("Hearty") instead of the whole Well Fed
 -- family. The same aura restrictions and combat gating as ordinary Food
 -- apply, so an unreadable aura cannot be reported as a certain failure.
@@ -1321,11 +1320,11 @@ function ns.ReportHeartyFood(toChat)
     SendOrPrint(HeartyFoodReportLine(), toChat)
 end
 
--- Middle-click on any report button sends all six reports: Flask, Food,
--- Hearty Food, Rune, Vantus and Repair. Staggering avoids flooding guild/
--- party chat. Durability remains last, since it needs its own delayed scan.
+-- Middle-click reports Flask, Hearty Food, Rune, Vantus and Repair.
+-- Ordinary Food stays in the grid, but only Hearty Food is reported.
+-- Staggering avoids flooding guild/party chat; Repair remains last.
 local HEARTY_REPORT_KEY = "hearty"
-local ALL_CONSUMABLE_KEYS = { "flask", "food", HEARTY_REPORT_KEY, "rune", "vantus", DURABILITY_KEY }
+local ALL_CONSUMABLE_KEYS = { "flask", HEARTY_REPORT_KEY, "rune", "vantus", DURABILITY_KEY }
 local ALL_REPORT_STAGGER = 0.4 -- seconds between consecutive reports
 
 function ns.ReportAllConsumables(toChat)
@@ -1345,6 +1344,10 @@ end
 -- toChat: true = right-click (post to /guild in a raid, /party in a party); false = left-click
 -- (this client's own chat frame only).
 function ns.ReportConsumable(key, toChat)
+    if key == FOOD_KEY then
+        ns.ReportHeartyFood(toChat)
+        return
+    end
     if not CanSendRaidCheckChatReport(toChat) then return end
     if key == DURABILITY_KEY then
         local LD = LibDur()
@@ -1357,19 +1360,10 @@ function ns.ReportConsumable(key, toChat)
     SendOrPrint(BooleanReportLine(key), toChat)
 end
 
--- Food clicks always include both ordinary Food and Hearty Food. Local output
--- is immediate; guild/party output is spaced to avoid two simultaneous chat
--- messages being dropped by the server's throttle.
+-- Food reporting covers only Hearty Food; ordinary Food remains visible
+-- in the ready-check grid and its tooltip, but never adds a chat report.
 function ns.ReportFood(toChat)
-    if not CanSendRaidCheckChatReport(toChat) then return end
-    ns.ReportConsumable(FOOD_KEY, toChat)
-    if toChat and ReportChannel() then
-        C_Timer.After(ALL_REPORT_STAGGER, function()
-            ns.ReportHeartyFood(toChat)
-        end)
-    else
-        ns.ReportHeartyFood(toChat)
-    end
+    ns.ReportHeartyFood(toChat)
 end
 
 -------------------------------------------------------------------------------
@@ -1577,12 +1571,12 @@ local function MakeRow(parent, index)
             tex:SetAlpha(0.9)
             r._cells[c] = tex
 
-            -- Flask/Food only: once the buff is about to run out (see
+            -- Flask/Food/Rune: once the buff is about to run out (see
             -- LOW_DURATION_THRESHOLD_MIN in Refresh), this replaces the
             -- checkmark in place with the remaining minutes, so the warning
             -- reads at a glance instead of needing a hover for the tooltip's
             -- countdown.
-            if def.key == "flask" or def.key == FOOD_KEY then
+            if def.key == "flask" or def.key == FOOD_KEY or def.key == "rune" then
                 local durFS = MakeText(r, SMALL_SIZE,
                     def.key == FOOD_KEY and "OUTLINE" or "")
                 durFS:SetPoint("CENTER", tex, "CENTER", 0, 0)
@@ -2450,7 +2444,7 @@ local function Refresh()
                                 SetSharedBlink(cell, mismatch, 0.9)
                             end
 
-                            -- Flask/Food only: swap the checkmark for the
+                            -- Flask/Food/Rune: swap the checkmark for the
                             -- remaining minutes once it drops to
                             -- LOW_DURATION_THRESHOLD_MIN or below. The
                             -- hit-frame above still makes the full tooltip

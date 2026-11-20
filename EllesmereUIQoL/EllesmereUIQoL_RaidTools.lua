@@ -2227,10 +2227,9 @@ local function BuildInviteToolsButton()
 end
 
 -- Flask/Food/Repair/Rune/Vantus report buttons: left-click prints locally;
--- right-click posts to /guild (raid) or /party (party). Food reports both
--- ordinary Food and Hearty Food on either click (ns.ReportFood). Middle-click
--- on ANY report button posts all six checks, including Hearty Food, to the
--- same guild/party destination (ns.ReportAllConsumables). These report
+-- right-click posts to /guild (raid) or /party (party). Food reports only
+-- Hearty Food (ns.ReportFood). Middle-click on any button sends the five
+-- reports (Flask, Hearty Food, Rune, Vantus, Repair) to guild/party. These
 -- helpers are defined in EllesmereUIQoL_RaidCheck.lua.
 -- Full-row content buttons, deliberately separate from the corner chrome.
 -- They use the same 22px row height and equal-width distribution as the rest
@@ -2258,7 +2257,7 @@ local function BuildReportButtons()
             if def.key == "durability" then
                 tip = tip .. "\n" .. EllesmereUI.L("Lists anyone at 90% or below, worst first.")
             elseif def.key == "food" then
-                tip = tip .. "\n" .. EllesmereUI.L("Reports normal Food and Hearty Food.")
+                tip = tip .. "\n" .. EllesmereUI.L("Reports Hearty Food only.")
             else
                 tip = tip .. "\n" .. EllesmereUI.L("Lists who is missing it.")
             end

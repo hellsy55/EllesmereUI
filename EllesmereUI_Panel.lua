@@ -4154,48 +4154,86 @@ function EllesmereUI:NavigateToElementSettings(moduleName, pageName, sectionName
         if not cached or not cached.wrapper then return end
 
         local sections = CollectAllChildren(cached.wrapper)
-        for _, sec in ipairs(sections) do
-            if sec.header._sectionName == sectionName then
-                -- Find the row to scroll to; narrow the highlight to the matching
-                -- slot (DualRow half) when possible, otherwise pulse the whole row.
-                local target = sec.header
-                local hlTarget = sec.header
-                if highlightText then
-                    -- The first row whose label or slot equals the text, so a later exact
-                    -- match wins over an earlier row that only contains it; failing that,
-                    -- the first row containing it.
-                    for pass = 1, 2 do
-                        for _, m in ipairs(sec.members) do
-                            if (m._labelText and m._labelText:find(highlightText, 1, true))
-                               or (m._labelTextLoc and m._labelTextLoc:find(highlightText, 1, true)) then
-                                local slot = ResolveHighlightSlot(m, highlightText, pass == 1)
-                                if pass == 2 or slot or m._labelText == highlightText
-                                   or m._labelTextLoc == highlightText then
-                                    target = m
-                                    hlTarget = slot or ResolveHighlightSlot(m, highlightText) or m
-                                    break
-                                end
-                            end
-                        end
-                        if target ~= sec.header then break end
+        -- Split-column pages keep their section headers inside the two columns,
+        -- not directly under the page wrapper. Collect them only for this jump;
+        -- changing CollectAllChildren itself would also change inline search.
+        for _, child in ipairs({ cached.wrapper:GetChildren() }) do
+            if child._leftCol and child._rightCol
+               and not (EUI_NS.PoolIsIdle and EUI_NS.PoolIsIdle(child)) then
+                for _, col in ipairs({ child._leftCol, child._rightCol }) do
+                    local colSections = CollectAllChildren(col)
+                    for _, sec in ipairs(colSections) do
+                        sections[#sections + 1] = sec
                     end
                 end
+            end
+        end
 
-                local a = target._origAnchor
-                if a then
-                    local scrollPos = math.abs(a[5]) - 40
-                    EllesmereUI.SmoothScrollTo(scrollPos)
-                    -- A page-pool rebuild in between dresses the row again (for
-                    -- another slot, maybe): no pulse then.
-                    local Gen = EUI_NS.PoolGen
-                    local hlGen = Gen and Gen(hlTarget)
-                    C_Timer.After(0.15, function()
-                        if Gen and Gen(hlTarget) ~= hlGen then return end
-                        local hl = GetSearchHighlight()
-                        PlaySearchHighlight(hl, hlTarget)
-                    end)
+        -- Prefer a matching section AND control. A few older notes may name
+        -- a section that has since changed; when the control name is unique on
+        -- the page, navigate to that row rather than silently doing nothing.
+        local function FindRow(sec)
+            if not highlightText then return nil end
+            for pass = 1, 2 do
+                for _, row in ipairs(sec.members) do
+                    local slot = ResolveHighlightSlot(row, highlightText, pass == 1)
+                    local label, loc = row._labelText, row._labelTextLoc
+                    if (pass == 1 and (slot or label == highlightText or loc == highlightText))
+                       or (pass == 2 and ((label and label:find(highlightText, 1, true))
+                           or (loc and loc:find(highlightText, 1, true)))) then
+                        return row, slot or ResolveHighlightSlot(row, highlightText) or row
+                    end
                 end
-                return
+            end
+        end
+
+        local chosen, target, hlTarget
+        for _, sec in ipairs(sections) do
+            if sec.header._sectionName == sectionName
+               or sec.header._sectionNameLoc == sectionName then
+                if not chosen then chosen = sec end
+                local row, slot = FindRow(sec)
+                if row then
+                    chosen, target, hlTarget = sec, row, slot
+                    break
+                end
+            end
+        end
+        if not target and highlightText then
+            local fallback, fallbackRow, fallbackSlot, matches
+            matches = 0
+            for _, sec in ipairs(sections) do
+                local row, slot = FindRow(sec)
+                if row then
+                    matches = matches + 1
+                    fallback, fallbackRow, fallbackSlot = sec, row, slot
+                    if matches > 1 then break end
+                end
+            end
+            if matches == 1 then
+                chosen, target, hlTarget = fallback, fallbackRow, fallbackSlot
+            end
+        end
+        if chosen then
+            target = target or chosen.header
+            hlTarget = hlTarget or target
+            -- GetTop includes the enclosing split frame's offset. A row's
+            -- original anchor alone is relative to its column, not the page.
+            local wrapperTop = cached.wrapper:GetTop()
+            local targetTop = target:GetTop()
+            local a = target._origAnchor
+            if wrapperTop and targetTop or a then
+                local scrollPos = (wrapperTop and targetTop)
+                    and (wrapperTop - targetTop - 40) or (math.abs(a[5]) - 40)
+                EllesmereUI.SmoothScrollTo(math.max(0, scrollPos))
+                -- Ignore a stale target if a page-pool rebuild re-dresses it.
+                local Gen = EUI_NS.PoolGen
+                local hlGen = Gen and Gen(hlTarget)
+                C_Timer.After(0.15, function()
+                    if Gen and Gen(hlTarget) ~= hlGen then return end
+                    local hl = GetSearchHighlight()
+                    PlaySearchHighlight(hl, hlTarget)
+                end)
             end
         end
     end)
@@ -6096,7 +6134,7 @@ end
 --  (a module can opt out of the latter with searchPrebuild = false).
 --  Developer guide: PLUGINS_API.md.
 -------------------------------------------------------------------------------
-EllesmereUI.PLUGIN_API_VERSION = 5
+EllesmereUI.PLUGIN_API_VERSION = 6
 
 do
     local PREFIX          = EUI_NS.PLUGIN_PREFIX
