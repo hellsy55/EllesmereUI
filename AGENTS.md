@@ -78,3 +78,4 @@ Before reviewing, editing, integrating, or testing Lua, changing guardrail rules
 - Do not write to protected Blizzard frames or call protected functions from insecure code, and do not do it in combat. Hook with `hooksecurefunc` and keep the work cosmetic.
 - Keep inline cog builders reachable during options prebuilding so search can index their rows. Guard frame work separately and run the guardrail tests after changing the checker.
 - Store per-character data through the character roster helpers in `EllesmereUI.lua`. Use a separate character store only when no roster field can meet the requirement.
+- For frames positioned by a StatusBar fill, show the bar and set its value before reanchoring those frames to the fill. Reanchor after each value change; do not hide the clipping frame on every active refresh.
