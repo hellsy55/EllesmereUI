@@ -297,17 +297,6 @@ try {
         }
         Assert ($urls[0].EndsWith('/new-features.zip'))
         Assert ($urls[1].EndsWith('/12.1.7-PTR-features.zip'))
-        function Read-Host { $answer = $script:answers[0]; $script:answers = @($script:answers | Select-Object -Skip 1); return $answer }
-        function Test-Path { param([string]$LiteralPath); return $true }
-        function Get-ChildItem { param([string]$LiteralPath) }
-        foreach ($choice in @('1', '2', 'C')) {
-            $script:answers = @('', 'invalid', $choice)
-            $selected = Select-PtrAddOnsPath -WarningAction SilentlyContinue
-            if ($choice -eq '1') { Assert ($selected -like '*\_ptr_\*') }
-            elseif ($choice -eq '2') { Assert ($selected -like '*\_xptr_\*') }
-            else { Assert ($null -eq $selected) }
-            Assert ($script:answers.Count -eq 0)
-        }
     }
     Check 'Manifest recovery failure retains pending marker and recovery backup' {
         Record
@@ -431,4 +420,133 @@ try {
     if (-not $resolved.StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture cleanup path' }
     Assert-EuiTree $resolved
     Remove-Item -LiteralPath $resolved -Recurse -Force
+}
+
+& {
+# Exercise the operational entry point with disposable paths and a fake installer.
+$ErrorActionPreference = 'Stop'
+$installDir = (Resolve-Path (Join-Path $PSScriptRoot '../install')).Path
+$installer = Join-Path $installDir 'atualizar-eui.ps1'
+$tokens = $null
+$errors = $null
+$ast = [Management.Automation.Language.Parser]::ParseFile($installer, [ref]$tokens, [ref]$errors)
+if ($errors) { throw ($errors -join "`n") }
+$install = $ast.Find({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Install-EUI'
+}, $true)
+$admin = $ast.Find({
+    param($node)
+    $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$isAdmin'
+}, $true)
+if (-not $install -or -not $admin) { throw 'Installer test boundaries were not found.' }
+
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) ('eui-menu-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $testRoot | Out-Null
+$fixtureInstaller = Join-Path $testRoot 'installer.ps1'
+$fixtureWow = Join-Path $testRoot 'WoW'
+$source = $ast.Extent.Text.Replace($install.Extent.Text, @'
+function Install-EUI {
+    param($Name, $Branch, [string[]]$AddOnsPaths)
+    $calls.Add("$Name|$Branch|$($AddOnsPaths -join ',')")
+    if ($menu.Input.Count -ne 0) { throw 'Installer called before valid choice.' }
+    foreach ($path in $AddOnsPaths) {
+        if (-not $path.StartsWith($fixtureWow + [IO.Path]::DirectorySeparatorChar)) {
+            throw "Unsafe fixture destination: $path"
+        }
+        [IO.File]::WriteAllText((Join-Path $path 'sentinel'), 'installed')
+    }
+}
+'@).Replace($admin.Extent.Text, '$isAdmin = $true')
+$source = $source.Replace('C:\Program Files (x86)\World of Warcraft', $fixtureWow)
+$source = $source.Replace('$PSScriptRoot "eui-package.ps1"', "'$($installDir.Replace("'", "''"))' `"eui-package.ps1`"")
+[IO.File]::WriteAllText($fixtureInstaller, $source)
+
+function Read-Host {
+    param($Prompt)
+    $menu.Prompts++
+    if ($menu.Input.Count -eq 0) { throw "Unexpected prompt: $Prompt" }
+    return $menu.Input.Dequeue()
+}
+
+function Check-Choice {
+    param([string]$Mode, [string[]]$ExpectedClients, [string[]]$Answers, [string]$Direct)
+    $menu = @{ Input = [Collections.Generic.Queue[string]]::new(); Prompts = 0 }
+    foreach ($answer in $Answers) { $menu.Input.Enqueue($answer) }
+    $script:calls = [Collections.Generic.List[string]]::new()
+    $clients = '_retail_', '_ptr_', '_xptr_'
+    $paths = @{}
+    foreach ($client in $clients) {
+        $paths[$client] = Join-Path $fixtureWow "$client\Interface\AddOns"
+        New-Item -ItemType Directory -Path $paths[$client] -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $paths[$client] 'sentinel'), 'original')
+    }
+    $work = Join-Path $testRoot ([guid]::NewGuid().ToString('N'))
+    $arguments = @{ WorkFolder = $work; Only = $Mode }
+    if ($PSBoundParameters.ContainsKey('Direct')) { $arguments.InstallChoice = $Direct }
+    $global:LASTEXITCODE = 0
+    $output = & $fixtureInstaller @arguments 6>&1
+    if ($?) { $exitCode = $LASTEXITCODE } else { throw 'Fixture installer failed.' }
+    if ($exitCode -ne 0 -or $menu.Prompts -ne @($Answers).Count) { throw 'Unexpected exit or prompt count.' }
+    $options = @($output | ForEach-Object { "$_" } | Where-Object { $_ -match '^\d\)' })
+    $expectedOptions = @(
+        if (@($Answers).Count -gt 0) {
+            switch ($Mode) {
+                'Retail' { '1) Instalar Retail (_retail_).'; '2) Abortar instalacao.' }
+                'PTR' { '1) Instalar PTR (_ptr_).'; '2) Instalar XPTR (_xptr_).'; '3) Abortar instalacao.' }
+                'Both' {
+                    '1) Instalar Retail + PTR (_retail_ + _ptr_).'
+                    '2) Instalar Retail + XPTR (_retail_ + _xptr_).'
+                    '3) Abortar instalacao.'
+                }
+            }
+        }
+    )
+    if (($options -join ';') -cne ($expectedOptions -join ';')) { throw 'Unexpected menu options.' }
+    $expected = @(
+        foreach ($client in $ExpectedClients) {
+            if ($client -eq '_retail_') { "Retail|new-features|$($paths[$client])" }
+            else { "PTR|12.1.7-PTR-features|$($paths[$client])" }
+        }
+    )
+    if (-not $expected -and (Test-Path -LiteralPath $work)) {
+        throw 'Cancellation created a work directory.'
+    }
+    if (($script:calls -join ';') -cne ($expected -join ';')) { throw 'Unexpected installer calls.' }
+    foreach ($client in $clients) {
+        $expectedText = if ($client -in $ExpectedClients) { 'installed' } else { 'original' }
+        if ([IO.File]::ReadAllText((Join-Path $paths[$client] 'sentinel')) -cne $expectedText) {
+            throw "Unexpected modification for $client."
+        }
+    }
+}
+
+try {
+    $cases = @(
+        @{ Mode = 'Retail'; Choice = '1'; ExpectedClients = @('_retail_') }
+        @{ Mode = 'Retail'; Choice = '2' }
+        @{ Mode = 'PTR'; Choice = '1'; ExpectedClients = @('_ptr_') }
+        @{ Mode = 'PTR'; Choice = '2'; ExpectedClients = @('_xptr_') }
+        @{ Mode = 'PTR'; Choice = '3' }
+        @{ Mode = 'Both'; Choice = '1'; ExpectedClients = @('_retail_', '_ptr_') }
+        @{ Mode = 'Both'; Choice = '2'; ExpectedClients = @('_retail_', '_xptr_') }
+        @{ Mode = 'Both'; Choice = '3' }
+    )
+    foreach ($case in $cases) {
+        $arguments = @{ Mode = $case.Mode; ExpectedClients = $case.ExpectedClients }
+        Check-Choice @arguments -Answers @($case.Choice)
+        Check-Choice @arguments -Direct $case.Choice -Answers @()
+    }
+    $invalid = @('a', 'b', '0', '', '4', ' 1 ')
+    Check-Choice -Mode Retail -Answers ($invalid + @('3', '2'))
+    Check-Choice -Mode PTR -Answers ($invalid + '3')
+    Check-Choice -Mode Both -Answers ($invalid + '3')
+    Check-Choice -Mode Retail -Direct '3' -Answers @('2')
+    Write-Host 'Passed 20 installation menu fixture tests.'
+} finally {
+    $resolved = [IO.Path]::GetFullPath($testRoot)
+    if (-not $resolved.StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture cleanup path.' }
+    Remove-Item -LiteralPath $resolved -Recurse -Force
+}
+
 }

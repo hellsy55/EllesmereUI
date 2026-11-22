@@ -1,17 +1,23 @@
 ---
 name: eui-install
-description: On confirmed local Windows, present the EUI update install menu and run only the user-selected Retail, PTR, or Both installation stage.
+description: On confirmed local Windows, present the EUI update install menu and install only the clients allowed by the update mode, or abort.
 ---
 
 # EUI install checkpoint
 
 Reuse the workflow's frozen root and environment. For standalone entry, initialize them once through the shared [maintenance context](../../references/python-runtime.md). Proceed only in confirmed `local_windows`. In `cloud`, skip the entire checkpoint and continue the applicable delivery and report. In `other`, skip physical installation. The update workflow does not load this skill in either environment.
 
-After the required syncs and library checks, stop and present one menu. Word option a) in Portuguese to run the Retail update now, the PTR update now, or the Retail + PTR update now, matching the selected mode. Option b) says in Portuguese to do nothing and stop here. Wait for the user's choice. Choosing a) itself confirms the install; do not ask again. Choosing b) ends the workflow without installing or fixing line endings.
+After sync and any library checks, present one menu titled **Instalação local** in Portuguese. Use only the options for the active mode:
 
-For PTR and Both, the operational installer must also prompt for exactly one PTR destination: option 1 selects `C:\Program Files (x86)\World of Warcraft\_ptr_\Interface\AddOns`; option 2 selects `C:\Program Files (x86)\World of Warcraft\_xptr_\Interface\AddOns`. There is no default; blank or invalid input must prompt again, and cancellation stops before any installation. In Both mode, select and validate the PTR destination before installing either client. Do not bypass this interactive selection or install to both PTR folders. After successful installation, pass the same selected path explicitly to the line-ending fixer; never use its default PTR path for this workflow.
+| Update mode | 1 | 2 | 3 |
+| --- | --- | --- | --- |
+| Retail (`atualizar` or `atualizar retail`) | Instalar Retail (`_retail_`) | Abortar instalação | |
+| PTR (`atualizar ptr`) | Instalar PTR (`_ptr_`) | Instalar XPTR (`_xptr_`) | Abortar instalação |
+| Both (`atualizar ambos`) | Instalar Retail + PTR (`_retail_` + `_ptr_`) | Instalar Retail + XPTR (`_retail_` + `_xptr_`) | Abortar instalação |
 
-The addon installation requires the existing local Windows WoW folders and operational scripts. Only after a) is chosen, determine and cache physical-install capability if not already known. If unavailable, explain the local requirement and stop without installation. In local Windows, complete Python preflight if not already resolved before installation, then read [install commands](references/install-commands.md). Run the matching install directly in the current Codex session. After it completes successfully, run the matching line-ending fix directly in the same session. Never touch the Retail install folder in PTR mode. If UAC appears despite the session's usual administrator rights, tell the user to approve it manually and wait for confirmation before proceeding.
+Present the selected row as a numbered list. Accept exactly the populated numeric choices for that mode. For any other reply, ask again with the same choices before running anything. An install choice is sufficient authorization. Pass the mode explicitly with `-Only` and the number with `-InstallChoice` to the maintained installer. A valid supplied choice skips the standalone prompt. An abort choice ends the stage without invoking either script or modifying files. Retail sync as a prerequisite for PTR does not authorize a Retail install.
+
+After an install choice, establish that the operational scripts and only the selected WoW AddOns folders are available. If unavailable, report the failure and stop. Reuse the Python preflight and read [install commands](references/install-commands.md). Run the installer directly in the current Codex session. After success, run the line-ending fixer in the same mode, passing the exact selected PTR path for PTR or Both. If UAC appears, ask the user to approve it manually and wait.
 
 Handle the menu and authorized installation in the main chat. Do not request a subagent for routine execution.
 

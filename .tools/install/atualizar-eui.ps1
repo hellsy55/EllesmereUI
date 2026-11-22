@@ -17,16 +17,12 @@
 #
 # MUST RUN AS ADMINISTRATOR (the Program Files folder is protected).
 #
-# Default usage (updates both, each from its own branch/folder):
-#   .\atualizar-eui.ps1
-#
-# Or, to update only one of them:
-#   .\atualizar-eui.ps1 -Only Retail
-#   .\atualizar-eui.ps1 -Only PTR
-
+# Run without arguments for the menu, or pass a confirmed numeric choice.
 param(
     [ValidateSet("Retail", "PTR", "Both")]
     [string]$Only = "Both",
+
+    [string]$InstallChoice,
 
     [string]$WorkFolder = "C:\Users\jonat\Desktop\EUI",
 
@@ -44,53 +40,62 @@ $ErrorActionPreference = "Stop"
 # get MUCH faster without it (sometimes 10x+).
 $ProgressPreference = "SilentlyContinue"
 
+$abortChoice = if ($Only -eq "Retail") { "2" } else { "3" }
+$validChoices = if ($Only -eq "Retail") { @("1", "2") } else { @("1", "2", "3") }
+$choiceList = $validChoices -join ", "
+if ($InstallChoice -cnotin $validChoices) {
+    if ($PSBoundParameters.ContainsKey("InstallChoice")) {
+        Write-Warning "Invalid choice. Enter one of: $choiceList."
+    }
+    Write-Host "Instalacao local"
+    switch ($Only) {
+        "Retail" { Write-Host "1) Instalar Retail (_retail_)." }
+        "PTR" {
+            Write-Host "1) Instalar PTR (_ptr_)."
+            Write-Host "2) Instalar XPTR (_xptr_)."
+        }
+        "Both" {
+            Write-Host "1) Instalar Retail + PTR (_retail_ + _ptr_)."
+            Write-Host "2) Instalar Retail + XPTR (_retail_ + _xptr_)."
+        }
+    }
+    Write-Host "$abortChoice) Abortar instalacao."
+    do {
+        $InstallChoice = Read-Host "Escolha uma opcao ($choiceList)"
+        if ($InstallChoice -cnotin $validChoices) {
+            Write-Warning "Invalid choice. Enter one of: $choiceList."
+        }
+    } until ($InstallChoice -cin $validChoices)
+}
+if ($InstallChoice -ceq $abortChoice) {
+    Write-Host "Installation cancelled."
+    return
+}
+
+$targets = @(
+    if ($Only -ne "PTR") {
+        @{ Name = "Retail"; Branch = $RetailBranch; AddOnsPaths = @($RetailAddOnsPath) }
+    }
+    if ($Only -ne "Retail") {
+        $ptrClient = if ($InstallChoice -ceq "1") { "_ptr_" } else { "_xptr_" }
+        $PtrAddOnsPath = "C:\Program Files (x86)\World of Warcraft\$ptrClient\Interface\AddOns"
+        if (-not (Test-Path -LiteralPath $PtrAddOnsPath -PathType Container)) {
+            throw "Selected PTR AddOns directory does not exist: '$PtrAddOnsPath'. No installation started."
+        }
+        try {
+            Get-ChildItem -LiteralPath $PtrAddOnsPath -ErrorAction Stop | Select-Object -First 1 | Out-Null
+        } catch {
+            throw "Cannot access selected PTR AddOns directory '${PtrAddOnsPath}': $_. No installation started."
+        }
+        Write-Host "Selected PTR AddOns directory: $PtrAddOnsPath"
+        @{ Name = "PTR"; Branch = $PtrBranch; AddOnsPaths = @($PtrAddOnsPath) }
+    }
+)
+
 . (Join-Path $PSScriptRoot "eui-package.ps1")
 
 $RepoOwner = "hellsy55"
 $RepoName  = "EllesmereUI"
-
-function Select-PtrAddOnsPath {
-    $ptrPath = "C:\Program Files (x86)\World of Warcraft\_ptr_\Interface\AddOns"
-    $experimentalPath = "C:\Program Files (x86)\World of Warcraft\_xptr_\Interface\AddOns"
-
-    :selectionLoop while ($true) {
-        Write-Host ""
-        Write-Host "Option 1 - PTR"
-        Write-Host "  $ptrPath"
-        Write-Host "Option 2 - Experimental PTR"
-        Write-Host "  $experimentalPath"
-        Write-Host "C - Cancel without installing"
-        $choice = (Read-Host "Choose 1 or 2, or C to cancel").Trim()
-        switch ($choice) {
-            "1" { $selectedPath = $ptrPath }
-            "2" { $selectedPath = $experimentalPath }
-            { $_ -in @("C", "Q", "0") } { return $null }
-            default {
-                Write-Warning "Invalid choice. Enter 1, 2, or C; there is no default."
-                continue selectionLoop
-            }
-        }
-        if (-not (Test-Path -LiteralPath $selectedPath -PathType Container)) {
-            throw "Selected PTR AddOns directory does not exist: '$selectedPath'. No installation started."
-        }
-        try {
-            Get-ChildItem -LiteralPath $selectedPath -ErrorAction Stop | Select-Object -First 1 | Out-Null
-        } catch {
-            throw "Cannot access selected PTR AddOns directory '$selectedPath': $_. No installation started."
-        }
-        return $selectedPath
-    }
-}
-
-$PtrAddOnsPath = $null
-if ($Only -eq "PTR" -or $Only -eq "Both") {
-    $PtrAddOnsPath = Select-PtrAddOnsPath
-    if (-not $PtrAddOnsPath) {
-        Write-Host "Installation cancelled."
-        return
-    }
-    Write-Host "Selected PTR AddOns directory: $PtrAddOnsPath"
-}
 
 # Check whether we are running as Administrator
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -294,25 +299,14 @@ function Install-EUI {
 $total = [System.Diagnostics.Stopwatch]::StartNew()
 $installationFailed = $false
 
-if ($Only -eq "Retail" -or $Only -eq "Both") {
+foreach ($target in $targets) {
+    $name = $target.Name
     try {
-        Install-EUI -Name "Retail" -Branch $RetailBranch -AddOnsPaths @($RetailAddOnsPath)
-        Write-Host "Result (Retail): SUCCESS" -ForegroundColor Green
+        Install-EUI @target
+        Write-Host "Result (${name}): SUCCESS" -ForegroundColor Green
     } catch {
         $installationFailed = $true
-        Write-Warning "Result (Retail): FAILED. $_"
-    }
-}
-
-if ($Only -eq "PTR" -or $Only -eq "Both") {
-    # Different branch from Retail, so it needs its own download/install
-    # (the ZIP downloaded for Retail can no longer be reused)
-    try {
-        Install-EUI -Name "PTR" -Branch $PtrBranch -AddOnsPaths @($PtrAddOnsPath)
-        Write-Host "Result (PTR): SUCCESS" -ForegroundColor Green
-    } catch {
-        $installationFailed = $true
-        Write-Warning "Result (PTR): FAILED. $_"
+        Write-Warning "Result (${name}): FAILED. $_"
     }
 }
 

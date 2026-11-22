@@ -5,7 +5,7 @@ description: Run the EUI Retail, PTR, or Both update workflow for ordinary updat
 
 # EUI update
 
-Follow the mode routed from `AGENTS.md`: Retail runs Sync A; PTR runs Sync A then Sync B; Both runs Sync A then Sync B. Keep branch, install, and triggered library scopes separate. Account for uncommitted changes before switching branches. Verify that `upstream` points to `https://github.com/EllesmereGaming/EllesmereUI.git` and `origin` to the user's fork; add a missing `upstream` and verify it before continuing.
+Follow the mode routed from `AGENTS.md`: Retail runs Sync A; PTR runs Sync A then Sync B; Both runs Sync A then Sync B. Keep branch, local installation, and triggered library scopes separate. Account for uncommitted changes before switching branches. Verify that `upstream` points to `https://github.com/EllesmereGaming/EllesmereUI.git` and `origin` to the user's fork; add a missing `upstream` and verify it before continuing.
 
 For PTR-only requests, retain the Sync A prerequisite but do not infer authorization to update Retail. Establish read-only whether Sync A would change Retail (including fast-forward from origin or publication). If so and that scope is not already explicitly authorized in the current conversation, explain the prerequisite and request explicit authorization before mutation; pause until authorized. Reuse existing authorization without asking again. If Retail needs no change, continue normally to Sync B. Do not silently skip required Retail synchronization or merge upstream directly into PTR. Retail and Both requests authorize their normal synchronization scopes; all existing human checkpoints still apply.
 
@@ -88,7 +88,7 @@ approved undated versions in the final update report.
 
 ## Sync B: PTR from Retail
 
-Compare `12.1.7-PTR-features` with fetched `origin/12.1.7-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip the merge but still run the manifest checkpoint. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`. Run the manifest checkpoint for PTR on the integrated tree before staged review and the approved commit; Retail Interface values must not survive this checkpoint. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only after the checkpoint, and only if its ref changed or its remote is behind. PTR mode never touches the Retail install folder or performs a Retail library check.
+Compare `12.1.7-PTR-features` with fetched `origin/12.1.7-PTR-features`; fast-forward a behind local ref and stop on divergence. If Retail is already an ancestor of PTR, skip the merge but still run the manifest checkpoint. Otherwise check out PTR, fast-forward if possible, or merge Retail with `--no-commit`. Run the manifest checkpoint for PTR on the integrated tree before staged review and the approved commit; Retail Interface values must not survive this checkpoint. On conflict, stop and read [merge conflicts](../../references/merge-conflicts.md), using Retail as incoming. Push PTR only after the checkpoint, and only if its ref changed or its remote is behind. PTR mode does not install Retail or perform a Retail library check.
 
 Always compare and merge the full `new-features` ref into PTR, never the upstream release SHA. In PTR and Both modes, continue to Sync B even when Sync A has no new release or is a Retail no-op: Retail-only features/fixes still propagate normally. The release limit applies only to upstream entering Retail.
 
@@ -147,15 +147,16 @@ Before the incoming integration described in Sync A or Sync B (including a fast-
 
 ## Mode sequence and checkpoints
 
-| Mode | Sync sequence | Menu in `local_windows` |
-| --- | --- | --- |
-| Retail | Sync A | Retail |
-| PTR | Sync A, then Sync B | PTR |
-| Both | Sync A, then Sync B | One combined Retail + PTR menu |
+| Mode | Sync sequence |
+| --- | --- |
+| Retail | Sync A |
+| PTR | Sync A, then Sync B |
+| Both | Sync A, then Sync B |
 
-In PTR mode, Sync A must not cause a Retail install, Retail library update, or
-any touch to the Retail install folder. After sync, publication and any
-applicable library stages, route completion using the frozen environment.
+After sync, publication and any applicable library stages, route completion
+using the frozen environment. Present one local installation menu for the
+active mode. The Retail prerequisite for PTR sync does not extend the
+installation scope.
 
 - `local_windows`: load [eui-install](../eui-install/SKILL.md) at the install
   checkpoint. Preserve its exact menu and authorization, including after a
