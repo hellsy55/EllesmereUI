@@ -53,7 +53,9 @@ function ns.ResolveNicknameForUnit(unit, ignoreRaidGroups)
     end
 
     if not nameSecret and NSAPI and NSAPI.GetName then
-        local ok, dn = pcall(NSAPI.GetName, NSAPI, name, "EUI")
+        -- Query by unit: NSRT resolves Character-Realm instead of a shared short name.
+        -- This keeps same-name players from different realms independent.
+        local ok, dn = pcall(NSAPI.GetName, NSAPI, unit, "EUI")
         dn = ok and CleanNickname(dn) or nil
         if dn and dn ~= name then display = dn end
     end
