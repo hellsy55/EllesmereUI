@@ -809,10 +809,14 @@ local function Roster()
     for i = 1, SLOT_COUNT do
         local name, rank, group, _, _, class, _, online = GetRaidRosterInfo(i)
         if SafeText(name) and name ~= "Unknown" and type(group) == "number" and group >= 1 and group <= 8 then
-            local key = Canonical(name)
+            local unit = "raid"..i
+            local identity = RGStyle.UnitIdentity(unit)
+            -- Keep a realm-qualified roster name if the unit API omitted its realm.
+            if not (identity and identity:find("-", 1, true)) then identity = name end
+            local key = Canonical(identity)
             if key then
-                local info = {name=FullName(name), key=key, index=i, group=group, class=class,
-                              online=online, rank=rank, unit="raid"..i}
+                local info = {name=FullName(identity), key=key, index=i, group=group, class=class,
+                              online=online, rank=rank, unit=unit}
                 rosterByKey[key] = info
                 rosterSorted[#rosterSorted+1] = info
                 RGStyle.RememberNicknameClass(info.name, info.class)
