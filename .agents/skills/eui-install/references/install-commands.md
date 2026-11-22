@@ -4,14 +4,28 @@ The maintained installer sources live in `.tools/install/`. Manual scripts in `C
 
 Repository/Codex metadata such as `AGENTS.md`, `.agents/`, and `.codex/` must not be copied into the installed addon. The operational installer uses `eui-package.ps1` beside the safety helper. Deploy all three with the line-ending fixer. The shared preparation reads `.pkgmeta` and `.tools/toc_policy.json` from the downloaded snapshot, validates manifests without rewriting them, applies literal ignore paths and folder moves, and retains vendored runtime libraries without downloading externals. Unsupported packaging syntax stops before installation. See [.tools/install/README.md](../../../../.tools/install/README.md) for supported syntax and portable packaging.
 
-| Mode | Install | Line-ending fix after successful install |
-| --- | --- | --- |
-| Retail | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\Github\EllesmereUI\.tools\install\atualizar-eui.ps1" -Only Retail` | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\Github\EllesmereUI\.tools\install\corrigir-fim-de-linha.ps1" -Only Retail` |
-| PTR | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\Github\EllesmereUI\.tools\install\atualizar-eui.ps1" -Only PTR` | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\Github\EllesmereUI\.tools\install\corrigir-fim-de-linha.ps1" -Only PTR -PtrAddOnsPath "<selected PTR AddOns path>"` |
-| Both | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\Github\EllesmereUI\.tools\install\atualizar-eui.ps1" -Only Both` | `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\jonat\Desktop\EUI\Github\EllesmereUI\.tools\install\corrigir-fim-de-linha.ps1" -Only Both -PtrAddOnsPath "<selected PTR AddOns path>"` |
+From the verified repository root, pass the active mode and the numeric choice already made in chat:
 
-The Both batch runs `atualizar-eui.ps1` without `-Only`, installing Retail from `new-features` and PTR from `12.1.7-PTR-features`, in that order, into their separate folders. The Both line-ending command fixes Retail and the selected PTR folder. Retail install folder: `C:\Program Files (x86)\World of Warcraft\_retail_\Interface\AddOns`. Before any installation in PTR or Both mode, the installer presents `Option 1 - PTR` (`C:\Program Files (x86)\World of Warcraft\_ptr_\Interface\AddOns`) and `Option 2 - Experimental PTR` (`C:\Program Files (x86)\World of Warcraft\_xptr_\Interface\AddOns`). It requires an explicit choice, provides cancellation, validates the selected directory, and installs PTR only there. PTR downloads the ZIP of `12.1.7-PTR-features`. Replace `<selected PTR AddOns path>` in the line-ending command with the exact path selected in that successful install; the placeholder is not a literal argument. The existing line-ending fixer supports `-PtrAddOnsPath`, so it needs no code changes. Do not use `Corrigir_Fim_de_Linha.bat` for this workflow because it uses the legacy default PTR destination. Run no line-ending command when installation did not run or did not complete successfully.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .tools/install/atualizar-eui.ps1 -Only <mode> -InstallChoice <choice>
+```
 
+| Mode | Choice 1 | Choice 2 | Choice 3 |
+| --- | --- | --- | --- |
+| Retail | Retail | Abort | Invalid |
+| PTR | PTR | XPTR | Abort |
+| Both | Retail + PTR | Retail + XPTR | Abort |
+
+The AddOns paths are under `C:\Program Files (x86)\World of Warcraft`. Retail uses `_retail_\Interface\AddOns`, PTR uses `_ptr_\Interface\AddOns`, and XPTR uses `_xptr_\Interface\AddOns`. Retail installs from `new-features`; either PTR client installs from `12.1.7-PTR-features`. Both validates the selected PTR path before writing and runs Retail first. A valid supplied choice skips the prompt. Without a choice the standalone installer shows the menu for `-Only`, which defaults to Both. Invalid entries are retried in the same menu.
+
+After successful installation, run the fixer with the same mode. For PTR or Both supply the exact selected path explicitly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .tools/install/corrigir-fim-de-linha.ps1 -Only Retail
+powershell -NoProfile -ExecutionPolicy Bypass -File .tools/install/corrigir-fim-de-linha.ps1 -Only <PTR-or-Both> -PtrAddOnsPath "<selected PTR AddOns path>"
+```
+
+On abort Codex invokes neither script.
 
 ## Managed-folder policy
 
