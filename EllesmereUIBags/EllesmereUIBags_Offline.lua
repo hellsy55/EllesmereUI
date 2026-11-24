@@ -7,7 +7,8 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  store: EllesmereUIBagsInventoryDB (its own saved vars, so profile exports
 --  and sync never carry inventories)
 --    chars[key] = { name, realm, class, level, bagsTime, bankTime,
---                   bags = { container... }, bank = { container... } }
+--                   bags = { container... }, bank = { container... },
+--                   equipment = container }
 --    warband    = { time, tabs = { container... } }
 --    container  = { size, name?, icon?, items = { [slot] = item string },
 --                   counts = { [slot] = count } } (counts only above 1)
@@ -21,7 +22,9 @@ if EUI_CLIENT_BLOCKED then return end -- pre-12.1 client failsafe (EllesmereUI_C
 --  saves as false. no warband bank there.
 --
 --  both switches are account-wide (EllesmereUIDB.bagOfflineBank /
---  .bagTooltipCounts), like the data. offline bank is set on the bags' bank
+--  .bagTooltipCounts), like the data. Counts use every saved character,
+--  regardless of level, plus the shared warband bank once. The offline bank
+--  is set on the bags' bank
 --  page, the tooltip counts in blizzard skins+ (tooltip extras: item counts),
 --  both through Offline.Set. read only: a bag saves after
 --  BAG_UPDATE_DELAYED when it changed, banks while a banker's open. nothing
@@ -61,10 +64,10 @@ local function ItemID(s)
 end
 Offline.ItemID = ItemID
 
--- Stable item variant: suffix, item context, bonus IDs and modifier pairs.
--- Ignore enchantments, gems, unique IDs and link level, which can differ
--- between links for otherwise identical gear. A malformed bonus block is
--- never matched to an item with a known variant.
+-- Compare item IDs and bonus IDs only. Context, suffix and item modifiers
+-- can differ between otherwise identical bonus variants on saved characters.
+-- Enchantments, gems, link level and unique IDs also do not affect counts.
+-- Reject incomplete bonus blocks rather than matching an unknown variant.
 local function VariantKey(s)
     if type(s) ~= "string" then return nil end
     local payload = s:match("^item:([^|]+)") or s:match("|Hitem:([^|]+)|h")
@@ -82,18 +85,7 @@ local function VariantKey(s)
         bonuses[#bonuses + 1] = bonus
     end
     table.sort(bonuses)
-    local modifierStart = 14 + count
-    local modifierCount = tonumber(fields[modifierStart]) or 0
-    if modifierCount < 0 or modifierCount > 100 or modifierCount % 1 ~= 0
-        or #fields < modifierStart + modifierCount * 2 then return nil end
-    local modifiers = {}
-    for i = 1, modifierCount * 2 do
-        local modifier = tonumber(fields[modifierStart + i])
-        if not modifier then return nil end
-        modifiers[#modifiers + 1] = modifier
-    end
-    return table.concat({ id, tonumber(fields[7]) or 0, tonumber(fields[12]) or 0,
-        count, table.concat(bonuses, ","), modifierCount, table.concat(modifiers, ",") }, ":")
+    return id .. ":" .. count .. ":" .. table.concat(bonuses, ",")
 end
 
 local function CountKey(s)
@@ -230,7 +222,7 @@ local function MyEntry()
     local guid = UnitGUID("player")
     if guid and c.guid ~= guid then
         local moved = c.guid ~= nil
-        if moved then c.bags, c.bank, c.bagsTime, c.bankTime = nil, nil, nil, nil end
+        if moved then c.bags, c.bank, c.equipment, c.bagsTime, c.bankTime = nil, nil, nil, nil, nil end
         c.guid = guid
         for k, o in pairs(chars) do
             if k ~= key and type(o) == "table" and o.guid == guid then
@@ -274,6 +266,20 @@ local function Same(x, y)
 end
 
 local Patch  -- below, with the tooltip index
+
+-- Equipped slots are a separate account-wide snapshot. This preserves the
+-- existing bags/bank data and also counts gear worn by offline characters.
+local EQUIPMENT_SLOTS = 19
+local function ReadEquipment()
+    local items = {}
+    for slot = 1, EQUIPMENT_SLOTS do
+        local link = GetInventoryItemLink("player", slot)
+        if not (issecretvalue and issecretvalue(link)) and type(link) == "string" then
+            items[slot] = ItemString(link)
+        end
+    end
+    return { size = EQUIPMENT_SLOTS, items = items, counts = {} }
+end
 
 -------------------------------------------------------------------------------
 --  snapshots: only the containers that changed get read again
@@ -324,6 +330,17 @@ local function SaveList(list, ids, pos, field, owner, meta)
     return changed
 end
 
+local function SaveEquipment()
+    local c = MyEntry()
+    if not c then return end
+    local fresh = ReadEquipment()
+    if not Same(c.equipment, fresh) then
+        Patch(c.equipment, fresh, "equipment", OwnKey())
+        c.equipment = fresh
+        Changed("equipment", true)
+    end
+end
+
 local function SaveBags()
     local c = MyEntry()
     if not c then return end
@@ -360,18 +377,20 @@ local function SaveBanks()
 end
 
 -- a burst of updates only saves once
-local pendingBags, pendingBank = false, false
+local pendingBags, pendingBank, pendingEquipment = false, false, false
 local function Flush()
     -- a save queued just before both switches went off (the Bags reset) is dropped
-    if not Active() then pendingBags, pendingBank = false, false; return end
+    if not Active() then pendingBags, pendingBank, pendingEquipment = false, false, false; return end
     if pendingBags then pendingBags = false; SaveBags() end
     if pendingBank then pendingBank = false; SaveBanks() end
+    if pendingEquipment then pendingEquipment = false; SaveEquipment() end
 end
 local flushQueued = false
 local function FlushQueued() flushQueued = false; Flush() end
-local function Queue(bags, bank)
+local function Queue(bags, bank, equipment)
     if bags then pendingBags = true end
     if bank then pendingBank = true end
+    if equipment then pendingEquipment = true end
     if flushQueued then return end
     flushQueued = true
     C_Timer.After(0.5, FlushQueued)
@@ -398,8 +417,10 @@ ev:SetScript("OnEvent", function(_, event, arg)
         end
     elseif event == "BAG_UPDATE_DELAYED" then
         Queue(true, false)
+    elseif event == "PLAYER_EQUIPMENT_CHANGED" then
+        Queue(false, false, true)
     elseif event == "PLAYER_LEVEL_UP" then
-        -- Update eligibility even when leveling does not change bag contents.
+        -- Keep saved character metadata current without reading any containers.
         local c = Offline.Store().chars[OwnKey()]
         if c and type(arg) == "number" and c.level ~= arg then
             c.level = arg
@@ -448,18 +469,29 @@ function Offline.Sync()
     -- Track level changes only while item counts are enabled, even when the
     -- independent offline bank viewer keeps the inventory watcher running.
     local counts = Offline.CountsEnabled()
+    local countsNewlyEnabled = counts and not levelListening
     if counts ~= levelListening then
         levelListening = counts
-        if counts then ev:RegisterEvent("PLAYER_LEVEL_UP") else ev:UnregisterEvent("PLAYER_LEVEL_UP") end
+        if counts then
+            ev:RegisterEvent("PLAYER_LEVEL_UP")
+            ev:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+        else
+            ev:UnregisterEvent("PLAYER_LEVEL_UP")
+            ev:UnregisterEvent("PLAYER_EQUIPMENT_CHANGED")
+            pendingEquipment = false
+        end
     end
-    if on == listening then return end
+    if on == listening then
+        if countsNewlyEnabled then Queue(false, false, true) end
+        return
+    end
     listening = on
     for _, e in ipairs(EVENTS) do
         if on then pcall(ev.RegisterEvent, ev, e) else ev:UnregisterEvent(e) end
     end
     if on then
         MarkAll(BAGS)
-        Queue(true, false)
+        Queue(true, false, counts)
     end
 end
 
@@ -472,7 +504,7 @@ function Offline.Wipe()
     Changed("forget")
     -- this character saves again right away
     MarkAll(BAGS)
-    if listening then Queue(true, false) end
+    if listening then Queue(true, false, Offline.CountsEnabled()) end
 end
 
 -- an options toggle: key is bagOfflineBank or bagTooltipCounts
@@ -495,21 +527,21 @@ end
 -------------------------------------------------------------------------------
 --  tooltip item counts
 -------------------------------------------------------------------------------
--- index: chars[countKey][key] = { bags, bank }, warband[countKey].n
+-- index: chars[countKey][key] = { bags, bank, equipment }, warband[countKey].n
 -- sign -1 takes a container back out (rows that hit zero go away)
-local function AddContainer(t, into, field, owner, sign)
+local function AddContainer(t, into, field, owner, sign, getKey)
     if type(t) ~= "table" or type(t.items) ~= "table" then return end
     for slot, s in pairs(t.items) do
-        local id = CountKey(s)
+        local id = (getKey or CountKey)(s)
         if id then
             local n = ((t.counts and t.counts[slot]) or 1) * sign
             local row = into[id]
             if not row then row = {}; into[id] = row end
             if owner then
                 local e = row[owner]
-                if not e then e = { bags = 0, bank = 0 }; row[owner] = e end
+                if not e then e = { bags = 0, bank = 0, equipment = 0 }; row[owner] = e end
                 e[field] = e[field] + n
-                if e.bags + e.bank <= 0 then row[owner] = nil end
+                if e.bags + e.bank + e.equipment <= 0 then row[owner] = nil end
             else
                 row.n = (row.n or 0) + n
                 if row.n <= 0 then row.n = nil end
@@ -522,15 +554,28 @@ end
 local function Index()
     if index and indexRev == rev then return index end
     local chars, war = {}, {}
+    local idChars, idWar = chars, war
+    if Offline.BonusIDsEnabled() then idChars, idWar = {}, {} end
     local db = Offline.Store()
     for key, c in pairs(db.chars) do
         if type(c) == "table" then
-            for _, t in ipairs(type(c.bags) == "table" and c.bags or _emptyP) do AddContainer(t, chars, "bags", key, 1) end
-            for _, t in ipairs(type(c.bank) == "table" and c.bank or _emptyP) do AddContainer(t, chars, "bank", key, 1) end
+            for _, t in pairs(type(c.bags) == "table" and c.bags or _emptyP) do
+                AddContainer(t, chars, "bags", key, 1)
+                if idChars ~= chars then AddContainer(t, idChars, "bags", key, 1, ItemID) end
+            end
+            for _, t in pairs(type(c.bank) == "table" and c.bank or _emptyP) do
+                AddContainer(t, chars, "bank", key, 1)
+                if idChars ~= chars then AddContainer(t, idChars, "bank", key, 1, ItemID) end
+            end
+            AddContainer(c.equipment, chars, "equipment", key, 1)
+            if idChars ~= chars then AddContainer(c.equipment, idChars, "equipment", key, 1, ItemID) end
         end
     end
-    for _, t in ipairs(db.warband.tabs) do AddContainer(t, war, nil, nil, 1) end
-    index, indexRev = { chars = chars, warband = war }, rev
+    for _, t in pairs(db.warband.tabs) do
+        AddContainer(t, war, nil, nil, 1)
+        if idWar ~= war then AddContainer(t, idWar, nil, nil, 1, ItemID) end
+    end
+    index, indexRev = { chars = chars, warband = war, idChars = idChars, idWarband = idWar }, rev
     return index
 end
 
@@ -541,6 +586,11 @@ Patch = function(old, new, field, owner)
     local into = owner and index.chars or index.warband
     AddContainer(old, into, field, owner, -1)
     AddContainer(new, into, field, owner, 1)
+    if index.idChars ~= index.chars then
+        local byID = owner and index.idChars or index.idWarband
+        AddContainer(old, byID, field, owner, -1, ItemID)
+        AddContainer(new, byID, field, owner, 1, ItemID)
+    end
 end
 
 -- built a moment after login, not inside the first hover
@@ -548,45 +598,31 @@ IndexSoon = function()
     C_Timer.After(3, function() if listening and Offline.CountsEnabled() then Index() end end)
 end
 
--- Finished lines per item key, until the next write.
--- Only max-level characters contribute to item counts; warband bank is global.
-local function MaxCharacterLevel()
-    local cap
-    if EUI.IS_FOREVER then
-        cap = GetMaxPlayerLevel and GetMaxPlayerLevel()
-    else
-        cap = GetMaxLevelForLatestExpansion and GetMaxLevelForLatestExpansion()
-    end
-    if type(cap) ~= "number" or cap <= 0 then
-        cap = GetMaxPlayerLevel and GetMaxPlayerLevel()
-    end
-    return type(cap) == "number" and cap > 0 and cap or nil
-end
-local function MaxLevelCharacter(c, cap)
-    return c and cap and type(c.level) == "number" and c.level >= cap
-end
-
+-- Finished lines per item key, until the next write. All saved characters
+-- contribute, including lower-level alts. Warband bank is counted once.
 local lineCache, lineRev = {}, -1
 local sameName = {}
-local function BuildLines(id)
+local function BuildLines(itemKey)
     local idx = Index()
-    local row, war = idx.chars[id], idx.warband[id]
+    local rows = type(itemKey) == "number" and idx.idChars or idx.chars
+    local banks = type(itemKey) == "number" and idx.idWarband or idx.warband
+    local row, war = rows[itemKey], banks[itemKey]
     if not row and not (war and war.n) then return false end
     local db, lines, total = Offline.Store(), {}, 0
-    local cap = MaxCharacterLevel()
-    -- two characters of one name (other realms) get their realm added
+    -- Two characters of one name (other realms) get their realm added.
     wipe(sameName)
     for key in pairs(row or _emptyP) do
         local c = db.chars[key]
-        if MaxLevelCharacter(c, cap) and c.name then sameName[c.name] = (sameName[c.name] or 0) + 1 end
+        if c and c.name then sameName[c.name] = (sameName[c.name] or 0) + 1 end
     end
     for key, e in pairs(row or _emptyP) do
         local c = db.chars[key]
-        local n = e.bags + e.bank
-        if MaxLevelCharacter(c, cap) and n > 0 then
+        local n = e.bags + e.bank + e.equipment
+        if c and n > 0 then
             local parts = {}
             if e.bags > 0 then parts[#parts + 1] = EllesmereUI.Lf("Bags %1$d", e.bags) end
             if e.bank > 0 then parts[#parts + 1] = EllesmereUI.Lf("Bank %1$d", e.bank) end
+            if e.equipment > 0 then parts[#parts + 1] = (EQUIPPED or "Equipped") .. " " .. e.equipment end
             local name = c.name or "?"
             if (sameName[name] or 0) > 1 and c.realm and c.realm ~= "" then name = name .. "-" .. c.realm end
             lines[#lines + 1] = { ClassHex(c.class) .. name .. "|r", table.concat(parts, "  "), 1, 1, 1, n = n }
@@ -603,23 +639,76 @@ local function BuildLines(id)
     return lines
 end
 
+-- The AH uses SetItemKey without an exact item hyperlink. Count by item ID
+-- in that context, even when Match Bonus IDs is enabled, since a complete
+-- variant cannot reliably be reconstructed from an AH item key.
+local shown = setmetatable({}, { __mode = "k" })
+-- The normal Item post-call is the primary tooltip path. Resolve a character
+-- equipment slot from its owner when available, but never suppress that path
+-- merely because a slot hook did not run.
+local function CharacterItemLink(tooltip)
+    if tooltip ~= GameTooltip or not tooltip.GetOwner or not GetInventoryItemLink then return nil end
+    local owner = tooltip:GetOwner()
+    for _ = 1, 16 do
+        if not owner or (issecretvalue and issecretvalue(owner)) then break end
+        if owner.GetName and owner.GetID then
+            local name = owner:GetName()
+            if not (issecretvalue and issecretvalue(name)) and type(name) == "string"
+                and name:match("^Character[%w]+Slot$") then
+                local slot = owner:GetID()
+                if not (issecretvalue and issecretvalue(slot)) and type(slot) == "number"
+                    and slot >= 1 and slot <= EQUIPMENT_SLOTS then
+                    local ok, link = pcall(GetInventoryItemLink, "player", slot)
+                    if ok and not (issecretvalue and issecretvalue(link))
+                        and type(link) == "string" then return link end
+                end
+                break
+            end
+        end
+        if not owner.GetParent then break end
+        owner = owner:GetParent()
+    end
+    return nil
+end
+local function IsAuctionTooltip(tooltip)
+    local frame = _G.AuctionHouseFrame
+    if not frame or not tooltip.GetOwner then return false end
+    local owner = tooltip:GetOwner()
+    for _ = 1, 12 do
+        if owner == frame then return true end
+        if not owner or (issecretvalue and issecretvalue(owner)) or not owner.GetParent then break end
+        owner = owner:GetParent()
+    end
+    return false
+end
 local function OnItemTooltip(tooltip, data)
     if not (listening and Offline.CountsEnabled()) then return end
-    if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
-    if tooltip:IsForbidden() then return end
+    if not (tooltip and tooltip.AddLine and tooltip.AddDoubleLine) then return end
+    if tooltip.IsForbidden and tooltip:IsForbidden() then return end
     local id = data and data.id
-    if type(id) ~= "number" or (issecretvalue and issecretvalue(id)) then return end
-    local key = id
-    if Offline.BonusIDsEnabled() then
-        local link = data and data.hyperlink
+    if issecretvalue and issecretvalue(id) then return end
+    local bonusIDs = Offline.BonusIDsEnabled()
+    -- Prefer the item actually equipped on a known Character slot; Blizzard
+    -- may pass a normalized or incomplete hyperlink to the generic post-call.
+    local link = CharacterItemLink(tooltip)
+    if link then id = ItemID(link) end
+    if not link and (type(id) ~= "number" or (bonusIDs and not (data and data.useItemID))) then
+        link = data and data.hyperlink
         if (issecretvalue and issecretvalue(link)) or type(link) ~= "string" then
             local ok, _, itemLink = pcall(tooltip.GetItem, tooltip)
             link = ok and itemLink or nil
         end
-        if (issecretvalue and issecretvalue(link)) or type(link) ~= "string" then return end
-        key = VariantKey(link)
-        if not key or ItemID(link) ~= id then return end
+        if issecretvalue and issecretvalue(link) then return end
+        if type(id) ~= "number" then id = ItemID(link or "") end
     end
+    if type(id) ~= "number" or id <= 0 then return end
+    local key = id
+    if bonusIDs and not (data and data.useItemID) and type(link) == "string"
+        and not IsAuctionTooltip(tooltip) then
+        local variant = VariantKey(link)
+        if variant and ItemID(link) == id then key = variant end
+    end
+    if tooltip == GameTooltip and shown[tooltip] == id then return end
     if lineRev ~= rev then wipe(lineCache); lineRev = rev end
     local lines = lineCache[key]
     if lines == nil then lines = BuildLines(key); lineCache[key] = lines end
@@ -632,17 +721,66 @@ local function OnItemTooltip(tooltip, data)
             tooltip:AddDoubleLine(l[1], l[2], l[3], l[4], l[5], 0.8, 0.8, 0.8)
         end
     end
+    if tooltip == GameTooltip then shown[tooltip] = id end
+end
+
+-- AH browse-result tooltips call SetItemKey; some client builds do not
+-- dispatch those through the regular Item post-call. Use a guarded fallback
+-- without replacing Blizzard scripts or adding duplicate count rows.
+local auctionHooked = false
+local function SyncAuctionTooltip()
+    if auctionHooked or not (listening and Offline.CountsEnabled()) then return end
+    if not (GameTooltip and GameTooltip.SetItemKey and hooksecurefunc) then return end
+    auctionHooked = true
+    if GameTooltip.SetOwner then
+        hooksecurefunc(GameTooltip, "SetOwner", function(tooltip)
+            if Offline.CountsEnabled() then shown[tooltip] = nil end
+        end)
+    end
+    if GameTooltip.ClearLines then
+        hooksecurefunc(GameTooltip, "ClearLines", function(tooltip)
+            if Offline.CountsEnabled() then shown[tooltip] = nil end
+        end)
+    end
+    hooksecurefunc(GameTooltip, "SetItemKey", function(tooltip, id)
+        if not (listening and Offline.CountsEnabled()) then return end
+        if issecretvalue and issecretvalue(id) then return end
+        if type(id) == "number" then OnItemTooltip(tooltip, { id = id, useItemID = true }) end
+    end)
+end
+
+-- Secondary fallback for clients that do not dispatch the regular Item
+-- post-call on a character equipment slot. Its failure cannot disable the
+-- normal post-call, and shown[] prevents duplicate lines if both callbacks run.
+local characterHooked = false
+local function SyncCharacterTooltip()
+    if characterHooked or not (listening and Offline.CountsEnabled()) then return end
+    if not (GameTooltip and GameTooltip.SetInventoryItem and hooksecurefunc and GetInventoryItemLink) then return end
+    local ok = pcall(hooksecurefunc, GameTooltip, "SetInventoryItem", function(tooltip, unit, slot)
+        if not (listening and Offline.CountsEnabled()) then return end
+        if (issecretvalue and (issecretvalue(unit) or issecretvalue(slot)))
+            or unit ~= "player" or type(slot) ~= "number" then return end
+        local link = GetInventoryItemLink("player", slot)
+        if (issecretvalue and issecretvalue(link)) or type(link) ~= "string" then return end
+        OnItemTooltip(tooltip, { id = ItemID(link), hyperlink = link, inventorySlot = true })
+    end)
+    characterHooked = ok
 end
 
 -- the post call can't be unhooked, so it just bails while off
 local hooked = false
 function Offline.SyncTooltip()
+    if GameTooltip then shown[GameTooltip] = nil end
     if not (listening and Offline.CountsEnabled()) then return end
     IndexSoon()
-    if hooked then return end
-    if not (TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall) then return end
-    hooked = true
-    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, OnItemTooltip)
+    -- Register the primary callback first. Optional, client-specific widget
+    -- hooks must never prevent character item counts from being registered.
+    if not hooked and TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, OnItemTooltip)
+        hooked = true
+    end
+    SyncAuctionTooltip()
+    SyncCharacterTooltip()
 end
 
 -------------------------------------------------------------------------------

@@ -688,8 +688,8 @@ initFrame:SetScript("OnEvent", function(self)
             { key="bagTooltipCounts", label="Item Counts", lockedFn=function() return BagOffline() == nil end,
               lockedTooltip=EllesmereUI.DisabledTooltip("Bags"),
               tooltip=EllesmereUI.IS_FOREVER
-                  and "Item tooltips show how many max-level characters have this item in their bags and bank. Applies to all max-level characters."
-                  or "Item tooltips show item counts for max-level characters in their bags and bank, plus the warband bank. Applies to all max-level characters." },
+                  and "Item tooltips show item counts across all saved characters in their bags, bank and equipped slots."
+                  or "Item tooltips show item counts across all saved characters in their bags, bank and equipped slots, plus the warband bank." },
             { key="bagTooltipCurrencyCounts", label="Currency Count",
               lockedFn=function() return BagOffline() == nil end,
               lockedTooltip=EllesmereUI.DisabledTooltip("Bags"),
@@ -791,7 +791,7 @@ initFrame:SetScript("OnEvent", function(self)
                     return not (offline and offline.CountsEnabled())
                 end,
                 disabledTooltip = "Item Counts",
-                tip = "When enabled, counts match item bonus IDs, suffix, context and modifiers instead of only the item ID.",
+                tip = "When enabled, counts match the item ID and its bonus IDs, ignoring unrelated item link metadata.",
                 title = "Item Counts",
                 rows = {
                     { type="toggle", label="Match Item Bonus IDs",
