@@ -501,7 +501,7 @@ local DB_DEFAULTS = {
             barSpacing   = 2,
             barGrowUp    = false,     -- false = rows stack downward
             texture      = "none",    -- the rows' bar texture (the Textures page's row writes this key)
-            barBgMode    = "class",   -- "class" = a darkened class colour behind each row | "custom" = barBgColor
+            barBgMode    = "class",   -- "class" = a darkened class color behind each row | "custom" = barBgColor
             barBgColor   = { r = 0, g = 0, b = 0, a = 0.45 },
             barBorderSize = 0,
             barShowIcon  = true,      -- the interrupt's icon at the row's end
@@ -2291,7 +2291,7 @@ local function PaintTimer(f, p, run, isPreview, sample)
         end
     end
 
-    -- Timer colours
+    -- Timer colors
     local elapsed = run.elapsed or 0
     local maxTime = run.maxTime or 0
     local timeLeft = max(0, maxTime - elapsed)

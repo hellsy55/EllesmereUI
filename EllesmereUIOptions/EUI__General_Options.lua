@@ -161,7 +161,7 @@ EllesmereUI._LEGENDS.staff = {
     } },
 }
 
--- Seasonal accents: a palette (first entry leads, colouring the Seasonal Legend
+-- Seasonal accents: a palette (first entry leads, coloring the Seasonal Legend
 -- spotlight) and the drift of the small particles in its column. dir -1 falls,
 -- dir 1 rises; size/dur are {min, max} ranges; spin is total degrees.
 EllesmereUI._LEGENDS_SEASONS = {
@@ -237,6 +237,145 @@ end
 --  deep-links via NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        version = "9.9.3",
+        releaseDate = "25/11/2026",
+        thanks = true,
+        heroes = {
+            {
+                -- The Corner Radius cog on Border Size: the CDM Bars page's ICON DISPLAY (the link), Tracking Bars,
+                -- the aura Border Size of Unit Frames, Raid & Party Frames and Player Aura Bars, and Apply Radius to
+                -- Auras in the nameplate Corner Radius cog (both clients). No module prefix: the card spans five modules.
+                title = "Rounded Icons",
+                desc  = "A Corner Radius cog on Border Size rounds your icons, their border and cooldown swipe: auras on Unit Frames, Raid & Party Frames, Player Aura Bars and nameplates, and the Cooldown Manager. Solid borders only, off by default.",
+                nav   = { module = "EllesmereUICooldownManager", page = "CDM Bars", section = "ICON DISPLAY", highlight = "Border Size" },
+            },
+            {
+                -- The Show Waypoints in the World row of WORLD MAP on the Forever Essentials General page (WoW Forever only).
+                module  = "Forever Essentials",
+                forever = true,
+                title   = "Show Waypoints in the World",
+                desc    = "A marker over your tracked quest or map pin in the world, with its distance and the time to get there, and an arrow at the screen edge while it is out of sight. Off by default.",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIForeverEssentials", page = "General", section = "WORLD MAP", highlight = "Show Waypoints in the World" } or nil,
+            },
+        },
+        features = {
+            {
+                -- The Set Sections cog on the Split Set Gear by Set row, CATEGORIES on the Bags page (both clients).
+                module = "Bags",
+                title  = "Set Sections",
+                desc   = "Split Set Gear by Set has a Set Sections cog: show each set as its own section in the bags, or nest the sets under Item Set Gear in the bank",
+                nav    = { module = "EllesmereUIBags", page = "Bags", section = "CATEGORIES", highlight = "Split Set Gear by Set" },
+            },
+            {
+                -- Show Icon Divider is a row of the Icon Settings cog on the Show Icon row, DISPLAY on the Tracking
+                -- Bars page (both clients).
+                module = "Cooldown Manager",
+                title  = "Tracking Bar Icon Divider",
+                desc   = "Show Icon Divider draws a line in the bar's border style between the spell icon and the fill, in the Icon Settings cog",
+                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars", section = "DISPLAY", highlight = "Show Icon" },
+            },
+            {
+                -- The Test Bars button at the end of DISPLAY on the Damage Meters page (both clients).
+                module = "Damage Meters",
+                title  = "Test Bars",
+                desc   = "A Test Bars button fills your meter windows with sample bars, so you can see your appearance changes without a fight",
+                nav    = { module = "EllesmereUIDamageMeters", page = "Damage Meters", section = "DISPLAY", highlight = "Test Bars" },
+            },
+            {
+                -- The Fishing Key row of FISHING on the Forever Essentials General page (WoW Forever only).
+                module  = "Forever Essentials",
+                forever = true,
+                title   = "Mouse Wheel Fishing Key",
+                desc    = "The Fishing Key can now be a mouse wheel direction, with or without Shift, Ctrl or Alt",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIForeverEssentials", page = "General", section = "FISHING", highlight = "Fishing Key" } or nil,
+            },
+            {
+                -- The condition picker of a conditional group, from the Overrides tab of Profiles & Presets in its
+                -- Conditional Overrides mode (both clients).
+                module = "General",
+                title  = "Raid Group Condition",
+                desc   = "Conditional Overrides can now apply while you are in a raid group, in the open world or inside a dungeon; the Raid condition is now named Raid (instance)",
+                nav    = { module = "_EUIProfiles", page = "Overrides",
+                           preSelect = function() EllesmereUI._overridesTabMode = "cond" end },
+            },
+            {
+                -- Distance is a value of the Sort Quests dropdown, TRACKING on the Quest Tracker page (WoW Forever's
+                -- custom tracker only).
+                module  = "Quest Tracker",
+                forever = true,
+                title   = "Distance Sort",
+                desc    = "Sort Quests can order the custom tracker's quests by distance, nearest first, re-sorting when you stop moving",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIQuestTracker", page = "Quest Tracker", section = "TRACKING", highlight = "Sort Quests" } or nil,
+            },
+            {
+                -- Right and then Down is a value of the Group Growth dropdown, LAYOUT on the Frames page; Groups Before
+                -- Wrap sits in its cog and in each custom raid size's cog (both clients).
+                module = "Raid & Party Frames",
+                title  = "Right and then Down Growth",
+                desc   = "A Group Growth that fills a row of groups and starts the next row below, and Groups Before Wrap sets how many groups fill each row or column",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Frames", section = "LAYOUT", highlight = "Group Growth" },
+            },
+            {
+                -- The Class Colored swatch on Border Size, DISPLAY on the Main Frames page with the Target frame
+                -- selected (its Border Settings cog holds Elite / Rare); Raid & Party Frames' twin on its Frames page.
+                module = "Unit Frames",
+                title  = "Class Colored Borders",
+                desc   = "Border Size has a Class Colored swatch beside the border color (Raid & Party Frames too), and Target and Focus can color elite and rare borders from its cog",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "DISPLAY", highlight = "Border Size",
+                           preSelect = function() if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end; EllesmereUI._pendingUnitSelect = "target" end },
+            },
+            {
+                -- Level Text: Classification is a row of a level text's cog in HEALTH BAR on the Main Frames page
+                -- (shown while that text shows the level); the tags are in the Custom text template's list.
+                module = "Unit Frames",
+                title  = "Classification Text",
+                desc   = "New [classification] and [classification:abbr] text tags, and Level Text: Classification in a level text's cog adds +, R or R+ after the level",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Main Frames", section = "HEALTH BAR",
+                           preSelect = function() if EllesmereUI._setUnitFrameUnit then EllesmereUI._setUnitFrameUnit("target") end; EllesmereUI._pendingUnitSelect = "target" end },
+            },
+            {
+                -- The Bar Position row of POWER BAR on the Mini Frames page with Target of Target selected (both clients).
+                module = "Unit Frames",
+                title  = "Mini Frame Power Bars",
+                desc   = "Target of Target and Focus Target can show a power bar in the EllesmereUI style; Bar Position, off by default",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Mini Frames", section = "POWER BAR", highlight = "Bar Position",
+                           preSelect = function() if EllesmereUI._setMiniUnit then EllesmereUI._setMiniUnit("targettarget") end; EllesmereUI._pendingMiniSelect = "targettarget" end },
+            },
+        },
+        fixes = {
+            { module = "Bags", text = "With Split Set Gear by Set on, each equipment set's category no longer goes missing from the bags and the bank after logging in." },
+            { module = "Bags", text = "With the new Keep Layout While Taking Items Out option (off by default), the bags and the bank keep every category in place while you sell, use or move items out." },
+            { module = "Chat", retail = true, text = "New profiles start with Friends, Copy Chat, M+ Portals and Chat Menu on the sidebar." },
+            { module = "Chat", forever = true, text = "New profiles start with Friends, Copy Chat, Durability and Chat Menu on the sidebar." },
+            { module = "Cooldown Manager", text = "Show Item Count set to Never or Out of Combat now also hides a spell's reagent count, such as Vanish's Flash Powder." },
+            { module = "Cooldown Manager", text = "Bar Glows set to At Stacks no longer light up below the chosen count." },
+            { module = "Cooldown Manager", text = "Custom auras on a buff bar now follow the bar's Cooldown Swipe setting." },
+            { module = "Cooldown Manager", retail = true, text = "Potions added by Custom Spell ID on a buff bar now become the potion's preset and keep their place in the bar's order." },
+            { module = "Cooldown Manager", forever = true, text = "Icons of spells whose buff shares the spell's ID, such as Death Wish or Bloodthirst, no longer stay grey while the spell is ready." },
+            { module = "Cooldown Manager", forever = true, text = "An Arcane Blast Tracking Bar no longer refills on every cast, and it now shows its stack count." },
+            { module = "Damage Meters", text = "Pet spells in the breakdown show the pet's name, as in Blizzard's meter." },
+            { module = "Damage Meters", text = "A window resized before it was ever moved now stays where it is after a reload." },
+            { module = "Forever Essentials", forever = true, text = "The Loot Feed now shows coin from opened junkboxes and quest rewards as a Money row and counts it toward Gold per Hour." },
+            { module = "Forever Essentials", forever = true, text = "Hovering Reset Session on the Gold per Hour Tracker now shows its Ctrl + Click hint." },
+            { module = "Forever Essentials", forever = true, text = "Simplified Stats now shortens and colors the crafted item's stats on profession trainer recipes." },
+            { module = "General", text = "Cropped icons in the Cooldown Manager, Action Bars, AuraBuff Reminders, Player Aura Bars and Quality of Life no longer stretch the icon art; only the top and bottom are cut." },
+            { module = "General", text = "The Gotham Narrow font can now be used on Russian clients." },
+            { module = "Nameplates", text = "Friendly nameplates no longer cause a Lua error when a guild or away/busy update arrives for your target's or focus's target." },
+            { module = "Player Aura Bars", text = "A filter border no longer leaves square edges under a custom icon shape picked in the same session." },
+            { module = "Quality of Life", text = "The Macro Factory's item macro menu shows its options in your saved priority order, and dragging a row moves the right entry." },
+            { module = "Quality of Life", retail = true, text = "The Macro Factory's Food macro now finds Tranquility Bloom Tea in your bags." },
+            { module = "Quest Tracker", forever = true, text = "Clicking anywhere on a quest in the tracker now works, and Open Quest Log opens every tracked quest, not only the first ones." },
+            { module = "Quest Tracker", forever = true, text = "Sort Quests by Zone no longer reshuffles when you open the map: your current zone comes first, then the others A-Z." },
+            { module = "Quest Tracker", forever = true, text = "Objective text no longer runs under a quest's item button." },
+            { module = "Raid & Party Frames", text = "Party target frames no longer show their health fill blurring past the border at some frame sizes." },
+            { module = "Raid & Party Frames", forever = true, text = "Heal Prediction is on for new profiles." },
+            { module = "Resource Bars", text = "The health bar's threshold color no longer stays on the low-health color after a heal." },
+            { module = "Resource Bars", forever = true, text = "Spell Cost Prediction no longer stays drawn on the mana bar after a cast ends, on the player frame's power bar too." },
+            { module = "Unit Frames", text = "Target of Target, Focus Target and Pet borders now match the main frames' exact border size, with their own Width / Height Offset." },
+            { module = "Localization", text = "German, Spanish, Portuguese (Brazil), Korean and Traditional Chinese translations updated." },
+        },
+    },
     {
         version = "9.9.2",
         releaseDate = "22/11/2026",
@@ -2231,26 +2370,27 @@ initFrame:SetScript("OnEvent", function(self)
 
         local FCT_FONT_DIR = "Interface\\AddOns\\EllesmereUI\\media\\fonts\\"
         local fctFontValues = {
+            _menuOpts = EllesmereUI.FONT_MENU_OPTS,
             ["default"]                                = { text = "Blizzard Default", font = "Fonts\\FRIZQT__.TTF" },
-            [FCT_FONT_DIR .. "Expressway.TTF"]         = { text = "Expressway",            font = FCT_FONT_DIR .. "Expressway.TTF" },
-            [FCT_FONT_DIR .. "Avant Garde Naowh.ttf"]        = { text = "Avant Garde",   font = FCT_FONT_DIR .. "Avant Garde Naowh.ttf" },
-            [FCT_FONT_DIR .. "Arial Bold.TTF"]         = { text = "Arial Bold",            font = FCT_FONT_DIR .. "Arial Bold.TTF" },
+            [FCT_FONT_DIR .. "Expressway.TTF"]         = { text = EllesmereUI.FontDisplayName("Expressway"), font = FCT_FONT_DIR .. "Expressway.TTF" },
+            [FCT_FONT_DIR .. "Avant Garde Naowh.ttf"]        = { text = EllesmereUI.FontDisplayName("Avant Garde"), font = FCT_FONT_DIR .. "Avant Garde Naowh.ttf" },
+            [FCT_FONT_DIR .. "Arial Bold.TTF"]         = { text = EllesmereUI.FontDisplayName("Arial Bold"), font = FCT_FONT_DIR .. "Arial Bold.TTF" },
             [FCT_FONT_DIR .. "Poppins.ttf"]            = { text = "Poppins",               font = FCT_FONT_DIR .. "Poppins.ttf" },
             [FCT_FONT_DIR .. "FiraSans Medium.ttf"]    = { text = "Fira Sans Medium",      font = FCT_FONT_DIR .. "FiraSans Medium.ttf" },
-            [FCT_FONT_DIR .. "Expressway CAPS.ttf"]    = { text = "Expressway CAPS",       font = FCT_FONT_DIR .. "Expressway CAPS.ttf" },
-            [FCT_FONT_DIR .. "Arial Narrow.ttf"]       = { text = "Arial Narrow",          font = FCT_FONT_DIR .. "Arial Narrow.ttf" },
+            [FCT_FONT_DIR .. "Expressway CAPS.ttf"]    = { text = EllesmereUI.FontDisplayName("Expressway CAPS"), font = FCT_FONT_DIR .. "Expressway CAPS.ttf" },
+            [FCT_FONT_DIR .. "Arial Narrow.ttf"]       = { text = EllesmereUI.FontDisplayName("Arial Narrow"), font = FCT_FONT_DIR .. "Arial Narrow.ttf" },
             [FCT_FONT_DIR .. "Changa.ttf"]             = { text = "Changa",                font = FCT_FONT_DIR .. "Changa.ttf" },
             [FCT_FONT_DIR .. "Cinzel Decorative.ttf"]  = { text = "Cinzel Decorative",     font = FCT_FONT_DIR .. "Cinzel Decorative.ttf" },
             [FCT_FONT_DIR .. "Exo.otf"]                = { text = "Exo",                   font = FCT_FONT_DIR .. "Exo.otf" },
             [FCT_FONT_DIR .. "FiraSans Bold.ttf"]      = { text = "Fira Sans Bold",        font = FCT_FONT_DIR .. "FiraSans Bold.ttf" },
             [FCT_FONT_DIR .. "FiraSans Light.ttf"]     = { text = "Fira Sans Light",       font = FCT_FONT_DIR .. "FiraSans Light.ttf" },
-            [FCT_FONT_DIR .. "Future X Black.otf"]     = { text = "Future X Black",        font = FCT_FONT_DIR .. "Future X Black.otf" },
-            [FCT_FONT_DIR .. "Gotham Narrow Ultra.otf"] = { text = "Gotham Narrow Ultra",  font = FCT_FONT_DIR .. "Gotham Narrow Ultra.otf" },
-            [FCT_FONT_DIR .. "Gotham Narrow.otf"]      = { text = "Gotham Narrow",         font = FCT_FONT_DIR .. "Gotham Narrow.otf" },
+            [FCT_FONT_DIR .. "Future X Black.otf"]     = { text = EllesmereUI.FontDisplayName("Future X Black"), font = FCT_FONT_DIR .. "Future X Black.otf" },
+            [FCT_FONT_DIR .. "Gotham Narrow Ultra.otf"] = { text = EllesmereUI.FontDisplayName("Gotham Narrow Ultra"), font = FCT_FONT_DIR .. "Gotham Narrow Ultra.otf" },
+            [FCT_FONT_DIR .. "Gotham Narrow.otf"]      = { text = EllesmereUI.FontDisplayName("Gotham Narrow"), font = FCT_FONT_DIR .. "Gotham Narrow.otf" },
             [FCT_FONT_DIR .. "Russo One.ttf"]          = { text = "Russo One",             font = FCT_FONT_DIR .. "Russo One.ttf" },
             [FCT_FONT_DIR .. "Ubuntu.ttf"]             = { text = "Ubuntu",                font = FCT_FONT_DIR .. "Ubuntu.ttf" },
             [FCT_FONT_DIR .. "Homespun.ttf"]           = { text = "Homespun",              font = FCT_FONT_DIR .. "Homespun.ttf" },
-            [FCT_FONT_DIR .. "HWT Artz.ttf"]           = { text = "HWT Artz",              font = FCT_FONT_DIR .. "HWT Artz.ttf" },
+            [FCT_FONT_DIR .. "HWT Artz.ttf"]           = { text = EllesmereUI.FontDisplayName("HWT Artz"), font = FCT_FONT_DIR .. "HWT Artz.ttf" },
             ["Fonts\\FRIZQT__.TTF"]                    = { text = "Friz Quadrata",         font = "Fonts\\FRIZQT__.TTF" },
             ["Fonts\\ARIALN.TTF"]                      = { text = "Arial",                 font = "Fonts\\ARIALN.TTF" },
             ["Fonts\\MORPHEUS.TTF"]                    = { text = "Morpheus",              font = "Fonts\\MORPHEUS.TTF" },

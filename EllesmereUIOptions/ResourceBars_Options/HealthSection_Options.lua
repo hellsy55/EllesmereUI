@@ -178,7 +178,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
     -- Everything below Row 1 is hidden entirely while the bar is off.
     if not healthOff() then
     -- Absorb Style | Absorb Opacity, then Heal Absorb Style | Heal Absorb Opacity: None turns
-    -- the overlay off, the inline swatch sets its colour and the slider its opacity.
+    -- the overlay off, the inline swatch sets its color and the slider its opacity.
     for _, def in ipairs({
         { k = ns.HEALTH_INDICATORS[1], styleText = "Absorb Style", opacityText = "Absorb Opacity", order = hiOrder },
         { k = ns.HEALTH_INDICATORS[2], styleText = "Heal Absorb Style", opacityText = "Heal Absorb Opacity", order = hiHealOrder },
@@ -317,7 +317,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
             rgn._lastInline = swatch
             EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
             EllesmereUI.RegisterWidgetRefresh(function() updateSwatch() end)
-            -- Blocked while the style is None, and for the outlined stripes, which carry their own colours.
+            -- Blocked while the style is None, and for the outlined stripes, which carry their own colors.
             local swBlock = CreateFrame("Frame", nil, swatch)
             swBlock:SetAllPoints()
             swBlock:SetFrameLevel(swatch:GetFrameLevel() + 10)
@@ -527,7 +527,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         end
     end
 
-    -- Health Border Style dropdown + inline offset cog. Style/size/colour/cog operate on cfg(); the cross-bar "apply to all" sync icons (+ _syncRows registration) are Simple-only.
+    -- Health Border Style dropdown + inline offset cog. Style/size/color/cog operate on cfg(); the cross-bar "apply to all" sync icons (+ _syncRows registration) are Simple-only.
     do
         local texValues, texOrder = EllesmereUI.GetBorderTextureDropdown()
         local hpBsRow

@@ -56,6 +56,7 @@ local RenderButton = ns.RenderButton
 local ShowRecentClearButton = ns.ShowRecentClearButton
 local BuildSlotBuckets = ns.BuildSlotBuckets
 local BuildExpansionBuckets = ns.BuildExpansionBuckets
+local PlaceEmptyPad = ns.PlaceEmptyPad
 
 -- Height of a label band for a label font size (default: the bags' Category Title Size)
 function ns.CompactBandHeight(size)
@@ -558,7 +559,7 @@ function ns.CompactLabel(pool, idx, owner)
     fs:SetMaxLines(1)
     fs:SetTextColor(0.7, 0.7, 0.7)
     lf._label = fs
-    -- The divider: the Grid display's category header line (colour, alpha,
+    -- The divider: the Grid display's category header line (color, alpha,
     -- one physical pixel thick)
     local line = lf:CreateTexture(nil, "ARTWORK")
     line:SetHeight(EUI.PP.mult)
@@ -651,6 +652,10 @@ local gZone, gKey, gPlanW, gReag = {}, {}, {}, {}
 local gRecent = {}
 local gCollapse = {}
 local cData = {}
+-- The layout hold is active this pass; per group its hold key (false: none)
+-- and cells with pads, and a section's held buckets (made on first use)
+local holdOn = false
+local gHKey, gCells, holdList
 -- A counted label per group index and what it was made from, so an
 -- unchanged label makes no string
 local lblA, lblB, lblN, lblText = {}, {}, {}, {}
@@ -667,7 +672,7 @@ local function CountLabel(g, a, b, n)
     return text
 end
 
-local function AddGroup(label, hint, interactive, clear, zone, key, collapseKey, flashRecent, reagent)
+local function AddGroup(label, hint, interactive, clear, zone, key, collapseKey, flashRecent, reagent, holdKey)
     gN = gN + 1
     local clickable = collapseKey and BP().bagCollapsibleCategories == true
     gCollapse[gN] = clickable and collapseKey or nil
@@ -681,6 +686,7 @@ local function AddGroup(label, hint, interactive, clear, zone, key, collapseKey,
     gZone[gN] = zone or false
     gKey[gN] = key or false
     gReag[gN] = reagent and true or false
+    if holdOn then gHKey[gN] = holdKey or false end
     gSize[gN] = 0
     gRecent[gN] = flashRecent == true
 end
@@ -692,9 +698,11 @@ local function AddCell(data)
 end
 
 -- Starts a pass: called by ns.RenderGridView right after its per-pass reset
-function ns.CompactBagsBegin()
+function ns.CompactBagsBegin(hold)
     gN, cN = 0, 0
     zonesOn = ns.GetSelection() >= 0
+    holdOn = hold
+    if hold and not gCells then gHKey, gCells, holdList = {}, {}, {} end
 end
 
 -- One grid section as compact groups. kind: "flat" | "slot" (armory slot
@@ -706,7 +714,7 @@ end
 -- A nested section becomes one group per bucket; the first is named
 -- "<section>: <bucket>", the others by their bucket. Labels end in their
 -- item count.
-function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint, collapseKey, flashRecent, reagent)
+function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint, collapseKey, flashRecent, reagent, holdKey)
     local count = #items
     if collapseKey and ns.IsBagCategoryCollapsed(collapseKey) then
         AddGroup(name .. " (" .. count .. ")", hint, false, false, false, false, collapseKey)
@@ -717,16 +725,23 @@ function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint, co
     if zonesOn then
         if pin then zone = ZONE_PIN elseif assignKey then zone = ZONE_ASSIGN end
     end
-    if (kind == "slot" or kind == "exp") and count > 0 then
-        local buckets = (kind == "slot") and BuildSlotBuckets(items) or BuildExpansionBuckets(items)
+    local nested = (kind == "slot" or kind == "exp") and count > 0
+    local hk = holdOn and (holdKey or ns.Hold.LABEL .. name)
+    if nested or (hk and count == 0) then
+        local buckets = items  -- no items: no buckets, only held ones
+        if nested then
+            buckets = (kind == "slot") and BuildSlotBuckets(items) or BuildExpansionBuckets(items)
+        end
+        local keys
+        if hk then buckets, keys = ns.Hold.Buckets("bags", hk, buckets, holdList, "items") end
         local first = true
         for b = 1, #buckets do
             local bucket = buckets[b]
             local bItems = bucket.items
             local bn = #bItems
-            if bn > 0 then
+            if bn > 0 or (keys and bItems == ns.Hold.NONE) then
                 AddGroup(CountLabel(gN + 1, first and name, bucket.label, bn), false, false, false, zone, assignKey,
-                    first and collapseKey or nil, nil, reagent)
+                    first and collapseKey or nil, nil, reagent, keys and keys[b])
                 for j = 1, bn do AddCell(bItems[j]) end
                 first = false
             end
@@ -742,10 +757,11 @@ function ns.CompactBagsSection(name, items, kind, assignKey, keepEmpty, hint, co
         clear = not pin and BP().bagShowRecentClear == true and recent ~= nil and next(recent) ~= nil
     end
     -- An empty section is dropped, but the Pinned block and an assignable
-    -- category stay as a label-only block (a drop target)
-    if count == 0 and not pin and not assignKey and not keepEmpty then return end
+    -- category stay as a label-only block (a drop target), as does a held one
+    if count == 0 and not pin and not assignKey and not keepEmpty
+        and not (hk and ns.Hold.Cells("bags", hk, 0) > 0) then return end
     AddGroup(name ~= "" and CountLabel(gN + 1, false, name, count) or false, hint, false, clear, zone, assignKey, collapseKey,
-        kind == "recent" or flashRecent == true, reagent)
+        kind == "recent" or flashRecent == true, reagent, hk)
     for j = 1, count do AddCell(items[j]) end
 end
 
@@ -934,6 +950,20 @@ function ns.CompactBagsPlace(child, startX, startY, columns, slotIdx)
             gW[g], gLi[g], gPlanW[g] = 0, false, 0
         end
     end
+    -- a held block keeps its cells and planned width (room for a lower count)
+    local sizes = gSize
+    if holdOn then
+        local Hold = ns.Hold
+        sizes = gCells
+        for g = 1, n do
+            local key, cells = gHKey[g], gSize[g]
+            if key then
+                gPlanW[g] = Hold.PlanW("bags", key, gPlanW[g], gLabel[g], size)
+                cells = Hold.Cells("bags", key, cells)
+            end
+            gCells[g] = cells
+        end
+    end
     ns.CompactHideLabels(bagLabels, k + 1)
     if n == 0 then
         if bagOut then bagOut.contentW = nil end
@@ -944,7 +974,7 @@ function ns.CompactBagsPlace(child, startX, startY, columns, slotIdx)
     if not bagOut then bagOut = ns.CompactNewOut() end
     local out = bagOut
     local bandH = size + BAND_PAD
-    local _, _, bottomY = ns.CompactPack(gSize, gPlanW, n, columns, bandH, startY, out)
+    local _, _, bottomY = ns.CompactPack(sizes, gPlanW, n, columns, bandH, startY, out)
     local groupX, groupY, groupW = out.groupX, out.groupY, out.groupW
 
     for g = 1, n do
@@ -977,6 +1007,22 @@ function ns.CompactBagsPlace(child, startX, startY, columns, slotIdx)
     end
 
     local cellX, cellY = out.cellX, out.cellY
+    -- A held block's freed cells: plain pads (mouse off), the pool's next after
+    -- the grid's (its reset hides them); the item cells close up in cData's order
+    if holdOn then
+        local from, to = 0, 0
+        for g = 1, n do
+            local s = gSize[g]
+            if from > to then
+                for j = 1, s do cellX[to + j], cellY[to + j] = cellX[from + j], cellY[from + j] end
+            end
+            from, to = from + s, to + s
+            for _ = s + 1, gCells[g] do
+                from = from + 1
+                PlaceEmptyPad(child, startX + cellX[from], cellY[from])
+            end
+        end
+    end
     local ci = 0
     for g = 1, n do
         local interactive, reagent = gInter[g], gReag[g]
