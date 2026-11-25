@@ -24,6 +24,7 @@ local PAGE_MOVEMENT = "MoveAlert"
 local PAGE_RAIDTOOLS = "Raid Tools"
 -- Also the target of the Bags module's link tab (EUI_Bags_Options.lua)
 local PAGE_ITEMICONS = "Item Icons"
+local PAGE_LOOT     = "Loot"
 
 -------------------------------------------------------------------------------
 --  Hide Item Transforms picker popup
@@ -2655,7 +2656,7 @@ initFrame:SetScript("OnEvent", function(self)
         return math.abs(y)
     end
 
-    local pages = { PAGE_QOL, PAGE_RAIDTOOLS, PAGE_CURSOR, PAGE_SHIFTER, PAGE_MOVEMENT, PAGE_ITEMICONS }
+    local pages = { PAGE_QOL, PAGE_RAIDTOOLS, PAGE_LOOT, PAGE_CURSOR, PAGE_SHIFTER, PAGE_MOVEMENT, PAGE_ITEMICONS }
     -- No item upgrade system on WoW Forever: the Upgrader tab is not offered there
     -- (its resident file returns at load, so the page builder never exists either).
     if not EllesmereUI.IS_FOREVER then pages[#pages + 1] = PAGE_UPGCALC end
@@ -2674,6 +2675,9 @@ initFrame:SetScript("OnEvent", function(self)
         searchTerms[#searchTerms + 1] = "legacy"
         searchTerms[#searchTerms + 1] = "legacy points"
     end
+    for _, term in ipairs({ "loot", "loot roll", "roll", "need", "greed", "item quality", "timer", "bop", "pass", "winner", "roll count" }) do
+        searchTerms[#searchTerms + 1] = term
+    end
     EllesmereUI:RegisterModule("EllesmereUIQoL", {
         title       = "Quality of Life",
         description = "Quality of life features and custom cursor.",
@@ -2687,6 +2691,12 @@ initFrame:SetScript("OnEvent", function(self)
             if pageName ~= PAGE_RAIDTOOLS and not EllesmereUI._prebuilding
                and _G._EUI_RaidTools_Preview then
                 _G._EUI_RaidTools_Preview(false)
+            end
+            -- Likewise the Loot page's on-screen preview (its eye button).
+            local lootRolls = EllesmereUI._LootRolls
+            if pageName ~= PAGE_LOOT and not EllesmereUI._prebuilding
+               and lootRolls and lootRolls.SamplesShown() then
+                lootRolls.ShowSamples(false)
             end
             if pageName == PAGE_QOL then
                 return BuildQoLPage(pageName, parent, yOffset)
@@ -2709,6 +2719,14 @@ initFrame:SetScript("OnEvent", function(self)
             if pageName == PAGE_ITEMICONS and _G._EUI_BuildItemIconsPage then
                 return _G._EUI_BuildItemIconsPage(pageName, parent, yOffset)
             end
+            if pageName == PAGE_LOOT and _G._EUI_BuildLootPage then
+                return _G._EUI_BuildLootPage(pageName, parent, yOffset)
+            end
+        end,
+        -- The Loot page's preview lives in the content header; declaring its
+        -- builder makes a cached page whose header was dropped rebuild with it.
+        getHeaderBuilder = function(pageName)
+            if pageName == PAGE_LOOT then return _G._EUI_LootRollsHeaderBuilder end
         end,
         -- Cached pages are restored WITHOUT a rebuild, so buildPage never runs
         -- on the warm path -- reopening the window onto Raid Tools would leave
@@ -2716,6 +2734,10 @@ initFrame:SetScript("OnEvent", function(self)
         -- arrangement: mirror the flag on BOTH paths).
         onPageCacheRestore = function(pageName)
             if EllesmereUI._prebuilding then return end
+            local lootRolls = EllesmereUI._LootRolls
+            if pageName ~= PAGE_LOOT and lootRolls and lootRolls.SamplesShown() then
+                lootRolls.ShowSamples(false)
+            end
             if _G._EUI_RaidTools_Preview then
                 _G._EUI_RaidTools_Preview(pageName == PAGE_RAIDTOOLS)
             end
@@ -2853,6 +2875,7 @@ initFrame:SetScript("OnEvent", function(self)
                     EllesmereUIDB.unlockAnchors.EUI_CombatAlert = nil
                     EllesmereUIDB.unlockAnchors.EUI_BattleRes = nil
                     EllesmereUIDB.unlockAnchors.EUI_Bloodlust = nil
+                    EllesmereUIDB.unlockAnchors.EUI_LootRolls = nil
                 end
                 EllesmereUIDB.hideTransforms = false
                 EllesmereUIDB.hideTransformItems = nil
@@ -2868,6 +2891,8 @@ initFrame:SetScript("OnEvent", function(self)
             if _G._EUI_ResetFailedCastAlert then _G._EUI_ResetFailedCastAlert() end
             if EllesmereUI._applyHideBlizzardPartyFrame then EllesmereUI._applyHideBlizzardPartyFrame() end
             if _G._EUI_BattleRes_Reset then _G._EUI_BattleRes_Reset() end
+            -- The Loot Roll Frame, on both clients.
+            if _G._EUI_LootRolls_Reset then _G._EUI_LootRolls_Reset() end
             if EllesmereUI._applyBonusRollConfirmation then EllesmereUI._applyBonusRollConfirmation() end
             if EllesmereUI._applyHideErrorMessages then EllesmereUI._applyHideErrorMessages() end
             if EllesmereUI._applyAnnounceGroupDeaths then EllesmereUI._applyAnnounceGroupDeaths() end
@@ -2890,12 +2915,13 @@ initFrame:SetScript("OnEvent", function(self)
             EllesmereUI.ItemIcons.Reset()
             EllesmereUI:InvalidatePageCache()
         end,
-        -- Tears down Duration Warning, Raid Tools, and Movement Alert
-        -- previews on module switch (Movement Alert also stops its ticker).
+        -- Tears down Duration Warning, Raid Tools, Movement Alert, and Loot
+        -- Roll previews on module switch (Movement Alert also stops its ticker).
         onModuleLeave = function()
             if EllesmereUI._durWarnHidePreview then EllesmereUI._durWarnHidePreview() end
             if _G._EUI_RaidTools_Preview then _G._EUI_RaidTools_Preview(false) end
             if EllesmereUI._MovementAlertPreview then EllesmereUI._MovementAlertPreview(false) end
+            if EllesmereUI._LootRolls then EllesmereUI._LootRolls.ShowSamples(false) end
         end,
     })
 

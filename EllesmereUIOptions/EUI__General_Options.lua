@@ -238,6 +238,22 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        -- An extension of 9.9.3, released a day after it: no fixes or thank-you line of its
+        -- own, and 9.9.3's card opens with this one (`openNext`, read only while it is newest).
+        version = "9.9.4",
+        releaseDate = "25/11/2026",
+        openNext = true,
+        heroes = {
+            {
+                -- The Enable Loot Roll Frame row of LOOT ROLLS on Quality of Life's Loot page (both clients).
+                module = "Quality of Life",
+                title  = "Loot Roll Frame",
+                desc   = "Group loot rolls show as one compact, movable list in place of Blizzard's popups: roll from the list, and see how many picked each choice, who won, and everyone's rolls on hover. Off by default.",
+                nav    = { module = "EllesmereUIQoL", page = "Loot", section = "LOOT ROLLS", highlight = "Enable Loot Roll Frame" },
+            },
+        },
+    },
+    {
         version = "9.9.3",
         releaseDate = "25/11/2026",
         thanks = true,
