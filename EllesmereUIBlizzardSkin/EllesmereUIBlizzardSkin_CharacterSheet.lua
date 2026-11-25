@@ -37,7 +37,7 @@ function ns.CharSheetForever()
     return EllesmereUI.IS_FOREVER == true and ns.CharSheetStock()
 end
 -- Stock styles' "Blizzard UI Color" (on unless turned off): every stat
--- category in Blizzard's yellow in place of its own colour. nil when it does
+-- category in Blizzard's yellow in place of its own color. nil when it does
 -- not apply (always under the EllesmereUI look).
 -- Stock styles: Blizzard's stats pane parked off-screen (method calls, never
 -- Hide) so the EllesmereUI stats section, a child of the pane anchored over
@@ -2579,7 +2579,7 @@ local function SkinCharacterSheet()
 
                 local value = sectionContainer:CreateFontString(nil, "OVERLAY")
                 value:SetFont(fontPath, 10, "")
-                -- "Blizzard UI Color" colours only the titles; values take the label grey.
+                -- "Blizzard UI Color" colors only the titles; values take the label grey.
                 if ns.CharSheetBlizzColor() then
                     value:SetTextColor(0.7, 0.7, 0.7, 0.8)
                 else
@@ -4119,6 +4119,52 @@ local function SkinCharacterSheet()
         emPane:SetPoint("TOPRIGHT", UIParent, "TOPLEFT", -100, 0)
     end
 
+    -- Gear set rows trade Blizzard's stat-strip art for the sheet's flat
+    -- look. A post-hook on Blizzard's row initializer, so it re-applies after
+    -- every (re)build; it touches regions only, never the row's own fields.
+    local SET_ROW_ART = { "BgTop", "BgMiddle", "BgBottom" }
+    hooksecurefunc("PaperDollEquipmentManagerPane_InitButton", function(button)
+        if EllesmereUIDB and (EllesmereUIDB.themedCharacterSheet == false or EllesmereUI.BlizzWindowSkinsKilled()) then return end
+        for i = 1, #SET_ROW_ART do
+            local region = button[SET_ROW_ART[i]]
+            if region then region:SetAlpha(0) end
+        end
+        -- Blizzard stripes every other row; every row gets the same faint
+        -- tile instead, matching the Titles list.
+        local stripe = button.Stripe
+        if stripe then
+            stripe:SetColorTexture(1, 1, 1, 1)
+            stripe:SetAlpha(0.04)
+            stripe:Show()
+        end
+        local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.51, g = 0.784, b = 1 }
+        local selected = button.SelectedBar
+        if selected then
+            selected:SetColorTexture(EG.r, EG.g, EG.b, 1)
+            selected:SetBlendMode("BLEND")
+            selected:SetAlpha(0.2)
+        end
+        local hover = button.HighlightBar
+        if hover then
+            hover:SetColorTexture(1, 1, 1, 1)
+            hover:SetBlendMode("BLEND")
+            hover:SetAlpha(0.08)
+        end
+        local label = button.text
+        if label then
+            label:SetFont(fontPath, 11, "")
+            -- The name runs to the check mark, so the widened rows show
+            -- longer names.
+            label:SetPoint("RIGHT", button, "RIGHT", -24, 0)
+            -- Gold set names read white here; red (items missing) and the
+            -- green New Set label stay as Blizzard colors them.
+            if button.setID then
+                local _, _, _, _, _, _, _, numLost = C_EquipmentSet.GetEquipmentSetInfo(button.setID)
+                if (numLost or 0) == 0 then label:SetTextColor(1, 1, 1, 1) end
+            end
+        end
+    end)
+
     -- Calc tab is created lazily by ApplyCharSheetCalcTab when showCalcButton is on.
     if EllesmereUI.ApplyCharSheetCalcTab then
         EllesmereUI.ApplyCharSheetCalcTab()
@@ -5295,7 +5341,7 @@ end
 -- dropped. A post-hook on EquipmentFlyout_UpdateItems, so it re-applies after
 -- every fill (Blizzard re-shows and re-sizes its strips each time). Regions
 -- only, plus child frames: no key is ever written onto a flyout button, and
--- the rarity edge takes an explicit colour read off Blizzard's ring, so no
+-- the rarity edge takes an explicit color read off Blizzard's ring, so no
 -- method hook lands on the buttons either.
 do
     local function FlyoutSkinActive()
@@ -5315,7 +5361,7 @@ do
             if btn.icon then WSkin.SquareIcon(btn.icon) end
         end
         -- The ring is Blizzard's quality cue, rounded: hidden by alpha, its
-        -- colour carried over to the square edge on every fill.
+        -- color carried over to the square edge on every fill.
         local ring = btn.IconBorder
         if ring then ring:SetAlpha(0) end
         if btn.icon then

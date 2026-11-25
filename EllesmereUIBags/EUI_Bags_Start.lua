@@ -1127,6 +1127,8 @@ local function StartAddon()
         end
         refreshBurst = refreshAgain
         if EUI_Bags:IsVisible() then
+            -- an item-event pass: it may keep the layout hold
+            ns.Hold.events.bags = true
             EUI_Bags:RefreshInventory()
             local detach = BP().detachReagentBag or false
             if detach and EUI_BagsReagent:IsVisible() then EUI_BagsReagent:RefreshInventory() end
@@ -1356,7 +1358,7 @@ local function StartAddon()
             end
             if EUI_Bags._refreshPendingCombat then
                 EUI_Bags._refreshPendingCombat = nil
-                if EUI_Bags:IsVisible() then EUI_Bags:RefreshInventory() end
+                if EUI_Bags:IsVisible() then ns.Hold.events.bags = true; EUI_Bags:RefreshInventory() end
                 if EUI_BagsReagent:IsVisible() and EUI_BagsReagent.RefreshInventory then
                     EUI_BagsReagent:RefreshInventory()
                 end

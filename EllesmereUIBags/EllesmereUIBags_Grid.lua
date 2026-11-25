@@ -687,6 +687,57 @@ function ns.LayoutCategoryLinks(ef, canDelete)
     ren._fs:SetPoint("RIGHT", bar1, "LEFT", -6, 0)
 end
 
+-- Lightweight empty pad pool (no ItemButton template, just bg + border)
+if not EUI_Bags._emptyPads then EUI_Bags._emptyPads = {} end
+local _emptyPads = EUI_Bags._emptyPads
+-- Pads placed this pass (the grid pass resets it; Compact places its pads after the grid's)
+local _emptyPadIdx = 0
+
+local function GetOrCreateEmptyPad(idx)
+    if _emptyPads[idx] then return _emptyPads[idx] end
+    local f = CreateFrame("Frame", nil, EUI_Bags)
+    ns.SizeSlot(f)
+    f:EnableMouse(false)
+    f._bg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+    f._bg:SetAllPoints()
+    ns.SetSlotBackgroundTexture(f._bg, false)
+    f._bg:SetAlpha(0.35)
+    CreateInsetBorder(f, true)
+    SetInsetBorderColor(f, 0, 0, 0, 0.3)
+    _emptyPads[idx] = f
+    return f
+end
+
+-- The pass's next pad at (x, y) from parent's top left (held cells)
+local function PlaceEmptyPad(parent, x, y)
+    _emptyPadIdx = _emptyPadIdx + 1
+    local pad = GetOrCreateEmptyPad(_emptyPadIdx)
+    pad:SetParent(parent)
+    pad:ClearAllPoints()
+    pad:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    ns.PaintSlotBackground(pad._bg, 0.35)
+    pad:Show()
+end
+ns.PlaceEmptyPad = PlaceEmptyPad
+
+-- While the layout hold is active: a bucket's held cells, a bucket array's section key (made on first use)
+local holdCells, holdSection
+
+-- Puts a section's held buckets that emptied back in place (as Compact)
+local function HoldBuckets(buckets, sectionKey)
+    local Hold = ns.Hold
+    local _, keys = Hold.Buckets("bags", sectionKey, buckets, buckets, "items")
+    for i, b in ipairs(buckets) do holdCells[b] = Hold.Cells("bags", keys[i], #b.items) end
+    holdSection[buckets] = sectionKey
+end
+
+-- A held block of n items keeps its cells: padFn(n, count) pads the rest; returns the cells
+local function HoldPads(padFn, key, n)
+    local cells = ns.Hold.Cells("bags", key, n)
+    if cells > n then padFn(n, cells - n) end
+    return cells
+end
+
 -------------------------------------------------------------------------------
 --  Grid layout pass. Called by RefreshInventory after the shared scan,
 --  classify, filter and scroll setup; returns the content bottom (curY).
@@ -698,6 +749,9 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
     junkOn = EUI_CategoryManager:IsJunkMarkerEnabled()
     iiOn = ns.ItemIconsOn()
     compactOn = EUI_Bags.IsCompactMode() == true
+    -- Held groups keep their cells, freed cells stay as pads
+    local holdOn = ns.Hold.active.bags
+    if holdOn and not holdCells then holdCells, holdSection = {}, {} end
     ReadReagentBadge()
 
     -- 5. Render grid into scroll child
@@ -739,27 +793,9 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
     local startX = gridPadX + 5
     local curY = -6
     local slotIdx = 0
-    if compactOn then ns.CompactBagsBegin() end
+    if compactOn then ns.CompactBagsBegin(holdOn) end
 
-    -- Lightweight empty pad pool (no ItemButton template, just bg + border)
-    if not EUI_Bags._emptyPads then EUI_Bags._emptyPads = {} end
-    local _emptyPads = EUI_Bags._emptyPads
-    local _emptyPadIdx = 0
-
-    local function GetOrCreateEmptyPad(idx)
-        if _emptyPads[idx] then return _emptyPads[idx] end
-        local f = CreateFrame("Frame", nil, EUI_Bags)
-        ns.SizeSlot(f)
-        f:EnableMouse(false)
-        f._bg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
-        f._bg:SetAllPoints()
-        ns.SetSlotBackgroundTexture(f._bg, false)
-        f._bg:SetAlpha(0.35)
-        CreateInsetBorder(f, true)
-        SetInsetBorderColor(f, 0, 0, 0, 0.3)
-        _emptyPads[idx] = f
-        return f
-    end
+    _emptyPadIdx = 0
 
     local function RenderEmptyPad(itemCount, padCount)
         for p = 1, padCount do
@@ -805,7 +841,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
     end
     end
 
-    local function RenderItemBlock(blockItems, reagentSection)
+    -- cells: a held block's cell count (items, then pads), else #blockItems
+    local function RenderItemBlock(blockItems, reagentSection, cells)
         local n = #blockItems
         for j, data in ipairs(blockItems) do
             slotIdx = slotIdx + 1
@@ -816,6 +853,10 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 local row = math.floor((j - 1) / columns)
                 RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, nil, nil, reagentSection)
             end
+        end
+        if cells and cells > n then
+            RenderEmptyPad(n, cells - n)
+            n = cells
         end
         local remainder = n % columns
         local padCount
@@ -847,6 +888,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             local epsilon = 0.5
             local categoryGap = math.max(8, SPACING * 3)
             local assignBucket = assignCatKey and buckets[1] and 1 or nil
+            local gapKey = holdOn and holdSection[buckets]
+            if gapKey then gapKey = gapKey .. ns.Hold.GAP end
 
             -- Prepare the headers first so their text widths can reserve enough
             -- horizontal space before the buckets are packed into rows.
@@ -854,10 +897,12 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 subHeaderIdx = subHeaderIdx + 1
                 local header = GetOrCreateExpSubHeader(subHeaderIdx)
                 header:SetParent(child)
-                header._label:SetText(bucket.label .. " (" .. #bucket.items .. ")")
+                local text = bucket.label .. " (" .. #bucket.items .. ")"
+                header._label:SetText(text)
                 SetBagFont(header._label, math.max(8, catTitleSize - 2))
 
-                local itemCount = #bucket.items + ((index == assignBucket) and 1 or 0)
+                local cells = holdOn and holdCells[bucket] or #bucket.items
+                local itemCount = cells + ((index == assignBucket) and 1 or 0)
                 local span = math.min(columns, itemCount)
                 local bucketWidth = span * stride - SPACING
                 bucket._compactHeader = header
@@ -867,10 +912,13 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 bucket._compactWidth = bucketWidth
 
                 if itemCount <= columns then
-                    categoryGap = math.max(categoryGap,
-                        (header._label:GetStringWidth() or 0) + 6 - bucketWidth)
+                    local textW = header._label:GetStringWidth() or 0
+                    if gapKey then textW = ns.Hold.LabelW(text, textW, math.max(8, catTitleSize - 2)) end
+                    categoryGap = math.max(categoryGap, textW + 6 - bucketWidth)
                 end
             end
+            -- held: the gap the hold started with
+            if gapKey then categoryGap = ns.Hold.PlanW("bags", gapKey, categoryGap) end
 
             local function RenderPadsAt(itemTop, usedWidth)
                 local padCount = math.floor((usableWidth - usedWidth + epsilon) / stride)
@@ -924,13 +972,19 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                             startX + startOffset, rowTop - headerGap, columns)
                     end
                 end
+                if holdOn then
+                    for c = #bucket.items + 1, holdCells[bucket] do
+                        PlaceEmptyPad(child, startX + startOffset + ((c - 1) % span) * stride,
+                            rowTop - headerGap - math.floor((c - 1) / span) * stride)
+                    end
+                end
 
                 if index == assignBucket then
                     slotIdx = slotIdx + 1
                     local assignSlot = GetOrCreateSlot(slotIdx)
                     if assignSlot then
                         assignSlot:GetParent():SetParent(child)
-                        local itemIndex = #bucket.items + 1
+                        local itemIndex = (holdOn and holdCells[bucket] or #bucket.items) + 1
                         local col = (itemIndex - 1) % span
                         local row = math.floor((itemIndex - 1) / span)
                         RenderButton(assignSlot, { bag = 0, slot = 0 }, slotIdx, col, row,
@@ -979,7 +1033,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
 
             local assignShown = false
             for _, bucket in ipairs(buckets) do
-                if #bucket.items > 0 then
+                local cells = holdOn and holdCells[bucket] or #bucket.items
+                if cells > 0 then
                     subHeaderIdx = subHeaderIdx + 1
                     local header = GetOrCreateExpSubHeader(subHeaderIdx)
                     header:SetParent(child)
@@ -990,11 +1045,11 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     SetBagFont(header._label, math.max(8, catTitleSize - 2))
                     header:Show()
                     curY = curY - 18
-                    RenderItemBlock(bucket.items)
+                    RenderItemBlock(bucket.items, nil, cells)
 
                     if assignCatKey and not assignShown then
                         assignShown = true
-                        local remainder = #bucket.items % columns
+                        local remainder = cells % columns
                         if remainder ~= 0 then
                             curY = curY + (SLOT_SIZE + SPACING)
                         end
@@ -1076,6 +1131,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             if RenderPinnedEmptyCount and RenderPinnedEmptyCount(pinItemCount + 1) then
                 pinItemCount = pinItemCount + 1
             end
+            if holdOn then pinItemCount = HoldPads(RenderEmptyPad, ns.Hold.LABEL .. EllesmereUI.L("Pinned Items"), pinItemCount) end
             do
                 local pinIdx = pinItemCount + 1
                 slotIdx = slotIdx + 1
@@ -1162,6 +1218,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 end
             end
             local recItemCount = #recentItems
+            if holdOn then recItemCount = HoldPads(RenderEmptyPad, ns.Hold.LABEL .. EllesmereUI.L("Recent Items"), recItemCount) end
             local recRemainder = recItemCount % columns
             local recPadCount = recRemainder == 0 and 0 or (columns - recRemainder)
             if recItemCount == 0 then recPadCount = columns end
@@ -1317,7 +1374,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
 
         local function RenderSection(sectionName, sectionItems, isUserCreated, showPinAdd, alwaysShow, assignCatIdx, nestByExpansion, collapseKey, reagentSection)
             local itemCount = #sectionItems
-            if itemCount == 0 and not isUserCreated and not showPinAdd and not alwaysShow then return end
+            local drop = itemCount == 0 and not isUserCreated and not showPinAdd and not alwaysShow
+            if drop and not holdOn then return end
 
             local useSlotNest = armorySlotGrouping
                 and IsGearOnlyGroup(sectionName)
@@ -1335,6 +1393,23 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             -- sectionName is the group's key; this is what the label shows
             local label = EUI_CategoryManager:GroupDisplayName(sectionName)
 
+            -- Held: keyed by the category's identity (a group's NAME, else a LABEL)
+            local holdKey
+            if holdOn then
+                local cat = assignCatIdx and EUI_CategoryManager:GetCategories()[assignCatIdx]
+                if not cat then
+                    holdKey = ns.Hold.LABEL .. label
+                elseif cat.groupName == sectionName then
+                    holdKey = ns.Hold.NAME .. sectionName
+                else
+                    holdKey = cat._defaultName
+                end
+                -- whether it shows (false: dropped) and how it nests, as at the hold's start
+                local mode = ns.Hold.Mode("bags", holdKey, not drop and (useSlotNest and "slot" or useExpNest and "exp" or "flat"), itemCount)
+                if not mode then return end
+                useSlotNest, useExpNest = mode == "slot" and armorySlotGrouping, mode == "exp"
+            end
+
             -- Compact: the collector draws this section (EllesmereUIBags_Compact.lua)
             if compactOn then
                 local assignKey
@@ -1344,7 +1419,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 end
                 local kind = (showPinAdd and "pinned") or (alwaysShow and "recent")
                     or (useSlotNest and "slot") or (useExpNest and "exp") or "flat"
-                ns.CompactBagsSection(label, sectionItems, kind, assignKey, nil, nil, collapseKey, nil, reagentSection)
+                ns.CompactBagsSection(label, sectionItems, kind, assignKey, nil, nil, collapseKey, nil, reagentSection, holdKey)
                 return
             end
 
@@ -1388,6 +1463,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
 
             if useSlotNest then
                 local buckets = BuildSlotBuckets(sectionItems)
+                if holdOn then HoldBuckets(buckets, holdKey) end
                 if #buckets > 0 then
                     local showAssign = assignCatIdx and EUI_CategoryManager
                         and EUI_CategoryManager:CanAssignToCategory(assignCatIdx)
@@ -1401,12 +1477,14 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
 
             if useExpNest then
                 local buckets = BuildExpansionBuckets(sectionItems)
+                if holdOn then HoldBuckets(buckets, holdKey) end
                 if #buckets > 0 then
                     local showAssign = assignCatIdx and EUI_CategoryManager
                         and EUI_CategoryManager:CanAssignToCategory(assignCatIdx)
                     local assignShown = false
                     for _, buck in ipairs(buckets) do
-                        if #buck.items > 0 then
+                        local cells = holdOn and holdCells[buck] or #buck.items
+                        if cells > 0 then
                             expSubIdx = expSubIdx + 1
                             local sh = GetOrCreateExpSubHeader(expSubIdx)
                             sh:SetParent(child)
@@ -1417,7 +1495,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                             SetBagFont(sh._label, math.max(8, catTitleSize - 2))
                             sh:Show()
                             curY = curY - 18
-                            RenderItemBlock(buck.items, reagentSection)
+                            RenderItemBlock(buck.items, reagentSection, cells)
                             -- Place assign "+" after the first bucket's items (newest expansion)
                             if showAssign and not assignShown then
                                 assignShown = true
@@ -1425,7 +1503,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                                 local aCat = cats[assignCatIdx]
                                 if aCat then
                                     -- RenderItemBlock already advanced curY; back up to place at the next slot after the items.
-                                    local n = #buck.items
+                                    local n = cells
                                     local remainder = n % columns
                                     if remainder == 0 then
                                         -- Last row filled exactly: curY already sits on the new row the button needs.
@@ -1467,6 +1545,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns, nil, alwaysShow and not showPinAdd, reagentSection)
                 end
             end
+            if holdOn then itemCount = HoldPads(RenderEmptyPad, holdKey, itemCount) end
 
             -- Group free slots into a single visual square, like Baganator.
             if showPinAdd and RenderPinnedEmptyCount and RenderPinnedEmptyCount(itemCount + 1) then
@@ -1540,6 +1619,18 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
         local hiddenSet = BP().bagHiddenInAllItems or {}
         -- A turned-off category shows no section (its items are in the catch-all's)
         local dc = BP().bagDisabledCategories
+        -- Separated set categories (Split Set Gear by Set's Separate Sets in Bags) draw
+        -- right after their Item Set Gear anchor's section, or the section of the group
+        -- holding it: they move with it in the sidebar and hide with it (a set
+        -- category's own index is fixed until the list is built again).
+        local function RenderSetSections()
+            if EUI_CategoryManager:FoldSetChildren() then return end
+            for si, sc in ipairs(cats) do
+                if sc.isEquipSet and not EUI_CategoryManager:IsCategoryOff(sc, dc) then
+                    RenderSection(sc.name, itemsByCat[si] or {}, false, nil, nil, si, true)
+                end
+            end
+        end
         for ci, cat in ipairs(cats) do
             if cat.isPinned then
                 -- Pinned Items quickview
@@ -1583,7 +1674,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                                 end
                             end
                             -- The Item Set Gear anchor folds in its set children's items
-                            if BP().bagSplitSetGearBySet and cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then
+                            if EUI_CategoryManager:FoldSetChildren() and cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then
                                 for i, c in ipairs(cats) do
                                     if c.isEquipSet and itemsByCat[i] then
                                         for _, data in ipairs(itemsByCat[i]) do
@@ -1601,16 +1692,24 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                         local firstOn = EUI_CategoryManager:FirstOnMember(cat.groupName, dc)
                         if firstOn then
                             RenderSection(cat.groupName, merged, false, nil, nil, firstOn, true, "group:" .. cat.groupName)
+                            for _, mi in ipairs(members) do
+                                local mc = cats[mi]
+                                if mc and mc.isSetGear and not mc.isEquipSet then
+                                    if not EUI_CategoryManager:IsCategoryOff(mc, dc) then RenderSetSections() end
+                                    break
+                                end
+                            end
                         end
                     end
                 end
             elseif cat.isEquipSet then
-                -- Set children render inside their anchor's section
+                -- Set children render inside their anchor's section, or right after it
+                -- when separated (RenderSetSections), never at their own place
             else
                 if not hiddenSet[cat._defaultName] and not EUI_CategoryManager:IsCategoryOff(cat, dc) then
                     local catItems = itemsByCat[ci] or {}
                     -- The Item Set Gear anchor folds in its set children's items
-                    if cat.isSetGear and BP().bagSplitSetGearBySet then
+                    if cat.isSetGear and EUI_CategoryManager:FoldSetChildren() then
                         local folded = nil
                         for i, c in ipairs(cats) do
                             if c.isEquipSet and itemsByCat[i] then
@@ -1625,6 +1724,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     end
                     local isUserCreated = cat.isUserCreated
                     RenderSection(cat.name, catItems, isUserCreated, cat.isPinned, cat.isRecent, ci, true, "cat:" .. cat._defaultName, cat.isReagentBag)
+                    if cat.isSetGear then RenderSetSections() end
                 end
             end
         end
@@ -1654,8 +1754,10 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
         end
         local headerIdx = 0
         -- One section. kind: "pinned" / "recent" (EUI's own: its hint, Hide link, the pin
-        -- "+" cell and the Clear link, as in All Items) or nil (a group).
-        local function RenderViewSection(label, sItems, kind, hint)
+        -- "+" cell and the Clear link, as in All Items) or nil (a group). key: a group's
+        -- hold key (its view key, JUNK for Junk; Other has none).
+        local function RenderViewSection(label, sItems, kind, hint, key)
+            local holdKey = holdOn and (kind and ns.Hold.LABEL .. label or key or ns.Hold.OTHER .. label)
             if #sItems > 0 then
                 if kind == "recent" then
                     sItems = RecentGainedItems(sItems)
@@ -1666,12 +1768,12 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     table.sort(sItems, VisualSortCompare)
                     sItems = MergeDuplicates(sItems)
                 end
-            elseif not kind then
+            elseif not kind and not (holdKey and ns.Hold.Cells("bags", holdKey, 0) > 0) then
                 return
             end
             local n = #sItems
             if compactOn then
-                ns.CompactBagsSection(label, sItems, kind or "flat", nil, nil, hint)
+                ns.CompactBagsSection(label, sItems, kind or "flat", nil, nil, hint, nil, nil, nil, holdKey)
                 return
             end
             headerIdx = headerIdx + 1
@@ -1711,21 +1813,21 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     RenderButton(btn, data, slotIdx, col, row, startX, curY, columns)
                 end
             end
-            local cells = n
+            local cells = holdOn and HoldPads(RenderEmptyPad, holdKey, n) or n
             if kind == "pinned" then
                 -- The pin "+" cell, a regular empty slot with the "+" overlay on top
                 slotIdx = slotIdx + 1
                 local pinSlot = GetOrCreateSlot(slotIdx)
                 if pinSlot then
                     pinSlot:GetParent():SetParent(child)
-                    RenderButton(pinSlot, { bag = 0, slot = 0 }, slotIdx, n % columns, math.floor(n / columns),
+                    RenderButton(pinSlot, { bag = 0, slot = 0 }, slotIdx, cells % columns, math.floor(cells / columns),
                         startX, curY, columns)
                     local ov = GetOrCreatePinOverlay()
                     ov:SetParent(child)
                     ov:ClearAllPoints()
                     ov:SetAllPoints(pinSlot)
                     ov:Show()
-                    cells = n + 1
+                    cells = cells + 1
                 end
             end
             local remainder = cells % columns
@@ -1744,14 +1846,15 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 EllesmereUI.L("Extra quickview display, your items are also in their category"))
         end
         for g = 1, nGroups + 1 do
-            RenderViewSection(g <= nGroups and groups[g].name or view.otherName, byGroup[g <= nGroups and g or 0])
+            RenderViewSection(g <= nGroups and groups[g].name or view.otherName, byGroup[g <= nGroups and g or 0],
+                nil, nil, holdOn and g <= nGroups and groups[g].key)
         end
         -- What Sell Junk sells stays ours: the Junk section, under the Junk category's name
         -- (junk exists only while the Junk Marker is on, when this refresh's classify pass
-        -- has found that category)
-        if #byGroup[-3] > 0 then
+        -- has found that category); a held Junk block stays once sold
+        if #byGroup[-3] > 0 or holdOn then
             local junkCat = EUI_CategoryManager:GetCategories()[EUI_CategoryManager._junkCatIdx]
-            RenderViewSection(junkCat and junkCat.name or EUI_CategoryManager.JUNK_KEY, byGroup[-3])
+            RenderViewSection(junkCat and junkCat.name or EUI_CategoryManager.JUNK_KEY, byGroup[-3], nil, nil, holdOn and ns.Hold.JUNK)
         end
     else
         if selectedGroupName then
@@ -1762,11 +1865,24 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             local expSubIdx = 0
             local useSlotNest = armorySlotGrouping and IsGearOnlyGroup(selectedGroupName)
 
+            -- Separated set children are members of their own, after the anchor
+            if BP().bagSplitSetGearBySet and not EUI_CategoryManager:FoldSetChildren() then
+                local withSets = {}
+                for _, mi in ipairs(members) do
+                    withSets[#withSets + 1] = mi
+                    if cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then
+                        for i, c in ipairs(cats) do
+                            if c.isEquipSet then withSets[#withSets + 1] = i end
+                        end
+                    end
+                end
+                members = withSets
+            end
             local itemsByMember = {}
             for _, mi in ipairs(members) do itemsByMember[mi] = {} end
             -- Split-mode set children fold into their anchor member's section
             local anchorMi, childSet
-            if BP().bagSplitSetGearBySet then
+            if EUI_CategoryManager:FoldSetChildren() then
                 for _, mi in ipairs(members) do
                     if cats[mi] and cats[mi].isSetGear and not cats[mi].isEquipSet then anchorMi = mi; break end
                 end
@@ -1790,7 +1906,17 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             for _, mi in ipairs(members) do
                 local memberCat = cats[mi]
                 local memberItems = itemsByMember[mi] or {}
-                if not (hideEmpty and #memberItems == 0) and not EUI_CategoryManager:IsCategoryOff(memberCat, dc) then
+                local drop = hideEmpty and #memberItems == 0
+                local memberNest = useSlotNest and #memberItems > 0
+                -- held: showing and nesting as at the hold's start
+                local holdKey
+                if holdOn then
+                    -- a member without a category: its member index
+                    holdKey = memberCat and memberCat._defaultName or ns.Hold.LABEL .. "?" .. mi
+                    local mode = ns.Hold.Mode("bags", holdKey, not drop and (memberNest and "slot" or "flat"), #memberItems)
+                    drop, memberNest = not mode, mode == "slot" and useSlotNest
+                end
+                if not drop and not EUI_CategoryManager:IsCategoryOff(memberCat, dc) then
 
                 if #memberItems > 0 then
                     PreCacheSortFields(memberItems)
@@ -1801,8 +1927,8 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 if compactOn then
                     local aKey = EUI_CategoryManager:CanAssignToCategory(mi) and memberCat and memberCat._defaultName or nil
                     ns.CompactBagsSection(memberCat and memberCat.name or "?", memberItems,
-                        useSlotNest and "slot" or "flat", aKey, nil, nil,
-                        memberCat and ("cat:" .. memberCat._defaultName))
+                        memberNest and "slot" or "flat", aKey, nil, nil,
+                        memberCat and ("cat:" .. memberCat._defaultName), nil, nil, holdKey)
                 else
                 headerIdx = headerIdx + 1
                 local hdr = GetOrCreateCatHeader(headerIdx)
@@ -1816,8 +1942,9 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                 curY = curY - 22
 
                 if not collapsed then
-                if useSlotNest and #memberItems > 0 then
+                if memberNest then
                     local buckets = BuildSlotBuckets(memberItems)
+                    if holdOn then HoldBuckets(buckets, holdKey) end
                     local showAssign = EUI_CategoryManager and EUI_CategoryManager:CanAssignToCategory(mi)
                     expSubIdx = RenderSlotBuckets(buckets, expSubIdx,
                         showAssign and memberCat and memberCat._defaultName)
@@ -1833,8 +1960,9 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     end
                 end
 
-                -- Assign "+" per member sub-section in group view
+                -- Assign "+" per member sub-section in group view, after held pads
                 local memberItemCount = #memberItems
+                if holdOn then memberItemCount = HoldPads(RenderEmptyPad, holdKey, memberItemCount) end
                 if EUI_CategoryManager and EUI_CategoryManager:CanAssignToCategory(mi) then
                     local aIdx = memberItemCount + 1
                     slotIdx = slotIdx + 1
@@ -1936,6 +2064,13 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             local useSlotNest = armorySlotGrouping
                 and selCat and IsArmoryGearCategory(selCat)
                 and itemCount > 0
+            -- held: nesting as at the hold's start (empty then: as now)
+            local holdKey
+            if holdOn then
+                holdKey = selCat and selCat._defaultName or ns.Hold.LABEL
+                useSlotNest = ns.Hold.Mode("bags", holdKey, itemCount > 0 and (useSlotNest and "slot" or "flat"), itemCount) == "slot"
+                    and armorySlotGrouping
+            end
 
             if compactOn then
                 local aKey
@@ -1951,12 +2086,13 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
                     hint = BP().bagHideRecentInCategories ~= true and EllesmereUI.L("Extra quickview display, your items are also in their category") or nil
                 end
                 ns.CompactBagsSection(headerName or "", displayItems, useSlotNest and "slot" or "flat", aKey, true, hint,
-                    selCat and ("cat:" .. selCat._defaultName), selCat and selCat.isRecent, selCat and selCat.isReagentBag)
+                    selCat and ("cat:" .. selCat._defaultName), selCat and selCat.isRecent, selCat and selCat.isReagentBag, holdKey)
             elseif IsBagCategoryCollapsed(selCat and ("cat:" .. selCat._defaultName)) then
                 -- The single-category view retains its title, but hides its items.
             elseif useSlotNest then
                 local expSubIdx = 0
                 local buckets = BuildSlotBuckets(displayItems)
+                if holdOn then HoldBuckets(buckets, holdKey) end
                 local showAssign = selectedCategoryIndex > 0
                     and EUI_CategoryManager
                     and EUI_CategoryManager:CanAssignToCategory(selectedCategoryIndex)
@@ -1976,6 +2112,7 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
             if selCat and selCat.isPinned and RenderPinnedEmptyCount and RenderPinnedEmptyCount(itemCount + 1) then
                 itemCount = itemCount + 1
             end
+            if holdOn then itemCount = HoldPads(RenderEmptyPad, holdKey, itemCount) end
 
             local remainder = itemCount % columns
             local padCount
@@ -2008,5 +2145,6 @@ function ns.RenderGridView(tempItems, displayItems, emptySlots, child, columns, 
         local btn = itemSlots[i]
         if btn then btn:GetParent():Hide() end
     end
+    if holdOn then wipe(holdCells); wipe(holdSection) end
     return curY
 end

@@ -103,6 +103,10 @@ function ns.RFO_AuraBorderSettings(parent, y, W, get, set, apply, disabled, disp
           getTex=function() return Val("Texture", "solid") end,
           getPx=function() return get("SizePx") end,
           setPx=function(v) set("SizePx", v) end, apply=apply })); y = y - h
+    local tex = Val("Texture", "solid")
+    EllesmereUI.BuildInlineCog(row._rightRegion, EllesmereUI.AuraRadiusCogCfg(tex,
+        function() return Val("CornerRadius", 0) end,
+        function(v) set("CornerRadius", v); apply() end, disabled, "Hide Icons"))
     if not EllesmereUI._prebuilding then
         local rgn = row._rightRegion
         local swatch, refresh = EllesmereUI.BuildColorSwatch(rgn, row:GetFrameLevel() + 3,
@@ -116,8 +120,7 @@ function ns.RFO_AuraBorderSettings(parent, y, W, get, set, apply, disabled, disp
         EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
         EllesmereUI.RegisterWidgetRefresh(refresh)
     end
-    local tex = Val("Texture", "solid")
-    if tex ~= "solid" and tex ~= "" then
+    if EllesmereUI._prebuilding or (tex ~= "solid" and tex ~= "") then
         local rows = {}
         for i, axis in ipairs({ "X", "Y" }) do
             rows[#rows + 1] = { type="slider", label="Shift " .. axis, min=-10, max=10, step=1,
@@ -144,9 +147,8 @@ function ns.RFO_AuraBorderSettings(parent, y, W, get, set, apply, disabled, disp
                 get=function() return Val("DispelTextured", false) end,
                 set=function(v) set("DispelTextured", v); apply() end }
         end
-        EllesmereUI.BuildInlineCog(row._leftRegion, {
-            title="Border Options", rows=rows, disabled=disabled,
-            disabledTooltip="Hide Icons", requireState="disabled" })
+        EllesmereUI.BuildInlineCog(row._leftRegion, { title="Border Options", rows=rows,
+            disabled=disabled, disabledTooltip="Hide Icons", requireState="disabled" })
     end
     return y
 end

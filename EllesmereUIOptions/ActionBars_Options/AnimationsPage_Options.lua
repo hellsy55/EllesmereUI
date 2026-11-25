@@ -309,7 +309,7 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
             local cr, cg, cb = ns._AssistCustomGlowColor()
             f:SetAlpha(1)
             -- Every widget refresh lands here: the engine glow restarts only
-            -- when the style or colour moved, or after a hide stopped it.
+            -- when the style or color moved, or after a hide stopped it.
             if f:IsVisible() and not (f._assistPvType == customType and f._assistPvR == cr
                 and f._assistPvG == cg and f._assistPvB == cb) then
                 G.StopAllGlows(glowHost)
@@ -789,7 +789,7 @@ local function InitAnimationsPage(PP, EAB, PAGE_ANIMATIONS)
         end
         y = y - h
 
-        -- Row 4: the custom glow's colour source (its swatch sits beside the
+        -- Row 4: the custom glow's color source (its swatch sits beside the
         -- preview icon above).
         _, h = W:DualRow(parent, y,
             { type="toggle", text="Use Class Color",

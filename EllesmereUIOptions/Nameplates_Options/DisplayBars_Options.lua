@@ -449,7 +449,7 @@ local function BuildDisplayBars(parent, y, ctx)
           } },
         { type="dropdown", text="Kick Ready Mid-Cast Hint",
           values=kickHintValues, order=kickHintOrder,
-          tooltip="Shows where your interrupt will be ready during an enemy cast. \"Tick\" marks the exact spot on the cast bar; \"Tick + Bar\" also colours the window during which your interrupt will be available.",
+          tooltip="Shows where your interrupt will be ready during an enemy cast. \"Tick\" marks the exact spot on the cast bar; \"Tick + Bar\" also colors the window during which your interrupt will be available.",
           getValue=function()
             -- View over two underlying toggles (kickTickEnabled + interruptMidCastEnabled) so nothing migrates: tick off -> None, tick on -> Tick, tick+bar on -> Tick + Bar. Tick defaults true, so a fresh user reads "Tick".
             local db = DB()
@@ -474,11 +474,11 @@ local function BuildDisplayBars(parent, y, ctx)
                 db.interruptMidCastEnabled = false
             end
             ns.RefreshAllSettings()
-            -- Rebuild so the inline mid-cast colour swatch greys/ungreys.
+            -- Rebuild so the inline mid-cast color swatch greys/ungreys.
             C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
           end });  y = y - h
 
-    -- Inline mid-cast colour swatch on the Hint dropdown; greys out unless "Tick + Bar" is selected, since the colour only applies to the bar.
+    -- Inline mid-cast color swatch on the Hint dropdown; greys out unless "Tick + Bar" is selected, since the color only applies to the bar.
     if not EllesmereUI._prebuilding then
         local rightRgn = castColorRow._rightRegion
         local ctrl = rightRgn and rightRgn._control
@@ -549,7 +549,7 @@ local function BuildDisplayBars(parent, y, ctx)
                     UpdatePreview()
                   end },
                 { type = "toggle", label = "Important Cast Color",
-                  tooltip = "Tint the cast bar with the Important colour when the enemy casts a spell the game flags as important.",
+                  tooltip = "Tint the cast bar with the Important color when the enemy casts a spell the game flags as important.",
                   get = function()
                     local db = DB()
                     if db and db.importantCastColorEnabled ~= nil then return db.importantCastColorEnabled end
@@ -631,7 +631,7 @@ local function BuildDisplayBars(parent, y, ctx)
         end
         local flashCfg = {
             type = "toggle", text = "Show Interrupted Flash Effect",
-            tooltip = "Flash the enemy's cast bar and show \"Interrupted\" for a moment when their cast is interrupted. Use the swatch to change the flash colour.",
+            tooltip = "Flash the enemy's cast bar and show \"Interrupted\" for a moment when their cast is interrupted. Use the swatch to change the flash color.",
             getValue = function()
                 local db = DB()
                 if db and db.interruptedFlashEnabled ~= nil then return db.interruptedFlashEnabled end
@@ -640,7 +640,7 @@ local function BuildDisplayBars(parent, y, ctx)
             setValue = function(v)
                 DB().interruptedFlashEnabled = v
                 RefreshAllPlates()
-                -- Rebuild so the inline flash colour swatch greys/ungreys.
+                -- Rebuild so the inline flash color swatch greys/ungreys.
                 C_Timer.After(0, function() EllesmereUI:RefreshPage() end)
             end,
         }
@@ -685,7 +685,7 @@ local function BuildDisplayBars(parent, y, ctx)
             swatchRegion = row3._leftRegion
         end
 
-        -- Inline flash colour swatch on the Show Interrupted Flash Effect toggle; greys out when disabled.
+        -- Inline flash color swatch on the Show Interrupted Flash Effect toggle; greys out when disabled.
         if not EllesmereUI._prebuilding then
             local rgn = swatchRegion
             local ctrl = rgn and rgn._control
@@ -705,7 +705,7 @@ local function BuildDisplayBars(parent, y, ctx)
                 EllesmereUI.OrderInlineAddon(rgn, swatch, "swatch")
                 swatch:SetScript("OnEnter", function(s) EllesmereUI.ShowWidgetTooltip(s, "Interrupted Flash Colour") end)
                 swatch:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-                -- Blizzard Style uses the stock interrupted fill art, so the flash colour is
+                -- Blizzard Style uses the stock interrupted fill art, so the flash color is
                 -- inert there: the build and every refresh grey the swatch out alike.
                 local function ApplyFlashSwatchState()
                     local off = flashOff() or ns.NP_BlizzOnly()

@@ -111,11 +111,15 @@ local CHANNEL_EVENTS = {
 -- power change (UNIT_POWER_UPDATE is throttled), and moves only the bar value
 -- and the power text through the value flush below; the power channel keeps
 -- the full paint on its own events.
+local BORDER_COLOR_EVENTS = { "UNIT_FACTION", "UNIT_FLAGS", "UNIT_NAME_UPDATE", "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED" }
 local OPTIN_EVENTS = {
     healpred = { "UNIT_HEAL_PREDICTION", "UNIT_MAXHEALTH",
                  "UNIT_HEAL_ABSORB_AMOUNT_CHANGED", "UNIT_MAX_HEALTH_MODIFIERS_CHANGED" },
     absglow  = { "UNIT_HEALTH" },
     powerval = { "UNIT_POWER_FREQUENT" },
+    bordercolor = BORDER_COLOR_EVENTS,
+    borderclassification = { "UNIT_CLASSIFICATION_CHANGED", unpack(BORDER_COLOR_EVENTS) },
+    textclassification = { "UNIT_CLASSIFICATION_CHANGED" },
 }
 
 -- Events consumed by the castbar channel; routed raw (event identity matters
@@ -475,6 +479,7 @@ end
 -- for the same reason).
 local IDENTITY_EVENTS = {
     UNIT_NAME_UPDATE = true, UNIT_LEVEL = true, UNIT_CONNECTION = true, UNIT_FACTION = true,
+    UNIT_CLASSIFICATION_CHANGED = true,
 }
 
 -- Heal prediction's trailing flush: a same-frame repeat can carry state the
@@ -1120,7 +1125,7 @@ globalFrame:SetScript("OnEvent", function(self, event, unit)
             -- The whole occupant changed, so the repaint is an identity one
             -- (the text painter paints only its target zones for the event
             -- name itself, which would leave the old name under the new
-            -- colour). The poll's GUID memo takes the new occupant, so its
+            -- color). The poll's GUID memo takes the new occupant, so its
             -- next tick does not repeat this paint.
             f._euiLastGuid = UnitGUID(f._euiUnit)
             Engine.RepaintAll(f, "UnitChanged")
