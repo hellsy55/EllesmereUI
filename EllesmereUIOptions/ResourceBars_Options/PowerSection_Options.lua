@@ -666,7 +666,14 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
 
     -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Power bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Energy / Focus / Mana Missing show the bar at its normal opacity while that resource is below full, a rule-hidden bar and a faded one alike (ns.ERB_MissingWanted / ns.ERB_MissingLiftFloor, same pass); Mana also covers a WoW Forever druid's Mana Bar while Shapeshifted.
     -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
-    local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
+    local fadeSyncRow
+    local function SetPowerText(v)
+        local c = cfg(); if not c then return end
+        c.textFormat = v; RefreshPower(); EllesmereUI:RefreshPage()
+        ns.ERB_RefreshTextMenu(fadeSyncRow and fadeSyncRow._rightRegion)
+    end
+    local fadeSyncH
+    fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
         { type="slider", text="Fade Opacity", min=0, max=100, step=1,
           disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
           disabledTooltip="Fade Out of Combat",
@@ -675,14 +682,29 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
         { type = "dropdown", text = "Power Text",
           disabled = powerOff,
           disabledTooltip = powerDisTip,
-          values = { none = "None", smart = "Smart Text", curpp = "Power Value", curmaxpp = "Power Value / Max", perpp = "Power %", both = "Power Value | Power %" },
+          values = ns.ERB_CustomTextValues(
+              { none = "None", smart = "Smart Text", curpp = "Power Value", curmaxpp = "Power Value / Max", perpp = "Power %", both = "Power Value | Power %" },
+              ns.ERB_PowerTags, cfg,
+              function(c)
+                  local gpp = _G._ERB_GetPrimaryPowerType
+                  local pt = c.textCustomColored == false and gpp and gpp()
+                  local pc = pt and _G._ERB_PowerColors and _G._ERB_PowerColors[pt]
+                  if pc then return { r = pc[1], g = pc[2], b = pc[3] } end
+                  return { r = c.textFillR or 1, g = c.textFillG or 1, b = c.textFillB or 1 }
+              end,
+              SetPowerText, { examples = ns.ERB_PowerTagExamples, label = "Power Text", apply = RefreshPower,
+                  region = function() return fadeSyncRow and fadeSyncRow._rightRegion end }),
           -- WoW Forever lists no Smart Text (EllesmereUI.PowerTextFormat).
-          order = EllesmereUI.PowerTextFormatOrder({ "none", "smart", "curpp", "curmaxpp", "perpp", "both" }),
+          order = EllesmereUI.PowerTextFormatOrder({ "none", "---", "custom", "---", "smart", "curpp", "curmaxpp", "perpp", "both" }),
+          -- Ebon Might is a buff timer: no power values for a template to show.
+          disabledValues = function(key)
+              local gpp = _G._ERB_GetPrimaryPowerType
+              if key == "custom" and gpp and gpp() == "EBON_MIGHT" then
+                  return "Custom text is not available for Ebon Might."
+              end
+          end,
           getValue = function() local c = cfg(); return EllesmereUI.PowerTextFormat(c and c.textFormat or "none") end,
-          setValue = function(v)
-              local c = cfg(); if not c then return end
-              c.textFormat = v; RefreshPower(); EllesmereUI:RefreshPage()
-          end }
+          setValue = SetPowerText }
     ); y = y - fadeSyncH
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerBgRow._rightRegion, env.DB, "primary", "oocFade", "Fade Out of Combat", SmoothRefresh) end
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "primary", "oocAlpha", "Fade Opacity", SmoothRefresh) end
@@ -828,6 +850,7 @@ function ns.ERB_BuildPowerSection(parent, y, ctx)
     );  y = y - h
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(powerTextSizeRow._rightRegion, env.DB, "primary", "textSize",
         "Text Size", SmoothRefresh, { "health", "primary" }) end
+    ns.ERB_AddCustomFormatAccessor(fadeSyncRow._rightRegion, "Power Text", cfg, RefreshPower)
     -- Power Text inline cog: percent sign, anchor, x/y offsets
     do
         local rgn = fadeSyncRow._rightRegion

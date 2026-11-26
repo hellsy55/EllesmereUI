@@ -40,7 +40,7 @@ function EllesmereUI.ShowTTSTextPopup(title, initial, defaultText, onSave, onPre
         bg:SetAllPoints(); bg:SetColorTexture(0.077, 0.068, 0.058, 1)
         EllesmereUI.MakeBorder(popup, 1, 1, 1, 0.18, EllesmereUI.PanelPP)
 
-        local font = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+        local font = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
         local heading = popup:CreateFontString(nil, "OVERLAY")
         heading:SetFont(font, 14, "")
         heading:SetPoint("TOP", popup, "TOP", 0, -16)
@@ -266,7 +266,7 @@ function EllesmereUI.BuildUnlockPlaceholder(opts)
 
     -- White centered label matching unlock mode mover style
     local fontPath = (EllesmereUI.GetFontPath("extras"))
-        or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.TTF"
+        or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
     local label = f:CreateFontString(nil, "OVERLAY")
     label:SetFont(fontPath, 10, "OUTLINE, SLUG")
     label:SetText(EllesmereUI.L(opts.text or "Move in Unlock Mode"))

@@ -229,7 +229,7 @@ end
 -- font from the locale system's own glyph table beats a multi-script family.
 local function LP_FontFor(locale)
     local fn = EllesmereUI.LocaleGlyphFont
-    return (fn and fn(locale)) or (EllesmereUI.MEDIA_PATH .. "fonts\\Expressway.TTF")
+    return (fn and fn(locale)) or (EllesmereUI.MEDIA_PATH .. "fonts\\EUI Highway.ttf")
 end
 
 -------------------------------------------------------------------------------
@@ -237,6 +237,73 @@ end
 --  deep-links via NavigateToElementSettings(module, page, section, preSelect, highlight).
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
+    {
+        -- A mini patch: no hero cards and no thank-you line.
+        version = "9.9.5",
+        releaseDate = "26/11/2026",
+        features = {
+            {
+                -- The Demonic Sacrifice row (warlocks) of SELF BUFFS on the Auras, Buffs & Consumables page; its cog
+                -- picks the demon (WoW Forever only).
+                module  = "AuraBuff Reminders",
+                forever = true,
+                title   = "Demonic Sacrifice",
+                desc    = "Self Buffs reminds a warlock with Demonic Sacrifice when its buff is missing; the icon summons the demon, then sacrifices it. Off by default",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "SELF BUFFS", highlight = "Demonic Sacrifice" } or nil,
+            },
+            {
+                -- The Where to Show row of SELF BUFFS on the Auras, Buffs & Consumables page (WoW Forever only).
+                module  = "AuraBuff Reminders",
+                forever = true,
+                title   = "Self Buffs and Consumables",
+                desc    = "The reminders are split into Self Buffs and Consumables, each with its own Where to Show and sound, and weapon imbues or poisons are now separate from weapon stones and oils",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "SELF BUFFS", highlight = "Where to Show" } or nil,
+            },
+            {
+                -- The Show Item Level for Items row, last in BLIZZARD TOOLTIP on the Tooltips, Menus & Popups page;
+                -- its cog holds the modifier, position, color, compare and bags options (WoW Forever only).
+                module  = "Blizzard Skins+",
+                forever = true,
+                title   = "Item Level on Item Tooltips",
+                desc    = "Weapon and armor tooltips can show their item level, with an optional difference from what you have equipped. Off by default",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIBlizzardSkin", page = "Tooltips, Menus & Popups", section = "BLIZZARD TOOLTIP", highlight = "Show Item Level for Items" } or nil,
+            },
+            {
+                -- The Clickable Cast Bar row of NAMEPLATE SPACING on the Nameplates General page (both clients).
+                module = "Nameplates",
+                title  = "Clickable Cast Bar",
+                desc   = "Enemy nameplates can include the cast bar in their click area, so clicking a cast bar targets the unit. Off by default",
+                nav    = { module = "EllesmereUINameplates", page = "General", section = "NAMEPLATE SPACING", highlight = "Clickable Cast Bar" },
+            },
+            {
+                -- Hide Your Pet sits in the cog of the Hide Self row, FRAMES on the Party page (both clients).
+                module = "Raid & Party Frames",
+                title  = "Hide Your Pet",
+                desc   = "With Hide Self on, a new option in its cog hides your own pet from the party pets too. Off by default",
+                nav    = { module = "EllesmereUIRaidFrames", page = "Party", section = "FRAMES", highlight = "Hide Self" },
+            },
+            {
+                -- Custom is a value of the Health Text dropdown, HEALTH BAR on the Class, Power and Health Bars page
+                -- (Power Text's twin in POWER BAR; both clients).
+                module = "Resource Bars",
+                title  = "Custom Health and Power Text",
+                desc   = "Health Text and Power Text gain a Custom option: write your own text with tags such as [hp:abr] or [pp:pct]%",
+                nav    = { module = "EllesmereUIResourceBars", page = "Class, Power and Health Bars", section = "HEALTH BAR", highlight = "Health Text" },
+            },
+        },
+        fixes = {
+            { module = "AuraBuff Reminders", forever = true, text = "With no Firestone or Spellstone in your bags, the warlock's weapon reminder now casts Create Firestone or Create Spellstone first; the next click applies the stone." },
+            { module = "Cooldown Manager", text = "Also Show Below accepts up to an hour (3600 seconds), so long buffs can show again in their last minutes." },
+            { module = "Cooldown Manager", forever = true, text = "Soulstone has its own item entry under Potions & Healthstone, which shows the stone's cooldown; the Soulstone Resurrection spell, which never showed one, is no longer offered for cooldown and utility bars." },
+            { module = "General", text = "Resolved an issue with various fonts displaying incorrectly." },
+            { module = "Quality of Life", text = "Self Combat Text shows the damage that gets through a partial absorb, block or resist (for example \"-1,234 (567 Absorbed)\"), as Blizzard's own combat text does, instead of only \"Absorb\"." },
+            { module = "Quest Tracker", text = "The Wowhead Link popup's Close button closes it again after the link was cut or deleted from the box." },
+            { module = "Unit Frames", text = "Cast bar textures with a gradient or pattern are no longer squeezed into the filled part: the texture stays in place as the cast fills." },
+            { module = "Unit Frames", text = "Under Blizzard Style and WoW Forever Style the cast bar background no longer shows in the empty icon slot when the cast icon is moved with its offsets." },
+            { module = "Unit Frames", text = "The options preview draws a detached power bar above or below the frame as the live frame does, following the Detached Power Bar strata." },
+            { module = "Localization", text = "Traditional Chinese, Portuguese (Brazil) and Spanish translations updated." },
+        },
+    },
     {
         -- An extension of 9.9.3, released a day after it: no fixes or thank-you line of its
         -- own, and 9.9.3's card opens with this one (`openNext`, read only while it is newest).
@@ -398,13 +465,12 @@ EllesmereUI._WHATSNEW_PATCHES = {
         thanks = true,
         features = {
             {
-                -- The Scrolls and Elixirs slot of WOW FOREVER on the Auras, Buffs & Consumables page (beside Arcane
-                -- Censer for a warrior or rogue, else a row of its own; WoW Forever only).
+                -- The Scrolls and Elixirs slot of CONSUMABLES on the Auras, Buffs & Consumables page (WoW Forever only).
                 module  = "AuraBuff Reminders",
                 forever = true,
                 title   = "Scrolls and Elixirs",
                 desc    = "A reminder for each stat you tick, per class, when its scroll or elixir buff is missing and you carry one; click it to use the best one for your level",
-                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "WOW FOREVER", highlight = "Scrolls and Elixirs" } or nil,
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Scrolls and Elixirs" } or nil,
             },
             {
                 -- A submenu of Blizzard's Looking For Group window cog menu: no options row (WoW Forever only).
@@ -516,13 +582,13 @@ EllesmereUI._WHATSNEW_PATCHES = {
         },
         features = {
             {
-                -- Target Tracking is a hunter item of the Class Buffs dropdown in WOW FOREVER on the Auras, Buffs &
+                -- Target Tracking is a hunter item of the Class Buffs dropdown in SELF BUFFS on the Auras, Buffs &
                 -- Consumables page (WoW Forever only).
                 module  = "AuraBuff Reminders",
                 forever = true,
                 title   = "Hunter Target Tracking",
                 desc    = "In combat, a hunter is reminded to switch to the tracking that matches their target's creature type; off by default, in the Class Buffs dropdown",
-                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "WOW FOREVER", highlight = "Class Buffs" } or nil,
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "SELF BUFFS", highlight = "Class Buffs" } or nil,
             },
             {
                 -- The Class Colored Names checkbox dropdown of EXTRAS on the Chat page (both clients).
@@ -588,13 +654,13 @@ EllesmereUI._WHATSNEW_PATCHES = {
         thanks = true,
         features = {
             {
-                -- Show Sleep Timer is a row of the Sleeping Bag cog in WOW FOREVER on the Auras, Buffs & Consumables
+                -- Show Sleep Timer is a row of the Sleeping Bag cog in CONSUMABLES on the Auras, Buffs & Consumables
                 -- page (WoW Forever only).
                 module  = "AuraBuff Reminders",
                 forever = true,
                 title   = "Sleeping Bag Sleep Timer",
                 desc    = "While you lie in your sleeping bag, the reminder counts down to three Well-Rested stacks and shows your stack count; on by default, in the Sleeping Bag cog",
-                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "WOW FOREVER", highlight = "Sleeping Bag" } or nil,
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Sleeping Bag" } or nil,
             },
             {
                 -- The Loadout Manager tab: one card per spec group plus the shared card (WoW Forever only).
@@ -671,12 +737,12 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIActionBars", page = "Bar Animations", section = "BAR INTERACTIONS", highlight = "Show Swing Timer on Attacks" } or nil,
             },
             {
-                -- The Arcane Censer row of WOW FOREVER on the Auras, Buffs & Consumables page (WoW Forever only).
+                -- The Arcane Censer row of CONSUMABLES on the Auras, Buffs & Consumables page (WoW Forever only).
                 module  = "AuraBuff Reminders",
                 forever = true,
                 title   = "Arcane Censer Reminder",
                 desc    = "In dungeons, reminds you to use your Arcane Censer while Magical Awareness is missing; click the icon to use it, off by default",
-                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "WOW FOREVER", highlight = "Arcane Censer" } or nil,
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Arcane Censer" } or nil,
             },
             {
                 -- The Talent Reminders tab: Export | Delete on each spec's card, Export All over the cards and
@@ -1127,13 +1193,13 @@ EllesmereUI._WHATSNEW_PATCHES = {
         thanks = true,
         features = {
             {
-                -- The Sleeping Bag row of WOW FOREVER on the Auras, Buffs & Consumables page; Show Below is in its
+                -- The Sleeping Bag row of CONSUMABLES on the Auras, Buffs & Consumables page; Show Below is in its
                 -- cog and in Well Fed's (WoW Forever only).
                 module  = "AuraBuff Reminders",
                 forever = true,
                 title   = "Show Below (Minutes)",
                 desc    = "The Sleeping Bag and Well Fed reminders can also show a set number of minutes before their buff runs out, with a countdown; in each reminder's cog, off by default",
-                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "WOW FOREVER", highlight = "Sleeping Bag" } or nil,
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Sleeping Bag" } or nil,
             },
             {
                 -- The Flag/Hide Owned Items toggle of MERCHANT OPTIONS in the Merchant card of Window Skins (both
@@ -1345,13 +1411,13 @@ EllesmereUI._WHATSNEW_PATCHES = {
                 nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "RAID BUFFS" } or nil,
             },
             {
-                -- The Sleeping Bag row of WOW FOREVER on the Auras, Buffs & Consumables page (WoW Forever
+                -- The Sleeping Bag row of CONSUMABLES on the Auras, Buffs & Consumables page (WoW Forever
                 -- only).
                 module  = "AuraBuff Reminders",
                 forever = true,
                 title   = "Sleeping Bag",
                 desc    = "A reminder to use your Cozy Sleeping Bag while Well-Rested is missing or under 3 stacks, below max level; off by default",
-                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "WOW FOREVER", highlight = "Sleeping Bag" } or nil,
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Sleeping Bag" } or nil,
             },
             {
                 -- The Show Pinned Items row of CATEGORIES on the Bags page; Pins per Character is in its
@@ -2388,25 +2454,25 @@ initFrame:SetScript("OnEvent", function(self)
         local fctFontValues = {
             _menuOpts = EllesmereUI.FONT_MENU_OPTS,
             ["default"]                                = { text = "Blizzard Default", font = "Fonts\\FRIZQT__.TTF" },
-            [FCT_FONT_DIR .. "Expressway.TTF"]         = { text = EllesmereUI.FontDisplayName("Expressway"), font = FCT_FONT_DIR .. "Expressway.TTF" },
-            [FCT_FONT_DIR .. "Avant Garde Naowh.ttf"]        = { text = EllesmereUI.FontDisplayName("Avant Garde"), font = FCT_FONT_DIR .. "Avant Garde Naowh.ttf" },
-            [FCT_FONT_DIR .. "Arial Bold.TTF"]         = { text = EllesmereUI.FontDisplayName("Arial Bold"), font = FCT_FONT_DIR .. "Arial Bold.TTF" },
+            [FCT_FONT_DIR .. "EUI Highway.ttf"]         = { text = EllesmereUI.FontDisplayName("Expressway"), font = FCT_FONT_DIR .. "EUI Highway.ttf" },
+            [FCT_FONT_DIR .. "EUI Geometric.ttf"]        = { text = EllesmereUI.FontDisplayName("Avant Garde"), font = FCT_FONT_DIR .. "EUI Geometric.ttf" },
+            [FCT_FONT_DIR .. "EUI Grotesk Bold.ttf"]         = { text = EllesmereUI.FontDisplayName("Arial Bold"), font = FCT_FONT_DIR .. "EUI Grotesk Bold.ttf" },
             [FCT_FONT_DIR .. "Poppins.ttf"]            = { text = "Poppins",               font = FCT_FONT_DIR .. "Poppins.ttf" },
             [FCT_FONT_DIR .. "FiraSans Medium.ttf"]    = { text = "Fira Sans Medium",      font = FCT_FONT_DIR .. "FiraSans Medium.ttf" },
-            [FCT_FONT_DIR .. "Expressway CAPS.ttf"]    = { text = EllesmereUI.FontDisplayName("Expressway CAPS"), font = FCT_FONT_DIR .. "Expressway CAPS.ttf" },
+            [FCT_FONT_DIR .. "EUI Highway Caps.ttf"]    = { text = EllesmereUI.FontDisplayName("Expressway CAPS"), font = FCT_FONT_DIR .. "EUI Highway Caps.ttf" },
             [FCT_FONT_DIR .. "Arial Narrow.ttf"]       = { text = EllesmereUI.FontDisplayName("Arial Narrow"), font = FCT_FONT_DIR .. "Arial Narrow.ttf" },
             [FCT_FONT_DIR .. "Changa.ttf"]             = { text = "Changa",                font = FCT_FONT_DIR .. "Changa.ttf" },
             [FCT_FONT_DIR .. "Cinzel Decorative.ttf"]  = { text = "Cinzel Decorative",     font = FCT_FONT_DIR .. "Cinzel Decorative.ttf" },
             [FCT_FONT_DIR .. "Exo.otf"]                = { text = "Exo",                   font = FCT_FONT_DIR .. "Exo.otf" },
             [FCT_FONT_DIR .. "FiraSans Bold.ttf"]      = { text = "Fira Sans Bold",        font = FCT_FONT_DIR .. "FiraSans Bold.ttf" },
             [FCT_FONT_DIR .. "FiraSans Light.ttf"]     = { text = "Fira Sans Light",       font = FCT_FONT_DIR .. "FiraSans Light.ttf" },
-            [FCT_FONT_DIR .. "Future X Black.otf"]     = { text = EllesmereUI.FontDisplayName("Future X Black"), font = FCT_FONT_DIR .. "Future X Black.otf" },
-            [FCT_FONT_DIR .. "Gotham Narrow Ultra.otf"] = { text = EllesmereUI.FontDisplayName("Gotham Narrow Ultra"), font = FCT_FONT_DIR .. "Gotham Narrow Ultra.otf" },
-            [FCT_FONT_DIR .. "Gotham Narrow.otf"]      = { text = EllesmereUI.FontDisplayName("Gotham Narrow"), font = FCT_FONT_DIR .. "Gotham Narrow.otf" },
+            [FCT_FONT_DIR .. "EUI Geometric Black.ttf"]     = { text = EllesmereUI.FontDisplayName("Future X Black"), font = FCT_FONT_DIR .. "EUI Geometric Black.ttf" },
+            [FCT_FONT_DIR .. "EUI Narrow Heavy.ttf"] = { text = EllesmereUI.FontDisplayName("Gotham Narrow Ultra"), font = FCT_FONT_DIR .. "EUI Narrow Heavy.ttf" },
+            [FCT_FONT_DIR .. "EUI Narrow Sans.ttf"]      = { text = EllesmereUI.FontDisplayName("Gotham Narrow"), font = FCT_FONT_DIR .. "EUI Narrow Sans.ttf" },
             [FCT_FONT_DIR .. "Russo One.ttf"]          = { text = "Russo One",             font = FCT_FONT_DIR .. "Russo One.ttf" },
             [FCT_FONT_DIR .. "Ubuntu.ttf"]             = { text = "Ubuntu",                font = FCT_FONT_DIR .. "Ubuntu.ttf" },
             [FCT_FONT_DIR .. "Homespun.ttf"]           = { text = "Homespun",              font = FCT_FONT_DIR .. "Homespun.ttf" },
-            [FCT_FONT_DIR .. "HWT Artz.ttf"]           = { text = EllesmereUI.FontDisplayName("HWT Artz"), font = FCT_FONT_DIR .. "HWT Artz.ttf" },
+            [FCT_FONT_DIR .. "EUI Poster Caps.ttf"]           = { text = EllesmereUI.FontDisplayName("HWT Artz"), font = FCT_FONT_DIR .. "EUI Poster Caps.ttf" },
             ["Fonts\\FRIZQT__.TTF"]                    = { text = "Friz Quadrata",         font = "Fonts\\FRIZQT__.TTF" },
             ["Fonts\\ARIALN.TTF"]                      = { text = "Arial",                 font = "Fonts\\ARIALN.TTF" },
             ["Fonts\\MORPHEUS.TTF"]                    = { text = "Morpheus",              font = "Fonts\\MORPHEUS.TTF" },
@@ -2414,12 +2480,12 @@ initFrame:SetScript("OnEvent", function(self)
         }
         local fctFontOrder = {
             "default",
-            FCT_FONT_DIR .. "Expressway.TTF",
-            FCT_FONT_DIR .. "Avant Garde Naowh.ttf",
-            FCT_FONT_DIR .. "Arial Bold.TTF",
+            FCT_FONT_DIR .. "EUI Highway.ttf",
+            FCT_FONT_DIR .. "EUI Geometric.ttf",
+            FCT_FONT_DIR .. "EUI Grotesk Bold.ttf",
             FCT_FONT_DIR .. "Poppins.ttf",
             FCT_FONT_DIR .. "FiraSans Medium.ttf",
-            FCT_FONT_DIR .. "Expressway CAPS.ttf",
+            FCT_FONT_DIR .. "EUI Highway Caps.ttf",
             "---",
             FCT_FONT_DIR .. "Arial Narrow.ttf",
             FCT_FONT_DIR .. "Changa.ttf",
@@ -2427,13 +2493,13 @@ initFrame:SetScript("OnEvent", function(self)
             FCT_FONT_DIR .. "Exo.otf",
             FCT_FONT_DIR .. "FiraSans Bold.ttf",
             FCT_FONT_DIR .. "FiraSans Light.ttf",
-            FCT_FONT_DIR .. "Future X Black.otf",
-            FCT_FONT_DIR .. "Gotham Narrow Ultra.otf",
-            FCT_FONT_DIR .. "Gotham Narrow.otf",
+            FCT_FONT_DIR .. "EUI Geometric Black.ttf",
+            FCT_FONT_DIR .. "EUI Narrow Heavy.ttf",
+            FCT_FONT_DIR .. "EUI Narrow Sans.ttf",
             FCT_FONT_DIR .. "Russo One.ttf",
             FCT_FONT_DIR .. "Ubuntu.ttf",
             FCT_FONT_DIR .. "Homespun.ttf",
-            FCT_FONT_DIR .. "HWT Artz.ttf",
+            FCT_FONT_DIR .. "EUI Poster Caps.ttf",
             "Fonts\\FRIZQT__.TTF",
             "Fonts\\ARIALN.TTF",
             "Fonts\\MORPHEUS.TTF",
@@ -2485,7 +2551,7 @@ initFrame:SetScript("OnEvent", function(self)
               tooltipOpts={ color={1, 0.3, 0.3} },
               values = fctFontValues, order = fctFontOrder,
               getValue=function()
-                local v = EllesmereUIDB and EllesmereUIDB.fctFont
+                local v = EllesmereUI.CurrentFontPath(EllesmereUIDB and EllesmereUIDB.fctFont)
                 return v and EllesmereUI.CombatTextFontCoversLocale(v) and v or "default"
               end,
               setValue=function(v)

@@ -123,7 +123,7 @@ local TTSVoiceDropdownValues = EllesmereUI.BuildTTSVoiceDropdownValues
 local addSpellPopup
 local function ShowAddSpellPopup(onAdded)
     local PP = EllesmereUI.PanelPP
-    local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+    local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
 
     if not addSpellPopup then
         local dimmer = CreateFrame("Frame", nil, UIParent)
@@ -228,7 +228,7 @@ end
 local customTextPopup
 local function ShowCustomTextPopup(titleText, initial, onSave)
     local PP = EllesmereUI.PanelPP
-    local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+    local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
 
     if not customTextPopup then
         local dimmer = CreateFrame("Frame", nil, UIParent)
@@ -317,7 +317,7 @@ end
 local function BuildMovementAlertPage(pageName, parent, yOffset)
     local W = EllesmereUI.Widgets
     local PP = EllesmereUI.PanelPP
-    local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+    local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
     local EG = EllesmereUI.ELLESMERE_GREEN or { r = 0.05, g = 0.82, b = 0.62 }
     local ma = MA()
     if not ma then return 0 end
