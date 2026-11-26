@@ -42,7 +42,7 @@ local function ShowTransformsPopup()
     if not data then return end
 
     if not transformsPopup then
-        local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+        local FONT = EllesmereUI._font or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
         local EG = EllesmereUI.PANEL_ACCENT or { r = 0.05, g = 0.82, b = 0.62 }
         local PP = EllesmereUI.PanelPP
         local COL_W, COL_GAP = 190, 12

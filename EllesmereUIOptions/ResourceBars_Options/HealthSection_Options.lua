@@ -953,7 +953,14 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
 
     -- Out of Combat Opacity & Visibility cog: Fade Out of Combat dims the Health bar to this alpha out of combat (100 = no fade; ns.ResolveBarAlpha in UpdateVisibility, which reacts to combat). Show When Health Missing shows the bar at its normal opacity while health is below full, a rule-hidden bar and a faded one alike (ns.ERB_MissingWanted / ns.ERB_MissingLiftFloor, same pass).
     -- Dedicated per-bar Fade controls, with selective cross-bar synchronization.
-    local fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
+    local fadeSyncRow
+    local function SetHealthText(v)
+        local c = cfg(); if not c then return end
+        c.textFormat = v; RefreshHealth(); EllesmereUI:RefreshPage()
+        ns.ERB_RefreshTextMenu(fadeSyncRow and fadeSyncRow._rightRegion)
+    end
+    local fadeSyncH
+    fadeSyncRow, fadeSyncH = W:DualRow(parent, y,
         { type="slider", text="Fade Opacity", min=0, max=100, step=1,
           disabled=function() local c=cfg(); return not (c and c.oocFadeEnabled) end,
           disabledTooltip="Fade Out of Combat",
@@ -962,13 +969,19 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
         { type = "dropdown", text = "Health Text",
           disabled = healthOff,
           disabledTooltip = "Health Bar",
-          values = { none = "None", perhp = "Health %", perhpnosign = "Health % (No Sign)", curhpshort = "Health #", curmaxhp = "Health # / Max #", perhpnum = "Health % | #", both = "Health # | %" },
-          order = { "none", "---", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both" },
+          values = ns.ERB_CustomTextValues(
+              { none = "None", perhp = "Health %", perhpnosign = "Health % (No Sign)", curhpshort = "Health #", curmaxhp = "Health # / Max #", perhpnum = "Health % | #", both = "Health # | %" },
+              ns.ERB_HealthTags, cfg,
+              function(c)
+                  local _, cls = UnitClass("player")
+                  if c.textCustomColored == false and cls then return EllesmereUI.GetClassColor(cls) end
+                  return { r = c.textFillR or 1, g = c.textFillG or 1, b = c.textFillB or 1 }
+              end,
+              SetHealthText, { examples = ns.ERB_HealthTagExamples, label = "Health Text", apply = RefreshHealth,
+                  region = function() return fadeSyncRow and fadeSyncRow._rightRegion end }),
+          order = { "none", "---", "custom", "---", "perhp", "perhpnosign", "curhpshort", "curmaxhp", "perhpnum", "both" },
           getValue = function() local c = cfg(); return c and c.textFormat or "none" end,
-          setValue = function(v)
-              local c = cfg(); if not c then return end
-              c.textFormat = v; RefreshHealth(); EllesmereUI:RefreshPage()
-          end }
+          setValue = SetHealthText }
     ); y = y - fadeSyncH
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(healthBgRow._rightRegion, env.DB, "health", "oocFade", "Fade Out of Combat", SmoothRefresh) end
     if ns.ERB_ScalarSync then ns.ERB_ScalarSync(fadeSyncRow._leftRegion, env.DB, "health", "oocAlpha", "Fade Opacity", SmoothRefresh) end
@@ -1065,6 +1078,7 @@ function ns.ERB_BuildHealthSection(parent, y, ctx)
               c.textSize = v; RefreshHealth()
           end }
     );  y = y - h
+    ns.ERB_AddCustomFormatAccessor(fadeSyncRow._rightRegion, "Health Text", cfg, RefreshHealth)
     -- Health Text inline cog: anchor + x/y offsets
     do
         local rgn = fadeSyncRow._rightRegion

@@ -5480,7 +5480,7 @@ do
         local fs = _flyoutFS[button]
         if not fs then
             local font = EllesmereUI._font
-                or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+                or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
             local flag = EllesmereUI.SlugFlag("OUTLINE, SLUG")
             fs = button:CreateFontString(nil, "OVERLAY", nil, 7)
             fs:SetFont(font, 12, flag)
@@ -5500,7 +5500,7 @@ do
         local fs = _flyoutStatFS[button]
         if not fs then
             local font = EllesmereUI._font
-                or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\Expressway.ttf"
+                or "Interface\\AddOns\\EllesmereUI\\media\\fonts\\EUI Highway.ttf"
             local flag = EllesmereUI.SlugFlag("OUTLINE, SLUG")
             fs = button:CreateFontString(nil, "OVERLAY", nil, 7)
             fs:SetFont(font, 11, flag)
