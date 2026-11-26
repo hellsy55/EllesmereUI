@@ -1600,7 +1600,13 @@ local function Panel(name, width, height)
     titleBand:SetHeight(25)
     EllesmereUI.MakeBorder(f, .2, .2, .2, 1, EllesmereUI.PP)
     f:Hide()
-    EllesmereUI.RegisterEscapeClose(f)
+    -- The compact bar must not participate in Escape/Back closing, while
+    -- remaining a controller cursor target like the other Raid Groups panels.
+    if name=="EllesmereUIRaidGroupsMiniWindow" then
+        EllesmereUI.RegisterPadFrame(f)
+    else
+        EllesmereUI.RegisterEscapeClose(f)
+    end
     f._raidGroupsScaleKey=RGStyle.windowNames[name]
     -- Restore each movable panel's last position when opened, including after
     -- reload. Reset to center only if the restored/current panel is offscreen.
@@ -1663,7 +1669,10 @@ local function MainWindowSizeToggle(parent, expanding, onClick)
         EllesmereUI.ShowWidgetTooltip(self,expanding and "Expand Raid Groups" or "Minimize Raid Groups")
     end)
     toggle:SetScript("OnLeave",function() EllesmereUI.HideWidgetTooltip() end)
-    toggle:SetScript("OnClick",onClick)
+    toggle:RegisterForClicks("LeftButtonUp","RightButtonUp")
+    toggle:SetScript("OnClick",function(_,button)
+        if button=="RightButton" then parent:Hide() else onClick() end
+    end)
     parent._rgSizeToggle=toggle
     return toggle
 end
@@ -1676,12 +1685,13 @@ local function MainTitleToggle(parent, title, onClick)
     hit:SetSize(math.max(110,title:GetStringWidth()+10),24)
     hit:SetPoint("CENTER",title,"CENTER",0,0)
     hit:SetFrameLevel(parent:GetFrameLevel()+2)
-    hit:RegisterForClicks("LeftButtonUp")
+    hit:RegisterForClicks("LeftButtonUp","RightButtonUp")
     hit:RegisterForDrag("LeftButton")
     hit:SetScript("OnMouseDown",function(self,button)
         if button=="LeftButton" then self._titleDragged=false end
     end)
-    hit:SetScript("OnClick",function(self)
+    hit:SetScript("OnClick",function(self,button)
+        if button=="RightButton" then parent:Hide(); return end
         if self._titleDragged then self._titleDragged=nil; return end
         onClick()
     end)
@@ -6722,9 +6732,8 @@ events:SetScript("OnEvent",function(self,event,addonName)
     end
     if event=="PLAYER_REGEN_DISABLED" then
         if applyState then StopApply();WarnCombat(true) end
-        -- Only the main Raid Groups editor (or its compact mini view) stays
-        -- visible. Auxiliary editors/popups retain their original combat close
-        -- behavior, without destroying pending nickname or setup edits.
+        -- The compact mini view alone survives combat. The expanded editor
+        -- and auxiliary panels close, without discarding pending draft edits.
         if previewWindow and previewWindow:IsShown() and previewDraftState then
             RGStyle.previewSuspendedForCombat=true
         end
@@ -6740,7 +6749,7 @@ events:SetScript("OnEvent",function(self,event,addonName)
         for _,panel in pairs(RGStyle.panels) do
             if panel:IsShown() then
                 panel:StopMovingOrSizing()
-                if panel~=win and panel~=RGStyle.mainMini then panel:Hide() end
+                if panel~=RGStyle.mainMini then panel:Hide() end
             end
         end
         return

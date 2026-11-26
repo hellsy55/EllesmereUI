@@ -99,7 +99,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
           end,
           tooltip="Increases the clickable hitbox height of enemy nameplates. 100% = matches bar height. Increase to make nameplates easier to click." });  y = y - h
 
-    _, h = W:DualRow(parent, y,
+    local clickableCastBarCfg =
         { type="toggle", text="Clickable Cast Bar",
           getValue=function() return DBVal("clickableCastBar") == true end,
           setValue=function(v)
@@ -108,8 +108,7 @@ local function BuildGeneralPage(pageName, parent, yOffset)
             -- An open hitbox overlay follows the new click area.
             if ns._hitboxOverlayShown and ns.SetHitboxOverlayShown then ns.SetHitboxOverlayShown(true) end
           end,
-          tooltip="Extends the clickable hitbox of enemy nameplates down over the cast bar, so clicking the cast bar targets the unit.\n\nWhile this is on, Blizzard's own nameplates (friendly plates and names, including inside instances) sit lower." },
-        EllesmereUI.BlankRowCfg());  y = y - h
+          tooltip="Extends the clickable hitbox of enemy nameplates down over the cast bar, so clicking the cast bar targets the unit.\n\nWhile this is on, Blizzard's own nameplates (friendly plates and names, including inside instances) sit lower." }
 
     -- Eyeball toggle on Hitbox Size X: translucent overlay on real enemy nameplates marking the clickable area, for visual slider tuning; runtime-only, auto-hides when the panel closes. None in the search pre-build: it indexes nothing, and the row is a stand-in there.
     if not EllesmereUI._prebuilding then
@@ -161,7 +160,9 @@ local function BuildGeneralPage(pageName, parent, yOffset)
     -- the client's default is not a fraction).
     do
         local function CVarDefault(name) return tonumber(C_CVar.GetCVarDefault(name)) end
-        local cvarRows = {}
+        -- Keep the left slot occupied even when CVars vary by client. The
+        -- first available CVar (usually Stacking Speed) fills the right slot.
+        local cvarRows = { clickableCastBarCfg }
         if C_CVar.GetCVarInfo("nameplateMotionSpeed") then
             cvarRows[#cvarRows + 1] = { type="slider", text="Stacking Speed",
                 min=25, max=400, step=5,
@@ -216,6 +217,8 @@ local function BuildGeneralPage(pageName, parent, yOffset)
                 end,
                 tooltip="How far from the bottom of the screen nameplates stop. 0 lets them reach the edge." }
         end
+        -- Pair the conditional CVars without introducing a blank row between
+        -- Clickable Cast Bar and Stacking Speed; only the final row may be open.
         for i = 1, #cvarRows, 2 do
             _, h = W:DualRow(parent, y, cvarRows[i], cvarRows[i + 1] or EllesmereUI.BlankRowCfg());  y = y - h
         end
