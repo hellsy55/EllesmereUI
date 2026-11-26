@@ -116,6 +116,9 @@ the user's approved conflict resolution leaves no unmerged paths, run:
 <python_runtime> -B .tools/normalize_tocs.py fix --target <destination-branch>
 <python_runtime> -B .tools/normalize_tocs.py check --target <destination-branch>
 <python_runtime> -B .tools/tests/test_toc_policy.py
+<python_runtime> -B .tools/tests/test_options_layout.py
+<python_runtime> -B .tools/options_layout.py
+<python_runtime> -B .tools/tests/test_nameplates_extras_layout.py
 <python_runtime> -B .tools/guardrails.py
 git diff --check
 ```
@@ -131,6 +134,43 @@ commit. With drift, report the correction, resolve the compiler before mutation,
 then check out that destination safely and follow `fix`, `check`, tests and
 guardrails above. For PTR-only requests this does not grant permission to repair
 Retail: retain the existing Sync A authorization check.
+
+### Options layout checkpoint
+
+In Local and Cloud, run the three layout commands above for every final Retail
+and PTR candidate, including no-ops and fast-forwards, before staged review,
+commit, publication or update completion. For an isolated candidate, use the
+validators from the verified workflow checkout with `--root <candidate-tree>`
+for the source scan and `--source <candidate-GeneralPage_Options.lua>` for the
+Nameplates fixture. Keep the validators in both maintained branches through
+Sync B. Use an existing Lua 5.1 interpreter (`lua5.1` on PATH or `LUA51` set to its
+absolute path), or on Windows an existing Lua 5.1 DLL (`LUA51_DLL` or the
+Warcraft Recorder location). Check execution capability before branch mutation.
+
+For integrations that change options builders or their shared layout helpers,
+review the affected pages and related sections on the integrated destination.
+Trace slot eligibility and order across the changed branches and helper calls.
+Check all-present, all-absent and single-omission cases where they exist, plus
+any mixed cases that change the row pairing or cross a section boundary. Use a
+focused builder fixture when source inspection cannot establish the layout.
+The general scan covers direct native DualRow streams within one Lua block and
+parent, including explicit blank configs and direct availability fallbacks. It
+does not execute arbitrary pages, follow conditions across blocks, resolve
+config aliases, wrappers or dynamic frames, or infer whether controls are
+functionally related. Include those patterns in the affected-page review.
+Preserve separate sections, intentional right-region content and native
+full-width rows.
+
+On a finding, identify the module, page, section, controls and triggering state.
+Trace the cause and apply the smallest safe correction to the native builder in
+the same update, preserving fork behavior. Rerun the layout checks and the
+applicable technical validations on the corrected tree. Preserve the existing
+human conflict and feature decisions. If a safe correction is ambiguous, stop
+for the user's decision. A failed check, missing execution support or unresolved
+regression blocks completion. For a fast-forward or no-op that needs correction,
+use the existing correction-commit checkpoint before publication. If a library
+stage changes the candidate tree, rerun the layout checks before its staged
+review and publication.
 
 Stage only intended integrated/corrected files. Show all four required staged
 views, including the complete native diff, and wait for explicit approval
