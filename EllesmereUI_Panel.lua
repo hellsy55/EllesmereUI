@@ -3415,7 +3415,9 @@ local function SetTabOffset(value)
 
     local content = tabBar._tabContent
     content:ClearAllPoints()
-    content:SetPoint("BOTTOMLEFT", viewport, "BOTTOMLEFT", -offset, 0)
+    -- Compensate for the moving viewport's left gutter. Otherwise showing
+    -- the left arrow shifts the labels an extra 31 pixels mid-scroll.
+    content:SetPoint("BOTTOMLEFT", viewport, "BOTTOMLEFT", -offset - leftPad, 0)
 
     if overflow and not tabBar._tabLeftArrow then
         -- LayoutTabOverflow creates the controls before calling SetTabOffset.
@@ -3532,11 +3534,10 @@ local function LayoutTabOverflow()
     tabBar._tabContent:SetWidth(math.max(contentWidth, space))
     -- At the two endpoints exactly one arrow is shown; in the middle both
     -- appear only when tabs are clipped on both sides. No slider is created.
-    -- At the far right the LEFT arrow owns its safe inset as well as its
-    -- button width. Include both when computing the last reachable position,
-    -- otherwise the final tab can remain clipped at the right endpoint.
-    tabBar._tabMaxOffset = overflow and math.max(0,
-        contentWidth - (space - TAB_LEFT_SAFE_INSET - TAB_ARROW_W)) or 0
+    -- Content uses the tab bar's fixed origin, so its right edge must meet
+    -- the viewport's fixed right edge, regardless of the left arrow gutter.
+    -- Reserving that gutter again here causes excessive end-of-strip travel.
+    tabBar._tabMaxOffset = overflow and math.max(0, contentWidth - space) or 0
     if overflow then EnsureTabScrollControls() end
     tabBar._tabViewport:EnableMouseWheel(overflow)
     for _, b in ipairs(buttons) do b:EnableMouseWheel(overflow) end
@@ -3549,23 +3550,34 @@ local function LayoutTabOverflow()
     SetTabOffset(overflow and (tabBar._tabOffset or 0) or 0)
 end
 
-local function RevealSelectedTab()
+local function RevealSelectedTab(smooth)
     if not tabBar or not tabBar._tabOverflow then return end
-    -- Selecting a tab explicitly takes precedence over a wheel/arrow animation.
-    if tabBar._tabSmoothFrame then tabBar._tabSmoothFrame:Hide() end
+    -- Direct header clicks share the wheel/arrow easing. Initial layout and
+    -- programmatic navigation still position tabs immediately.
+    if not smooth and tabBar._tabSmoothFrame then tabBar._tabSmoothFrame:Hide() end
     for _, b in ipairs(tabBar._tabButtons) do
         if b._name == activePage then
             -- The available width changes by one arrow at the endpoints.
             -- Check twice so a newly revealed left arrow cannot clip the
             -- selected tab when the viewport becomes narrower.
-            for _ = 1, 2 do
+            for _ = 1, smooth and 1 or 2 do
                 local offset = tabBar._tabOffset or 0
                 local viewWidth = tabBar._tabViewport:GetWidth()
-                if b._tabX < offset + 4 then
-                    SetTabOffset(b._tabX - 4)
-                elseif b._tabX + b:GetWidth() > offset + viewWidth - 4 then
-                    SetTabOffset(b._tabX + b:GetWidth() - viewWidth + 4)
+                local leftInset = tabBar._tabLeftArrow and tabBar._tabLeftArrow:IsShown()
+                    and (TAB_LEFT_SAFE_INSET + TAB_ARROW_W) or 0
+                if b._tabX < offset + leftInset + 4 then
+                    local target = b._tabX - leftInset - 4
+                    if smooth then SmoothTabTo(target) else SetTabOffset(target) end
+                elseif b._tabX + b:GetWidth() > offset + leftInset + viewWidth - 4 then
+                    local target = b._tabX + b:GetWidth() - leftInset - viewWidth + 4
+                    if smooth then SmoothTabTo(target) else SetTabOffset(target) end
                 else
+                    -- Stop an in-flight wheel animation if it would hide the
+                    -- selected header after this click.
+                    if smooth and tabBar._tabSmoothFrame then
+                        tabBar._tabSmoothFrame:Hide()
+                        tabBar._tabScrollTarget = offset
+                    end
                     break
                 end
             end
@@ -3580,14 +3592,16 @@ function EUI_NS.RestoreSelectedTabOnOptionClick()
     if not tabBar or not tabBar._tabOverflow then return end
     local offset = tabBar._tabOffset or 0
     local visibleWidth = tabBar._tabViewport:GetWidth()
+    local leftInset = tabBar._tabLeftArrow and tabBar._tabLeftArrow:IsShown()
+        and (TAB_LEFT_SAFE_INSET + TAB_ARROW_W) or 0
     for _, btn in ipairs(tabBar._tabButtons) do
         if btn._name == activePage then
             local left, right = btn._tabX, btn._tabX + btn:GetWidth()
-            if right <= offset + TAB_SCROLL_EPSILON then
-                SmoothTabTo(left - 4)
-            elseif left >= offset + visibleWidth - TAB_SCROLL_EPSILON then
-                -- The left arrow can narrow the viewport as the animation runs.
-                SmoothTabTo(right - visibleWidth + TAB_LEFT_SAFE_INSET + TAB_ARROW_W + 4)
+            if right <= offset + leftInset + TAB_SCROLL_EPSILON then
+                SmoothTabTo(left - leftInset - 4)
+            elseif left >= offset + leftInset + visibleWidth - TAB_SCROLL_EPSILON then
+                -- The left arrow changes only clipping, not the strip origin.
+                SmoothTabTo(right - leftInset - visibleWidth + 4)
             end
             return
         end
@@ -3645,7 +3659,7 @@ CreateTabButton = function(index, name)
         btn:SetScript("OnClick", function(self)
             if self._disabled then return end
             local previousModule, previousPage = activeModule, activePage
-            EllesmereUI:SelectPage(self._name)
+            EllesmereUI:SelectPage(self._name, true)
             -- Header tab changes should reveal a fully hidden selected sidebar row.
             if activeModule == previousModule and activePage ~= previousPage
                 and EUI_NS.RestoreSelectedSidebarOnOptionClick then
@@ -3845,10 +3859,10 @@ BuildTabs = function(pageNames, disabledPages, disabledTooltips)
     end)
 end
 
-UpdateTabHighlight = function(selectedName)
+UpdateTabHighlight = function(selectedName, smooth)
     if tabBar._lastAutoTab ~= selectedName then
         tabBar._lastAutoTab = selectedName
-        RevealSelectedTab()
+        RevealSelectedTab(smooth)
     end
     for _, btn in ipairs(tabBar._tabButtons) do
         if btn._disabled then
@@ -3978,7 +3992,15 @@ end
 
 local function PlaySearchHighlight(hl, targetFrame)
     hl:SetParent(targetFrame)
-    hl:SetAllPoints(targetFrame)
+    hl:ClearAllPoints()
+    if targetFrame._isSectionHeader then
+        -- Section labels start flush with their frames. Expand the outline,
+        -- not the label, to give deep-linked headers balanced horizontal inset.
+        hl:SetPoint("TOPLEFT", targetFrame, "TOPLEFT", -8, 0)
+        hl:SetPoint("BOTTOMRIGHT", targetFrame, "BOTTOMRIGHT", 8, 0)
+    else
+        hl:SetAllPoints(targetFrame)
+    end
     hl:SetFrameLevel(targetFrame:GetFrameLevel() + 5)
     hl:SetAlpha(0)
     hl:Show()
@@ -5227,7 +5249,7 @@ end
 -- a scratch set never keeps a dropped page alive).
 local tabResnapRoots = setmetatable({}, { __mode = "k" })
 
-function EllesmereUI:SelectPage(pageName)
+function EllesmereUI:SelectPage(pageName, smoothTab)
     -- Excluded pages (CDM Bar Glows / Tracking Bars) lock during an override editing
     -- session: their systems keep their own per-spec storage, outside the capture.
     if EllesmereUI.SpecOverrides_EditSessionActive
@@ -5302,7 +5324,7 @@ function EllesmereUI:SelectPage(pageName)
     end
 
     activePage = pageName
-    UpdateTabHighlight(pageName)
+    UpdateTabHighlight(pageName, smoothTab)
     -- A page that draws its own layout over the scroll frame (a manager page,
     -- config.noSearchPages) has nothing the inline search can filter: the box
     -- shows disabled there.
@@ -5589,6 +5611,12 @@ function EllesmereUI:SelectModule(folderName, requestedPage)
     -- Re-sync pixel perfect mult on every addon switch
     if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
 
+    -- Preserve only Patch Notes' viewport when a link opens another module.
+    -- Ordinary tabs and modules keep their existing reset-to-top behavior.
+    if activeModule == "_EUIPatchNotes" and scrollFrame then
+        EUI_NS._patchNotesScrollPosition = math.max(0, scrollFrame:GetVerticalScroll() or 0)
+    end
+
     -- Save current page's content header under the CORRECT old key
     -- before we overwrite activeModule.
     if activePage and activeModule then
@@ -5671,6 +5699,18 @@ function EllesmereUI:SelectModule(folderName, requestedPage)
     activePage = nil
     if targetPage then
         self:SelectPage(targetPage)
+        if folderName == "_EUIPatchNotes" and scrollFrame then
+            -- SelectPage resets scroll for every module. Restore only this
+            -- feed after the new page's scroll range has been rebuilt.
+            scrollFrame:UpdateScrollChildRect()
+            local restored = math.min(EUI_NS._patchNotesScrollPosition or 0,
+                EllesmereUI.SafeScrollRange(scrollFrame))
+            scrollTarget = restored
+            isSmoothing = false
+            if smoothFrame then smoothFrame:Hide() end
+            scrollFrame:SetVerticalScroll(restored)
+            UpdateScrollThumb()
+        end
     else
         activePage = nil
         ClearContent()

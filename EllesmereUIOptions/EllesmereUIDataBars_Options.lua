@@ -3728,6 +3728,14 @@ initFrame:SetScript("OnEvent", function(self)
                         end
                     end
                 end
+                local notesCfg =
+                    { type = "toggle", text = "Show Guild Notes",
+                      tooltip = "Shows each online member's public note after their name in the Guild tooltip.",
+                      getValue = function() return s.showGuildNotes == true end,
+                      setValue = function(v)
+                          s.showGuildNotes = v and true or false
+                          Apply(); EllesmereUI:RefreshPage()
+                      end }
                 local mmRow
                 mmRow, h = W:DualRow(parent, y,
                     { type = "dropdown", text = "Menu Elements",
@@ -3735,7 +3743,7 @@ initFrame:SetScript("OnEvent", function(self)
                       values = { __placeholder = "..." }, order = { "__placeholder" },
                       getValue = function() return "__placeholder" end,
                       setValue = function() end },
-                    iconStyleCfg or EllesmereUI.BlankRowCfg());  y = y - h
+                    iconStyleCfg or notesCfg);  y = y - h
                 do
                     local leftRgn = mmRow._leftRegion
                     if leftRgn._control then leftRgn._control:Hide() end
@@ -3762,18 +3770,13 @@ initFrame:SetScript("OnEvent", function(self)
                     if cbDDRefresh then EllesmereUI.RegisterWidgetRefresh(cbDDRefresh) end
                 end
 
-                local notesRow
-                notesRow, h = W:DualRow(parent, y,
-                    { type = "toggle", text = "Show Guild Notes",
-                      tooltip = "Shows each online member's public note after their name in the Guild tooltip.",
-                      getValue = function() return s.showGuildNotes == true end,
-                      setValue = function(v)
-                          s.showGuildNotes = v and true or false
-                          Apply(); EllesmereUI:RefreshPage()
-                      end },
-                    EllesmereUI.BlankRowCfg());  y = y - h
+                local notesRow, notesRegion = mmRow, mmRow._rightRegion
+                if iconStyleCfg then
+                    notesRow, h = W:DualRow(parent, y, notesCfg, EllesmereUI.BlankRowCfg());  y = y - h
+                    notesRegion = notesRow._leftRegion
+                end
                 if not EllesmereUI._prebuilding then
-                    local rgn = notesRow._leftRegion
+                    local rgn = notesRegion
                     local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(
                         rgn, notesRow:GetFrameLevel() + 3,
                         function()
