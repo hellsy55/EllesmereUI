@@ -646,6 +646,7 @@ local defaults = {
         slotBgOpacity = 50,
         hideCastingAnimations = true,
         mouseoverShowAll = false,
+        modifierShowAll = false,
         barPositions = {},
         bars = {},
     },
