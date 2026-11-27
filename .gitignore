@@ -49,7 +49,9 @@ __pycache__/
 # repository. Tracked there is only what the GitHub checks run.
 /.tools/*
 !/.tools/guardrails.py
+!/.tools/official_patch_dates.py
 !/.tools/extract-locale-keys.sh
 !/.tools/tests/
 /.tools/tests/*
 !/.tools/tests/test_guardrails.py
+!/.tools/tests/test_official_patch_dates.py
