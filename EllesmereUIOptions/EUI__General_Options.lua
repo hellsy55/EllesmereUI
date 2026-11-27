@@ -404,7 +404,7 @@ EllesmereUI._WHATSNEW_PATCHES = {
     },
     {
         version = "9.9.3",
-        releaseDate = "25/11/2026",
+        releaseDate = "24/11/2026",
         thanks = true,
         heroes = {
             {
