@@ -238,6 +238,88 @@ end
 -------------------------------------------------------------------------------
 EllesmereUI._WHATSNEW_PATCHES = {
     {
+        version = "9.9.6",
+        releaseDate = "27/11/2026",
+        thanks = true,
+        features = {
+            {
+                -- The Well Fed row of CONSUMABLES on the Auras, Buffs & Consumables page; the click is on the
+                -- reminder itself, with no setting of its own (WoW Forever only).
+                module  = "AuraBuff Reminders",
+                forever = true,
+                title   = "Click Well Fed to Eat",
+                desc    = "Clicking the Well Fed reminder eats a buff food from your bags: your Action Picker pick, else the food you last ate, else the best one you can eat",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIAuraBuffReminders", page = "Auras, Buffs & Consumables", section = "CONSUMABLES", highlight = "Well Fed" } or nil,
+            },
+            {
+                -- The Show Average Item Level row of CORE OPTIONS in the Character Sheet card on the Window Skins
+                -- page; the inspect sheet's twin sits in INSPECT SHEET (WoW Forever only).
+                module  = "Blizzard Skins+",
+                forever = true,
+                title   = "Show Average Item Level",
+                desc    = "The character sheet shows your average item level under Blizz Default too, and the character and inspect sheets each gain a Show Average Item Level toggle",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIBlizzardSkin", page = "Blizzard Window Skins", section = "CORE OPTIONS", highlight = "Show Average Item Level" } or nil,
+            },
+            {
+                -- The Tracking Bars page: Custom Cooldown ID is an entry of a bar's spell picker, under Custom
+                -- Buff ID (both clients).
+                module = "Cooldown Manager",
+                title  = "Custom Cooldown ID",
+                desc   = "Tracking Bars can follow the cooldown of any spell by its ID: pick Custom Cooldown ID in a bar's spell picker",
+                nav    = { module = "EllesmereUICooldownManager", page = "Tracking Bars" },
+            },
+            {
+                -- The CDM Bars page: Proc Glow and Max Charges Glow are rows of the menu of a spell added by ID
+                -- (both clients).
+                module = "Cooldown Manager",
+                title  = "Glows for Custom Spells",
+                desc   = "Spells added by ID now glow on procs like tracked spells, and their menu gains Proc Glow and Max Charges Glow",
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars" },
+            },
+            {
+                -- The CDM Bars page: Hidden (Until Castable) and Hidden Until Castable (Shift Icons) are values of
+                -- Cooldown State Effect in an icon's menu (both clients).
+                module = "Cooldown Manager",
+                title  = "Hidden Until Castable",
+                desc   = "A new Cooldown State Effect shows an icon only while its spell can be cast right now: usable, off cooldown and with enough resources. Works on spells added by ID too",
+                nav    = { module = "EllesmereUICooldownManager", page = "CDM Bars" },
+            },
+            {
+                -- The Enable Flight Timer row of FLIGHT TIMER on the Forever Essentials Travel page; the learning
+                -- has no setting of its own (WoW Forever only).
+                module  = "Forever Essentials",
+                forever = true,
+                title   = "Flight Times That Learn",
+                desc    = "After you fly a route once, the flight timer and the flight map tooltip show its real time",
+                nav     = EllesmereUI.IS_FOREVER and { module = "EllesmereUIForeverEssentials", page = "Travel", section = "FLIGHT TIMER", highlight = "Enable Flight Timer" } or nil,
+            },
+            {
+                -- The Player Aura Bars page of Unit Frames: both sliders sit in the Duration Text cog of a bar's
+                -- Duration row (both clients).
+                module = "Player Aura Bars",
+                title  = "Decimals Below and Color Below",
+                desc   = "A bar's Duration Text cog can show tenths of a second, and change the text's color, once an aura has only a few seconds left",
+                nav    = { module = "EllesmereUIUnitFrames", page = "Player Aura Bars" },
+            },
+        },
+        fixes = {
+            { module = "AuraBuff Reminders", forever = true, text = "Raid Buffs reminders no longer count caster talent specs, such as Restoration druids or Holy paladins, as missing Battle Shout when their addons share their spec." },
+            { module = "AuraBuff Reminders", forever = true, text = "The reminder row now shows Raid Buffs first, then Self Buffs, then Consumables." },
+            { module = "AuraBuff Reminders", forever = true, text = "Divine Spirit reminders, and the Missing Buffs Spirit icon on Raid & Party Frames, no longer count warriors and rogues." },
+            { module = "Cooldown Manager", text = "Tracking Bars for custom buff IDs now show their fill, timer and stacks in dungeon and raid combat, also for buffs Blizzard's Cooldown Manager does not track. The game draws these bars, so they show no corner radius, threshold colors, tick marks or Pandemic Glow." },
+            { module = "Cooldown Manager", text = "On buff bars with Always Show Buffs or Keep Buffs in Same Place, a custom spell ID now shows in its place in the bar's order instead of at the end." },
+            { module = "Cooldown Manager", text = "Spells added by ID now show their charges like spells from Blizzard's Cooldown Manager, with no Show Charges checkbox, and keep showing the recharge while a charge is in hand." },
+            { module = "Cooldown Manager", text = "Tracking Bars with Charge Hash Lines now show the Stack Threshold color." },
+            { module = "Cooldown Manager", text = "Tracking Bars with Decimals on now show tenths of a second in Mythic+ and raid combat too." },
+            { module = "Forever Essentials", forever = true, text = "The flight timer now follows flights the server speeds up partway, so it reaches 0:00 as you land." },
+            { module = "General", text = "Spell ID on Tooltip now shows on spells with charges in Mythic+ and raid combat." },
+            { module = "Minimap", text = "Hovering the mail icon no longer causes an error when a recent sender is unknown." },
+            { module = "Minimap", text = "With the round Blizzard Style map at the top of the screen, the zone bar and its zone name now stay on screen." },
+            { module = "Raid & Party Frames", text = "Pet frames now show debuffs, dispel highlights and Buff Manager indicators." },
+            { module = "Localization", text = "German, Korean, Simplified Chinese and Traditional Chinese translations updated." },
+        },
+    },
+    {
         -- A mini patch: no hero cards and no thank-you line.
         version = "9.9.5",
         releaseDate = "26/11/2026",

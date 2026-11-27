@@ -113,7 +113,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
         local VIS_EXTRAS = "Visibility Extras"
         local VIS_EXTRAS_TIP = "More times this bar shows, beyond its Visibility setting."
         IndexChecklistRow(VIS_EXTRAS, VIS_EXTRAS_TIP,
-            { "Show When Spellbook Is Open", "Show During Drag", "Show All Bars on Mouseover", "Always Show While Skyriding /\nIn Vehicle" })
+            { "Show When Spellbook Is Open", "Show During Drag", "Show All Bars on Mouseover", "Show All Bars on Ctrl+Shift+Alt", "Always Show While Skyriding /\nIn Vehicle" })
 
         local visRow1
         visRow1, h = EllesmereUI.BuildVisibilityRow(W, parent, y,
@@ -155,6 +155,7 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                   _ = s.dragShow
                   _ = s.visShowSkyriding
                   _ = EAB.db.profile.mouseoverShowAll
+                  _ = EAB.db.profile.modifierShowAll
                   return "__placeholder"
               end,
               setValue=function() end });  y = y - h
@@ -237,6 +238,10 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                   tooltip = "Hovering one Mouseover bar shows them all.",
                   lockedFn = function() return not AnyMouseoverBar() end,
                   lockedTooltip = "This option requires a bar set to Mouseover" },
+                { key = "modifierShowAll", label = "Show All Bars on Ctrl+Shift+Alt",
+                  tooltip = "Holding Ctrl, Shift, and Alt together shows all Mouseover bars. Releasing any of these keys restores their normal visibility.",
+                  lockedFn = function() return not AnyMouseoverBar() end,
+                  lockedTooltip = "This option requires a bar set to Mouseover" },
             }
             items[#items + 1] = { key = "visShowSkyriding", label = "Always Show While Skyriding /\nIn Vehicle",
                 tooltip = "Keeps this bar fully visible while flying on a skyriding mount (or Druid Flight Form), or while it is paged onto the vehicle bar, regardless of Visibility." }
@@ -246,8 +251,8 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
             local cbDD, cbDDRefresh = EllesmereUI.BuildVisOptsCBDropdown(
                 rgn, 240, rgn:GetFrameLevel() + 2, items,
                 function(k)
-                    if k == "mouseoverShowAll" then
-                        return EAB.db.profile.mouseoverShowAll and true or false
+                    if k == "mouseoverShowAll" or k == "modifierShowAll" then
+                        return EAB.db.profile[k] and true or false
                     end
                     return SB()[k] == true
                 end,
@@ -267,6 +272,9 @@ local function BuildBarVisibilityLayout(parent, y, ctx)
                         SB().dragShow = v
                         -- The Apply Visibility link compares this setting.
                         EllesmereUI:RefreshPage()
+                    elseif k == "modifierShowAll" then
+                        EAB.db.profile.modifierShowAll = v
+                        EAB:RefreshMouseover()
                     else
                         EAB.db.profile.mouseoverShowAll = v
                     end

@@ -28,6 +28,18 @@ local abs = math.abs
 -------------------------------------------------------------------------------
 local hoverStates = {}  -- shared by action bars, data bars, and extra bars
 
+-- Modifier reveal is opt-in. Only an enabled profile with a Mouseover bar
+-- registers the event; idle profiles have no per-frame or event work for it.
+local modifierShowAllFrame
+local modifierShowAllActive = false
+local modifierWasHeld = false
+local function ModifierKeysHeld()
+    return (IsControlKeyDown() and IsShiftKeyDown() and IsAltKeyDown()) and true or false
+end
+function EAB_VTABLE.Hover.ModifierShowAllHeld()
+    return modifierShowAllActive and ModifierKeysHeld() or false
+end
+
 -- Every mouseover-enabled bar follows the same state machine: entering marks
 -- it hovered and fades in, leaving schedules a guarded fade-out on the next
 -- frame. Per-bar attach functions only provide edge-case policies that differ
@@ -175,6 +187,7 @@ function EAB_VTABLE.Hover.RefreshCustomFadeBar(barKey, animate, force)
         if not over and EAB.db.profile.mouseoverShowAll then
             over = ns.AnyMouseoverBarHovered()
         end
+        if not over then over = EAB_VTABLE.Hover.ModifierShowAllHeld() end
         hoverHidden = not over
     end
 
@@ -269,6 +282,7 @@ function EAB_VTABLE.Hover.ReleaseAdvancedFadeBar(barKey)
     if not over and EAB.db.profile.mouseoverShowAll then
         over = ns.AnyMouseoverBarHovered()
     end
+    if not over then over = EAB_VTABLE.Hover.ModifierShowAllHeld() end
     local target, wantsHover = EAB_VTABLE.Hover.RestingAlpha(barKey, s)
     if wantsHover and over then target = s._savedBarAlpha or 1 end
     local skyAlpha = EAB_VTABLE.Hover.SkyridingOverrideAlpha(barKey, s)
@@ -333,7 +347,12 @@ function EAB_VTABLE.Hover.RestingAlpha(barKey, s)
     else
         wantsHover = s.mouseoverEnabled
     end
-    if wantsHover then return 0, true end
+    if wantsHover then
+        if EAB_VTABLE.Hover.ModifierShowAllHeld() then
+            return s._savedBarAlpha or 1, true
+        end
+        return 0, true
+    end
     return s._savedBarAlpha or s.mouseoverAlpha or 1, false
 end
 
@@ -376,6 +395,7 @@ end
 
 function EAB_VTABLE.Hover.FadeOut(barKey, state)
     if _gridState.shown then return end  -- keep bars visible during spell drag
+    if EAB_VTABLE.Hover.ModifierShowAllHeld() then return end
     -- Spellbook/macro panel surfacing holds the bar up until the panel closes.
     if EAB_VTABLE.Hover.SpellbookHolds(barKey) then return end
     local s = EAB_VTABLE.Hover.GetSettings(barKey)
@@ -433,6 +453,7 @@ function EAB_VTABLE.Hover.ScheduleFadeOut(barKey, state, opts)
             end
             if _quickKeybindState.open then return end
             if opts.blockFadeOut and opts.blockFadeOut(state) then return end
+            if EAB_VTABLE.Hover.ModifierShowAllHeld() then return end
             -- When showing all bars together, keep visible while any bar is hovered
             if EAB.db.profile.mouseoverShowAll and ns.AnyMouseoverBarHovered() then return end
             EAB_VTABLE.Hover.FadeOut(barKey, state)
@@ -627,10 +648,64 @@ function EAB:UpdateSkyridingVisOverride()
     if self.RefreshMouseover then self:RefreshMouseover() end
 end
 
+-- Sync the modifier event only when the opt-in setting and a Mouseover bar
+-- are present. The existing alpha refresh also runs after profile swaps.
+function EAB:RefreshModifierShowAllGate()
+    local profile = self.db and self.db.profile
+    local enabled = false
+    if profile and profile.modifierShowAll and profile.bars then
+        for _, info in ipairs(ALL_BARS) do
+            local s = profile.bars[info.key]
+            if s and s.mouseoverEnabled and not info.noManagedVisibility then
+                enabled = true
+                break
+            end
+        end
+    end
+
+    modifierShowAllActive = enabled
+    if enabled then
+        if not modifierShowAllFrame then
+            modifierShowAllFrame = CreateFrame("Frame")
+            modifierShowAllFrame:SetScript("OnEvent", function()
+                local held = ModifierKeysHeld()
+                if held == modifierWasHeld then return end
+                modifierWasHeld = held
+                local allHovered = EAB.db.profile.mouseoverShowAll
+                    and ns.AnyMouseoverBarHovered()
+                for _, info in ipairs(ALL_BARS) do
+                    local s = EAB.db.profile.bars[info.key]
+                    if s and s.mouseoverEnabled and not info.noManagedVisibility then
+                        local state = hoverStates[info.key]
+                        if state then
+                            if held or allHovered or state.isHovered then
+                                EAB_VTABLE.Hover.FadeInOne(info.key, state)
+                            else
+                                EAB_VTABLE.Hover.FadeOut(info.key, state)
+                            end
+                        end
+                    end
+                end
+                if EAB._anyCustomFade then
+                    EAB:RefreshAllCustomFade(true, true)
+                end
+            end)
+        end
+        modifierShowAllFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+        modifierWasHeld = ModifierKeysHeld()
+    else
+        if modifierShowAllFrame then
+            modifierShowAllFrame:UnregisterEvent("MODIFIER_STATE_CHANGED")
+        end
+        modifierWasHeld = false
+    end
+end
+
 -- onlyHoverGated: visit ONLY the bars whose hover gate can move on a state edge (Match
 -- Any plus mouseover). The edge-driven caller passes it so a target change does not drag
 -- every other bar through a StopFade/SetAlpha it cannot need.
 function EAB:RefreshMouseover(onlyHoverGated)
+    if not onlyHoverGated then self:RefreshModifierShowAllGate() end
     for _, info in ipairs(ALL_BARS) do
         local key = info.key
         local s = self.db.profile.bars[key]
