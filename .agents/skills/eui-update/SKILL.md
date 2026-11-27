@@ -43,48 +43,17 @@ For `new-features`, first compare the local ref with fetched `origin/new-feature
 
 ### Patch Notes release dates
 
-When an upstream fast-forward is possible, compare the destination and frozen
-release Patch Notes during the read-only preflight. New versions or historical
-dates that need restoration can require a correction commit. Resolve the Lua
-compiler before the first branch mutation when either case applies.
+Load and follow [official Patch Notes release dates](../../references/patch-note-dates.md)
+after freezing the upstream release and before modifying any branch. Compare the
+planned What's New inputs and run the official date preflight for exact new
+versions. When a fast-forward needs date application or historical restoration,
+resolve the Lua compiler before mutation for the possible correction commit.
 
-In Local and Cloud, capture the Retail Patch Notes versions and existing
-`releaseDate` values before integrating the frozen upstream release. After
-integration and any approved conflict resolution, with no unmerged paths,
-complete this step before the manifest checkpoint, final validation, staged
-review, or publication. Use
-`EllesmereUIOptions/EUI__General_Options.lua` and inspect only the records of
-`EllesmereUI._WHATSNEW_PATCHES`. Compare exact version strings with the
-pre-integration Retail tree to identify every newly incorporated version.
-Include the first record, displayed as Latest, under the same rules.
-
-Reuse the official [Patch Notes](https://ellesmereui.com/patch-notes) evidence
-from the impact review. If the static page lacks the entries, inspect the
-rendered page. Match each new version to the date displayed on its own entry,
-keeping the version and source date in the update record. A leading display
-`v` may be ignored; do not equate different version strings. Convert the displayed
-calendar date without a timezone shift to `DD/MM/YYYY`. Verify both the exact
-ASCII shape `[0-9]{2}/[0-9]{2}/[0-9]{4}` and calendar validity with the frozen
-Python runtime. If incoming content already supplies a date for a new version,
-verify it against the site and use the confirmed official value.
-
-Preserve previously confirmed dates verbatim for historical records still in
-the table, restoring any that were dropped or changed by integration. Leave
-unrelated historical records and Patch Notes content untouched. If a version
-has no unambiguous official date, record the version and why confirmation
-failed, leave its date unset, and stop for the user's decision to wait or
-explicitly proceed with that version undated. Commit and publication retain
-their separate checkpoints. Never infer dates from Git, tags, GitHub Releases,
-CurseForge, nearby entries, or the current date.
-
-Review the final version-to-date mapping and verify that repeating the step
-with the same inputs requires no further edits. A Retail source-ancestry no-op
-does not query the site or backfill historical dates. For an explicitly
-requested date correction, apply the same source and validation rules. Include
-date edits in the pending merge commit, or in the approved correction commit
-if an upstream fast-forward leaves date edits. Include the edited Lua in
-guardrails and run the locale key check before staged review. Report any
-approved undated versions in the final update report.
+After integration and approved conflict resolution, with no unmerged paths,
+reuse preflight evidence and verify the actual integrated version-to-date mapping
+before the manifest checkpoint, staged review or publication. Include date edits
+in the pending merge commit, or in the approved correction commit after a
+fast-forward. A Retail no-op does not query the site or backfill history.
 
 ## Sync B: PTR from Retail
 
@@ -219,6 +188,9 @@ The other trigger is an upstream change in the exact incoming range recorded bef
 Report in a few Portuguese progress lines: preflight scope and clean/dirty state; release target, incoming release commit count, excluded post-release count, and only branches that changed; then the install checkpoint in local Windows. Surface errors, conflicts, feature risks, and required choices. Keep hashes other than the release summary, full status, fetch output, checkout output, temporary paths, copied-file lists, and line-ending details out of routine output. Report line-ending fix scope only if relevant.
 
 ## Final update report
+
+Include the mandatory [Patch Notes release-date footer](../../references/patch-note-dates.md#required-update-footer)
+and the Token Savings report on every outcome.
 
 Before modifying either selected branch, record its initial commit. In Both
 mode, capture both baselines before any branch mutation. Reuse the immutable
